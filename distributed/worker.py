@@ -10,7 +10,7 @@ import sys
 from toolz import merge
 from tornado.gen import Return
 from tornado import gen
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 
 from .client import _gather, pack_data
 from .core import rpc, connect_sync, read_sync, write_sync, connect, Server
@@ -85,8 +85,8 @@ class Worker(Server):
     def _start(self):
         while True:
             try:
-                logger.info('Start worker at             %s:%d', self.ip, self.port)
                 self.listen(self.port)
+                logger.info('Start worker at             %s:%d', self.ip, self.port)
                 break
             except (OSError, IOError):
                 logger.info('Port %d taken. Trying %d', self.port, self.port + 1)
@@ -154,6 +154,8 @@ class Worker(Server):
             i = job_counter[0]
             logger.info("Start job %d: %s", i, funcname(function))
             future = self.executor.submit(function, *args2, **kwargs)
+            cb = PeriodicCallback(lambda: None, 1000)
+            cb.start()
             while not future.done():
                 try:
                     yield gen.with_timeout(timedelta(seconds=1), future)
@@ -161,6 +163,7 @@ class Worker(Server):
                 except gen.TimeoutError:
                     logger.debug("Pending job %d: %s", i, future)
             result = future.result()
+            cb.stop()
             logger.info("Finish job %d: %s", i, funcname(function))
             self.data[key] = result
             response = yield self.center.add_keys(address=(self.ip, self.port),
