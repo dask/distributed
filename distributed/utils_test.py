@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
+import logging
 from multiprocessing import Process
 import socket
 from time import time
@@ -8,6 +9,9 @@ from time import time
 from distributed.core import connect_sync, write_sync, read_sync
 from distributed.utils import ignoring
 import pytest
+
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.yield_fixture
@@ -95,6 +99,7 @@ def cluster(nworkers=2, nanny=False):
 
         yield {'proc': center, 'port': cport}, workers
     finally:
+        logger.debug("Closing out test cluster")
         for port in [cport] + [w['port'] for w in workers]:
             with ignoring(socket.error):
                 sock = connect_sync('127.0.0.1', port)
@@ -137,6 +142,7 @@ def _test_cluster(f, loop=None):
 
             yield f(c, a, b)
         finally:
+            logger.debug("Closing out test cluster")
             with ignoring():
                 yield a._close()
             with ignoring():
