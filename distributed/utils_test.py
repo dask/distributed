@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from contextlib import contextmanager
 from multiprocessing import Process
 import socket
+from time import time
 
 from distributed.core import connect_sync, write_sync, read_sync
 from distributed.utils import ignoring
