@@ -114,11 +114,12 @@ class Worker(Server):
 
     @gen.coroutine
     def _close(self):
-        yield self.center.unregister(address=(self.ip, self.port))
-        self.center.close_streams()
-        self.stop()
-        self.executor.shutdown()
-        self.status = 'closed'
+        if self.status != 'closed':
+            yield self.center.unregister(address=(self.ip, self.port))
+            self.center.close_streams()
+            self.stop()
+            self.executor.shutdown()
+            self.status = 'closed'
 
     @gen.coroutine
     def terminate(self, stream):
