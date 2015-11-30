@@ -63,6 +63,7 @@ class Center(Server):
     @gen.coroutine
     def terminate(self, stream):
         self.stop()
+        self.status = 'closed'
         return b'OK'
 
     def register(self, stream, address=None, keys=(), ncores=None,

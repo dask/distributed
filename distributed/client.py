@@ -14,7 +14,7 @@ from tornado.iostream import StreamClosedError
 from toolz import merge, concat, groupby, drop
 
 from .core import rpc, coerce_to_rpc
-from .utils import ignore_exceptions, ignoring
+from .utils import ignore_exceptions, ignoring, sync, All
 
 
 no_default = '__no_default__'
@@ -431,3 +431,22 @@ def pack_data(o, d):
         return {k: pack_data(v, d) for k, v in o.items()}
     else:
         return o
+
+
+@gen.coroutine
+def _shutdown_cluster(center):
+    center = coerce_to_rpc(center)
+    nannies = yield center.nannies()
+
+    result = yield All([rpc(ip=ip, port=nanny_port or worker_port)
+                           .terminate(close=True)
+                        for (ip, worker_port), nanny_port in nannies.items()])
+    assert all(r == b'OK' for r in result)
+
+    result = yield center.terminate()
+    assert result == b'OK'
+
+
+def shutdown_cluster(center):
+    """ Terminate workers and center """
+    return IOLoop().run_sync(lambda: _shutdown_cluster(center))

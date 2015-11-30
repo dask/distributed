@@ -10,7 +10,8 @@ from distributed import Center, Worker
 from distributed.utils import ignoring
 from distributed.utils_test import cluster, loop
 from distributed.client import (RemoteData, _gather, _scatter, _delete, _clear,
-        scatter_to_workers, pack_data, gather, scatter, delete, clear)
+        scatter_to_workers, pack_data, gather, scatter, delete, clear,
+        _shutdown_cluster)
 
 
 def _test_cluster(f, loop=None):
@@ -196,4 +197,12 @@ def test_scatter_round_robins_between_calls(loop):
         assert a.data
         assert b.data
 
+    _test_cluster(f)
+
+
+def test_shutdown_cluster(loop):
+    @gen.coroutine
+    def f(c, a, b):
+        yield _shutdown_cluster((c.ip, c.port))
+        assert a.status == b.status == c.status == 'closed'
     _test_cluster(f)
