@@ -176,7 +176,7 @@ def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
     logger.debug("Read %d blocks of binary bytes from %s", len(blocks), fn)
 
     dfs1 = [do(avro_body)(b, schema, marker, codec) for b in blockss]
-    return dfs1, blockss
+    raise gen.Return((dfs1, blockss))
     if lazy:
         from dask.dataframe import from_imperative
         raise gen.Return(from_imperative(dfs1, columns=names))
