@@ -179,7 +179,8 @@ def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
     dfs1 = [do(avro_to_df)(b, schema, marker, codec) for b in blockss]
     if lazy:
         from dask.dataframe import from_imperative
-        raise gen.Return(from_imperative(dfs1))
+        names = [c['name'] for c in schema['fields']]
+        raise gen.Return(from_imperative(dfs1, names))
     else:
         futures = executor.compute(*dfs1)
         from distributed.collections import _futures_to_dask_dataframe
