@@ -139,16 +139,17 @@ def avro_body(data, schema, sync_marker, codec):
             yield fa.read_data(block_fo, schema, None)    
         fa.skip_sync(stream, sync_marker)
 
+def avro_to_df(b, schema, marker, codec):
+    import pandas as pd
+    return pd.DataFrame(data=avro_body(b, schema, marker, codec))
+
 @gen.coroutine
 def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
     from hdfs3 import HDFileSystem
     from dask import do
-    import pandas as pd
     hdfs = hdfs or HDFileSystem()
     executor = default_executor(executor)
     filenames = hdfs.glob(fn)
-    #blockss = [read_bytes(fn, executor, hdfs, lazy=True, delimiter=lineterminator)
-    #           for fn in filenames]
     blockss = []
     for fn in filenames:
         f = hdfs.open(fn)
@@ -175,17 +176,15 @@ def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
                                 delimiter=marker, workers=workers, allow_other_workers=True))
     logger.debug("Read %d blocks of binary bytes from %s", len(blocks), fn)
 
-    dfs1 = [do(avro_body)(b, schema, marker, codec) for b in blockss]
-    raise gen.Return((dfs1, blockss))
+    dfs1 = [do(avro_to_df)(b, schema, marker, codec) for b in blockss]
     if lazy:
         from dask.dataframe import from_imperative
-        raise gen.Return(from_imperative(dfs1, columns=names))
+        raise gen.Return(from_imperative(dfs1))
     else:
         futures = executor.compute(*dfs1)
         from distributed.collections import _futures_to_dask_dataframe
         df = yield _futures_to_dask_dataframe(futures)
         raise gen.Return(df)
-    
 
 
 def write_block_to_hdfs(fn, data, hdfs=None):
