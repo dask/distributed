@@ -175,14 +175,13 @@ def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
                                 delimiter=marker, workers=workers, allow_other_workers=True))
     logger.debug("Read %d blocks of binary bytes from %s", len(blocks), fn)
 
-    dfs1 = [[do(avro_body)(b, schema, marker, codec) for b in blocks]
-            for blocks in blockss]
-    dfs2 = sum(dfs1, [])
+    dfs1 = [do(avro_body)(b, schema, marker, codec) for b in blockss]
+    return dfs1, blockss
     if lazy:
         from dask.dataframe import from_imperative
-        raise gen.Return(from_imperative(dfs2, columns=names))
+        raise gen.Return(from_imperative(dfs1, columns=names))
     else:
-        futures = executor.compute(*dfs2)
+        futures = executor.compute(*dfs1)
         from distributed.collections import _futures_to_dask_dataframe
         df = yield _futures_to_dask_dataframe(futures)
         raise gen.Return(df)
