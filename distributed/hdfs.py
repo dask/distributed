@@ -109,20 +109,18 @@ def _read_csv(fn, executor=None, hdfs=None, lazy=False, lineterminator='\n',
         df = yield _futures_to_dask_dataframe(futures)
         raise gen.Return(df)
 
-def avro_body(data, header):
+def avro_body(data, av):
     import fastavro._reader as fa
-
-    if not data.endswith(sync_marker):
+    sync = av._header['sync']
+    if not data.endswith(sync):
         ## Read delimited should keep end-of-block delimiter
-        data = data + sync_marker
+        data = data + sync
     stream = io.BytesIO(data)
-    codec = header['meta']['avro.codec']
-    schema = header['meta']['avro.schema']
-    return list(fa._iter_avro(stream, header, codec, schema, None))
+    return list(fa._iter_avro(stream, av._header, av.codec, av.schema, None))
 
-def avro_to_df(b, header):
+def avro_to_df(b, av):
     import pandas as pd
-    return pd.DataFrame(data=avro_body(b, header))
+    return pd.DataFrame(data=avro_body(b, av))
 
 @gen.coroutine
 def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
@@ -134,17 +132,17 @@ def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
     filenames = hdfs.glob(fn)
     blockss = []
     with hdfs.open(filenames[0]) as f:
-        header = fastavro.reader(f)._header
-        sync = header['sync']
+        av = fastavro.reader(f)
+        sync = av._header['sync']
     filenames = hdfs.glob(fn)
     blockss = [read_bytes(fn, executor, hdfs, lazy=True, delimiter=sync)
-               for fn in filenames]:
+               for fn in filenames]
                    
     
-    dfs1 = [do(avro_to_df)(b, schema, marker, codec) for b in blockss]
+    dfs1 = [do(avro_to_df)(b, av) for b in blockss]
     if lazy:
         from dask.dataframe import from_imperative
-        names = [c['name'] for c in schema['fields']]
+        names = [c['name'] for c in av.schema['fields']]
         raise gen.Return(from_imperative(dfs1, names))
     else:
         futures = executor.compute(*dfs1)
