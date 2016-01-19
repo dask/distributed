@@ -221,7 +221,7 @@ def test_avro(s, a, b):
             av = fastavro.reader(f)
 
         sync = av._header['sync']
-        by = read_bytes(fn, e, fs, False, delimiter=sync, not_zero=True)
+        by = read_bytes(fn, e, hdfs, False, delimiter=sync, not_zero=True)
         df = avro_to_df(by[0].result(), av)
         assert len(df) == len(data)
 
