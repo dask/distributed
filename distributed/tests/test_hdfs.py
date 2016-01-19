@@ -226,11 +226,11 @@ def test_avro(s, a, b):
         assert len(df) == len(data)
 
         # Single file, direct
-        from dask import do
-        from distributed.collections import _futures_to_dask_dataframe
-        dfs1 = [do(avro_to_df)(b, av) for b in by]
-        futures = e.compute(*dfs1)
-        df = _futures_to_dask_dataframe(futures)
+#        from dask import do
+#        from distributed.collections import _futures_to_dask_dataframe
+#        dfs1 = [do(avro_to_df)(b, av) for b in by]
+#        futures = yield e.compute(*dfs1)
+#        df = _futures_to_dask_dataframe(futures)
 
         # general method
         df = yield _read_avro('/tmp/test/*.avro')
