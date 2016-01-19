@@ -115,15 +115,17 @@ def avro_body(data, av):
     import fastavro._reader as fa
     sync = av._header['sync']
     if not data.endswith(sync):
-        ## Read delimited should keep end-of-block delimiter
+        # Read delimited should keep end-of-block delimiter
         data = data + sync
     stream = io.BytesIO(data)
     return list(fa._iter_avro(stream, av._header, av.codec, av.schema, None))
+
 
 def avro_to_df(b, av):
     """Parse avro binary data with header av into a pandas dataframe"""
     import pandas as pd
     return pd.DataFrame(data=avro_body(b, av))
+
 
 @gen.coroutine
 def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
@@ -142,7 +144,7 @@ def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
             av = fastavro.reader(f)
             sync = av._header['sync']
         blockss.extend([read_bytes(fn, executor, hdfs, lazy=True,
-                         delimiter=sync, not_zero=True) for fn in filenames])
+                        delimiter=sync, not_zero=True) for fn in filenames])
 
     dfs1 = [do(avro_to_df)(b, av) for b in blockss]
     if lazy:
