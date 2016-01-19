@@ -216,14 +216,14 @@ def test_avro(s, a, b):
             assert hdfs.info(fname)['size'] > 0
 
         # simple read
-        fn = fnames[0]
-        with hdfs.open(fn, 'r') as f:
-            av = fastavro.reader(f)
-
-        sync = av._header['sync']
-        by = read_bytes(fn, e, hdfs, False, delimiter=sync, not_zero=True)
-        df = avro_to_df(by[0].result(), av)
-        assert len(df) == len(data)
+#        fn = fnames[0]
+#        with hdfs.open(fn, 'r') as f:
+#            av = fastavro.reader(f)
+#
+#        sync = av._header['sync']
+#        by = read_bytes(fn, e, hdfs, False, delimiter=sync, not_zero=True)
+#        df = avro_to_df(by[0].result(), av)
+#        assert len(df) == len(data)
 
         # Single file, direct
 #        from dask import do
