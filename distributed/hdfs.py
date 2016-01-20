@@ -4,6 +4,7 @@ from __future__ import print_function, division, absolute_import
 import logging
 from math import log
 import os
+import io
 
 from dask.imperative import Value
 from tornado import gen
@@ -23,7 +24,8 @@ def get_block_locations(hdfs, filename):
             for block in hdfs.get_block_locations(fn)]
 
 
-def read_bytes(fn, executor=None, hdfs=None, lazy=False, delimiter=None, **hdfs_auth):
+def read_bytes(fn, executor=None, hdfs=None, lazy=False, delimiter=None,
+               not_zero=False, **hdfs_auth):
     """ Convert location in HDFS to a list of distributed futures
 
     Parameters
@@ -33,6 +35,7 @@ def read_bytes(fn, executor=None, hdfs=None, lazy=False, delimiter=None, **hdfs_
     executor: Executor (optional)
         defaults to most recently created executor
     hdfs: HDFileSystem
+    not_zero: force seek of start-of-file delimiter, discarding header
     **hdfs_auth: keyword arguments
         Extra keywords to send to ``hdfs3.HDFileSystem``
 
@@ -46,6 +49,8 @@ def read_bytes(fn, executor=None, hdfs=None, lazy=False, delimiter=None, **hdfs_
     blocks = get_block_locations(hdfs, fn)
     filenames = [d['filename'] for d in blocks]
     offsets = [d['offset'] for d in blocks]
+    if not_zero:
+        offsets = [max([o, 1]) for o in offsets]
     lengths = [d['length'] for d in blocks]
     workers = [d['hosts'] for d in blocks]
     names = ['read-binary-%s-%d-%d' % (fn, offset, length)
@@ -100,6 +105,54 @@ def _read_csv(fn, executor=None, hdfs=None, lazy=False, lineterminator='\n',
         raise gen.Return(from_imperative(dfs2, columns=names))
     else:
         futures = executor.compute(*dfs2)
+        from distributed.collections import _futures_to_dask_dataframe
+        df = yield _futures_to_dask_dataframe(futures)
+        raise gen.Return(df)
+
+def avro_body(data, av):
+    """Read records from binary data using the avro reader object av,
+    which defined the metadata."""
+    import fastavro._reader as fa
+    sync = av._header['sync']
+    if not data.endswith(sync):
+        # Read delimited should keep end-of-block delimiter
+        data = data + sync
+    stream = io.BytesIO(data)
+    return list(fa._iter_avro(stream, av._header, av.codec, av.schema, None))
+
+
+def avro_to_df(b, av):
+    """Parse avro binary data with header av into a pandas dataframe"""
+    import pandas as pd
+    return pd.DataFrame(data=avro_body(b, av))
+
+
+@gen.coroutine
+def _read_avro(fn, executor=None, hdfs=None, lazy=False, **kwargs):
+    """Read avro data from the filespec fn (can be globby) in HDFS into
+    a dask dataframe. Uses the geader in the first file only."""
+    from hdfs3 import HDFileSystem
+    from dask import do
+    import fastavro
+    hdfs = hdfs or HDFileSystem()
+    executor = default_executor(executor)
+    filenames = hdfs.glob(fn)
+    blockss = []
+    filenames = hdfs.glob(fn)
+    for fn in filenames:
+        with hdfs.open(fn, 'r') as f:
+            av = fastavro.reader(f)
+            sync = av._header['sync']
+        blockss.extend([read_bytes(fn, executor, hdfs, lazy=True,
+                        delimiter=sync, not_zero=True) for fn in filenames])
+
+    dfs1 = [do(avro_to_df)(b, av) for b in blockss]
+    if lazy:
+        from dask.dataframe import from_imperative
+        names = [c['name'] for c in av.schema['fields']]
+        raise gen.Return(from_imperative(dfs1, names))
+    else:
+        futures = executor.compute(*dfs1)
         from distributed.collections import _futures_to_dask_dataframe
         df = yield _futures_to_dask_dataframe(futures)
         raise gen.Return(df)
