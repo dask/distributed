@@ -1,0 +1,26 @@
+<html>
+<body>
+<div>Info <div id="info"><span>Info</span></div></div>
+<div>Resources <div id="resources"><span>Info</span></div></div>
+<div>Data <div id="data"><span>Info</span></div></div>
+<script type="text/javascript" src="renderjson.js"></script>
+<script src="http://code.jquery.com/jquery-1.12.0.min.js"></script>
+<script>
+load_one = function(fname, divname) {
+    $.get(fname, function( data ) {
+      var e = document.getElementById(divname);
+      e.removeChild(e.childNodes[0]);
+      e.appendChild( renderjson(data) );
+    });
+}
+load_data = function() {
+    renderjson.set_show_to_level(2);
+    load_one("info.json", "info");
+    load_one("resources.json", "resources");
+    load_one("haswhat.json", "data");
+    setTimeout(load_data, 3000);
+};
+window.onload = function() {load_data()};
+</script>
+</body>
+</html>
