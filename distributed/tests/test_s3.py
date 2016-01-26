@@ -107,7 +107,7 @@ def test_av_read(s, a, b):
     e = Executor((s.ip, s.port), start=False)
     yield e._start()
     data1 = [json.loads(x.decode()) for x in files[
-             'test/accounts.1.json'].split(b'\n')]
+             'test/accounts.1.json'].split(b'\n')[:-1]]
     dfs = _read_avro('distributed-test', 'test/data/avro', e, lazy=False,
                      anon=True)
     out = yield e._gather(dfs)
