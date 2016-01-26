@@ -3,7 +3,7 @@ from dask.imperative import Value
 from distributed import Executor
 from distributed.executor import _wait
 from distributed.s3 import (read_bytes, get_list_of_summary_objects,
-        read_content_from_keys, get_s3)
+        read_content_from_keys, get_s3, _read_avro)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster
 
@@ -21,7 +21,12 @@ files = {'test/accounts.1.json':  (b'{"amount": 100, "name": "Alice"}\n'
                                    b'{"amount": 600, "name": "Bob"}\n'
                                    b'{"amount": 700, "name": "Charlie"}\n'
                                    b'{"amount": 800, "name": "Dennis"}\n')}
-
+schema = {'doc': 'Test file',  # avro schema of the records above
+          'name': 'test',
+          'namespace': 'test',
+          'type': 'record',
+          'fields': [{'name': 'amount', 'type': 'long'},
+          {'name': 'name', 'type': 'string'}]}
 
 
 def test_get_list_of_summary_objects():
@@ -94,3 +99,15 @@ def test_get_s3():
     assert get_s3(False) is get_s3(False)
     assert get_s3(True) is not get_s3(False)
     assert 'boto3' in type(get_s3(True)).__module__
+
+
+@gen_cluster()
+def test_av_read(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start
+    data1 = [json.loads(x.decode()) for x in files[
+             'test/accounts.1.json'].split(b'\n')]
+    dfs = s3._read_avro('distributed-test', 'test/data/avro', e, lazy=False,
+                        anon=True)
+    data = e.gather(dfs)
+    assert data = data1 + data1
