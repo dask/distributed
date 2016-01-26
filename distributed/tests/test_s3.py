@@ -110,4 +110,4 @@ def test_av_read(s, a, b):
     dfs = _read_avro('distributed-test', 'test/data/avro', e, lazy=False,
                      anon=True)
     out = yield e.gather(dfs)
-    assert out = [data1, data1]
+    assert out == [data1, data1]
