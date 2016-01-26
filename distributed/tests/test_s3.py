@@ -107,7 +107,7 @@ def test_av_read(s, a, b):
     yield e._start
     data1 = [json.loads(x.decode()) for x in files[
              'test/accounts.1.json'].split(b'\n')]
-    dfs = s3._read_avro('distributed-test', 'test/data/avro', e, lazy=False,
-                        anon=True)
-    data = e.gather(dfs)
-    assert data = data1 + data1
+    dfs = _read_avro('distributed-test', 'test/data/avro', e, lazy=False,
+                     anon=True)
+    out = yield e.gather(dfs)
+    assert out = [data1, data1]
