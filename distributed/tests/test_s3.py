@@ -109,5 +109,5 @@ def test_av_read(s, a, b):
              'test/accounts.1.json'].split(b'\n')]
     dfs = _read_avro('distributed-test', 'test/data/avro', e, lazy=False,
                      anon=True)
-    out = yield e.gather(dfs)
+    out = yield e._gather(dfs)
     assert out == [data1, data1]
