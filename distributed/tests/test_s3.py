@@ -104,7 +104,7 @@ def test_get_s3():
 @gen_cluster()
 def test_av_read(s, a, b):
     e = Executor((s.ip, s.port), start=False)
-    yield e._start
+    yield e._start()
     data1 = [json.loads(x.decode()) for x in files[
              'test/accounts.1.json'].split(b'\n')]
     dfs = _read_avro('distributed-test', 'test/data/avro', e, lazy=False,
