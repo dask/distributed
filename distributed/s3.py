@@ -21,6 +21,7 @@ DEFAULT_PAGE_LENGTH = 1000
 
 _conn = {True: None, False: None}
 
+
 def get_s3(anon):
     """ Get S3 connection
 
@@ -31,7 +32,7 @@ def get_s3(anon):
         s3 = boto3.resource('s3')
         if anon:
             s3.meta.client.meta.events.register('choose-signer.s3.*',
-                    disable_signing)
+                                                disable_signing)
         _conn[anon] = s3
     return _conn[anon]
 
@@ -57,8 +58,8 @@ def read_content_from_keys(bucket, key, anon=False):
     return s3.Object(bucket, key).get()['Body'].read()
 
 
-def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None, lazy=False,
-               anon=False):
+def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None,
+               lazy=False, anon=False):
     """ Read data on S3 into bytes in distributed memory
 
     Parameters
@@ -101,17 +102,17 @@ def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None, lazy=Fa
         return values
     else:
         return executor.map(read_content_from_keys, [bucket_name] * len(keys),
-                keys, anon=anon)
+                            keys, anon=anon)
 
 
 def avro_bytes(data):
     """ Interpret bytes block data as an avro file.
-    
+
     Parameters
     ----------
     data : bytes
         data, including avro header and packed records
-        
+
     Returns
     -------
     List of python objects (e.g., dicts)
@@ -120,19 +121,20 @@ def avro_bytes(data):
     b = io.BytesIO(data)
     return list(fastavro.reader(b))
 
+
 @gen.coroutine
 def _read_avro(bucket_name, prefix='', executor=None, lazy=False,
                path_delimiter='', anon=False, collection=True):
     """ Distributed read of set of avro files on S3.
-    
+
     Parameters
     ----------
     bucket_name : string
         Location in S3
-        
+
     perefix : string
         Set of keys to filter for (can be see as firectory name)
-    
+
     anon : bool (False)
         Whether to attempt to ignore authentication
 
@@ -144,10 +146,11 @@ def _read_avro(bucket_name, prefix='', executor=None, lazy=False,
     -------
     List of Futures or Values
     """
-    
+    executor = default_executor(executor)
+
     from dask import do
-    bytes = read_bytes(bucket_name, prefix=prefix, executor=executor, lazy=True,
-                       path_delimiter=path_delimiter, anon=anon)
+    bytes = read_bytes(bucket_name, prefix=prefix, executor=executor,
+                       lazy=True, path_delimiter=path_delimiter, anon=anon)
     dfs = [do(avro_bytes)(b) for b in bytes]
 
     if lazy:
@@ -158,14 +161,14 @@ def _read_avro(bucket_name, prefix='', executor=None, lazy=False,
 
 def buffer_to_csv(b, **kwargs):
     """Load bytes as a CSV into pandas dataframe.
-    
+
     Parameters
     ----------
     b : bytes
         Data to load (as if read from a file)
-        
+
     kwarks : passed to pd.read_csv()
-    
+
     Returns
     -------
     Pandas dataframe
@@ -175,19 +178,20 @@ def buffer_to_csv(b, **kwargs):
     bio = BytesIO(b)
     return pd.read_csv(bio, **kwargs)
 
+
 @gen.coroutine
 def _read_csv(bucket_name, prefix='', executor=None, lazy=False,
-               path_delimiter='', anon=False, collection=True):
+              path_delimiter='', anon=False, collection=True):
     """ Distributed read of set of CSV files on S3.
-    
+
     Parameters
     ----------
     bucket_name : string
         Location in S3
-        
+
     perefix : string
         Set of keys to filter for (can be see as firectory name)
-    
+
     anon : bool (False)
         Whether to attempt to ignore authentication
 
@@ -200,13 +204,11 @@ def _read_csv(bucket_name, prefix='', executor=None, lazy=False,
     List of Futures or Values
     """
     from dask import do
-    bytes = read_bytes(bucket_name, prefix=prefix, executor=executor, lazy=True,
-                       path_delimiter=path_delimiter, anon=anon)
-    
+    bytes = read_bytes(bucket_name, prefix=prefix, executor=executor,
+                       lazy=True, path_delimiter=path_delimiter, anon=anon)
     dfs = [do(buffer_to_csv)(b) for b in bytes]
 
     if lazy:
         yield gen.Return(dfs)
     else:
         yield gen.Return(executor.compute(*dfs))
-    
