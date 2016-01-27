@@ -1,8 +1,9 @@
 <html>
 <body>
-<div>Info <div id="info"><span>Info</span></div></div>
-<div>Resources <div id="resources"><span>Info</span></div></div>
-<div>Data <div id="data"><span>Info</span></div></div>
+<div>Info <div id="info"><span>.</span></div></div>
+<div>Resources <div id="resources"><span>.</span></div></div>
+<div>Data <div id="data"><span>.</span></div></div>
+<div>Processing <div id="proc"><span>.</span></div></div>
 <script type="text/javascript" src="renderjson.js"></script>
 <script src="http://code.jquery.com/jquery-1.12.0.min.js"></script>
 <script>
@@ -18,6 +19,7 @@ load_data = function() {
     load_one("info.json", "info");
     load_one("resources.json", "resources");
     load_one("haswhat.json", "data");
+    load_one("processing.json", "proc")
     setTimeout(load_data, 3000);
 };
 window.onload = function() {load_data()};

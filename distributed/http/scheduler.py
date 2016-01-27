@@ -7,6 +7,7 @@ from tornado import web, gen
 from tornado.httpclient import AsyncHTTPClient
 
 from .core import RequestHandler, MyApp, Resources, Proxy
+from ..utils import key_split
 
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,12 @@ class Info(RequestHandler):
     def get(self):
         resp = {'ncores': {'%s:%d' % k: n for k, n in self.server.ncores.items()},
                 'status': self.server.status}
+        self.write(resp)
+
+class Processing(RequestHandler):
+    def get(self):
+        resp = {'%s:%d' % addr: list(map(key_split, tasks))
+                for addr, tasks in self.server.processing.items()}
         self.write(resp)
 
 
@@ -64,6 +71,7 @@ def HTTPScheduler(scheduler):
         (r'/info.json', Info, {'server': scheduler}),
         (r'/resources.json', Resources, {'server': scheduler}),
         (r'/haswhat.json', HasWhat, {'server': scheduler}),
+        (r'/processing.json', Processing, {'server': scheduler}),
         (r'/proxy/([\w.-]+):(\d+)/(.+)', Proxy),
         (r'/broadcast/(.+)', Broadcast, {'server': scheduler}),
         (r'/render', Render),
