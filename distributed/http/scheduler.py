@@ -59,7 +59,8 @@ class KeyStatus(RequestHandler):
             out = 'processing'
         else:
             out = 'queued'
-        self.write({'status': out})
+        where = self.server.who_has.get(key, [])
+        self.write({'status': out, 'machines': where})
 
 
 class NBytes(RequestHandler):
