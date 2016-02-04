@@ -9,6 +9,7 @@ from distributed import Scheduler
 from distributed.utils_test import gen_cluster, gen_test
 from distributed.http.scheduler import HTTPScheduler
 from distributed.http.worker import HTTPWorker
+from distributed.http import core
 
 
 @gen_cluster()
@@ -22,6 +23,9 @@ def test_simple(s, a, b):
     response = json.loads(response.body.decode())
     assert response['ncores'] == {'%s:%d' % k: v for k, v in s.ncores.items()}
     assert response['status'] == a.status
+    response = yield client.fetch('http://localhost:%d/resources.json' % server.port)
+    response = json.loads(response.body.decode())
+    assert response['status'] == core.resource_collect()['status']
 
 @gen_cluster()
 def test_processing(s, a, b):
