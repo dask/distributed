@@ -39,6 +39,7 @@ def test_simple(s, a, b):
         print(response)
         assert response
 
+
 @gen_cluster()
 def test_services(s, a, b):
     c = Worker(s.ip, s.port, ncores=1, ip='127.0.0.1',
@@ -47,3 +48,5 @@ def test_services(s, a, b):
     assert isinstance(c.services['http'], HTTPServer)
     assert c.service_ports['http'] == c.services['http'].port
     assert s.worker_services[c.address]['http'] == c.service_ports['http']
+
+# TODO: tests including data sent to a worker via an Executor

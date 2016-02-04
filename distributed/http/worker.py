@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class Info(RequestHandler):
+    """Basic info about the worker """
     def get(self):
         resp = {'ncores': self.server.ncores,
                 'nkeys': len(self.server.data),
