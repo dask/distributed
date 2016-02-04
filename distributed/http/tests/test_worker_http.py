@@ -24,8 +24,20 @@ def test_simple(s, a, b):
 
     response = yield client.fetch('http://localhost:%d/resources.json' % port)
     response = json.loads(response.body.decode())
-    assert 0 < response['memory_percent'] < 100
+    try:
+        import psutil
+        assert 0 < response['memory_percent'] < 100
+    except ImportError:
+        assert response == {}
 
+    endpoints = ['/data.json', '/value/none.json', '/active.json',
+                 '/files.json']
+    for endpoint in endpoints:
+        response = yield client.fetch(('http://localhost:%d' % port)
+                                      + endpoint)
+        response = json.loads(response.body.decode())
+        print(response)
+        assert response
 
 @gen_cluster()
 def test_services(s, a, b):
