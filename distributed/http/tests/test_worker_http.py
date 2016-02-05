@@ -8,6 +8,9 @@ from tornado.httpserver import HTTPServer
 from distributed.utils_test import gen_cluster, gen_test
 from distributed import Worker
 from distributed.http.worker import HTTPWorker
+from distributed import Executor
+
+import requests
 
 
 @gen_cluster()
@@ -49,4 +52,21 @@ def test_services(s, a, b):
     assert c.service_ports['http'] == c.services['http'].port
     assert s.worker_services[c.address]['http'] == c.service_ports['http']
 
-# TODO: tests including data sent to a worker via an Executor
+
+@gen_cluster()
+def test_with_data(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    e.scatter([1])
+    sch_hport = e.services['http']
+    (wip, wport) = list(e.workers)[0]
+    w_hport = e.workers[(wip, wport)]['http']
+    keys = requests.get("http://{ip}:{port}/data.json".format(ip=wip,
+                        port=w_hport)).json()['keys']
+    assert len(keys) == 1
+    key = keys[0]
+    out = requests.get('http://192.168.20.132:60004/value/{}.json'.format(
+                       key)).json()
+    assert out[key] = 1
+    
+    
