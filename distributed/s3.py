@@ -153,9 +153,9 @@ def _read_avro(bucket_name, prefix='', executor=None, lazy=False,
     dfs = [do(avro_bytes)(b) for b in bytes]
 
     if lazy:
-        yield gen.Return(dfs)
+        raise gen.Return(dfs)
     else:
-        yield gen.Return(executor.compute(*dfs))
+        raise gen.Return(executor.compute(*dfs))
 
 
 def buffer_to_csv(b, **kwargs):
@@ -209,6 +209,6 @@ def _read_csv(bucket_name, prefix='', executor=None, lazy=False,
     dfs = [do(buffer_to_csv)(b) for b in bytes]
 
     if lazy:
-        yield gen.Return(dfs)
+        raise gen.Return(dfs)
     else:
-        yield gen.Return(executor.compute(*dfs))
+        raise gen.Return(executor.compute(*dfs))
