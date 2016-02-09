@@ -1,7 +1,7 @@
 import json
 
 from tornado.ioloop import IOLoop
-from tornado import web
+from tornado import web, gen
 from tornado.httpclient import AsyncHTTPClient
 from tornado.httpserver import HTTPServer
 
@@ -112,3 +112,23 @@ def test_with_data(s, a, b):
     stat = json.loads(response.body.decode())
     assert stat['status'] == 'ready'
     
+
+@gen_cluster()
+def test_with_exception(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    ss = HTTPScheduler(s)
+    ss.listen(0)
+    port = ss.port
+    yield e._start()
+    future = e.submit(lambda: wibble)
+    key = future.key
+    yield gen.sleep(0.1)
+    client = AsyncHTTPClient()
+    response = yield client.fetch("http://localhost:{port}/key_status/{key}.json".format(
+                                  port=port, key=key))
+    stat = json.loads(response.body.decode())
+    assert stat['status'] == 'error'
+    response = yield client.fetch("http://localhost:{port}/exception/{key}.json".format(
+                                  port=port, key=key))
+    ex = json.loads(response.body.decode())
+    assert 'not defined' in ex[key]

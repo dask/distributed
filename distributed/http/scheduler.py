@@ -51,10 +51,12 @@ class KeyStatus(RequestHandler):
             out = "ready"
         elif key in self.server.waiting:
             out = 'waiting'
-        elif any(key in a for a in self.server.active):
+        elif any(key in a for a in self.server.processing):
             out = 'processing'
         elif any(key in a for a in self.server.stacks):
             out = 'queued'
+        elif key in self.server.exceptions:
+            out = 'error'
         else:
             out = None
         where = self.server.who_has.get(key, [])
@@ -77,6 +79,13 @@ class MemoryLoad(RequestHandler):
         self.write(out)
 
 
+class KeyException(RequestHandler):
+    """Return exception associated with key (if any)"""
+    def get(self, key):
+        ex = self.server.exceptions.get(key, None)
+        self.write({key: str(ex)})
+
+
 def HTTPScheduler(scheduler):
     application = MyApp(web.Application([
         (r'/info.json', Info, {'server': scheduler}),
@@ -87,5 +96,6 @@ def HTTPScheduler(scheduler):
         (r'/nbytes/(.+).json', NBytes, {'server': scheduler}),
         (r'/memory_load.json', MemoryLoad, {'server': scheduler}),
         (r'/key_status/(.+).json', KeyStatus, {'server': scheduler}),
+        (r'/exception/(.+).json', KeyException, {'server': scheduler})
         ]))
     return application
