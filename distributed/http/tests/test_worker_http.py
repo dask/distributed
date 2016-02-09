@@ -1,4 +1,5 @@
 import json
+import tornado
 
 from tornado.ioloop import IOLoop
 from tornado import web
@@ -9,8 +10,6 @@ from distributed.utils_test import gen_cluster, gen_test
 from distributed import Worker
 from distributed.http.worker import HTTPWorker
 from distributed import Executor
-
-import requests
 
 
 @gen_cluster()
@@ -56,17 +55,21 @@ def test_services(s, a, b):
 @gen_cluster()
 def test_with_data(s, a, b):
     e = Executor((s.ip, s.port), start=False)
+    yield tornado.gen.sleep(0.5)
     yield e._start()
-    e.scatter([1])
-    sch_hport = e.services['http']
+    yield e._scatter([1])
+    yield tornado.gen.sleep(0.5)
+    client = AsyncHTTPClient()
+    d = yield e.scheduler.identity()
+    sch_hport = services['http']
     (wip, wport) = list(e.workers)[0]
     w_hport = e.workers[(wip, wport)]['http']
-    keys = requests.get("http://{ip}:{port}/data.json".format(ip=wip,
-                        port=w_hport)).json()['keys']
+    response = yield client.fetch("http://{ip}:{port}/data.json".format(ip=wip,
+                                  port=w_hport))
+    keys = json.loads(response.body.decode())['keys']
     assert len(keys) == 1
     key = keys[0]
-    out = requests.get('http://192.168.20.132:60004/value/{}.json'.format(
-                       key)).json()
-    assert out[key] = 1
-    
-    
+    response = yield client.fetch('http://{ip}:{port}/value/{key}.json'.format(
+                                  ip=wip, port=w_hport, key=key))
+    out = json.loads(response.body.decode())
+    assert out[key] == 1
