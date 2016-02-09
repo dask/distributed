@@ -38,7 +38,6 @@ def test_simple(s, a, b):
         response = yield client.fetch(('http://localhost:%d' % port)
                                       + endpoint)
         response = json.loads(response.body.decode())
-        print(response)
         assert response
 
 
