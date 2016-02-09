@@ -47,19 +47,18 @@ class Broadcast(RequestHandler):
 class KeyStatus(RequestHandler):
     """What is the given key up to?"""
     def get(self, key):
-        if key not in self.server.dask:
-            out = None
-        elif key in self.server.nbytes:
+        if key in self.server.nbytes:
             out = "ready"
         elif key in self.server.waiting:
             out = 'waiting'
-        # TODO: consider worst-case performance here; maybe unnecessary to
-        # differentiate between the last two statuses
-        elif key in set.union(*self.server.active):
+        elif any(key in a for a in self.server.active):
             out = 'processing'
-        else:
+        elif any(key in a for a in self.server.stacks):
             out = 'queued'
+        else:
+            out = None
         where = self.server.who_has.get(key, [])
+        where = ["%s:%s" % w for w in where]
         self.write({'status': out, 'machines': where})
 
 
@@ -74,7 +73,7 @@ class MemoryLoad(RequestHandler):
     def get(self):
         out = {}
         for worker, keys in self.server.has_what.items():
-            out[worker] = sum(self.server.nbytes[k] for k in keys)
+            out["%s:%s"%worker] = sum(self.server.nbytes[k] for k in keys)
         self.write(out)
 
 

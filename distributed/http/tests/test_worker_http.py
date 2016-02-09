@@ -55,21 +55,30 @@ def test_services(s, a, b):
 @gen_cluster()
 def test_with_data(s, a, b):
     e = Executor((s.ip, s.port), start=False)
-    yield tornado.gen.sleep(0.5)
+    porta = 19898
+    portb = 19899
+    servera = HTTPWorker(a)
+    servera.listen(porta)
+    serverb = HTTPWorker(b)
+    serverb.listen(portb)
     yield e._start()
-    yield e._scatter([1])
-    yield tornado.gen.sleep(0.5)
+    future = yield e._scatter([1])
     client = AsyncHTTPClient()
-    d = yield e.scheduler.identity()
-    sch_hport = services['http']
-    (wip, wport) = list(e.workers)[0]
-    w_hport = e.workers[(wip, wport)]['http']
-    response = yield client.fetch("http://{ip}:{port}/data.json".format(ip=wip,
-                                  port=w_hport))
-    keys = json.loads(response.body.decode())['keys']
-    assert len(keys) == 1
-    key = keys[0]
+    response = yield client.fetch("http://{ip}:{port}/data.json".format(ip=a.ip,
+                                  port=porta))
+    keysa = json.loads(response.body.decode())['keys']
+    response = yield client.fetch("http://{ip}:{port}/data.json".format(ip=b.ip,
+                                  port=portb))
+    keysb = json.loads(response.body.decode())['keys']
+    assert len(keysa) + len(keysb) == 1
+    key = (keysa + keysb)[0]
+    if len(keysa) > len(keysb):
+        ip = a.ip
+        port = porta
+    else:
+        ip = b.ip
+        port = portb
     response = yield client.fetch('http://{ip}:{port}/value/{key}.json'.format(
-                                  ip=wip, port=w_hport, key=key))
+                                  ip=ip, port=port, key=key))
     out = json.loads(response.body.decode())
     assert out[key] == 1

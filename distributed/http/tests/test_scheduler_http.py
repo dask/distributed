@@ -5,7 +5,7 @@ from tornado import web
 from tornado.httpclient import AsyncHTTPClient
 from tornado.httpserver import HTTPServer
 
-from distributed import Scheduler
+from distributed import Scheduler, Executor
 from distributed.utils_test import gen_cluster, gen_test
 from distributed.http.scheduler import HTTPScheduler
 from distributed.http.worker import HTTPWorker
@@ -84,3 +84,31 @@ def test_services():
     s = Scheduler(services={'http': HTTPScheduler})
     assert isinstance(s.services['http'], HTTPServer)
     assert s.services['http'].port
+
+
+@gen_cluster()
+def test_with_data(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    ss = HTTPScheduler(s)
+    ss.listen(0)
+    port = ss.port
+    yield e._start()
+    future = yield e._scatter([1])
+    key = future[0].key
+    client = AsyncHTTPClient()
+    response = yield client.fetch("http://localhost:{port}/nbytes/{key}.json".format(
+                                  port=port, key='o'))
+    assert json.loads(response.body.decode())['o'] == 0
+    response = yield client.fetch("http://localhost:{port}/nbytes/{key}.json".format(
+                                  port=port, key=key))
+    mem = json.loads(response.body.decode()).values()
+    assert sum(mem) > 0
+    response = yield client.fetch('http://localhost:{port}/memory_load.json'.format(
+                                  port=port, key=key))
+    out = json.loads(response.body.decode())
+    assert sum(out.values()) == sum(mem)
+    response = yield client.fetch("http://localhost:{port}/key_status/{key}.json".format(
+                                  port=port, key=key))
+    stat = json.loads(response.body.decode())
+    assert stat['status'] == 'ready'
+    
