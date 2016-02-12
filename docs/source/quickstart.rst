@@ -8,6 +8,16 @@ Install
 
     $ pip install distributed --upgrade
 
+**Note for Macports users:** There
+[is a known issue](https://trac.macports.org/ticket/50058) with python from macports
+that makes executables be placed in a location that is not
+available by default. A simple solution is to extend the `PATH` environment
+variable to the location where python from macports install the binaries:
+
+```
+$ export PATH=/opt/local/Library/Frameworks/Python.framework/Versions/2.7/bin:$PATH
+```
+
 Setup Cluster
 -------------
 
