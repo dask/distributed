@@ -97,7 +97,7 @@ def seek_delimiter(ob, offset, delimiter, seeklength=4096):
             offset += seeklength
 
 
-def read_block_from_ob(ob, offset, length, delimiter=None, anon=None):
+def read_block(buc, fn, offset, length, delimiter=None, anon=None):
     """
     Read one chunk of bytes from the given S3 key, optionally delimited.
 
@@ -111,6 +111,8 @@ def read_block_from_ob(ob, offset, length, delimiter=None, anon=None):
     delimiter : bytes
         If given, seek to next delimiter at the star and end of the block
     """
+    s3 = get_s3(anon)
+    ob = s3.Object(buc, fn)
     if delimiter is None:
         try:
             return ob.get(Range="bytes=%i-%i" %
@@ -176,14 +178,15 @@ def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None,
     if blocksize is not None:
         values = []
         for ob in s3_objects:
-            for offset in range(0, ob.content_length + 1, blocksize):
+            flen = ob.get()['ContentLength']
+            for offset in range(0, flen + 1, blocksize):
                 name = 'read-bytes-%s-%d' % (ob.key, offset)
                 values.append(Value(name, [{name:
-                    (read_block_from_ob, ob, offset, blocksize, delimiter)}]))
+                    (read_block, bucket_name, ob.key, offset, blocksize, delimiter)}]))
         if lazy:
             return values
         else:
-            return executor.compute(*values)
+            return executor.compute(values)
     else:
         keys = [obj.key for obj in s3_objects]
         names = ['read-bytes-{0}'.format(key) for key in keys]

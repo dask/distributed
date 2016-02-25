@@ -8,7 +8,7 @@ from dask.imperative import Value
 from distributed import Executor
 from distributed.executor import _wait, Future
 from distributed.s3 import (read_bytes, get_list_of_summary_objects,
-        read_content_from_keys, get_s3, read_text, read_block_from_ob)
+        read_content_from_keys, get_s3, read_text, read_block)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster, loop, cluster
 
@@ -56,15 +56,14 @@ def test_read_block():
     import io
     data = files['test/accounts.1.json']
     lines = io.BytesIO(data).readlines()
-    s = get_s3(None)
-    ob = s.Object('distributed-test', 'test/accounts.1.json')
-    assert read_block_from_ob(ob, 1, 35, b'\n') == lines[1]
-    assert read_block_from_ob(ob, 0, 30, b'\n') == lines[0]
-    assert read_block_from_ob(ob, 0, 35, b'\n') == lines[0] + lines[1]
-    assert read_block_from_ob(ob, 0, 5000, b'\n') == data
-    assert len(read_block_from_ob(ob, 0, 5)) == 5
-    assert len(read_block_from_ob(ob, 0, 5000)) == len(data)
-    assert read_block_from_ob(ob, 5000, 5010) == b''
+    buc, fn = 'distributed-test', 'test/accounts.1.json'
+    assert read_block(buc, fn, 1, 35, b'\n') == lines[1]
+    assert read_block(buc, fn, 0, 30, b'\n') == lines[0]
+    assert read_block(buc, fn, 0, 35, b'\n') == lines[0] + lines[1]
+    assert read_block(buc, fn, 0, 5000, b'\n') == data
+    assert len(read_block(buc, fn, 0, 5)) == 5
+    assert len(read_block(buc, fn, 0, 5000)) == len(data)
+    assert read_block(buc, fn, 5000, 5010) == b''
 
 
 def test_list_summary_object_with_prefix_and_delimiter():
@@ -89,7 +88,7 @@ def test_read_bytes(s, a, b):
     e = Executor((s.ip, s.port), start=False)
     yield e._start()
 
-    futures = read_bytes(test_bucket_name, prefix='test/', anon=True,
+    futures = read_bytes(test_bucket_name, prefix='test/accounts.', anon=True,
                          lazy=False)
     assert len(futures) >= len(files)
     results = yield e._gather(futures)
@@ -98,11 +97,39 @@ def test_read_bytes(s, a, b):
     yield e._shutdown()
 
 
-#@gen_cluster(timeout=60)
-#def test_read_bytes_delimited(s, a, b):
-#    e = Executor((s.ip, s.port), start=False)
-#    yield e._start()
-    
+@gen_cluster(timeout=60)
+def test_read_bytes_block(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    bs = 15
+    vals = read_bytes(test_bucket_name, prefix='test/accounts', anon=True,
+                      lazy=True, blocksize=bs)
+    assert len(vals) == sum([(len(v) // bs + 1) for v in files.values()])
+    assert sum(len(v.compute()) for v in vals) == sum(len(v) for v in
+               files.values())
+    futures = read_bytes(test_bucket_name, prefix='test/accounts', anon=True,
+                         lazy=False, blocksize=bs)
+    assert len(vals) == len(futures)
+    results = yield e._gather(futures)
+    assert sum(len(r) for r in results) == sum(len(v) for v in
+               files.values())
+    yield e._shutdown()
+
+
+@gen_cluster(timeout=60)
+def test_read_bytes_delimited(s, a, b):
+    import io
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    bs = 5
+    futures = read_bytes(test_bucket_name, prefix='test/accounts', anon=True,
+                         lazy=False, blocksize=bs, delimiter=b'\n')
+    results = yield e._gather(futures)
+    res = [r for r in results if r]
+    data = [io.BytesIO(o).readlines() for o in files.values()]
+    assert set(res) == set(data[0] + data[1])
+    yield e._shutdown()
+
 
 @gen_cluster(timeout=60)
 def test_read_bytes_lazy(s, a, b):
