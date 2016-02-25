@@ -8,7 +8,7 @@ from dask.imperative import Value
 from distributed import Executor
 from distributed.executor import _wait, Future
 from distributed.s3 import (read_bytes, get_list_of_summary_objects,
-        read_content_from_keys, get_s3, read_text)
+        read_content_from_keys, get_s3, read_text, read_block_from_ob)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster, loop, cluster
 
@@ -52,6 +52,21 @@ def test_read_keys_from_bucket():
             read_content_from_keys('distributed-test', k, anon=True))
 
 
+def test_read_block():
+    import io
+    data = files['test/accounts.1.json']
+    lines = io.BytesIO(data).readlines()
+    s = get_s3(None)
+    ob = s.Object('distributed-test', 'test/accounts.1.json')
+    assert read_block_from_ob(ob, 1, 35, b'\n') == lines[1]
+    assert read_block_from_ob(ob, 0, 30, b'\n') == lines[0]
+    assert read_block_from_ob(ob, 0, 35, b'\n') == lines[0] + lines[1]
+    assert read_block_from_ob(ob, 0, 5000, b'\n') == data
+    assert len(read_block_from_ob(ob, 0, 5)) == 5
+    assert len(read_block_from_ob(ob, 0, 5000)) == len(data)
+    assert read_block_from_ob(ob, 5000, 5010) == b''
+
+
 def test_list_summary_object_with_prefix_and_delimiter():
     keys = get_list_of_summary_objects(test_bucket_name, 'nested/nested2/',
                                        delimiter='/', anon=True)
@@ -82,6 +97,12 @@ def test_read_bytes(s, a, b):
 
     yield e._shutdown()
 
+
+#@gen_cluster(timeout=60)
+#def test_read_bytes_delimited(s, a, b):
+#    e = Executor((s.ip, s.port), start=False)
+#    yield e._start()
+    
 
 @gen_cluster(timeout=60)
 def test_read_bytes_lazy(s, a, b):

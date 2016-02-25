@@ -5,6 +5,7 @@ import threading
 
 import boto3
 from botocore.handlers import disable_signing
+from botocore.exceptions import ClientError
 from tornado import gen
 
 from dask.imperative import Value
@@ -65,6 +66,64 @@ def get_list_of_summary_objects(bucket_name, prefix='', delimiter='',
     return [s for s in L if s.key[-1] != '/']
 
 
+def seek_delimiter(ob, offset, delimiter, seeklength=4096):
+    """
+    Find the bytes location of the next delimiter after the given offset
+
+    Parameters
+    ----------
+    ob : boto3 open s3 key
+    offset : int
+        bytes location to start
+    delimiter : bytes
+        pattern to seek
+    seeklength : int
+        If seeking delimited, the blocksize for finding delimiters.
+    """
+    if offset == 0:
+        return 0
+    data = b''
+    while True:
+        try:
+            piece = ob.get(Range="bytes=%i-%i" %
+                           (offset, offset + seeklength))['Body'].read()
+        except ClientError:
+            return ob.content_length
+        data += piece
+        try:
+            i = data.index(delimiter)
+            return offset + i + len(delimiter)
+        except ValueError:
+            offset += seeklength
+
+
+def read_block_from_ob(ob, offset, length, delimiter=None, anon=None):
+    """
+    Read one chunk of bytes from the given S3 key, optionally delimited.
+
+    Parameters
+    ----------
+    ob : boto3 open s3 key
+    offset : int
+        From which byte location to read
+    length : int
+        size of block to read
+    delimiter : bytes
+        If given, seek to next delimiter at the star and end of the block
+    """
+    if delimiter is None:
+        try:
+            return ob.get(Range="bytes=%i-%i" %
+                          (offset, offset + length - 1))['Body'].read()
+        except ClientError:
+            return b''
+    start = seek_delimiter(ob, offset, delimiter)
+    end = seek_delimiter(ob, offset + length, delimiter)
+    if start == end:
+        return b''
+    return ob.get(Range="bytes=%i-%i" % (start, end - 1))['Body'].read()
+
+
 def read_content_from_keys(bucket, key, anon=None):
     if bucket.startswith('s3://'):
         bucket = bucket[len('s3://'):]
@@ -73,7 +132,7 @@ def read_content_from_keys(bucket, key, anon=None):
 
 
 def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None,
-               lazy=True, anon=None):
+               lazy=True, anon=None, blocksize=None, delimiter=None):
     """ Read data on S3 into bytes in distributed memory
 
     Parameters
@@ -90,6 +149,11 @@ def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None,
         If True then return lazily evaluated dask Values
     anon: boolean (optional)
         If True then don't try to authenticate with AWS
+    blocksize : int or None
+        If not none, produce multiple futures per key of blocksize bytes
+    delimiter : bytes
+        if using blocksize, split on this delimiter rather than exact
+        number of bytes
 
     Returns
     -------
@@ -108,18 +172,29 @@ def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None,
     executor = default_executor(executor)
     s3_objects = get_list_of_summary_objects(bucket_name, prefix,
                                              path_delimiter, anon=anon)
-    keys = [obj.key for obj in s3_objects]
 
-    names = ['read-bytes-{0}'.format(key) for key in keys]
-
-    if lazy:
-        values = [Value(name, [{name: (read_content_from_keys, bucket_name,
-                                       key, anon)}])
-                  for name, key in zip(names, keys)]
-        return values
+    if blocksize is not None:
+        values = []
+        for ob in s3_objects:
+            for offset in range(0, ob.content_length + 1, blocksize):
+                name = 'read-bytes-%s-%d' % (ob.key, offset)
+                values.append(Value(name, [{name:
+                    (read_block_from_ob, ob, offset, blocksize, delimiter)}]))
+        if lazy:
+            return values
+        else:
+            return executor.compute(*values)
     else:
-        return executor.map(read_content_from_keys, [bucket_name] * len(keys),
-                keys, anon=anon)
+        keys = [obj.key for obj in s3_objects]
+        names = ['read-bytes-{0}'.format(key) for key in keys]
+        if lazy:
+            values = [Value(name, [{name: (read_content_from_keys, bucket_name,
+                                           key, anon)}])
+                      for name, key in zip(names, keys)]
+            return values
+        else:
+            return executor.map(read_content_from_keys, [bucket_name] * len(keys),
+                    keys, anon=anon)
 
 
 def read_text(bucket_name, prefix='', path_delimiter='', encoding='utf-8',
