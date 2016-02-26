@@ -8,7 +8,8 @@ from dask.imperative import Value
 from distributed import Executor
 from distributed.executor import _wait, Future
 from distributed.s3 import (read_bytes, get_list_of_summary_objects,
-        read_content_from_keys, get_s3, read_text, read_block)
+        read_content_from_keys, get_s3, read_text, read_block,
+        seek_delimiter)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster, loop, cluster
 
@@ -50,6 +51,19 @@ def test_read_keys_from_bucket():
 
     assert (read_content_from_keys('s3://distributed-test', k, anon=True) ==
             read_content_from_keys('distributed-test', k, anon=True))
+
+
+def test_seek_delimiter():
+    fn = 'test/accounts.1.json'
+    data = files[fn]
+    s3 = get_s3(True)
+    ob = s3.Object(test_bucket_name, fn)
+    i = seek_delimiter(ob, 0, b'}')
+    assert i == 0
+    i = seek_delimiter(ob, 5, b'}')
+    assert i == data.index(b'}') + 1
+    i = seek_delimiter(ob, 5, b'\n')
+    assert i == data.index(b'\n') + 1
 
 
 def test_read_block():
@@ -123,13 +137,21 @@ def test_read_bytes_delimited(s, a, b):
     import io
     e = Executor((s.ip, s.port), start=False)
     yield e._start()
-    bs = 5
+    bs = 15
     futures = read_bytes(test_bucket_name, prefix='test/accounts', anon=True,
                          lazy=False, blocksize=bs, delimiter=b'\n')
     results = yield e._gather(futures)
     res = [r for r in results if r]
     data = [io.BytesIO(o).readlines() for o in files.values()]
     assert set(res) == set(data[0] + data[1])
+
+    # delimiter not at the end
+    d = b'}'
+    futures = read_bytes(test_bucket_name, prefix='test/accounts', anon=True,
+                         lazy=False, blocksize=bs, delimiter=d)
+    results = yield e._gather(futures)
+    res = [r for r in results if r]
+    assert len(res) == sum(f.count(d) for f in files.values()) + len(files)
     yield e._shutdown()
 
 

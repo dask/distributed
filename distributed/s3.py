@@ -9,6 +9,7 @@ from botocore.exceptions import ClientError
 from tornado import gen
 
 from dask.imperative import Value
+from dask.base import tokenize
 
 from .compatibility import get_thread_identity
 from .executor import default_executor, ensure_default_get
@@ -180,7 +181,8 @@ def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None,
         for ob in s3_objects:
             flen = ob.get()['ContentLength']
             for offset in range(0, flen + 1, blocksize):
-                name = 'read-bytes-%s-%d' % (ob.key, offset)
+                name = 'read-binary-s3-%s-%s' % (ob.key, tokenize(bucket_name,
+                                                 offset, blocksize, delimiter))
                 values.append(Value(name, [{name:
                     (read_block, bucket_name, ob.key, offset, blocksize, delimiter)}]))
         if lazy:
@@ -189,7 +191,7 @@ def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None,
             return executor.compute(values)
     else:
         keys = [obj.key for obj in s3_objects]
-        names = ['read-bytes-{0}'.format(key) for key in keys]
+        names = ['read-binary-s3-{0}'.format(key) for key in keys]
         if lazy:
             values = [Value(name, [{name: (read_content_from_keys, bucket_name,
                                            key, anon)}])
