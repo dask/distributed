@@ -88,7 +88,7 @@ def seek_delimiter(ob, offset, delimiter, seeklength=4096):
             piece = ob.get(Range="bytes=%i-%i" %
                            (offset, offset + seeklength))['Body'].read()
         except ClientError:
-            return ob.content_length
+            return ob.get()['ContentLength']
         data += piece
         try:
             i = data.index(delimiter)

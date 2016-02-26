@@ -105,7 +105,9 @@ def test_read_bytes_block(s, a, b):
     vals = read_bytes(test_bucket_name, prefix='test/accounts', anon=True,
                       lazy=True, blocksize=bs)
     assert len(vals) == sum([(len(v) // bs + 1) for v in files.values()])
-    assert sum(len(v.compute()) for v in vals) == sum(len(v) for v in
+    futures = e.compute(vals)
+    results = yield e._gather(futures)
+    assert sum(len(r) for r in results) == sum(len(v) for v in
                files.values())
     futures = read_bytes(test_bucket_name, prefix='test/accounts', anon=True,
                          lazy=False, blocksize=bs)
