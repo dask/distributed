@@ -29,6 +29,98 @@ _conn = dict()
 get_s3_lock = threading.Lock()
 
 
+class S3File(object):
+    """
+    Cached read-only interface to a key in S3, behaving like a seekable file.
+
+    Optimized for a single continguous block.
+    """
+
+    def __init__(self, s3, bucket, key, blocksize=4*2**20):
+        """
+        Open S3 as a file. Data is only loaded and cached on demand.
+
+        Parameters
+        ----------
+        s3 : boto3 connection
+        bucket : string
+            S3 bucket to access
+        key : string
+            S3 key to access
+        blocksize : int
+            read-ahead size for finding delimiters
+        """
+        self.bucket = bucket
+        self.key = key
+        self.blocksize = blocksize
+        self.ob = s3.Object(bucket, key)
+        try:
+            self.size = self.ob.content_length
+        except ClientError:
+            raise IOError('Key %s not available' % ((bucket, key)))
+        self.cache = None
+        self.loc = 0
+        self.start = None
+        self.end = None
+        self.closed = False
+
+    def tell(self):
+        return self.loc
+
+    def seek(self, loc, whence=0):
+        if whence == 0:
+            self.loc = loc
+        elif whence == 1:
+            self.loc += loc
+        elif whence == 2:
+            self.loc = self.size + loc
+        else:
+            raise ValueError("invalid whence (%s, should be 0, 1 or 2)" % whence)
+        if self.loc < 0:
+            self.loc = 0
+        return self.loc
+
+    def _fetch(self, start, end):
+        if self.start is None and self.end is None:
+            # First read
+            self.start = start
+            self.end = end + self.blocksize
+            self.cache = self.ob.get(Range='bytes=%i-%i' % (start, self.end - 1)
+                                     )['Body'].read()
+        if start < self.start:
+            new = self.ob.get(Range='bytes=%i-%i' % (start, self.start - 1)
+                              )['Body'].read()
+            self.start = start
+            self.cache = new + self.cache
+        if end > self.end:
+            if end > self.size:
+                return
+            new = self.ob.get(Range='bytes=%i-%i' % (self.end, end + self.blocksize - 1)
+                              )['Body'].read()
+            self.end = end + self.blocksize
+            self.cache = self.cache + new
+
+    def read(self, length=-1):
+        """
+        Return data from cache, or fetch pieces as necessary
+        """
+        if length < 0:
+            length = self.size
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+        self._fetch(self.loc, self.loc + length)
+        out = self.cache[self.loc - self.start:
+                         self.loc - self.start + length]
+        self.loc += len(out)
+        return out
+
+    def close(self):
+        self.cache = None
+        self.closed = True
+
+    def __repr__(self):
+        return "Cached S3 key %s/%s" % (self.bucket, self.key)
+
 def get_s3(anon):
     """ Get S3 connection
 
