@@ -388,8 +388,8 @@ def read_block(f, offset, length, delimiter=None):
         offset = start
         length = end - start
 
-        if length and not eof:
-            length -= len(delimiter)
+        # if length and not eof:
+        #    length -= len(delimiter)
 
     f.seek(offset)
     bytes = f.read(length)

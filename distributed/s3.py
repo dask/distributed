@@ -3,19 +3,21 @@ from __future__ import print_function, division, absolute_import
 import logging
 import threading
 import re
+import json
+import io
+import sys
 
 import boto3
-from botocore.handlers import disable_signing
 from botocore.exceptions import ClientError
 from tornado import gen
 
 from dask.imperative import Value
 from dask.base import tokenize
-from distributed.utils import read_block
+from distributed.utils import read_block, seek_delimiter
 
-from .compatibility import get_thread_identity
 from .executor import default_executor, ensure_default_get
-
+from .utils import ignoring, sync
+from .compatibility import unicode
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +72,11 @@ class S3FileSystem(object):
             if self.anon:
                 from botocore import UNSIGNED
                 from botocore.client import Config                
-                s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
+                s3 = boto3.Session().client('s3',
+                         config=Config(signature_version=UNSIGNED))
             else:
-                s3 = boto3.session.Session(self.key, self.secret,
-                                           **self.kwargs).client('s3')
+                s3 = boto3.Session(self.key, self.secret,
+                                   **self.kwargs).client('s3')
             self._conn[tok] = s3
         return self._conn[tok]
 
@@ -93,7 +96,7 @@ class S3FileSystem(object):
         Parameters
         ----------
         path: string
-            Path of file on HDFS
+            Path of file on S3
         mode: string
             One of 'rb' or 'wb'
         block_size: int
@@ -161,7 +164,7 @@ class S3FileSystem(object):
         if len(files) == 1:
             return files[0]
         else:
-            raise ValueError("Info must be called on exactly one path")
+            raise IOError("File not found: %s" %path)
 
     def walk(self, path):
         return [f['Key'] for f in self._ls(path) if f['Key'].rstrip('/'
@@ -173,6 +176,7 @@ class S3FileSystem(object):
 
         Note that the bucket part of the path must not contain a "*"
         """
+        path0 = path
         path = path.lstrip('s3://').lstrip('/')
         bucket, *key = path.split('/', maxsplit=1)
         if "*" in bucket:
@@ -191,6 +195,8 @@ class S3FileSystem(object):
                                         .replace('?', '.') + "$")
         out = [f for f in allfiles if re.match(pattern,
                f.replace('//', '/').rstrip('/'))]
+        if not out:
+            out = self.ls(path0)
         return out
 
     def du(self, path, total=False, deep=False):
@@ -264,8 +270,7 @@ class S3FileSystem(object):
         self._ls(path2, refresh=True)
 
     def get(self, s3_path, local_path, blocksize=2**16):
-        """ Copy HDFS file to local """
-        #TODO: _lib.hdfsCopy() may do this more efficiently
+        """ Copy S3 file to local """
         if not self.exists(s3_path):
             raise IOError(s3_path)
         with self.open(s3_path, 'rb') as f:
@@ -291,7 +296,7 @@ class S3FileSystem(object):
                         f2.write(out)
 
     def put(self, filename, path, chunk=2**27):
-        """ Copy local file to path in HDFS """
+        """ Copy local file to path in S3 """
         with self.open(path, 'wb') as f:
             with open(filename, 'rb') as f2:
                 while True:
@@ -316,7 +321,7 @@ class S3FileSystem(object):
             return f.read(size)
 
     def read_block(self, fn, offset, length, delimiter=None):
-        """ Read a block of bytes from an HDFS file
+        """ Read a block of bytes from an S3 file
 
         Starting at ``offset`` of the file, read ``length`` bytes.  If
         ``delimiter`` is set then we ensure that the read starts and stops at
@@ -339,9 +344,9 @@ class S3FileSystem(object):
 
         Examples
         --------
-        >>> hdfs.read_block('/data/file.csv', 0, 13)  # doctest: +SKIP
+        >>> s3.read_block('data/file.csv', 0, 13)  # doctest: +SKIP
         b'Alice, 100\\nBo'
-        >>> hdfs.read_block('/data/file.csv', 0, 13, delimiter=b'\\n')  # doctest: +SKIP
+        >>> s3.read_block('data/file.csv', 0, 13, delimiter=b'\\n')  # doctest: +SKIP
         b'Alice, 100\\nBob, 200'
 
         See Also
@@ -490,4 +495,279 @@ class S3File(object):
     def __exit__(self, *args):
         self.close()
 
-from distributed.hdfs import read_bytes, read_text
+
+def read_bytes(fn, executor=None, s3=None, lazy=True, delimiter=None,
+               not_zero=False, blocksize=2**27, **s3pars):
+    """ Convert location in S3 to a list of distributed futures
+
+    Parameters
+    ----------
+    fn: string
+        location in S3
+    executor: Executor (optional)
+        defaults to most recently created executor
+    s3: HDFileSystem (optional)
+    lazy: boolean (optional)
+        If True then return lazily evaluated dask Values
+    delimiter: bytes
+        An optional delimiter, like ``b'\n'`` on which to split blocks of bytes
+    not_zero: force seek of start-of-file delimiter, discarding header
+    blocksize: int (=128MB)
+        Chunk size
+    **s3pars: keyword arguments
+        Extra keywords to send to boto3 session (anon, key, secret...)
+
+    Returns
+    -------
+    List of ``distributed.Future`` objects if ``lazy=False``
+    or ``dask.Value`` objects if ``lazy=True``
+    """
+    if s3 is None:
+        s3 = S3FileSystem(**s3pars)
+    executor = default_executor(executor)
+    filenames, lengths, offsets = [], [], []
+    for afile in s3.glob(fn):
+        size = s3.info(afile)['Size']
+        offset = list(range(0, size, blocksize))
+        if not_zero:
+            offset[0] = 1
+        offsets.extend(offset)
+        filenames.extend([afile]*len(offset))
+        lengths.extend([blocksize]*len(offset))
+    names = ['read-binary-s3-%s-%s' % (fn, tokenize(offset, length, delimiter, not_zero))
+            for fn, offset, length in zip(filenames, offsets, lengths)]
+
+    logger.debug("Read %d blocks of binary bytes from %s", len(names), fn)
+    if lazy:
+        executor._send_to_scheduler({'op': 'update-graph',
+                                     'tasks': {},
+                                     'dependencies': set(),
+                                     'keys': [],
+                                     'client': executor.id})
+        values = [Value(name, [{name: (read_block_from_s3, fn, offset, length, s3pars, delimiter)}])
+                  for name, fn, offset, length in zip(names, filenames, offsets, lengths)]
+        return values
+    else:
+        return executor.map(read_block_from_s3, filenames, offsets, lengths,
+                s3pars=s3pars, delimiter=delimiter)
+
+
+def read_block_from_s3(filename, offset, length, s3pars={}, delimiter=None):
+    s3 = S3FileSystem(**s3pars)
+    bytes = s3.read_block(filename, offset, length, delimiter)
+    return bytes
+
+
+def bytes_read_csv(b, **kwargs):
+    from io import BytesIO
+    import pandas as pd
+    bio = BytesIO(b)
+    return pd.read_csv(bio, **kwargs)
+
+
+@gen.coroutine
+def _read_csv(path, executor=None, fs=None, lazy=True, lineterminator='\n',
+        header=True, names=None, collection=True, **kwargs):
+    from dask import do
+    import pandas as pd
+    fs = fs or S3FileSystem()
+    executor = default_executor(executor)
+    kwargs['lineterminator'] = lineterminator
+
+    filenames = fs.glob(path)
+    blockss = [read_bytes(fn, executor, fs, lazy=True,
+                          delimiter=ensure_bytes(lineterminator))
+               for fn in filenames]
+    if names is None and header:
+        with fs.open(filenames[0]) as f:
+            head = pd.read_csv(f, nrows=5, **kwargs)
+            names = head.columns
+
+    dfs1 = [[do(bytes_read_csv)(blocks[0], names=names, skiprows=1, **kwargs)] +
+            [do(bytes_read_csv)(b, names=names, **kwargs) for b in blocks[1:]]
+            for blocks in blockss]
+    dfs2 = sum(dfs1, [])
+    if lazy:
+        from dask.dataframe import from_imperative
+        if collection:
+            ensure_default_get(executor)
+            raise gen.Return(from_imperative(dfs2, head))
+        else:
+            raise gen.Return(dfs2)
+
+    else:
+        futures = executor.compute(dfs2)
+        from distributed.collections import _futures_to_dask_dataframe
+        if collection:
+            ensure_default_get(executor)
+            df = yield _futures_to_dask_dataframe(futures)
+            raise gen.Return(df)
+        else:
+            raise gen.Return(futures)
+
+
+def read_csv(fn, executor=None, fs=None, lazy=True, **kwargs):
+    """ Read CSV encoded data from bytes on S3
+
+    Parameters
+    ----------
+    fn: string
+        filename or globstring of CSV files on S3
+    lazy: boolean, optional
+        If True return dask Value objects
+
+    Returns
+    -------
+    List of futures of Python objects
+    """
+    executor = default_executor(executor)
+    return sync(executor.loop, _read_csv, fn, executor, fs, lazy, **kwargs)
+
+
+def avro_body(data, header):
+    """ Convert bytes and header to Python objects
+
+    Parameters
+    ----------
+    data: bytestring
+        bulk avro data, without header information
+    header: bytestring
+        Header information collected from ``fastavro.reader(f)._header``
+
+    Returns
+    -------
+    List of deserialized Python objects, probably dictionaries
+    """
+    import fastavro
+    sync = header['sync']
+    if not data.endswith(sync):
+        # Read delimited should keep end-of-block delimiter
+        data = data + sync
+    stream = io.BytesIO(data)
+    schema = header['meta']['avro.schema'].decode()
+    schema = json.loads(schema)
+    codec = header['meta']['avro.codec'].decode()
+    return list(fastavro._reader._iter_avro(stream, header, codec,
+        schema, schema))
+
+
+def avro_to_df(b, av):
+    """Parse avro binary data with header av into a pandas dataframe"""
+    import pandas as pd
+    return pd.DataFrame(data=avro_body(b, av))
+
+
+@gen.coroutine
+def _read_avro(path, executor=None, fs=None, lazy=True, **kwargs):
+    """ See distributed.hdfs.read_avro for docstring """
+    from dask import do
+    import fastavro
+    fs = fs or S3FileSystem()
+    executor = default_executor(executor)
+
+    filenames = fs.glob(path)
+
+    blockss = []
+    for fn in filenames:
+        with fs.open(fn, 'rb') as f:
+            av = fastavro.reader(f)
+            header = av._header
+        schema = json.loads(header['meta']['avro.schema'].decode())
+
+        blockss.extend([read_bytes(fn, executor, fs, lazy=True,
+                                   delimiter=header['sync'], not_zero=True)
+                       for fn in filenames])  # TODO: why is filenames used twice?
+
+    lazy_values = [do(avro_body)(b, header) for blocks in blockss
+                                            for b in blocks]
+
+    if lazy:
+        raise gen.Return(lazy_values)
+    else:
+        futures = executor.compute(lazy_values)
+        raise gen.Return(futures)
+
+
+def read_avro(fn, executor=None, fs=None, lazy=True, **kwargs):
+    """ Read avro encoded data from bytes on HDFS
+
+    Parameters
+    ----------
+    fn: string
+        filename or globstring of avro files on HDFS
+    lazy: boolean, optional
+        If True return dask Value objects
+
+    Returns
+    -------
+    List of futures of Python objects
+    """
+    executor = default_executor(executor)
+    return sync(executor.loop, _read_avro, fn, executor, fs, lazy, **kwargs)
+
+
+@gen.coroutine
+def _read_text(fn, encoding='utf-8', errors='strict', lineterminator='\n',
+               executor=None, fs=None, lazy=True, collection=True):
+    from dask import do
+    fs = fs or S3FileSystem()
+    executor = default_executor(executor)
+
+    filenames = sorted(fs.glob(fn))
+    blocks = [block for fn in filenames
+                    for block in read_bytes(fn, executor, fs, lazy=True,
+                                            delimiter=lineterminator.encode())]
+    strings = [do(bytes.decode)(b, encoding, errors) for b in blocks]
+    lines = [do(unicode.split)(s, lineterminator) for s in strings]
+
+    if lazy:
+        from dask.bag import from_imperative
+        if collection:
+            ensure_default_get(executor)
+            raise gen.Return(from_imperative(lines))
+        else:
+            raise gen.Return(lines)
+
+    else:
+        futures = executor.compute(lines)
+        from distributed.collections import _futures_to_dask_bag
+        if collection:
+            ensure_default_get(executor)
+            b = yield _futures_to_dask_bag(futures)
+            raise gen.Return(b)
+        else:
+            raise gen.Return(futures)
+
+
+def read_text(fn, encoding='utf-8', errors='strict', lineterminator='\n',
+              executor=None, fs=None, lazy=False, collection=True, **kwargs):
+    """ Read text lines from S3
+
+    Parameters
+    ----------
+    fn: string
+        filename or globstring of files on S3
+    collection: boolean, optional
+        Whether or not to return a high level collection
+    lazy: boolean, optional
+        Whether or not to start reading immediately
+
+    Returns
+    -------
+    Dask bag (if collection=True) or Futures or dask values
+    """
+    executor = default_executor(executor)
+    return sync(executor.loop, _read_text, fn, encoding, errors,
+            lineterminator, executor, fs, lazy, collection)
+
+
+def ensure_bytes(s):
+    """ Give strings that ctypes is guaranteed to handle """
+    if isinstance(s, dict):
+        return {k: ensure_bytes(v) for k, v in s.items()}
+    if isinstance(s, str) and sys.version_info < (3,):
+        return s
+    if hasattr(s, 'encode'):
+        return s.encode()
+    else:
+        return s
