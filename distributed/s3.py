@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 import logging
 import threading
+import re
 
 import boto3
 from botocore.handlers import disable_signing
@@ -10,6 +11,7 @@ from tornado import gen
 
 from dask.imperative import Value
 from dask.base import tokenize
+from distributed.utils import read_block
 
 from .compatibility import get_thread_identity
 from .executor import default_executor, ensure_default_get
@@ -29,6 +31,326 @@ _conn = dict()
 get_s3_lock = threading.Lock()
 
 
+class S3FileSystem(object):
+    """
+    Access S3 data as if it were a file system.
+    """
+    _conn = {}
+
+    def __init__(self, anon=True, key=None, secret=None, **kwargs):
+        """
+        Create connection object to S3
+
+        Will use configured key/secret (typically in ~/.aws, see the
+        boto3 documentation) unless specified
+
+        Parameters
+        ----------
+        anon : bool (True)
+            whether to use anonymous connection (public buckets only)
+        key : string (None)
+            if not anonymouns, use this key, if specified
+        secret : string (None)
+            if not anonymous, use this password, if specified
+        kwargs : other parameters for boto3 session
+        """
+        self.anon = anon
+        self.key = key
+        self.secret = secret
+        self.kwargs = kwargs
+        self.connect(anon, key, secret, kwargs)
+        self.dirs = {}
+        self.s3 = self.connect(anon, key, secret, kwargs)
+    
+    def connect(self, anon, key, secret, kwargs):
+        tok = tokenize(anon, key, secret, kwargs)
+        if tok not in self._conn:
+            logger.debug("Open S3 connection.  Anonymous: %s",
+                         self.anon)
+            if self.anon:
+                from botocore import UNSIGNED
+                from botocore.client import Config                
+                s3 = boto3.client('s3', config=Config(signature_version=UNSIGNED))
+            else:
+                s3 = boto3.session.Session(self.key, self.secret,
+                                           **self.kwargs).client('s3')
+            self._conn[tok] = s3
+        return self._conn[tok]
+
+    def __getstate__(self):
+        d = self.__dict__.copy()
+        del d['s3']
+        logger.debug("Serialize with state: %s", d)
+        return d
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.connect(self.anon, self.key, self.secret, self.kwargs)
+
+    def open(self, path, mode='rb', block_size=4*1024**2):
+        """ Open a file for reading or writing
+
+        Parameters
+        ----------
+        path: string
+            Path of file on HDFS
+        mode: string
+            One of 'rb' or 'wb'
+        block_size: int
+            Size of data-node blocks if reading
+        """
+        if 'b' not in mode:
+            raise NotImplementedError("Text mode not supported, use mode='%s'"
+                    " and manage bytes" % (mode + 'b'))
+        return S3File(self, path, mode, block_size=block_size)
+
+    def _ls(self, path, refresh=False):
+        """ List files below path
+
+        Parameters
+        ----------
+        path : string/bytes
+            location at which to list files
+        detail : bool (=True)
+            if True, each list item is a dict of file properties;
+            otherwise, returns list of filenames
+        refresh : bool (=False)
+            if False, look in local cache for file details first
+        """
+        path = path.lstrip('/')
+        bucket, *key = path.split('/', maxsplit=1)
+        if bucket not in self.dirs or refresh:
+            if bucket == '':
+                # list of buckets
+                if self.anon:
+                    # cannot list buckets if not logged in
+                    return []
+                files = self.s3.list_buckets()['Buckets']
+                for f in files:
+                    f['Key'] = f['Name']
+                    f['Size'] = 0
+                    del f['Name']
+            else:
+                files = self.s3.list_objects(Bucket=bucket).get('Contents', [])
+                for f in files:
+                    f['Key'] = "/".join([bucket, f['Key']])
+            self.dirs[bucket] = files
+        files = self.dirs[bucket]
+        return files
+
+    def ls(self, path, detail=False):
+        path = path.rstrip('/')
+        try:
+            files = self._ls(path)
+        except ClientError:
+            files = []
+        if path:
+            pattern = re.compile(path + '/[^/]*.$')
+            files = [f for f in files if pattern.match(f['Key']) is not None]
+            if not files:
+                files = [self.info(path)]
+        if detail:
+            return files
+        else:
+            return [f['Key'] for f in files]
+    
+    def info(self, path):
+        path = path.rstrip('/')
+        files = self._ls(path)
+        files = [f for f in files if f['Key'].rstrip('/') == path]
+        if len(files) == 1:
+            return files[0]
+        else:
+            raise ValueError("Info must be called on exactly one path")
+
+    def walk(self, path):
+        return [f['Key'] for f in self._ls(path)]
+
+    def glob(self, path):
+        """
+        Find files by glob-matching.
+
+        Note that the bucket part of the path must not contain a "*"
+        """
+        path = path.lstrip('/')
+        bucket, *key = path.split('/', maxsplit=1)
+        if "*" in bucket:
+            raise ValueError('Bucket cannot contain a "*"')
+        if '*' not in path:
+            path = path.rstrip('/') + '/*'
+        if '/' in path[:path.index('*')]:
+            ind = path[:path.index('*')].rindex('/')
+            root = path[:ind+1]
+        else:
+            root = '/'
+        allfiles = self.walk(root)
+        pattern = re.compile("^" + path.replace('//', '/')
+                                        .rstrip('/')
+                                        .replace('*', '[^/]*')
+                                        .replace('?', '.') + "$")
+        out = [f for f in allfiles if re.match(pattern,
+               f.replace('//', '/').rstrip('/'))]
+        return out
+
+    def du(self, path, total=False, deep=False):
+        if deep:
+            files = self.walk(path)
+            files = [self.info(f) for f in files]
+        else:
+            files = self.ls(path, detail=True)
+        if total:
+            return sum(f.get('Size', 0) for f in files)
+        else:
+            return {p['Key']: p['Size'] for p in files}
+
+    def df(self):
+        total = 0
+        for files in self.dirs.values():
+            total += sum(f['Size'] for f in files)
+        return {'capacity': None, 'used': total, 'percent-free': None}
+
+    def get_block_locations(self, path, start=0, length=0, sizes=100*1024**2):
+        """ Fetch block offsets """
+        info = self.info(path)
+        length = length or info['Size']
+        boffsets = range(start, length, sizes)
+        locs = []
+        for i in boffsets:
+            locs.append({'hosts': set(), 'length': length, 'offset': i})
+        return locs
+
+    def __repr__(self):
+        return 'S3 File System'
+
+    def mkdir(self, path):
+        self.touch(path)
+
+    def touch(self, path):
+        bucket, *key = path.split('/', maxsplit=1)
+        if not key:
+            out = self.s3.create_bucket(Bucket=bucket)
+        else:
+            out = self.s3.put_object(Bucket=bucket, Key=key[0])
+        if out['ResponseMetadata']['HTTPStatusCode'] != 200:
+            raise IOError('Touch failed on %s', path)
+        self._ls(path, refresh=True)
+
+    def mv(self, path1, path2):
+        self.copy(path1, path2)
+        self.rm(path1)        
+
+    def rm(self, path, recursive=True):
+        if recursive:
+            for f in self.walk(path):
+                self.rm(f, recursive=False)
+        bucket, *key = path.split('/', maxsplit=1)
+        if key:
+            out = self.s3.delete_object(Bucket=bucket, Key=key[0])
+        else:
+            out = self.s3.delete_bucket(Bucket=bucket)
+        if out['ResponseMetadata']['HTTPStatusCode'] != 204:
+            raise IOError('rm failed on %s', path)
+        self._ls(path, refresh=True)
+
+    def exists(self, path):
+        return bool(self.ls(path))
+
+    def copy(self, path1, path2):
+        buc2, key2 = path2.split('/', maxsplit=1)
+        out = self.s3.copy_object(Bucket=buc2, Key=key2, CopySource=path1)
+        if out['ResponseMetadata']['HTTPStatusCode'] != 200:
+            raise IOError('Copy failed on %s->%s', path1, path2)
+        self._ls(path2, refresh=True)
+
+    def get(self, s3_path, local_path, blocksize=2**16):
+        """ Copy HDFS file to local """
+        #TODO: _lib.hdfsCopy() may do this more efficiently
+        if not self.exists(s3_path):
+            raise IOError(s3_path)
+        with self.open(s3_path, 'rb') as f:
+            with open(local_path, 'wb') as f2:
+                out = 1
+                while out:
+                    out = f.read(blocksize)
+                    f2.write(out)
+
+    def getmerge(self, path, filename, blocksize=2**27):
+        """ Concat all files in path (a directory) to output file """
+        files = self.ls(path)
+        with open(filename, 'wb') as f2:
+            for apath in files:
+                with self.open(apath['name'], 'rb') as f:
+                    out = 1
+                    while out:
+                        out = f.read(blocksize)
+                        f2.write(out)
+
+    def put(self, filename, path, chunk=2**27):
+        """ Copy local file to path in HDFS """
+        with self.open(path, 'wb') as f:
+            with open(filename, 'rb') as f2:
+                while True:
+                    out = f2.read(chunk)
+                    if len(out) == 0:
+                        break
+                    f.write(out)
+        self._ls(path, refresh=True)
+
+    def tail(self, path, size=1024):
+        """ Return last bytes of file """
+        length = self.info(path)['Size']
+        if size > length:
+            return self.cat(path)
+        with self.open(path, 'rb') as f:
+            f.seek(length - size)
+            return f.read(size)
+
+    def head(self, path, size=1024):
+        """ Return first bytes of file """
+        with self.open(path, 'rb', block_size=size) as f:
+            return f.read(size)
+
+    def read_block(self, fn, offset, length, delimiter=None):
+        """ Read a block of bytes from an HDFS file
+
+        Starting at ``offset`` of the file, read ``length`` bytes.  If
+        ``delimiter`` is set then we ensure that the read starts and stops at
+        delimiter boundaries that follow the locations ``offset`` and ``offset
+        + length``.  If ``offset`` is zero then we start at zero.  The
+        bytestring returned will not include the surrounding delimiter strings.
+
+        If offset+length is beyond the eof, reads to eof.
+
+        Parameters
+        ----------
+        fn: string
+            Path to filename on HDFS
+        offset: int
+            Byte offset to start read
+        length: int
+            Number of bytes to read
+        delimiter: bytes (optional)
+            Ensure reading starts and stops at delimiter bytestring
+
+        Examples
+        --------
+        >>> hdfs.read_block('/data/file.csv', 0, 13)  # doctest: +SKIP
+        b'Alice, 100\\nBo'
+        >>> hdfs.read_block('/data/file.csv', 0, 13, delimiter=b'\\n')  # doctest: +SKIP
+        b'Alice, 100\\nBob, 200'
+
+        See Also
+        --------
+        hdfs3.utils.read_block
+        """
+        with self.open(fn, 'rb') as f:
+            size = f.info()['Size']
+            if offset + length > size:
+                length = size - offset
+            bytes = read_block(f, offset, length, delimiter)
+        return bytes
+
+
 class S3File(object):
     """
     Cached read-only interface to a key in S3, behaving like a seekable file.
@@ -36,7 +358,7 @@ class S3File(object):
     Optimized for a single continguous block.
     """
 
-    def __init__(self, s3, bucket, key, blocksize=4*2**20):
+    def __init__(self, s3, path, mode='rb', block_size=4*2**20):
         """
         Open S3 as a file. Data is only loaded and cached on demand.
 
@@ -50,19 +372,29 @@ class S3File(object):
         blocksize : int
             read-ahead size for finding delimiters
         """
+        self.mode = mode
+        if mode not in {'rb', 'wb'}:
+            raise ValueError("File mode %s not in {'rb', 'wb'}" % mode)
+        self.path = path
+        bucket, key = path.split('/', maxsplit=1)
+        self.s3 = s3
+        if mode == 'wb':
+            self.mpu = s3.s3.create_multipart_upload(Bucket=bucket, Key=key)
+            self.part_info = {'Parts': []}
+            self.size = 0
+        else:
+            self.size = self.info()['Size']            
         self.bucket = bucket
         self.key = key
-        self.blocksize = blocksize
-        self.ob = s3.Object(bucket, key)
-        try:
-            self.size = self.ob.content_length
-        except ClientError:
-            raise IOError('Key %s not available' % ((bucket, key)))
+        self.blocksize = block_size
         self.cache = None
         self.loc = 0
         self.start = None
         self.end = None
         self.closed = False
+
+    def info(self):
+        return self.s3.info(self.path)
 
     def tell(self):
         return self.loc
@@ -85,18 +417,21 @@ class S3File(object):
             # First read
             self.start = start
             self.end = end + self.blocksize
-            self.cache = self.ob.get(Range='bytes=%i-%i' % (start, self.end - 1)
-                                     )['Body'].read()
+            self.cache = self.s3.s3.get_object(Bucket=self.bucket, Key=self.key,
+                                            Range='bytes=%i-%i' % (start, self.end - 1)
+                                            )['Body'].read()
         if start < self.start:
-            new = self.ob.get(Range='bytes=%i-%i' % (start, self.start - 1)
-                              )['Body'].read()
+            new = self.s3.s3.get_object(Bucket=self.bucket, Key=self.key,
+                                     Range='bytes=%i-%i' % (start, self.start - 1)
+                                     )['Body'].read()
             self.start = start
             self.cache = new + self.cache
         if end > self.end:
             if end > self.size:
                 return
-            new = self.ob.get(Range='bytes=%i-%i' % (self.end, end + self.blocksize - 1)
-                              )['Body'].read()
+            new = self.s3.s3.get_object.get(Bucket=self.bucket, Key=self.key,
+                                         Range='bytes=%i-%i' % (self.end, end + self.blocksize - 1)
+                                         )['Body'].read()
             self.end = end + self.blocksize
             self.cache = self.cache + new
 
@@ -104,6 +439,8 @@ class S3File(object):
         """
         Return data from cache, or fetch pieces as necessary
         """
+        if self.mode != 'rb':
+            raise ValueError('File not in read mode')
         if length < 0:
             length = self.size
         if self.closed:
@@ -114,232 +451,34 @@ class S3File(object):
         self.loc += len(out)
         return out
 
+    def write(self, data):
+        if self.mode != 'wb':
+            raise ValueError('File not in write mode')
+        partno = len(self.part_info['Parts']) + 1
+        part = self.s3.s3.upload_part(Bucket=self.bucket, Key=self.key,
+                                      PartNumber=partno,
+                                      UploadId=self.mpu['UploadId'], Body=data)
+        self.part_info['Parts'].append({'PartNumber': partno, 'ETag': part['ETag']})
+
+    def flush(self):
+        if self.mode != 'wb':
+            return
+        self.s3.s3.complete_multipart_upload(Bucket=self.bucket, Key=self.key,
+                                             UploadId=self.mpu['UploadId'],
+                                             MultipartUpload=self.part_info)
+
     def close(self):
+        self.flush()
         self.cache = None
         self.closed = True
 
     def __repr__(self):
         return "Cached S3 key %s/%s" % (self.bucket, self.key)
 
-def get_s3(anon):
-    """ Get S3 connection
+    def __enter__(self):
+        return self
 
-    Caches connection for future use
-    """
-    if anon is None:
-        try:
-            return get_s3(True)
-        except:
-            return get_s3(False)
+    def __exit__(self, *args):
+        self.close()
 
-    with get_s3_lock:
-        key = anon, get_thread_identity()
-        if not _conn.get(key):
-            logger.debug("Open S3 connection.  Anonymous: %s.  Thread ID: %d",
-                         *key)
-            s3 = boto3.resource('s3')
-            if anon:
-                s3.meta.client.meta.events.register('choose-signer.s3.*',
-                        disable_signing)
-            _conn[key] = s3
-        return _conn[key]
-
-
-def get_list_of_summary_objects(bucket_name, prefix='', delimiter='',
-        page_size=DEFAULT_PAGE_LENGTH, anon=None):
-    s3 = get_s3(anon)
-    if bucket_name.startswith('s3://'):
-        bucket_name = bucket_name[len('s3://'):]
-    if prefix.startswith('/'):
-        prefix = prefix[1:]
-
-    L = list(s3.Bucket(bucket_name)
-               .objects.filter(Prefix=prefix, Delimiter=delimiter)
-               .page_size(page_size))
-    return [s for s in L if s.key[-1] != '/']
-
-
-def seek_delimiter(ob, offset, delimiter, seeklength=4096):
-    """
-    Find the bytes location of the next delimiter after the given offset
-
-    Parameters
-    ----------
-    ob : boto3 open s3 key
-    offset : int
-        bytes location to start
-    delimiter : bytes
-        pattern to seek
-    seeklength : int
-        If seeking delimited, the blocksize for finding delimiters.
-    """
-    if offset == 0:
-        return 0
-    data = b''
-    while True:
-        try:
-            piece = ob.get(Range="bytes=%i-%i" %
-                           (offset, offset + seeklength))['Body'].read()
-        except ClientError:
-            return ob.get()['ContentLength']
-        data += piece
-        try:
-            i = data.index(delimiter)
-            return offset + i + len(delimiter)
-        except ValueError:
-            offset += seeklength
-
-
-def read_block(buc, fn, offset, length, delimiter=None, anon=None):
-    """
-    Read one chunk of bytes from the given S3 key, optionally delimited.
-
-    Parameters
-    ----------
-    ob : boto3 open s3 key
-    offset : int
-        From which byte location to read
-    length : int
-        size of block to read
-    delimiter : bytes
-        If given, seek to next delimiter at the star and end of the block
-    """
-    s3 = get_s3(anon)
-    ob = s3.Object(buc, fn)
-    if delimiter is None:
-        try:
-            return ob.get(Range="bytes=%i-%i" %
-                          (offset, offset + length - 1))['Body'].read()
-        except ClientError:
-            return b''
-    start = seek_delimiter(ob, offset, delimiter)
-    end = seek_delimiter(ob, offset + length, delimiter)
-    if start == end:
-        return b''
-    return ob.get(Range="bytes=%i-%i" % (start, end - 1))['Body'].read()
-
-
-def read_content_from_keys(bucket, key, anon=None):
-    if bucket.startswith('s3://'):
-        bucket = bucket[len('s3://'):]
-    s3 = get_s3(anon)
-    return s3.Object(bucket, key).get()['Body'].read()
-
-
-def read_bytes(bucket_name, prefix='', path_delimiter='', executor=None,
-               lazy=True, anon=None, blocksize=None, delimiter=None):
-    """ Read data on S3 into bytes in distributed memory
-
-    Parameters
-    ----------
-    bucket_name: string
-        Name of S3 bucket like ``'my-bucket'``
-    prefix: string
-        Prefix of key name to match like ``'/data/2016/``
-    path_delimiter: string (optional)
-        Delimiter like ``'/'`` to define implicit S3 directory structure
-    executor: Executor (optional)
-        defaults to most recently created executor
-    lazy: boolean (optional)
-        If True then return lazily evaluated dask Values
-    anon: boolean (optional)
-        If True then don't try to authenticate with AWS
-    blocksize : int or None
-        If not none, produce multiple futures per key of blocksize bytes
-    delimiter : bytes
-        if using blocksize, split on this delimiter rather than exact
-        number of bytes
-
-    Returns
-    -------
-    list of Futures.  Each future holds bytes for one key within the bucket
-
-    Examples
-    --------
-    >>> futures = read_bytes('distributed-test', 'test')  # doctest: +SKIP
-    >>> futures  # doctest: +SKIP
-    [<Future: status: finished, key: read_binary-s3-00092e8a75141837c1e9b717b289f9d2>,
-     <Future: status: finished, key: read_binary-s3-4f0f2cbcf4573a373cc62467ffbfd30d>]
-    >>> futures[0].result()  # doctest: +SKIP
-    b'{"amount": 100, "name": "Alice"}\\n{"amount": 200, "name": "Bob"}\\n
-      {"amount": 300, "name": "Charlie"}\\n{"amount": 400, "name": "Dennis"}\\n'
-    """
-    executor = default_executor(executor)
-    s3_objects = get_list_of_summary_objects(bucket_name, prefix,
-                                             path_delimiter, anon=anon)
-
-    if blocksize is not None:
-        values = []
-        for ob in s3_objects:
-            flen = ob.get()['ContentLength']
-            for offset in range(0, flen + 1, blocksize):
-                name = 'read-binary-s3-%s-%s' % (ob.key, tokenize(bucket_name,
-                                                 offset, blocksize, delimiter))
-                values.append(Value(name, [{name:
-                    (read_block, bucket_name, ob.key, offset, blocksize, delimiter)}]))
-        if lazy:
-            return values
-        else:
-            return executor.compute(values)
-    else:
-        keys = [obj.key for obj in s3_objects]
-        names = ['read-binary-s3-{0}'.format(key) for key in keys]
-        if lazy:
-            values = [Value(name, [{name: (read_content_from_keys, bucket_name,
-                                           key, anon)}])
-                      for name, key in zip(names, keys)]
-            return values
-        else:
-            return executor.map(read_content_from_keys, [bucket_name] * len(keys),
-                    keys, anon=anon)
-
-
-def read_text(bucket_name, prefix='', path_delimiter='', encoding='utf-8',
-        errors='strict', lineterminator='\n', executor=None, anon=None,
-        collection=True, lazy=True, compression=None):
-    """
-    Read lines of text from S3
-
-    Parameters
-    ----------
-    bucket_name: string
-        Name of S3 bucket like ``'my-bucket'``
-    prefix: string
-        Prefix of key name to match like ``'/data/2016/``
-    path_delimiter: string (optional)
-        Delimiter like ``'/'`` to define implicit S3 directory structure
-    compression: {None, 'gzip'}
-
-    Returns
-    -------
-    Dask bag
-    """
-    from dask import do
-    import dask.bag as db
-    executor = default_executor(executor)
-
-    blocks = read_bytes(bucket_name, prefix, path_delimiter, executor=executor,
-                        lazy=True, anon=anon)
-
-    if compression:
-        blocks = map(do(decompress[compression]), blocks)
-
-    lists = [b.decode(encoding, errors).split(lineterminator) for b in blocks]
-
-    if collection:
-        ensure_default_get(executor)
-        b = db.from_imperative(lists).filter(None)
-        if lazy:
-            return b
-        else:
-            return executor.persist(b)[0]
-    else:
-        if lazy:
-            ensure_default_get(executor)
-            return lists
-        else:
-            return executor.compute(lists)
-
-
-from .compatibility import gzip_decompress
-decompress = {'gzip': gzip_decompress}
+from distributed.hdfs import read_bytes, read_text

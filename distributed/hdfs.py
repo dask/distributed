@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def walk_glob(hdfs, path):
-    if '*' not in path and hdfs.info(path)['kind'] == 'directory':
+    if '*' not in path and hdfs.info(path).get('kind', '') == 'directory':
         return sorted([fn for fn in hdfs.walk(path) if fn[-1] != '/'])
     else:
         return sorted(hdfs.glob(path))
@@ -69,8 +69,9 @@ def read_bytes(fn, executor=None, hdfs=None, lazy=True, delimiter=None,
     List of ``distributed.Future`` objects if ``lazy=False``
     or ``dask.Value`` objects if ``lazy=True``
     """
-    from hdfs3 import HDFileSystem
-    hdfs = hdfs or HDFileSystem(**hdfs_auth)
+    if hdfs is None:
+        from hdfs3 import HDFileSystem
+        hdfs = HDFileSystem(**hdfs_auth)
     executor = default_executor(executor)
     blocks = get_block_locations(hdfs, fn)
     filenames = [d['filename'] for d in blocks]
@@ -308,10 +309,11 @@ def write_bytes(path, futures, executor=None, hdfs=None, **hdfs_auth):
 @gen.coroutine
 def _read_text(fn, encoding='utf-8', errors='strict', lineterminator='\n',
                executor=None, hdfs=None, lazy=True, collection=True):
-    from hdfs3 import HDFileSystem
     from dask import do
     import pandas as pd
-    hdfs = hdfs or HDFileSystem()
+    if hdfs is None:
+        from hdfs3 import HDFileSystem
+        hdfs = HDFileSystem()
     executor = default_executor(executor)
 
     filenames = sorted(hdfs.glob(fn))
