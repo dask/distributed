@@ -9,7 +9,7 @@ from distributed import Executor
 from distributed.executor import _wait, Future
 from distributed.s3 import (read_bytes, get_list_of_summary_objects,
         read_content_from_keys, get_s3, read_text, read_block,
-        seek_delimiter)
+        seek_delimiter, S3FileSystem)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster, loop, cluster
 
@@ -28,29 +28,30 @@ files = {'test/accounts.1.json':  (b'{"amount": 100, "name": "Alice"}\n'
                                    b'{"amount": 700, "name": "Charlie"}\n'
                                    b'{"amount": 800, "name": "Dennis"}\n')}
 
+@pytest.yield_fixture
+def s3():
+    # could do with a bucket with write privileges.
+    yield S3FileSystem(anon=True)
 
 
-def test_get_list_of_summary_objects():
-    L = get_list_of_summary_objects(test_bucket_name, prefix='test/accounts',
-                                    anon=True)
+def test_get_list_of_summary_objects(s3):
+    L = s3.ls(test_bucket_name + '/test')
 
     assert len(L) == 2
-    assert list(map(lambda o: o.key, L)) == sorted(list(files))
+    assert list(sorted(L)) == sorted(list(files))
 
-    L2 = get_list_of_summary_objects('s3://' + test_bucket_name, prefix='/test/accounts',
-                                    anon=True)
+    L2 = s3.ls('s3://' + test_bucket_name + '/test')
 
     assert L == L2
 
 
-def test_read_keys_from_bucket():
+def test_read_keys_from_bucket(s3):
     for k, data in files.items():
-        file_contents = read_content_from_keys('distributed-test', k, anon=True)
-
+        file_contents = s3.cat('/'.join([test_bucket_name, k])) 
         assert file_contents == data
 
     assert (read_content_from_keys('s3://distributed-test', k, anon=True) ==
-            read_content_from_keys('distributed-test', k, anon=True))
+            s3.cat()
 
 
 def test_seek_delimiter():

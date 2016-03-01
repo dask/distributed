@@ -117,7 +117,7 @@ class S3FileSystem(object):
         refresh : bool (=False)
             if False, look in local cache for file details first
         """
-        path = path.lstrip('/')
+        path = path.lstrip('s3://').lstrip('/')
         bucket, *key = path.split('/', maxsplit=1)
         if bucket not in self.dirs or refresh:
             if bucket == '':
@@ -139,7 +139,7 @@ class S3FileSystem(object):
         return files
 
     def ls(self, path, detail=False):
-        path = path.rstrip('/')
+        path = path.lstrip('s3://').rstrip('/')
         try:
             files = self._ls(path)
         except ClientError:
@@ -155,7 +155,7 @@ class S3FileSystem(object):
             return [f['Key'] for f in files]
     
     def info(self, path):
-        path = path.rstrip('/')
+        path = path.lstrip('s3://').rstrip('/')
         files = self._ls(path)
         files = [f for f in files if f['Key'].rstrip('/') == path]
         if len(files) == 1:
@@ -164,7 +164,8 @@ class S3FileSystem(object):
             raise ValueError("Info must be called on exactly one path")
 
     def walk(self, path):
-        return [f['Key'] for f in self._ls(path)]
+        return [f['Key'] for f in self._ls(path) if f['Key'].rstrip('/'
+                ).startswith(path.rstrip('/') + '/')]
 
     def glob(self, path):
         """
@@ -172,7 +173,7 @@ class S3FileSystem(object):
 
         Note that the bucket part of the path must not contain a "*"
         """
-        path = path.lstrip('/')
+        path = path.lstrip('s3://').lstrip('/')
         bucket, *key = path.split('/', maxsplit=1)
         if "*" in bucket:
             raise ValueError('Bucket cannot contain a "*"')
@@ -226,7 +227,7 @@ class S3FileSystem(object):
         self.touch(path)
 
     def touch(self, path):
-        bucket, *key = path.split('/', maxsplit=1)
+        bucket, *key = path.lstrip('s3://').split('/', maxsplit=1)
         if not key:
             out = self.s3.create_bucket(Bucket=bucket)
         else:
@@ -243,7 +244,7 @@ class S3FileSystem(object):
         if recursive:
             for f in self.walk(path):
                 self.rm(f, recursive=False)
-        bucket, *key = path.split('/', maxsplit=1)
+        bucket, *key = path.lstrip('s3://').split('/', maxsplit=1)
         if key:
             out = self.s3.delete_object(Bucket=bucket, Key=key[0])
         else:
@@ -256,8 +257,8 @@ class S3FileSystem(object):
         return bool(self.ls(path))
 
     def copy(self, path1, path2):
-        buc2, key2 = path2.split('/', maxsplit=1)
-        out = self.s3.copy_object(Bucket=buc2, Key=key2, CopySource=path1)
+        buc2, key2 = path2.lstrip('s3://').split('/', maxsplit=1)
+        out = self.s3.copy_object(Bucket=buc2, Key=key2, CopySource=path1.lstrip('s3://'))
         if out['ResponseMetadata']['HTTPStatusCode'] != 200:
             raise IOError('Copy failed on %s->%s', path1, path2)
         self._ls(path2, refresh=True)
@@ -273,6 +274,10 @@ class S3FileSystem(object):
                 while out:
                     out = f.read(blocksize)
                     f2.write(out)
+
+    def cat(self, path):
+        with self.open(path, 'rb') as f:
+            return f.read()
 
     def getmerge(self, path, filename, blocksize=2**27):
         """ Concat all files in path (a directory) to output file """
@@ -376,7 +381,7 @@ class S3File(object):
         if mode not in {'rb', 'wb'}:
             raise ValueError("File mode %s not in {'rb', 'wb'}" % mode)
         self.path = path
-        bucket, key = path.split('/', maxsplit=1)
+        bucket, key = path.lstrip('s3://').split('/', maxsplit=1)
         self.s3 = s3
         if mode == 'wb':
             self.mpu = s3.s3.create_multipart_upload(Bucket=bucket, Key=key)
@@ -387,7 +392,7 @@ class S3File(object):
         self.bucket = bucket
         self.key = key
         self.blocksize = block_size
-        self.cache = None
+        self.cache = b""
         self.loc = 0
         self.start = None
         self.end = None
@@ -413,27 +418,31 @@ class S3File(object):
         return self.loc
 
     def _fetch(self, start, end):
-        if self.start is None and self.end is None:
-            # First read
-            self.start = start
-            self.end = end + self.blocksize
-            self.cache = self.s3.s3.get_object(Bucket=self.bucket, Key=self.key,
-                                            Range='bytes=%i-%i' % (start, self.end - 1)
-                                            )['Body'].read()
-        if start < self.start:
-            new = self.s3.s3.get_object(Bucket=self.bucket, Key=self.key,
-                                     Range='bytes=%i-%i' % (start, self.start - 1)
-                                     )['Body'].read()
-            self.start = start
-            self.cache = new + self.cache
-        if end > self.end:
-            if end > self.size:
-                return
-            new = self.s3.s3.get_object.get(Bucket=self.bucket, Key=self.key,
-                                         Range='bytes=%i-%i' % (self.end, end + self.blocksize - 1)
+        try:
+            if self.start is None and self.end is None:
+                # First read
+                self.start = start
+                self.end = end + self.blocksize
+                self.cache = self.s3.s3.get_object(Bucket=self.bucket, Key=self.key,
+                                                Range='bytes=%i-%i' % (start, self.end - 1)
+                                                )['Body'].read()
+            if start < self.start:
+                new = self.s3.s3.get_object(Bucket=self.bucket, Key=self.key,
+                                         Range='bytes=%i-%i' % (start, self.start - 1)
                                          )['Body'].read()
-            self.end = end + self.blocksize
-            self.cache = self.cache + new
+                self.start = start
+                self.cache = new + self.cache
+            if end > self.end:
+                if end > self.size:
+                    return
+                new = self.s3.s3.get_object.get(Bucket=self.bucket, Key=self.key,
+                                             Range='bytes=%i-%i' % (self.end, end + self.blocksize - 1)
+                                             )['Body'].read()
+                self.end = end + self.blocksize
+                self.cache = self.cache + new
+        except ClientError:
+            self.start = min([start, self.start or self.size])
+            self.end = max(end, self.end or self.size)
 
     def read(self, length=-1):
         """
