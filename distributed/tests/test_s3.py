@@ -7,7 +7,7 @@ from tornado import gen
 from dask.imperative import Value
 from distributed import Executor
 from distributed.executor import _wait, Future
-from distributed.s3 import (read_bytes, read_text,
+from distributed.s3 import (read_bytes, read_text, _read_avro, read_avro,
         read_block, seek_delimiter, S3FileSystem, _read_text)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster, loop, cluster
@@ -88,7 +88,7 @@ def test_read_bytes(s, a, b):
     futures = read_bytes(test_bucket_name+'/test/accounts.*', lazy=False)
     assert len(futures) >= len(files)
     results = yield e._gather(futures)
-    assert set(results).issuperset(set(files.values()))
+    assert set(results) == set(files.values())
 
     yield e._shutdown()
 
@@ -97,42 +97,49 @@ def test_read_bytes(s, a, b):
 def test_read_bytes_block(s, a, b):
     e = Executor((s.ip, s.port), start=False)
     yield e._start()
-    bs = 15
-    vals = read_bytes(test_bucket_name+'/test/account*', blocksize=bs)
-    assert len(vals) == sum([(len(v) // bs + 1) for v in files.values()])
-    futures = e.compute(vals)
-    results = yield e._gather(futures)
-    assert sum(len(r) for r in results) == sum(len(v) for v in
-               files.values())
-    futures = read_bytes(test_bucket_name+'/test/accounts*', blocksize=bs,
-                         lazy=False)
-    assert len(vals) == len(futures)
-    results = yield e._gather(futures)
-    assert sum(len(r) for r in results) == sum(len(v) for v in
-               files.values())
+    for bs in [5, 15, 45, 1500]:
+        vals = read_bytes(test_bucket_name+'/test/account*', blocksize=bs)
+        assert len(vals) == sum([(len(v) // bs + 1) for v in files.values()])
+        futures = e.compute(vals)
+        results = yield e._gather(futures)
+        assert sum(len(r) for r in results) == sum(len(v) for v in
+                   files.values())
+        futures = read_bytes(test_bucket_name+'/test/accounts*', blocksize=bs,
+                             lazy=False)
+        assert len(vals) == len(futures)
+        results = yield e._gather(futures)
+        assert sum(len(r) for r in results) == sum(len(v) for v in
+                   files.values())
+        ourlines = b"".join(results).split(b'\n')
+        testlines = b"".join(files.values()).split(b'\n')
+        assert set(ourlines) == set(testlines)
     yield e._shutdown()
 
 
 @gen_cluster(timeout=60)
 def test_read_bytes_delimited(s, a, b):
-    import io
     e = Executor((s.ip, s.port), start=False)
     yield e._start()
-    bs = 15
-    futures = read_bytes(test_bucket_name+'/test/accounts*',
-                         lazy=False, blocksize=bs, delimiter=b'\n')
-    results = yield e._gather(futures)
-    res = [r for r in results if r]
-    data = [io.BytesIO(o).readlines() for o in files.values()]
-    assert set(res) == set(data[0] + data[1])
-
-    # delimiter not at the end
-    d = b'}'
-    futures = read_bytes(test_bucket_name+'/test/accounts*',
-                         lazy=False, blocksize=bs, delimiter=d)
-    results = yield e._gather(futures)
-    res = [r for r in results if r]
-    assert len(res) == sum(f.count(d) for f in files.values()) + len(files)
+    for bs in [5, 15, 45, 1500]:
+        futures = read_bytes(test_bucket_name+'/test/accounts*',
+                             lazy=False, blocksize=bs, delimiter=b'\n')
+        results = yield e._gather(futures)
+        res = [r for r in results if r]
+        assert all(r.endswith(b'\n') for r in res)
+        ourlines = b''.join(res).split(b'\n')
+        testlines = b"".join(files.values()).split(b'\n')
+        assert set(ourlines) == set(testlines)
+    
+        # delimiter not at the end
+        d = b'}'
+        futures = read_bytes(test_bucket_name+'/test/accounts*',
+                             lazy=False, blocksize=bs, delimiter=d)
+        results = yield e._gather(futures)
+        res = [r for r in results if r]
+        # All should end in } except EOF
+        assert sum(r.endswith(b'}') for r in res) == len(res) - 2
+        ours = b"".join(res)
+        assert ours == b"".join(files.values())
     yield e._shutdown()
 
 
@@ -191,3 +198,25 @@ def test_read_text_sync(loop):
             result = c.compute(get=e.get)
 
             assert result == (1 + 2 + 3 + 4 + 5 + 6 + 7 + 8) * 100
+
+
+@gen_cluster(timeout=60)
+def test_read_avro(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+
+    b = yield _read_avro(test_bucket_name+'/test/data/avro', lazy=False)
+    out = yield e._gather(b)
+    assert out[0] == out[1]
+    assert isinstance(out[0][0], dict)
+    assert sum(sum(o['amount'] for o in bit) for bit in out)
+
+
+def test_read_avro_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            res = read_avro(test_bucket_name+'/test/data/avro', lazy=True)
+            out = [r.compute(get=e.get) for r in res]
+    assert out[0] == out[1]
+    assert isinstance(out[0][0], dict)
+    assert sum(sum(o['amount'] for o in bit) for bit in out)

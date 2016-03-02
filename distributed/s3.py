@@ -238,44 +238,22 @@ class S3FileSystem(object):
         return 'S3 File System'
 
     def mkdir(self, path):
-        self.touch(path)
+        raise NotImplementedError('S3 implemented as read-only')
 
     def touch(self, path):
-        bucket, key = split_path(path)
-        if not key:
-            out = self.s3.create_bucket(Bucket=bucket)
-        else:
-            out = self.s3.put_object(Bucket=bucket, Key=key)
-        if out['ResponseMetadata']['HTTPStatusCode'] != 200:
-            raise IOError('Touch failed on %s', path)
-        self._ls(path, refresh=True)
+        raise NotImplementedError('S3 implemented as read-only')
 
     def mv(self, path1, path2):
-        self.copy(path1, path2)
-        self.rm(path1)        
+        raise NotImplementedError('S3 implemented as read-only')
 
     def rm(self, path, recursive=True):
-        if recursive:
-            for f in self.walk(path):
-                self.rm(f, recursive=False)
-        bucket, key = split_path(path)
-        if key:
-            out = self.s3.delete_object(Bucket=bucket, Key=key)
-        else:
-            out = self.s3.delete_bucket(Bucket=bucket)
-        if out['ResponseMetadata']['HTTPStatusCode'] != 204:
-            raise IOError('rm failed on %s', path)
-        self._ls(path, refresh=True)
+        raise NotImplementedError('S3 implemented as read-only')
 
     def exists(self, path):
         return bool(self.ls(path))
 
     def copy(self, path1, path2):
-        buc2, key2 = path2.lstrip('s3://').split('/', maxsplit=1)
-        out = self.s3.copy_object(Bucket=buc2, Key=key2, CopySource=path1.lstrip('s3://'))
-        if out['ResponseMetadata']['HTTPStatusCode'] != 200:
-            raise IOError('Copy failed on %s->%s', path1, path2)
-        self._ls(path2, refresh=True)
+        raise NotImplementedError('S3 implemented as read-only')
 
     def get(self, s3_path, local_path, blocksize=2**16):
         """ Copy S3 file to local """
@@ -304,15 +282,7 @@ class S3FileSystem(object):
                         f2.write(out)
 
     def put(self, filename, path, chunk=2**27):
-        """ Copy local file to path in S3 """
-        with self.open(path, 'wb') as f:
-            with open(filename, 'rb') as f2:
-                while True:
-                    out = f2.read(chunk)
-                    if len(out) == 0:
-                        break
-                    f.write(out)
-        self._ls(path, refresh=True)
+        raise NotImplementedError('S3 implemented as read-only')
 
     def tail(self, path, size=1024):
         """ Return last bytes of file """
@@ -391,17 +361,12 @@ class S3File(object):
             read-ahead size for finding delimiters
         """
         self.mode = mode
-        if mode not in {'rb', 'wb'}:
-            raise ValueError("File mode %s not in {'rb', 'wb'}" % mode)
+        if mode != 'rb':
+            raise NotImplementedError("File mode must be 'rb', not %s" % mode)
         self.path = path
         bucket, key = split_path(path)
         self.s3 = s3
-        if mode == 'wb':
-            self.mpu = s3.s3.create_multipart_upload(Bucket=bucket, Key=key)
-            self.part_info = {'Parts': []}
-            self.size = 0
-        else:
-            self.size = self.info()['Size']            
+        self.size = self.info()['Size']            
         self.bucket = bucket
         self.key = key
         self.blocksize = block_size
@@ -473,21 +438,8 @@ class S3File(object):
         self.loc += len(out)
         return out
 
-    def write(self, data):
-        if self.mode != 'wb':
-            raise ValueError('File not in write mode')
-        partno = len(self.part_info['Parts']) + 1
-        part = self.s3.s3.upload_part(Bucket=self.bucket, Key=self.key,
-                                      PartNumber=partno,
-                                      UploadId=self.mpu['UploadId'], Body=data)
-        self.part_info['Parts'].append({'PartNumber': partno, 'ETag': part['ETag']})
-
     def flush(self):
-        if self.mode != 'wb':
-            return
-        self.s3.s3.complete_multipart_upload(Bucket=self.bucket, Key=self.key,
-                                             UploadId=self.mpu['UploadId'],
-                                             MultipartUpload=self.part_info)
+        pass
 
     def close(self):
         self.flush()
@@ -682,9 +634,8 @@ def _read_avro(path, executor=None, fs=None, lazy=True, **kwargs):
             header = av._header
         schema = json.loads(header['meta']['avro.schema'].decode())
 
-        blockss.extend([read_bytes(fn, executor, fs, lazy=True,
-                                   delimiter=header['sync'], not_zero=True)
-                       for fn in filenames])  # TODO: why is filenames used twice?
+        blockss.append(read_bytes(fn, executor, fs, lazy=True,
+                                   delimiter=header['sync'], not_zero=True))  # TODO: why is filenames used twice?
 
     lazy_values = [do(avro_body)(b, header) for blocks in blockss
                                             for b in blocks]
