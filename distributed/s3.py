@@ -33,7 +33,21 @@ _conn = dict()
 get_s3_lock = threading.Lock()
 
 def split_path(path):
-    path = path.lstrip('s3://')
+    """
+    Normalise S3 path string into bucket and key.
+
+    Parameters
+    ----------
+    path : string
+        Input path, like `s3://mybucket/path/to/file`
+
+    Examples
+    --------
+    >>> split_path("s3://mybucket/path/to/file")
+    ("mybucket", "path/to/file")
+    """
+    if path.startswith('s3://'):
+        path = path[5:]
     if '/' not in path:
         return path, ""
     else:
@@ -230,23 +244,8 @@ class S3FileSystem(object):
     def __repr__(self):
         return 'S3 File System'
 
-    def mkdir(self, path):
-        raise NotImplementedError('S3 implemented as read-only')
-
-    def touch(self, path):
-        raise NotImplementedError('S3 implemented as read-only')
-
-    def mv(self, path1, path2):
-        raise NotImplementedError('S3 implemented as read-only')
-
-    def rm(self, path, recursive=True):
-        raise NotImplementedError('S3 implemented as read-only')
-
     def exists(self, path):
         return bool(self.ls(path))
-
-    def copy(self, path1, path2):
-        raise NotImplementedError('S3 implemented as read-only')
 
     def get(self, s3_path, local_path, blocksize=2**16):
         """ Copy S3 file to local """
@@ -273,9 +272,6 @@ class S3FileSystem(object):
                     while out:
                         out = f.read(blocksize)
                         f2.write(out)
-
-    def put(self, filename, path, chunk=2**27):
-        raise NotImplementedError('S3 implemented as read-only')
 
     def tail(self, path, size=1024):
         """ Return last bytes of file """
@@ -492,11 +488,6 @@ def read_bytes(fn, executor=None, s3=None, lazy=True, delimiter=None,
 
     logger.debug("Read %d blocks of binary bytes from %s", len(names), fn)
     if lazy:
-        executor._send_to_scheduler({'op': 'update-graph',
-                                     'tasks': {},
-                                     'dependencies': set(),
-                                     'keys': [],
-                                     'client': executor.id})
         values = [Value(name, [{name: (read_block_from_s3, fn, offset, length, s3pars, delimiter)}])
                   for name, fn, offset, length in zip(names, filenames, offsets, lengths)]
         return values
@@ -509,94 +500,6 @@ def read_block_from_s3(filename, offset, length, s3pars={}, delimiter=None):
     s3 = S3FileSystem(**s3pars)
     bytes = s3.read_block(filename, offset, length, delimiter)
     return bytes
-
-
-def bytes_read_csv(b, **kwargs):
-    from io import BytesIO
-    import pandas as pd
-    bio = BytesIO(b)
-    return pd.read_csv(bio, **kwargs)
-
-
-def avro_body(data, header):
-    """ Convert bytes and header to Python objects
-
-    Parameters
-    ----------
-    data: bytestring
-        bulk avro data, without header information
-    header: bytestring
-        Header information collected from ``fastavro.reader(f)._header``
-
-    Returns
-    -------
-    List of deserialized Python objects, probably dictionaries
-    """
-    import fastavro
-    sync = header['sync']
-    if not data.endswith(sync):
-        # Read delimited should keep end-of-block delimiter
-        data = data + sync
-    stream = io.BytesIO(data)
-    schema = header['meta']['avro.schema'].decode()
-    schema = json.loads(schema)
-    codec = header['meta']['avro.codec'].decode()
-    return list(fastavro._reader._iter_avro(stream, header, codec,
-        schema, schema))
-
-
-def avro_to_df(b, av):
-    """Parse avro binary data with header av into a pandas dataframe"""
-    import pandas as pd
-    return pd.DataFrame(data=avro_body(b, av))
-
-
-@gen.coroutine
-def _read_avro(path, executor=None, fs=None, lazy=True, **kwargs):
-    """ See read_avro for docstring """
-    from dask import do
-    import fastavro
-    fs = fs or S3FileSystem()
-    executor = default_executor(executor)
-
-    filenames = fs.glob(path)
-
-    blockss = []
-    for fn in filenames:
-        with fs.open(fn, 'rb') as f:
-            av = fastavro.reader(f)
-            header = av._header
-        schema = json.loads(header['meta']['avro.schema'].decode())
-
-        blockss.append(read_bytes(fn, executor, fs, lazy=True,
-                                   delimiter=header['sync'], not_zero=True))  # TODO: why is filenames used twice?
-
-    lazy_values = [do(avro_body)(b, header) for blocks in blockss
-                                            for b in blocks]
-
-    if lazy:
-        raise gen.Return(lazy_values)
-    else:
-        futures = executor.compute(lazy_values)
-        raise gen.Return(futures)
-
-
-def read_avro(fn, executor=None, fs=None, lazy=True, **kwargs):
-    """ Read avro encoded data from bytes on S3
-
-    Parameters
-    ----------
-    fn: string
-        filename or globstring of avro files on S3
-    lazy: boolean, optional
-        If True return dask Value objects
-
-    Returns
-    -------
-    List of futures of Python objects
-    """
-    executor = default_executor(executor)
-    return sync(executor.loop, _read_avro, fn, executor, fs, lazy, **kwargs)
 
 
 @gen.coroutine
@@ -652,15 +555,3 @@ def read_text(fn, encoding='utf-8', errors='strict', lineterminator='\n',
     executor = default_executor(executor)
     return sync(executor.loop, _read_text, fn, encoding, errors,
             lineterminator, executor, fs, lazy, collection)
-
-
-def ensure_bytes(s):
-    """ Give strings that ctypes is guaranteed to handle """
-    if isinstance(s, dict):
-        return {k: ensure_bytes(v) for k, v in s.items()}
-    if isinstance(s, str) and sys.version_info < (3,):
-        return s
-    if hasattr(s, 'encode'):
-        return s.encode()
-    else:
-        return s

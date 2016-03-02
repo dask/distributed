@@ -7,7 +7,7 @@ from tornado import gen
 from dask.imperative import Value
 from distributed import Executor
 from distributed.executor import _wait, Future
-from distributed.s3 import (read_bytes, read_text, _read_avro, read_avro,
+from distributed.s3 import (read_bytes, read_text,
         read_block, seek_delimiter, S3FileSystem, _read_text)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster, loop, cluster
@@ -33,23 +33,36 @@ def s3():
     yield S3FileSystem(anon=True)
 
 
-def test_s3_filesystem(s3):
+def test_s3_file_access(s3):
     fn = 'distributed-test/nested/file1'
-    assert fn in s3.walk('distributed-test')
-    assert s3.exists(fn)
-    assert not s3.exists(fn+'another')
     data = b'hello\n'
     assert s3.cat(fn) == data
     assert s3.head(fn, 3) == data[:3]
     assert s3.tail(fn, 3) == data[-3:]
+
+
+def test_s3_file_info(s3):
+    fn = 'distributed-test/nested/file1'
+    data = b'hello\n'
+    assert fn in s3.walk('distributed-test')
+    assert s3.exists(fn)
+    assert not s3.exists(fn+'another')
     assert s3.info(fn)['Size'] == len(data)
     with pytest.raises(OSError):
         s3.info(fn+'another')
     assert s3.du(test_bucket_name, deep=True)[fn] == len(data)
+
+
+def test_s3_ls(s3):
+    fn = 'distributed-test/nested/file1'
     assert fn not in s3.ls('distributed-test/')
     assert fn in s3.ls('distributed-test/nested/')
     assert fn in s3.ls('distributed-test/nested')
     assert fn in s3.ls('s3://distributed-test/nested/')
+
+
+def test_s3_glob(s3):
+    fn = 'distributed-test/nested/file1'
     assert fn not in s3.glob('distributed-test/')
     assert fn not in s3.glob('distributed-test/*')
     assert fn in s3.glob('distributed-test/nested')
@@ -89,6 +102,10 @@ def test_seek_delimiter(s3):
         assert f.tell() == data.index(b'}') + 1
         seek_delimiter(f, b'\n', 5)
         assert f.tell() == data.index(b'\n') + 1
+        f.seek(1, 1)
+        ind = data.index(b'\n') + data[data.index(b'\n')+1:].index(b'\n') + 1
+        seek_delimiter(f, b'\n', 5)
+        assert f.tell() == ind + 1
 
 
 def test_read_block(s3):
@@ -152,8 +169,8 @@ def test_read_bytes_delimited(s, a, b):
         res = [r for r in results if r]
         assert all(r.endswith(b'\n') for r in res)
         ourlines = b''.join(res).split(b'\n')
-        testlines = b"".join(files.values()).split(b'\n')
-        assert set(ourlines) == set(testlines)
+        testlines = b"".join(files[k] for k in sorted(files)).split(b'\n')
+        assert ourlines == testlines
     
         # delimiter not at the end
         d = b'}'
@@ -224,25 +241,3 @@ def test_read_text_sync(loop):
             result = c.compute(get=e.get)
 
             assert result == (1 + 2 + 3 + 4 + 5 + 6 + 7 + 8) * 100
-
-
-@gen_cluster(timeout=60)
-def test_read_avro(s, a, b):
-    e = Executor((s.ip, s.port), start=False)
-    yield e._start()
-
-    b = yield _read_avro(test_bucket_name+'/test/data/avro', lazy=False)
-    out = yield e._gather(b)
-    assert out[0] == out[1]
-    assert isinstance(out[0][0], dict)
-    assert sum(sum(o['amount'] for o in bit) for bit in out)
-
-
-def test_read_avro_sync(loop):
-    with cluster() as (s, [a, b]):
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            res = read_avro(test_bucket_name+'/test/data/avro', lazy=True)
-            out = [r.compute(get=e.get) for r in res]
-    assert out[0] == out[1]
-    assert isinstance(out[0][0], dict)
-    assert sum(sum(o['amount'] for o in bit) for bit in out)
