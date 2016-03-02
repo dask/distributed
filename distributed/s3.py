@@ -13,8 +13,8 @@ from tornado import gen
 
 from dask.imperative import Value
 from dask.base import tokenize
-from distributed.utils import read_block, seek_delimiter
 
+from .utils import read_block, seek_delimiter
 from .executor import default_executor, ensure_default_get
 from .utils import ignoring, sync
 from .compatibility import unicode
