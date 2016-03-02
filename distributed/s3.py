@@ -518,65 +518,6 @@ def bytes_read_csv(b, **kwargs):
     return pd.read_csv(bio, **kwargs)
 
 
-@gen.coroutine
-def _read_csv(path, executor=None, fs=None, lazy=True, lineterminator='\n',
-        header=True, names=None, collection=True, **kwargs):
-    from dask import do
-    import pandas as pd
-    fs = fs or S3FileSystem()
-    executor = default_executor(executor)
-    kwargs['lineterminator'] = lineterminator
-
-    filenames = fs.glob(path)
-    blockss = [read_bytes(fn, executor, fs, lazy=True,
-                          delimiter=ensure_bytes(lineterminator))
-               for fn in filenames]
-    if names is None and header:
-        with fs.open(filenames[0]) as f:
-            head = pd.read_csv(f, nrows=5, **kwargs)
-            names = head.columns
-
-    dfs1 = [[do(bytes_read_csv)(blocks[0], names=names, skiprows=1, **kwargs)] +
-            [do(bytes_read_csv)(b, names=names, **kwargs) for b in blocks[1:]]
-            for blocks in blockss]
-    dfs2 = sum(dfs1, [])
-    if lazy:
-        from dask.dataframe import from_imperative
-        if collection:
-            ensure_default_get(executor)
-            raise gen.Return(from_imperative(dfs2, head))
-        else:
-            raise gen.Return(dfs2)
-
-    else:
-        futures = executor.compute(dfs2)
-        from distributed.collections import _futures_to_dask_dataframe
-        if collection:
-            ensure_default_get(executor)
-            df = yield _futures_to_dask_dataframe(futures)
-            raise gen.Return(df)
-        else:
-            raise gen.Return(futures)
-
-
-def read_csv(fn, executor=None, fs=None, lazy=True, **kwargs):
-    """ Read CSV encoded data from bytes on S3
-
-    Parameters
-    ----------
-    fn: string
-        filename or globstring of CSV files on S3
-    lazy: boolean, optional
-        If True return dask Value objects
-
-    Returns
-    -------
-    List of futures of Python objects
-    """
-    executor = default_executor(executor)
-    return sync(executor.loop, _read_csv, fn, executor, fs, lazy, **kwargs)
-
-
 def avro_body(data, header):
     """ Convert bytes and header to Python objects
 
