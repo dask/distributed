@@ -33,6 +33,31 @@ def s3():
     yield S3FileSystem(anon=True)
 
 
+def test_s3_filesystem(s3):
+    fn = 'distributed-test/nested/file1'
+    assert fn in s3.walk('distributed-test')
+    assert s3.exists(fn)
+    assert not s3.exists(fn+'another')
+    data = b'hello\n'
+    assert s3.cat(fn) == data
+    assert s3.head(fn, 3) == data[:3]
+    assert s3.tail(fn, 3) == data[-3:]
+    assert s3.info(fn)['Size'] == len(data)
+    with pytest.raises(OSError):
+        s3.info(fn+'another')
+    assert s3.du(test_bucket_name, deep=True)[fn] == len(data)
+    assert fn not in s3.ls('distributed-test/')
+    assert fn in s3.ls('distributed-test/nested/')
+    assert fn in s3.ls('distributed-test/nested')
+    assert fn in s3.ls('s3://distributed-test/nested/')
+    assert fn not in s3.glob('distributed-test/')
+    assert fn not in s3.glob('distributed-test/*')
+    assert fn in s3.glob('distributed-test/nested')
+    assert fn in s3.glob('distributed-test/nested/*')
+    assert fn in s3.glob('distributed-test/nested/file*')
+    assert fn in s3.glob('distributed-test/*/*')
+
+
 def test_get_list_of_summary_objects(s3):
     L = s3.ls(test_bucket_name + '/test')
 
@@ -139,7 +164,8 @@ def test_read_bytes_delimited(s, a, b):
         # All should end in } except EOF
         assert sum(r.endswith(b'}') for r in res) == len(res) - 2
         ours = b"".join(res)
-        assert ours == b"".join(files.values())
+        test = b"".join(files[v] for v in sorted(files))
+        assert ours == test
     yield e._shutdown()
 
 

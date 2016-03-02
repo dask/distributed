@@ -159,7 +159,10 @@ class S3FileSystem(object):
             pattern = re.compile(path + '/[^/]*.$')
             files = [f for f in files if pattern.match(f['Key']) is not None]
             if not files:
-                files = [self.info(path)]
+                try:
+                    files = [self.info(path)]
+                except OSError:
+                    files = []
         if detail:
             return files
         else:
@@ -223,16 +226,6 @@ class S3FileSystem(object):
         for files in self.dirs.values():
             total += sum(f['Size'] for f in files)
         return {'capacity': None, 'used': total, 'percent-free': None}
-
-    def get_block_locations(self, path, start=0, length=0, sizes=100*1024**2):
-        """ Fetch block offsets """
-        info = self.info(path)
-        length = length or info['Size']
-        boffsets = range(start, length, sizes)
-        locs = []
-        for i in boffsets:
-            locs.append({'hosts': set(), 'length': length, 'offset': i})
-        return locs
 
     def __repr__(self):
         return 'S3 File System'
