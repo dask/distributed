@@ -51,8 +51,7 @@ def split_path(path):
     if '/' not in path:
         return path, ""
     else:
-        bits = path.split('/')
-        return bits[0], '/'.join(bits[1:])
+        return path.split('/', 1)
 
 
 class S3FileSystem(object):
@@ -175,7 +174,7 @@ class S3FileSystem(object):
             if not files:
                 try:
                     files = [self.info(path)]
-                except OSError:
+                except (OSError, IOError):
                     files = []
         if detail:
             return files
@@ -294,7 +293,7 @@ class S3FileSystem(object):
         ``delimiter`` is set then we ensure that the read starts and stops at
         delimiter boundaries that follow the locations ``offset`` and ``offset
         + length``.  If ``offset`` is zero then we start at zero.  The
-        bytestring returned will not include the surrounding delimiter strings.
+        bytestring returned WILL include the end delimiter string.
 
         If offset+length is beyond the eof, reads to eof.
 
@@ -314,7 +313,7 @@ class S3FileSystem(object):
         >>> s3.read_block('data/file.csv', 0, 13)  # doctest: +SKIP
         b'Alice, 100\\nBo'
         >>> s3.read_block('data/file.csv', 0, 13, delimiter=b'\\n')  # doctest: +SKIP
-        b'Alice, 100\\nBob, 200'
+        b'Alice, 100\\nBob, 200\\n'
 
         See Also
         --------
@@ -455,7 +454,7 @@ def read_bytes(fn, executor=None, s3=None, lazy=True, delimiter=None,
         location in S3
     executor: Executor (optional)
         defaults to most recently created executor
-    s3: HDFileSystem (optional)
+    s3: S3FileSystem (optional)
     lazy: boolean (optional)
         If True then return lazily evaluated dask Values
     delimiter: bytes

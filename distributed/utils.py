@@ -408,8 +408,8 @@ def read_block(f, offset, length, delimiter=None):
     If using the ``delimiter=`` keyword argument we ensure that the read
     starts and stops at delimiter boundaries that follow the locations
     ``offset`` and ``offset + length``.  If ``offset`` is zero then we
-    start at zero.  The bytestring returned will not include the
-    surrounding delimiter strings.
+    start at zero.  The bytestring returned WILL include the
+    terminating delimiter string.
 
     Examples
     --------
@@ -420,7 +420,7 @@ def read_block(f, offset, length, delimiter=None):
     b'Alice, 100\\nBo'
 
     >>> read_block(f, 0, 13, delimiter=b'\\n')  # doctest: +SKIP
-    b'Alice, 100\\nBob, 200'
+    b'Alice, 100\\nBob, 200\\n'
 
     >>> read_block(f, 10, 10, delimiter=b'\\n')  # doctest: +SKIP
     b'Bob, 200\\nCharlie, 300'
@@ -438,9 +438,6 @@ def read_block(f, offset, length, delimiter=None):
 
         offset = start
         length = end - start
-
-        # if length and not eof:
-        #    length -= len(delimiter)
 
     f.seek(offset)
     bytes = f.read(length)

@@ -1,5 +1,6 @@
 import pytest
 import json
+import io
 
 import boto3
 from tornado import gen
@@ -10,7 +11,7 @@ from distributed.executor import _wait, Future
 from distributed.s3 import (read_bytes, read_text,
         read_block, seek_delimiter, S3FileSystem, _read_text)
 from distributed.utils import get_ip
-from distributed.utils_test import gen_cluster, loop, cluster
+from distributed.utils_test import gen_cluster, loop, cluster, slow
 
 
 ip = get_ip()
@@ -91,6 +92,7 @@ def test_read_keys_from_bucket(s3):
             s3.cat('s3://' + '/'.join([test_bucket_name, k])))
 
 
+@slow
 def test_seek_delimiter(s3):
     fn = 'test/accounts.1.json'
     data = files[fn]
@@ -108,7 +110,7 @@ def test_seek_delimiter(s3):
         assert f.tell() == ind + 1
 
 
-def test_read_block(s3):
+def test_read_s3_block(s3):
     import io
     data = files['test/accounts.1.json']
     lines = io.BytesIO(data).readlines()
@@ -158,6 +160,28 @@ def test_read_bytes_block(s, a, b):
     yield e._shutdown()
 
 
+def test_read_block():
+    delimiter = b'\n'
+    data = delimiter.join([b'123', b'456', b'789'])
+    f = io.BytesIO(data)
+
+    assert read_block(f, 1, 2) == b'23'
+    assert read_block(f, 0, 1, delimiter=b'\n') == b'123\n'
+    assert read_block(f, 0, 2, delimiter=b'\n') == b'123\n'
+    assert read_block(f, 0, 3, delimiter=b'\n') == b'123\n'
+    assert read_block(f, 0, 5, delimiter=b'\n') == b'123\n456\n'
+    assert read_block(f, 0, 8, delimiter=b'\n') == b'123\n456\n789'
+    assert read_block(f, 0, 100, delimiter=b'\n') == b'123\n456\n789'
+    assert read_block(f, 1, 1, delimiter=b'\n') == b''
+    assert read_block(f, 1, 5, delimiter=b'\n') == b'456\n'
+    assert read_block(f, 1, 8, delimiter=b'\n') == b'456\n789'
+
+    for ols in [[(0, 3), (3, 3), (6, 3), (9, 2)],
+                [(0, 4), (4, 4), (8, 4)]]:
+        out = [read_block(f, o, l, b'\n') for o, l in ols]
+        assert b"".join(filter(None, out)) == data
+
+
 @gen_cluster(timeout=60)
 def test_read_bytes_delimited(s, a, b):
     e = Executor((s.ip, s.port), start=False)
@@ -165,6 +189,9 @@ def test_read_bytes_delimited(s, a, b):
     for bs in [5, 15, 45, 1500]:
         futures = read_bytes(test_bucket_name+'/test/accounts*',
                              lazy=False, blocksize=bs, delimiter=b'\n')
+        futures2 = read_bytes(test_bucket_name+'/test/accounts*',
+                             lazy=False, blocksize=bs, delimiter=b'foo')
+        assert [a.key for a in futures] != [b.key for b in futures2]
         results = yield e._gather(futures)
         res = [r for r in results if r]
         assert all(r.endswith(b'\n') for r in res)
