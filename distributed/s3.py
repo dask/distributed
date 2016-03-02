@@ -32,6 +32,14 @@ _conn = dict()
 
 get_s3_lock = threading.Lock()
 
+def split_path(path):
+    path = path.lstrip('s3://')
+    if '/' not in path:
+        return path, ""
+    else:
+        bits = path.split('/')
+        return bits[0], '/'.join(bits[1:])
+
 
 class S3FileSystem(object):
     """
@@ -121,7 +129,7 @@ class S3FileSystem(object):
             if False, look in local cache for file details first
         """
         path = path.lstrip('s3://').lstrip('/')
-        bucket, *key = path.split('/', maxsplit=1)
+        bucket, key = split_path(path)
         if bucket not in self.dirs or refresh:
             if bucket == '':
                 # list of buckets
@@ -178,7 +186,7 @@ class S3FileSystem(object):
         """
         path0 = path
         path = path.lstrip('s3://').lstrip('/')
-        bucket, *key = path.split('/', maxsplit=1)
+        bucket, key = split_path(path)
         if "*" in bucket:
             raise ValueError('Bucket cannot contain a "*"')
         if '*' not in path:
@@ -233,11 +241,11 @@ class S3FileSystem(object):
         self.touch(path)
 
     def touch(self, path):
-        bucket, *key = path.lstrip('s3://').split('/', maxsplit=1)
+        bucket, key = split_path(path)
         if not key:
             out = self.s3.create_bucket(Bucket=bucket)
         else:
-            out = self.s3.put_object(Bucket=bucket, Key=key[0])
+            out = self.s3.put_object(Bucket=bucket, Key=key)
         if out['ResponseMetadata']['HTTPStatusCode'] != 200:
             raise IOError('Touch failed on %s', path)
         self._ls(path, refresh=True)
@@ -250,9 +258,9 @@ class S3FileSystem(object):
         if recursive:
             for f in self.walk(path):
                 self.rm(f, recursive=False)
-        bucket, *key = path.lstrip('s3://').split('/', maxsplit=1)
+        bucket, key = split_path(path)
         if key:
-            out = self.s3.delete_object(Bucket=bucket, Key=key[0])
+            out = self.s3.delete_object(Bucket=bucket, Key=key)
         else:
             out = self.s3.delete_bucket(Bucket=bucket)
         if out['ResponseMetadata']['HTTPStatusCode'] != 204:
@@ -334,7 +342,7 @@ class S3FileSystem(object):
         Parameters
         ----------
         fn: string
-            Path to filename on HDFS
+            Path to filename on S3
         offset: int
             Byte offset to start read
         length: int
@@ -351,7 +359,7 @@ class S3FileSystem(object):
 
         See Also
         --------
-        hdfs3.utils.read_block
+        distributed.utils.read_block
         """
         with self.open(fn, 'rb') as f:
             size = f.info()['Size']
@@ -386,7 +394,7 @@ class S3File(object):
         if mode not in {'rb', 'wb'}:
             raise ValueError("File mode %s not in {'rb', 'wb'}" % mode)
         self.path = path
-        bucket, key = path.lstrip('s3://').split('/', maxsplit=1)
+        bucket, key = split_path(path)
         self.s3 = s3
         if mode == 'wb':
             self.mpu = s3.s3.create_multipart_upload(Bucket=bucket, Key=key)
@@ -659,7 +667,7 @@ def avro_to_df(b, av):
 
 @gen.coroutine
 def _read_avro(path, executor=None, fs=None, lazy=True, **kwargs):
-    """ See distributed.hdfs.read_avro for docstring """
+    """ See read_avro for docstring """
     from dask import do
     import fastavro
     fs = fs or S3FileSystem()
@@ -689,12 +697,12 @@ def _read_avro(path, executor=None, fs=None, lazy=True, **kwargs):
 
 
 def read_avro(fn, executor=None, fs=None, lazy=True, **kwargs):
-    """ Read avro encoded data from bytes on HDFS
+    """ Read avro encoded data from bytes on S3
 
     Parameters
     ----------
     fn: string
-        filename or globstring of avro files on HDFS
+        filename or globstring of avro files on S3
     lazy: boolean, optional
         If True return dask Value objects
 

@@ -8,7 +8,7 @@ from dask.imperative import Value
 from distributed import Executor
 from distributed.executor import _wait, Future
 from distributed.s3 import (read_bytes, read_text,
-        read_block, seek_delimiter, S3FileSystem)
+        read_block, seek_delimiter, S3FileSystem, _read_text)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster, loop, cluster
 
@@ -160,7 +160,7 @@ def test_read_text(s, a, b):
     e = Executor((s.ip, s.port), start=False)
     yield e._start()
 
-    b = read_text(test_bucket_name+'/test/accounts*', lazy=True,
+    b = yield _read_text(test_bucket_name+'/test/accounts*', lazy=True,
                   collection=True)
     assert isinstance(b, db.Bag)
     yield gen.sleep(0.2)
@@ -171,11 +171,11 @@ def test_read_text(s, a, b):
 
     assert result == (1 + 2 + 3 + 4 + 5 + 6 + 7 + 8) * 100
 
-    text = read_text(test_bucket_name+'/test/accounts*', lazy=True,
+    text = yield _read_text(test_bucket_name+'/test/accounts*', lazy=True,
                      collection=False)
     assert all(isinstance(v, Value) for v in text)
 
-    text = read_text(test_bucket_name+'/test/accounts*', lazy=False,
+    text = yield _read_text(test_bucket_name+'/test/accounts*', lazy=False,
                      collection=False)
     assert all(isinstance(v, Future) for v in text)
 
