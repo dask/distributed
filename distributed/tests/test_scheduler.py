@@ -1,8 +1,10 @@
+import cloudpickle
 from collections import defaultdict, deque
 from copy import deepcopy
 from operator import add
 from time import time
 
+import dask
 from dask.core import get_deps
 from toolz import merge, concat, valmap
 from tornado.queues import Queue
@@ -13,18 +15,19 @@ from tornado import gen
 import pytest
 
 from distributed import Nanny, Worker
-from distributed.core import connect, read, write, rpc, loads
+from distributed.core import connect, read, write, rpc, dumps
 from distributed.client import WrappedKey
-from distributed.scheduler import (validate_state, heal,
-        decide_worker, heal_missing_data, Scheduler,
-        _maybe_complex, dumps_function, dumps_task, apply)
+from distributed.scheduler import (validate_state, heal, decide_worker,
+        heal_missing_data, Scheduler)
+from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
         loop)
 from distributed.utils import All
+from dask.compatibility import apply
 
 
-alice = 'alice'
-bob = 'bob'
+alice = 'alice:1234'
+bob = 'bob:1234'
 
 
 def test_heal():
@@ -33,8 +36,8 @@ def test_heal():
     dependents = {'x': {'y'}, 'y': set()}
 
     who_has = dict()
-    stacks = {'alice': [], 'bob': []}
-    processing = {'alice': set(), 'bob': set()}
+    stacks = {alice: [], bob: []}
+    processing = {alice: set(), bob: set()}
 
     waiting = {'y': {'x'}}
     ready = {'x'}
@@ -55,8 +58,8 @@ def test_heal():
     assert output['released'] == set()
 
     state = {'who_has': dict(),
-             'stacks': {'alice': ['x'], 'bob': []},
-             'processing': {'alice': set(), 'bob': set()},
+             'stacks': {alice: ['x'], bob: []},
+             'processing': {alice: set(), bob: set()},
              'waiting': {}, 'waiting_data': {}, 'ready': set()}
 
     heal(dependencies, dependents, **state)
@@ -74,8 +77,8 @@ def test_heal_2():
                   'result': set()}
 
     state = {'who_has': {'y': {alice}, 'a': {alice}},  # missing 'b'
-             'stacks': {'alice': ['z'], 'bob': []},
-             'processing': {'alice': set(), 'bob': set(['c'])},
+             'stacks': {alice: ['z'], bob: []},
+             'processing': {alice: set(), bob: set(['c'])},
              'waiting': {}, 'waiting_data': {}, 'ready': set()}
 
     output = heal(dependencies, dependents, **state)
@@ -85,8 +88,8 @@ def test_heal_2():
                                       'y': {'z'}, 'z': {'result'},
                                       'result': set()}
     assert output['who_has'] == {'y': {alice}, 'a': {alice}}
-    assert output['stacks'] == {'alice': ['z'], 'bob': []}
-    assert output['processing'] == {'alice': set(), 'bob': set()}
+    assert output['stacks'] == {alice: ['z'], bob: []}
+    assert output['processing'] == {alice: set(), bob: set()}
     assert output['released'] == {'x'}
 
 
@@ -96,12 +99,12 @@ def test_heal_restarts_leaf_tasks():
     dependents, dependencies = get_deps(dsk)
 
     state = {'who_has': dict(),  # missing 'b'
-             'stacks': {'alice': ['a'], 'bob': ['x']},
-             'processing': {'alice': set(), 'bob': set()},
+             'stacks': {alice: ['a'], bob: ['x']},
+             'processing': {alice: set(), bob: set()},
              'waiting': {}, 'waiting_data': {}, 'ready': set()}
 
-    del state['stacks']['bob']
-    del state['processing']['bob']
+    del state['stacks'][bob]
+    del state['processing'][bob]
 
     output = heal(dependencies, dependents, **state)
     assert 'x' in output['waiting']
@@ -113,15 +116,15 @@ def test_heal_culls():
     dependencies, dependents = get_deps(dsk)
 
     state = {'who_has': {'c': {alice}, 'y': {alice}},
-             'stacks': {'alice': ['a'], 'bob': []},
-             'processing': {'alice': set(), 'bob': set('y')},
+             'stacks': {alice: ['a'], bob: []},
+             'processing': {alice: set(), bob: set('y')},
              'waiting': {}, 'waiting_data': {}, 'ready': set()}
 
     output = heal(dependencies, dependents, **state)
-    assert 'a' not in output['stacks']['alice']
+    assert 'a' not in output['stacks'][alice]
     assert output['released'] == {'a', 'b', 'x'}
     assert output['finished_results'] == {'c'}
-    assert 'y' not in output['processing']['bob']
+    assert 'y' not in output['processing'][bob]
 
     assert output['ready'] == {'z'}
 
@@ -129,25 +132,26 @@ def test_heal_culls():
 @gen_cluster()
 def test_ready_add_worker(s, a, b):
     s.add_client(client='client')
-    s.add_worker(address='alice')
+    s.add_worker(address=alice)
 
     s.update_graph(tasks={'x-%d' % i: dumps_task((inc, i)) for i in range(20)},
                    keys=['x-%d' % i for i in range(20)],
                    client='client',
                    dependencies={'x-%d' % i: set() for i in range(20)})
 
+
 def test_update_state(loop):
     s = Scheduler()
     s.start(0)
-    s.add_worker(address='alice', ncores=1)
+    s.add_worker(address=alice, ncores=1)
     s.update_graph(tasks={'x': 1, 'y': (inc, 'x')},
                    keys=['y'],
                    dependencies={'y': 'x', 'x': set()},
                    client='client')
 
-    s.mark_task_finished('x', 'alice', nbytes=10, type=int)
+    s.mark_task_finished('x', alice, nbytes=10, type=dumps(int))
 
-    assert s.processing['alice'] == {'y'}
+    assert s.processing[alice] == {'y'}
     assert not s.ready
     assert s.who_wants == {'y': {'client'}}
     assert s.wants_what == {'client': {'y'}}
@@ -177,13 +181,13 @@ def test_update_state(loop):
 def test_update_state_with_processing(loop):
     s = Scheduler()
     s.start(0)
-    s.add_worker(address='alice', ncores=1)
+    s.add_worker(address=alice, ncores=1)
     s.update_graph(tasks={'x': 1, 'y': (inc, 'x'), 'z': (inc, 'y')},
                    keys=['z'],
                    dependencies={'y': {'x'}, 'x': set(), 'z': {'y'}},
                    client='client')
 
-    s.mark_task_finished('x', 'alice', nbytes=10, type=int)
+    s.mark_task_finished('x', alice, nbytes=10, type=dumps(int))
 
     assert s.waiting == {'z': {'y'}}
     assert s.waiting_data == {'x': {'y'}, 'y': {'z'}, 'z': set()}
@@ -192,7 +196,7 @@ def test_update_state_with_processing(loop):
     assert s.who_wants == {'z': {'client'}}
     assert s.wants_what == {'client': {'z'}}
 
-    assert s.who_has == {'x': {'alice'}}
+    assert s.who_has == {'x': {alice}}
     assert s.in_play == {'z', 'x', 'y'}
 
     s.update_graph(tasks={'a': (inc, 'x'), 'b': (add,'a','y'), 'c': (inc, 'z')},
@@ -201,7 +205,7 @@ def test_update_state_with_processing(loop):
                    client='client')
 
     assert s.waiting == {'z': {'y'}, 'b': {'a', 'y'}, 'c': {'z'}}
-    assert s.stacks['alice'] == ['a']
+    assert s.stacks[alice] == ['a']
     assert not s.ready
     assert s.waiting_data == {'x': {'y', 'a'}, 'y': {'z', 'b'}, 'z': {'c'},
                               'a': {'b'}, 'b': set(), 'c': set()}
@@ -216,16 +220,16 @@ def test_update_state_with_processing(loop):
 def test_update_state_respects_data_in_memory(loop):
     s = Scheduler()
     s.start(0)
-    s.add_worker(address='alice', ncores=1)
+    s.add_worker(address=alice, ncores=1)
     s.update_graph(tasks={'x': 1, 'y': (inc, 'x')},
                    keys=['y'],
                    dependencies={'y': {'x'}, 'x': set()},
                    client='client')
 
-    s.mark_task_finished('x', 'alice', nbytes=10, type=int)
-    s.mark_task_finished('y', 'alice', nbytes=10, type=int)
+    s.mark_task_finished('x', alice, nbytes=10, type=dumps(int))
+    s.mark_task_finished('y', alice, nbytes=10, type=dumps(int))
 
-    assert s.who_has == {'y': {'alice'}}
+    assert s.who_has == {'y': {alice}}
 
     s.update_graph(tasks={'x': 1, 'y': (inc, 'x'), 'z': (add, 'y', 'x')},
                    keys=['z'],
@@ -233,7 +237,7 @@ def test_update_state_respects_data_in_memory(loop):
                    client='client')
 
     assert s.waiting == {'z': {'x'}}
-    assert s.processing['alice'] == {'x'}  # x was released, need to recompute
+    assert s.processing[alice] == {'x'}  # x was released, need to recompute
     assert s.waiting_data == {'x': {'z'}, 'y': {'z'}, 'z': set()}
     assert s.who_wants == {'y': {'client'}, 'z': {'client'}}
     assert s.wants_what == {'client': {'y', 'z'}}
@@ -245,21 +249,21 @@ def test_update_state_respects_data_in_memory(loop):
 def test_update_state_supports_recomputing_released_results(loop):
     s = Scheduler()
     s.start(0)
-    s.add_worker(address='alice', ncores=1)
+    s.add_worker(address=alice, ncores=1)
     s.update_graph(tasks={'x': 1, 'y': (inc, 'x'), 'z': (inc, 'x')},
                    keys=['z'],
                    dependencies={'y': {'x'}, 'x': set(), 'z': {'y'}},
                    client='client')
 
-    s.mark_task_finished('x', 'alice', nbytes=10, type=int)
-    s.mark_task_finished('y', 'alice', nbytes=10, type=int)
-    s.mark_task_finished('z', 'alice', nbytes=10, type=int)
+    s.mark_task_finished('x', alice, nbytes=10, type=dumps(int))
+    s.mark_task_finished('y', alice, nbytes=10, type=dumps(int))
+    s.mark_task_finished('z', alice, nbytes=10, type=dumps(int))
 
     assert not s.waiting
     assert not s.ready
     assert s.waiting_data == {'z': set()}
 
-    assert s.who_has == {'z': {'alice'}}
+    assert s.who_has == {'z': {alice}}
 
     s.update_graph(tasks={'x': 1, 'y': (inc, 'x')},
                    keys=['y'],
@@ -270,7 +274,7 @@ def test_update_state_supports_recomputing_released_results(loop):
     assert s.waiting_data == {'x': {'y'}, 'y': set(), 'z': set()}
     assert s.who_wants == {'z': {'client'}, 'y': {'client'}}
     assert s.wants_what == {'client': {'y', 'z'}}
-    assert s.processing['alice'] == {'x'}
+    assert s.processing[alice] == {'x'}
 
     s.stop()
 
@@ -279,24 +283,24 @@ def test_decide_worker_with_many_independent_leaves():
     dsk = merge({('y', i): (inc, ('x', i)) for i in range(100)},
                 {('x', i): i for i in range(100)})
     dependencies, dependents = get_deps(dsk)
-    stacks = {'alice': [], 'bob': []}
-    who_has = merge({('x', i * 2): {'alice'} for i in range(50)},
-                    {('x', i * 2 + 1): {'bob'} for i in range(50)})
+    stacks = {alice: [], bob: []}
+    who_has = merge({('x', i * 2): {alice} for i in range(50)},
+                    {('x', i * 2 + 1): {bob} for i in range(50)})
     nbytes = {k: 0 for k in who_has}
 
     for key in dsk:
         worker = decide_worker(dependencies, stacks, who_has, {}, set(), nbytes, key)
         stacks[worker].append(key)
 
-    nhits = (len([k for k in stacks['alice'] if 'alice' in who_has[('x', k[1])]])
-             + len([k for k in stacks['bob'] if 'bob' in who_has[('x', k[1])]]))
+    nhits = (len([k for k in stacks[alice] if alice in who_has[('x', k[1])]])
+             + len([k for k in stacks[bob] if bob in who_has[('x', k[1])]]))
 
     assert nhits > 90
 
 
 def test_decide_worker_with_restrictions():
     dependencies = {'x': set()}
-    alice, bob, charlie = ('alice', 8000), ('bob', 8000), ('charlie', 8000)
+    alice, bob, charlie = 'alice:8000', 'bob:8000', 'charlie:8000'
     stacks = {alice: [], bob: [], charlie: []}
     who_has = {}
     restrictions = {'x': {'alice', 'charlie'}}
@@ -318,7 +322,7 @@ def test_decide_worker_with_restrictions():
 
 def test_decide_worker_with_loose_restrictions():
     dependencies = {'x': set()}
-    alice, bob, charlie = ('alice', 8000), ('bob', 8000), ('charlie', 8000)
+    alice, bob, charlie = 'alice:8000', 'bob:8000', 'charlie:8000'
     stacks = {alice: [1, 2, 3], bob: [], charlie: [1]}
     who_has = {}
     nbytes = {}
@@ -356,8 +360,8 @@ def test_validate_state():
     dependents = {'x': {'y'}, 'y': set()}
     waiting_data = {'x': {'y'}}
     who_has = dict()
-    stacks = {'alice': [], 'bob': []}
-    processing = {'alice': set(), 'bob': set()}
+    stacks = {alice: [], bob: []}
+    processing = {alice: set(), bob: set()}
     finished_results = set()
     released = set()
     in_play = {'x', 'y'}
@@ -382,21 +386,21 @@ def test_validate_state():
     ready.appendleft('y')
     validate_state(**locals())
 
-    stacks['alice'].append('y')
+    stacks[alice].append('y')
     with pytest.raises(Exception):
         validate_state(**locals())
 
     ready.remove('y')
     validate_state(**locals())
 
-    stacks['alice'].pop()
+    stacks[alice].pop()
     with pytest.raises(Exception):
         validate_state(**locals())
 
-    processing['alice'].add('y')
+    processing[alice].add('y')
     validate_state(**locals())
 
-    processing['alice'].pop()
+    processing[alice].pop()
     with pytest.raises(Exception):
         validate_state(**locals())
 
@@ -452,12 +456,12 @@ def test_scheduler(s, a, b):
 
     # Test update graph
     yield write(stream, {'op': 'update-graph',
-                         'tasks': {'x': (inc, 1),
-                                   'y': (inc, 'x'),
-                                   'z': (inc, 'y')},
-                         'dependencies': {'x': set(),
-                                          'y': {'x'},
-                                          'z': {'y'}},
+                         'tasks': valmap(dumps_task, {'x': (inc, 1),
+                                                      'y': (inc, 'x'),
+                                                      'z': (inc, 'y')}),
+                         'dependencies': {'x': [],
+                                          'y': ['x'],
+                                          'z': ['y']},
                          'keys': ['x', 'z'],
                          'client': 'ident'})
     while True:
@@ -469,10 +473,10 @@ def test_scheduler(s, a, b):
 
     # Test erring tasks
     yield write(stream, {'op': 'update-graph',
-                         'tasks': {'a': (div, 1, 0),
-                                 'b': (inc, 'a')},
-                         'dependencies': {'a': set(),
-                                          'b': {'a'}},
+                         'tasks': valmap(dumps_task, {'a': (div, 1, 0),
+                                                       'b': (inc, 'a')}),
+                         'dependencies': {'a': [],
+                                           'b': ['a']},
                          'keys': ['a', 'b'],
                          'client': 'ident'})
 
@@ -494,8 +498,8 @@ def test_scheduler(s, a, b):
         if 'z' in w.data:
             del w.data['z']
     yield write(stream, {'op': 'update-graph',
-                         'tasks': {'zz': (inc, 'z')},
-                         'dependencies': {'zz': {'z'}},
+                         'tasks': {'zz': dumps_task((inc, 'z'))},
+                         'dependencies': {'zz': ['z']},
                          'keys': ['zz'],
                          'client': 'ident'})
     while True:
@@ -517,12 +521,12 @@ def test_multi_queues(s, a, b):
 
     # Test update graph
     sched.put_nowait({'op': 'update-graph',
-                      'tasks': {'x': (inc, 1),
-                              'y': (inc, 'x'),
-                              'z': (inc, 'y')},
-                      'dependencies': {'x': set(),
-                                       'y': {'x'},
-                                       'z': {'y'}},
+                      'tasks': valmap(dumps_task, {'x': (inc, 1),
+                                                   'y': (inc, 'x'),
+                                                   'z': (inc, 'y')}),
+                      'dependencies': {'x': [],
+                                       'y': ['x'],
+                                       'z': ['y']},
                       'keys': ['z']})
 
     while True:
@@ -537,8 +541,8 @@ def test_multi_queues(s, a, b):
     assert rlen + 1 == len(s.report_queues)
 
     sched2.put_nowait({'op': 'update-graph',
-                       'tasks': {'a': (inc, 10)},
-                       'dependencies': {'a': set()},
+                       'tasks': {'a': dumps_task((inc, 10))},
+                       'dependencies': {'a': []},
                        'keys': ['a']})
 
     for q in [report, report2]:
@@ -553,8 +557,9 @@ def test_server(s, a, b):
     stream = yield connect('127.0.0.1', s.port)
     yield write(stream, {'op': 'register-client', 'client': 'ident'})
     yield write(stream, {'op': 'update-graph',
-                         'tasks': {'x': (inc, 1), 'y': (inc, 'x')},
-                         'dependencies': {'x': set(), 'y': {'x'}},
+                         'tasks': {'x': dumps_task((inc, 1)),
+                                   'y': dumps_task((inc, 'x'))},
+                         'dependencies': {'x': [], 'y': ['x']},
                          'keys': ['y'],
                          'client': 'ident'})
 
@@ -597,11 +602,11 @@ def test_remove_worker_from_scheduler(s, a, b):
 @gen_cluster()
 def test_add_worker(s, a, b):
     w = Worker(s.ip, s.port, ncores=3, ip='127.0.0.1')
-    w.data[('x', 5)] = 6
+    w.data['x-5'] = 6
     w.data['y'] = 1
     yield w._start(0)
 
-    dsk = {('x', i): (inc, i) for i in range(10)}
+    dsk = {('x-%d' % i).encode(): (inc, i) for i in range(10)}
     s.update_graph(tasks=valmap(dumps_task, dsk), keys=list(dsk), client='client',
                    dependencies={k: set() for k in dsk})
 
@@ -617,16 +622,17 @@ def test_add_worker(s, a, b):
 @gen_cluster()
 def test_feed(s, a, b):
     def func(scheduler):
-        return scheduler.processing, scheduler.stacks
+        return dumps((scheduler.processing, scheduler.stacks))
 
     stream = yield connect(s.ip, s.port)
     yield write(stream, {'op': 'feed',
-                         'function': func,
+                         'function': dumps(func),
                          'interval': 0.01})
 
     for i in range(5):
         response = yield read(stream)
         expected = s.processing, s.stacks
+        assert cloudpickle.loads(response) == expected
 
     stream.close()
 
@@ -638,21 +644,21 @@ def test_feed_setup_teardown(s, a, b):
 
     def func(scheduler, state):
         assert state == 1
-        return b'OK'
+        return 'OK'
 
     def teardown(scheduler, state):
         scheduler.flag = 'done'
 
     stream = yield connect(s.ip, s.port)
     yield write(stream, {'op': 'feed',
-                         'function': func,
-                         'setup': setup,
-                         'teardown': teardown,
+                         'function': dumps(func),
+                         'setup': dumps(setup),
+                         'teardown': dumps(teardown),
                          'interval': 0.01})
 
     for i in range(5):
         response = yield read(stream)
-        assert response == b'OK'
+        assert response == 'OK'
 
     stream.close()
     start = time()
@@ -679,7 +685,7 @@ def test_scheduler_as_center():
 
     s.update_graph(tasks={'a': dumps_task((inc, 1))},
                    keys=['a'],
-                   dependencies={'a': set()})
+                   dependencies={'a': []})
     while not s.who_has['a']:
         yield gen.sleep(0.01)
     assert 'a' in a.data or 'a' in b.data or 'a' in c.data
@@ -695,8 +701,9 @@ def test_scheduler_as_center():
 
 @gen_cluster()
 def test_delete_data(s, a, b):
-    yield s.scatter(data={'x': 1, 'y': 2, 'z': 3})
+    yield s.scatter(data=valmap(dumps, {'x': 1, 'y': 2, 'z': 3}))
     assert set(a.data) | set(b.data) == {'x', 'y', 'z'}
+    assert merge(a.data, b.data) == {'x': 1, 'y': 2, 'z': 3}
 
     s.delete_data(keys=['x', 'y'])
     yield s.clear_data_from_workers()
@@ -733,10 +740,11 @@ def test_delete_callback(s, a, b):
 @gen_cluster()
 def test_self_aliases(s, a, b):
     a.data['a'] = 1
-    s.update_data(who_has={'a': {a.address}}, nbytes={'a': 10}, client='client')
+    s.update_data(who_has={'a': [a.address]},
+                  nbytes={'a': 10}, client='client')
     s.update_graph(tasks=valmap(dumps_task, {'a': 'a', 'b': (inc, 'a')}),
                    keys=['b'], client='client',
-                   dependencies={'b': {'a'}})
+                   dependencies={'b': ['a']})
 
     sched, report = Queue(), Queue()
     s.handle_queues(sched, report)
@@ -761,14 +769,16 @@ def test_filtered_communication(s, a, b):
     assert set(s.streams) == {'e', 'f'}
 
     yield write(e, {'op': 'update-graph',
-                    'tasks': {'x': (inc, 1), 'y': (inc, 'x')},
-                    'dependencies': {'x': set(), 'y': {'x'}},
+                    'tasks': {'x': dumps_task((inc, 1)),
+                              'y': dumps_task((inc, 'x'))},
+                    'dependencies': {'x': [], 'y': ['x']},
                     'client': 'e',
                     'keys': ['y']})
 
     yield write(f, {'op': 'update-graph',
-                    'tasks': {'x': (inc, 1), 'z': (add, 'x', 10)},
-                    'dependencies': {'x': set(), 'z': {'x'}},
+                    'tasks': {'x': dumps_task((inc, 1)),
+                              'z': dumps_task((add, 'x', 10))},
+                    'dependencies': {'x': [], 'z': ['x']},
                     'client': 'f',
                     'keys': ['z']})
 
@@ -780,18 +790,9 @@ def test_filtered_communication(s, a, b):
     assert msg['key'] == 'z'
 
 
-def test_maybe_complex():
-    assert not _maybe_complex(1)
-    assert not _maybe_complex('x')
-    assert _maybe_complex((inc, 1))
-    assert _maybe_complex([(inc, 1)])
-    assert _maybe_complex([(inc, 1)])
-    assert _maybe_complex({'x': (inc, 1)})
-
-
 def test_dumps_function():
     a = dumps_function(inc)
-    assert loads(a)(10) == 11
+    assert cloudpickle.loads(a)(10) == 11
 
     b = dumps_function(inc)
     assert a is b
@@ -806,9 +807,14 @@ def test_dumps_task():
 
     f = lambda x, y=2: x + y
     d = dumps_task((apply, f, (1,), {'y': 10}))
-    assert loads(d['function'])(1, 2) == 3
-    assert loads(d['args']) == (1,)
-    assert loads(d['kwargs']) == {'y': 10}
+    assert cloudpickle.loads(d['function'])(1, 2) == 3
+    assert cloudpickle.loads(d['args']) == (1,)
+    assert cloudpickle.loads(d['kwargs']) == {'y': 10}
+
+    d = dumps_task((apply, f, (1,)))
+    assert cloudpickle.loads(d['function'])(1, 2) == 3
+    assert cloudpickle.loads(d['args']) == (1,)
+    assert set(d) == {'function', 'args'}
 
 
 @gen_cluster()
@@ -817,7 +823,7 @@ def test_ready_remove_worker(s, a, b):
     s.update_graph(tasks={'x-%d' % i: dumps_task((inc, i)) for i in range(20)},
                    keys=['x-%d' % i for i in range(20)],
                    client='client',
-                   dependencies={'x-%d' % i: set() for i in range(20)})
+                   dependencies={'x-%d' % i: [] for i in range(20)})
 
     assert all(len(s.processing[w]) == s.ncores[w]
                 for w in s.ncores)
@@ -841,7 +847,7 @@ def test_restart(s, a, b):
     s.update_graph(tasks={'x-%d' % i: dumps_task((inc, i)) for i in range(20)},
                    keys=['x-%d' % i for i in range(20)],
                    client='client',
-                   dependencies={'x-%d' % i: set() for i in range(20)})
+                   dependencies={'x-%d' % i: [] for i in range(20)})
 
     assert len(s.ready) + sum(map(len, s.processing.values())) == 20
     assert s.ready
@@ -865,7 +871,7 @@ def test_ready_add_worker(s, a, b):
     s.update_graph(tasks={'x-%d' % i: dumps_task((inc, i)) for i in range(20)},
                    keys=['x-%d' % i for i in range(20)],
                    client='client',
-                   dependencies={'x-%d' % i: set() for i in range(20)})
+                   dependencies={'x-%d' % i: [] for i in range(20)})
 
     assert all(len(s.processing[w]) == s.ncores[w]
                 for w in s.ncores)
@@ -879,3 +885,12 @@ def test_ready_add_worker(s, a, b):
     assert all(len(s.processing[w]) == s.ncores[w]
                 for w in s.ncores)
     assert len(s.ready) + sum(map(len, s.processing.values())) == 20
+
+
+@gen_cluster()
+def test_ready_add_worker(s, a, b):
+    result = yield s.broadcast(msg={'op': 'ping'})
+    assert result == {a.address: b'pong', b.address: b'pong'}
+
+    result = yield s.broadcast(msg={'op': 'ping'}, workers=[a.address])
+    assert result == {a.address: b'pong'}

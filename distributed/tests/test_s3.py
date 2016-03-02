@@ -149,16 +149,15 @@ def test_read_bytes_lazy(s, a, b):
 
     assert set(results).issuperset(set(files.values()))
 
-    yield e._shutdown()
-
 
 @gen_cluster(timeout=60)
 def test_read_text(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+
     pytest.importorskip('dask.bag')
     import dask.bag as db
     from dask.imperative import Value
-    e = Executor((s.ip, s.port), start=False)
-    yield e._start()
 
     b = yield _read_text(test_bucket_name+'/test/accounts*', lazy=True,
                   collection=True)
@@ -178,8 +177,6 @@ def test_read_text(s, a, b):
     text = yield _read_text(test_bucket_name+'/test/accounts*', lazy=False,
                      collection=False)
     assert all(isinstance(v, Future) for v in text)
-
-    yield e._shutdown()
 
 
 def test_read_text_sync(loop):
