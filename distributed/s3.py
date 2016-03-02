@@ -145,7 +145,7 @@ class S3FileSystem(object):
                 files = self.s3.list_objects(Bucket=bucket).get('Contents', [])
                 for f in files:
                     f['Key'] = "/".join([bucket, f['Key']])
-            self.dirs[bucket] = files
+            self.dirs[bucket] = list(sorted(files, key=lambda x: x['Key']))
         files = self.dirs[bucket]
         return files
 
