@@ -9,7 +9,8 @@ from dask.imperative import Value
 from distributed import Executor
 from distributed.executor import _wait, Future
 from distributed.s3 import (read_bytes, read_text, seek_delimiter,
-        S3FileSystem, _read_text, _read_csv, read_csv)
+        S3FileSystem, _read_text, _read_csv, read_csv, avro_body,
+        avro_to_df, _read_avro, read_avro)
 from distributed.utils import get_ip
 from distributed.utils_test import gen_cluster, loop, cluster, slow
 
@@ -393,3 +394,91 @@ def test_read_csv_sync(loop):
             assert list(df.columns) == ['name', 'amount', 'id']
             f = e.compute(df.amount.sum())
             assert f.result() == (100 + 200 + 300 + 400 + 500 + 600)
+
+def test_avro_body(s3):
+    fastavro = pytest.importorskip('fastavro')
+    fn = 'distributed-test/test/data/avro/2.avro'
+    byte = s3.cat(fn)
+    av = fastavro.reader(s3.open(fn))
+    header = av._header
+    records = list(av)
+    
+    schema = header['meta']['avro.schema'].decode()
+    schema = json.loads(schema)
+    assert ['amount', 'name'] == sorted(f['name'] for f in schema['fields'])
+    sync = header['sync']
+    assert len(sync) == 16
+    bit = byte[byte.index(sync)+len(sync):]
+    assert avro_body(bit, header) == records
+    bit = byte[byte.index(sync)+len(sync):-len(sync)]
+    assert avro_body(bit, header) == records
+    assert avro_body(b"", header) == []
+
+
+def test_avro_to_df(s3):
+    fastavro = pytest.importorskip('fastavro')
+    pytest.importorskip('pandas')
+    fn = 'distributed-test/test/data/avro/2.avro'
+    byte = s3.cat(fn)
+    av = fastavro.reader(s3.open(fn))
+    header = av._header
+    sync = header['sync']
+    bit = byte[byte.index(sync)+len(sync):]
+
+    df = avro_to_df(bit, header)
+    assert ['amount', 'name'] == sorted(df.columns)
+    assert len(df) == 4
+    assert 100 + 200 + 300 + 400 == df.amount.sum()
+    df = avro_to_df(b"", header)
+    assert len(df) == 0
+    df = avro_to_df(b"", header, cols=['amount', 'name'])
+    assert ['amount', 'name'] == list(df.columns)
+
+
+@gen_cluster(timeout=60, executor=True)
+def test_read_avro(e, s, a, b):
+    dd = pytest.importorskip('dask.dataframe')
+    s3 = S3FileSystem(anon=True)
+    df = yield _read_avro('distributed-test/test/data/avro', fs=s3)
+    assert isinstance(df, dd.DataFrame)
+
+    yield gen.sleep(0.1)
+    assert not s.tasks
+
+    df = yield _read_avro('distributed-test/test/data/avro/')
+    assert isinstance(df, dd.DataFrame)
+    assert list(df.columns) == ['amount', 'name']
+
+    f = e.compute(df.amount.sum())
+    result = yield f._result()
+    assert result == (100 + 200 + 300 + 400) * 2
+
+    futures = yield _read_avro('distributed-test/test/data/avro/',
+                               collection=False, lazy=False)
+    assert len(futures) == 2
+    assert all(isinstance(f, Future) for f in futures)
+    results = yield e._gather(futures)
+    assert isinstance(results[0][0], dict)
+    assert sum(sum(o['amount'] for o in r) for r in results) ==  (100 + 200 + 300 + 400) * 2
+
+    values = yield _read_avro('distributed-test/test/data/avro/',
+                              collection=False, lazy=True)
+    assert len(values) == 2
+    assert all(isinstance(v, Value) for v in values)
+
+    df2 = yield _read_avro('distributed-test/test/data/avro/',
+                           collection=True, lazy=True, blocksize=20)
+    assert df2.npartitions > df.npartitions
+    result = yield e.compute(df2.amount.sum())._result()
+    assert result == (100 + 200 + 300 + 400) * 2
+
+
+def test_read_avro_sync(loop):
+    dd = pytest.importorskip('dask.dataframe')
+    with cluster() as (s, [a, b]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            df = read_avro('distributed-test/test/data/avro/')
+            assert isinstance(df, dd.DataFrame)
+            assert list(df.columns) == ['amount', 'name']
+            f = e.compute(df.amount.sum())
+            assert f.result() == (100 + 200 + 300 + 400) * 2
