@@ -50,6 +50,7 @@ install:
   - source activate test-environment
   - conda install pytest coverage tornado toolz dill futures dask ipywidgets psutil bokeh
   - pip install git+https://github.com/dask/dask.git --upgrade
+  - pip install fastavro
 
   # Install distributed
   - python setup.py install
