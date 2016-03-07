@@ -92,6 +92,8 @@ class Server(TCPServer):
     *  ``{'op': 'ping'}``
     *  ``{'op': 'add': 'x': 10, 'y': 20}``
     """
+    default_port = 0
+
     def __init__(self, handlers, max_buffer_size=MAX_BUFFER_SIZE, **kwargs):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
@@ -110,7 +112,9 @@ class Server(TCPServer):
     def identity(self, stream):
         return {'type': type(self).__name__, 'id': self.id}
 
-    def listen(self, port):
+    def listen(self, port=None):
+        if port is None:
+            port = self.default_port
         while True:
             try:
                 super(Server, self).listen(port)
@@ -230,8 +234,8 @@ def connect(ip, port, timeout=3):
     client = TCPClient()
     start = time()
     while True:
+        future = client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE)
         try:
-            future = client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE)
             stream = yield gen.with_timeout(timedelta(seconds=timeout), future)
             raise Return(stream)
         except StreamClosedError:
@@ -381,6 +385,9 @@ class rpc(object):
             self.streams[stream] = True  # mark as open
             raise Return(result)
         return send_recv_from_rpc
+
+    def __del__(self):
+        self.close_streams()
 
 
 def coerce_to_address(o, out=str):

@@ -570,6 +570,19 @@ def test_restrictions_submit(e, s, a, b):
     assert y.key in b.data
 
 
+@gen_cluster(executor=True)
+def test_restrictions_ip_port(e, s, a, b):
+    x = e.submit(inc, 1, workers={a.address})
+    y = e.submit(inc, x, workers={b.address})
+    yield _wait([x, y])
+
+    assert s.restrictions[x.key] == {a.address}
+    assert x.key in a.data
+
+    assert s.restrictions[y.key] == {b.address}
+    assert y.key in b.data
+
+
 @pytest.mark.skipif(sys.platform!='linux',
                     reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], executor=True)
@@ -899,6 +912,9 @@ def test_directed_scatter(e, s, a, b):
     yield e._scatter([1, 2, 3], workers=[a.address])
     assert len(a.data) == 3
     assert not b.data
+
+    yield e._scatter([4, 5], workers=[b.name])
+    assert len(b.data) == 2
 
 
 def test_directed_scatter_sync(loop):
@@ -1903,11 +1919,24 @@ def test_map_iterator(e, s, a, b):
     result = yield future._result()
     assert result == (1 + 10) * 2
 
+    items = enumerate(range(10))
+    futures = e.map(lambda x: x, items)
+    result = yield next(futures)._result()
+    assert result == (0, 0)
+
 
 @gen_cluster(executor=True)
 def test_map_infinite_iterators(e, s, a, b):
     futures = e.map(add, [1, 2], itertools.repeat(10))
     assert len(futures) == 2
+
+
+def test_map_iterator_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            items = enumerate(range(10))
+            futures = e.map(lambda x: x, items)
+            next(futures).result() == (0, 0)
 
 
 @gen_cluster(executor=True)
@@ -2146,3 +2175,24 @@ def test_diagnostic_ui(loop):
 
             d = e.has_what(('127.0.0.1', a['port']))
             assert set(d) == {a_addr}
+
+
+@gen_test()
+def test_worker_aliases():
+    s = Scheduler()
+    s.start(0)
+    a = Worker(s.ip, s.port, name='alice')
+    b = Worker(s.ip, s.port, name='bob')
+    yield [a._start(), b._start()]
+
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+
+    L = e.map(inc, range(10), workers='alice')
+    yield _wait(L)
+    assert len(a.data) == 10
+    assert len(b.data) == 0
+
+    yield e._shutdown()
+    yield [a._close(), b._close()]
+    yield s.close()

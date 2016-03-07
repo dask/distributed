@@ -50,6 +50,21 @@ def test_services(s, a, b):
     yield c._start()
     assert isinstance(c.services['http'], HTTPServer)
     assert c.service_ports['http'] == c.services['http'].port
-    assert s.worker_services[c.address]['http'] == c.service_ports['http']
+    assert s.worker_info[c.address]['services']['http'] == c.service_ports['http']
 
+    yield c._close()
+
+
+@gen_cluster()
+def test_services_port(s, a, b):
+    c = Worker(s.ip, s.port, ncores=1, ip='127.0.0.1',
+               services={('http', 9898): HTTPWorker})
+    yield c._start()
+    assert isinstance(c.services['http'], HTTPServer)
+    assert (c.service_ports['http']
+         == c.services['http'].port
+         == s.worker_info[c.address]['services']['http']
+         == 9898)
+
+    c.services['http'].stop()
     yield c._close()
