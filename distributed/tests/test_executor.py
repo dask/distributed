@@ -2205,7 +2205,6 @@ def test_executor_num_fds(loop):
         before = proc.num_fds()
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
             during = proc.num_fds()
-            print(during)
         after = proc.num_fds()
 
-        assert before == after
+        assert before >= after
