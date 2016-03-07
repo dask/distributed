@@ -250,6 +250,7 @@ class Executor(object):
     def __init__(self, address, start=True, loop=None, timeout=3):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
+        self._should_close_loop = loop is None and start
         self.loop = loop or IOLoop() if start else IOLoop.current()
         self.coroutines = []
         self.id = str(uuid.uuid1())
@@ -274,15 +275,16 @@ class Executor(object):
         """ Start scheduler running in separate thread """
         if hasattr(self, '_loop_thread'):
             return
-        from threading import Thread
-        self._loop_thread = Thread(target=self.loop.start)
-        self._loop_thread.daemon = True
+        if not self.loop._running:
+            from threading import Thread
+            self._loop_thread = Thread(target=self.loop.start)
+            self._loop_thread.daemon = True
+            self._loop_thread.start()
+            while not self.loop._running:
+                sleep(0.001)
         pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
         self.loop.add_callback(pc.start)
         _global_executor[0] = self
-        self._loop_thread.start()
-        while not self.loop._running:
-            sleep(0.001)
         sync(self.loop, self._start, **kwargs)
 
     def _send_to_scheduler(self, msg):
@@ -425,12 +427,23 @@ class Executor(object):
             with ignoring(TimeoutError):
                 yield [gen.with_timeout(timedelta(seconds=2), f)
                         for f in self.coroutines]
+        with ignoring(AttributeError):
+            self.scheduler_stream.close()
+        with ignoring(AttributeError):
+            self.scheduler.close_streams()
 
     def shutdown(self, timeout=10):
         """ Send shutdown signal and wait until scheduler terminates """
         self._send_to_scheduler({'op': 'close'})
         self.loop.stop()
-        self._loop_thread.join(timeout=timeout)
+        with ignoring(AttributeError):
+            self.scheduler_stream.close()
+        with ignoring(AttributeError):
+            self.scheduler.close_streams()
+        if self._should_close_loop:
+            self.loop.close()
+        with ignoring(AttributeError):
+            self._loop_thread.join(timeout=timeout)
         if _global_executor[0] is self:
             _global_executor[0] = None
 
