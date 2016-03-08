@@ -44,7 +44,7 @@ def split_path(path):
     Examples
     --------
     >>> split_path("s3://mybucket/path/to/file")
-    ("mybucket", "path/to/file")
+    ['mybucket', 'path/to/file']
     """
     if path.startswith('s3://'):
         path = path[5:]
@@ -635,5 +635,116 @@ def read_csv(fn, executor=None, fs=None, lazy=True, collection=True, **kwargs):
     return sync(executor.loop, _read_csv, fn, executor, fs, lazy, collection,
             **kwargs)
 
+def avro_body(data, header):
+    """ Convert bytes and header to Python objects
+
+    Parameters
+    ----------
+    data: bytestring
+        bulk avro data, without header information
+    header: bytestring
+        Header information collected from ``fastavro.reader(f)._header``
+
+    Returns
+    -------
+    List of deserialized Python objects, probably dictionaries
+    """
+    import fastavro
+    sync = header['sync']
+    if not data:
+        return []
+    if not data.endswith(sync):
+        # Read delimited should keep end-of-block delimiter
+        data = data + sync
+    stream = io.BytesIO(data)
+    schema = header['meta']['avro.schema'].decode()
+    schema = json.loads(schema)
+    codec = header['meta']['avro.codec'].decode()
+    return list(fastavro._reader._iter_avro(stream, header, codec,
+                                            schema, schema))
+
+
+def avro_to_df(b, av, cols=None):
+    """Parse avro binary data with header av into a pandas dataframe.
+
+    Cols should be given in the event that the data may not contain records.
+
+    Parameters
+    ----------
+    b : bytes
+        Binary data for one block of a avro file
+    av : fastavro header
+        Contains schema information from the file head
+    cols : list of strings (None)
+        If given, tell pandas to use these column names"""
+    import pandas as pd
+    return pd.DataFrame(data=avro_body(b, av), columns=cols)
+
+
+@gen.coroutine
+def _read_avro(path, executor=None, fs=None, lazy=True, collection=True,
+               blocksize=2**27, **kwargs):
+    """ See read_avro for docstring """
+    from dask import do
+    import fastavro
+    fs = fs or S3FileSystem()
+    executor = default_executor(executor)
+
+    filenames = fs.glob(path)
+
+    blocks = []
+    for fn in filenames:
+        with fs.open(fn, 'rb') as f:
+            av = fastavro.reader(f)
+            header = av._header
+
+        schema = json.loads(header['meta']['avro.schema'].decode())
+        cols = [o['name'] for o in schema['fields']]
+
+        blocks.extend((b, header) for b in read_bytes(fn, executor, fs,
+                       lazy=True, delimiter=header['sync'], not_zero=True,
+                       blocksize=blocksize))
+
+    if collection:
+        dfs = [do(avro_to_df)(*b, cols=cols) for b in blocks]
+    else:
+        dfs = [do(avro_body)(*b) for b in blocks]
+
+    if lazy:
+        from dask.dataframe import from_imperative
+        if collection:
+            ensure_default_get(executor)
+            raise gen.Return(from_imperative(dfs, cols))
+        else:
+            raise gen.Return(dfs)
+
+    else:
+        futures = executor.compute(dfs)
+        from distributed.collections import _futures_to_dask_dataframe
+        if collection:
+            ensure_default_get(executor)
+            df = yield _futures_to_dask_dataframe(futures)
+            raise gen.Return(df)
+        else:
+            raise gen.Return(futures)
+
+
+def read_avro(fn, executor=None, fs=None, lazy=True, collection=True, **kwargs):
+    """ Read avro encoded data from bytes on S3
+
+    Parameters
+    ----------
+    fn: string
+        filename or globstring of avro files on S3
+    lazy: boolean, optional
+        If True return dask Value objects
+
+    Returns
+    -------
+    List of futures of Python objects
+    """
+    executor = default_executor(executor)
+    return sync(executor.loop, _read_avro, fn, executor, fs, lazy, collection,
+                **kwargs)
 
 decompressors = {'gzip': gzip_decompress}
