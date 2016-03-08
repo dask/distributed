@@ -311,7 +311,6 @@ def test_get_sync(loop):
             assert e.get({'x': (inc, 1)}, 'x') == 2
 
 
-
 def test_submit_errors(loop):
     def f(a, b, c):
         pass
@@ -1051,6 +1050,7 @@ def test_restart(e, s, a, b):
 
     x = e.submit(inc, 1)
     y = e.submit(inc, x)
+    z = e.submit(div, 1, 0)
     yield y._result()
 
     assert set(s.who_has) == {x.key, y.key}
@@ -1065,6 +1065,11 @@ def test_restart(e, s, a, b):
 
     assert x.cancelled()
     assert y.cancelled()
+    assert z.cancelled()
+    assert z.key not in s.exceptions
+
+    assert not s.who_wants
+    assert not s.wants_what
 
 
 def test_restart_sync_no_center(loop):
@@ -1097,7 +1102,7 @@ def test_restart_sync(loop):
 
 def test_restart_fast(loop):
     with cluster(nanny=True) as (s, [a, b]):
-        with Executor(('127.0.0.1', s['port'])) as e:
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
             L = e.map(sleep, range(10))
 
             start = time()
@@ -1149,7 +1154,7 @@ def test_upload_file(e, s, a, b):
 
 def test_upload_file_sync(loop):
     with cluster() as (s, [a, b]):
-        with Executor(('127.0.0.1', s['port'])) as e:
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
             def g():
                 import myfile
                 return myfile.x
@@ -1169,7 +1174,7 @@ def test_upload_file_exception(e, s, a, b):
 
 def test_upload_file_exception_sync(loop):
     with cluster() as (s, [a, b]):
-        with Executor(('127.0.0.1', s['port'])) as e:
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
             with tmp_text('myfile.py', 'syntax-error!') as fn:
                 with pytest.raises(SyntaxError):
                     e.upload_file(fn)
@@ -1256,7 +1261,7 @@ def test_async_compute_with_scatter(e, s, a, b):
 
 def test_sync_compute(loop):
     with cluster() as (s, [a, b]):
-        with Executor(('127.0.0.1', s['port'])) as e:
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
             from dask.imperative import do, value
             x = value(1)
             y = do(inc)(x)
@@ -1506,7 +1511,7 @@ def test_badly_serialized_input(e, s, a, b):
 @pytest.mark.xfail
 def test_badly_serialized_input_stderr(capsys):
     with cluster() as (s, [a, b]):
-        with Executor(('127.0.0.1', s['port'])) as e:
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
             o = BadlySerializedObject()
             future = e.submit(inc, o)
 
@@ -1607,6 +1612,39 @@ def test_forget_in_flight(e, s, A, B):
         assert k not in s.waiting
         assert k not in s.who_has
 
+
+@gen_cluster(executor=True)
+def test_forget_errors(e, s, a, b):
+    x = e.submit(div, 1, 0)
+    y = e.submit(inc, x)
+    z = e.submit(inc, y)
+    yield _wait([y])
+
+    assert x.key in s.exceptions
+    assert x.key in s.exceptions_blame
+    assert y.key in s.exceptions_blame
+    assert z.key in s.exceptions_blame
+
+    s.client_releases_keys(keys=[z.key], client=e.id)
+
+    assert x.key in s.exceptions
+    assert x.key in s.exceptions_blame
+    assert y.key in s.exceptions_blame
+    assert z.key not in s.exceptions_blame
+
+    s.client_releases_keys(keys=[x.key], client=e.id)
+
+    assert x.key in s.exceptions
+    assert x.key in s.exceptions_blame
+    assert y.key in s.exceptions_blame
+    assert z.key not in s.exceptions_blame
+
+    s.client_releases_keys(keys=[y.key], client=e.id)
+
+    assert x.key not in s.exceptions
+    assert x.key not in s.exceptions_blame
+    assert y.key not in s.exceptions_blame
+    assert z.key not in s.exceptions_blame
 
 
 def test_repr_sync(loop):
@@ -2198,13 +2236,35 @@ def test_worker_aliases():
     yield s.close()
 
 
-def test_executor_num_fds(loop):
-    psutil = pytest.importorskip('psutil')
+def test_persist_get_sync(loop):
     with cluster() as (s, [a, b]):
-        proc = psutil.Process()
-        before = proc.num_fds()
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            during = proc.num_fds()
-        after = proc.num_fds()
+            dadd = do(add)
+            x, y = value(1), value(2)
+            xx = do(add)(x, x)
+            yy = do(add)(y, y)
+            xxyy = do(add)(xx, yy)
 
-        assert before >= after
+            xxyy2 = e.persist(xxyy)
+            xxyy3 = do(add)(xxyy2, 10)
+
+            assert xxyy3.compute(get=e.get) == ((1+1) + (2+2)) + 10
+
+
+@gen_cluster(executor=True)
+def test_persist_get(e, s, a, b):
+        dadd = do(add)
+        x, y = value(1), value(2)
+        xx = do(add)(x, x)
+        yy = do(add)(y, y)
+        xxyy = do(add)(xx, yy)
+
+        xxyy2 = e.persist(xxyy)
+        xxyy3 = do(add)(xxyy2, 10)
+
+        yield gen.sleep(0.5)
+        result = yield e._get(xxyy3.dask, xxyy3._keys())
+        assert result[0] == ((1+1) + (2+2)) + 10
+
+        result = yield e.compute(xxyy3)._result()
+        assert result == ((1+1) + (2+2)) + 10
