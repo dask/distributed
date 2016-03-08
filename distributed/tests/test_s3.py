@@ -29,6 +29,24 @@ files = {'test/accounts.1.json':  (b'{"amount": 100, "name": "Alice"}\n'
                                    b'{"amount": 700, "name": "Charlie"}\n'
                                    b'{"amount": 800, "name": "Dennis"}\n')}
 
+records = [
+{u'station': u'011990-99999', u'temp': 0, u'time': 1433269388},
+{u'station': u'011990-99999', u'temp': 22, u'time': 1433270389},
+{u'station': u'011990-99999', u'temp': -11, u'time': 1433273379},
+{u'station': u'012650-99999', u'temp': 111, u'time': 1433275478},
+]
+
+def make_avro():
+    from fastavro import writer
+    schema = {'name': 'test', 'namespace': 'test', 'type': 'record', 'fields': [
+        {'name': 'station', 'type': 'string'}, {'name': 'temp', 'type': 'int'},
+        {'name': 'time', 'type': 'long'}]}
+    b = io.BytesIO()
+    writer(b, schema, records)
+    b.seek(0)
+    return b.read()
+
+
 @pytest.yield_fixture
 def s3():
     # could do with a bucket with write privileges.
@@ -401,44 +419,41 @@ def test_read_csv_sync(loop):
             f = e.compute(df.amount.sum())
             assert f.result() == (100 + 200 + 300 + 400 + 500 + 600)
 
-def test_avro_body(s3):
+def test_avro_body():
     fastavro = pytest.importorskip('fastavro')
-    fn = 'distributed-test/test/data/avro/2.avro'
-    byte = s3.cat(fn)
-    av = fastavro.reader(s3.open(fn))
+    b = make_avro()
+    av = fastavro.reader(io.BytesIO(b))
     header = av._header
-    records = list(av)
     
     schema = header['meta']['avro.schema'].decode()
     schema = json.loads(schema)
-    assert ['amount', 'name'] == sorted(f['name'] for f in schema['fields'])
+    assert ['station', 'temp', 'time'] == sorted(f['name'] for f in schema['fields'])
     sync = header['sync']
     assert len(sync) == 16
-    bit = byte[byte.index(sync)+len(sync):]
+    bit = b[b.index(sync)+len(sync):]
     assert avro_body(bit, header) == records
-    bit = byte[byte.index(sync)+len(sync):-len(sync)]
+    bit = b[b.index(sync)+len(sync):-len(sync)]
     assert avro_body(bit, header) == records
     assert avro_body(b"", header) == []
 
 
-def test_avro_to_df(s3):
+def test_avro_to_df():
     fastavro = pytest.importorskip('fastavro')
     pytest.importorskip('pandas')
-    fn = 'distributed-test/test/data/avro/2.avro'
-    byte = s3.cat(fn)
-    av = fastavro.reader(s3.open(fn))
+    byte = make_avro()
+    av = fastavro.reader(io.BytesIO(byte))
     header = av._header
     sync = header['sync']
     bit = byte[byte.index(sync)+len(sync):]
 
     df = avro_to_df(bit, header)
-    assert ['amount', 'name'] == sorted(df.columns)
+    assert ['station', 'temp', 'time'] == sorted(df.columns)
     assert len(df) == 4
-    assert 100 + 200 + 300 + 400 == df.amount.sum()
+    assert 22 - 11 + 111 == df.temp.sum()
     df = avro_to_df(b"", header)
     assert len(df) == 0
-    df = avro_to_df(b"", header, cols=['amount', 'name'])
-    assert ['amount', 'name'] == list(df.columns)
+    df = avro_to_df(b"", header, cols=['station', 'temp', 'time'])
+    assert  ['station', 'temp', 'time']== list(df.columns)
 
 
 @gen_cluster(timeout=60, executor=True)
