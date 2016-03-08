@@ -17,13 +17,14 @@ from distributed import Executor
 from distributed.executor import _wait, Future
 
 
-pytest.importorskip('hdfs3')
-from hdfs3 import HDFileSystem
 try:
+    import hdfs3
+    from hdfs3 import HDFileSystem
     hdfs = HDFileSystem(host='localhost', port=8020)
     hdfs.df()
     del hdfs
 except:
+    pytest.skip()
     pytestmark = pytest.mark.skipif('True')
 
 
