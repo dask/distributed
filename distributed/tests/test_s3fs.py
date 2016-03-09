@@ -25,11 +25,64 @@ csv_files = {'2014-01-01.csv': (b'name,amount,id\n'
                                 b'Dennis,400,4\n'
                                 b'Edith,500,5\n'
                                 b'Frank,600,6\n')}
+text_files = {'nested/file1': b'hello\n',
+              'nested/file2': b'world',
+              'nested/nested2/file1': b'hello\n',
+              'nested/nested2/file2': b'world'}
+a = 'tmp/test/a'
+b = 'tmp/test/b'
+c = 'tmp/test/c'
+d = 'tmp/test/d'
+
 
 @pytest.yield_fixture
 def s3():
-    # could do with a bucket with write privileges.
+    # make writable local S3 system
+    m = moto.mock_s3()
+    m.start()
+    import boto3
+    client = boto3.client('s3')
+    client.create_bucket(Bucket=test_bucket_name)
+    for flist in [files, csv_files, text_files]:
+        for f, data in flist.items():
+            client.put_object(Bucket=test_bucket_name, Key=f, Body=data)
     yield S3FileSystem(anon=True)
+    m.stop()
+
+
+def test_simple(s3):
+    data = b'a' * (10 * 2**20)
+
+    with s3.open(a, 'wb') as f:
+        f.write(data)
+
+    with s3.open(a, 'rb') as f:
+        out = f.read(len(data))
+        assert len(data) == len(out)
+        assert out == data
+
+
+def test_idempotent_connect(s3):
+    s3.connect()
+    s3.connect()
+
+
+def test_ls_touch(s3):
+    assert not s3.ls('tmp/test')
+    s3.touch(a)
+    s3.touch(b)
+    L = s3.ls('tmp/test', True)
+    assert set(d['Key'] for d in L) == set([a, b])
+    L = s3.ls('tmp/test', False)
+    assert set(L) == set([a, b])
+
+
+def test_rm(s3):
+    assert not s3.exists(a)
+    s3.touch(a)
+    assert s3.exists(a)
+    s3.rm(a)
+    assert not s3.exists(a)
 
 
 def test_s3_file_access(s3):
@@ -101,6 +154,68 @@ def test_read_keys_from_bucket(s3):
 
     assert (s3.cat('/'.join([test_bucket_name, k])) ==
             s3.cat('s3://' + '/'.join([test_bucket_name, k])))
+
+
+def test_seek(s3):
+    with s3.open(a, 'wb') as f:
+        f.write(b'123')
+
+    with s3.open(a) as f:
+        f.seek(1000)
+        with pytest.raises(ValueError):
+            f.seek(-1)
+        with pytest.raises(ValueError):
+            f.seek(-5, 2)
+        with pytest.raises(ValueError):
+            f.seek(0, 10)
+        f.seek(0)
+        assert f.read(1) == b'1'
+        f.seek(0)
+        assert f.read(1) == b'1'
+        f.seek(3)
+        assert f.read(1) == b''
+        f.seek(-1, 2)
+        assert f.read(1) == b'3'
+        f.seek(-1, 1)
+        f.seek(-1, 1)
+        assert f.read(1) == b'2'
+        for i in range(4):
+            assert f.seek(i) == i
+
+
+def test_bad_open(s3):
+    with pytest.raises(IOError):
+        s3.open('')
+
+
+def test_errors(s3):
+    with pytest.raises((IOError, OSError)):
+        s3.open('tmp/test/shfoshf', 'rb')
+
+    ## This is fine, no need for interleving directories on S3
+    #with pytest.raises((IOError, OSError)):
+    #    s3.touch('tmp/test/shfoshf/x')
+
+    with pytest.raises((IOError, OSError)):
+        s3.rm('tmp/test/shfoshf/x')
+
+    with pytest.raises((IOError, OSError)):
+        s3.mv('tmp/test/shfoshf/x', 'tmp/test/shfoshf/y')
+
+    #with pytest.raises((IOError, OSError)):
+    #    s3.open('x', 'wb')
+
+    with pytest.raises((IOError, OSError)):
+        s3.open('x', 'rb')
+
+    #with pytest.raises(IOError):
+    #    s3.chown('/unknown', 'someone', 'group')
+
+    #with pytest.raises(IOError):
+    #    s3.chmod('/unknonwn', 'rb')
+
+    with pytest.raises(IOError):
+        s3.rm('unknown')
 
 
 @slow
