@@ -117,6 +117,8 @@ class Future(WrappedKey):
         if self.status == 'error':
             exception = d['exception']
             traceback = d['traceback']
+            if isinstance(traceback, str):
+                traceback = None
             if raiseit:
                 six.reraise(type(exception), exception, traceback)
             else:
@@ -250,7 +252,7 @@ class Executor(object):
     def __init__(self, address, start=True, loop=None, timeout=3):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
-        self._should_close_loop = start and not loop
+        self._should_close_loop = loop is None and start
         self.loop = loop or IOLoop() if start else IOLoop.current()
         self.coroutines = []
         self.id = str(uuid.uuid1())
@@ -375,7 +377,7 @@ class Executor(object):
                 try:
                     msg = yield next_message()
                 except StreamClosedError:
-                    logger.info("Stream closed to scheduler", exc_info=True)
+                    logger.debug("Stream closed to scheduler", exc_info=True)
                     break
 
                 logger.debug("Executor receives message %s", msg)
@@ -402,8 +404,13 @@ class Executor(object):
                 elif msg['op'] == 'task-erred':
                     if msg['key'] in self.futures:
                         self.futures[msg['key']]['status'] = 'error'
-                        self.futures[msg['key']]['exception'] = cloudpickle.loads(msg['exception'])
-                        self.futures[msg['key']]['traceback'] = cloudpickle.loads(msg['traceback'])
+                        try:
+                            self.futures[msg['key']]['exception'] = cloudpickle.loads(msg['exception'])
+                        except TypeError:
+                            self.futures[msg['key']]['exception'] = \
+                                Exception('Undeserializable exception', msg['exception'])
+                        self.futures[msg['key']]['traceback'] = (cloudpickle.loads(msg['traceback'])
+                                                                 if msg['traceback'] else None)
                         self.futures[msg['key']]['event'].set()
                 elif msg['op'] == 'restart':
                     logger.info("Receive restart signal from scheduler")
@@ -427,6 +434,10 @@ class Executor(object):
             with ignoring(TimeoutError):
                 yield [gen.with_timeout(timedelta(seconds=2), f)
                         for f in self.coroutines]
+        with ignoring(AttributeError):
+            self.scheduler_stream.close()
+        with ignoring(AttributeError):
+            self.scheduler.close_streams()
 
     def shutdown(self, timeout=10):
         """ Send shutdown signal and wait until scheduler terminates """
@@ -436,7 +447,7 @@ class Executor(object):
         with ignoring(AttributeError):
             self.scheduler.close_streams()
         if self._should_close_loop:
-            self.loop.stop()
+            sync(self.loop, self.loop.stop)
             self.loop.close()
             self._loop_thread.join(timeout=timeout)
         if _global_executor[0] is self:

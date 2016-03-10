@@ -5,7 +5,6 @@ from distributed.s3 import seek_delimiter
 from distributed.utils_test import slow
 import moto
 
-# These get mirrored on s3://distributed-test/
 test_bucket_name = 'distributed-test'
 files = {'test/accounts.1.json':  (b'{"amount": 100, "name": "Alice"}\n'
                                    b'{"amount": 200, "name": "Bob"}\n'
@@ -37,7 +36,7 @@ d = 'tmp/test/d'
 
 @pytest.yield_fixture
 def s3():
-    # make writable local S3 system
+    # writable local S3 system
     m = moto.mock_s3()
     m.start()
     import boto3
@@ -103,6 +102,7 @@ def test_s3_file_info(s3):
     assert s3.info(fn)['Size'] == len(data)
     with pytest.raises((OSError, IOError)):
         s3.info(fn+'another')
+
 
 def test_du(s3):
     d = s3.du(test_bucket_name, deep=True)

@@ -2273,6 +2273,9 @@ def test_persist_get(e, s, a, b):
     result = yield e.compute(xxyy3)._result()
     assert result == ((1+1) + (2+2)) + 10
 
+    result = yield e.compute(xxyy3)._result()
+    assert result == ((1+1) + (2+2)) + 10
+
 
 def test_executor_num_fds(loop):
     psutil = pytest.importorskip('psutil')
@@ -2284,6 +2287,7 @@ def test_executor_num_fds(loop):
         after = proc.num_fds()
 
         assert before >= after
+
 
 @gen_cluster()
 def test_startup_shutdown_startup(s, a, b):
@@ -2308,3 +2312,21 @@ def test_startup_shutdown_startup_sync(loop):
         sleep(0.1)
         with Executor(('127.0.0.1', s['port'])) as e:
             pass
+
+
+@gen_cluster(executor=True)
+def test_badly_serialized_exceptions(e, s, a, b):
+    def f():
+        class BadlySerializedException(Exception):
+            def __reduce__(self):
+                raise TypeError()
+        raise BadlySerializedException('hello world')
+
+    x = e.submit(f)
+
+    try:
+        result = yield x._result()
+    except Exception as e:
+        assert 'hello world' in str(e)
+    else:
+        assert False
