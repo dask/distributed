@@ -66,11 +66,11 @@ class S3FileSystem(object):
         self.key = key
         self.secret = secret
         self.kwargs = kwargs
-        self.connect(anon, key, secret, kwargs)
         self.dirs = {}
-        self.s3 = self.connect(anon, key, secret, kwargs)
+        self.s3 = self.connect()
 
-    def connect(self, anon, key, secret, kwargs):
+    def connect(self):
+        anon, key, secret, kwargs = self.anon, self.key, self.secret, self.kwargs
         tok = tokenize(anon, key, secret, kwargs)
         if tok not in self._conn:
             logger.debug("Open S3 connection.  Anonymous: %s",
@@ -97,7 +97,7 @@ class S3FileSystem(object):
 
     def __setstate__(self, state):
         self.__dict__.update(state)
-        self.s3 = self.connect(self.anon, self.key, self.secret, self.kwargs)
+        self.s3 = self.connect()
 
     def open(self, path, mode='rb', block_size=4*1024**2):
         """ Open a file for reading or writing
@@ -143,7 +143,10 @@ class S3FileSystem(object):
                     f['Size'] = 0
                     del f['Name']
             else:
-                files = self.s3.list_objects(Bucket=bucket).get('Contents', [])
+                try:
+                    files = self.s3.list_objects(Bucket=bucket).get('Contents', [])
+                except ClientError:
+                    files = []
                 for f in files:
                     f['Key'] = "/".join([bucket, f['Key']])
             self.dirs[bucket] = list(sorted(files, key=lambda x: x['Key']))
@@ -162,7 +165,7 @@ class S3FileSystem(object):
             if not files:
                 try:
                     files = [self.info(path)]
-                except (OSError, IOError):
+                except (OSError, IOError, ClientError):
                     files = []
         if detail:
             return files
@@ -245,6 +248,44 @@ class S3FileSystem(object):
         with self.open(path, 'rb', block_size=size) as f:
             return f.read(size)
 
+    def mkdir(self, path):
+        self.touch(path)
+
+    def mv(self, path1, path2):
+        self.copy(path1, path2)
+        self.rm(path1)        
+
+    def copy(self, path1, path2):
+        buc1, key1 = split_path(path1)
+        buc2, key2 = split_path(path2)
+        try:
+            self.s3.copy_object(Bucket=buc2, Key=key2, CopySource='/'.join([buc1, key1]))
+        except ClientError:
+            raise IOError('Copy failed on %s->%s', path1, path2)
+        self._ls(path2, refresh=True)
+
+    def rm(self, path, recursive=True):
+        if recursive:
+            for f in self.walk(path):
+                self.rm(f, recursive=False)
+        bucket, key = split_path(path)
+        if key:
+            try:
+                out = self.s3.delete_object(Bucket=bucket, Key=key)
+            except ClientError:
+                raise IOError('Delete key failed: (%s, %s)', bucket, key)
+        else:
+            try:
+                out = self.s3.delete_bucket(Bucket=bucket)
+            except ClientError:
+                raise IOError('Delete bucket failed: %s', bucket)
+        if out['ResponseMetadata']['HTTPStatusCode'] != 204:
+            raise IOError('rm failed on %s', path)
+        self._ls(path, refresh=True)
+
+    def touch(self, path):
+        self.open(path, mode='wb')
+
     def read_block(self, fn, offset, length, delimiter=None):
         """ Read a block of bytes from an S3 file
 
@@ -314,12 +355,11 @@ class S3File(object):
             read-ahead size for finding delimiters
         """
         self.mode = mode
-        if mode != 'rb':
-            raise NotImplementedError("File mode must be 'rb', not %s" % mode)
+        if mode not in {'rb', 'wb'}:
+            raise NotImplementedError("File mode must be 'rb' or 'wb', not %s" % mode)
         self.path = path
         bucket, key = split_path(path)
         self.s3 = s3
-        self.size = self.info()['Size']
         self.bucket = bucket
         self.key = key
         self.blocksize = block_size
@@ -328,6 +368,14 @@ class S3File(object):
         self.start = None
         self.end = None
         self.closed = False
+        if mode == 'wb':
+            self.buffer = io.BytesIO()
+            self.size = 0
+        else:
+            try:
+                self.size = self.info()['Size']
+            except ClientError:
+                raise IOError("File not accessible: %s", path)
 
     def info(self):
         return self.s3.info(self.path)
@@ -336,17 +384,24 @@ class S3File(object):
         return self.loc
 
     def seek(self, loc, whence=0):
+        if not self.mode == 'rb':
+            raise ValueError('Seek only available in read mode')
         if whence == 0:
-            self.loc = loc
+            nloc = loc
         elif whence == 1:
-            self.loc += loc
+            nloc = self.loc + loc
         elif whence == 2:
-            self.loc = self.size + loc
+            nloc = self.size + loc
         else:
             raise ValueError("invalid whence (%s, should be 0, 1 or 2)" % whence)
-        if self.loc < 0:
-            self.loc = 0
+        if nloc < 0:
+            raise ValueError('Seek before start of file')
+        self.loc = nloc
         return self.loc
+
+    def mv(self, path1, path2):
+        self.copy(path1, path2)
+        self.rm(path1)        
 
     def _fetch(self, start, end):
         if self.start is None and self.end is None:
@@ -384,13 +439,48 @@ class S3File(object):
         self.loc += len(out)
         return out
 
+    def write(self, data):
+        """
+        Write data to buffer.
+
+        Buffer only sent to S3 on flush().
+        """
+        if self.mode != 'wb':
+            raise ValueError('File not in write mode')
+        if self.closed:
+            raise ValueError('I/O operation on closed file.')
+        return self.buffer.write(data)
+
     def flush(self):
-        pass
+        """
+        Write buffered data to S3.
+        """
+        if self.mode == 'wb':
+            try:
+                self.s3.s3.head_bucket(Bucket=self.bucket)
+            except ClientError:
+                try:
+                    self.s3.s3.create_bucket(Bucket=self.bucket)
+                except ClientError:
+                    raise IOError('Create bucket failed: %s', self.bucket)
+            pos = self.buffer.tell()
+            self.buffer.seek(0)
+            try:
+                out = self.s3.s3.put_object(Bucket=self.bucket, Key=self.key,
+                                            Body=self.buffer.read())
+            finally:
+                self.buffer.seek(pos)
+            self.s3._ls(self.bucket, refresh=True)
+            if out['ResponseMetadata']['HTTPStatusCode'] != 200:
+                raise IOError("Write failed: %s", out)
 
     def close(self):
         self.flush()
         self.cache = None
         self.closed = True
+
+    def __del__(self):
+        self.close()
 
     def __str__(self):
         return "<S3File %s/%s>" % (self.bucket, self.key)
@@ -402,7 +492,6 @@ class S3File(object):
 
     def __exit__(self, *args):
         self.close()
-
 
 
 def _fetch_range(client, bucket, key, start, end, max_attempts=10):

@@ -3,6 +3,8 @@ from __future__ import print_function, division, absolute_import
 import logging
 import io
 
+from tornado import gen
+
 from dask.imperative import Value, do
 from dask.base import tokenize
 
