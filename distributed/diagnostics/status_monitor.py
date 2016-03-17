@@ -77,11 +77,7 @@ class Status_Monitor(object):
         the bokeh figure
         """
 
-        try:
-            response = yield self.client.fetch('http://%s:%d/status.json' % (ip, port))
-        except Exception as e:
-            print(e)
-
+        response = yield self.client.fetch('http://%s:%d/status.json' % (ip, port))
         d = json.loads(response.body.decode())
 
         self.wkr_source.data['workers'] = [k for k, v in sorted(d['ncores'].items(),
