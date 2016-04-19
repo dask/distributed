@@ -2598,3 +2598,37 @@ def test_replicate_tree_branching(e, s, *workers):
 
     max_count = max(w.data[future.key].n for w in workers)
     assert max_count > 1
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 10)
+def test_executor_replicate(e, s, *workers):
+    x = e.submit(inc, 1)
+    y = e.submit(inc, 2)
+    yield e._replicate([x, y], n=5)
+
+    assert len(s.who_has[x.key]) == 5
+    assert len(s.who_has[y.key]) == 5
+
+    yield e._replicate([x, y], n=3)
+
+    assert len(s.who_has[x.key]) == 3
+    assert len(s.who_has[y.key]) == 3
+
+    yield e._replicate([x, y])
+
+    assert len(s.who_has[x.key]) == 10
+    assert len(s.who_has[y.key]) == 10
+
+
+def test_executor_replicate_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            x = e.submit(inc, 1)
+            y = e.submit(inc, 2)
+            e.replicate([x, y], n=2)
+
+            who_has = e.who_has()
+            assert len(who_has[x.key]) == len(who_has[y.key]) == 2
+
+            with pytest.raises(ValueError):
+                e.replicate([x], n=0)

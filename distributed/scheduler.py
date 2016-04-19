@@ -217,7 +217,8 @@ class Scheduler(Server):
                          'has_what': self.get_has_what,
                          'who_has': self.get_who_has,
                          'add_keys': self.add_keys,
-                         'rebalance': self.rebalance}
+                         'rebalance': self.rebalance,
+                         'replicate': self.replicate}
 
         self.services = {}
         for k, v in (services or {}).items():
@@ -1575,6 +1576,9 @@ class Scheduler(Server):
                 n = len(self.ncores)
             n = min(n, len(self.ncores))
             keys = set(keys)
+
+            if n == 0:
+                raise ValueError("Can not use replicate to delete data")
 
             if not keys.issubset(self.who_has):
                 raise Return({'status': 'missing-data',
