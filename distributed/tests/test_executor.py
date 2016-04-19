@@ -2620,6 +2620,24 @@ def test_executor_replicate(e, s, *workers):
     assert len(s.who_has[y.key]) == 10
 
 
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Need 127.0.0.2 to mean localhost")
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1),
+                                    ('127.0.0.2', 1),
+                                    ('127.0.0.2', 1)], timeout=None)
+def test_executor_replicate_host(e, s, a, b, c):
+    x = e.submit(inc, 1, workers='127.0.0.2')
+    yield _wait([x])
+    assert (s.who_has[x.key] == {b.address} or
+            s.who_has[x.key] == {c.address})
+
+    yield e._replicate([x], workers=['127.0.0.2'])
+    assert s.who_has[x.key] == {b.address, c.address}
+
+    yield e._replicate([x], workers=['127.0.0.1'])
+    assert s.who_has[x.key] == {a.address, b.address, c.address}
+
+
 def test_executor_replicate_sync(loop):
     with cluster() as (s, [a, b]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
