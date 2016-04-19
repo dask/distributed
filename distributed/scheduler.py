@@ -1566,18 +1566,37 @@ class Scheduler(Server):
         --------
         Scheduler.rebalance
         """
-        original_keys = set(keys)
-        if workers is None:
-            workers = self.ncores
-        workers = set(workers)
-        n = min(n, len(self.ncores))
         with log_errors():
+            original_keys = set(keys)
+            if workers is None:
+                workers = self.ncores
+            workers = set(workers)
+            if n is None:
+                n = len(self.ncores)
+            n = min(n, len(self.ncores))
             keys = set(keys)
 
             if not keys.issubset(self.who_has):
                 raise Return({'status': 'missing-data',
                               'keys': list(keys - set(self.who_has))})
 
+            # Delete extraneous data
+            del_keys = {k: random.sample(self.who_has[k] & workers,
+                                         len(self.who_has[k] & workers) - n)
+                        for k in keys
+                        if len(self.who_has[k] & workers) > n}
+            del_workers = {k: v for k, v in reverse_dict(del_keys).items() if v}
+            yield [self.rpc(addr=worker).delete_data(keys=list(keys),
+                                                     report=False)
+                    for worker, keys in del_workers.items()]
+
+            for worker, keys in del_workers.items():
+                self.has_what[worker] -= keys
+                for key in keys:
+                    self.who_has[key].remove(worker)
+
+            keys = {k for k in keys if len(self.who_has[k] - workers) < n}
+            # Copy not-yet-filled data
             while keys:
                 gathers = defaultdict(dict)
                 for k in list(keys):

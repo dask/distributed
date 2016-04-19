@@ -2557,6 +2557,27 @@ def test_replicate_workers(e, s, *workers):
     assert sum(a.key in w.data for w in workers[5:]) == 0
     assert sum(b.key in w.data for w in workers[5:]) == 0
 
+    yield s.replicate(keys=[a.key, b.key], n=1)
+
+    assert len(s.who_has[a.key]) == 1
+    assert len(s.who_has[b.key]) == 1
+    assert sum(a.key in w.data for w in workers) == 1
+    assert sum(b.key in w.data for w in workers) == 1
+
+    s.validate()
+
+    yield s.replicate(keys=[a.key, b.key], n=None) # all
+    assert len(s.who_has[a.key]) == 10
+    assert len(s.who_has[b.key]) == 10
+    s.validate()
+
+    yield s.replicate(keys=[a.key, b.key], n=1,
+                      workers=[w.address for w in workers[:5]])
+    assert sum(a.key in w.data for w in workers[:5]) == 1
+    assert sum(b.key in w.data for w in workers[:5]) == 1
+    assert sum(a.key in w.data for w in workers[5:]) == 5
+    assert sum(b.key in w.data for w in workers[5:]) == 5
+
 
 class CountSerialization(object):
     def __init__(self):
