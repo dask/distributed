@@ -67,10 +67,7 @@ def resource_append(lists, msg):
     for k in ['cpu', 'memory-percent']:
         lists[k].append(mean(pluck(k, L)) / 100)
 
-    try:
-        net = mean(pluck('network-send', L)) if list(pluck(k, L)) else 0
-    except KeyError:
-        net = 0
+    net = mean(pluck('network-send', L, 0))
     lists['network-send'].append(net / 2**20 / 0.5)
     lists['time'].append(mean(pluck('time', L)) * 1000)
 
