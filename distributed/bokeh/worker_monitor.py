@@ -9,13 +9,13 @@ from ..utils import ignoring
 
 with ignoring(ImportError):
     from bokeh.models import (ColumnDataSource, DataRange1d, Range1d,
-            NumeralTickFormatter)
+            NumeralTickFormatter, LinearAxis)
     from bokeh.palettes import Spectral9
     from bokeh.plotting import figure
 
 
 def resource_profile_plot(width=600, height=300):
-    names = ['time', 'cpu', 'memory-percent']
+    names = ['time', 'cpu', 'memory-percent', 'network-send']
     source = ColumnDataSource({k: [] for k in names})
 
     x_range = DataRange1d(follow='end', follow_interval=30000, range_padding=0)
@@ -30,6 +30,14 @@ def resource_profile_plot(width=600, height=300):
     p.legend[0].location = 'top_left'
     p.yaxis[0].formatter = NumeralTickFormatter(format="0 %")
     p.min_border_right = 10
+    p.extra_y_ranges = {"send": DataRange1d(bounds=(0, None))}
+    p.add_layout(LinearAxis(y_range_name="send", axis_label="Throughput (MB/s)"),
+                 'right')
+    p.yaxis.axis_label_text_font_size = "10pt"
+
+    p.line(x='time', y='network-send', line_width=2, line_alpha=0.8,
+           color=Spectral9[2], legend='Network', source=source,
+           y_range_name="send")
 
     return source, p
 
@@ -39,7 +47,7 @@ def resource_profile_update(source, worker_buffer, times_buffer):
 
     workers = sorted(list(set(chain(*list(w.keys() for w in worker_buffer)))))
 
-    for name in ['cpu', 'memory-percent']:
+    for name in ['cpu', 'memory-percent', 'network-send']:
         data[name] = [[msg[w][name] if w in msg and name in msg[w] else 'null'
                        for msg in worker_buffer]
                        for w in workers]
@@ -59,6 +67,11 @@ def resource_append(lists, msg):
     for k in ['cpu', 'memory-percent']:
         lists[k].append(mean(pluck(k, L)) / 100)
 
+    try:
+        net = mean(pluck('network-send', L)) if list(pluck(k, L)) else 0
+    except KeyError:
+        net = 0
+    lists['network-send'].append(net / 2**20 / 0.5)
     lists['time'].append(mean(pluck('time', L)) * 1000)
 
 
