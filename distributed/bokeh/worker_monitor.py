@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 from collections import defaultdict
 from itertools import chain
 
-from toolz import pluck, tail
+from toolz import pluck
 
 from ..utils import ignoring
 
@@ -70,7 +70,7 @@ def resource_append(lists, msg):
     lists['time'].append(mean(pluck('time', L)) * 1000)
     net = mean(pluck('network-send', L, 0))
     if len(lists['time']) >= 2:
-        t1, t2 = tail(2, lists['time'])
+        t1, t2 = lists['time'][-2], lists['time'][-1]
         interval = (t2 - t1) / 1000
     else:
         interval = 0.5
