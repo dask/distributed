@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 from collections import defaultdict
 from itertools import chain
 
-from toolz import pluck
+from toolz import pluck, tail
 
 from ..utils import ignoring
 
@@ -67,9 +67,14 @@ def resource_append(lists, msg):
     for k in ['cpu', 'memory-percent']:
         lists[k].append(mean(pluck(k, L)) / 100)
 
-    net = mean(pluck('network-send', L, 0))
-    lists['network-send'].append(net / 2**20 / 0.5)
     lists['time'].append(mean(pluck('time', L)) * 1000)
+    net = mean(pluck('network-send', L, 0))
+    if len(lists['time']) >= 2:
+        t1, t2 = tail(2, lists['time'])
+        interval = (t2 - t1) / 1000
+    else:
+        interval = 0.5
+    lists['network-send'].append(net / 2**20 / interval)
 
 
 def mean(seq):
