@@ -3,16 +3,17 @@ from __future__ import print_function, division, absolute_import
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
 import logging
+import math
 import random
 import socket
 from time import time
 from timeit import default_timer
 
 try:
-    from cytoolz import frequencies
+    from cytoolz import frequencies, topk
 except ImportError:
-    from toolz import frequencies
-from toolz import memoize, valmap, first, second, keymap
+    from toolz import frequencies, topk
+from toolz import memoize, valmap, first, second, keymap, unique
 from tornado import gen
 from tornado.gen import Return
 from tornado.queues import Queue
@@ -28,7 +29,7 @@ from .client import (scatter_to_workers, gather_from_workers)
 from .core import (rpc, connect, read, write, MAX_BUFFER_SIZE,
         Server, send_recv, coerce_to_address, error_message)
 from .utils import (All, ignoring, clear_queue, get_ip, ignore_exceptions,
-        ensure_ip, log_errors, key_split)
+        ensure_ip, log_errors, key_split, mean, divide_n_among_bins)
 
 
 logger = logging.getLogger(__name__)
@@ -380,7 +381,7 @@ class Scheduler(Server):
                 # self.ensure_occupied(new_worker)
         else:
             self.ready.appendleft(key)
-            self.ensure_idle_ready()
+            # self.ensure_idle_ready()
 
     def ensure_idle_ready(self):
         """ Run ready tasks on idle workers
@@ -400,8 +401,39 @@ class Scheduler(Server):
         certain workers.
         """
         for worker in self.maybe_ready:
-            self.ensure_occupied(worker)
+            self.ensure_occupied_stacks(worker)
         self.maybe_ready.clear()
+
+        if self.idle and self.ready:
+            if len(self.ready) < len(self.idle):
+                def keyfunc(w):
+                    try:
+                        return -self.worker_info[w]['memory-percent']
+                    except KeyError:
+                        return -len(self.has_what[w])
+                for worker in topk(len(self.ready), self.idle, key=keyfunc):
+                    self.ensure_occupied_ready_count(worker, count=1)
+            else:
+                workers = list(self.idle)
+                tpc = math.ceil(mean(map(self.tasks_per_core, workers))) # tasks per core
+                free_slots = [tpc * self.ncores[w] - len(self.processing[w])
+                              for w in workers]
+
+                # Clean out workers that *are* actually full
+                workers2 = []
+                free_slots2 = []
+                for w, fs in zip(workers, free_slots):
+                    if fs > 0:
+                        workers2.append(w)
+                        free_slots2.append(fs)
+                    else:
+                        self.idle.remove(w)
+
+                if workers2:
+                    n = min(sum(free_slots2), len(self.ready))
+                    counts = divide_n_among_bins(n, free_slots2)
+                    for worker, count in zip(workers2, counts):
+                        self.ensure_occupied_ready_count(worker, count=count)
 
         if 0 < len(self.idle) < len(self.ncores) and not self.ready:
             n = sum(map(len, self.stacks)) * len(self.idle) / len(self.ncores)
@@ -427,10 +459,6 @@ class Scheduler(Server):
 
                 if n <= 0:
                     break
-
-        while self.idle and self.ready and self.ncores:
-            worker = min(self.idle, key=lambda w: len(self.has_what[w]))
-            self.ensure_occupied(worker)
 
     def mark_key_in_memory(self, key, workers=None, type=None):
         """ Mark that a key now lives in distributed memory """
@@ -488,7 +516,7 @@ class Scheduler(Server):
                 if not s and dep and dep not in self.who_wants:
                     self.delete_data(keys=[dep])
 
-    def task_load(self, address):
+    def tasks_per_core(self, address):
         if time() - self.worker_info[address].get('last-task', 0) > 2:
             tasks_per_core = 2
         else:
@@ -501,9 +529,13 @@ class Scheduler(Server):
             latency = max(latency, 10e-3)
             tasks_per_core = max(2, latency // duration)
             tasks_per_core = min(500, tasks_per_core)
-        return tasks_per_core * self.ncores[address]
+        return tasks_per_core
 
     def ensure_occupied(self, worker):
+        self.ensure_occupied_stacks(worker)
+        self.ensure_occupied_ready(worker)
+
+    def ensure_occupied_stacks(self, worker):
         """ Send tasks to worker while it has tasks and free cores
 
         These tasks may come from the worker's own stacks or from the global
@@ -511,13 +543,12 @@ class Scheduler(Server):
 
         We update the idle workers set appropriately.
         """
-        logger.debug('Ensure worker is occupied: %s', worker)
+        load = self.tasks_per_core(worker) * self.ncores[worker]
+        stack = self.stacks[worker]
 
-        load = self.task_load(worker)
-
-        while (self.stacks[worker] and
+        while (stack and
                load * self.ncores[worker] > len(self.processing[worker])):
-            key = self.stacks[worker].pop()
+            key = stack.pop()
             if key not in self.tasks:
                 continue
             if self.who_has.get(key):
@@ -529,6 +560,31 @@ class Scheduler(Server):
             except StreamClosedError:
                 self.remove_worker(worker)
                 return
+
+        self._check_idle(worker, load)
+
+    def ensure_occupied_ready_count(self, worker, count):
+        for i in range(count):
+            try:
+                key = self.ready.pop()
+            except KeyError:
+                break
+            if key not in self.tasks:
+                continue
+            if self.who_has.get(key):
+                continue
+            self.processing[worker].add(key)
+            logger.debug("Send job to worker: %s, %s", worker, key)
+            try:
+                self.send_task_to_worker(worker, key)
+            except StreamClosedError:
+                self.remove_worker(worker)
+                return
+
+        self._check_idle(worker)
+
+    def ensure_occupied_ready(self, worker):
+        load = self.tasks_per_core(worker) * self.ncores[worker]
 
         while (self.ready and
                load * self.ncores[worker] > len(self.processing[worker])):
@@ -545,6 +601,11 @@ class Scheduler(Server):
                 self.remove_worker(worker)
                 return
 
+        self._check_idle(worker, load)
+
+    def _check_idle(self, worker, load=None):
+        if load is None:
+            load = self.tasks_per_core(worker) * self.ncores[worker]
         if load * self.ncores[worker] > len(self.processing[worker]):
             self.idle.add(worker)
         elif worker in self.idle:
@@ -893,7 +954,7 @@ class Scheduler(Server):
             if k in self.tasks:
                 del tasks[k]
 
-        keys = set(keys)
+        keys = set(unique(keys))
         for k in keys:
             self.who_wants[k].add(client)
             self.wants_what[client].add(k)

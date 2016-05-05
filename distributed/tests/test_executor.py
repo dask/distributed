@@ -2715,20 +2715,20 @@ def test_executor_replicate_sync(loop):
 
 
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 4)] * 1)
-def test_task_load(e, s, a):
-    assert 4 < s.task_load(a.address) < 20
+def test_tasks_per_core(e, s, a):
+    assert 1 < s.tasks_per_core(a.address) < 4
     L = e.map(inc, range(100))  # very fast
     yield _wait(L)
     assert 0 < s.worker_info[a.address]['avg-task-duration'] < 0.1
 
-    assert 8 <= s.task_load(a.address) < 10000
+    assert 2 <= s.tasks_per_core(a.address) < 10000
 
     L = e.map(sleep, [0.1] * 10, pure=False)
     yield _wait(L)
 
     assert 0.0001 < s.worker_info[a.address]['avg-task-duration'] < 0.2
 
-    assert 4 < s.task_load(a.address) < 100
+    assert 1 < s.tasks_per_core(a.address) < 25
 
 
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 4)] * 1)
@@ -2748,3 +2748,45 @@ def test_task_load_adapts_quickly_after_delay(e, s, a):
     future = e.submit(inc, 2)  # fast but soon, defers to old average
     yield _wait(future)
     assert 0.2 < s.worker_info[a.address]['avg-task-duration'] < 1
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 4)] * 1)
+def test_task_load_adapts_quickly(e, s, a):
+    future = e.submit(slowinc, 1, delay=0.2)  # slow
+    yield _wait(future)
+    assert 0.15 < s.worker_info[a.address]['avg-task-duration'] < 0.4
+
+    futures = e.map(inc, range(10))  # very fast
+    yield _wait(futures)
+
+    assert 0 < s.worker_info[a.address]['avg-task-duration'] < 0.1
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_even_load_after_fast_functions(e, s, a, b):
+    x = e.submit(inc, 1, workers=a.address)  # very fast
+    y = e.submit(inc, 2, workers=b.address)  # very fast
+    yield _wait([x, y])
+    assert 0 < s.worker_info[a.address]['avg-task-duration'] < 0.1
+    assert 0 < s.worker_info[b.address]['avg-task-duration'] < 0.1
+
+    futures = e.map(inc, range(2, 11))
+    yield _wait(futures)
+    assert len(a.data) == len(b.data)
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_even_load_on_startup(e, s, a, b):
+    x, y = e.map(inc, [1, 2])
+    yield _wait([x, y])
+    assert len(a.data) == len(b.data) == 1
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 2)] * 2)
+def test_contiguous_load(e, s, a, b):
+    w, x, y, z = e.map(inc, [1, 2, 3, 4])
+    yield _wait([w, x, y, z])
+
+    groups = [set(a.data), set(b.data)]
+    assert {w.key, x.key} in groups
+    assert {y.key, z.key} in groups
