@@ -371,6 +371,7 @@ class Scheduler(Server):
 
         if self.dependencies.get(key, None) or key in self.restrictions:
             new_worker = decide_worker(self.dependencies, self.stacks,
+                    self.processing,
                     self.who_has, self.restrictions, self.loose_restrictions,
                     self.nbytes, key)
             if not new_worker:
@@ -407,10 +408,7 @@ class Scheduler(Server):
         if self.idle and self.ready:
             if len(self.ready) < len(self.idle):
                 def keyfunc(w):
-                    try:
-                        return -self.worker_info[w]['memory-percent']
-                    except KeyError:
-                        return -len(self.has_what[w])
+                    return - len(self.stacks[w]) - len(self.processing[w])
                 for worker in topk(len(self.ready), self.idle, key=keyfunc):
                     self.ensure_occupied_ready_count(worker, count=1)
             else:
@@ -1770,7 +1768,7 @@ class Scheduler(Server):
                         self.add_keys(address=w, keys=list(gathers[w]))
 
 
-def decide_worker(dependencies, stacks, who_has, restrictions,
+def decide_worker(dependencies, stacks, processing, who_has, restrictions,
                   loose_restrictions, nbytes, key):
     """ Decide which worker should take task
 
@@ -1825,7 +1823,7 @@ def decide_worker(dependencies, stacks, who_has, restrictions,
             workers = {w for w in stacks if w in r or w.split(':')[0] in r}
             if not workers:
                 if key in loose_restrictions:
-                    return decide_worker(dependencies, stacks, who_has,
+                    return decide_worker(dependencies, stacks, processing, who_has,
                                          {}, set(), nbytes, key)
                 else:
                     return None
@@ -1842,7 +1840,7 @@ def decide_worker(dependencies, stacks, who_has, restrictions,
     minbytes = min(commbytes.values())
 
     workers = {w for w, nb in commbytes.items() if nb == minbytes}
-    worker = min(workers, key=lambda w: len(stacks[w]))
+    worker = min(workers, key=lambda w: len(stacks[w]) + len(processing[w]))
     return worker
 
 

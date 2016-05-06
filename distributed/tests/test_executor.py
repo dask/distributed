@@ -2790,3 +2790,20 @@ def test_contiguous_load(e, s, a, b):
     groups = [set(a.data), set(b.data)]
     assert {w.key, x.key} in groups
     assert {y.key, z.key} in groups
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 4)
+def test_balanced_with_submit(e, s, *workers):
+    L = [e.submit(slowinc, i) for i in range(4)]
+    yield _wait(L)
+    for w in workers:
+        assert len(w.data) == 1
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 4)
+def test_balanced_with_submit_and_resident_data(e, s, *workers):
+    [x] = yield e._scatter([10], broadcast=True)
+    L = [e.submit(slowinc, x, pure=False) for i in range(4)]
+    yield _wait(L)
+    for w in workers:
+        assert len(w.data) == 2
