@@ -1580,7 +1580,7 @@ def test_forget_simple(e, s, a, b):
     for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
             s.waiting_data, s.who_has, s.restrictions, s.loose_restrictions,
             s.released, s.keyorder, s.exceptions, s.who_wants,
-            s.exceptions_blame]:
+            s.exceptions_blame, s.nbytes]:
         assert x.key not in coll
         assert z.key not in coll
 
@@ -2015,7 +2015,7 @@ def test_map_iterator_with_return(e, s, a, b):
         raise StopIteration(3)  # py2.7 compat.
     f1 = e.map(lambda x: x, g())
     assert isinstance(f1, Iterator)
-    
+
     start = time()  # ensure that we compute eagerly
     while not s.tasks:
         yield gen.sleep(0.01)

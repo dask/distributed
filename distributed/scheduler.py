@@ -371,9 +371,9 @@ class Scheduler(Server):
 
         if self.dependencies.get(key, None) or key in self.restrictions:
             new_worker = decide_worker(self.dependencies, self.stacks,
-                    self.processing,
-                    self.who_has, self.restrictions, self.loose_restrictions,
-                    self.nbytes, key)
+                    self.processing, self.who_has, self.has_what,
+                    self.restrictions, self.loose_restrictions, self.nbytes,
+                    key)
             if not new_worker:
                 self.unrunnable.add(key)
             else:
@@ -408,7 +408,8 @@ class Scheduler(Server):
         if self.idle and self.ready:
             if len(self.ready) < len(self.idle):
                 def keyfunc(w):
-                    return - len(self.stacks[w]) - len(self.processing[w])
+                    return (-len(self.stacks[w]) - len(self.processing[w]),
+                            -len(self.has_what.get(w, ())))
                 for worker in topk(len(self.ready), self.idle, key=keyfunc):
                     self.ensure_occupied_ready_count(worker, count=1)
             else:
@@ -952,7 +953,8 @@ class Scheduler(Server):
             if k in self.tasks:
                 del tasks[k]
 
-        keys = set(unique(keys))
+        original_keys = keys
+        keys = set(keys)
         for k in keys:
             self.who_wants[k].add(client)
             self.wants_what[client].add(k)
@@ -1005,8 +1007,9 @@ class Scheduler(Server):
             if loose_restrictions:
                 self.loose_restrictions |= set(loose_restrictions)
 
-        for key in keys:
-            self.ensure_in_play(key)
+        for key in unique(original_keys):
+            if key in keys:
+                self.ensure_in_play(key)
 
         for key in touched | keys:
             for dep in self.dependencies[key]:
@@ -1107,6 +1110,9 @@ class Scheduler(Server):
         if key in self.who_has:
             self.delete_data(keys=[key])
 
+        if key in self.nbytes:
+            del self.nbytes[key]
+
         for plugin in self.plugins:
             try:
                 plugin.forget(self, key)
@@ -1128,7 +1134,7 @@ class Scheduler(Server):
 
     def cancel(self, stream, keys=None, client=None):
         """ Stop execution on a list of keys """
-        logger.info("Client %s requests to cancel keys %s", client, keys)
+        logger.info("Client %s requests to cancel %d keys", client, len(keys))
         for key in keys:
             self.cancel_key(key, client)
 
@@ -1221,7 +1227,7 @@ class Scheduler(Server):
             while True:
                 try:
                     msgs = yield next_message()  # in_queue.get()
-                except (StreamClosedError, AssertionError):
+                except (StreamClosedError, AssertionError, GeneratorExit):
                     break
                 except Exception as e:
                     logger.exception(e)
@@ -1768,35 +1774,38 @@ class Scheduler(Server):
                         self.add_keys(address=w, keys=list(gathers[w]))
 
 
-def decide_worker(dependencies, stacks, processing, who_has, restrictions,
+def decide_worker(dependencies, stacks, processing, who_has, has_what, restrictions,
                   loose_restrictions, nbytes, key):
     """ Decide which worker should take task
 
     >>> dependencies = {'c': {'b'}, 'b': {'a'}}
     >>> stacks = {'alice:8000': ['z'], 'bob:8000': []}
+    >>> processing = {'alice:8000': set(), 'bob:8000': set()}
     >>> who_has = {'a': {'alice:8000'}}
+    >>> has_what = {'alice:8000': {'a'}}
     >>> nbytes = {'a': 100}
     >>> restrictions = {}
     >>> loose_restrictions = set()
 
     We choose the worker that has the data on which 'b' depends (alice has 'a')
 
-    >>> decide_worker(dependencies, stacks, who_has, restrictions,
-    ...               loose_restrictions, nbytes, 'b')
+    >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
+    ...               restrictions, loose_restrictions, nbytes, 'b')
     'alice:8000'
 
     If both Alice and Bob have dependencies then we choose the less-busy worker
 
     >>> who_has = {'a': {'alice:8000', 'bob:8000'}}
-    >>> decide_worker(dependencies, stacks, who_has, restrictions,
-    ...               loose_restrictions, nbytes, 'b')
+    >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'a'}}
+    >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
+    ...               restrictions, loose_restrictions, nbytes, 'b')
     'bob:8000'
 
     Optionally provide restrictions of where jobs are allowed to occur
 
     >>> restrictions = {'b': {'alice', 'charlie'}}
-    >>> decide_worker(dependencies, stacks, who_has, restrictions,
-    ...               loose_restrictions, nbytes, 'b')
+    >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
+    ...               restrictions, loose_restrictions, nbytes, 'b')
     'alice:8000'
 
     If the task requires data communication, then we choose to minimize the
@@ -1805,10 +1814,12 @@ def decide_worker(dependencies, stacks, processing, who_has, restrictions,
 
     >>> dependencies = {'c': {'a', 'b'}}
     >>> who_has = {'a': {'alice:8000'}, 'b': {'bob:8000'}}
+    >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'b'}}
     >>> nbytes = {'a': 1, 'b': 1000}
     >>> stacks = {'alice:8000': [], 'bob:8000': []}
 
-    >>> decide_worker(dependencies, stacks, who_has, {}, set(), nbytes, 'c')
+    >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
+    ...               {}, set(), nbytes, 'c')
     'bob:8000'
     """
     deps = dependencies[key]
@@ -1823,8 +1834,8 @@ def decide_worker(dependencies, stacks, processing, who_has, restrictions,
             workers = {w for w in stacks if w in r or w.split(':')[0] in r}
             if not workers:
                 if key in loose_restrictions:
-                    return decide_worker(dependencies, stacks, processing, who_has,
-                                         {}, set(), nbytes, key)
+                    return decide_worker(dependencies, stacks, processing,
+                            who_has, has_what, {}, set(), nbytes, key)
                 else:
                     return None
     if not workers or not stacks:
@@ -1840,7 +1851,10 @@ def decide_worker(dependencies, stacks, processing, who_has, restrictions,
     minbytes = min(commbytes.values())
 
     workers = {w for w, nb in commbytes.items() if nb == minbytes}
-    worker = min(workers, key=lambda w: len(stacks[w]) + len(processing[w]))
+    def objective(w):
+        return (len(stacks[w]) + len(processing[w]),
+                len(has_what.get(w, ())))
+    worker = min(workers, key=objective)
     return worker
 
 

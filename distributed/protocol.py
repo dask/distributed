@@ -43,6 +43,9 @@ from .compatibility import unicode
 compressions = {None: {'compress': identity,
                        'decompress': identity}}
 
+default_compression = None
+
+
 with ignoring(ImportError):
     import zlib
     compressions['zlib'] = {'compress': zlib.compress,
