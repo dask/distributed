@@ -185,11 +185,13 @@ class Scheduler(Server):
         self.ready = deque()
         self.unrunnable = set()
         self.idle = set()
-        self.maybe_ready = set()
+        self.maybe_idle = set()
         self.who_has = defaultdict(set)
         self.deleted_keys = defaultdict(set)
         self.who_wants = defaultdict(set)
         self.wants_what = defaultdict(set)
+
+        self.saturated = set()
 
         self.exceptions = dict()
         self.tracebacks = dict()
@@ -385,11 +387,57 @@ class Scheduler(Server):
                 self.unrunnable.add(key)
             else:
                 self.stacks[new_worker].append(key)
-                self.maybe_ready.add(new_worker)
+                self.maybe_idle.add(new_worker)
                 # self.ensure_occupied(new_worker)
         else:
             self.ready.appendleft(key)
             # self.ensure_idle_ready()
+
+    def work_steal(self, bandwidth=100e6):
+        if not self.idle or not self.saturated:
+            return
+
+        thieves = set()  # Output list
+
+        idle = iter(list(self.idle))  # we will walk down these two sequences
+        saturated = iter(list(self.saturated))
+
+        thief = next(idle)
+        victim = next(saturated)
+        try:
+            while True:
+                if victim == thief:
+                    raise ValueError()
+                thieves.add(thief)  # add to output
+                n = (self.ncores[thief]  # number of tasks to consume
+                  - len(self.processing[thief])
+                  - len(self.stacks[thief]))
+                stack = self.stacks[victim]
+                while n > 0 and stack:
+                    key = stack.popleft()
+                    nbytes = sum(self.nbytes[k] for k in self.dependencies[key])
+                    transfer_time = nbytes / bandwidth
+                    compute_time = self.task_duration.get(key_split(key), 1)
+                    if (transfer_time < compute_time and  # good to move
+                        (key not in self.restrictions or key in
+                            self.loose_restrictions)):
+                        self.stacks[thief].append(key)
+                    else:
+                        stack.appendleft(key)  # replace task in victim's stack
+                        victim = next(saturated)
+                        break
+
+                if not stack:
+                    self.saturated.remove(victim)
+                    victim = next(saturated)
+
+                if n <= 0:
+                    self.idle.remove(thief)
+                    thief = next(idle)
+        except StopIteration:
+            pass
+        logger.debug('Stolen tasks for %d workers', len(thieves))
+        return thieves
 
     def ensure_idle_ready(self):
         """ Run ready tasks on idle workers
@@ -408,9 +456,9 @@ class Scheduler(Server):
         We are careful not to reclaim tasks that are restricted to run on
         certain workers.
         """
-        for worker in self.maybe_ready:
+        for worker in self.maybe_idle:
             self.ensure_occupied_stacks(worker)
-        self.maybe_ready.clear()
+        self.maybe_idle.clear()
 
         if self.idle and self.ready:
             if len(self.ready) < len(self.idle):
@@ -463,31 +511,10 @@ class Scheduler(Server):
                     for worker, count in zip(workers2, counts):
                         self.ensure_occupied_ready_count(worker, count=count)
 
-        # Work stealing
-        if 0 < len(self.idle) < len(self.ncores) and not self.ready:
-            n = sum(map(len, self.stacks)) * len(self.idle) / len(self.ncores)
-
-            if not n:
-                return
-            stacks = sorted([(w, self.stacks[w]) for w in self.ncores
-                                                  if w not in self.idle],
-                            key=lambda kv: len(kv[1]), reverse=True)
-
-            for w, stack in stacks:
-                k = min(len(stack) // 2, len(stack) - self.ncores[w])
-                if k <= 0:
-                    continue
-                tasks = stack[:k]
-                good = [t for t in tasks if t not in self.restrictions]
-                bad = [t for t in tasks if t in self.restrictions]
-                del self.stacks[w][:k]
-                self.stacks[w][:0] = bad
-                self.ready.extend(good)
-
-                n -= len(good)
-
-                if n <= 0:
-                    break
+        if self.idle and self.saturated:
+            thieves = self.work_steal()
+            for worker in thieves:
+                self.ensure_occupied_stacks(worker)
 
     def mark_key_in_memory(self, key, workers=None, type=None):
         """ Mark that a key now lives in distributed memory """
@@ -578,7 +605,14 @@ class Scheduler(Server):
                 self.remove_worker(worker)
                 return
 
-        self._check_idle(worker)
+        if stack:
+            self.saturated.add(worker)
+            if worker in self.idle:
+                self.idle.remove(worker)
+        else:
+            if worker in self.saturated:
+                self.saturated.remove(worker)
+            self._check_idle(worker)
 
     def ensure_occupied_ready_count(self, worker, count):
         latency = 5e-3
@@ -626,9 +660,12 @@ class Scheduler(Server):
 
         self._check_idle(worker)
 
+    def issaturated(self, worker, latency=5e-3):
+        return (len(self.processing[worker]) > self.ncores[worker] and
+                self.occupancy[worker] > latency * self.ncores[worker])
+
     def _check_idle(self, worker, latency=5e-3):
-        if (len(self.processing[worker]) < self.ncores[worker] or
-            self.occupancy[worker] < latency * self.ncores[worker]):
+        if not self.issaturated(worker, latency=latency):
             self.idle.add(worker)
         elif worker in self.idle:
             self.idle.remove(worker)
@@ -671,7 +708,7 @@ class Scheduler(Server):
             self.exceptions[key] = exception
             self.tracebacks[key] = traceback
             self.mark_failed(key, key)
-            self.maybe_ready.add(worker)
+            self.maybe_idle.add(worker)
             # self.ensure_occupied(worker)
             for plugin in self.plugins[:]:
                 try:
@@ -707,7 +744,7 @@ class Scheduler(Server):
         if worker in self.processing and key in self.processing[worker]:
             self.nbytes[key] = nbytes
             self.mark_key_in_memory(key, [worker], type=type)
-            self.maybe_ready.add(worker)
+            self.maybe_idle.add(worker)
 
             # Update average task duration for worker
             info = self.worker_info[worker]
@@ -740,7 +777,7 @@ class Scheduler(Server):
         else:
             logger.debug("Key not found in processing, %s, %s, %s",
                          key, worker, self.processing[worker])
-            self.maybe_ready.add(worker)
+            self.maybe_idle.add(worker)
 
     def recover_missing(self, key):
         """ Recover a recently lost piece of data
@@ -853,6 +890,8 @@ class Scheduler(Server):
             del self.worker_info[address]
             if address in self.idle:
                 self.idle.remove(address)
+            if address in self.saturated:
+                self.saturated.remove(address)
 
             in_flight = set(self.stacks.pop(address))
             in_flight |= set(self.processing.pop(address))
@@ -917,7 +956,7 @@ class Scheduler(Server):
                 self.has_what[address] = set()
                 self.processing[address] = dict()
                 self.occupancy[address] = 0
-                self.stacks[address] = []
+                self.stacks[address] = deque()
 
             for key in keys:
                 self.mark_key_in_memory(key, [address])
@@ -1888,8 +1927,8 @@ def decide_worker(dependencies, stacks, processing, who_has, has_what, restricti
                  for w in workers}
 
     minbytes = min(commbytes.values())
-
     workers = {w for w, nb in commbytes.items() if nb == minbytes}
+
     def objective(w):
         return (len(stacks[w]) + len(processing[w]),
                 len(has_what.get(w, ())))

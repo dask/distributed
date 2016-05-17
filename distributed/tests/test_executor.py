@@ -2829,3 +2829,43 @@ def test_scheduler_saturates_cores_random(e, s, a, b):
             if s.tasks:
                 assert all(len(p) >= 20 for p in s.processing.values())
             yield gen.sleep(0.01)
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_dont_steal_expensive_data_fast_computation(e, s, a, b):
+    np = pytest.importorskip('numpy')
+    x = e.submit(np.arange, 1000000, workers=a.address)
+    yield _wait([x])
+
+    cheap = [e.submit(np.sum, x, pure=False, workers=a.address,
+                      allow_other_workers=True) for i in range(10)]
+    yield _wait(cheap)
+    assert len(b.data) == 0
+    assert len(a.data) == 11
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_steal_cheap_data_slow_computation(e, s, a, b):
+    x = e.submit(slowinc, 100, delay=0.1)  # learn that slowinc is slow
+    yield _wait([x])
+
+    futures = e.map(slowinc, range(10), delay=0.01, workers=a.address,
+                    allow_other_workers=True)
+    yield _wait(futures)
+    assert abs(len(a.data) - len(b.data)) < 3
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_steal_expensive_data_slow_computation(e, s, a, b):
+    np = pytest.importorskip('numpy')
+
+    x = e.submit(slowinc, 100, delay=0.1, workers=a.address)
+    yield _wait([x])  # learn that slowinc is slow
+
+    x = e.submit(np.arange, 1000000, workers=a.address)  # put expensive data
+    yield _wait([x])
+
+    slow = [e.submit(slowinc, x, delay=0.1, pure=False) for i in range(4)]
+    yield _wait([slow])
+
+    assert b.data  # not empty
