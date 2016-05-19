@@ -415,6 +415,11 @@ class Scheduler(Server):
                 stack = self.stacks[victim]
                 while n > 0 and stack:
                     key = stack.popleft()
+                    if len(self.dependencies[key]) > 10:  # complex, dont bother
+                        stack.appendleft(key)  # replace task in victim's stack
+                        victim = next(saturated)
+                        break
+
                     nbytes = sum(self.nbytes[k] for k in self.dependencies[key])
                     transfer_time = nbytes / bandwidth
                     compute_time = self.task_duration.get(key_split(key), 1)
