@@ -419,8 +419,10 @@ class Scheduler(Server):
 
         thieves = set()  # Output list
 
-        idle = iter(list(self.idle))  # we will walk down these two sequences
-        saturated = iter(list(self.saturated))
+        idle = iter(self.idle)  # we will walk down these two sequences
+        remove_idle = set()
+        saturated = iter(self.saturated)
+        remove_saturated = set()
 
         thief = next(idle)
         victim = next(saturated)
@@ -439,18 +441,23 @@ class Scheduler(Server):
                         self.stacks[thief].append(key)
                     else:
                         stack.appendleft(key)  # replace task in victim's stack
+                        remove_saturated.add(victim)
                         victim = next(saturated)
                         break
 
                 if not stack:
-                    self.saturated.remove(victim)
+                    remove_saturated.add(victim)
                     victim = next(saturated)
 
                 if n <= 0:
-                    self.idle.remove(thief)
+                    remove_idle.add(thief)
                     thief = next(idle)
         except StopIteration:
             pass
+        for worker in remove_saturated:
+            self.saturated.remove(worker)
+        for worker in remove_idle:
+            self.idle.remove(worker)
         logger.debug('Stolen tasks for %d workers', len(thieves))
         return thieves
 
@@ -601,6 +608,8 @@ class Scheduler(Server):
         """
         stack = self.stacks[worker]
         latency = 5e-3
+
+        bottom = stack[0] if stack else None
 
         while (stack and
                (self.ncores[worker] > len(self.processing[worker]) or
