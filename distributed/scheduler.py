@@ -393,6 +393,26 @@ class Scheduler(Server):
             self.ready.appendleft(key)
             # self.ensure_idle_ready()
 
+    def should_steal(self, key, bandwidth=100e6):
+        """ Is a key good for stealing from its chosen worker?
+
+        It must have the following attributes
+
+        1.  Not have too many dependencies
+        2.  Not be restricted to run on that worker
+        3   Take less time to transfer than to compute
+        """
+        if len(self.dependencies[key]) > 10:
+            return False
+        if key in self.restrictions and key not in self.loose_restrictions:
+            return False
+
+        nbytes = sum(self.nbytes[k] for k in self.dependencies[key])
+        transfer_time = nbytes / bandwidth
+        compute_time = self.task_duration.get(key_split(key), 1)
+
+        return transfer_time < compute_time
+
     def work_steal(self, bandwidth=100e6):
         if not self.idle or not self.saturated:
             return
@@ -415,17 +435,7 @@ class Scheduler(Server):
                 stack = self.stacks[victim]
                 while n > 0 and stack:
                     key = stack.popleft()
-                    if len(self.dependencies[key]) > 10:  # complex, dont bother
-                        stack.appendleft(key)  # replace task in victim's stack
-                        victim = next(saturated)
-                        break
-
-                    nbytes = sum(self.nbytes[k] for k in self.dependencies[key])
-                    transfer_time = nbytes / bandwidth
-                    compute_time = self.task_duration.get(key_split(key), 1)
-                    if (transfer_time < compute_time and  # good to move
-                        (key not in self.restrictions or key in
-                            self.loose_restrictions)):
+                    if self.should_steal(key):
                         self.stacks[thief].append(key)
                     else:
                         stack.appendleft(key)  # replace task in victim's stack
