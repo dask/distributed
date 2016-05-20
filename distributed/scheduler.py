@@ -439,6 +439,7 @@ class Scheduler(Server):
                     key = stack.popleft()
                     if self.should_steal(key):
                         self.stacks[thief].append(key)
+                        n -= 1
                     else:
                         stack.appendleft(key)  # replace task in victim's stack
                         remove_saturated.add(victim)

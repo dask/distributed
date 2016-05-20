@@ -2869,3 +2869,17 @@ def test_steal_expensive_data_slow_computation(e, s, a, b):
     yield _wait([slow])
 
     assert b.data  # not empty
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 10)
+def test_worksteal_many_thieves(e, s, *workers):
+    np = pytest.importorskip('numpy')
+    x = e.submit(slowinc, -1, delay=0.1)
+    yield x._result()
+
+    xs = e.map(slowinc, [x] * 100, pure=False, delay=0.01)
+
+    yield _wait(xs)
+
+    for w, keys in s.has_what.items():
+        assert 2 < len(keys) < 50
