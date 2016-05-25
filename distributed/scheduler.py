@@ -34,6 +34,8 @@ from .utils import (All, ignoring, clear_queue, get_ip, ignore_exceptions,
 
 logger = logging.getLogger(__name__)
 
+BANDWIDTH = 100e6
+
 
 class Scheduler(Server):
     """ Dynamic distributed task scheduler
@@ -393,7 +395,7 @@ class Scheduler(Server):
             self.ready.appendleft(key)
             # self.ensure_idle_ready()
 
-    def should_steal(self, key, bandwidth=100e6):
+    def should_steal(self, key, bandwidth=None):
         """ Is a key good for stealing from its chosen worker?
 
         It must have the following attributes
@@ -409,11 +411,14 @@ class Scheduler(Server):
 
         nbytes = sum(self.nbytes[k] for k in self.dependencies[key])
         transfer_time = nbytes / bandwidth
-        compute_time = self.task_duration.get(key_split(key), 1)
+        try:
+            compute_time = self.task_duration[key_split(key)]
+            return transfer_time < compute_time
+        except KeyError:
+            return False
 
-        return transfer_time < compute_time
-
-    def work_steal(self, bandwidth=100e6):
+    def work_steal(self, bandwidth=None):
+        bandwidth = bandwidth if bandwidth is not None else BANDWIDTH
         if not self.idle or not self.saturated:
             return
 
@@ -686,7 +691,17 @@ class Scheduler(Server):
         self._check_idle(worker)
 
     def issaturated(self, worker, latency=5e-3):
-        return (len(self.processing[worker]) > self.ncores[worker] and
+        """ A worker is saturated if it has enough work to avoid being idle
+
+        A worker is saturated if the following criteria are met
+
+        1.  It is working on at least as many tasks as it has cores
+        2.  The expected time it will take to complete all of its currently
+            assigned  tasks is at least a full round-trip time.  This is
+            relevant when it has many small tasks
+        """
+        return (len(self.stacks[worker]) + len(self.processing[worker])
+                > self.ncores[worker] and
                 self.occupancy[worker] > latency * self.ncores[worker])
 
     def _check_idle(self, worker, latency=5e-3):
@@ -2059,4 +2074,4 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
 _round_robin = [0]
 
 
-fast_task_prefixes = {'sum', 'max', 'min', 'len', 'rechunk-split'}
+fast_task_prefixes = {'rechunk-split'}

@@ -67,7 +67,7 @@ Choosing tasks to steal
 -----------------------
 
 Occupied workers maintain a stack of excess work.  The tasks at the top of this
-stack are prioritized to run by that worker before the tasks at the bottom.
+stack are prioritized to be run by that worker before the tasks at the bottom.
 
 Ideally we choose the worker with the *largest* stack of excess work and then
 select the task at the *bottom* of this stack, hopefully starting a new
@@ -82,5 +82,4 @@ structures necessary to efficiently find the most occupied workers.  Common
 solutions, like maintaining priority queue of workers by stack length add a
 ``log(n)`` cost to the common case.
 
-Instead we allow Python to iterate through the set of saturated workers however
-it finds to be the most efficient.
+Instead we just call ``next(iter(saturated_workers))`` and allow Python to iterate through the set of saturated workers however it prefers.

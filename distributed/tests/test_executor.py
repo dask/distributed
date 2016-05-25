@@ -976,6 +976,27 @@ def test_queue_scatter(loop):
             assert ee.gather(a) == 0
 
 
+def test_queue_scatter_gather_maxsize(loop):
+    with cluster() as (s, [a, b]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            from distributed.compatibility import Queue
+            q = Queue(maxsize=3)
+            out = e.scatter(q, maxsize=10)
+            assert out.maxsize == 10
+            local = e.gather(q)
+            assert not local.maxsize
+
+            q = Queue()
+            out = e.scatter(q)
+            assert not out.maxsize
+            local = e.gather(out, maxsize=10)
+            assert local.maxsize == 10
+
+            q = Queue(maxsize=3)
+            out = e.scatter(q)
+            assert not out.maxsize
+
+
 def test_queue_gather(loop):
     with cluster() as (s, [a, b]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as ee:
@@ -2001,8 +2022,10 @@ def test_map_queue(e, s, a, b):
     q_1 = Queue(maxsize=2)
     q_2 = e.map(inc, q_1)
     assert isqueue(q_2)
-    q_3 = e.map(double, q_2)
+    assert not q_2.maxsize
+    q_3 = e.map(double, q_2, maxsize=3)
     assert isqueue(q_3)
+    assert q_3.maxsize == 3
     q_4 = yield e._gather(q_3)
     assert isqueue(q_4)
 
@@ -2836,12 +2859,14 @@ def test_dont_steal_expensive_data_fast_computation(e, s, a, b):
     np = pytest.importorskip('numpy')
     x = e.submit(np.arange, 1000000, workers=a.address)
     yield _wait([x])
+    future = e.submit(np.sum, [1], workers=a.address)  # learn that sum is fast
+    yield _wait([future])
 
     cheap = [e.submit(np.sum, x, pure=False, workers=a.address,
                       allow_other_workers=True) for i in range(10)]
     yield _wait(cheap)
     assert len(b.data) == 0
-    assert len(a.data) == 11
+    assert len(a.data) == 12
 
 
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 2)
@@ -2873,7 +2898,6 @@ def test_steal_expensive_data_slow_computation(e, s, a, b):
 
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 10)
 def test_worksteal_many_thieves(e, s, *workers):
-    np = pytest.importorskip('numpy')
     x = e.submit(slowinc, -1, delay=0.1)
     yield x._result()
 
@@ -2883,3 +2907,20 @@ def test_worksteal_many_thieves(e, s, *workers):
 
     for w, keys in s.has_what.items():
         assert 2 < len(keys) < 50
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_dont_steal_unknown_functions(e, s, a, b):
+    futures = e.map(inc, [1, 2], workers=a.address, allow_other_workers=True)
+    yield _wait(futures)
+    assert len(a.data) == 2
+    assert len(b.data) == 0
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_eventually_steal_unknown_functions(e, s, a, b):
+    futures = e.map(slowinc, range(10), delay=0.1,  workers=a.address,
+                    allow_other_workers=True)
+    yield _wait(futures)
+    assert len(a.data) >= 3
+    assert len(b.data) >= 3
