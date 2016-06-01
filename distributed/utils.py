@@ -15,6 +15,7 @@ from threading import Thread
 from dask import istask
 from toolz import memoize, valmap
 from tornado import gen
+from tornado.iostream import StreamClosedError
 
 from .compatibility import Queue, PY3
 
@@ -203,7 +204,7 @@ def key_split(s):
 def log_errors(pdb=False):
     try:
         yield
-    except gen.Return:
+    except (StreamClosedError, gen.Return):
         raise
     except Exception as e:
         logger.exception(e)
@@ -226,7 +227,7 @@ def ensure_ip(hostname):
     '127.0.0.1:5000'
     """
     if ':' in hostname:
-        host, port = hostname.split(':')
+        host, port = hostname.rsplit(':', 1)
         return ':'.join([ensure_ip(host), port])
     if PY3 and isinstance(hostname, bytes):
         hostname = hostname.decode()

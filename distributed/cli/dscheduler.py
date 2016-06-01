@@ -60,14 +60,14 @@ def main(center, host, port, http_port, bokeh_port, show, _bokeh, bokeh_whitelis
             dirname = os.path.dirname(distributed.__file__)
             paths = [os.path.join(dirname, 'bokeh', name)
                      for name in ['status', 'tasks']]
-            binname = 'bokeh.bat' if 'win' in sys.platform else 'bokeh'
+            binname = 'bokeh.bat' if sys.platform.startswith('win') else 'bokeh'
             binname = os.path.join(os.path.dirname(sys.argv[0]), binname)
             args = ([binname, 'serve'] + paths +
                     ['--log-level', 'warning',
                      '--check-unused-sessions=50',
                      '--unused-session-lifetime=1',
                      '--port', str(bokeh_port)] +
-                     sum([['--host', host] for host in hosts], []))
+                     sum([['--host', h] for h in hosts], []))
             if show:
                 args.append('--show')
 
