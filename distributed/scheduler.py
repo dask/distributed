@@ -412,6 +412,7 @@ class Scheduler(Server):
         2.  Not be restricted to run on that worker
         3   Take less time to transfer than to compute
         """
+        bandwidth = bandwidth if bandwidth is not None else BANDWIDTH
         if len(self.dependencies[key]) > 10:
             return False
         if key in self.restrictions and key not in self.loose_restrictions:
@@ -644,8 +645,6 @@ class Scheduler(Server):
         """
         stack = self.stacks[worker]
         latency = 5e-3
-
-        bottom = stack[0] if stack else None
 
         while (stack and
                (self.ncores[worker] > len(self.processing[worker]) or
