@@ -444,7 +444,7 @@ class Executor(object):
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
         allow_other_workers: bool (defaults to False)
-            Used with `workers`. Inidicates whether or not the computations
+            Used with `workers`. Indicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
 
         Examples
@@ -1086,7 +1086,7 @@ class Executor(object):
         else:
             return result
 
-    def persist(self, collections):
+    def persist(self, collections, workers=None, allow_other_workers=False):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -1097,6 +1097,12 @@ class Executor(object):
         ----------
         collections: sequence or single dask object
             Collections like dask.array or dataframe or dask.value objects
+        workers: set, iterable of sets
+            A set of worker hostnames on which computations may be performed.
+            Leave empty to default to all workers (common case)
+        allow_other_workers: bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
 
         Returns
         -------
@@ -1117,6 +1123,11 @@ class Executor(object):
             singleton = True
             collections = [collections]
 
+        if allow_other_workers not in (True, False, None):
+            raise TypeError("allow_other_workers= must be True or False")
+        if allow_other_workers and workers is None:
+            raise ValueError("Only use allow_other_workers= if using workers=")
+
         assert all(isinstance(c, Base) for c in collections)
 
         groups = groupby(lambda x: x._optimize, collections)
@@ -1133,15 +1144,26 @@ class Executor(object):
 
         names = list({tokey(k) for c in collections for k in flatten(c._keys())})
 
+        if isinstance(workers, str):
+            workers = [workers]
+        if workers is not None:
+            restrictions = {key: workers for key in names}
+            loose_restrictions = names if allow_other_workers else []
+        else:
+            restrictions = {}
+            loose_restrictions = []
+
         self._send_to_scheduler({'op': 'update-graph',
                                  'tasks': valmap(dumps_task, dsk2),
                                  'dependencies': valmap(list, dependencies),
                                  'keys': names,
+                                 'restrictions': valmap(list, restrictions),
+                                 'loose_restrictions': loose_restrictions,
                                  'client': self.id})
 
         result = [redict_collection(c, {k: Future(tokey(k), self)
                                         for k in flatten(c._keys())})
-                for c in collections]
+                  for c in collections]
         if singleton:
             return first(result)
         else:
