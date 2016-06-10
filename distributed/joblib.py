@@ -4,7 +4,7 @@ from joblib._parallel_backends import ParallelBackendBase, AutoBatchingMixin
 from joblib.parallel import register_parallel_backend
 from tornado import gen
 
-from .executor import Executor, _wait
+from .executor import Executor, _wait, Future
 
 
 class DistributedBackend(ParallelBackendBase, AutoBatchingMixin):
@@ -34,6 +34,12 @@ class DistributedBackend(ParallelBackendBase, AutoBatchingMixin):
 
         future.get = future.result  # monkey patch to achieve AsyncResult API
         return future
+
+    def abort_everything(self, ensure_ready=True):
+        # Tell the executor to cancel any task submitted via this instance
+        # as joblib.Parallel will never access those results.
+        executor = self.executor
+        executor.cancel([Future(k, executor) for k in executor.futures])
 
 
 register_parallel_backend('distributed', DistributedBackend)
