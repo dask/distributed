@@ -243,7 +243,7 @@ class Executor(object):
     distributed.scheduler.Scheduler: Internal scheduler
     """
     def __init__(self, address, start=True, loop=None, timeout=3,
-                 set_as_default=True):
+                 set_as_default=False):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
@@ -434,6 +434,8 @@ class Executor(object):
             dask.set_options(get=self._previous_get)
         if _global_executor[0] is self:
             _global_executor[0] = None
+        if self.get == _globals.get('get'):
+            del _globals['get']
 
     def submit(self, func, *args, **kwargs):
         """ Submit a function application to the scheduler

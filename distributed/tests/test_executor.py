@@ -2970,14 +2970,14 @@ def test_cancel_stress_sync(loop):
 def test_default_get(loop):
     with cluster() as (s, [a, b]):
         pre_get = _globals.get('get')
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+        with Executor(('127.0.0.1', s['port']), loop=loop, set_as_default=True) as e:
             assert _globals['get'] == e.get
         assert _globals['get'] is pre_get
 
         e = Executor(('127.0.0.1', s['port']), loop=loop, set_as_default=False)
         assert _globals['get'] is pre_get
 
-        e = Executor(('127.0.0.1', s['port']), loop=loop)
+        e = Executor(('127.0.0.1', s['port']), loop=loop, set_as_default=True)
         assert _globals['get'] == e.get
         e.shutdown()
         assert _globals['get'] is pre_get
