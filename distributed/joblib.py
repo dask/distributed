@@ -4,7 +4,7 @@ from joblib._parallel_backends import ParallelBackendBase, AutoBatchingMixin
 from joblib.parallel import register_parallel_backend
 from tornado import gen
 
-from .executor import Executor, _wait
+from .executor import Executor, _wait, Future
 
 
 class DistributedBackend(ParallelBackendBase, AutoBatchingMixin):
