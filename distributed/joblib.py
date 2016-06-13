@@ -4,7 +4,7 @@ from joblib._parallel_backends import ParallelBackendBase, AutoBatchingMixin
 from joblib.parallel import register_parallel_backend
 from tornado import gen
 
-from .executor import Executor, _wait, Future
+from .executor import Executor, _wait
 
 
 class DistributedBackend(ParallelBackendBase, AutoBatchingMixin):
@@ -13,6 +13,7 @@ class DistributedBackend(ParallelBackendBase, AutoBatchingMixin):
 
     def __init__(self, scheduler_host='127.0.0.1:8786', loop=None):
         self.executor = Executor(scheduler_host, loop=loop)
+        self.futures = set()
 
     def configure(self, n_jobs=1, parallel=None, **backend_args):
         return self.effective_n_jobs(n_jobs)
@@ -24,10 +25,12 @@ class DistributedBackend(ParallelBackendBase, AutoBatchingMixin):
         callback = kwargs.pop('callback', None)
         kwargs['pure'] = False
         future = self.executor.submit(func, *args, **kwargs)
+        self.futures.add(future)
 
         @gen.coroutine
         def callback_wrapper():
             result = yield _wait([future])
+            self.futures.remove(future)
             callback(result)  # gets called in separate thread
 
         self.executor.loop.add_callback(callback_wrapper)
@@ -38,8 +41,8 @@ class DistributedBackend(ParallelBackendBase, AutoBatchingMixin):
     def abort_everything(self, ensure_ready=True):
         # Tell the executor to cancel any task submitted via this instance
         # as joblib.Parallel will never access those results.
-        executor = self.executor
-        executor.cancel([Future(k, executor) for k in executor.futures])
+        self.executor.cancel(self.futures)
+        self.futures.clear()
 
 
 register_parallel_backend('distributed', DistributedBackend)
