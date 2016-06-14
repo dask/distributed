@@ -1537,17 +1537,6 @@ class Scheduler(Server):
             if key in self.nbytes:
                 del self.nbytes[key]
 
-    def update_info(self, d, info):
-        delay = time() - info.pop('time')
-        try:
-            avg_delay = d['time-delay']
-            info['time-delay'] = (0.90 * avg_delay + 0.10 * delay)
-        except KeyError:
-            info['time-delay'] = delay
-
-        info['last-seen'] = datetime.now()
-        d.update(info)
-
     @gen.coroutine
     def scatter(self, stream=None, data=None, workers=None, client=None,
             broadcast=False):

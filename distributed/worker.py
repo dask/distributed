@@ -114,6 +114,8 @@ class Worker(Server):
         self.active = set()
         self.name = name
         self.heartbeat_interval = heartbeat_interval
+        self._last_disk_io = None
+        self._last_net_io = None
 
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
@@ -148,9 +150,9 @@ class Worker(Server):
         super(Worker, self).__init__(handlers, **kwargs)
 
         self.heartbeat_callback = PeriodicCallback(self.heartbeat,
-                                                    self.heartbeat_interval,
-                                                    io_loop=self.loop)
-        self.heartbeat_callback.start()
+                                                   self.heartbeat_interval,
+                                                   io_loop=self.loop)
+        self.loop.add_callback(self.heartbeat_callback.start)
 
     @gen.coroutine
     def heartbeat(self):
@@ -362,7 +364,7 @@ class Worker(Server):
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         future = self.executor.submit(function, *args, **kwargs)
         pc = PeriodicCallback(lambda: logger.debug("future state: %s - %s",
-            key, future._state), 1000); pc.start()
+            key, future._state), 1000, io_loop=self.loop); pc.start()
         try:
             yield future
         finally:
@@ -642,25 +644,27 @@ class Worker(Server):
                       'memory-percent': mem.percent})
 
             net_io = psutil.net_io_counters()
-            try:
+            if self._last_net_io:
                 d['network-send'] = net_io.bytes_sent - self._last_net_io.bytes_sent
                 d['network-recv'] = net_io.bytes_recv - self._last_net_io.bytes_recv
-            except AttributeError:
-                pass
+            else:
+                d['network-send'] = 0
+                d['network-recv'] = 0
             self._last_net_io = net_io
 
             try:
                 disk_io = psutil.disk_io_counters()
-                try:
-                    d['disk-read'] = disk_io.read_bytes - self._last_disk_io.read_bytes
-                    d['disk-write'] = disk_io.write_bytes - self._last_disk_io.write_bytes
-                    self._last_disk_io = disk_io
-                except AttributeError:
-                    pass
-                self._last_disk_io = disk_io
             except RuntimeError:
                 # This happens when there is no physical disk in worker
                 pass
+            else:
+                if self._last_disk_io:
+                    d['disk-read'] = disk_io.read_bytes - self._last_disk_io.read_bytes
+                    d['disk-write'] = disk_io.write_bytes - self._last_disk_io.write_bytes
+                else:
+                    d['disk-read'] = 0
+                    d['disk-write'] = 0
+                self._last_disk_io = disk_io
 
         except ImportError:
             pass

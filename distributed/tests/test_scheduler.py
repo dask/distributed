@@ -943,7 +943,7 @@ def test_host_health(s, a, b, c):
 
 
 def test_add_worker_is_idempotent(loop):
-    s = Scheduler()
+    s = Scheduler(loop=loop)
     s.start(0)
     s.add_worker(address=alice, ncores=1, coerce_address=False)
     ncores = s.ncores.copy()

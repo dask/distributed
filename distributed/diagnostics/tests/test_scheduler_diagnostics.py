@@ -29,14 +29,11 @@ def test_tasks(e, s, a, b):
 
 @gen_cluster(executor=True)
 def test_workers(e, s, a, b):
-    while 'latency' not in s.host_info[a.ip]:
-        yield gen.sleep(0.01)
     d = workers(s)
 
     assert json.loads(json.dumps(d)) == d
 
     assert 0 <= d[a.ip]['cpu'] <= 100
-    assert 0 <= d[a.ip]['latency'] <= 2
     assert 0 <= d[a.ip]['memory']
     assert 0 < d[a.ip]['memory-percent'] < 100
     assert set(map(int, d[a.ip]['ports'])) == {a.port, b.port}
@@ -47,7 +44,6 @@ def test_workers(e, s, a, b):
     yield _wait(L)
 
     assert 0 <= d[a.ip]['cpu'] <= 100
-    assert 0 <= d[a.ip]['latency'] <= 2
     assert 0 <= d[a.ip]['memory']
     assert 0 < d[a.ip]['memory-percent'] < 100
     assert set(map(int, d[a.ip]['ports'])) == {a.port, b.port}
