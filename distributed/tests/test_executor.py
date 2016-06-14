@@ -3034,3 +3034,17 @@ def test_get_stacks_processing_sync(loop):
             assert set(e.processing([aa])) == {aa}
 
             e.cancel(futures)
+
+
+def test_scheduler_falldown(loop):
+    with cluster(worker_kwargs={'heartbeat_interval': 10}) as (s, [a, b]):
+        s['proc'].terminate()
+        s['proc'].join(timeout=2)
+        try:
+            s2 = Scheduler(loop=loop)
+            loop.add_callback(s2.start, s['port'])
+            sleep(0.1)
+            with Executor(('127.0.0.1', s['port']), loop=loop) as ee:
+                assert len(ee.ncores()) == 2
+        finally:
+            s2.close()
