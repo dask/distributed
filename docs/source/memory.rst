@@ -9,21 +9,39 @@ The result of a task is kept in memory if either of the following conditions
 hold:
 
 1.  A client holds a future pointing to this task.  The data should stay in RAM
-    so that the client can pull the data on demand.
+    so that the client can gather the data on demand.
 2.  The task is necessary for ongoing computations that are working to produce
     the final results pointed to by futures.  These tasks will be removed once
     no ongoing tasks require them.
 
 When users hold Future objects or persisted collections (which contain many
-such Futures) they pin those results to active memory.  When the user
-deletes futures or collections from their local Python process, the scheduler
-removes the associated data from distributed RAM.  Because of this
-relationship, distributed memory reflects the state of local memory.
-A user may free distributed memory on the cluster by deleting persisted
-collections in the local session.
+such Futures inside their ``.dask`` attribute) they pin those results to active
+memory.  When the user deletes futures or collections from their local Python
+process the scheduler removes the associated data from distributed RAM.
+Because of this relationship, distributed memory reflects the state of local
+memory.  A user may free distributed memory on the cluster by deleting
+persisted collections in the local session.
 
-Persisting Data
----------------
+Creating Futures
+----------------
+
+The following functions produce Futures
+
+.. currentmodule:: distributed.executor
+
+.. autosummary::
+   Executor.submit
+   Executor.map
+   Executor.compute
+   Executor.persist
+   Executor.scatter
+
+Submit and map handle raw Python functions.  Compute and persist handle Dask
+collections like arrays, bags, delayed values, and dataframes.  Scatter sends
+data directly from the local process.
+
+Persisting Collections
+----------------------
 
 Calls to ``Executor.compute`` or ``Executor.persist`` submit task graphs to the
 cluster and return ``Future`` objects that point to particular output tasks.
@@ -58,15 +76,16 @@ built up a recipe to perform the work as a graph in the ``df`` object.
 When we call ``df = e.perist(df)`` we cut this graph off of the ``df`` object,
 send it up to the scheduler, receive ``Future`` objects in return and create a
 new dataframe with a very shallow graph that points directly to these futures.
-This happens more or less immediately and we can continue working on our new
-``df`` object while the cluster works to evaluate the graph in the background.
+This happens more or less immediately (as long as it takes to serialize and
+send the graph) and we can continue working on our new ``df`` object while the
+cluster works to evaluate the graph in the background.
 
 
 Difference with dask.compute
 ----------------------------
 
-The operations ``e.persist`` and ``e.compute`` are asynchronous and so differ
-from the traditional ``.compute()`` method or ``dask.compute`` function, which
+The operations ``e.persist(df)`` and ``e.compute(df)`` are asynchronous and so differ
+from the traditional ``df.compute()`` method or ``dask.compute`` function, which
 blocks until a result is available.  The ``.compute()`` method does not persist
 any data on the cluster.  The ``.compute()`` method also brings the entire
 result back to the local machine, so it is unwise to use it on large datasets.
@@ -79,7 +98,9 @@ collections and then use ``df.compute()`` for fast analyses.
 .. code-block:: python
 
    >>> # df.compute()  # This is bad and would likely flood local memory
+   >>> df = e.persist(df)    # This is good and asynchronously pins df
    >>> df.x.sum().compute()  # This is good because the result is small
+   >>> future = e.compute(df.x.sum())  # This is also good but less intuitive
 
 
 Clearing data
@@ -121,3 +142,39 @@ completes in around a second.
 .. code-block:: python
 
    >>> e.restart()
+
+
+Resilience
+----------
+
+Results are not intentionally copied unless necessary for computations on other
+worker nodes.  Resilience is achieved through recomputation by maintaining the
+provenance of any result.  If a worker node goes down the scheduler is able to
+recompute all of its results.  The complete graph for any desired Future is
+maintained until no references to that future exist.
+
+
+Advanced techniques
+-------------------
+
+At first the result of a task is not intentionally copied, but only persists on
+the node where it was originally computed or scattered.  However result may be
+copied to another worker node in the course of normal computation if that
+result is required by another task that is intended to by run by a different
+worker.  This occurs if a task requires two pieces of data on different
+machines (at least one must move) or through work stealing.  In these cases it
+is the policy for the second machine to maintain its redundant copy of the data.  This helps to organically spread around data that is in high demand.
+
+However, advanced users may want to control the location, replication, and
+balancing of data more directly throughout the cluster.  They may know ahead of
+time that certain data should be broadcast throughout the network or that their
+data has become particularly imbalanced, or that they want certain pieces of
+data to live on certain parts of their network.  These considerations are not
+usually necessary.
+
+.. currentmodule:: distributed.executor
+
+.. autosummary::
+   Executor.rebalance
+   Executor.replicate
+   Executor.scatter
