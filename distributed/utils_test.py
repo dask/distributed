@@ -161,6 +161,7 @@ def run_nanny(q, center_port, **kwargs):
         try:
             loop.start()
         finally:
+            loop.run_sync(worker._close)
             loop.close(all_fds=True)
 
 
@@ -272,7 +273,9 @@ def cluster_center(nworkers=2, nanny=False):
         for proc in [center] + [w['proc'] for w in workers]:
             with ignoring(Exception):
                 proc.terminate()
-                proc.join(timeout=2)
+        for proc in [center] + [w['proc'] for w in workers]:
+            with ignoring(Exception):
+                proc.join(timeout=5)
         for fn in glob('_test_worker-*'):
             shutil.rmtree(fn)
 

@@ -156,6 +156,7 @@ class Worker(Server):
 
     @gen.coroutine
     def heartbeat(self):
+        logger.debug("Heartbeat: %s" % self.address)
         yield self.scheduler.register(address=self.address, name=self.name,
                                 ncores=self.ncores,
                                 now=time(),
