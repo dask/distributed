@@ -70,6 +70,7 @@ class Future(WrappedKey):
         self.key = key
         self.executor = executor
         self.executor._inc_ref(key)
+        self._cleared = False
 
         if key not in executor.futures:
             executor.futures[key] = {'event': Event(), 'status': 'pending'}
@@ -181,8 +182,13 @@ class Future(WrappedKey):
         except KeyError:
             return None
 
+    def _del(self):
+        if not self._cleared:
+            self._cleared = True
+            self.executor._dec_ref(self.key)
+
     def __del__(self):
-        self.executor._dec_ref(self.key)
+        self._del()
 
     def __str__(self):
         if self.type:
@@ -1019,13 +1025,15 @@ class Executor(object):
         try:
             result = yield self._gather(packed)
         except Exception as e:
-            yield self._cancel(futures)
             if raise_on_error:
                 raise
             else:
                 result = 'error', e
                 raise gen.Return(result)
-        if raise_on_error:
+        finally:
+            for f in futures.values():
+                f._del()
+        if not raise_on_error:
             result = 'OK', result
         raise gen.Return(result)
 

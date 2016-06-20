@@ -3091,5 +3091,17 @@ def test_get_returns_early(e, s, a, b):
     with ignoring(Exception):
         result = yield e._get({'x': (throws, 1), 'y': (sleep, 1)}, ['x', 'y'])
     assert time() < start + 0.5
-    assert 'y' not in s.tasks
-    assert 'y' not in e.futures
+    assert not e.futures
+
+    start = time()
+    while 'y' in s.tasks:
+        yield gen.sleep(0.01)
+        assert time() < start + 3
+
+    x = e.submit(inc, 1)
+    yield x._result()
+
+    with ignoring(Exception):
+        result = yield e._get({'x': (throws, 1),
+                               x.key: (inc, 1)}, ['x', x.key])
+    assert x.key in s.tasks
