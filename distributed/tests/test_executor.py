@@ -25,7 +25,7 @@ from distributed.executor import (Executor, Future, CompatibleExecutor, _wait,
         default_executor, _first_completed, ensure_default_get, futures_of)
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
-from distributed.utils import sync, tmp_text
+from distributed.utils import sync, tmp_text, ignoring
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
         _test_scheduler, loop, inc, dec, div, throws,
         gen_cluster, gen_test, double, deep)
@@ -3083,3 +3083,13 @@ def test_shutdown_idempotent(loop):
             e.shutdown()
             e.shutdown()
             e.shutdown()
+
+
+@gen_cluster(executor=True)
+def test_get_returns_early(e, s, a, b):
+    start = time()
+    with ignoring(Exception):
+        result = yield e._get({'x': (throws, 1), 'y': (sleep, 1)}, ['x', 'y'])
+    assert time() < start + 0.5
+    assert 'y' not in s.tasks
+    assert 'y' not in e.futures

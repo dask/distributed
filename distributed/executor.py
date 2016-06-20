@@ -685,10 +685,18 @@ class Executor(object):
         keys = [tokey(key) for key in keys]
         bad_data = dict()
 
+        @gen.coroutine
+        def wait(k):
+            yield self.futures[k]['event'].wait()
+            if self.futures[k]['status'] != 'finished':
+                raise Exception()
+
         while True:
             logger.debug("Waiting on futures to clear before gather")
-            yield All([self.futures[key]['event'].wait() for key in keys
-                                                    if key in self.futures])
+
+            with ignoring(Exception):
+                yield All([wait(key) for key in keys if key in self.futures])
+
             exceptions = set()
             bad_keys = set()
             for key in keys:
@@ -1008,14 +1016,17 @@ class Executor(object):
                                  'client': self.id})
 
         packed = pack_data(keys, futures)
-        if raise_on_error:
+        try:
             result = yield self._gather(packed)
-        else:
-            try:
-                result = yield self._gather(packed)
-                result = 'OK', result
-            except Exception as e:
+        except Exception as e:
+            yield self._cancel(futures)
+            if raise_on_error:
+                raise
+            else:
                 result = 'error', e
+                raise gen.Return(result)
+        if raise_on_error:
+            result = 'OK', result
         raise gen.Return(result)
 
     def get(self, dsk, keys, **kwargs):
