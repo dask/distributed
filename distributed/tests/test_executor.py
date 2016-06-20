@@ -1255,28 +1255,29 @@ def test_upload_file_exception_sync(loop):
                     e.upload_file(fn)
 
 
+@pytest.mark.xfail
 @gen_cluster()
 def test_multiple_executors(s, a, b):
-        a = Executor((s.ip, s.port), start=False)
-        yield a._start()
-        b = Executor((s.ip, s.port), start=False)
-        yield b._start()
+    a = Executor((s.ip, s.port), start=False)
+    yield a._start()
+    b = Executor((s.ip, s.port), start=False)
+    yield b._start()
 
-        x = a.submit(inc, 1)
-        y = b.submit(inc, 2)
-        assert x.executor is a
-        assert y.executor is b
-        xx = yield x._result()
-        yy = yield y._result()
-        assert xx == 2
-        assert yy == 3
-        z = a.submit(add, x, y)
-        assert z.executor is a
-        zz = yield z._result()
-        assert zz == 5
+    x = a.submit(inc, 1)
+    y = b.submit(inc, 2)
+    assert x.executor is a
+    assert y.executor is b
+    xx = yield x._result()
+    yy = yield y._result()
+    assert xx == 2
+    assert yy == 3
+    z = a.submit(add, x, y)
+    assert z.executor is a
+    zz = yield z._result()
+    assert zz == 5
 
-        yield a._shutdown()
-        yield b._shutdown()
+    yield a._shutdown()
+    yield b._shutdown()
 
 
 @gen_cluster(Worker=Nanny)
@@ -2238,6 +2239,29 @@ def test_futures_of(e, s, a, b):
     assert set(futures_of(b)) == {x, y, z}
 
 
+@gen_cluster(executor=True)
+def test_futures_of_cancelled_raises(e, s, a, b):
+    x = e.submit(inc, 1)
+    yield e._cancel([x])
+
+    with pytest.raises(CancelledError):
+        yield x._result()
+
+    with pytest.raises(CancelledError):
+        yield e._get({'x': (inc, x), 'y': (inc, 2)}, ['x', 'y'])
+
+    with pytest.raises(CancelledError):
+        e.submit(inc, x)
+
+    with pytest.raises(CancelledError):
+        e.submit(add, 1, y=x)
+
+    with pytest.raises(CancelledError):
+        e.map(add, [1], y=x)
+
+    assert 'y' not in s.tasks
+
+
 @gen_cluster(ncores=[('127.0.0.1', 1)], executor=True)
 def test_dont_delete_recomputed_results(e, s, w):
     x = e.submit(inc, 1)                        # compute first time
@@ -2613,9 +2637,8 @@ def test_submit_on_cancelled_future(e, s, a, b):
 
     yield e._cancel(x)
 
-    y = e.submit(inc, x)
-    yield _wait(y)
-    assert y.cancelled()
+    with pytest.raises(CancelledError):
+        y = e.submit(inc, x)
 
 
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 10)
