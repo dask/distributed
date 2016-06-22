@@ -422,6 +422,7 @@ class Scheduler(Server):
         3   Take less time to transfer than to compute
         """
         bandwidth = bandwidth if bandwidth is not None else BANDWIDTH
+
         if len(self.dependencies[key]) > 10:
             return False
         if key in self.restrictions and key not in self.loose_restrictions:
