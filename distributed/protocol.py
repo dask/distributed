@@ -64,6 +64,14 @@ with ignoring(ImportError):
     default_compression = 'lz4'
 
 
+with ignoring(ImportError):
+    import blosc
+    blosc.set_nthreads(2)
+    compressions['blosc'] = {'compress': lambda b: blosc.compress(b, clevel=5),
+                           'decompress': blosc.decompress}
+    default_compression = 'blosc'
+
+
 def dumps(msg):
     """ Transform Python value to bytestream suitable for communication """
     small_header = {}

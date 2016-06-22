@@ -22,7 +22,7 @@ def test_compression():
 def test_compression():
     pytest.importorskip('lz4')
     np = pytest.importorskip('numpy')
-    x = np.random.random(10000)
+    x = np.random.randint(0, 255, dtype='u1', size=100000)
     header, payload = dumps(x.tobytes())
     assert (not header or
             not msgpack.loads(header, encoding='utf8').get('compression'))
