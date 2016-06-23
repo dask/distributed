@@ -86,7 +86,7 @@ class Status_Monitor(object):
                 push_notebook()
 
 
-def task_table_plot(row_headers=False, width=600, height="auto"):
+def task_table_plot(row_headers=False, width=600, height=400):
     names = ['waiting', 'ready', 'failed', 'processing', 'in-memory', 'total']
     source = ColumnDataSource({k: [] for k in names})
 
@@ -101,7 +101,7 @@ def task_table_update(source, d):
     source.data = d
 
 
-def worker_table_plot(width=600, height="auto", **kwargs):
+def worker_table_plot(width=600, height=400, **kwargs):
     """ Column data source and plot for host table """
     names = ['workers', 'cpu', 'memory-percent', 'memory', 'cores', 'processes',
              'processing', 'latency', 'last-seen', 'disk-read', 'disk-write',

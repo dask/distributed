@@ -47,11 +47,11 @@ doc.add_periodic_callback(task_update, messages['tasks']['interval'])
 
 
 resource_source, resource_plot = resource_profile_plot(height=int(width/3), width=width)
-resource_plot.min_border_top -= 40
-resource_plot.title = None
-resource_plot.min_border_bottom -= 40
-resource_plot.plot_height -= 80
-resource_plot.logo = None
+# resource_plot.min_border_top -= 40
+# resource_plot.title = None
+# resource_plot.min_border_bottom -= 40
+# resource_plot.plot_height -= 80
+# resource_plot.logo = None
 # resource_plot.toolbar_location = None
 resource_plot.xaxis.axis_label = None
 resource_index = [0]
@@ -78,11 +78,11 @@ doc.add_periodic_callback(resource_update, messages['workers']['interval'])
 
 
 progress_source, progress_plot = progress_plot(height=int(width/3), width=width)
-progress_plot.min_border_top -= 40
-progress_plot.title = None
-progress_plot.min_border_bottom -= 40
-progress_plot.plot_height -= 80
-progress_plot.logo = None
+# progress_plot.min_border_top -= 40
+# progress_plot.title = None
+# progress_plot.min_border_bottom -= 40
+# progress_plot.plot_height -= 80
+# progress_plot.logo = None
 # progress_plot.toolbar_location = None
 progress_plot.xaxis.axis_label = None
 

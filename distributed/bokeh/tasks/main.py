@@ -18,11 +18,11 @@ width = 800
 
 task_stream_source, task_stream_plot = task_stream_plot(height=600,
         width=width, follow_interval=20000)
-task_stream_plot.min_border_top = 0
-task_stream_plot.min_border_bottom = 0
-task_stream_plot.min_border_left = 0
-task_stream_plot.min_border_right = 10
-task_stream_plot.xaxis.axis_label = None
+# task_stream_plot.min_border_top = 0
+# task_stream_plot.min_border_bottom = 0
+# task_stream_plot.min_border_left = 0
+# task_stream_plot.min_border_right = 10
+# task_stream_plot.xaxis.axis_label = None
 task_stream_index = [0]
 
 rectangles = messages['task-events']['rectangles']
