@@ -104,10 +104,8 @@ doc.add_periodic_callback(task_stream_update, messages['task-events']['interval'
 
 layout = column(
     resource_plot,
-    progress_plot,
     task_stream_plot,
-    worker_table,
-    task_table,
-    sizing_mode='scale_width'
+    progress_plot,
+    sizing_mode='stretch_both'
 )
 doc.add_root(layout)

@@ -244,7 +244,7 @@ def progress_plot(**kwargs):
                            'erred': {}, 'released': {}})
 
     source = ColumnDataSource(data)
-    fig = figure(tools=['resize'], **kwargs)
+    fig = figure(tools='', toolbar_location=None, **kwargs)
     fig.quad(source=source, top='top', bottom='bottom',
              left=0, right=1, color='#aaaaaa', alpha=0.2)
     fig.quad(source=source, top='top', bottom='bottom',
@@ -263,11 +263,7 @@ def progress_plot(**kwargs):
     fig.xgrid.grid_line_color = None
     fig.ygrid.grid_line_color = None
     fig.axis.visible = None
-    fig.min_border_left = 0
-    fig.min_border_right = 10
-    fig.min_border_top = 0
-    fig.min_border_bottom = 0
-    fig.outline_line_color = None
+    fig.background_fill_color = fig.outline_line_color
 
     hover = HoverTool()
     fig.add_tools(hover)
