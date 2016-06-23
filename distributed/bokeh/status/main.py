@@ -3,16 +3,16 @@
 from __future__ import print_function, division, absolute_import
 
 from bisect import bisect
-import json
 
-from bokeh.plotting import curdoc, vplot
+from bokeh.io import curdoc
+from bokeh.layouts import column
 from toolz import valmap
 
 from distributed.bokeh.status_monitor import (
-        worker_table_plot, worker_table_update, task_table_plot,
-        task_table_update, progress_plot, task_stream_plot)
-from distributed.bokeh.worker_monitor import (
-        resource_profile_plot, resource_profile_update)
+    worker_table_plot, worker_table_update, task_table_plot,
+    task_table_update, progress_plot, task_stream_plot
+)
+from distributed.bokeh.worker_monitor import resource_profile_plot
 from distributed.diagnostics.progress_stream import progress_quads
 from distributed.utils import log_errors
 import distributed.bokeh
@@ -20,11 +20,8 @@ import distributed.bokeh
 
 messages = distributed.bokeh.messages  # global message store
 doc = curdoc()
-table_width = 800
-width = 600
 
-
-worker_source, worker_table = worker_table_plot(width=table_width)
+worker_source, worker_table = worker_table_plot()
 def worker_update():
     with log_errors():
         try:
@@ -35,7 +32,7 @@ def worker_update():
 doc.add_periodic_callback(worker_update, messages['workers']['interval'])
 
 
-task_source, task_table = task_table_plot(width=table_width)
+task_source, task_table = task_table_plot()
 def task_update():
     with log_errors():
         try:
@@ -46,17 +43,8 @@ def task_update():
 doc.add_periodic_callback(task_update, messages['tasks']['interval'])
 
 
-resource_source, resource_plot = resource_profile_plot(height=int(width/3), width=width)
-# resource_plot.min_border_top -= 40
-# resource_plot.title = None
-# resource_plot.min_border_bottom -= 40
-# resource_plot.plot_height -= 80
-# resource_plot.logo = None
-# resource_plot.toolbar_location = None
-resource_plot.xaxis.axis_label = None
 resource_index = [0]
-
-
+resource_source, resource_plot = resource_profile_plot()
 def resource_update():
     with log_errors():
         index = messages['workers']['index']
@@ -77,31 +65,18 @@ def resource_update():
 doc.add_periodic_callback(resource_update, messages['workers']['interval'])
 
 
-progress_source, progress_plot = progress_plot(height=int(width/3), width=width)
-# progress_plot.min_border_top -= 40
-# progress_plot.title = None
-# progress_plot.min_border_bottom -= 40
-# progress_plot.plot_height -= 80
-# progress_plot.logo = None
-# progress_plot.toolbar_location = None
-progress_plot.xaxis.axis_label = None
-
-
+progress_source, progress_plot = progress_plot()
 def progress_update():
     with log_errors():
         msg = messages['progress']
         d = progress_quads(msg)
         progress_source.data.update(d)
+        progress_plot.title.text = "Progress plot %s" % messages['tasks']['deque'][-1]
 doc.add_periodic_callback(progress_update, 50)
 
 
-task_stream_source, task_stream_plot = task_stream_plot(height=int(width/2),
-        width=width, follow_interval=None)
-task_stream_plot.min_border_bottom = 0
-task_stream_plot.min_border_left = 0
-task_stream_plot.min_border_right = 10
-task_stream_plot.xaxis.axis_label = None
 task_stream_index = [0]
+task_stream_source, task_stream_plot = task_stream_plot()
 def task_stream_update():
     with log_errors():
         index = messages['task-events']['index']
@@ -127,11 +102,12 @@ def task_stream_update():
 doc.add_periodic_callback(task_stream_update, messages['task-events']['interval'])
 
 
-vbox = vplot(
-           resource_plot,
-           progress_plot,
-           task_stream_plot,
-           worker_table,
-           task_table,
-         )
-doc.add_root(vbox)
+layout = column(
+    resource_plot,
+    progress_plot,
+    task_stream_plot,
+    worker_table,
+    task_table,
+    sizing_mode='scale_width'
+)
+doc.add_root(layout)

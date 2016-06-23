@@ -155,21 +155,17 @@ def worker_table_update(source, d):
     source.data.update(data)
 
 
-def task_stream_plot(height=400, width=800, follow_interval=5000, **kwargs):
+def task_stream_plot(sizing_mode='scale_width', **kwargs):
     data = {'start': [], 'duration': [],
             'key': [], 'name': [], 'color': [],
             'worker': [], 'y': [], 'worker_thread': [], 'alpha': []}
 
     source = ColumnDataSource(data)
-    if follow_interval:
-        x_range = DataRange1d(follow='end', follow_interval=follow_interval,
-                              range_padding=0)
-    else:
-        x_range = None
+    x_range = DataRange1d(range_padding=0)
 
-    fig = figure(width=width, height=height, x_axis_type='datetime',
+    fig = figure(x_axis_type='datetime', title="Task stream",
                  tools=['xwheel_zoom', 'xpan', 'reset', 'resize', 'box_zoom'],
-                 responsive=True, x_range=x_range, **kwargs)
+                 sizing_mode=sizing_mode, x_range=x_range, **kwargs)
     fig.rect(x='start', y='y', width='duration', height=0.9,
              fill_color='color', line_color='gray', alpha='alpha',
              source=source)
@@ -242,14 +238,13 @@ def task_stream_append(lists, msg, workers, palette=Spectral11):
         lists['y'].append(workers[worker_thread])
 
 
-def progress_plot(height=300, width=800, **kwargs):
+def progress_plot(**kwargs):
     from ..diagnostics.progress_stream import progress_quads
     data = progress_quads({'all': {}, 'in_memory': {},
                            'erred': {}, 'released': {}})
 
     source = ColumnDataSource(data)
-    fig = figure(width=width, height=height, tools=['resize'],
-                 responsive=True, **kwargs)
+    fig = figure(tools=['resize'], **kwargs)
     fig.quad(source=source, top='top', bottom='bottom',
              left=0, right=1, color='#aaaaaa', alpha=0.2)
     fig.quad(source=source, top='top', bottom='bottom',
