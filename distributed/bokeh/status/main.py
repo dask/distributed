@@ -44,7 +44,7 @@ doc.add_periodic_callback(task_update, messages['tasks']['interval'])
 
 
 resource_index = [0]
-resource_source, resource_plot = resource_profile_plot()
+resource_source, resource_plot, network_plot = resource_profile_plot()
 def resource_update():
     with log_errors():
         index = messages['workers']['index']
@@ -104,6 +104,7 @@ doc.add_periodic_callback(task_stream_update, messages['task-events']['interval'
 
 layout = column(
     resource_plot,
+    network_plot,
     task_stream_plot,
     progress_plot,
     sizing_mode='stretch_both'

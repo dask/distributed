@@ -14,36 +14,40 @@ with ignoring(ImportError):
     from bokeh.plotting import figure
 
 
-def resource_profile_plot(width=600, height=300):
+def resource_profile_plot():
     names = ['time', 'cpu', 'memory-percent', 'network-send', 'network-recv']
     source = ColumnDataSource({k: [] for k in names})
-
     x_range = DataRange1d(follow='end', follow_interval=30000, range_padding=0)
+
     y_range = Range1d(0, 1)
-    p = figure(width=width, height=height, x_axis_type='datetime',
+    p1 = figure(x_axis_type='datetime',
                responsive=True, tools='xpan,xwheel_zoom,box_zoom,resize,reset',
                x_range=x_range, y_range=y_range)
-    p.line(x='time', y='memory-percent', line_width=2, line_alpha=0.8,
+    p1.line(x='time', y='memory-percent', line_width=2, line_alpha=0.8,
            color=Spectral9[7], legend='Memory', source=source)
-    p.line(x='time', y='cpu', line_width=2, line_alpha=0.8,
+    p1.line(x='time', y='cpu', line_width=2, line_alpha=0.8,
            color=Spectral9[0], legend='CPU', source=source)
-    p.legend[0].location = 'top_left'
-    p.yaxis[0].formatter = NumeralTickFormatter(format="0 %")
-    p.min_border_right = 10
-    p.extra_y_ranges = {"network": DataRange1d(bounds=(0, None))}
-    p.add_layout(LinearAxis(y_range_name="network",
-                            axis_label="Throughput (MB/s)"),
-                 'right')
-    p.yaxis.axis_label_text_font_size = "10pt"
+    p1.legend[0].location = 'top_left'
+    p1.yaxis[0].formatter = NumeralTickFormatter(format="0 %")
 
-    p.line(x='time', y='network-send', line_width=2, line_alpha=0.8,
+
+    y_range = DataRange1d(bounds=(0, None))
+    p2 = figure(x_axis_type='datetime',
+               responsive=True, tools='xpan,xwheel_zoom,box_zoom,resize,reset',
+               x_range=x_range, y_range=y_range)
+    p2.line(x='time', y='network-send', line_width=2, line_alpha=0.8,
            color=Spectral9[2], legend='Network Send', source=source,
            y_range_name="network")
-    p.line(x='time', y='network-recv', line_width=2, line_alpha=0.8,
+    p2.line(x='time', y='network-recv', line_width=2, line_alpha=0.8,
            color=Spectral9[3], legend='Network Recv', source=source,
            y_range_name="network")
+    p2.legend[0].location = 'top_left'
+    p2.yaxis[0].formatter = NumeralTickFormatter(format="0 %")
+    # p2.add_layout(LinearAxis(y_range_name="network",
+    #                         axis_label="Throughput (MB/s)"),
+    #              'left')
 
-    return source, p
+    return source, p1, p2
 
 
 def resource_profile_update(source, worker_buffer, times_buffer):
