@@ -169,8 +169,6 @@ def task_stream_plot(sizing_mode='scale_width', **kwargs):
     fig.rect(x='start', y='y', width='duration', height=0.9,
              fill_color='color', line_color='gray', alpha='alpha',
              source=source)
-    if x_range:
-        fig.circle(x=[1, 2], y=[1, 2], alpha=0.0)
     fig.xaxis.axis_label = 'Time'
     fig.yaxis.axis_label = 'Worker Core'
     fig.min_border_right = 10
