@@ -10,7 +10,7 @@ import distributed.bokeh
 
 messages = distributed.bokeh.messages  # global message store
 doc = curdoc()
-task_stream_source, task_stream_plot = task_stream_plot(follow_interval=20000, sizing_mode='stretch_both')
+task_stream_source, task_stream_plot = task_stream_plot(sizing_mode='stretch_both')
 task_stream_index = [0]
 
 rectangles = messages['task-events']['rectangles']

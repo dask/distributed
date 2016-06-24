@@ -5,7 +5,7 @@ from __future__ import print_function, division, absolute_import
 from bisect import bisect
 
 from bokeh.io import curdoc
-from bokeh.layouts import column
+from bokeh.layouts import column, row
 from toolz import valmap
 
 from distributed.bokeh.status_monitor import (
@@ -17,6 +17,7 @@ from distributed.diagnostics.progress_stream import progress_quads
 from distributed.utils import log_errors
 import distributed.bokeh
 
+SIZING_MODE = 'stretch_both'
 
 messages = distributed.bokeh.messages  # global message store
 doc = curdoc()
@@ -44,7 +45,7 @@ doc.add_periodic_callback(task_update, messages['tasks']['interval'])
 
 
 resource_index = [0]
-resource_source, resource_plot, network_plot = resource_profile_plot()
+resource_source, resource_plot, network_plot, combo_toolbar = resource_profile_plot(sizing_mode=SIZING_MODE)
 def resource_update():
     with log_errors():
         index = messages['workers']['index']
@@ -101,12 +102,14 @@ def task_stream_update():
 
 doc.add_periodic_callback(task_stream_update, messages['task-events']['interval'])
 
-
 layout = column(
-    resource_plot,
-    network_plot,
-    task_stream_plot,
-    progress_plot,
-    sizing_mode='stretch_both'
+    row(
+        column(resource_plot, network_plot, sizing_mode=SIZING_MODE),
+        column(combo_toolbar, sizing_mode=SIZING_MODE),
+        sizing_mode=SIZING_MODE
+    ),
+    row(task_stream_plot, sizing_mode=SIZING_MODE),
+    row(progress_plot, sizing_mode=SIZING_MODE),
+    sizing_mode=SIZING_MODE
 )
 doc.add_root(layout)

@@ -13,8 +13,8 @@ from ..executor import default_executor
 from ..scheduler import Scheduler
 
 try:
-    from bokeh.palettes import Spectral11
-    from bokeh.models import ColumnDataSource, DataRange1d, HoverTool
+    from bokeh.palettes import Spectral11, Spectral9
+    from bokeh.models import ColumnDataSource, DataRange1d, HoverTool, Range1d
     from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
     from bokeh.plotting import vplot, output_notebook, show, figure
     from bokeh.io import curstate, push_notebook
@@ -163,17 +163,20 @@ def task_stream_plot(sizing_mode='scale_width', **kwargs):
     source = ColumnDataSource(data)
     x_range = DataRange1d(range_padding=0)
 
-    fig = figure(x_axis_type='datetime', title="Task stream",
-                 tools=['xwheel_zoom', 'xpan', 'reset', 'resize', 'box_zoom'],
-                 sizing_mode=sizing_mode, x_range=x_range, **kwargs)
-    fig.rect(x='start', y='y', width='duration', height=0.9,
-             fill_color='color', line_color='gray', alpha='alpha',
-             source=source)
+    fig = figure(
+        x_axis_type='datetime', title="Task stream",
+        tools='xwheel_zoom,xpan,reset,box_zoom', toolbar_location='above',
+        sizing_mode=sizing_mode, x_range=x_range, **kwargs
+    )
+    fig.rect(
+        x='start', y='y', width='duration', height=0.9,
+        fill_color='color', line_color='gray', alpha='alpha',
+        source=source
+    )
     fig.xaxis.axis_label = 'Time'
     fig.yaxis.axis_label = 'Worker Core'
-    fig.min_border_right = 10
     fig.ygrid.grid_line_alpha = 0.4
-    fig.xgrid.grid_line_alpha = 0.0
+    fig.xgrid.grid_line_color = None
 
     hover = HoverTool()
     fig.add_tools(hover)
@@ -241,15 +244,17 @@ def progress_plot(**kwargs):
     data = progress_quads({'all': {}, 'in_memory': {},
                            'erred': {}, 'released': {}})
 
+    x_range = Range1d(-0.5, 1.5)
+    y_range = Range1d(5.1, -0.1)
     source = ColumnDataSource(data)
-    fig = figure(tools='', toolbar_location=None, **kwargs)
+    fig = figure(tools='', toolbar_location=None, y_range=y_range, x_range=x_range, **kwargs)
     fig.quad(source=source, top='top', bottom='bottom',
              left=0, right=1, color='#aaaaaa', alpha=0.2)
     fig.quad(source=source, top='top', bottom='bottom',
-             left=0, right='released_right', color='#0000FF', alpha=0.4)
+             left=0, right='released_right', color=Spectral9[0], alpha=0.4)
     fig.quad(source=source, top='top', bottom='bottom',
              left='released_right', right='in_memory_right',
-             color='#0000FF', alpha=0.8)
+             color=Spectral9[0], alpha=0.8)
     fig.quad(source=source, top='top', bottom='bottom',
              left='erred_left', right=1,
              color='#000000', alpha=0.3)
@@ -257,11 +262,10 @@ def progress_plot(**kwargs):
              text_align='right', text_baseline='middle')
     fig.text(source=source, text='name', y='center', x=1.01,
              text_align='left', text_baseline='middle')
-    fig.scatter(x=[-0.2, 1.4], y=[0, 5], alpha=0)
     fig.xgrid.grid_line_color = None
     fig.ygrid.grid_line_color = None
     fig.axis.visible = None
-    fig.background_fill_color = fig.outline_line_color
+    fig.outline_line_color = None
 
     hover = HoverTool()
     fig.add_tools(hover)
