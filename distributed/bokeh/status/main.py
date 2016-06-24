@@ -72,7 +72,10 @@ def progress_update():
         msg = messages['progress']
         d = progress_quads(msg)
         progress_source.data.update(d)
-        progress_plot.title.text = "Progress plot %s" % messages['tasks']['deque'][-1]
+        progress_plot.title.text = ("Progress -- total: %(total)s, "
+            "in-memory: %(in-memory)s, processing: %(processing)s, "
+            "ready: %(ready)s, waiting: %(waiting)s, failed: %(failed)s"
+            % messages['tasks']['deque'][-1])
 doc.add_periodic_callback(progress_update, 50)
 
 
