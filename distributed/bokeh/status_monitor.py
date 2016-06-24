@@ -177,6 +177,7 @@ def task_stream_plot(sizing_mode='scale_width', **kwargs):
     fig.yaxis.axis_label = 'Worker Core'
     fig.ygrid.grid_line_alpha = 0.4
     fig.xgrid.grid_line_color = None
+    fig.min_border_right = 35
 
     hover = HoverTool()
     fig.add_tools(hover)
