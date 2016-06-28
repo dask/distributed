@@ -22,8 +22,10 @@ logger = logging.getLogger('distributed.scheduler')
 
 import signal
 
+
 def handle_signal(sig, frame):
     IOLoop.instance().add_callback(IOLoop.instance().stop)
+
 
 signal.signal(signal.SIGINT, handle_signal)
 signal.signal(signal.SIGTERM, handle_signal)
