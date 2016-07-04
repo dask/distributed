@@ -47,8 +47,8 @@ class Worker(Server):
     1.  **Serve data** from a local dictionary
     2.  **Perform computation** on that data and on data from peers
 
-    Additionally workers keep a Center informed of their data and use that
-    Center to gather data from other workers when necessary to perform a
+    Additionally workers keep a scheduler informed of their data and use that
+    scheduler to gather data from other workers when necessary to perform a
     computation.
 
     You can start a worker with the ``dworker`` command line application::
@@ -67,8 +67,8 @@ class Worker(Server):
         Executor used to perform computation
     * **local_dir:** ``path``:
         Path on local machine to store temporary files
-    * **center:** ``rpc``:
-        Location of center or scheduler.  See ``.ip/.port`` attributes.
+    * **scheduler:** ``rpc``:
+        Location of scheduler.  See ``.ip/.port`` attributes.
     * **name:** ``string``:
         Alias
     * **services:** ``{str: Server}``:
@@ -78,30 +78,30 @@ class Worker(Server):
     Examples
     --------
 
-    Create centers and workers in Python:
+    Create schedulers and workers in Python:
 
-    >>> from distributed import Center, Worker
-    >>> c = Center('192.168.0.100', 8787)  # doctest: +SKIP
+    >>> from distributed import Scheduler, Worker
+    >>> c = Scheduler('192.168.0.100', 8787)  # doctest: +SKIP
     >>> w = Worker(c.ip, c.port)  # doctest: +SKIP
     >>> yield w._start(port=8788)  # doctest: +SKIP
 
     Or use the command line::
 
-       $ dcenter
-       Start center at 127.0.0.1:8787
+        $ dask-scheduler
+        Start scheduler at 127.0.0.1:8787
 
-       $ dworker 127.0.0.1:8787
-       Start worker at:            127.0.0.1:8788
-       Registered with center at:  127.0.0.1:8787
+        $ dask-worker 127.0.0.1:8787
+        Start worker at:               127.0.0.1:8788
+        Registered with scheduler at:  127.0.0.1:8787
 
     See Also
     --------
-    distributed.center.Center:
+    distributed.scheduler.Scheduler:
     """
 
-    def __init__(self, center_ip, center_port, ip=None, ncores=None,
+    def __init__(self, scheduler_ip, scheduler_port, ip=None, ncores=None,
                  loop=None, local_dir=None, services=None, service_ports=None,
-                 name=None, **kwargs):
+                 name=None, heartbeat_interval=1000, **kwargs):
         self.ip = ip or get_ip()
         self._port = 0
         self.ncores = ncores or _ncores
@@ -110,9 +110,12 @@ class Worker(Server):
         self.status = None
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
         self.executor = ThreadPoolExecutor(self.ncores)
-        self.center = rpc(ip=center_ip, port=center_port)
+        self.scheduler = rpc(ip=scheduler_ip, port=scheduler_port)
         self.active = set()
         self.name = name
+        self.heartbeat_interval = heartbeat_interval
+        self._last_disk_io = None
+        self._last_net_io = None
 
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
@@ -128,7 +131,7 @@ class Worker(Server):
             else:
                 port = 0
 
-            self.services[k] = v(self)
+            self.services[k] = v(self, io_loop=self.loop)
             self.services[k].listen(port)
             self.service_ports[k] = self.services[k].port
 
@@ -141,10 +144,30 @@ class Worker(Server):
                     'delete_data': self.delete_data,
                     'terminate': self.terminate,
                     'ping': pingpong,
-                    'health': self.health,
+                    'health': self.host_health,
                     'upload_file': self.upload_file}
 
-        super(Worker, self).__init__(handlers, **kwargs)
+        super(Worker, self).__init__(handlers, io_loop=self.loop, **kwargs)
+
+        self.heartbeat_callback = PeriodicCallback(self.heartbeat,
+                                                   self.heartbeat_interval,
+                                                   io_loop=self.loop)
+        self.loop.add_callback(self.heartbeat_callback.start)
+
+    @gen.coroutine
+    def heartbeat(self):
+        logger.debug("Heartbeat: %s" % self.address)
+        yield self.scheduler.register(address=self.address, name=self.name,
+                                ncores=self.ncores,
+                                now=time(),
+                                info=self.process_health(),
+                                host_info=self.host_health(),
+                                services=self.service_ports,
+                                **self.process_health())
+
+    @property
+    def center(self):
+        return self.scheduler
 
     @gen.coroutine
     def _start(self, port=0):
@@ -158,13 +181,17 @@ class Worker(Server):
         for k, v in self.service_ports.items():
             logger.info('  %16s at: %20s:%d' % (k, self.ip, v))
         logger.info('Waiting to connect to: %20s:%d',
-                    self.center.ip, self.center.port)
+                    self.scheduler.ip, self.scheduler.port)
         while True:
             try:
-                resp = yield self.center.register(
+                resp = yield self.scheduler.register(
                         ncores=self.ncores, address=(self.ip, self.port),
-                        keys=list(self.data), services=self.service_ports,
-                        name=self.name)
+                        keys=list(self.data),
+                        name=self.name, nbytes=valmap(sizeof, self.data),
+                        now=time(),
+                        host_info=self.host_health(),
+                        services=self.service_ports,
+                        **self.process_health())
                 break
             except (OSError, StreamClosedError):
                 logger.debug("Unable to register with scheduler.  Waiting")
@@ -172,7 +199,7 @@ class Worker(Server):
         if resp != 'OK':
             raise ValueError(resp)
         logger.info('        Registered to: %20s:%d',
-                    self.center.ip, self.center.port)
+                    self.scheduler.ip, self.scheduler.port)
         self.status = 'running'
 
     def start(self, port=0):
@@ -180,15 +207,16 @@ class Worker(Server):
 
     def identity(self, stream):
         return {'type': type(self).__name__, 'id': self.id,
-                'center': (self.center.ip, self.center.port)}
+                'scheduler': (self.scheduler.ip, self.scheduler.port)}
 
     @gen.coroutine
     def _close(self, report=True, timeout=10):
         if report:
             yield gen.with_timeout(timedelta(seconds=timeout),
-                    self.center.unregister(address=(self.ip, self.port)),
+                    self.scheduler.unregister(address=(self.ip, self.port)),
                     io_loop=self.loop)
-        self.center.close_streams()
+        self.heartbeat_callback.stop()
+        self.scheduler.close_streams()
         self.stop()
         self.executor.shutdown()
         if os.path.exists(self.local_dir):
@@ -264,7 +292,7 @@ class Worker(Server):
                     permissive=True, rpc=self.rpc, close=False)
             if remote:
                 self.data.update(remote)
-                yield self.center.add_keys(address=self.address, keys=list(remote))
+                yield self.scheduler.add_keys(address=self.address, keys=list(remote))
 
             data = merge(local, remote)
 
@@ -293,7 +321,7 @@ class Worker(Server):
                 other = yield gather_from_workers(who_has)
                 diagnostics['transfer_stop'] = time()
                 self.data.update(other)
-                yield self.center.add_keys(address=self.address,
+                yield self.scheduler.add_keys(address=self.address,
                                            keys=list(other))
                 data.update(other)
             except KeyError as e:
@@ -337,7 +365,7 @@ class Worker(Server):
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         future = self.executor.submit(function, *args, **kwargs)
         pc = PeriodicCallback(lambda: logger.debug("future state: %s - %s",
-            key, future._state), 1000); pc.start()
+            key, future._state), 1000, io_loop=self.loop); pc.start()
         try:
             yield future
         finally:
@@ -433,6 +461,7 @@ class Worker(Server):
                 emsg['key'] = key
                 raise Return(emsg)
 
+            self.active.add(key)
             # Fill args with data
             args2 = pack_data(args, data)
             kwargs2 = pack_data(kwargs, data)
@@ -447,18 +476,19 @@ class Worker(Server):
             if result['status'] == 'OK':
                 self.data[key] = result.pop('result')
                 if report:
-                    response = yield self.center.add_keys(keys=[key],
+                    response = yield self.scheduler.add_keys(keys=[key],
                                             address=(self.ip, self.port))
                     if not response == 'OK':
-                        logger.warn('Could not report results to center: %s',
+                        logger.warn('Could not report results to scheduler: %s',
                                     str(response))
             else:
                 logger.warn(" Compute Failed\n"
                     "Function: %s\n"
                     "args:     %s\n"
                     "kwargs:   %s\n",
-                    str(funcname(function))[:1000], str(args)[:1000],
-                    str(kwargs)[:1000], exc_info=True)
+                    str(funcname(function))[:1000], 
+                    convert_args_to_str(args, max_len=1000),
+                    convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
 
             logger.debug("Send compute response to scheduler: %s, %s", key,
                          result)
@@ -498,20 +528,22 @@ class Worker(Server):
         if result['status'] == 'OK':
             self.data[key] = result.pop('result')
             if report:
-                response = yield self.center.add_keys(address=(self.ip, self.port),
+                response = yield self.scheduler.add_keys(address=(self.ip, self.port),
                                                       keys=[key])
                 if not response == 'OK':
-                    logger.warn('Could not report results to center: %s',
+                    logger.warn('Could not report results to scheduler: %s',
                                 str(response))
         else:
             logger.warn(" Compute Failed\n"
                 "Function: %s\n"
                 "args:     %s\n"
                 "kwargs:   %s\n",
-                str(funcname(function))[:1000], str(args)[:1000],
-                str(kwargs)[:1000], exc_info=True)
+                str(funcname(function))[:1000], 
+                convert_args_to_str(args, max_len=1000),
+                convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
 
-        logger.debug("Send compute response to scheduler: %s, %s", key, msg)
+        logger.debug("Send compute response to scheduler: %s, %s", key,
+            get_msg_safe_str(msg))
         try:
             self.active.remove(key)
         except KeyError:
@@ -532,8 +564,9 @@ class Worker(Server):
                 "Function: %s\n"
                 "args:     %s\n"
                 "kwargs:   %s\n",
-                str(funcname(function))[:1000], str(args)[:1000],
-                str(kwargs)[:1000], exc_info=True)
+                str(funcname(function))[:1000], 
+                convert_args_to_str(args, max_len=1000),
+                convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
 
             response = error_message(e)
         else:
@@ -549,8 +582,9 @@ class Worker(Server):
             data = valmap(loads, data)
         self.data.update(data)
         if report:
-            response = yield self.center.add_keys(address=(self.ip, self.port),
-                                                  keys=list(data))
+            response = yield self.scheduler.add_keys(
+                                address=(self.ip, self.port),
+                                keys=list(data))
             assert response == 'OK'
         info = {'nbytes': {k: sizeof(v) for k, v in data.items()},
                 'status': 'OK'}
@@ -563,8 +597,8 @@ class Worker(Server):
                 del self.data[key]
         logger.info("Deleted %d keys", len(keys))
         if report:
-            logger.debug("Reporting loss of keys to center")
-            yield self.center.remove_keys(address=self.address,
+            logger.debug("Reporting loss of keys to scheduler")
+            yield self.scheduler.remove_keys(address=self.address,
                                           keys=list(keys))
         raise Return('OK')
 
@@ -599,36 +633,47 @@ class Worker(Server):
                 return {'status': 'error', 'exception': dumps(e)}
         return {'status': 'OK', 'nbytes': len(data)}
 
-    def health(self, stream=None):
-        """ Information about worker """
+    def process_health(self, stream=None):
         d = {'active': len(self.active),
-             'stored': len(self.data),
-             'time': time()}
+             'stored': len(self.data)}
+        return d
+
+    def host_health(self, stream=None):
+        """ Information about worker """
+        d = {'time': time()}
         try:
             import psutil
             mem = psutil.virtual_memory()
             d.update({'cpu': psutil.cpu_percent(),
                       'memory': mem.total,
                       'memory-percent': mem.percent})
-            try:
-                net_io = psutil.net_io_counters()
+
+            net_io = psutil.net_io_counters()
+            if self._last_net_io:
                 d['network-send'] = net_io.bytes_sent - self._last_net_io.bytes_sent
                 d['network-recv'] = net_io.bytes_recv - self._last_net_io.bytes_recv
-            except AttributeError:
-                pass
+            else:
+                d['network-send'] = 0
+                d['network-recv'] = 0
             self._last_net_io = net_io
 
             try:
                 disk_io = psutil.disk_io_counters()
-                d['disk-read'] = disk_io.read_bytes - self._last_disk_io.read_bytes
-                d['disk-write'] = disk_io.write_bytes - self._last_disk_io.write_bytes
-            except AttributeError:
+            except RuntimeError:
+                # This happens when there is no physical disk in worker
                 pass
-            self._last_disk_io = disk_io
+            else:
+                if self._last_disk_io:
+                    d['disk-read'] = disk_io.read_bytes - self._last_disk_io.read_bytes
+                    d['disk-write'] = disk_io.write_bytes - self._last_disk_io.write_bytes
+                else:
+                    d['disk-read'] = 0
+                    d['disk-write'] = 0
+                self._last_disk_io = disk_io
+
         except ImportError:
             pass
         return d
-
 
 
 job_counter = [0]
@@ -719,3 +764,61 @@ def apply_function(function, args, kwargs):
     msg['compute_stop'] = end
     msg['thread'] = current_thread().ident
     return msg
+
+
+def get_msg_safe_str(msg):
+    """ Make a worker msg, which contains args and kwargs, safe to cast to str:
+    allowing for some arguments to raise exceptions during conversion and
+    ignoring them.
+    """
+    class Repr(object):
+        def __init__(self, f, val):
+            self._f = f
+            self._val = val
+        def __repr__(self):
+            return self._f(self._val)
+    msg = msg.copy()
+    if "args" in msg:
+        msg["args"] = Repr(convert_args_to_str, msg["args"])
+    if "kwargs" in msg:
+        msg["kwargs"] = Repr(convert_kwargs_to_str, msg["kwargs"])
+    return msg
+
+
+def convert_args_to_str(args, max_len=None):
+    """ Convert args to a string, allowing for some arguments to raise
+    exceptions during conversion and ignoring them.
+    """
+    length = 0
+    strs = ["" for i in range(len(args))]
+    for i, arg in enumerate(args):
+        try:
+            sarg = repr(arg)
+        except:
+            sarg = "< could not convert arg to str >"
+        strs[i] = sarg
+        length += len(sarg) + 2
+        if max_len is not None and length > max_len:
+            return "({}".format(", ".join(strs[:i+1]))[:max_len]
+    else:
+        return "({})".format(", ".join(strs))
+
+
+def convert_kwargs_to_str(kwargs, max_len=None):
+    """ Convert kwargs to a string, allowing for some arguments to raise
+    exceptions during conversion and ignoring them.
+    """
+    length = 0
+    strs = ["" for i in range(len(kwargs))]
+    for i, (argname, arg) in enumerate(kwargs.items()):
+        try:
+            sarg = repr(arg)
+        except:
+            sarg = "< could not convert arg to str >"
+        skwarg = repr(argname) + ": " + sarg
+        strs[i] = skwarg
+        length += len(skwarg) + 2
+        if max_len is not None and length > max_len:
+            return "{{{}".format(", ".join(strs[:i+1]))[:max_len]
+    else:
+        return "{{{}}}".format(", ".join(strs))

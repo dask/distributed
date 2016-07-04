@@ -69,21 +69,23 @@ class Future(WrappedKey):
     def __init__(self, key, executor):
         self.key = key
         self.executor = executor
-        self.executor._inc_ref(key)
+        self.executor._inc_ref(tokey(key))
+        self._generation = self.executor.generation
+        self._cleared = False
 
         if key not in executor.futures:
-            executor.futures[key] = {'event': Event(), 'status': 'pending'}
+            executor.futures[tokey(key)] = {'event': Event(), 'status': 'pending'}
 
     @property
     def status(self):
         try:
-            return self.executor.futures[self.key]['status']
+            return self.executor.futures[tokey(self.key)]['status']
         except KeyError:
             return 'cancelled'
 
     @property
     def event(self):
-        return self.executor.futures[self.key]['event']
+        return self.executor.futures[tokey(self.key)]['event']
 
     def done(self):
         """ Is the computation complete? """
@@ -102,7 +104,7 @@ class Future(WrappedKey):
     @gen.coroutine
     def _result(self, raiseit=True):
         try:
-            d = self.executor.futures[self.key]
+            d = self.executor.futures[tokey(self.key)]
         except KeyError:
             exception = CancelledError(self.key)
             if raiseit:
@@ -144,13 +146,13 @@ class Future(WrappedKey):
 
     def cancelled(self):
         """ Returns True if the future has been cancelled """
-        return self.key not in self.executor.futures
+        return tokey(self.key) not in self.executor.futures
 
     @gen.coroutine
     def _traceback(self):
         yield self.event.wait()
         if self.status == 'error':
-            raise Return(self.executor.futures[self.key]['traceback'])
+            raise Return(self.executor.futures[tokey(self.key)]['traceback'])
         else:
             raise Return(None)
 
@@ -177,12 +179,17 @@ class Future(WrappedKey):
     @property
     def type(self):
         try:
-            return self.executor.futures[self.key]['type']
+            return self.executor.futures[tokey(self.key)]['type']
         except KeyError:
             return None
 
+    def release(self):
+        if not self._cleared and self.executor.generation == self._generation:
+            self._cleared = True
+            self.executor._dec_ref(tokey(self.key))
+
     def __del__(self):
-        self.executor._dec_ref(self.key)
+        self.release()
 
     def __str__(self):
         if self.type:
@@ -242,14 +249,23 @@ class Executor(object):
     --------
     distributed.scheduler.Scheduler: Internal scheduler
     """
-    def __init__(self, address, start=True, loop=None, timeout=3):
+    def __init__(self, address=None, start=True, loop=None, timeout=3,
+                 set_as_default=False):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
         self.loop = loop or IOLoop() if start else IOLoop.current()
         self.coroutines = []
         self.id = str(uuid.uuid1())
+        self.generation = 0
+        self.status = None
+        if hasattr(address, 'scheduler_address'):
+            self.cluster = address
+            address = address.scheduler_address
         self._start_arg = address
+        if set_as_default:
+            self._previous_get = _globals.get('get')
+            dask.set_options(get=self.get)
 
         if start:
             self.start(timeout=timeout)
@@ -257,11 +273,11 @@ class Executor(object):
     def __str__(self):
         if hasattr(self, '_loop_thread'):
             n = sync(self.loop, self.scheduler.ncores)
-            return '<Executor: scheduler=%s:%d processes=%d cores=%d>' % (
+            return '<Executor: scheduler="%s:%d" processes=%d cores=%d>' % (
                     self.scheduler.ip, self.scheduler.port, len(n),
                     sum(n.values()))
         else:
-            return '<Executor: scheduler=%s:%d>' % (
+            return '<Executor: scheduler="%s:%d">' % (
                     self.scheduler.ip, self.scheduler.port)
 
     __repr__ = __str__
@@ -281,12 +297,22 @@ class Executor(object):
         self.loop.add_callback(pc.start)
         _global_executor[0] = self
         sync(self.loop, self._start, **kwargs)
+        self.status = 'running'
 
     def _send_to_scheduler(self, msg):
         self.loop.add_callback(self.scheduler_stream.send, msg)
 
     @gen.coroutine
     def _start(self, timeout=3, **kwargs):
+        if self._start_arg is None:
+            from distributed.deploy import LocalCluster
+            try:
+                self.cluster = LocalCluster(loop=self.loop, start=False)
+            except OSError:
+                self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
+                                            start=False)
+            self._start_arg = self.cluster.scheduler_address
+
         r = coerce_to_rpc(self._start_arg, timeout=timeout)
         try:
             ident = yield r.identity()
@@ -297,7 +323,7 @@ class Executor(object):
             stream = yield connect(r.ip, r.port)
             yield write(stream, {'op': 'register-client',
                                  'client': self.id})
-            bstream = BatchedSend(interval=10)
+            bstream = BatchedSend(interval=10, loop=self.loop)
             bstream.start(stream)
             self.scheduler_stream = bstream
         else:
@@ -316,6 +342,9 @@ class Executor(object):
         return self
 
     def __exit__(self, type, value, traceback):
+        self.shutdown()
+
+    def __del__(self):
         self.shutdown()
 
     def _inc_ref(self, key):
@@ -402,6 +431,9 @@ class Executor(object):
     @gen.coroutine
     def _shutdown(self, fast=False):
         """ Send shutdown signal and wait until scheduler completes """
+        if self.status == 'closed':
+            raise Return()
+        self.status = 'closed'
         self._send_to_scheduler({'op': 'close-stream'})
         if _global_executor[0] is self:
             _global_executor[0] = None
@@ -416,6 +448,9 @@ class Executor(object):
 
     def shutdown(self, timeout=10):
         """ Send shutdown signal and wait until scheduler terminates """
+        if self.status == 'closed':
+            return
+        self.status = 'closed'
         with ignoring(AttributeError):
             self.loop.add_callback(self.scheduler_stream.send,
                                    {'op': 'close-stream'})
@@ -424,10 +459,14 @@ class Executor(object):
             self.scheduler.close_streams()
         if self._should_close_loop:
             sync(self.loop, self.loop.stop)
-            self.loop.close()
+            self.loop.close(all_fds=True)
             self._loop_thread.join(timeout=timeout)
+        with ignoring(AttributeError):
+            dask.set_options(get=self._previous_get)
         if _global_executor[0] is self:
             _global_executor[0] = None
+        if self.get == _globals.get('get'):
+            del _globals['get']
 
     def submit(self, func, *args, **kwargs):
         """ Submit a function application to the scheduler
@@ -476,9 +515,7 @@ class Executor(object):
             else:
                 key = funcname(func) + '-' + str(uuid.uuid4())
 
-        key = tokey(key)
-
-        if key in self.futures:
+        if tokey(key) in self.futures:
             return Future(key, self)
 
         if allow_other_workers and workers is None:
@@ -493,26 +530,17 @@ class Executor(object):
             restrictions = {}
             loose_restrictions = []
 
-        args2, arg_dependencies = unpack_remotedata(args, byte_keys=True)
-        kwargs2, kwarg_dependencies = unpack_remotedata(kwargs, byte_keys=True)
-        dependencies = arg_dependencies | kwarg_dependencies
+        if kwargs:
+            dsk = {key: (apply, func, list(args), kwargs)}
+        else:
+            dsk = {key: (func,) + tuple(args)}
 
-        task = {'function': dumps_function(func)}
-        if args2:
-            task['args'] = dumps(args2)
-        if kwargs2:
-            task['kwargs'] = dumps(kwargs2)
+        futures = self._graph_to_futures(dsk, [key], restrictions,
+                loose_restrictions)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
-        self._send_to_scheduler({'op': 'update-graph',
-                                 'tasks': {key: task},
-                                 'keys': [key],
-                                 'dependencies': {key: list(dependencies)},
-                                 'restrictions': valmap(list, restrictions),
-                                 'loose_restrictions': loose_restrictions,
-                                 'client': self.id})
 
-        return Future(key, self)
+        return futures[tokey(key)]
 
     def _threaded_map(self, q_out, func, qs_in, **kwargs):
         """ Internal function for mapping Queue """
@@ -594,18 +622,12 @@ class Executor(object):
             keys = [funcname(func) + '-' + uid + '-' + str(i)
                     for i in range(min(map(len, iterables)))]
 
-        keys = [tokey(key) for key in keys]
-
         if not kwargs:
             dsk = {key: (func,) + args
                    for key, args in zip(keys, zip(*iterables))}
         else:
             dsk = {key: (apply, func, (tuple, list(args)), kwargs)
                    for key, args in zip(keys, zip(*iterables))}
-
-        d = {key: unpack_remotedata(task, byte_keys=True) for key, task in dsk.items()}
-        dsk2 = str_graph({k: v[0] for k, v in d.items()})
-        dependencies = {k: set(map(tokey, v[1])) for k, v in d.items()}
 
         if isinstance(workers, str):
             workers = [workers]
@@ -628,16 +650,11 @@ class Executor(object):
         else:
             loose_restrictions = set()
 
+        futures = self._graph_to_futures(dsk, keys, restrictions,
+                loose_restrictions)
         logger.debug("map(%s, ...)", funcname(func))
-        self._send_to_scheduler({'op': 'update-graph',
-                                 'tasks': valmap(dumps_task, dsk2),
-                                 'dependencies': valmap(list, dependencies),
-                                 'keys': keys,
-                                 'restrictions': valmap(list, restrictions),
-                                 'loose_restrictions': list(loose_restrictions),
-                                 'client': self.id})
 
-        return [Future(key, self) for key in keys]
+        return [futures[tokey(key)] for key in keys]
 
     @gen.coroutine
     def _gather(self, futures, errors='raise'):
@@ -645,10 +662,18 @@ class Executor(object):
         keys = [tokey(key) for key in keys]
         bad_data = dict()
 
+        @gen.coroutine
+        def wait(k):
+            yield self.futures[k]['event'].wait()
+            if self.futures[k]['status'] != 'finished':
+                raise Exception()
+
         while True:
             logger.debug("Waiting on futures to clear before gather")
-            yield All([self.futures[key]['event'].wait() for key in keys
-                                                    if key in self.futures])
+
+            with ignoring(Exception):
+                yield All([wait(key) for key in keys if key in self.futures])
+
             exceptions = set()
             bad_keys = set()
             for key in keys:
@@ -931,26 +956,36 @@ class Executor(object):
         """
         return sync(self.loop, self._run, function, *args, **kwargs)
 
-    @gen.coroutine
-    def _get(self, dsk, keys, restrictions=None, raise_on_error=True):
-        keyset = set(flatten([keys]))
-        flatkeys = list(map(tokey, flatten([keys])))
-        futures = {key: Future(key, self) for key in flatkeys}
+    def _graph_to_futures(self, dsk, keys, restrictions=None,
+                                loose_restrictions=None,
+                                allow_other_workers=True):
+        keyset = set(keys)
+        flatkeys = list(map(tokey, keys))
+        futures = {key: Future(key, self) for key in keyset}
 
         values = {k for k, v in dsk.items() if isinstance(v, Future)
                                             and k not in keyset}
         if values:
             dsk = dask.optimize.inline(dsk, keys=values)
 
-        d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
-        dsk2 = str_graph({k: v[0] for k, v in d.items()})
-        dsk3 = {k: v for k, v in dsk2.items() if (k == v) is not True}
+        d = {k: unpack_remotedata(v) for k, v in dsk.items()}
+        extra_keys = set.union(*[v[1] for v in d.values()]) if d else set()
+        dsk2 = str_graph({k: v[0] for k, v in d.items()}, extra_keys)
+        dsk3 = {k: v for k, v in dsk2.items() if k is not v}
 
         if restrictions:
             restrictions = keymap(tokey, restrictions)
             restrictions = valmap(list, restrictions)
 
+        if loose_restrictions is not None:
+            loose_restrictions = list(map(tokey, loose_restrictions))
+
         dependencies = {tokey(k): set(map(tokey, v[1])) for k, v in d.items()}
+
+        for s in dependencies.values():
+            for v in s:
+                if v not in self.futures:
+                    raise CancelledError(v)
 
         for k, v in dsk3.items():
             dependencies[k] |= set(_deps(dsk3, v))
@@ -960,20 +995,32 @@ class Executor(object):
                                  'dependencies': valmap(list, dependencies),
                                  'keys': list(flatkeys),
                                  'restrictions': restrictions or {},
+                                 'loose_restrictions': loose_restrictions,
                                  'client': self.id})
 
+        return futures
+
+    @gen.coroutine
+    def _get(self, dsk, keys, restrictions=None, raise_on_error=True):
+        futures = self._graph_to_futures(dsk, set(flatten([keys])), restrictions)
+
         packed = pack_data(keys, futures)
-        if raise_on_error:
+        try:
             result = yield self._gather(packed)
-        else:
-            try:
-                result = yield self._gather(packed)
-                result = 'OK', result
-            except Exception as e:
+        except Exception as e:
+            if raise_on_error:
+                raise
+            else:
                 result = 'error', e
+                raise gen.Return(result)
+        finally:
+            for f in futures.values():
+                f.release()
+        if not raise_on_error:
+            result = 'OK', result
         raise gen.Return(result)
 
-    def get(self, dsk, keys, **kwargs):
+    def get(self, dsk, keys, restrictions=None, loose_restrictions=None):
         """ Compute dask graph
 
         Parameters
@@ -995,13 +1042,18 @@ class Executor(object):
         --------
         Executor.compute: Compute asynchronous collections
         """
-        status, result = sync(self.loop, self._get, dsk, keys,
-                              raise_on_error=False, **kwargs)
+        futures = self._graph_to_futures(dsk, set(flatten([keys])),
+                restrictions, loose_restrictions)
 
-        if status == 'error':
-            raise result
-        else:
-            return result
+        try:
+            results = self.gather(futures)
+        except (KeyboardInterrupt, Exception) as e:
+            for f in futures.values():
+                f.release()
+            raise
+
+        results2 = pack_data(keys, results)
+        return results2
 
     def compute(self, args, sync=False):
         """ Compute dask collections on cluster
@@ -1051,27 +1103,16 @@ class Executor(object):
         dsk = merge([opt(merge([v.dask for v in val]),
                          [v._keys() for v in val])
                     for opt, val in groups.items()])
-        names = [tokey('finalize-%s' % tokenize(v)) for v in variables]
+        names = ['finalize-%s' % tokenize(v) for v in variables]
         dsk2 = {name: (v._finalize, v._keys()) for name, v in zip(names, variables)}
 
-        d = {k: unpack_remotedata(v, byte_keys=True) for k, v in merge(dsk, dsk2).items()}
-        dsk3 = str_graph({k: v[0] for k, v in d.items()})
-        dependencies = {tokey(k): set(map(tokey, v[1])) for k, v in d.items()}
-
-        for k, v in dsk3.items():
-            dependencies[k] |= set(_deps(dsk3, v))
-
-        self._send_to_scheduler({'op': 'update-graph',
-                                 'tasks': valmap(dumps_task, dsk3),
-                                 'dependencies': valmap(list, dependencies),
-                                 'keys': names,
-                                 'client': self.id})
+        futures_dict = self._graph_to_futures(merge(dsk2, dsk), names)
 
         i = 0
         futures = []
         for arg in args:
             if isinstance(arg, Base):
-                futures.append(Future(names[i], self))
+                futures.append(futures_dict[names[i]])
                 i += 1
             else:
                 futures.append(arg)
@@ -1124,22 +1165,12 @@ class Executor(object):
                          [v._keys() for v in val])
                     for opt, val in groups.items()])
 
-        d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
-        dsk2 = str_graph({k: v[0] for k, v in d.items()})
-        dependencies = {tokey(k): set(map(tokey, v[1])) for k, v in d.items()}
+        names = {k for c in collections for k in flatten(c._keys())}
 
-        for k, v in dsk2.items():
-            dependencies[k] |= set(_deps(dsk2, v))
+        futures = self._graph_to_futures(dsk, names)
 
-        names = list({tokey(k) for c in collections for k in flatten(c._keys())})
 
-        self._send_to_scheduler({'op': 'update-graph',
-                                 'tasks': valmap(dumps_task, dsk2),
-                                 'dependencies': valmap(list, dependencies),
-                                 'keys': names,
-                                 'client': self.id})
-
-        result = [redict_collection(c, {k: Future(tokey(k), self)
+        result = [redict_collection(c, {k: futures[k]
                                         for k in flatten(c._keys())})
                 for c in collections]
         if singleton:
@@ -1152,6 +1183,8 @@ class Executor(object):
         self._send_to_scheduler({'op': 'restart'})
         self._restart_event = Event()
         yield self._restart_event.wait()
+        self.generation += 1
+        self.refcount.clear()
 
         raise gen.Return(self)
 
@@ -1208,7 +1241,7 @@ class Executor(object):
     @gen.coroutine
     def _rebalance(self, futures=None, workers=None):
         yield _wait(futures)
-        keys = list({f.key for f in futures_of(futures)})
+        keys = list({f.key for f in self.futures_of(futures)})
         result = yield self.scheduler.rebalance(keys=keys, workers=workers)
         assert result['status'] == 'OK'
 
@@ -1234,7 +1267,7 @@ class Executor(object):
 
     @gen.coroutine
     def _replicate(self, futures, n=None, workers=None, branching_factor=2):
-        futures = futures_of(futures)
+        futures = self.futures_of(futures)
         yield _wait(futures)
         keys = {f.key for f in futures}
         yield self.scheduler.replicate(keys=list(keys), n=n, workers=workers,
@@ -1318,6 +1351,7 @@ class Executor(object):
         Examples
         --------
         >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> wait([x, y, z])  # doctest: +SKIP
         >>> e.who_has()  # doctest: +SKIP
         {'inc-1c8dd6be1c21646c71f76c16d09304ea': ['192.168.1.141:46784'],
          'inc-1e297fc27658d7b67b3a758f16bcf47a': ['192.168.1.141:46784'],
@@ -1333,7 +1367,7 @@ class Executor(object):
         Executor.ncores
         """
         if futures is not None:
-            futures = futures_of(futures)
+            futures = self.futures_of(futures)
             keys = list({f.key for f in futures})
         else:
             keys = None
@@ -1350,6 +1384,7 @@ class Executor(object):
         Examples
         --------
         >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> wait([x, y, z])  # doctest: +SKIP
         >>> e.has_what()  # doctest: +SKIP
         {'192.168.1.141:46784': ['inc-1c8dd6be1c21646c71f76c16d09304ea',
                                  'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b',
@@ -1366,6 +1401,67 @@ class Executor(object):
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
         return sync(self.loop, self.scheduler.has_what, keys=workers)
+
+    def stacks(self, workers=None):
+        """ The task queues on each worker
+
+        Parameters
+        ----------
+        workers: list (optional)
+            A list of worker addresses, defaults to all
+
+        Examples
+        --------
+        >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> e.stacks()  # doctest: +SKIP
+        {'192.168.1.141:46784': ['inc-1c8dd6be1c21646c71f76c16d09304ea',
+                                 'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b',
+                                 'inc-1e297fc27658d7b67b3a758f16bcf47a']}
+
+        See Also
+        --------
+        Executor.processing
+        Executor.who_has
+        Executor.has_what
+        Executor.ncores
+        """
+        if (isinstance(workers, tuple)
+            and all(isinstance(i, (str, tuple)) for i in workers)):
+            workers = list(workers)
+        if workers is not None and not isinstance(workers, (list, set)):
+            workers = [workers]
+        return sync(self.loop, self.scheduler.stacks, workers=workers)
+
+    def processing(self, workers=None):
+        """ The tasks currently running on each worker
+
+        Parameters
+        ----------
+        workers: list (optional)
+            A list of worker addresses, defaults to all
+
+        Examples
+        --------
+        >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> e.processing()  # doctest: +SKIP
+        {'192.168.1.141:46784': ['inc-1c8dd6be1c21646c71f76c16d09304ea',
+                                 'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b',
+                                 'inc-1e297fc27658d7b67b3a758f16bcf47a']}
+
+        See Also
+        --------
+        Executor.stacks
+        Executor.who_has
+        Executor.has_what
+        Executor.ncores
+        """
+        if (isinstance(workers, tuple)
+            and all(isinstance(i, (str, tuple)) for i in workers)):
+            workers = list(workers)
+        if workers is not None and not isinstance(workers, (list, set)):
+            workers = [workers]
+        return valmap(set, sync(self.loop, self.scheduler.processing,
+                                workers=workers))
 
     def nbytes(self, keys=None, summary=True):
         """ The bytes taken up by each key on the cluster
@@ -1397,6 +1493,9 @@ class Executor(object):
         """
         return sync(self.loop, self.scheduler.nbytes, keys=keys,
                     summary=summary)
+
+    def futures_of(self, futures):
+        return futures_of(futures, executor=self)
 
 
 class CompatibleExecutor(Executor):
@@ -1494,6 +1593,7 @@ def as_completed(fs):
 
     This function does not return futures in the order in which they are input.
     """
+    fs = list(fs)
     if len(set(f.executor for f in fs)) == 1:
         loop = first(fs).executor.loop
     else:
@@ -1540,7 +1640,7 @@ def redict_collection(c, dsk):
         return cc
 
 
-def futures_of(o):
+def futures_of(o, executor=None):
     """ Future objects in a collection """
     stack = [o]
     futures = set()
@@ -1554,5 +1654,10 @@ def futures_of(o):
             futures.add(x)
         if hasattr(x, 'dask'):
             stack.extend(x.dask.values())
+
+    if executor is not None:
+        bad = {f for f in futures if f.cancelled()}
+        if bad:
+            raise CancelledError(bad)
 
     return list(futures)

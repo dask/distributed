@@ -10,7 +10,8 @@ from tornado.ioloop import IOLoop
 from tornado import gen
 
 from .core import Server, rpc, write
-from .utils import get_ip, ignoring
+from .utils import get_ip, ignoring, log_errors
+from .worker import _ncores
 
 
 logger = logging.getLogger(__name__)
@@ -22,12 +23,12 @@ class Nanny(Server):
     them as necessary.
     """
     def __init__(self, center_ip, center_port, ip=None, worker_port=0,
-                ncores=None, loop=None, local_dir=None, services=None,
-                name=None, **kwargs):
+                 ncores=None, loop=None, local_dir=None, services=None,
+                 name=None, **kwargs):
         self.ip = ip or get_ip()
         self.worker_port = None
         self._given_worker_port = worker_port
-        self.ncores = ncores
+        self.ncores = ncores or _ncores
         self.local_dir = local_dir
         self.worker_dir = ''
         self.status = None
@@ -42,7 +43,7 @@ class Nanny(Server):
                     'terminate': self._close,
                     'monitor_resources': self.monitor_resources}
 
-        super(Nanny, self).__init__(handlers, **kwargs)
+        super(Nanny, self).__init__(handlers, io_loop=self.loop, **kwargs)
 
     @gen.coroutine
     def _start(self, port=0):
@@ -69,9 +70,23 @@ class Nanny(Server):
 
         if self.process is not None:
             try:
+                # Ask worker to close
+                worker = rpc(ip='127.0.0.1', port=self.worker_port)
+                result = yield gen.with_timeout(
+                            timedelta(seconds=min(1, timeout)),
+                            worker.terminate(report=False),
+                            io_loop=self.loop)
+            except gen.TimeoutError:
+                logger.info("Worker non-responsive.  Terminating.")
+            except Exception as e:
+                logger.exception(e)
+
+            try:
+                # Tell scheduler that worker is gone
                 result = yield gen.with_timeout(timedelta(seconds=timeout),
-                            self.center.unregister(address=self.worker_address))
-                if result != 'OK':
+                            self.center.unregister(address=self.worker_address),
+                            io_loop=self.loop)
+                if result not in ('OK', 'already-removed'):
                     logger.critical("Unable to unregister with center %s. "
                             "Nanny: %s, Worker: %s", result, self.address_tuple,
                             self.worker_address)
@@ -82,12 +97,16 @@ class Nanny(Server):
                 logger.info("Nanny %s:%d failed to unregister worker %s:%d",
                         self.ip, self.port, self.ip, self.worker_port,
                         exc_info=True)
-            self.process.terminate()
-            self.process.join(timeout=timeout)
-            self.process = None
-            logger.info("Nanny %s:%d kills worker process %s:%d",
-                        self.ip, self.port, self.ip, self.worker_port)
-            self.cleanup()
+            except Exception as e:
+                logger.exception(e)
+
+            if self.process:
+                self.process.terminate()
+                self.process.join(timeout=timeout)
+                self.process = None
+                self.cleanup()
+                logger.info("Nanny %s:%d kills worker process %s:%d",
+                            self.ip, self.port, self.ip, self.worker_port)
         raise gen.Return('OK')
 
     @gen.coroutine
@@ -131,11 +150,11 @@ class Nanny(Server):
     def _watch(self, wait_seconds=0.10):
         """ Watch the local process, if it dies then spin up a new one """
         while True:
-            if self.status == 'closed':
+            if closing[0] or self.status == 'closed':
                 yield self._close()
                 break
-            if self.process and not self.process.is_alive():
-                logger.warn("Discovered failed worker.  Restarting")
+            elif self.process and not self.process.is_alive():
+                logger.warn("Discovered failed worker.  Restarting.  Status: %s", self.status)
                 self.cleanup()
                 yield self.center.unregister(address=self.worker_address)
                 yield self.instantiate()
@@ -146,10 +165,10 @@ class Nanny(Server):
     def _close(self, stream=None, timeout=5, report=None):
         """ Close the nanny process, stop listening """
         logger.info("Closing Nanny at %s:%d", self.ip, self.port)
+        self.status = 'closed'
         yield self._kill(timeout=timeout)
         self.center.close_streams()
         self.stop()
-        self.status = 'closed'
         raise gen.Return('OK')
 
     @property
@@ -200,7 +219,7 @@ def run_worker(q, ip, center_ip, center_port, ncores, nanny_port,
     loop.make_current()  # pragma: no cover
     worker = Worker(center_ip, center_port, ncores=ncores, ip=ip,
                     service_ports={'nanny': nanny_port}, local_dir=local_dir,
-                    services=services, name=name)  # pragma: no cover
+                    services=services, name=name, loop=loop)  # pragma: no cover
 
     @gen.coroutine  # pragma: no cover
     def start():
@@ -214,5 +233,18 @@ def run_worker(q, ip, center_ip, center_port, ncores, nanny_port,
             q.put({'port': worker.port, 'dir': worker.local_dir})  # pragma: no cover
 
     loop.add_callback(start)  # pragma: no cover
-    with ignoring(KeyboardInterrupt):
+    try:
         loop.start()  # pragma: no cover
+    finally:
+        loop.stop()
+        loop.close(all_fds=True)
+
+
+import atexit
+
+closing = [False]
+
+def _closing():
+    closing[0] = True
+
+atexit.register(_closing)

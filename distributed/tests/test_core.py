@@ -131,19 +131,19 @@ def test_identity(loop):
 
 def test_ports(loop):
     port = 9876
-    server = Server({})
+    server = Server({}, io_loop=loop)
     server.listen(port)
     try:
         assert server.port == port
 
         with pytest.raises((OSError, socket.error)):
-            server2 = Server({})
+            server2 = Server({}, io_loop=loop)
             server2.listen(port)
     finally:
         server.stop()
 
     try:
-        server3 = Server({})
+        server3 = Server({}, io_loop=loop)
         server3.listen(0)
         assert isinstance(server3.port, int)
         assert server3.port > 1024
@@ -164,6 +164,8 @@ def test_coerce_to_rpc():
     assert (r.ip, r.port) == ('127.0.0.1', 8000)
     r = coerce_to_rpc('127.0.0.1:8000')
     assert (r.ip, r.port) == ('127.0.0.1', 8000)
+    r = coerce_to_rpc('foo:bar:8000')
+    assert (r.ip, r.port) == ('foo:bar', 8000)
 
 
 def stream_div(stream=None, x=None, y=None):

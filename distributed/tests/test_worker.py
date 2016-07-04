@@ -6,6 +6,8 @@ import os
 import shutil
 import sys
 import traceback
+import logging
+import re
 
 import pytest
 from toolz import pluck
@@ -15,9 +17,12 @@ from tornado.ioloop import TimeoutError
 from distributed.batched import BatchedStream
 from distributed.center import Center
 from distributed.core import rpc, dumps, loads, connect, read, write
+from distributed.scheduler import Scheduler
 from distributed.sizeof import sizeof
-from distributed.worker import Worker, error_message
-from distributed.utils_test import loop, _test_cluster, inc, gen_cluster, slow
+from distributed.worker import Worker, error_message, logger
+from distributed.utils import ignoring
+from distributed.utils_test import (loop, _test_cluster, inc, gen_cluster,
+        slow, slowinc, throws, current_loop)
 
 
 
@@ -34,15 +39,14 @@ def test_identity():
     w = Worker('127.0.0.1', 8019)
     ident = w.identity(None)
     assert ident['type'] == 'Worker'
-    assert ident['center'] == ('127.0.0.1', 8019)
+    assert ident['scheduler'] == ('127.0.0.1', 8019)
 
 
 def test_health():
     w = Worker('127.0.0.1', 8019)
-    d = w.health()
+    d = w.host_health()
     assert isinstance(d, dict)
-    d = w.health()
-    assert 'time' in d
+    d = w.host_health()
     try:
         import psutil
     except ImportError:
@@ -54,7 +58,126 @@ def test_health():
         assert 'network-send' in d
 
 
-def test_worker(loop):
+def test_worker_bad_args(current_loop):
+    @gen.coroutine
+    def f(c, a, b):
+        aa = rpc(ip=a.ip, port=a.port)
+        bb = rpc(ip=b.ip, port=b.port)
+
+        class NoReprObj(object):
+            """ This object cannot be properly represented as a string. """
+            def __str__(self):
+                raise ValueError("I have no str representation.")
+            def __repr__(self):
+                raise ValueError("I have no repr representation.")
+
+        response = yield aa.compute(key='x',
+                                    function=dumps(NoReprObj),
+                                    args=dumps(()),
+                                    who_has={})
+        assert not a.active
+        assert response['status'] == 'OK'
+        assert a.data['x']
+        assert c.who_has['x'] == {a.address}
+        assert isinstance(response['compute_start'], float)
+        assert isinstance(response['compute_stop'], float)
+        assert isinstance(response['thread'], Integral)
+
+        def bad_func(*args, **kwargs):
+            1 / 0
+
+        class MockLoggingHandler(logging.Handler):
+            """Mock logging handler to check for expected logs."""
+
+            def __init__(self, *args, **kwargs):
+                self.reset()
+                logging.Handler.__init__(self, *args, **kwargs)
+
+            def emit(self, record):
+                self.messages[record.levelname.lower()].append(record.getMessage())
+
+            def reset(self):
+                self.messages = {
+                    'debug': [],
+                    'info': [],
+                    'warning': [],
+                    'error': [],
+                    'critical': [],
+                }
+
+        hdlr = MockLoggingHandler()
+        old_level = logger.level
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(hdlr)
+        response = yield bb.compute(key='y',
+                                    function=dumps(bad_func),
+                                    args=dumps(['x']),
+                                    kwargs=dumps({'k': 'x'}),
+                                    who_has={'x': [a.address]})
+        assert not b.active
+        assert response['status'] == 'error'
+        # Make sure job died because of bad func and not because of bad
+        # argument.
+        assert isinstance(loads(response['exception']), ZeroDivisionError)
+        if sys.version_info[0] >= 3:
+            assert any('1 / 0' in line
+                      for line in pluck(3, traceback.extract_tb(
+                          loads(response['traceback'])))
+                      if line)
+        assert hdlr.messages['warning'][0] == " Compute Failed\n" \
+            "Function: bad_func\n" \
+            "args:     (< could not convert arg to str >)\n" \
+            "kwargs:   {'k': < could not convert arg to str >}\n"
+        assert re.match(r"^Send compute response to scheduler: y, " \
+            "\{.*'args': \(< could not convert arg to str >\), .*" \
+            "'kwargs': \{'k': < could not convert arg to str >\}.*\}",
+            hdlr.messages['debug'][0]) or \
+            re.match("^Send compute response to scheduler: y, " \
+            "\{.*'kwargs': \{'k': < could not convert arg to str >\}, .*" \
+            "'args': \(< could not convert arg to str >\).*\}",
+            hdlr.messages['debug'][0])
+        logger.setLevel(old_level)
+
+        # Now we check that both workers are still alive.
+
+        assert not a.active
+        response = yield aa.compute(key='z',
+                                    function=dumps(add),
+                                    args=dumps([1, 2]),
+                                    who_has={},
+                                    close=True)
+        assert not a.active
+        assert response['status'] == 'OK'
+        assert a.data['z'] == 3
+        assert c.who_has['z'] == {a.address}
+        assert isinstance(response['compute_start'], float)
+        assert isinstance(response['compute_stop'], float)
+        assert isinstance(response['thread'], Integral)
+
+        assert not b.active
+        response = yield bb.compute(key='w',
+                                    function=dumps(add),
+                                    args=dumps([1, 2]),
+                                    who_has={},
+                                    close=True)
+        assert not b.active
+        assert response['status'] == 'OK'
+        assert b.data['w'] == 3
+        assert c.who_has['w'] == {b.address}
+        assert isinstance(response['compute_start'], float)
+        assert isinstance(response['compute_stop'], float)
+        assert isinstance(response['thread'], Integral)
+
+        aa.close_streams()
+        yield a._close()
+
+        bb.close_streams()
+        yield b._close()
+
+    _test_cluster(f)
+
+
+def test_worker(current_loop):
     @gen.coroutine
     def f(c, a, b):
         aa = rpc(ip=a.ip, port=a.port)
@@ -119,7 +242,7 @@ def test_worker(loop):
     _test_cluster(f)
 
 
-def test_compute_who_has(loop):
+def test_compute_who_has(current_loop):
     @gen.coroutine
     def f():
         c = Center(ip='127.0.0.1')
@@ -149,10 +272,10 @@ def test_compute_who_has(loop):
         yield [x._close(), y._close(), z._close()]
         zz.close_streams()
 
-    loop.run_sync(f, timeout=5)
+    current_loop.run_sync(f, timeout=5)
 
 
-def test_workers_update_center(loop):
+def test_workers_update_center(current_loop):
     @gen.coroutine
     def f(c, a, b):
         aa = rpc(ip=a.ip, port=a.port)
@@ -199,7 +322,7 @@ def dont_test_delete_data_with_missing_worker(loop):
     _test_cluster(f)
 
 
-def test_upload_file(loop):
+def test_upload_file(current_loop):
     @gen.coroutine
     def f(c, a, b):
         assert not os.path.exists(os.path.join(a.local_dir, 'foobar.py'))
@@ -232,7 +355,7 @@ def test_upload_file(loop):
     _test_cluster(f)
 
 
-def test_upload_egg(loop):
+def test_upload_egg(current_loop):
     @gen.coroutine
     def f(c, a, b):
         eggname = 'mytestegg-1.0.0-py3.4.egg'
@@ -268,7 +391,7 @@ def test_upload_egg(loop):
     _test_cluster(f)
 
 
-def test_broadcast(loop):
+def test_broadcast(current_loop):
     @gen.coroutine
     def f(c, a, b):
         cc = rpc(ip=c.ip, port=c.port)
@@ -280,7 +403,7 @@ def test_broadcast(loop):
     _test_cluster(f)
 
 
-def test_worker_with_port_zero(loop):
+def test_worker_with_port_zero(current_loop):
     @gen.coroutine
     def f():
         c = Center('127.0.0.1')
@@ -290,17 +413,17 @@ def test_worker_with_port_zero(loop):
         assert isinstance(w.port, int)
         assert w.port > 1024
 
-    loop.run_sync(f)
+    current_loop.run_sync(f)
 
-@pytest.mark.slow
-def test_worker_waits_for_center_to_come_up(loop):
+@slow
+def test_worker_waits_for_center_to_come_up(current_loop):
     @gen.coroutine
     def f():
         w = Worker('127.0.0.1', 8007, ip='127.0.0.1')
         yield w._start()
 
     try:
-        loop.run_sync(f, timeout=4)
+        current_loop.run_sync(f, timeout=4)
     except TimeoutError:
         pass
 
@@ -381,3 +504,25 @@ def test_compute_stream(s, a, b):
         assert msg['key'][0] == 'x'
 
     yield write(stream, {'op': 'close'})
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)])
+def test_active_holds_tasks(e, s, w):
+    future = e.submit(slowinc, 1, delay=0.2)
+    yield gen.sleep(0.1)
+    assert future.key in w.active
+    yield future._result()
+    assert future.key not in w.active
+
+    future = e.submit(throws, 1)
+    with ignoring(Exception):
+        yield _wait([future])
+    assert not w.active
+
+
+def test_io_loop(loop):
+    s = Scheduler(loop=loop)
+    s.listen(0)
+    assert s.io_loop is loop
+    w = Worker(s.ip, s.port, loop=loop)
+    assert w.io_loop is loop

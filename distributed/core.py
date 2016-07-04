@@ -204,6 +204,9 @@ class Server(TCPServer):
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = yield gen.maybe_future(handler(stream, **msg))
+                    except StreamClosedError as e:
+                        logger.info("%s", e)
+                        result = error_message(e, status='uncaught-error')
                     except Exception as e:
                         logger.exception(e)
                         result = error_message(e, status='uncaught-error')
@@ -270,10 +273,12 @@ def write(stream, msg):
 
         lengths = ([struct.pack('Q', len(frames))] +
                    [struct.pack('Q', len(frame)) for frame in frames])
-        yield stream.write(b''.join(lengths))
+        stream.write(b''.join(lengths))
 
-        for frame in frames:
-            yield stream.write(frame)
+        for frame in frames[:-1]:
+            stream.write(frame)
+
+        yield stream.write(frames[-1])
 
 
 def pingpong(stream):
@@ -317,7 +322,7 @@ def send_recv(stream=None, arg=None, ip=None, port=None, addr=None, reply=True, 
         assert not ip and not port
         if PY3 and isinstance(addr, bytes):
             addr = addr.decode()
-        ip, port = addr.split(':')
+        ip, port = addr.rsplit(':', 1)
         port = int(port)
     if PY3 and isinstance(ip, bytes):
         ip = ip.decode()
@@ -338,12 +343,6 @@ def send_recv(stream=None, arg=None, ip=None, port=None, addr=None, reply=True, 
     if kwargs.get('close'):
         stream.close()
     raise Return(response)
-
-
-def send_recv_sync(stream=None, ip=None, port=None, reply=True, **kwargs):
-    return IOLoop.current().run_sync(
-            lambda: send_recv(stream=stream, ip=ip, port=port, reply=reply,
-                              **kwargs))
 
 
 class rpc(object):
@@ -379,7 +378,7 @@ class rpc(object):
             if PY3 and isinstance(addr, bytes):
                 addr = addr.decode()
             assert not ip and not port
-            ip, port = addr.split(':')
+            ip, port = addr.rsplit(':', 1)
             port = int(port)
         if PY3 and isinstance(ip, bytes):
             ip = ip.decode()
@@ -449,7 +448,7 @@ def coerce_to_address(o, out=str):
     if PY3 and isinstance(o, bytes):
         o = o.decode()
     if isinstance(o, (unicode, str)):
-        ip, port = o.split(':')
+        ip, port = o.rsplit(':', 1)
         port = int(port)
         o = (ip, port)
     if isinstance(o, list):
