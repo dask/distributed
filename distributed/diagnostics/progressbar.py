@@ -18,7 +18,6 @@ from ..utils import sync, ignoring, key_split, is_kernel
 
 logger = logging.getLogger(__name__)
 
-
 def get_scheduler(scheduler):
     if scheduler is None:
         scheduler = default_executor().scheduler
@@ -193,6 +192,7 @@ class MultiProgressBar(object):
             self._last_response = response
             self.status = response['status']
             self._draw_bar(**response)
+
             if response['status'] in ('error', 'finished'):
                 self.stream.close()
                 self._draw_stop(**response)
@@ -253,15 +253,13 @@ class MultiProgressWidget(MultiProgressBar):
         return self.widget._ipython_display_(**kwargs)
 
     def _draw_stop(self, remaining, status, exception=None, key=None, **kwargs):
-        for k, v in remaining.items():
-            if not v:
-                self.bars[k].bar_style = 'success'
 
-        """ TODO
-        if status == 'error':
-            self.bars[self.func(key)].bar_style = 'danger'
-            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Warning:</b> the computation terminated due to an error after ' + format_time(self.elapsed) + '</div>'
-        """
+        for k, v in remaining.items():
+            if status == 'error':
+                self.bars[k].bar_style = 'danger'
+                self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Warning:</b> the computation terminated due to an error after ' + format_time(self.elapsed) + '</div>'
+            elif not v:
+                self.bars[k].bar_style = 'success'
 
     def _draw_bar(self, remaining, all, status, **kwargs):
         if self.keys and not self.widget.children:
