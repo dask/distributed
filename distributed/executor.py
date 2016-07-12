@@ -1497,6 +1497,29 @@ class Executor(object):
     def futures_of(self, futures):
         return futures_of(futures, executor=self)
 
+    @gen.coroutine
+    def _start_ipython(self, workers):
+        responses = yield self.scheduler.broadcast(
+            msg=dict(op='start_ipython'), workers=workers,
+        )
+        raise gen.Return(responses)
+
+    def start_ipython(self, workers=None):
+        """ Start IPython kernels on workers
+        
+        Parameters
+        ----------
+        workers: list (optional)
+            A list of worker addresses, defaults to all
+
+        Returns
+        -------
+        iter_connection_info: list
+            List of connection_info dicts containing info necessary
+            to connect Jupyter clients to the workers.
+        """
+        return sync(self.loop, self._start_ipython, workers)
+
 
 class CompatibleExecutor(Executor):
     """ A concurrent.futures-compatible Executor
