@@ -28,7 +28,7 @@ class BokehWebInterface(object):
         hosts = ['localhost',
                  '127.0.0.1',
                  ip,
-                 host] + list(map(str, bokeh_whitelist))
+                 host]
         with ignoring(Exception):
             hosts.append(socket.gethostbyname(ip))
         with ignoring(Exception):
@@ -37,6 +37,8 @@ class BokehWebInterface(object):
         hosts = ['%s:%d' % (h, bokeh_port) for h in hosts]
 
         hosts.append("*")
+
+        hosts.extend(map(str, bokeh_whitelist))
 
         args = ([binname, 'serve'] + paths +
                 ['--log-level', 'warning',
