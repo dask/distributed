@@ -624,6 +624,8 @@ class Worker(Server):
 
         # start IPython, disabling its signal handlers that won't work due to running in a thread:
         app = self._ipython_kernel = IPKernelApp.instance(log=logger)
+        # Don't connect to the history database
+        app.config.HistoryManager.hist_file = ':memory:'
         # listen on all interfaces, so remote clients can connect:
         app.ip = self.ip
         app.init_signal = lambda : None
