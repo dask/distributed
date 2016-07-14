@@ -1499,18 +1499,28 @@ class Executor(object):
 
     @gen.coroutine
     def _start_ipython(self, workers):
+        if workers is None:
+            workers = yield self.scheduler.ncores()
+
         responses = yield self.scheduler.broadcast(
             msg=dict(op='start_ipython'), workers=workers,
         )
-        raise gen.Return(responses)
+        raise gen.Return((workers, responses))
 
-    def start_ipython(self, workers=None):
+    def start_ipython(self, workers=None, magic_names=False, qtconsole=False):
         """ Start IPython kernels on workers
-        
+
         Parameters
         ----------
         workers: list (optional)
             A list of worker addresses, defaults to all
+
+        magic_names: str or list(str) (optional)
+            If defined, register IPython magics with these names for
+            executing code on the workers.
+
+        qtconsole: bool (optional)
+            If True, launch a Jupyter QtConsole connected to the worker(s).
 
         Returns
         -------
@@ -1518,7 +1528,24 @@ class Executor(object):
             List of connection_info dicts containing info necessary
             to connect Jupyter clients to the workers.
         """
-        return sync(self.loop, self._start_ipython, workers)
+
+        if magic_names and isinstance(magic_names, six.string_types):
+            magic_names = [magic_names]
+        if isinstance(workers, six.string_types):
+            workers = [workers]
+
+        (workers, info_dict) = sync(self.loop, self._start_ipython, workers)
+        if magic_names:
+            from ._ipython_utils import register_worker_magic
+            for worker, magic_name in zip(workers, magic_names):
+                connection_info = info_dict[worker]
+                register_worker_magic(connection_info, magic_name)
+        if qtconsole:
+            from ._ipython_utils import connect_qtconsole
+            for worker, connection_info in info_dict.items():
+                connect_qtconsole(connection_info,
+                                  name='dask-' + worker.replace(':','-'))
+        return info_dict
 
 
 class CompatibleExecutor(Executor):
