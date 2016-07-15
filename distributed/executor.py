@@ -1507,7 +1507,7 @@ class Executor(object):
         )
         raise gen.Return((workers, responses))
 
-    def start_ipython(self, workers=None, magic_names=False, qtconsole=False):
+    def start_ipython(self, workers=None, magic_names=False, qtconsole=False, qtconsole_args=None):
         """ Start IPython kernels on workers
 
         Parameters
@@ -1544,7 +1544,9 @@ class Executor(object):
             from ._ipython_utils import connect_qtconsole
             for worker, connection_info in info_dict.items():
                 connect_qtconsole(connection_info,
-                                  name='dask-' + worker.replace(':','-'))
+                                  name='dask-' + worker.replace(':','-'),
+                                  extra_args=qtconsole_args,
+                )
         return info_dict
 
 

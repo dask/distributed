@@ -89,7 +89,7 @@ def register_worker_magic(connection_info, magic_name='worker'):
     ip.register_magic_function(remote, magic_kind='cell', magic_name=magic_name)
 
 
-def connect_qtconsole(connection_info, name=None):
+def connect_qtconsole(connection_info, name=None, extra_args=None):
     """Open a QtConsole connected to a worker who has the given future
     
     - identify worker with who_has
@@ -102,7 +102,10 @@ def connect_qtconsole(connection_info, name=None):
 
     path = os.path.join(runtime_dir, name + '.json')
     write_connection_file(path, **connection_info)
-    Popen(['jupyter', 'qtconsole', '--existing', path])
+    cmd = ['jupyter', 'qtconsole', '--existing', path]
+    if extra_args:
+        cmd.extend(extra_args)
+    Popen(cmd)
     def _cleanup_connection_file():
         """Cleanup our connection file when we exit."""
         try:
