@@ -79,6 +79,14 @@ def loop():
             print(f)
 
 
+@pytest.yield_fixture
+def zmq_ctx():
+    import zmq
+    ctx = zmq.Context.instance()
+    yield ctx
+    ctx.destroy(linger=0)
+
+
 def inc(x):
     return x + 1
 

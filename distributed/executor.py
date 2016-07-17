@@ -7,6 +7,7 @@ from datetime import timedelta
 from functools import partial
 import logging
 import os
+import sys
 from time import sleep
 import uuid
 from threading import Thread
@@ -1638,6 +1639,10 @@ class Executor(object):
             workers = [workers]
 
         (workers, info_dict) = sync(self.loop, self._start_ipython, workers)
+
+        if 'IPython' in sys.modules:
+            from ._ipython_utils import register_remote_magic
+            register_remote_magic()
         if magic_names:
             from ._ipython_utils import register_worker_magic
             for worker, magic_name in zip(workers, magic_names):

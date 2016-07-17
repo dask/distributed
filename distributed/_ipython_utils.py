@@ -76,8 +76,10 @@ def register_worker_magic(connection_info, magic_name='worker'):
     which run the given cell in a remote kernel.
     """
     ip = get_ipython()
+    info = dict(connection_info) # copy
+    key = info.pop('key')
     kc = BlockingKernelClient(**connection_info)
-    kc.session.key = connection_info['key']
+    kc.session.key = key
     kc.start_channels()
     def remote(line, cell=None):
         """Run the current cell on a remote IPython kernel"""
@@ -85,8 +87,67 @@ def register_worker_magic(connection_info, magic_name='worker'):
             # both line and cell magic
             cell = line
         run_cell_remote(ip, kc, cell)
+    remote.client = kc # preserve reference on kc, largely for mocking
     ip.register_magic_function(remote, magic_kind='line', magic_name=magic_name)
     ip.register_magic_function(remote, magic_kind='cell', magic_name=magic_name)
+
+
+def remote_magic(line, cell=None):
+    """A magic for running code on a specified remote worker
+
+    The connection_info dict of the worker will be looked up
+    as the first positional arg to the magic.
+    The rest of the line (or the entire cell for a %%cell magic)
+    will be passed to the remote kernel.
+
+    Usage:
+
+        info = e.start_ipython(worker)[worker]
+        %remote info print(worker.data)
+    """
+    # get connection info from IPython's user namespace
+    ip = get_ipython()
+    split_line = line.split(None, 1)
+    info_name = split_line[0]
+    if info_name not in ip.user_ns:
+        raise NameError(info_name)
+    connection_info = dict(ip.user_ns[info_name])
+
+    if not cell: # line magic, use the rest of the line
+        if len(split_line) == 1:
+            raise ValueError("I need some code to run!")
+        cell = split_line[1]
+
+    # turn info dict to hashable str for use as lookup key in _clients cache
+    key = ','.join(map(str, sorted(connection_info.items())))
+    session_key = connection_info.pop('key')
+
+    if key in remote_magic._clients:
+        kc = remote_magic._clients[key]
+    else:
+        kc = BlockingKernelClient(**connection_info)
+        kc.session.key = session_key
+        kc.start_channels()
+        kc.wait_for_ready(timeout=10)
+        remote_magic._clients[key] = kc
+
+    # actually run the code
+    run_cell_remote(ip, kc, cell)
+
+# cache clients for re-use in remote magic
+remote_magic._clients = {}
+
+
+def register_remote_magic(magic_name='remote'):
+    """Define the parameterized %remote magic
+
+    See remote_magic above for details.
+    """
+    ip = get_ipython()
+    if ip is None:
+        return # do nothing if IPython's not running
+    ip.register_magic_function(remote_magic, magic_kind='line', magic_name=magic_name)
+    ip.register_magic_function(remote_magic, magic_kind='cell', magic_name=magic_name)
 
 
 def connect_qtconsole(connection_info, name=None, extra_args=None):
@@ -113,4 +174,3 @@ def connect_qtconsole(connection_info, name=None, extra_args=None):
         except OSError:
             pass
     atexit.register(_cleanup_connection_file)
-

@@ -34,7 +34,7 @@ from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
         _test_scheduler, loop, inc, dec, div, throws, gen_cluster, gen_test,
-        double, deep)
+        double, deep, zmq_ctx)
 
 
 @gen_cluster(executor=True, timeout=None)
@@ -3209,11 +3209,8 @@ def test_as_completed_list(loop):
 
 
 @pytest.mark.ipython
-def test_start_ipython(loop):
+def test_start_ipython(loop, zmq_ctx):
     from jupyter_client import BlockingKernelClient
-    from ipykernel.kernelapp import IPKernelApp
-    from IPython.core.interactiveshell import InteractiveShell
-
     with cluster(1) as (s, [a]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
             info_dict = e.start_ipython()
@@ -3222,27 +3219,65 @@ def test_start_ipython(loop):
             kc = BlockingKernelClient(**info)
             kc.session.key = key
             kc.start_channels()
+            kc.wait_for_ready(timeout=10)
             msg_id = kc.execute("worker")
             reply = kc.get_shell_msg(timeout=10)
+            assert reply['parent_header']['msg_id'] == msg_id
+            assert reply['content']['status'] == 'ok'
             kc.stop_channels()
 
+
 @pytest.mark.ipython
-def test_start_ipython_magic(loop):
+def test_start_ipython_magic(loop, zmq_ctx):
+    from jupyter_client import BlockingKernelClient
     ip = mock.Mock()
-    with cluster() as (s, [a, b]):
-        with mock.patch('IPython.get_ipython', lambda : ip), Executor(('127.0.0.1', s['port']), loop=loop) as e:
+    get_ip = lambda : ip
+    with cluster(2) as (s, [a, b]):
+
+        with mock.patch('IPython.get_ipython', get_ip), \
+                mock.patch('distributed._ipython_utils.get_ipython', get_ip), \
+                Executor(('127.0.0.1', s['port']), loop=loop) as e:
             workers = list(e.ncores())[:2]
             names = [ 'magic%i' % i for i in range(len(workers)) ]
-            e.start_ipython(workers, magic_names=names)
-    assert ip.register_magic_function.call_count == 4
-    expected = [
-        {'magic_kind': 'line', 'magic_name': 'magic0'},
-        {'magic_kind': 'cell', 'magic_name': 'magic0'},
-        {'magic_kind': 'line', 'magic_name': 'magic1'},
-        {'magic_kind': 'cell', 'magic_name': 'magic1'},
-    ]
-    call_kwargs_list = [ kwargs for (args, kwargs) in ip.register_magic_function.call_args_list ]
-    assert call_kwargs_list == expected
+            info_dict = e.start_ipython(workers, magic_names=names)
+
+        expected = [
+            {'magic_kind': 'line', 'magic_name': 'remote'},
+            {'magic_kind': 'cell', 'magic_name': 'remote'},
+            {'magic_kind': 'line', 'magic_name': 'magic0'},
+            {'magic_kind': 'cell', 'magic_name': 'magic0'},
+            {'magic_kind': 'line', 'magic_name': 'magic1'},
+            {'magic_kind': 'cell', 'magic_name': 'magic1'},
+        ]
+        call_kwargs_list = [ kwargs for (args, kwargs) in ip.register_magic_function.call_args_list ]
+        assert call_kwargs_list == expected
+        assert ip.register_magic_function.call_count == 6
+        magics = [ args[0][0] for args in ip.register_magic_function.call_args_list[2:] ]
+        magics[-1](line="", cell="worker")
+        [ m.client.stop_channels() for m in magics ]
+
+
+@pytest.mark.ipython
+def test_start_ipython_remote(loop, zmq_ctx):
+    from distributed._ipython_utils import remote_magic
+    ip = mock.Mock()
+    ip.user_ns = {}
+    get_ip = lambda : ip
+    with cluster(1) as (s, [a]):
+        with mock.patch('IPython.get_ipython', get_ip), \
+                mock.patch('distributed._ipython_utils.get_ipython', get_ip), \
+                Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            worker = first(e.ncores())
+            ip.user_ns['info'] = e.start_ipython(worker)[worker]
+            remote_magic('info 1') # line magic
+            remote_magic('info', 'worker') # cell magic
+
+        expected = [
+            ((remote_magic,), {'magic_kind': 'line', 'magic_name': 'remote'}),
+            ((remote_magic,), {'magic_kind': 'cell', 'magic_name': 'remote'}),
+        ]
+        assert ip.register_magic_function.call_args_list == expected
+        assert ip.register_magic_function.call_count == 2
 
 
 @pytest.mark.ipython

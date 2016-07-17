@@ -8,7 +8,7 @@ from multiprocessing.pool import ThreadPool
 import os
 import pkg_resources
 import tempfile
-from threading import current_thread, Thread
+from threading import current_thread, Thread, Event
 from time import time
 from timeit import default_timer
 import shutil
@@ -638,18 +638,34 @@ class Worker(Server):
         app.config.HistoryManager.hist_file = ':memory:'
         # listen on all interfaces, so remote clients can connect:
         app.ip = self.ip
-        app.init_signal = lambda : None
-        app.initialize([])
-        app.kernel.pre_handler_hook = lambda : None
-        app.kernel.post_handler_hook = lambda : None
-        app.kernel.start()
+        # disable some signal handling, logging
+        noop = lambda : None
+        app.init_signal = noop
+        app.log_connection_info = noop
 
-        # save self in the IPython namespace as 'worker'
-        app.kernel.shell.user_ns['worker'] = self
+        # start IPython in a thread
+        # initialization happens in the thread to avoid threading problems
+        # with the sqlite history
+        evt = Event()
+        def _start():
+            app.initialize([])
+            app.kernel.pre_handler_hook = noop
+            app.kernel.post_handler_hook = noop
+            app.kernel.start()
+            app.kernel.loop = IOLoop.instance()
+            # save self in the IPython namespace as 'worker'
+            app.kernel.shell.user_ns['worker'] = self
+            from tornado.ioloop import PeriodicCallback
+            pc = PeriodicCallback(lambda : print(os.getpid(), file=sys.__stdout__), 1000, io_loop=zmq_loop)
+            pc.start()
+            evt.set()
+            zmq_loop.start()
 
-        # start IPython's IOLoop in a thread
-        zmq_loop_thread = Thread(target=zmq_loop.start)
+        zmq_loop_thread = Thread(target=_start)
+        zmq_loop_thread.daemon = True
         zmq_loop_thread.start()
+        self._zmq_thread = zmq_loop_thread
+        assert evt.wait(timeout=5), "IPython didn't start in a reasonable amount of time."
 
         # put the global IOLoop instance back:
         IOLoop.clear_instance()
