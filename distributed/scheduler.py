@@ -584,10 +584,7 @@ class Scheduler(Server):
         for dep in deps:
             if dep in self.waiting:
                 s = self.waiting[dep]
-                try:
-                    s.remove(key)
-                except KeyError:
-                    pass
+                s.discard(key)
                 if not s:  # new task ready to run
                     self.mark_ready_to_run(dep)
 
@@ -752,10 +749,8 @@ class Scheduler(Server):
         self.nbytes.update(nbytes)
 
         for key in who_has:
-            if key not in self.dependents:
-                self.dependents[key] = set()
-            if key not in self.dependencies:
-                self.dependencies[key] = set()
+            self.dependents.setdefault(key, set())
+            self.dependencies.setdefault(key, set())
 
     def mark_task_killed_worker(self, key=None, worker=None):
         """ Mark that is likely killing workers """
@@ -896,11 +891,10 @@ class Scheduler(Server):
         missing = set(missing)
         logger.debug("Recovering missing data: %s", missing)
         for k in missing:
-            with ignoring(KeyError):
-                workers = self.who_has.pop(k)
-                for worker in workers:
-                    self.has_what[worker].remove(k)
-                del self.nbytes[k]
+            workers = self.who_has.pop(k, ())
+            for worker in workers:
+                self.has_what[worker].discard(k)
+            self.nbytes.pop(k, None)
             self.recover_missing(k)
 
         if worker:
@@ -1080,10 +1074,7 @@ class Scheduler(Server):
             visited.add(k)
 
             for dep in self.dependencies[k]:
-                try:
-                    self.waiting_data[dep].add(k)
-                except KeyError:
-                    self.waiting_data[dep] = {k}
+                self.waiting_data.setdefault(dep, set()).add(k)
 
             waiting = {dep for dep in self.dependencies[k]
                         if not self.who_has.get(dep)}
@@ -1094,8 +1085,7 @@ class Scheduler(Server):
             else:
                 self.mark_ready_to_run(k)
 
-            if k not in self.waiting_data:
-                self.waiting_data[k] = set()
+            self.waiting_data.setdefault(k, set())
 
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None,
@@ -1139,14 +1129,11 @@ class Scheduler(Server):
             touched.add(k)
             if k not in self.tasks and k in tasks:
                 self.tasks[k] = tasks[k]
-                self.dependencies[k] = set(dependencies.get(k, ()))
+                self.dependencies.setdefault(k, set())
+                self.dependents.setdefault(k, set())
                 self.released.add(k)
                 for dep in self.dependencies[k]:
-                    if dep not in self.dependents:
-                        self.dependents[dep] = set()
-                    self.dependents[dep].add(k)
-                if k not in self.dependents:
-                    self.dependents[k] = set()
+                    self.dependents.setdefault(dep, set()).add(k)
 
             stack.extend(self.dependencies[k])
 
@@ -1191,14 +1178,8 @@ class Scheduler(Server):
 
     def client_releases_keys(self, keys=None, client=None):
         for k in list(keys):
-            try:
-                self.wants_what[client].remove(k)
-            except KeyError:
-                pass
-            try:
-                self.who_wants[k].remove(client)
-            except KeyError:
-                pass
+            self.wants_what[client].discard(k)
+            self.who_wants[k].discard(client)
             if not self.who_wants[k]:
                 del self.who_wants[k]
                 self.release_held_data([k])
@@ -1362,8 +1343,7 @@ class Scheduler(Server):
     def remove_client(self, client=None):
         logger.info("Remove client %s", client)
         self.client_releases_keys(self.wants_what.get(client, ()), client)
-        with ignoring(KeyError):
-            del self.wants_what[client]
+        self.wants_what.pop(client, None)
 
     @gen.coroutine
     def handle_messages(self, in_queue, report, client=None):
