@@ -36,7 +36,7 @@ from .utils import (All, ignoring, clear_queue, get_ip, ignore_exceptions,
 logger = logging.getLogger(__name__)
 
 BANDWIDTH = 100e6
-ALLOWED_FAILURES = 3
+ALLOWED_FAILURES = 300
 
 
 class Scheduler(Server):
@@ -421,20 +421,19 @@ class Scheduler(Server):
         2.  Not be restricted to run on that worker
         3   Take less time to transfer than to compute
         """
-        with log_errors(): # removeme
-            bandwidth = bandwidth if bandwidth is not None else BANDWIDTH
-            if len(self.dependencies[key]) > 10:
-                return False
-            if key in self.restrictions and key not in self.loose_restrictions:
-                return False
+        bandwidth = bandwidth if bandwidth is not None else BANDWIDTH
+        if len(self.dependencies[key]) > 10:
+            return False
+        if key in self.restrictions and key not in self.loose_restrictions:
+            return False
 
-            nbytes = sum(self.nbytes[k] for k in self.dependencies[key])
-            transfer_time = nbytes / bandwidth
-            try:
-                compute_time = self.task_duration[key_split(key)]
-                return transfer_time < compute_time
-            except KeyError:
-                return False
+        nbytes = sum(self.nbytes[k] for k in self.dependencies[key])
+        transfer_time = nbytes / bandwidth
+        try:
+            compute_time = self.task_duration[key_split(key)]
+            return transfer_time < compute_time
+        except KeyError:
+            return False
 
     def work_steal(self, bandwidth=None):
         bandwidth = bandwidth if bandwidth is not None else BANDWIDTH
@@ -613,13 +612,21 @@ class Scheduler(Server):
 
         This occurs after we've computed it or after we've forgotten it
         """
+        if key in self.waiting:
+            del self.waiting[key]
+
         for dep in self.dependencies.get(key, []):
             if dep in self.waiting_data:
                 s = self.waiting_data[dep]
                 if key in s:
                     s.remove(key)
                 if not s and dep and dep not in self.who_wants:
-                    self.delete_data(keys=[dep])
+                    self.release_live_dependencies(dep)
+
+        if (not self.waiting_data.get(key) and
+                self.who_has.get(key) and
+                key not in self.who_wants):
+            self.delete_data(keys=[key])
 
     def ensure_occupied(self, worker):
         self.ensure_occupied_stacks(worker)
@@ -804,8 +811,6 @@ class Scheduler(Server):
                      'key': key,
                      'exception': self.exceptions[failing_key],
                      'traceback': self.tracebacks[failing_key]})
-        if key in self.waiting:
-            del self.waiting[key]
 
         self.release_live_dependencies(key)
 
@@ -861,6 +866,7 @@ class Scheduler(Server):
 
         This assumes that we've already removed this key from who_has/has_what.
         """
+        logger.info("Recover missing %s", key)
         if key in self.released:
             return
         if self.who_has.get(key):
@@ -873,8 +879,9 @@ class Scheduler(Server):
         self.ensure_in_play(key)
 
         # a dependent is in processing
-        for dep in self.dependents[key]:
+        for dep in sorted(self.dependents[key]):
             if dep in self.released:
+                logger.info("  key already released %s", dep)
                 continue
             if self.who_has.get(dep):
                 continue
@@ -894,24 +901,24 @@ class Scheduler(Server):
         --------
         recover_missing
         """
-        with log_errors():  # removeme
-            missing = keys
-            if key and worker:
-                if key not in self.processing[worker]:
-                    return
-                self.mark_not_processing(key, worker)
+        missing = keys
+        if key and worker:
+            if key not in self.processing[worker]:
+                return
+            self.mark_not_processing(key, worker)
 
-            missing = set(missing)
-            logger.debug("Recovering missing data: %s", missing)
-            for k in missing:
-                del self.nbytes[k]
-                workers = self.who_has.pop(k)
-                for worker in workers:
-                    self.has_what[worker].remove(k)
-                self.recover_missing(k)
+        missing = set(missing)
+        logger.debug("Recovering missing data: %s", missing)
+        for k in sorted(missing):
+            del self.nbytes[k]
+            workers = self.who_has.pop(k)
+            for worker in workers:
+                assert worker in self.has_what
+                self.has_what[worker].remove(k)
+            self.recover_missing(k)
 
-            if worker:
-                self.ensure_occupied(worker)
+        if worker:
+            self.ensure_occupied(worker)
 
         # self.validate(allow_overlap=True, allow_bad_stacks=True)
 
@@ -941,13 +948,6 @@ class Scheduler(Server):
         before_processing = {k: v.copy() for k, v in self.processing.items()}
 
         with log_errors():
-            try:
-                self.validate()
-            except Exception as e:
-                bad = True
-                f = e
-            else:
-                bad = False
             address = self.coerce_address(address)
             logger.debug("Remove worker %s", address)
             if address not in self.processing:
@@ -997,7 +997,10 @@ class Scheduler(Server):
                 s.remove(address)
                 if not s:
                     self.who_has.pop(key)
-                    del self.nbytes[key]
+                    try:
+                        del self.nbytes[key]
+                    except KeyError:
+                        pass
                     self.report({'op': 'lost-data', 'key': key})
                     missing.add(key)
                     for plugin in self.plugins:
@@ -1006,23 +1009,21 @@ class Scheduler(Server):
                         except Exception as e:
                             logger.exception(e)
 
-            for key in missing:
+            for key in sorted(missing):
                 self.recover_missing(key)
             for key in in_flight:
                 self.released.add(key)
                 self.ensure_in_play(key)
 
+            for k, v in self.waiting.items():
+                for d in self.dependencies[k]:
+                    if d not in self.who_has and d not in v:
+                        import pdb; pdb.set_trace()
+
             if not self.stacks:
                 logger.info("Lost all workers")
 
             self.ensure_idle_ready()
-        if not bad:
-            try:
-                self.validate()
-            except Exception as e:
-                g = e
-                self.loop.stop()
-                import ipdb; ipdb.set_trace()
 
         return 'OK'
 
@@ -1248,7 +1249,8 @@ class Scheduler(Server):
 
         if keys:
             logger.debug("Release keys: %s", keys)
-            keys2 = {k for k in keys if not self.waiting_data.get(k)}
+            keys2 = {k for k in keys if self.who_has.get(k) and
+                                    not self.waiting_data.get(k)}
             if keys2:
                 self.delete_data(keys=keys2)  # async
 
@@ -1298,8 +1300,7 @@ class Scheduler(Server):
                     del self.exceptions_blame[key]
                 if key in self.released:
                     self.released.remove(key)
-                if key in self.waiting:
-                    del self.waiting[key]
+                self.release_live_dependencies(key)
                 if key in self.waiting_data:
                     del self.waiting_data[key]
                 if key in self.suspicious_tasks:
@@ -1601,7 +1602,7 @@ class Scheduler(Server):
         for key in keys:
             if self.who_has.get(key):
                 for worker in self.who_has.pop(key):
-                    self.has_what[worker].remove(key)
+                    self.has_what.get(worker).remove(key)
                     self.deleted_keys[worker].add(key)
                 del self.nbytes[key]
                 trigger_plugins(key)
@@ -1609,6 +1610,8 @@ class Scheduler(Server):
                 self.ready.remove(key)
                 trigger_plugins(key)
 
+            if key in self.waiting:
+                import pdb; pdb.set_trace()
             self.released.add(key)
 
             for worker in list(self.rprocessing.get(key, ())):
@@ -1762,7 +1765,7 @@ class Scheduler(Server):
     def get_has_what(self, stream=None, keys=None):
         if keys is not None:
             keys = map(self.coerce_address, keys)
-            return {k: list(self.has_what[k]) for k in keys}
+            return {k: list(self.has_what.get(k, ())) for k in keys}
         else:
             return valmap(list, self.has_what)
 
@@ -2100,6 +2103,8 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
         for vv in v:
             assert vv not in who_has, ("waiting dependency in memory", k, vv)
             assert vv not in released, ("dependency released", k, vv)
+        for dep in dependencies[k]:
+            assert dep in v or who_has.get(k), ("dep missing", k, dep)
 
     for k, v in waiting_data.items():
         for vv in v:
@@ -2115,10 +2120,6 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
 
     for key in who_has:
         assert key in waiting_data or key in who_wants
-
-    for key, v in waiting.items():
-        for dep in dependencies[key]:
-            assert dep in v or who_has.get(dep), ("dep missing", key, dep)
 
     @memoize
     def check_key(key):
