@@ -446,7 +446,7 @@ class Executor(object):
         with ignoring(AttributeError):
             yield self.scheduler_stream.close(ignore_closed=True)
         with ignoring(AttributeError):
-            self.scheduler.close()
+            self.scheduler.close_rpc()
 
     def shutdown(self, timeout=10):
         """ Send shutdown signal and wait until scheduler terminates """

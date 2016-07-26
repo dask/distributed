@@ -1865,7 +1865,7 @@ class Scheduler(Server):
             recipient = next(recipients)
             msgs = []  # (sender, recipient, key)
             for sender in sorted_workers[:len(workers) // 2]:
-                sender_keys = {k: self.nbytes(k, 1000) for k in keys_by_worker[sender]}
+                sender_keys = {k: self.nbytes.get(k, 1000) for k in keys_by_worker[sender]}
                 sender_keys = iter(sorted(sender_keys.items(),
                                           key=second, reverse=True))
 

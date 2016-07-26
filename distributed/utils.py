@@ -201,7 +201,7 @@ def key_split(s):
 
 
 @contextmanager
-def log_errors(pdb=True):
+def log_errors(pdb=False):
     try:
         yield
     except (StreamClosedError, gen.Return):
