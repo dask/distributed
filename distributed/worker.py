@@ -31,7 +31,7 @@ from .compatibility import reload, unicode
 from .core import (rpc, Server, pingpong, dumps, loads, coerce_to_address,
         error_message, read, RPCClosed)
 from .sizeof import sizeof
-from .utils import funcname, get_ip, _maybe_complex, log_errors, All
+from .utils import funcname, get_ip, _maybe_complex, log_errors, All, ignoring
 
 _ncores = ThreadPool()._processes
 
@@ -214,10 +214,11 @@ class Worker(Server):
 
     @gen.coroutine
     def _close(self, report=True, timeout=10):
-        if report:
-            yield gen.with_timeout(timedelta(seconds=timeout),
-                    self.scheduler.unregister(address=(self.ip, self.port)),
-                    io_loop=self.loop)
+        with ignoring(RPCClosed):
+            if report:
+                yield gen.with_timeout(timedelta(seconds=timeout),
+                        self.scheduler.unregister(address=(self.ip, self.port)),
+                        io_loop=self.loop)
         self.scheduler.close_rpc()
         self.heartbeat_callback.stop()
         self.stop()
