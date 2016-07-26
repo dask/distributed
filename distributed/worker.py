@@ -409,21 +409,7 @@ class Worker(Server):
                     else:
                         logger.warning("Unknown operation %s, %s", op, msg)
                 # self.loop.add_callback(self.compute_many, bstream, msgs)
-                try:
-                    last = self.compute_many(bstream, msgs)
-                except RuntimeError as e:
-                    if 'shutdown' in str(e):
-                        break
-                    else:
-                        for i in range(100):
-                            print(e)
-                            print(type(e))
-                            print('shutdown' in str(e))
-                except Exception as e:
-                    for i in range(10):
-                        print(e)
-                        print(type(e))
-                        print(type(e).mro())
+                last = self.compute_many(bstream, msgs)
 
             try:
                 yield last  # TODO: there might be more than one lingering
