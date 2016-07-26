@@ -3245,7 +3245,8 @@ def test_stress_creation_and_deletion(e, s):
 
     @gen.coroutine
     def create_and_destroy_worker(delay):
-        while True:
+        start = time()
+        while time() < start + 10:
             n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
             n.start(0)
 
@@ -3254,8 +3255,4 @@ def test_stress_creation_and_deletion(e, s):
             yield n._close()
             print("Killed nanny")
 
-    for i in range(10):
-        s.loop.add_callback(create_and_destroy_worker, 0.1 * i)
-
-    for i in range(10):
-        yield gen.sleep(1)
+    yield [create_and_destroy_worker(0.1 * i) for i in range(10)]
