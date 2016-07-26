@@ -1124,11 +1124,10 @@ class Scheduler(Server):
 
             if k in self.released:
                 for dep in self.dependencies[k]:
-                    if not self.who_has.get(dep):
-                        try:
-                            self.waiting_data[dep].add(k)
-                        except KeyError:
-                            self.waiting_data[dep] = {k}
+                    try:
+                        self.waiting_data[dep].add(k)
+                    except KeyError:
+                        self.waiting_data[dep] = {k}
 
                 waiting = {dep for dep in self.dependencies[k]
                             if not self.who_has.get(dep)}
