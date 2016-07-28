@@ -28,4 +28,5 @@ def submit(remote_client_address, filepath):
     @gen.coroutine
     def f():
         yield _submit(remote_client_address, filepath)
+
     IOLoop.instance().run_sync(f)

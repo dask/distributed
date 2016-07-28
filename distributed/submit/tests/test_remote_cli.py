@@ -1,10 +1,7 @@
 from mock import Mock
-
 from click.testing import CliRunner
-
-
-
 from tornado.ioloop import IOLoop
+
 from distributed.submit.remote_cli import remote, _remote
 from distributed.submit.remote_client import RemoteClient
 

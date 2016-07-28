@@ -17,7 +17,7 @@ logger = logging.getLogger('distributed.remote')
 @click.option('--port', type=int, default=8788, help="Remote Client Port")
 def remote(host, port):
     _remote(host, port)
-    logger.info("End remote client at %s:%d", host, port)
+
 
 
 def _remote(host, port, loop=IOLoop.current(), client=RemoteClient):
@@ -31,5 +31,4 @@ def _remote(host, port, loop=IOLoop.current(), client=RemoteClient):
     loop.start()
     loop.close()
     remote_client.stop()
-
-
+    logger.info("End remote client at %s:%d", host, port)
