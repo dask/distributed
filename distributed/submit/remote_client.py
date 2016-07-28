@@ -16,7 +16,6 @@ from distributed.utils import get_ip
 logger = logging.getLogger('distributed.remote')
 
 
-
 class RemoteClient(Server):
     def __init__(self, ip=get_ip(), local_dir=tempfile.mkdtemp(prefix='client-'), loop=None, **kwargs):
         self.ip = ip
@@ -24,6 +23,7 @@ class RemoteClient(Server):
         self.local_dir = local_dir
         handlers = {'upload_file': self.upload_file, 'execute': self.execute}
         super(RemoteClient, self).__init__(handlers, io_loop=self.loop, **kwargs)
+
     @gen.coroutine
     def _start(self, port=0):
         self.listen(port)
