@@ -1,8 +1,8 @@
 from __future__ import print_function, division, absolute_import
 from click.testing import CliRunner
 from tornado import gen
-from distributed.cli.dask_submit import _submit, submit
-from distributed.remote import RemoteClient
+from distributed.submit.remote_client import RemoteClient
+from distributed.submit.submit_cli import _submit, submit
 from distributed.utils_test import valid_python_script, invalid_python_script, current_loop
 
 
