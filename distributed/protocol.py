@@ -27,6 +27,7 @@ outside of this module though and is not baked in.
 from __future__ import print_function, division, absolute_import
 
 import random
+from copy import deepcopy
 
 try:
     import pandas.msgpack as msgpack
@@ -62,6 +63,20 @@ with ignoring(ImportError):
     default_compression = 'lz4'
 
 
+def extract_big_bytes(x):
+    big = {}
+    _extract_big_bytes(x, big)
+    if big:
+        x = deepcopy(x)
+        for path in big:
+            t = get_in(path[:-1], x)
+            if isinstance(t, dict):
+                del t[path[-1]]
+            else:
+                t[path[-1]] = None
+    return x, big
+
+
 def _extract_big_bytes(x, big, path=()):
     if type(x) is dict:
         for k, v in x.items():
@@ -69,14 +84,12 @@ def _extract_big_bytes(x, big, path=()):
                 _extract_big_bytes(v, big, path + (k,))
             elif type(v) is bytes and len(v) >= 2**31:
                 big[path + (k,)] = v
-                del x[k]
     elif type(x) is list:
         for k, v in enumerate(x):
             if isinstance(v, (list, dict)):
                 _extract_big_bytes(v, big, path + (k,))
             elif type(v) is bytes and len(v) >= 2**31:
                 big[path + (k,)] = v
-                x[k] = None
 
 
 def dumps(msg):
@@ -84,7 +97,7 @@ def dumps(msg):
     big = {}
     # Only dicts can contain big values
     if isinstance(msg, dict):
-        _extract_big_bytes(msg, big)
+        msg, big = extract_big_bytes(msg)
     small_header, small_payload = dumps_msgpack(msg)
     if not big:
         return small_header, small_payload

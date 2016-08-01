@@ -1,5 +1,4 @@
 from __future__ import print_function, division, absolute_import
-from copy import deepcopy
 
 from distributed.protocol import loads, dumps, msgpack, maybe_compress
 import pytest
@@ -46,7 +45,7 @@ def test_big_bytes_protocol():
     np = pytest.importorskip('numpy')
     data = np.random.randint(0, 255, dtype='u1', size=2000000).tobytes()
     d = {'x': data, 'y': b'1' * 2000000}
-    L = dumps(d.copy())
+    L = dumps(d)
     assert d['x'] in L[1]
     dd = loads(L)
     assert dd == d
@@ -83,7 +82,7 @@ def test_large_messages():
     msg = {'x': [big_bytes, b'small_bytes'],
            'y': {'a': big_bytes, 'b': b'small_bytes'}}
 
-    b = dumps(deepcopy(msg))
+    b = dumps(msg)
     msg2 = loads(b)
     assert msg == msg2
 
