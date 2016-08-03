@@ -63,6 +63,10 @@ with ignoring(ImportError):
     default_compression = 'lz4'
 
 
+BIG_BYTES_SIZE = 2**20
+BIG_BYTES_SHARD_SIZE = 2**28
+
+
 def extract_big_bytes(x):
     big = {}
     _extract_big_bytes(x, big)
@@ -82,13 +86,13 @@ def _extract_big_bytes(x, big, path=()):
         for k, v in x.items():
             if isinstance(v, (list, dict)):
                 _extract_big_bytes(v, big, path + (k,))
-            elif type(v) is bytes and len(v) >= 2**31:
+            elif type(v) is bytes and len(v) >= BIG_BYTES_SIZE:
                 big[path + (k,)] = v
     elif type(x) is list:
         for k, v in enumerate(x):
             if isinstance(v, (list, dict)):
                 _extract_big_bytes(v, big, path + (k,))
-            elif type(v) is bytes and len(v) >= 2**31:
+            elif type(v) is bytes and len(v) >= BIG_BYTES_SIZE:
                 big[path + (k,)] = v
 
 
@@ -107,9 +111,9 @@ def dumps(msg):
     res = {}
     for k, v in list(big.items()):
         L = []
-        for i, j in enumerate(range(0, len(v), 2**30)):
+        for i, j in enumerate(range(0, len(v), BIG_BYTES_SHARD_SIZE)):
             key = '.shard-%d-%s' % (i, k)
-            res[key] = v[j: j + 2**30]
+            res[key] = v[j: j + BIG_BYTES_SHARD_SIZE]
             L.append(key)
         shards.append((k, L))
 

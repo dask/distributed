@@ -43,11 +43,27 @@ def test_small_and_big():
 
 def test_big_bytes_protocol():
     np = pytest.importorskip('numpy')
-    data = np.random.randint(0, 255, dtype='u1', size=2000000).tobytes()
-    d = {'x': data, 'y': b'1' * 2000000}
-    L = dumps(d)
-    assert d['x'] in L[1]
-    dd = loads(L)
+    data = np.random.randint(0, 255, dtype='u1', size=2**21).tobytes()
+
+    d = {'x': data, 'y': 'foo'}
+    frames = dumps(d)
+    assert len(frames) == 4     # Only `data` is extracted
+    assert data is frames[3]    # `data` isn't sharded as it's too short
+    dd = loads(frames)
+    assert dd == d
+
+    d = {'x': [data], 'y': 'foo'}
+    frames = dumps(d)
+    assert len(frames) == 4
+    assert data is frames[3]
+    dd = loads(frames)
+    assert dd == d
+
+    d = {'x': {'z': [data, 'small_data']}, 'y': 'foo'}
+    frames = dumps(d)
+    assert len(frames) == 4
+    assert data is frames[3]
+    dd = loads(frames)
     assert dd == d
 
 
