@@ -1,16 +1,8 @@
 from mock import Mock
-from click.testing import CliRunner
+
 from tornado.ioloop import IOLoop
-
-from distributed.submit.remote_cli import remote, _remote
 from distributed.submit.remote_client import RemoteClient
-
-
-def test_dask_remote():
-    runner = CliRunner()
-    result = runner.invoke(remote, ['--help'])
-    assert '--host TEXT     IP or hostname of this server' in result.output
-    assert result.exit_code == 0
+from distributed.submit.remote_cli import _remote
 
 
 def test_cli_runs_remote_client():
