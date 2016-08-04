@@ -10,11 +10,28 @@ from distributed import Nanny, Worker, sync, rpc
 from distributed.utils import get_ip, All
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed.cli.utils import check_python_3
 from tornado.ioloop import IOLoop
 from tornado import gen
 
 logger = logging.getLogger('distributed.dask_worker')
+
+import signal
+
+
+def handle_signal(sig, frame):
+    loop = IOLoop.instance()
+    if loop._running:
+        loop.add_callback(loop.stop)
+    else:
+        exit(1)
+
+
+def install_signal_handlers():
+    # NOTE: We can't use the generic install_signal_handlers() function from
+    # distributed.cli.utils because we're handling the signal differently.
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
 
 
 @click.command()
