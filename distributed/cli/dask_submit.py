@@ -2,18 +2,8 @@ import sys
 import click
 from tornado import gen
 from tornado.ioloop import IOLoop
-from distributed.cli.utils import check_python_3
+from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.submit import _submit
-
-import signal
-
-
-def handle_signal(sig, frame):
-    IOLoop.instance().add_callback(IOLoop.instance().stop)
-
-
-signal.signal(signal.SIGINT, handle_signal)
-signal.signal(signal.SIGTERM, handle_signal)
 
 
 @click.command()
@@ -32,6 +22,7 @@ def main(remote_client_address, filepath):
 
 
 def go():
+    install_signal_handlers()
     check_python_3()
     main()
 

@@ -1,20 +1,8 @@
 from __future__ import print_function, division, absolute_import
 
 import click
-from tornado.ioloop import IOLoop
-
-from distributed.cli.utils import check_python_3
+from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.submit import _remote
-
-import signal
-
-
-def handle_signal(sig, frame):
-    IOLoop.instance().add_callback(IOLoop.instance().stop)
-
-
-signal.signal(signal.SIGINT, handle_signal)
-signal.signal(signal.SIGTERM, handle_signal)
 
 
 @click.command()
@@ -26,6 +14,7 @@ def main(host, port):
 
 
 def go():
+    install_signal_handlers()
     check_python_3()
     main()
 
