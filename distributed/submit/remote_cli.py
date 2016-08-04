@@ -1,23 +1,12 @@
 import socket
 import logging
 
-import click
-
 from tornado.ioloop import IOLoop
 from distributed.submit.remote_client import RemoteClient
 
 from distributed.utils import get_ip
 
 logger = logging.getLogger('distributed.remote')
-
-
-@click.command()
-@click.option('--host', type=str, default=None,
-              help="IP or hostname of this server")
-@click.option('--port', type=int, default=8788, help="Remote Client Port")
-def remote(host, port):
-    _remote(host, port)
-
 
 
 def _remote(host, port, loop=IOLoop.current(), client=RemoteClient):
