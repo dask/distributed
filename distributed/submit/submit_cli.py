@@ -1,8 +1,6 @@
 import os
 import sys
-import click
 from tornado import gen
-from tornado.ioloop import IOLoop
 from distributed import rpc
 
 
@@ -18,14 +16,3 @@ def _submit(remote_client_address, filepath):
         sys.stdout.write(str(result['stdout']))
     if result['stderr']:
         sys.stderr.write(str(result['stderr']))
-
-
-@click.command()
-@click.argument('remote_client_address', type=str, required=True)
-@click.argument('filepath', type=str, required=True)
-def submit(remote_client_address, filepath):
-    @gen.coroutine
-    def f():
-        yield _submit(remote_client_address, filepath)
-
-    IOLoop.instance().run_sync(f)
