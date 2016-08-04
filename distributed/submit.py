@@ -44,7 +44,8 @@ class RemoteClient(Server):
                                    stderr=subprocess.PIPE)
         out, err = process.communicate()
         return_code = process.returncode
-        raise gen.Return({'stdout': out, 'stderr': err, 'returncode': return_code})
+        raise gen.Return({'stdout': out, 'stderr': err,
+                          'returncode': return_code})
 
     def upload_file(self, stream, filename=None, file_payload=None):
         out_filename = os.path.join(self.local_dir, filename)
@@ -81,4 +82,4 @@ def _submit(remote_client_address, filepath):
         bytes_read = f.read()
     yield rc.upload_file(filename=remote_file, file_payload=bytes_read)
     result = yield rc.execute(filename=remote_file)
-    return (result['stdout'], result['stderr'])
+    raise gen.Return((result['stdout'], result['stderr']))
