@@ -4,7 +4,7 @@ import click
 from tornado.ioloop import IOLoop
 
 from distributed.cli.utils import check_python_3
-from distributed.submit.remote_cli import _remote
+from distributed.submit import _remote
 
 import signal
 

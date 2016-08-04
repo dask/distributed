@@ -1,9 +1,9 @@
+import sys
 import click
-
 from tornado import gen
 from tornado.ioloop import IOLoop
 from distributed.cli.utils import check_python_3
-from distributed.submit.submit_cli import _submit
+from distributed.submit import _submit
 
 import signal
 
@@ -22,7 +22,11 @@ signal.signal(signal.SIGTERM, handle_signal)
 def main(remote_client_address, filepath):
     @gen.coroutine
     def f():
-        yield _submit(remote_client_address, filepath)
+        stdout, stderr = yield _submit(remote_client_address, filepath)
+        if stdout:
+            sys.stdout.write(str(stdout))
+        if stderr:
+            sys.stderr.write(str(stderr))
 
     IOLoop.instance().run_sync(f)
 

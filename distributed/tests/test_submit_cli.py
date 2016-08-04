@@ -1,8 +1,9 @@
 from __future__ import print_function, division, absolute_import
-from click.testing import CliRunner
+from mock import Mock
+
 from tornado import gen
-from distributed.submit.remote_client import RemoteClient
-from distributed.submit.submit_cli import _submit
+from tornado.ioloop import IOLoop
+from distributed.submit import RemoteClient, _submit, _remote
 from distributed.utils_test import valid_python_script, invalid_python_script,\
     current_loop
 
@@ -37,3 +38,19 @@ def test_dask_submit_cli_writes_traceback_to_stdout(capsys, current_loop, tmpdir
         yield remote_client._close()
 
     current_loop.run_sync(test, timeout=5)
+
+
+
+
+def test_cli_runs_remote_client():
+    mock_remote_client = Mock(spec=RemoteClient)
+    mock_ioloop = Mock(spec=IOLoop.current())
+
+    _remote('127.0.0.1:8799', 8788, loop=mock_ioloop, client=mock_remote_client)
+
+    mock_remote_client.assert_called_once_with(ip='127.0.0.1', loop=mock_ioloop)
+    mock_remote_client().start.assert_called_once_with(port=8799)
+
+    assert mock_ioloop.start.called
+    assert mock_ioloop.close.called
+    assert mock_remote_client().stop.called
