@@ -27,13 +27,6 @@ def handle_signal(sig, frame):
         exit(1)
 
 
-def install_signal_handlers():
-    # NOTE: We can't use the generic install_signal_handlers() function from
-    # distributed.cli.utils because we're handling the signal differently.
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
-
-
 @click.command()
 @click.argument('scheduler', type=str)
 @click.option('--worker-port', type=int, default=0,
@@ -127,7 +120,11 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
 
 def go():
-    install_signal_handlers()
+    # NOTE: We can't use the generic install_signal_handlers() function from
+    # distributed.cli.utils because we're handling the signal differently.
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
     check_python_3()
     main()
 
