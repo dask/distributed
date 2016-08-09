@@ -62,6 +62,12 @@ def test_Executor_solo(loop):
     e.shutdown()
 
 
+def test_Executor_twice(loop):
+    with Executor(loop=loop) as e:
+        with Executor(loop=loop) as f:
+            assert e.cluster.scheduler.port != f.cluster.scheduler.port
+
+
 def test_defaults():
     from distributed.worker import _ncores
 
