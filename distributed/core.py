@@ -337,6 +337,8 @@ def send_recv(stream=None, arg=None, ip=None, port=None, addr=None, reply=True, 
     msg = kwargs
     msg['reply'] = reply
 
+    if stream.closed():
+        import pdb; pdb.set_trace()
     yield write(stream, msg)
 
     if reply:
