@@ -812,6 +812,8 @@ class Scheduler(Server):
             try:
                 func = getattr(self, 'validate_' + self.task_state[key])
             except KeyError:
+                logger.debug("Key lost: %s", key)
+            except AttributeError:
                 logger.info("self.validate_%s not found", self.task_state[key])
             else:
                 func(key)
@@ -2086,11 +2088,17 @@ class Scheduler(Server):
         This includes feedback from previous transitions and continues until we
         reach a steady state
         """
+        keys = set()
         recommendations = recommendations.copy()
         while recommendations:
             key, finish = recommendations.popitem()
+            keys.add(key)
             new = self.transition(key, finish)
             recommendations.update(new)
+
+        if self.validate:
+            for key in keys:
+                self.validate_key(key)
 
     def transition_story(self, *keys):
         """ Get all transitions that touch one of the input keys """
