@@ -31,8 +31,8 @@ from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
-        _test_scheduler, loop, inc, dec, div, throws,
-        gen_cluster, gen_test, double, deep)
+        _test_scheduler, loop, inc, dec, div, throws, gen_cluster, gen_test,
+        double, deep)
 
 
 @gen_cluster(executor=True, timeout=None)
@@ -2822,6 +2822,8 @@ def test_executor_replicate_sync(loop):
             with pytest.raises(ValueError):
                 e.replicate([x], n=0)
 
+            assert y.result() == 3
+
 
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 4)] * 1)
 def test_task_load_adapts_quickly(e, s, a):
@@ -3355,6 +3357,7 @@ def test_stress_creation_and_deletion(e, s):
     yield [create_and_destroy_worker(0.1 * i) for i in range(10)]
 
 
+"""
 @gen_test(timeout=None)
 def test_reconnect():
     s = Scheduler()
@@ -3374,7 +3377,6 @@ def test_reconnect():
     s.close_streams()
 
     yield gen.sleep(1)
-    import pdb; pdb.set_trace()
 
     with pytest.raises(CancelledError):
         result = yield x._result()
@@ -3390,6 +3392,7 @@ def test_reconnect():
     x = e.submit(inc, 2)
     result = yield x._result()
     assert result == 3
+"""
 
 
 @gen_test()
@@ -3437,7 +3440,37 @@ def test_persist_optimize_graph(e, s, a, b):
         assert not any(tokey(k) in s.tasks for k in b2._keys())
 
 
-@gen_cluster(executor=True, ncores=[])
-def test_persist_optimize_graph(e, s):
-    with pytest.raises(ValueError):
-        yield e._scatter([1])
+from distributed.utils_test import popen
+def test_reconnect(loop):
+    e = Executor('localhost:9393', loop=loop, start=False)
+    with popen(['dask-scheduler', '--port', '9393']) as s:
+        e.start()
+        assert e.ncores() == {}
+        x = e.submit(inc, 1)
+        assert x.status == 'pending'
+
+    start = time()
+    while e.status != 'connecting':
+        assert time() < start + 5
+        sleep(0.01)
+
+    with pytest.raises(Exception):
+        e.ncores()
+
+    assert x.status == 'cancelled'
+    with pytest.raises(CancelledError):
+        x.result()
+
+    with popen(['dask-scheduler', '--port', '9393']) as s:
+        start = time()
+        while e.status != 'running':
+            sleep(0.01)
+            assert time() < start + 5
+        assert e.ncores() == {}
+        x = e.submit(inc, 1)
+        assert x.status == 'pending'
+
+    with pytest.raises(CancelledError):
+        x.result()
+
+    e.shutdown()

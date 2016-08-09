@@ -262,6 +262,8 @@ class Executor(object):
         self.id = str(uuid.uuid1())
         self.generation = 0
         self.status = None
+        self._start_event = Event()
+        self._pending_msg_buffer = []
         if hasattr(address, 'scheduler_address'):
             self.cluster = address
             address = address.scheduler_address
@@ -305,10 +307,12 @@ class Executor(object):
         self.status = 'running'
 
     def _send_to_scheduler(self, msg):
-        if self.status is not 'running':
+        if self.status is 'running':
+            self.loop.add_callback(self.scheduler_stream.send, msg)
+        elif self.status is 'connecting':
+            self._pending_msg_buffer.append(msg)
+        else:
             raise Exception("Executor not running.  Status: %s" % self.status)
-
-        self.loop.add_callback(self.scheduler_stream.send, msg)
 
     @gen.coroutine
     def _start(self, timeout=3, **kwargs):
@@ -321,27 +325,60 @@ class Executor(object):
                                             start=False)
             self._start_arg = self.cluster.scheduler_address
 
-        r = coerce_to_rpc(self._start_arg, timeout=timeout)
-        try:
-            ident = yield r.identity()
-        except (StreamClosedError, OSError):
-            raise IOError("Could not connect to %s:%d" % (r.ip, r.port))
-        assert ident['type'] == 'Scheduler'
+        self.scheduler = coerce_to_rpc(self._start_arg, timeout=timeout)
+        self.scheduler_stream = None
 
-        self.scheduler = r
-        stream = yield connect(r.ip, r.port)
+        yield self.ensure_connected()
+
+    @gen.coroutine
+    def reconnect(self, timeout=0.1):
+        with log_errors():
+            assert self.scheduler_stream.stream.closed()
+            self.status = 'connecting'
+            self.scheduler_stream = None
+
+            events = [d['event'] for d in self.futures.values()]
+            self.futures.clear()
+            for e in events:
+                e.set()
+
+            while self.status == 'connecting':
+                try:
+                    yield self.ensure_connected()
+                    break
+                except IOError:
+                    yield gen.sleep(timeout)
+
+    @gen.coroutine
+    def ensure_connected(self):
+        if self.scheduler_stream and not self.scheduler_stream.closed():
+            return
+        else:
+            self._start_event.clear()
+
+        try:
+            ident = yield self.scheduler.identity()
+        except (StreamClosedError, OSError):
+            raise IOError("Could not connect to %s:%d" %
+                          (self.scheduler.ip, self.scheduler.port))
+
+        stream = yield connect(self.scheduler.ip, self.scheduler.port)
         yield write(stream, {'op': 'register-client',
                              'client': self.id})
+
         bstream = BatchedSend(interval=10, loop=self.loop)
         bstream.start(stream)
         self.scheduler_stream = bstream
 
-        start_event = Event()
-        self.coroutines.append(self._handle_report(start_event))
+        self.coroutines.clear()
+        self.coroutines.append(self._handle_report())
 
         _global_executor[0] = self
-        yield start_event.wait()
+        yield self._start_event.wait()
         self.status = 'running'
+        for msg in self._pending_msg_buffer:
+            self._send_to_scheduler(msg)
+        self._pending_msg_buffer.clear()
         logger.debug("Started scheduling coroutines. Synchronized")
 
     def __enter__(self):
@@ -370,13 +407,13 @@ class Executor(object):
         if key in self.futures:
             self.futures[key]['event'].clear()
             del self.futures[key]
-        if self.status == 'running':
+        if self.status != 'closed':
             self._send_to_scheduler({'op': 'client-releases-keys',
                                      'keys': [key],
                                      'client': self.id})
 
     @gen.coroutine
-    def _handle_report(self, start_event):
+    def _handle_report(self):
         """ Listen to scheduler """
         with log_errors():
             while True:
@@ -384,6 +421,8 @@ class Executor(object):
                     msgs = yield read(self.scheduler_stream.stream)
                 except StreamClosedError:
                     logger.debug("Stream closed to scheduler", exc_info=True)
+                    self.loop.add_callback(self.reconnect)
+                    self.status = 'connecting'
                     break
                 if not isinstance(msgs, list):
                     msgs = [msgs]
@@ -393,7 +432,7 @@ class Executor(object):
                     logger.debug("Executor receives message %s", msg)
 
                     if msg['op'] == 'stream-start':
-                        start_event.set()
+                        self._start_event.set()
                     elif msg['op'] == 'close':
                         breakout = True
                         break
@@ -440,20 +479,21 @@ class Executor(object):
     @gen.coroutine
     def _shutdown(self, fast=False):
         """ Send shutdown signal and wait until scheduler completes """
-        if self.status == 'closed':
-            raise Return()
-        self._send_to_scheduler({'op': 'close-stream'})
-        self.status = 'closed'
-        if _global_executor[0] is self:
-            _global_executor[0] = None
-        if not fast:
-            with ignoring(TimeoutError):
-                yield [gen.with_timeout(timedelta(seconds=2), f)
-                        for f in self.coroutines]
-        with ignoring(AttributeError):
-            yield self.scheduler_stream.close(ignore_closed=True)
-        with ignoring(AttributeError):
-            self.scheduler.close_rpc()
+        with log_errors():
+            if self.status == 'closed':
+                raise Return()
+            self._send_to_scheduler({'op': 'close-stream'})
+            self.status = 'closed'
+            if _global_executor[0] is self:
+                _global_executor[0] = None
+            if not fast:
+                with ignoring(TimeoutError):
+                    yield [gen.with_timeout(timedelta(seconds=2), f)
+                            for f in self.coroutines]
+            with ignoring(AttributeError):
+                yield self.scheduler_stream.close(ignore_closed=True)
+            with ignoring(AttributeError):
+                self.scheduler.close_rpc()
 
     def shutdown(self, timeout=10):
         """ Send shutdown signal and wait until scheduler terminates """
