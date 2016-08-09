@@ -370,9 +370,10 @@ class Executor(object):
         if key in self.futures:
             self.futures[key]['event'].clear()
             del self.futures[key]
-        self._send_to_scheduler({'op': 'client-releases-keys',
-                                 'keys': [key],
-                                 'client': self.id})
+        if self.status == 'running':
+            self._send_to_scheduler({'op': 'client-releases-keys',
+                                     'keys': [key],
+                                     'client': self.id})
 
     @gen.coroutine
     def _handle_report(self, start_event):
