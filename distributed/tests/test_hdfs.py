@@ -408,4 +408,4 @@ def test_write_bytes(e, s, a, b):
                                     hdfs=hdfs, lazy=True)
         futures = e.compute(vals)
         results = yield e._gather(futures)
-        assert set(values) == set(results)
+        assert values == results
