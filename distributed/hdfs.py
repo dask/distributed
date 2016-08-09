@@ -53,7 +53,14 @@ def open_file_write(paths, hdfs=None, **kwargs):
     out = [delayed(hdfs.open)(path, 'wb') for path in paths]
     return out
 
-dask.bytes.core._open_files_write['hdfs'] = open_file_write
+
+def open_file_write_direct(path, hdfs=None, **kwargs):
+    if hdfs is None:
+        from hdfs3 import HDFileSystem
+        hdfs = HDFileSystem(kwargs.get('host'), kwargs.get('port'))
+    return hdfs.open(path, 'wb')
+
+dask.bytes.core._open_files_write['hdfs'] = open_file_write_direct
 
 
 def read_bytes(path, executor=None, hdfs=None, lazy=True, delimiter=None,

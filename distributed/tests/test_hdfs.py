@@ -379,20 +379,6 @@ def test_deterministic_key_names(e, s, a, b):
         assert [f.key for f in x] != [f.key for f in z]
 
 
-def test_write_bytes_nocluster():
-    from dask.bytes.core import write_bytes, read_bytes
-    import dask
-    with make_hdfs() as hdfs:
-        path = 'hdfs:///tmp/test/'
-        values = [b'test data %i' % i for i in range(5)]
-        out = write_bytes(values, path, hdfs=hdfs)
-        dask.compute(*out)
-        assert len(hdfs.ls('/tmp/test/')) == 5
-
-        sample, values = read_bytes('hdfs:///tmp/test/', hdfs=hdfs)
-        assert set(list(values())) == set(results)
-
-
 @gen_cluster([(ip, 1), (ip, 2)], timeout=60, executor=True)
 def test_write_bytes(e, s, a, b):
     from dask.bytes.core import write_bytes, read_bytes
