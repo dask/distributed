@@ -200,12 +200,14 @@ def test_send_recv_args():
 
     result = yield send_recv(arg=('127.0.0.1', server.port), op='echo', x=b'1')
     assert result == b'1'
-    result = yield send_recv(addr=b'127.0.0.1:%d' % server.port, op='echo', x=b'1')
-    assert result == b'1'
-    result = yield send_recv(ip=b'127.0.0.1', port=server.port, op='echo', x=b'1')
+    result = yield send_recv(addr=('127.0.0.1:%d' % server.port).encode(),
+                             op='echo', x=b'1')
     assert result == b'1'
     result = yield send_recv(ip=b'127.0.0.1', port=server.port, op='echo',
-            x=b'1', reply=False)
+                            x=b'1')
+    assert result == b'1'
+    result = yield send_recv(ip=b'127.0.0.1', port=server.port, op='echo',
+                             x=b'1', reply=False)
     assert result == None
 
     server.stop()
