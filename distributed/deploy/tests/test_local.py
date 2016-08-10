@@ -58,8 +58,8 @@ def test_Executor_with_local(loop):
 
 
 def test_Executor_solo(loop):
-    e = Executor(loop=loop)
-    e.shutdown()
+    with Executor(loop=loop) as e:
+        pass
 
 
 def test_Executor_twice(loop):
