@@ -11,6 +11,7 @@ from time import sleep
 import uuid
 from threading import Thread
 import six
+import socket
 
 import dask
 from dask.base import tokenize, normalize_token, Base
@@ -315,7 +316,7 @@ class Executor(object):
             from distributed.deploy import LocalCluster
             try:
                 self.cluster = LocalCluster(loop=self.loop, start=False)
-            except OSError:
+            except (OSError, socket.error):
                 self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
                                             start=False)
             self._start_arg = self.cluster.scheduler_address
