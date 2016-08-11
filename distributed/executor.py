@@ -736,13 +736,19 @@ class Executor(object):
             exceptions = set()
             bad_keys = set()
             for key in keys:
-                if self.futures[key]['status'] == 'error':
+                if (key not in self.futures or
+                    self.futures[key]['status'] == 'error'):
                     exceptions.add(key)
                     if errors == 'raise':
-                        d = self.futures[key]
-                        six.reraise(type(d['exception']),
-                                    d['exception'],
-                                    d['traceback'])
+                        try:
+                            d = self.futures[key]
+                            six.reraise(type(d['exception']),
+                                        d['exception'],
+                                        d['traceback'])
+                        except KeyError:
+                            six.reraise(CancelledError,
+                                        CancelledError(key),
+                                        None)
                     if errors == 'skip':
                         bad_keys.add(key)
                         bad_data[key] = None
