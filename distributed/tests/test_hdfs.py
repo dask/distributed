@@ -6,7 +6,7 @@ from tornado import gen
 from dask.delayed import Delayed
 import dask.bag as db
 import dask.dataframe as dd
-from dask import compute
+from dask import compute, delayed
 
 from distributed.compatibility import unicode
 from distributed.utils_test import gen_cluster, cluster, make_hdfs
@@ -384,7 +384,8 @@ def test_write_bytes(e, s, a, b):
     from dask.bytes.core import write_bytes, read_bytes
     with make_hdfs() as hdfs:
         path = 'hdfs:///tmp/test/'
-        values = [b'test data %i' % i for i in range(5)]
+        data = [b'test data %i' % i for i in range(5)]
+        values = [delayed(d) for d in data]
         out = write_bytes(values, path, hdfs=hdfs)
         futures = e.compute(out)
         results = yield e._gather(futures)
@@ -394,4 +395,4 @@ def test_write_bytes(e, s, a, b):
                                     hdfs=hdfs, lazy=True)
         futures = e.compute(vals)
         results = yield e._gather(futures)
-        assert values == results
+        assert data == results
