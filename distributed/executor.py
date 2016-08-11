@@ -262,7 +262,6 @@ class Executor(object):
         self.id = str(uuid.uuid1())
         self.generation = 0
         self.status = None
-        self._start_event = Event()
         self._pending_msg_buffer = []
         if hasattr(address, 'scheduler_address'):
             self.cluster = address
@@ -330,6 +329,8 @@ class Executor(object):
 
         yield self.ensure_connected()
 
+        self.coroutines.append(self._handle_report())
+
     @gen.coroutine
     def reconnect(self, timeout=0.1):
         with log_errors():
@@ -353,32 +354,32 @@ class Executor(object):
     def ensure_connected(self):
         if self.scheduler_stream and not self.scheduler_stream.closed():
             return
-        else:
-            self._start_event.clear()
 
         try:
-            ident = yield self.scheduler.identity()
-        except (StreamClosedError, OSError):
+            stream = yield connect(self.scheduler.ip, self.scheduler.port)
+        except:
             raise IOError("Could not connect to %s:%d" %
                           (self.scheduler.ip, self.scheduler.port))
 
-        stream = yield connect(self.scheduler.ip, self.scheduler.port)
+        ident = yield self.scheduler.identity()
+
         yield write(stream, {'op': 'register-client',
                              'client': self.id})
+        msg = yield read(stream)
+        assert len(msg) == 1
+        assert msg[0]['op'] == 'stream-start'
 
         bstream = BatchedSend(interval=10, loop=self.loop)
         bstream.start(stream)
         self.scheduler_stream = bstream
 
-        self.coroutines.clear()
-        self.coroutines.append(self._handle_report())
-
         _global_executor[0] = self
-        yield self._start_event.wait()
         self.status = 'running'
+
         for msg in self._pending_msg_buffer:
             self._send_to_scheduler(msg)
         self._pending_msg_buffer.clear()
+
         logger.debug("Started scheduling coroutines. Synchronized")
 
     def __enter__(self):
@@ -421,9 +422,13 @@ class Executor(object):
                     msgs = yield read(self.scheduler_stream.stream)
                 except StreamClosedError:
                     logger.debug("Stream closed to scheduler", exc_info=True)
-                    self.loop.add_callback(self.reconnect)
-                    self.status = 'connecting'
-                    break
+                    if self.status == 'running':
+                        logger.info("Reconnecting...")
+                        self.status = 'connecting'
+                        yield self.reconnect()
+                        continue
+                    else:
+                        break
                 if not isinstance(msgs, list):
                     msgs = [msgs]
 
@@ -431,9 +436,7 @@ class Executor(object):
                 for msg in msgs:
                     logger.debug("Executor receives message %s", msg)
 
-                    if msg['op'] == 'stream-start':
-                        self._start_event.set()
-                    elif msg['op'] == 'close':
+                    if msg['op'] == 'close':
                         breakout = True
                         break
                     elif msg['op'] == 'key-in-memory':

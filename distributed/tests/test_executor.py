@@ -3357,44 +3357,6 @@ def test_stress_creation_and_deletion(e, s):
     yield [create_and_destroy_worker(0.1 * i) for i in range(10)]
 
 
-"""
-@gen_test(timeout=None)
-def test_reconnect():
-    s = Scheduler()
-    s.start(0)
-
-    w = Worker(s.ip, s.port)
-    yield w._start(0)
-
-    e = Executor(s.address, start=False, loop=s.loop)
-    yield e._start()
-
-    x = e.submit(inc, 1)
-    result = yield x._result()
-    assert result == 2
-
-    s.stop()
-    s.close_streams()
-
-    yield gen.sleep(1)
-
-    with pytest.raises(CancelledError):
-        result = yield x._result()
-
-    s2 = Scheduler()
-    s2.start(s.port)
-
-    start = time()
-    while e.id not in s2.wants_what:
-        yield gen.sleep(0.01)
-        assert time() < start + 5
-
-    x = e.submit(inc, 2)
-    result = yield x._result()
-    assert result == 3
-"""
-
-
 @gen_test()
 def test_status():
     s = Scheduler()
@@ -3442,9 +3404,8 @@ def test_persist_optimize_graph(e, s, a, b):
 
 from distributed.utils_test import popen
 def test_reconnect(loop):
-    e = Executor('localhost:9393', loop=loop, start=False)
-    with popen(['dask-scheduler', '--port', '9393']) as s:
-        e.start()
+    with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
+        e = Executor('localhost:9393', loop=loop)
         assert e.ncores() == {}
         x = e.submit(inc, 1)
         assert x.status == 'pending'
@@ -3461,7 +3422,7 @@ def test_reconnect(loop):
     with pytest.raises(CancelledError):
         x.result()
 
-    with popen(['dask-scheduler', '--port', '9393']) as s:
+    with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
         start = time()
         while e.status != 'running':
             sleep(0.01)
