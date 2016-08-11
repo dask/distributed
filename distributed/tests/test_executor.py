@@ -3402,6 +3402,12 @@ def test_persist_optimize_graph(e, s, a, b):
         assert not any(tokey(k) in s.tasks for k in b2._keys())
 
 
+@gen_cluster(executor=True, ncores=[])
+def test_scatter_raises_if_no_workers(e, s):
+    with pytest.raises(ValueError):
+        yield e._scatter([1])
+
+
 from distributed.utils_test import popen
 def test_reconnect(loop):
     with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
