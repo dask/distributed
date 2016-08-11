@@ -378,7 +378,7 @@ class Executor(object):
 
         for msg in self._pending_msg_buffer:
             self._send_to_scheduler(msg)
-        self._pending_msg_buffer.clear()
+        del self._pending_msg_buffer[:]
 
         logger.debug("Started scheduling coroutines. Synchronized")
 
