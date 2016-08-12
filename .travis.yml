@@ -1,0 +1,80 @@
+language: python
+sudo: false
+services:
+  - docker
+
+matrix:
+  fast_finish: true
+  include:
+    - python: "2.7"
+    - python: "3.4"
+    - python: "3.5"
+      env: HDFS=false
+    - python: "2.7"
+      env: HDFS=true
+      sudo: true
+      dist: trusty
+    - python: "3.5"
+      env: HDFS=true
+      sudo: true
+      dist: trusty
+
+before_install:
+  - |
+    if [[ $HDFS == true ]]; then
+        if [[ "$TRAVIS_PYTHON_VERSION" == "2.7" ]]; then
+          export DOCKER_ENV=/opt/conda;
+        else
+          export DOCKER_ENV=/opt/conda/envs/py3;
+        fi
+        echo $DOCKER_ENV
+        pwd
+        pushd continuous_integration
+        docker build -t distributed-hdfs .
+        popd
+        docker run -d -p 8020:8020 -p 50070:50070 -v $(pwd):/distributed distributed-hdfs
+        export CONTAINER_ID=$(docker ps -l -q)
+        sleep 60  # Wait for namenode and datanode
+    fi;
+
+install:
+  # Install conda
+  - wget http://repo.continuum.io/miniconda/Miniconda-latest-Linux-x86_64.sh -O miniconda.sh
+  - bash miniconda.sh -b -p $HOME/miniconda
+  - export PATH="$HOME/miniconda/bin:$PATH"
+  - conda config --set always_yes yes --set changeps1 no
+  - conda update conda
+
+  # Install dependencies
+  - conda create -n test-environment python=$TRAVIS_PYTHON_VERSION
+  - source activate test-environment
+  - conda install pytest coverage tornado toolz dill futures dask ipywidgets psutil bokeh requests joblib mock ipykernel jupyter_client
+  - pip install git+https://github.com/dask/dask.git --upgrade
+  - pip install git+https://github.com/joblib/joblib.git --upgrade
+  - pip install git+https://github.com/dask/s3fs.git --upgrade
+
+  # Install distributed
+  - python setup.py install
+
+  - |
+    if [[ $HDFS == true ]]; then
+        pwd
+        docker exec -it $CONTAINER_ID $DOCKER_ENV/bin/python setup.py install
+    fi;
+
+script:
+    - |
+      if [[ $HDFS == true ]]; then
+        pwd
+        docker exec -it $CONTAINER_ID $DOCKER_ENV/bin/py.test distributed/tests/test_hdfs.py --verbose
+      elif [[ $TRAVIS_PYTHON_VERSION == '3.4' ]]; then
+        coverage run $(which py.test) distributed -m "not avoid_travis" --verbose;
+      else
+        py.test -m "not avoid_travis" distributed --verbose;
+      fi;
+
+after_success:
+    - if [[ $TRAVIS_PYTHON_VERSION == '3.4' ]]; then coverage report; pip install coveralls ; coveralls ; fi
+
+notifications:
+  email: false
