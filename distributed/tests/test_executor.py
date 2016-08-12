@@ -1996,9 +1996,9 @@ def test__cancel_collection(e, s, a, b):
 def test_cancel(loop):
     with cluster() as (s, [a, b]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            x = e.submit(slowinc, 1)
-            y = e.submit(slowinc, x)
-            z = e.submit(slowinc, y)
+            x = e.submit(slowinc, 1, key='x')
+            y = e.submit(slowinc, x, key='y')
+            z = e.submit(slowinc, y, key='z')
 
             e.cancel([y])
 

@@ -737,7 +737,7 @@ class Scheduler(Server):
                     if key in self.waiting_data and not self.waiting_data[key]:
                         r = self.transition(key, 'released')
                         self.transitions(r)
-                    if not self.dependents[key]:
+                    if key in self.dependents and not self.dependents[key]:
                         r = self.transition(key, 'forgotten')
                         self.transitions(r)
 
