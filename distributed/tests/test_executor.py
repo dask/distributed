@@ -3410,11 +3410,13 @@ def test_scatter_raises_if_no_workers(e, s):
 
 from distributed.utils_test import popen
 def test_reconnect(loop):
+    w = Worker('127.0.0.1', 9393, loop=loop)
+    w.start()
     with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
         e = Executor('localhost:9393', loop=loop)
-        assert e.ncores() == {}
+        assert len(e.ncores()) == 1
         x = e.submit(inc, 1)
-        assert x.status == 'pending'
+        assert x.result() == 2
 
     start = time()
     while e.status != 'connecting':
@@ -3433,11 +3435,17 @@ def test_reconnect(loop):
         while e.status != 'running':
             sleep(0.01)
             assert time() < start + 5
-        assert e.ncores() == {}
+
+        start = time()
+        while len(e.ncores()) != 1:
+            sleep(0.01)
+            assert time() < start + 5
+
         x = e.submit(inc, 1)
-        assert x.status == 'pending'
+        assert x.result() == 2
 
     with pytest.raises(CancelledError):
         x.result()
 
     e.shutdown()
+    sync(loop, w._close)
