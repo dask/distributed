@@ -18,6 +18,7 @@ from toolz import (identity, isdistinct, first, concat, pluck, valmap,
         partition_all, partial)
 from tornado import gen
 from tornado.ioloop import IOLoop
+from tornado.iostream import StreamClosedError
 
 import dask
 from dask import delayed
@@ -3444,8 +3445,17 @@ def test_reconnect(loop):
         x = e.submit(inc, 1)
         assert x.result() == 2
 
-    with pytest.raises(CancelledError):
-        x.result()
+    start = time()
+    while True:
+        try:
+            x.result()
+            assert False
+        except StreamClosedError:
+            continue
+        except CancelledError:
+            break
+        assert time() < start + 5
+        sleep(0.1)
 
     e.shutdown()
     sync(loop, w._close)
