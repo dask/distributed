@@ -12,21 +12,18 @@ from distributed.compatibility import unicode
 from distributed.utils_test import gen_cluster, cluster, make_hdfs
 from distributed.utils import get_ip
 from distributed.utils_test import loop
-from distributed.hdfs import (read_bytes, get_block_locations)
 from distributed import Executor
 from distributed.executor import _wait, Future
 
+hdfs3 = pytest.importorskip('hdfs3')
+from distributed.hdfs import read_bytes, get_block_locations
 
-
-pytest.importorskip('hdfs3')
-from hdfs3 import HDFileSystem
 try:
-    hdfs = HDFileSystem(host='localhost', port=8020)
+    hdfs = hdfs3.HDFileSystem(host='localhost', port=8020)
     hdfs.df()
     del hdfs
 except:
-    pytestmark = pytest.mark.skipif('True')
-
+    pytestmark = pytest.skip()
 
 ip = get_ip()
 
@@ -252,7 +249,6 @@ def test_read_csv(e, s, a, b):
             f.write(b'name,amount,id\nCharlie,300,3\nDennis,400,4')
 
         df = dd.read_csv('hdfs:///tmp/test/*.csv', lineterminator='\n')
-        assert df._known_dtype
         result = e.compute(df.id.sum(), sync=False)
         result = yield result._result()
         assert result == 1 + 2 + 3 + 4
@@ -279,7 +275,6 @@ def test_read_csv_lazy(e, s, a, b):
             f.write(b'name,amount,id\nCharlie,300,3\nDennis,400,4')
 
         df = dd.read_csv('hdfs:///tmp/test/*.csv', lineterminator='\n')
-        assert df._known_dtype
         yield gen.sleep(0.5)
         assert not s.tasks
 

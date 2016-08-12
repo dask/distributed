@@ -53,7 +53,6 @@ def test__futures_to_dask_dataframe(e, s, a, b):
 
     assert isinstance(ddf, dd.DataFrame)
     assert ddf.divisions == (0, 30, 60, 80)
-    assert ddf._known_dtype
     expr = ddf.x.sum()
     result = yield e._get(expr.dask, expr._keys())
     assert result == [sum([df.x.sum() for df in dfs])]
@@ -82,19 +81,14 @@ def test_futures_to_dask_dataframe(loop):
             assert ddf.dask == ddf2.dask
 
 
-@gen_cluster(timeout=120, executor=True)
+@gen_cluster(timeout=240, executor=True)
 def test_dataframes(e, s, a, b):
-    dfs = [pd.DataFrame({'x': np.random.random(100),
-                         'y': np.random.random(100)},
-                        index=list(range(i, i + 100)))
-           for i in range(0, 100*10, 100)]
+    df = pd.DataFrame({'x': np.random.random(1000),
+                       'y': np.random.random(1000)},
+                       index=np.arange(1000))
+    ldf = dd.from_pandas(df, npartitions=10)
 
-    remote_dfs = e.map(lambda x: x, dfs)
-    rdf = yield _futures_to_dask_dataframe(remote_dfs, divisions=True)
-    name = 'foo'
-    ldf = dd.DataFrame({(name, i): df for i, df in enumerate(dfs)},
-                       name, dfs[0].columns,
-                       list(range(0, 1000, 100)) + [999])
+    rdf = e.persist(ldf)
 
     assert rdf.divisions == ldf.divisions
 
@@ -115,7 +109,7 @@ def test_dataframes(e, s, a, b):
     for f in exprs:
         local = f(ldf).compute(get=dask.get)
         remote = e.compute(f(rdf))
-        remote = yield gen.with_timeout(timedelta(seconds=5), remote._result())
+        remote = yield remote._result()
         assert_equal(local, remote)
 
 

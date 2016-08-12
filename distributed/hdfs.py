@@ -2,20 +2,16 @@
 from __future__ import print_function, division, absolute_import
 
 import logging
-import json
 from math import log
 import os
-import io
 from warnings import warn
 
-from dask.delayed import delayed
-from dask.base import tokenize
 import dask.bytes.core
+from dask.delayed import delayed
 from toolz import merge
+from hdfs3 import HDFileSystem
 
-from .compatibility import unicode
 from .executor import default_executor, ensure_default_get
-from .utils import ensure_bytes
 
 
 logger = logging.getLogger(__name__)
@@ -37,7 +33,6 @@ def get_block_locations(hdfs, filename):
 
 def read_block_from_hdfs(filename, offset, length, host=None, port=None,
         delimiter=None):
-    from hdfs3 import HDFileSystem
     from locket import lock_file
     with lock_file('.lock'):
         hdfs = HDFileSystem(host=host, port=port)
@@ -48,7 +43,6 @@ def read_block_from_hdfs(filename, offset, length, host=None, port=None,
 def open_file_write(paths, hdfs=None, **kwargs):
     """ Open list of files using delayed """
     if hdfs is None:
-        from hdfs3 import HDFileSystem
         hdfs = HDFileSystem(kwargs.get('host'), kwargs.get('port'))
     out = [delayed(hdfs.open)(path, 'wb') for path in paths]
     return out
@@ -56,7 +50,6 @@ def open_file_write(paths, hdfs=None, **kwargs):
 
 def open_file_write_direct(path, hdfs=None, **kwargs):
     if hdfs is None:
-        from hdfs3 import HDFileSystem
         hdfs = HDFileSystem(kwargs.get('host'), kwargs.get('port'))
     return hdfs.open(path, 'wb')
 
@@ -89,7 +82,6 @@ def read_bytes(path, executor=None, hdfs=None, lazy=True, delimiter=None,
     """
     if compression:
         raise NotImplementedError("hdfs compression")
-    from hdfs3 import HDFileSystem
     hdfs = hdfs or HDFileSystem(**hdfs_auth)
     executor = default_executor(executor)
     blocks = get_block_locations(hdfs, path)
@@ -130,7 +122,6 @@ dask.bytes.core._read_bytes['hdfs'] = read_bytes
 
 
 def hdfs_open_file(path, auth):
-    from hdfs3 import HDFileSystem
     hdfs = HDFileSystem(**auth)
     return hdfs.open(path, mode='rb')
 
@@ -139,7 +130,6 @@ def open_files(path, hdfs=None, lazy=None, **auth):
     if lazy is not None:
         raise DeprecationWarning("Lazy keyword has been deprecated. "
                                  "Now always lazy")
-    from hdfs3 import HDFileSystem
     hdfs = hdfs or HDFileSystem(**auth)
     filenames = sorted(hdfs.glob(path))
     myopen = delayed(hdfs_open_file)
