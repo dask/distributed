@@ -652,6 +652,18 @@ def test_submit_after_failed_worker(loop):
             assert total.result() == sum(map(inc, range(10)))
 
 
+@gen_cluster(executor=True, timeout=30)
+def test__submit_after_failed_worker(e, s, a, b):
+    L = e.map(inc, range(10))
+    yield _wait(L)
+
+    a.stop()
+
+    total = e.submit(sum, L)
+    result = yield total._result()
+    assert result == sum(map(inc, range(10)))
+
+
 def test_gather_after_failed_worker(loop):
     with cluster() as (s, [a, b]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
