@@ -116,7 +116,8 @@ def gather_from_workers(who_has, deserialize=True, rpc=rpc, close=True,
             else:
                 raise KeyError(*bad_keys)
 
-        coroutines = [rpc(address).get_data(keys=keys, close=close)
+        rpcs = {address: rpc(address) for address in d}
+        coroutines = [rpcs[address].get_data(keys=keys, close=close)
                             for address, keys in d.items()]
         response = yield ignore_exceptions(coroutines, socket.error,
                                            StreamClosedError)
