@@ -123,7 +123,7 @@ def test_multi_progressbar_widget(s, a, b):
 
     assert p.bars['x'].bar_style == 'success'
     assert p.bars['y'].bar_style == 'success'
-    # assert p.bars['e'].bar_style == 'danger'
+    assert p.bars['e'].bar_style == 'danger'
 
     assert p.status == 'error'
 
