@@ -53,7 +53,6 @@ def test__futures_to_dask_dataframe(e, s, a, b):
 
     assert isinstance(ddf, dd.DataFrame)
     assert ddf.divisions == (0, 30, 60, 80)
-    assert ddf._known_dtype
     expr = ddf.x.sum()
     result = yield e._get(expr.dask, expr._keys())
     assert result == [sum([df.x.sum() for df in dfs])]
@@ -82,19 +81,14 @@ def test_futures_to_dask_dataframe(loop):
             assert ddf.dask == ddf2.dask
 
 
-@gen_cluster(timeout=120, executor=True)
+@gen_cluster(timeout=240, executor=True)
 def test_dataframes(e, s, a, b):
-    dfs = [pd.DataFrame({'x': np.random.random(100),
-                         'y': np.random.random(100)},
-                        index=list(range(i, i + 100)))
-           for i in range(0, 100*10, 100)]
+    df = pd.DataFrame({'x': np.random.random(1000),
+                       'y': np.random.random(1000)},
+                       index=np.arange(1000))
+    ldf = dd.from_pandas(df, npartitions=10)
 
-    remote_dfs = e.map(lambda x: x, dfs)
-    rdf = yield _futures_to_dask_dataframe(remote_dfs, divisions=True)
-    name = 'foo'
-    ldf = dd.DataFrame({(name, i): df for i, df in enumerate(dfs)},
-                       name, dfs[0].columns,
-                       list(range(0, 1000, 100)) + [999])
+    rdf = e.persist(ldf)
 
     assert rdf.divisions == ldf.divisions
 
@@ -115,7 +109,7 @@ def test_dataframes(e, s, a, b):
     for f in exprs:
         local = f(ldf).compute(get=dask.get)
         remote = e.compute(f(rdf))
-        remote = yield gen.with_timeout(timedelta(seconds=5), remote._result())
+        remote = yield remote._result()
         assert_equal(local, remote)
 
 
@@ -309,7 +303,7 @@ def test_dataframe_set_index_sync(loop):
                         freq='2H', partition_freq='1M', seed=1)
                 df = e.persist(df)
 
-                df2 = df.set_index('name', method='tasks')
+                df2 = df.set_index('name', shuffle='tasks')
                 df2 = e.persist(df2)
 
                 df2.head()
@@ -337,3 +331,31 @@ def test_loc(e, s, a, b):
     ddf = dd.from_pandas(df, npartitions=10)
     future = e.compute(ddf.loc['2000-01-17':'2000-01-24'])
     yield future._result()
+
+
+def test_dataframe_groupby_tasks(loop):
+    df = pd.util.testing.makeTimeDataFrame()
+    df['A'] = df.A // 0.1
+    df['B'] = df.B // 0.1
+    ddf = dd.from_pandas(df, npartitions=10)
+    with cluster() as (c, [a, b]):
+        with Executor(('127.0.0.1', c['port']), loop=loop) as e:
+            with dask.set_options(get=e.get):
+                for ind in [lambda x: 'A', lambda x: x.A]:
+                    a = df.groupby(ind(df)).apply(len)
+                    b = ddf.groupby(ind(ddf)).apply(len)
+                    assert_equal(a, b.compute(get=dask.get).sort_index())
+                    assert not any('partd' in k[0] for k in b.dask)
+
+                    a = df.groupby(ind(df)).B.apply(len)
+                    b = ddf.groupby(ind(ddf)).B.apply(len)
+                    assert_equal(a, b.compute(get=dask.get).sort_index())
+                    assert not any('partd' in k[0] for k in b.dask)
+
+                with pytest.raises(NotImplementedError):
+                    ddf.groupby(ddf[['A', 'B']]).apply(len)
+
+                a = df.groupby(['A', 'B']).apply(len)
+                b = ddf.groupby(['A', 'B']).apply(len)
+
+                assert_equal(a, b.compute(get=dask.get).sort_index())

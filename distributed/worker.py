@@ -8,7 +8,7 @@ from multiprocessing.pool import ThreadPool
 import os
 import pkg_resources
 import tempfile
-from threading import current_thread
+from threading import current_thread, Thread
 from time import time
 from timeit import default_timer
 import shutil
@@ -29,9 +29,9 @@ from .batched import BatchedSend
 from .client import pack_data, gather_from_workers
 from .compatibility import reload, unicode
 from .core import (rpc, Server, pingpong, dumps, loads, coerce_to_address,
-        error_message, read)
+        error_message, read, RPCClosed)
 from .sizeof import sizeof
-from .utils import funcname, get_ip, _maybe_complex, log_errors, All
+from .utils import funcname, get_ip, _maybe_complex, log_errors, All, ignoring
 
 _ncores = ThreadPool()._processes
 
@@ -81,17 +81,17 @@ class Worker(Server):
     Create schedulers and workers in Python:
 
     >>> from distributed import Scheduler, Worker
-    >>> c = Scheduler('192.168.0.100', 8787)  # doctest: +SKIP
+    >>> c = Scheduler('192.168.0.100', 8786)  # doctest: +SKIP
     >>> w = Worker(c.ip, c.port)  # doctest: +SKIP
-    >>> yield w._start(port=8788)  # doctest: +SKIP
+    >>> yield w._start(port=8786)  # doctest: +SKIP
 
     Or use the command line::
 
         $ dask-scheduler
-        Start scheduler at 127.0.0.1:8787
+        Start scheduler at 127.0.0.1:8786
 
-        $ dask-worker 127.0.0.1:8787
-        Start worker at:               127.0.0.1:8788
+        $ dask-worker 127.0.0.1:8786
+        Start worker at:               127.0.0.1:8786
         Registered with scheduler at:  127.0.0.1:8787
 
     See Also
@@ -114,8 +114,10 @@ class Worker(Server):
         self.active = set()
         self.name = name
         self.heartbeat_interval = heartbeat_interval
+        self.heartbeat_active = False
         self._last_disk_io = None
         self._last_net_io = None
+        self._ipython_kernel = None
 
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
@@ -145,7 +147,9 @@ class Worker(Server):
                     'terminate': self.terminate,
                     'ping': pingpong,
                     'health': self.host_health,
-                    'upload_file': self.upload_file}
+                    'upload_file': self.upload_file,
+                    'start_ipython': self.start_ipython,
+                }
 
         super(Worker, self).__init__(handlers, io_loop=self.loop, **kwargs)
 
@@ -156,14 +160,21 @@ class Worker(Server):
 
     @gen.coroutine
     def heartbeat(self):
-        logger.debug("Heartbeat: %s" % self.address)
-        yield self.scheduler.register(address=self.address, name=self.name,
-                                ncores=self.ncores,
-                                now=time(),
-                                info=self.process_health(),
-                                host_info=self.host_health(),
-                                services=self.service_ports,
-                                **self.process_health())
+        if not self.heartbeat_active:
+            self.heartbeat_active = True
+            logger.debug("Heartbeat: %s" % self.address)
+            try:
+                yield self.scheduler.register(address=self.address, name=self.name,
+                                        ncores=self.ncores,
+                                        now=time(),
+                                        info=self.process_health(),
+                                        host_info=self.host_health(),
+                                        services=self.service_ports,
+                                        **self.process_health())
+            finally:
+                self.heartbeat_active = False
+        else:
+            logger.debug("Heartbeat skipped: channel busy")
 
     @property
     def center(self):
@@ -211,12 +222,13 @@ class Worker(Server):
 
     @gen.coroutine
     def _close(self, report=True, timeout=10):
-        if report:
-            yield gen.with_timeout(timedelta(seconds=timeout),
-                    self.scheduler.unregister(address=(self.ip, self.port)),
-                    io_loop=self.loop)
         self.heartbeat_callback.stop()
-        self.scheduler.close_streams()
+        with ignoring(RPCClosed, StreamClosedError):
+            if report:
+                yield gen.with_timeout(timedelta(seconds=timeout),
+                        self.scheduler.unregister(address=(self.ip, self.port)),
+                        io_loop=self.loop)
+        self.scheduler.close_rpc()
         self.stop()
         self.executor.shutdown()
         if os.path.exists(self.local_dir):
@@ -284,26 +296,25 @@ class Worker(Server):
         data: The scope in which to run tasks
         len(remote): the number of new keys we've gathered
         """
-        with log_errors():
-            who_has = merge(msg['who_has'] for msg in msgs if 'who_has' in msg)
-            local = {k: self.data[k] for k in who_has if k in self.data}
-            who_has = {k: v for k, v in who_has.items() if k not in local}
-            remote, bad_data = yield gather_from_workers(who_has,
-                    permissive=True, rpc=self.rpc, close=False)
-            if remote:
-                self.data.update(remote)
-                yield self.scheduler.add_keys(address=self.address, keys=list(remote))
+        who_has = merge(msg['who_has'] for msg in msgs if 'who_has' in msg)
+        local = {k: self.data[k] for k in who_has if k in self.data}
+        who_has = {k: v for k, v in who_has.items() if k not in local}
+        remote, bad_data = yield gather_from_workers(who_has,
+                permissive=True, rpc=self.rpc, close=False)
+        if remote:
+            self.data.update(remote)
+            yield self.scheduler.add_keys(address=self.address, keys=list(remote))
 
-            data = merge(local, remote)
+        data = merge(local, remote)
 
-            if bad_data:
-                missing = {msg['key']: {k for k in msg['who_has'] if k in bad_data}
-                            for msg in msgs if 'who_has' in msg}
-                bad = {k: v for k, v in missing.items() if v}
-                good = [msg for msg in msgs if not missing.get(msg['key'])]
-            else:
-                good, bad = msgs, {}
-            raise Return([good, bad, data, len(remote)])
+        if bad_data:
+            missing = {msg['key']: {k for k in msg['who_has'] if k in bad_data}
+                        for msg in msgs if 'who_has' in msg}
+            bad = {k: v for k, v in missing.items() if v}
+            good = [msg for msg in msgs if not missing.get(msg['key'])]
+        else:
+            good, bad = msgs, {}
+        raise Return([good, bad, data, len(remote)])
 
     @gen.coroutine
     def _ready_task(self, function=None, key=None, args=(), kwargs={},
@@ -322,7 +333,7 @@ class Worker(Server):
                 diagnostics['transfer_stop'] = time()
                 self.data.update(other)
                 yield self.scheduler.add_keys(address=self.address,
-                                           keys=list(other))
+                                              keys=list(other))
                 data.update(other)
             except KeyError as e:
                 logger.warn("Could not find data for %s", key)
@@ -384,7 +395,6 @@ class Worker(Server):
             bstream = BatchedSend(interval=2, loop=self.loop)
             bstream.start(stream)
 
-        with log_errors():
             closed = False
             last = gen.sleep(0)
             while not closed:
@@ -410,93 +420,95 @@ class Worker(Server):
                 # self.loop.add_callback(self.compute_many, bstream, msgs)
                 last = self.compute_many(bstream, msgs)
 
-            yield last  # TODO: there might be more than one lingering
+            try:
+                yield last  # TODO: there might be more than one lingering
+            except (RPCClosed, RuntimeError):
+                pass
+
             yield bstream.close()
             logger.info("Close compute stream")
 
     @gen.coroutine
     def compute_many(self, bstream, msgs, report=False):
-        with log_errors():
-            transfer_start = time()
-            good, bad, data, num_transferred = yield self.gather_many(msgs)
-            transfer_end = time()
+        transfer_start = time()
+        good, bad, data, num_transferred = yield self.gather_many(msgs)
+        transfer_end = time()
 
-            for msg in msgs:
-                msg.pop('who_has', None)
+        for msg in msgs:
+            msg.pop('who_has', None)
 
-            if bad:
-                logger.warn("Could not find data for %s", sorted(bad))
-            for k, v in bad.items():
-                bstream.send({'status': 'missing-data',
-                              'key': k,
-                              'keys': list(v)})
+        if bad:
+            logger.warn("Could not find data for %s", sorted(bad))
+        for k, v in bad.items():
+            bstream.send({'status': 'missing-data',
+                          'key': k,
+                          'keys': list(v)})
 
-            if good:
-                futures = [self.compute_one(data, report=report, **msg)
-                                         for msg in good]
-                wait_iterator = gen.WaitIterator(*futures)
-                result = yield wait_iterator.next()
-                if num_transferred:
-                    result['transfer_start'] = transfer_start
-                    result['transfer_stop'] = transfer_end
-                bstream.send(result)
-                while not wait_iterator.done():
-                    msg = yield wait_iterator.next()
-                    bstream.send(msg)
+        if good:
+            futures = [self.compute_one(data, report=report, **msg)
+                                     for msg in good]
+            wait_iterator = gen.WaitIterator(*futures)
+            result = yield wait_iterator.next()
+            if num_transferred:
+                result['transfer_start'] = transfer_start
+                result['transfer_stop'] = transfer_end
+            bstream.send(result)
+            while not wait_iterator.done():
+                msg = yield wait_iterator.next()
+                bstream.send(msg)
 
     @gen.coroutine
     def compute_one(self, data, key=None, function=None, args=None, kwargs=None,
                     report=False, task=None):
         logger.debug("Compute one on %s", key)
-        with log_errors():
-            diagnostics = dict()
-            try:
-                start = default_timer()
-                function, args, kwargs = self.deserialize(function, args, kwargs,
-                        task)
-                diagnostics['deserialization'] = default_timer() - start
-            except Exception as e:
-                logger.warn("Could not deserialize task", exc_info=True)
-                emsg = error_message(e)
-                emsg['key'] = key
-                raise Return(emsg)
+        diagnostics = dict()
+        try:
+            start = default_timer()
+            function, args, kwargs = self.deserialize(function, args, kwargs,
+                    task)
+            diagnostics['deserialization'] = default_timer() - start
+        except Exception as e:
+            logger.warn("Could not deserialize task", exc_info=True)
+            emsg = error_message(e)
+            emsg['key'] = key
+            raise Return(emsg)
 
-            self.active.add(key)
-            # Fill args with data
-            args2 = pack_data(args, data)
-            kwargs2 = pack_data(kwargs, data)
+        self.active.add(key)
+        # Fill args with data
+        args2 = pack_data(args, data)
+        kwargs2 = pack_data(kwargs, data)
 
-            # Log and compute in separate thread
-            result = yield self.executor_submit(key, apply_function, function,
-                                                args2, kwargs2)
+        # Log and compute in separate thread
+        result = yield self.executor_submit(key, apply_function, function,
+                                            args2, kwargs2)
 
-            result['key'] = key
-            result.update(diagnostics)
+        result['key'] = key
+        result.update(diagnostics)
 
-            if result['status'] == 'OK':
-                self.data[key] = result.pop('result')
-                if report:
-                    response = yield self.scheduler.add_keys(keys=[key],
-                                            address=(self.ip, self.port))
-                    if not response == 'OK':
-                        logger.warn('Could not report results to scheduler: %s',
-                                    str(response))
-            else:
-                logger.warn(" Compute Failed\n"
-                    "Function: %s\n"
-                    "args:     %s\n"
-                    "kwargs:   %s\n",
-                    str(funcname(function))[:1000], 
-                    convert_args_to_str(args, max_len=1000),
-                    convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
+        if result['status'] == 'OK':
+            self.data[key] = result.pop('result')
+            if report:
+                response = yield self.scheduler.add_keys(keys=[key],
+                                        address=(self.ip, self.port))
+                if not response == 'OK':
+                    logger.warn('Could not report results to scheduler: %s',
+                                str(response))
+        else:
+            logger.warn(" Compute Failed\n"
+                "Function: %s\n"
+                "args:     %s\n"
+                "kwargs:   %s\n",
+                str(funcname(function))[:1000],
+                convert_args_to_str(args, max_len=1000),
+                convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
 
-            logger.debug("Send compute response to scheduler: %s, %s", key,
-                         result)
-            try:
-                self.active.remove(key)
-            except KeyError:
-                pass
-            raise Return(result)
+        logger.debug("Send compute response to scheduler: %s, %s", key,
+                     result)
+        try:
+            self.active.remove(key)
+        except KeyError:
+            pass
+        raise Return(result)
 
     @gen.coroutine
     def compute(self, stream=None, function=None, key=None, args=(), kwargs={},
@@ -529,7 +541,7 @@ class Worker(Server):
             self.data[key] = result.pop('result')
             if report:
                 response = yield self.scheduler.add_keys(address=(self.ip, self.port),
-                                                      keys=[key])
+                                                         keys=[key])
                 if not response == 'OK':
                     logger.warn('Could not report results to scheduler: %s',
                                 str(response))
@@ -538,7 +550,7 @@ class Worker(Server):
                 "Function: %s\n"
                 "args:     %s\n"
                 "kwargs:   %s\n",
-                str(funcname(function))[:1000], 
+                str(funcname(function))[:1000],
                 convert_args_to_str(args, max_len=1000),
                 convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
 
@@ -564,7 +576,7 @@ class Worker(Server):
                 "Function: %s\n"
                 "args:     %s\n"
                 "kwargs:   %s\n",
-                str(funcname(function))[:1000], 
+                str(funcname(function))[:1000],
                 convert_args_to_str(args, max_len=1000),
                 convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
 
@@ -604,6 +616,53 @@ class Worker(Server):
 
     def get_data(self, stream, keys=None):
         return {k: dumps(self.data[k]) for k in keys if k in self.data}
+
+    def _start_ipython(self):
+        from IPython import get_ipython
+        if get_ipython() is not None:
+            raise RuntimeError("Cannot start IPython, it's already running.")
+
+        from zmq.eventloop.ioloop import ZMQIOLoop
+        from ipykernel.kernelapp import IPKernelApp
+        # save the global IOLoop instance
+        # since IPython relies on it, but we are going to put it in a thread.
+        save_inst = IOLoop.instance()
+        IOLoop.clear_instance()
+        zmq_loop = ZMQIOLoop()
+        zmq_loop.install()
+
+        # start IPython, disabling its signal handlers that won't work due to running in a thread:
+        app = self._ipython_kernel = IPKernelApp.instance(log=logger)
+        # Don't connect to the history database
+        app.config.HistoryManager.hist_file = ':memory:'
+        # listen on all interfaces, so remote clients can connect:
+        app.ip = self.ip
+        app.init_signal = lambda : None
+        app.initialize([])
+        app.kernel.pre_handler_hook = lambda : None
+        app.kernel.post_handler_hook = lambda : None
+        app.kernel.start()
+
+        # save self in the IPython namespace as 'worker'
+        app.kernel.shell.user_ns['worker'] = self
+
+        # start IPython's IOLoop in a thread
+        zmq_loop_thread = Thread(target=zmq_loop.start)
+        zmq_loop_thread.start()
+
+        # put the global IOLoop instance back:
+        IOLoop.clear_instance()
+        save_inst.install()
+        return app
+
+    def start_ipython(self, stream):
+        """Start an IPython kernel
+
+        Returns Jupyter connection info dictionary.
+        """
+        if self._ipython_kernel is None:
+            self._ipython_kernel = self._start_ipython()
+        return self._ipython_kernel.get_connection_info()
 
     def upload_file(self, stream, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_dir, filename)

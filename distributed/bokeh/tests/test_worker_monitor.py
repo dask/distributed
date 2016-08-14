@@ -13,6 +13,7 @@ from distributed.bokeh.worker_monitor import (resource_profile_plot,
 from distributed.diagnostics.scheduler import workers, tasks
 from distributed.utils_test import gen_cluster
 
+
 @gen_cluster()
 def test_resource_monitor_plot(s, a, b):
     while any('last-seen' not in v for v in s.host_info.values()):
@@ -28,7 +29,7 @@ def test_resource_monitor_plot(s, a, b):
                                        'network-send': 2**17,
                                        'network-recv': 2**16}}]
 
-    source, plot = resource_profile_plot()
+    source, _, _, _ = resource_profile_plot()
     resource_profile_update(source, workers_buffer, times_buffer)
 
     assert source.data['workers'] == ['10.10.20.86', '10.10.20.87']

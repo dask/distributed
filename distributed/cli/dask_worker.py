@@ -16,8 +16,8 @@ from tornado import gen
 
 logger = logging.getLogger('distributed.dask_worker')
 
-
 import signal
+
 
 def handle_signal(sig, frame):
     loop = IOLoop.instance()
@@ -25,9 +25,6 @@ def handle_signal(sig, frame):
         loop.add_callback(loop.stop)
     else:
         exit(1)
-
-signal.signal(signal.SIGINT, handle_signal)
-signal.signal(signal.SIGTERM, handle_signal)
 
 
 @click.command()
@@ -76,7 +73,14 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     services = {('http', http_port): HTTPWorker}
 
     loop = IOLoop.current()
-    t = Worker if no_nanny else Nanny
+
+    if no_nanny:
+        kwargs = {}
+        t = Worker
+    else:
+        kwargs = {'worker_port': worker_port}
+        t = Nanny
+
     if host is not None:
         ip = socket.gethostbyname(host)
     else:
@@ -84,8 +88,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         # reach the scheduler
         ip = get_ip(scheduler_ip, scheduler_port)
     nannies = [t(scheduler_ip, scheduler_port, ncores=nthreads, ip=ip,
-                 services=services, name=name, loop=loop,
-                 worker_port=worker_port)
+                 services=services, name=name, loop=loop, **kwargs)
                for i in range(nprocs)]
 
     for nanny in nannies:
@@ -117,6 +120,11 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
 
 def go():
+    # NOTE: We can't use the generic install_signal_handlers() function from
+    # distributed.cli.utils because we're handling the signal differently.
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
     check_python_3()
     main()
 

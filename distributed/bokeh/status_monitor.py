@@ -13,80 +13,16 @@ from ..executor import default_executor
 from ..scheduler import Scheduler
 
 try:
-    from bokeh.palettes import Spectral11
-    from bokeh.models import ColumnDataSource, DataRange1d, HoverTool
+    from bokeh.palettes import Spectral11, Spectral9, viridis
+    from bokeh.models import ColumnDataSource, DataRange1d, HoverTool, Range1d
     from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
     from bokeh.plotting import vplot, output_notebook, show, figure
     from bokeh.io import curstate, push_notebook
 except ImportError:
     Spectral11 = None
 
-class Status_Monitor(object):
-    """ Display the tasks running and waiting on each worker
 
-    Parameters
-    ----------
-    addr: tuple, optional
-        (ip, port) of scheduler.  Defaults to scheduler of recent Executor
-    interval: Number, optional
-        Interval between updates.  Defaults to 1s
-    """
-    def __init__(self, addr=None, interval=1000.00, loop=None):
-        if addr is None:
-            scheduler = default_executor().scheduler
-            if isinstance(scheduler, rpc):
-                addr = (scheduler.ip, 9786)
-            elif isinstance(scheduler, Scheduler):
-                addr = ('127.0.0.1', scheduler.services['http'].port)
-        self.addr = addr
-        self.interval = interval
-
-        self.display_notebook = False
-
-        if is_kernel() and not curstate().notebook:
-            output_notebook()
-            assert curstate().notebook
-
-        self.task_source, self.task_table = task_table_plot()
-        self.worker_source, self.worker_table = worker_table_plot()
-
-        self.output = vplot(self.worker_table, self.task_table)
-
-        self.client = AsyncHTTPClient()
-
-        self.loop = loop or IOLoop.current()
-        self.loop.add_callback(self.update)
-        self._pc = PeriodicCallback(self.update, self.interval, io_loop=self.loop)
-        self._pc.start()
-
-    def _ipython_display_(self, **kwargs):
-        show(self.output)
-        self.display_notebook = True
-
-    @gen.coroutine
-    def update(self):
-        """ Query the Scheduler, update the figure
-
-        This opens a connection to the scheduler, sends it a function to run
-        periodically, streams the results back and uses those results to update
-        the bokeh figure
-        """
-        with log_errors():
-            tasks, workers = yield [
-                    self.client.fetch('http://%s:%d/tasks.json' % self.addr),
-                    self.client.fetch('http://%s:%d/workers.json' % self.addr)]
-
-            tasks = json.loads(tasks.body.decode())
-            workers = json.loads(workers.body.decode())
-
-            task_table_update(self.task_source, tasks)
-            worker_table_update(self.worker_source, workers)
-
-            if self.display_notebook:
-                push_notebook()
-
-
-def task_table_plot(row_headers=False, width=600, height="auto"):
+def task_table_plot(row_headers=False, width=600, height=400):
     names = ['waiting', 'ready', 'failed', 'processing', 'in-memory', 'total']
     source = ColumnDataSource({k: [] for k in names})
 
@@ -101,7 +37,7 @@ def task_table_update(source, d):
     source.data = d
 
 
-def worker_table_plot(width=600, height="auto", **kwargs):
+def worker_table_plot(width=600, height=400, **kwargs):
     """ Column data source and plot for host table """
     names = ['workers', 'cpu', 'memory-percent', 'memory', 'cores', 'processes',
              'processing', 'latency', 'last-seen', 'disk-read', 'disk-write',
@@ -155,31 +91,30 @@ def worker_table_update(source, d):
     source.data.update(data)
 
 
-def task_stream_plot(height=400, width=800, follow_interval=5000, **kwargs):
+def task_stream_plot(sizing_mode='scale_width', **kwargs):
     data = {'start': [], 'duration': [],
             'key': [], 'name': [], 'color': [],
             'worker': [], 'y': [], 'worker_thread': [], 'alpha': []}
 
     source = ColumnDataSource(data)
-    if follow_interval:
-        x_range = DataRange1d(follow='end', follow_interval=follow_interval,
-                              range_padding=0)
-    else:
-        x_range = None
+    x_range = DataRange1d(range_padding=0)
 
-    fig = figure(width=width, height=height, x_axis_type='datetime',
-                 tools=['xwheel_zoom', 'xpan', 'reset', 'resize', 'box_zoom'],
-                 responsive=True, x_range=x_range, **kwargs)
-    fig.rect(x='start', y='y', width='duration', height=0.9,
-             fill_color='color', line_color='gray', alpha='alpha',
-             source=source)
-    if x_range:
-        fig.circle(x=[1, 2], y=[1, 2], alpha=0.0)
+    fig = figure(
+        x_axis_type='datetime', title="Task stream",
+        tools='xwheel_zoom,xpan,reset,box_zoom', toolbar_location='above',
+        sizing_mode=sizing_mode, x_range=x_range, **kwargs
+    )
+    fig.rect(
+        x='start', y='y', width='duration', height=0.8,
+        fill_color='color', line_color='color', line_alpha=0.6, alpha='alpha',
+        line_width=3, source=source
+    )
     fig.xaxis.axis_label = 'Time'
     fig.yaxis.axis_label = 'Worker Core'
-    fig.min_border_right = 10
     fig.ygrid.grid_line_alpha = 0.4
-    fig.xgrid.grid_line_alpha = 0.0
+    fig.xgrid.grid_line_color = None
+    fig.min_border_right = 35
+    fig.yaxis[0].ticker.num_minor_ticks = 0
 
     hover = HoverTool()
     fig.add_tools(hover)
@@ -199,6 +134,11 @@ def task_stream_plot(height=400, width=800, follow_interval=5000, **kwargs):
     return source, fig
 
 
+
+import random
+task_stream_palette = list(viridis(25))
+random.shuffle(task_stream_palette)
+
 import itertools
 counter = itertools.count()
 @memoize
@@ -206,7 +146,7 @@ def incrementing_index(o):
     return next(counter)
 
 
-def task_stream_append(lists, msg, workers, palette=Spectral11):
+def task_stream_append(lists, msg, workers, palette=task_stream_palette):
     start, stop = msg['compute_start'], msg['compute_stop']
     lists['start'].append((start + stop) / 2 * 1000)
     lists['duration'].append(1000 * (stop - start))
@@ -242,21 +182,22 @@ def task_stream_append(lists, msg, workers, palette=Spectral11):
         lists['y'].append(workers[worker_thread])
 
 
-def progress_plot(height=300, width=800, **kwargs):
+def progress_plot(**kwargs):
     from ..diagnostics.progress_stream import progress_quads
-    data = progress_quads({'all': {}, 'in_memory': {},
+    data = progress_quads({'all': {}, 'memory': {},
                            'erred': {}, 'released': {}})
 
+    x_range = Range1d(-0.5, 1.5)
+    y_range = Range1d(5.1, -0.1)
     source = ColumnDataSource(data)
-    fig = figure(width=width, height=height, tools=['resize'],
-                 responsive=True, **kwargs)
+    fig = figure(tools='', toolbar_location=None, y_range=y_range, x_range=x_range, **kwargs)
     fig.quad(source=source, top='top', bottom='bottom',
              left=0, right=1, color='#aaaaaa', alpha=0.2)
     fig.quad(source=source, top='top', bottom='bottom',
-             left=0, right='released_right', color='#0000FF', alpha=0.4)
+             left=0, right='released_right', color=Spectral9[0], alpha=0.4)
     fig.quad(source=source, top='top', bottom='bottom',
-             left='released_right', right='in_memory_right',
-             color='#0000FF', alpha=0.8)
+             left='released_right', right='memory_right',
+             color=Spectral9[0], alpha=0.8)
     fig.quad(source=source, top='top', bottom='bottom',
              left='erred_left', right=1,
              color='#000000', alpha=0.3)
@@ -264,14 +205,9 @@ def progress_plot(height=300, width=800, **kwargs):
              text_align='right', text_baseline='middle')
     fig.text(source=source, text='name', y='center', x=1.01,
              text_align='left', text_baseline='middle')
-    fig.scatter(x=[-0.2, 1.4], y=[0, 5], alpha=0)
     fig.xgrid.grid_line_color = None
     fig.ygrid.grid_line_color = None
     fig.axis.visible = None
-    fig.min_border_left = 0
-    fig.min_border_right = 10
-    fig.min_border_top = 0
-    fig.min_border_bottom = 0
     fig.outline_line_color = None
 
     hover = HoverTool()
@@ -288,7 +224,7 @@ def progress_plot(height=300, width=800, **kwargs):
     </div>
     <div>
         <span style="font-size: 14px; font-weight: bold;">In Memory:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@in_memory</span>
+        <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
     </div>
     <div>
         <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;

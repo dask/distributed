@@ -6,25 +6,24 @@ from tornado import gen
 from dask.delayed import Delayed
 import dask.bag as db
 import dask.dataframe as dd
+from dask import compute, delayed
 
 from distributed.compatibility import unicode
 from distributed.utils_test import gen_cluster, cluster, make_hdfs
 from distributed.utils import get_ip
 from distributed.utils_test import loop
-from distributed.hdfs import (read_bytes, get_block_locations, write_bytes)
 from distributed import Executor
 from distributed.executor import _wait, Future
 
+hdfs3 = pytest.importorskip('hdfs3')
+from distributed.hdfs import read_bytes, get_block_locations
 
-pytest.importorskip('hdfs3')
-from hdfs3 import HDFileSystem
 try:
-    hdfs = HDFileSystem(host='localhost', port=8020)
+    hdfs = hdfs3.HDFileSystem(host='localhost', port=8020)
     hdfs.df()
     del hdfs
 except:
-    pytestmark = pytest.mark.skipif('True')
-
+    pytestmark = pytest.skip()
 
 ip = get_ip()
 
@@ -250,7 +249,6 @@ def test_read_csv(e, s, a, b):
             f.write(b'name,amount,id\nCharlie,300,3\nDennis,400,4')
 
         df = dd.read_csv('hdfs:///tmp/test/*.csv', lineterminator='\n')
-        assert df._known_dtype
         result = e.compute(df.id.sum(), sync=False)
         result = yield result._result()
         assert result == 1 + 2 + 3 + 4
@@ -277,7 +275,6 @@ def test_read_csv_lazy(e, s, a, b):
             f.write(b'name,amount,id\nCharlie,300,3\nDennis,400,4')
 
         df = dd.read_csv('hdfs:///tmp/test/*.csv', lineterminator='\n')
-        assert df._known_dtype
         yield gen.sleep(0.5)
         assert not s.tasks
 
@@ -375,3 +372,22 @@ def test_deterministic_key_names(e, s, a, b):
 
         assert [f.key for f in x] == [f.key for f in y]
         assert [f.key for f in x] != [f.key for f in z]
+
+
+@gen_cluster([(ip, 1), (ip, 2)], timeout=60, executor=True)
+def test_write_bytes(e, s, a, b):
+    from dask.bytes.core import write_bytes, read_bytes
+    with make_hdfs() as hdfs:
+        path = 'hdfs:///tmp/test/'
+        data = [b'test data %i' % i for i in range(5)]
+        values = [delayed(d) for d in data]
+        out = write_bytes(values, path, hdfs=hdfs)
+        futures = e.compute(out)
+        results = yield e._gather(futures)
+        assert len(hdfs.ls('/tmp/test/')) == 5
+
+        sample, vals = read_bytes('hdfs:///tmp/test/*.part',
+                                    hdfs=hdfs, lazy=True)
+        futures = e.compute(vals)
+        results = yield e._gather(futures)
+        assert data == results

@@ -23,6 +23,10 @@ def test_defaults(loop):
             response = requests.get('http://127.0.0.1:9786/info.json')
             assert response.ok
             assert response.json()['status'] == 'running'
+    with pytest.raises(Exception):
+        requests.get('http://127.0.0.1:9786/info.json')
+    with pytest.raises(Exception):
+        requests.get('http://127.0.0.1:8787/status/')
 
 
 def test_hostport(loop):
@@ -38,6 +42,8 @@ def test_no_bokeh(loop):
             for i in range(3):
                 line = proc.stderr.readline()
                 assert b'bokeh' not in line.lower()
+            with pytest.raises(Exception):
+                requests.get('http://127.0.0.1:8787/status/')
 
 
 def test_bokeh(loop):
@@ -63,6 +69,8 @@ def test_bokeh(loop):
                 print(f)
                 sleep(0.1)
                 assert time() < start + 10
+    with pytest.raises(Exception):
+        requests.get('http://127.0.0.1:8787/status/')
 
 
 def test_bokeh_non_standard_ports(loop):
@@ -89,6 +97,8 @@ def test_bokeh_non_standard_ports(loop):
             except:
                 sleep(0.1)
                 assert time() < start + 20
+    with pytest.raises(Exception):
+        requests.get('http://127.0.0.1:4832/status/')
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'),
@@ -98,8 +108,8 @@ def test_bokeh_whitelist(loop):
     with pytest.raises(Exception):
         requests.get('http://localhost:8787/status/').ok
 
-    with popen(['dask-scheduler', '--bokeh-whitelist', '127.0.0.2',
-                                  '--bokeh-whitelist', '127.0.0.3']) as proc:
+    with popen(['dask-scheduler', '--bokeh-whitelist', '127.0.0.2:8787',
+                                  '--bokeh-whitelist', '127.0.0.3:8787']) as proc:
         with Executor('127.0.0.1:%d' % Scheduler.default_port, loop=loop) as e:
             pass
 

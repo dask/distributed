@@ -11,6 +11,7 @@ from time import sleep
 import uuid
 from threading import Thread
 import six
+import socket
 
 import dask
 from dask.base import tokenize, normalize_token, Base
@@ -73,8 +74,10 @@ class Future(WrappedKey):
         self._generation = self.executor.generation
         self._cleared = False
 
-        if key not in executor.futures:
-            executor.futures[tokey(key)] = {'event': Event(), 'status': 'pending'}
+        tkey = tokey(key)
+
+        if tkey not in executor.futures:
+            executor.futures[tkey] = {'event': Event(), 'status': 'pending'}
 
     @property
     def status(self):
@@ -250,7 +253,7 @@ class Executor(object):
     distributed.scheduler.Scheduler: Internal scheduler
     """
     def __init__(self, address=None, start=True, loop=None, timeout=3,
-                 set_as_default=False):
+                 set_as_default=True):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
@@ -259,6 +262,7 @@ class Executor(object):
         self.id = str(uuid.uuid1())
         self.generation = 0
         self.status = None
+        self._pending_msg_buffer = []
         if hasattr(address, 'scheduler_address'):
             self.cluster = address
             address = address.scheduler_address
@@ -266,6 +270,8 @@ class Executor(object):
         if set_as_default:
             self._previous_get = _globals.get('get')
             dask.set_options(get=self.get)
+            self._previous_shuffle = _globals.get('shuffle')
+            dask.set_options(shuffle='tasks')
 
         if start:
             self.start(timeout=timeout)
@@ -300,7 +306,12 @@ class Executor(object):
         self.status = 'running'
 
     def _send_to_scheduler(self, msg):
-        self.loop.add_callback(self.scheduler_stream.send, msg)
+        if self.status is 'running':
+            self.loop.add_callback(self.scheduler_stream.send, msg)
+        elif self.status is 'connecting':
+            self._pending_msg_buffer.append(msg)
+        else:
+            raise Exception("Executor not running.  Status: %s" % self.status)
 
     @gen.coroutine
     def _start(self, timeout=3, **kwargs):
@@ -308,32 +319,67 @@ class Executor(object):
             from distributed.deploy import LocalCluster
             try:
                 self.cluster = LocalCluster(loop=self.loop, start=False)
-            except OSError:
+            except (OSError, socket.error):
                 self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
                                             start=False)
             self._start_arg = self.cluster.scheduler_address
 
-        r = coerce_to_rpc(self._start_arg, timeout=timeout)
-        try:
-            ident = yield r.identity()
-        except (StreamClosedError, OSError):
-            raise IOError("Could not connect to %s:%d" % (r.ip, r.port))
-        if ident['type'] == 'Scheduler':
-            self.scheduler = r
-            stream = yield connect(r.ip, r.port)
-            yield write(stream, {'op': 'register-client',
-                                 'client': self.id})
-            bstream = BatchedSend(interval=10, loop=self.loop)
-            bstream.start(stream)
-            self.scheduler_stream = bstream
-        else:
-            raise ValueError("Unknown Type")
+        self.scheduler = coerce_to_rpc(self._start_arg, timeout=timeout)
+        self.scheduler_stream = None
 
-        start_event = Event()
-        self.coroutines.append(self._handle_report(start_event))
+        yield self.ensure_connected()
+
+        self.coroutines.append(self._handle_report())
+
+    @gen.coroutine
+    def reconnect(self, timeout=0.1):
+        with log_errors():
+            assert self.scheduler_stream.stream.closed()
+            self.status = 'connecting'
+            self.scheduler_stream = None
+
+            events = [d['event'] for d in self.futures.values()]
+            self.futures.clear()
+            for e in events:
+                e.set()
+
+            while self.status == 'connecting':
+                try:
+                    yield self.ensure_connected()
+                    break
+                except IOError:
+                    yield gen.sleep(timeout)
+
+    @gen.coroutine
+    def ensure_connected(self):
+        if self.scheduler_stream and not self.scheduler_stream.closed():
+            return
+
+        try:
+            stream = yield connect(self.scheduler.ip, self.scheduler.port)
+        except:
+            raise IOError("Could not connect to %s:%d" %
+                          (self.scheduler.ip, self.scheduler.port))
+
+        ident = yield self.scheduler.identity()
+
+        yield write(stream, {'op': 'register-client',
+                             'client': self.id})
+        msg = yield read(stream)
+        assert len(msg) == 1
+        assert msg[0]['op'] == 'stream-start'
+
+        bstream = BatchedSend(interval=10, loop=self.loop)
+        bstream.start(stream)
+        self.scheduler_stream = bstream
 
         _global_executor[0] = self
-        yield start_event.wait()
+        self.status = 'running'
+
+        for msg in self._pending_msg_buffer:
+            self._send_to_scheduler(msg)
+        del self._pending_msg_buffer[:]
+
         logger.debug("Started scheduling coroutines. Synchronized")
 
     def __enter__(self):
@@ -362,12 +408,13 @@ class Executor(object):
         if key in self.futures:
             self.futures[key]['event'].clear()
             del self.futures[key]
-        self._send_to_scheduler({'op': 'client-releases-keys',
-                                 'keys': [key],
-                                 'client': self.id})
+        if self.status != 'closed':
+            self._send_to_scheduler({'op': 'client-releases-keys',
+                                     'keys': [key],
+                                     'client': self.id})
 
     @gen.coroutine
-    def _handle_report(self, start_event):
+    def _handle_report(self):
         """ Listen to scheduler """
         with log_errors():
             while True:
@@ -375,7 +422,13 @@ class Executor(object):
                     msgs = yield read(self.scheduler_stream.stream)
                 except StreamClosedError:
                     logger.debug("Stream closed to scheduler", exc_info=True)
-                    break
+                    if self.status == 'running':
+                        logger.info("Reconnecting...")
+                        self.status = 'connecting'
+                        yield self.reconnect()
+                        continue
+                    else:
+                        break
                 if not isinstance(msgs, list):
                     msgs = [msgs]
 
@@ -383,9 +436,7 @@ class Executor(object):
                 for msg in msgs:
                     logger.debug("Executor receives message %s", msg)
 
-                    if msg['op'] == 'stream-start':
-                        start_event.set()
-                    elif msg['op'] == 'close':
+                    if msg['op'] == 'close':
                         breakout = True
                         break
                     elif msg['op'] == 'key-in-memory':
@@ -431,20 +482,21 @@ class Executor(object):
     @gen.coroutine
     def _shutdown(self, fast=False):
         """ Send shutdown signal and wait until scheduler completes """
-        if self.status == 'closed':
-            raise Return()
-        self.status = 'closed'
-        self._send_to_scheduler({'op': 'close-stream'})
-        if _global_executor[0] is self:
-            _global_executor[0] = None
-        if not fast:
-            with ignoring(TimeoutError):
-                yield [gen.with_timeout(timedelta(seconds=2), f)
-                        for f in self.coroutines]
-        with ignoring(AttributeError):
-            yield self.scheduler_stream.close(ignore_closed=True)
-        with ignoring(AttributeError):
-            self.scheduler.close_streams()
+        with log_errors():
+            if self.status == 'closed':
+                raise Return()
+            self._send_to_scheduler({'op': 'close-stream'})
+            self.status = 'closed'
+            if _global_executor[0] is self:
+                _global_executor[0] = None
+            if not fast:
+                with ignoring(TimeoutError):
+                    yield [gen.with_timeout(timedelta(seconds=2), f)
+                            for f in self.coroutines]
+            with ignoring(AttributeError):
+                yield self.scheduler_stream.close(ignore_closed=True)
+            with ignoring(AttributeError):
+                self.scheduler.close_rpc()
 
     def shutdown(self, timeout=10):
         """ Send shutdown signal and wait until scheduler terminates """
@@ -456,17 +508,21 @@ class Executor(object):
                                    {'op': 'close-stream'})
             sync(self.loop, self.scheduler_stream.close)
         with ignoring(AttributeError):
-            self.scheduler.close_streams()
+            self.scheduler.close_rpc()
         if self._should_close_loop:
             sync(self.loop, self.loop.stop)
             self.loop.close(all_fds=True)
             self._loop_thread.join(timeout=timeout)
         with ignoring(AttributeError):
             dask.set_options(get=self._previous_get)
+        with ignoring(AttributeError):
+            dask.set_options(shuffle=self._previous_shuffle)
         if _global_executor[0] is self:
             _global_executor[0] = None
         if self.get == _globals.get('get'):
             del _globals['get']
+        with ignoring(AttributeError):
+            self.cluster.close()
 
     def submit(self, func, *args, **kwargs):
         """ Submit a function application to the scheduler
@@ -536,7 +592,7 @@ class Executor(object):
             dsk = {key: (func,) + tuple(args)}
 
         futures = self._graph_to_futures(dsk, [key], restrictions,
-                loose_restrictions)
+                loose_restrictions, priority={key: 0})
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -650,8 +706,10 @@ class Executor(object):
         else:
             loose_restrictions = set()
 
+        priority = dict(zip(keys, range(len(keys))))
+
         futures = self._graph_to_futures(dsk, keys, restrictions,
-                loose_restrictions)
+                loose_restrictions, priority=priority)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(key)] for key in keys]
@@ -664,6 +722,7 @@ class Executor(object):
 
         @gen.coroutine
         def wait(k):
+            """ Want to stop the All(...) early if we find an error """
             yield self.futures[k]['event'].wait()
             if self.futures[k]['status'] != 'finished':
                 raise Exception()
@@ -677,13 +736,19 @@ class Executor(object):
             exceptions = set()
             bad_keys = set()
             for key in keys:
-                if self.futures[key]['status'] == 'error':
+                if (key not in self.futures or
+                    self.futures[key]['status'] == 'error'):
                     exceptions.add(key)
                     if errors == 'raise':
-                        d = self.futures[key]
-                        six.reraise(type(d['exception']),
-                                    d['exception'],
-                                    d['traceback'])
+                        try:
+                            d = self.futures[key]
+                            six.reraise(type(d['exception']),
+                                        d['exception'],
+                                        d['traceback'])
+                        except KeyError:
+                            six.reraise(CancelledError,
+                                        CancelledError(key),
+                                        None)
                     if errors == 'skip':
                         bad_keys.add(key)
                         bad_data[key] = None
@@ -957,8 +1022,8 @@ class Executor(object):
         return sync(self.loop, self._run, function, *args, **kwargs)
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
-                                loose_restrictions=None,
-                                allow_other_workers=True):
+            loose_restrictions=None, allow_other_workers=True, priority=None):
+
         keyset = set(keys)
         flatkeys = list(map(tokey, keys))
         futures = {key: Future(key, self) for key in keyset}
@@ -996,7 +1061,8 @@ class Executor(object):
                                  'keys': list(flatkeys),
                                  'restrictions': restrictions or {},
                                  'loose_restrictions': loose_restrictions,
-                                 'client': self.id})
+                                 'client': self.id,
+                                 'priority': priority})
 
         return futures
 
@@ -1020,7 +1086,8 @@ class Executor(object):
             result = 'OK', result
         raise gen.Return(result)
 
-    def get(self, dsk, keys, restrictions=None, loose_restrictions=None):
+    def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
+            **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -1055,7 +1122,7 @@ class Executor(object):
         results2 = pack_data(keys, results)
         return results2
 
-    def compute(self, args, sync=False):
+    def compute(self, args, sync=False, optimize_graph=True):
         """ Compute dask collections on cluster
 
         Parameters
@@ -1099,10 +1166,14 @@ class Executor(object):
 
         variables = [a for a in args if isinstance(a, Base)]
 
-        groups = groupby(lambda x: x._optimize, variables)
-        dsk = merge([opt(merge([v.dask for v in val]),
-                         [v._keys() for v in val])
-                    for opt, val in groups.items()])
+        if optimize_graph:
+            groups = groupby(lambda x: x._optimize, variables)
+            dsk = merge([opt(merge([v.dask for v in val]),
+                             [v._keys() for v in val])
+                        for opt, val in groups.items()])
+        else:
+            dsk = merge(c.dask for c in variables)
+
         names = ['finalize-%s' % tokenize(v) for v in variables]
         dsk2 = {name: (v._finalize, v._keys()) for name, v in zip(names, variables)}
 
@@ -1127,7 +1198,7 @@ class Executor(object):
         else:
             return result
 
-    def persist(self, collections):
+    def persist(self, collections, optimize_graph=True):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -1160,15 +1231,17 @@ class Executor(object):
 
         assert all(isinstance(c, Base) for c in collections)
 
-        groups = groupby(lambda x: x._optimize, collections)
-        dsk = merge([opt(merge([v.dask for v in val]),
-                         [v._keys() for v in val])
-                    for opt, val in groups.items()])
+        if optimize_graph:
+            groups = groupby(lambda x: x._optimize, collections)
+            dsk = merge([opt(merge([v.dask for v in val]),
+                             [v._keys() for v in val])
+                        for opt, val in groups.items()])
+        else:
+            dsk = merge(c.dask for c in collections)
 
         names = {k for c in collections for k in flatten(c._keys())}
 
         futures = self._graph_to_futures(dsk, names)
-
 
         result = [redict_collection(c, {k: futures[k]
                                         for k in flatten(c._keys())})
@@ -1338,7 +1411,7 @@ class Executor(object):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
-        return sync(self.loop, self.scheduler.ncores, addresses=workers)
+        return sync(self.loop, self.scheduler.ncores, workers=workers)
 
     def who_has(self, futures=None):
         """ The workers storing each future's data
@@ -1400,7 +1473,7 @@ class Executor(object):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
-        return sync(self.loop, self.scheduler.has_what, keys=workers)
+        return sync(self.loop, self.scheduler.has_what, workers=workers)
 
     def stacks(self, workers=None):
         """ The task queues on each worker
@@ -1496,6 +1569,58 @@ class Executor(object):
 
     def futures_of(self, futures):
         return futures_of(futures, executor=self)
+
+    @gen.coroutine
+    def _start_ipython(self, workers):
+        if workers is None:
+            workers = yield self.scheduler.ncores()
+
+        responses = yield self.scheduler.broadcast(
+            msg=dict(op='start_ipython'), workers=workers,
+        )
+        raise gen.Return((workers, responses))
+
+    def start_ipython(self, workers=None, magic_names=False, qtconsole=False, qtconsole_args=None):
+        """ Start IPython kernels on workers
+
+        Parameters
+        ----------
+        workers: list (optional)
+            A list of worker addresses, defaults to all
+
+        magic_names: str or list(str) (optional)
+            If defined, register IPython magics with these names for
+            executing code on the workers.
+
+        qtconsole: bool (optional)
+            If True, launch a Jupyter QtConsole connected to the worker(s).
+
+        Returns
+        -------
+        iter_connection_info: list
+            List of connection_info dicts containing info necessary
+            to connect Jupyter clients to the workers.
+        """
+
+        if magic_names and isinstance(magic_names, six.string_types):
+            magic_names = [magic_names]
+        if isinstance(workers, six.string_types):
+            workers = [workers]
+
+        (workers, info_dict) = sync(self.loop, self._start_ipython, workers)
+        if magic_names:
+            from ._ipython_utils import register_worker_magic
+            for worker, magic_name in zip(workers, magic_names):
+                connection_info = info_dict[worker]
+                register_worker_magic(connection_info, magic_name)
+        if qtconsole:
+            from ._ipython_utils import connect_qtconsole
+            for worker, connection_info in info_dict.items():
+                connect_qtconsole(connection_info,
+                                  name='dask-' + worker.replace(':','-'),
+                                  extra_args=qtconsole_args,
+                )
+        return info_dict
 
 
 class CompatibleExecutor(Executor):

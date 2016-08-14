@@ -4,6 +4,7 @@ from operator import add
 
 from collections import Iterator
 from concurrent.futures import CancelledError
+from datetime import timedelta
 import itertools
 from multiprocessing import Process
 import sys
@@ -11,12 +12,16 @@ from threading import Thread
 from time import sleep, time
 import traceback
 
+
+import mock
 import pytest
 from toolz import (identity, isdistinct, first, concat, pluck, valmap,
-        partition_all)
+        partition_all, partial)
 from tornado import gen
 from tornado.ioloop import IOLoop
+from tornado.iostream import StreamClosedError
 
+import dask
 from dask import delayed
 from dask.context import _globals
 from distributed import Worker, Nanny
@@ -26,13 +31,13 @@ from distributed.executor import (Executor, Future, CompatibleExecutor, _wait,
         default_executor, _first_completed, ensure_default_get, futures_of)
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
-from distributed.utils import sync, tmp_text, ignoring
+from distributed.utils import sync, tmp_text, ignoring, tokey, All
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
-        _test_scheduler, loop, inc, dec, div, throws,
-        gen_cluster, gen_test, double, deep)
+        _test_scheduler, loop, inc, dec, div, throws, gen_cluster, gen_test,
+        double, deep)
 
 
-@gen_cluster(executor=True)
+@gen_cluster(executor=True, timeout=None)
 def test_submit(e, s, a, b):
     x = e.submit(inc, 10)
     assert not x.done()
@@ -128,7 +133,6 @@ def test_future(e, s, a, b):
 
 @gen_cluster(executor=True)
 def test_Future_exception(e, s, a, b):
-
     x = e.submit(div, 1, 0)
     result = yield x._exception()
     assert isinstance(result, ZeroDivisionError)
@@ -202,7 +206,7 @@ def test_gc(s, a, b):
 
     yield e._shutdown()
 
-    assert not s.who_has[x.key]
+    assert x.key not in s.who_has
 
 
 def test_thread(loop):
@@ -285,7 +289,7 @@ def test_gather_strict(e, s, a, b):
     assert xx == 2
 
 
-@gen_cluster(executor=True)
+@gen_cluster(executor=True, timeout=None)
 def test_get(e, s, a, b):
     result = yield e._get({'x': (inc, 1)}, 'x')
     assert result == 2
@@ -305,6 +309,15 @@ def test_get_sync(loop):
     with cluster() as (s, [a, b]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
             assert e.get({'x': (inc, 1)}, 'x') == 2
+
+
+def test_get_sync_optimize_graph_passes_through(loop):
+    import dask.bag as db
+    import dask
+    bag = db.range(10, npartitions=3).map(inc)
+    with cluster() as (s, [a, b]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            dask.compute(bag.sum(), optimize_graph=False, get=e.get)
 
 
 def test_submit_errors(loop):
@@ -616,6 +629,19 @@ def dont_test_bad_restrictions_raise_exception(e, s, a, b):
         assert z.key in str(e)
 
 
+@gen_cluster(executor=True, timeout=None)
+def test_remove_worker(e, s, a, b):
+    L = e.map(inc, range(20))
+    yield _wait(L)
+
+    yield b._close()
+
+    assert b.address not in s.worker_info
+
+    result = yield e._gather(L)
+    assert result == list(map(inc, range(20)))
+
+
 def test_submit_after_failed_worker(loop):
     with cluster() as (s, [a, b]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
@@ -866,13 +892,13 @@ def test_nbytes_determines_worker(e, s, a, b):
 
 @gen_cluster(executor=True)
 def test_if_intermediates_clear_on_error(e, s, a, b):
-    x = delayed(div)(1, 0)
-    y = delayed(div)(1, 2)
-    z = delayed(add)(x, y)
+    x = delayed(div, pure=True)(1, 0)
+    y = delayed(div, pure=True)(1, 2)
+    z = delayed(add, pure=True)(x, y)
     f = e.compute(z)
     with pytest.raises(ZeroDivisionError):
         yield f._result()
-    s.validate()
+    s.validate_state()
     assert not s.who_has
 
 
@@ -1140,7 +1166,7 @@ def test_restart_cleared(e, s, a, b):
 
     for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
             s.waiting_data, s.who_has, s.restrictions, s.loose_restrictions,
-            s.released, s.keyorder, s.exceptions, s.who_wants,
+            s.released, s.priority, s.exceptions, s.who_wants,
             s.exceptions_blame]:
         assert not coll
 
@@ -1598,8 +1624,8 @@ def test_forget_simple(e, s, a, b):
     s.client_releases_keys(keys=[z.key], client=e.id)
     for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
             s.waiting_data, s.who_has, s.restrictions, s.loose_restrictions,
-            s.released, s.keyorder, s.exceptions, s.who_wants,
-            s.exceptions_blame, s.nbytes]:
+            s.released, s.priority, s.exceptions, s.who_wants,
+            s.exceptions_blame, s.nbytes, s.task_state]:
         assert x.key not in coll
         assert z.key not in coll
 
@@ -1642,21 +1668,22 @@ def test_forget_complex(e, s, A, B):
 
 @gen_cluster(executor=True)
 def test_forget_in_flight(e, s, A, B):
-    a, b, c, d = [delayed(slowinc)(i) for i in range(4)]
-    ab = delayed(slowadd)(a, b)
-    cd = delayed(slowadd)(c, d)
-    ac = delayed(slowadd)(a, c)
-    acab = delayed(slowadd)(ac, ab)
+    delayed2 = partial(delayed, pure=True)
+    a, b, c, d = [delayed2(slowinc)(i) for i in range(4)]
+    ab = delayed2(slowadd)(a, b)
+    cd = delayed2(slowadd)(c, d)
+    ac = delayed2(slowadd)(a, c)
+    acab = delayed2(slowadd)(ac, ab)
 
     x, y = e.compute([ac, acab])
-    s.validate()
+    s.validate_state()
 
     for i in range(5):
         yield gen.sleep(0.01)
-        s.validate()
+        s.validate_state()
 
     s.client_releases_keys(keys=[y.key], client=e.id)
-    s.validate()
+    s.validate_state()
 
     for k in [acab.key, ab.key, b.key]:
         assert k not in s.tasks
@@ -1910,7 +1937,7 @@ def test__cancel(e, s, a, b):
 
     assert x.cancelled()
     assert 'cancel' in str(x)
-    s.validate()
+    s.validate_state()
 
     start = time()
     while not y.cancelled():
@@ -1919,7 +1946,7 @@ def test__cancel(e, s, a, b):
 
     assert not s.tasks
     assert not s.who_has
-    s.validate()
+    s.validate_state()
 
 
 @gen_cluster()
@@ -1971,9 +1998,9 @@ def test__cancel_collection(e, s, a, b):
 def test_cancel(loop):
     with cluster() as (s, [a, b]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            x = e.submit(slowinc, 1)
-            y = e.submit(slowinc, x)
-            z = e.submit(slowinc, y)
+            x = e.submit(slowinc, 1, key='x')
+            y = e.submit(slowinc, x, key='y')
+            z = e.submit(slowinc, y, key='z')
 
             e.cancel([y])
 
@@ -2196,7 +2223,9 @@ def test_persist(loop):
             assert all(isinstance(v, Future) for v in yy.dask.values())
             assert yy._keys() == y._keys()
 
-            assert (yy.compute(get=e.get) == y.compute(get=e.get)).all()
+            zz = yy.compute(get=e.get)
+            z = y.compute(get=e.get)
+            assert (zz == z).all()
 
 
 @gen_cluster(timeout=60, executor=True)
@@ -2234,6 +2263,7 @@ def test_futures_of(e, s, a, b):
     assert set(futures_of(x)) == {x}
     assert set(futures_of([x, y, z])) == {x, y, z}
     assert set(futures_of([x, [y], [[z]]])) == {x, y, z}
+    assert set(futures_of({'x': x, 'y': [y]})) == {x, y}
 
     import dask.bag as db
     b = db.Bag({('b', i): f for i, f in enumerate([x, y, z])}, 'b', 3)
@@ -2410,7 +2440,7 @@ def test_diagnostic_nbytes(e, s, a, b):
 
 @gen_test()
 def test_worker_aliases():
-    s = Scheduler()
+    s = Scheduler(validate=True)
     s.start(0)
     a = Worker(s.ip, s.port, name='alice')
     b = Worker(s.ip, s.port, name='bob')
@@ -2469,6 +2499,8 @@ def test_persist_get(e, s, a, b):
     assert result == ((1+1) + (2+2)) + 10
 
 
+@pytest.mark.skipif(sys.platform.startswith('win'),
+                    reason="num_fds not supported on windows")
 def test_executor_num_fds(loop):
     psutil = pytest.importorskip('psutil')
     with cluster() as (s, [a, b]):
@@ -2594,6 +2626,35 @@ def test_receive_lost_key(e, s, a, b):
         yield gen.sleep(0.01)
 
 
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Need 127.0.0.2 to mean localhost")
+@gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], executor=True)
+def test_unrunnable_task_runs(e, s, a, b):
+    x = e.submit(inc, 1, workers=[a.ip])
+    result = yield x._result()
+
+    yield a._close()
+    start = time()
+    while x.status == 'finished':
+        assert time() < start + 5
+        yield gen.sleep(0.01)
+
+    assert x.key in s.unrunnable
+    assert s.task_state[x.key] == 'no-worker'
+
+    w = Worker(s.ip, s.port, ip=a.ip, loop=s.loop)
+    yield w._start()
+
+    start = time()
+    while x.status != 'finished':
+        assert time() < start + 2
+        yield gen.sleep(0.01)
+
+    assert x.key not in s.unrunnable
+    result = yield x._result()
+    assert result == 2
+
+
 @gen_cluster(executor=True, ncores=[])
 def test_add_worker_after_tasks(e, s):
     futures = e.map(inc, range(10))
@@ -2616,7 +2677,7 @@ def test_workers_register_indirect_data(e, s, a, b):
     assert b.data[x.key] == 1
     assert s.who_has[x.key] == {a.address, b.address}
     assert s.has_what[b.address] == {x.key, y.key}
-    s.validate()
+    s.validate_state()
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'),
@@ -2676,12 +2737,12 @@ def test_replicate_workers(e, s, *workers):
     assert sum(a.key in w.data for w in workers) == 1
     assert sum(b.key in w.data for w in workers) == 1
 
-    s.validate()
+    s.validate_state()
 
     yield s.replicate(keys=[a.key, b.key], n=None) # all
     assert len(s.who_has[a.key]) == 10
     assert len(s.who_has[b.key]) == 10
-    s.validate()
+    s.validate_state()
 
     yield s.replicate(keys=[a.key, b.key], n=1,
                       workers=[w.address for w in workers[:5]])
@@ -2762,6 +2823,8 @@ def test_executor_replicate_sync(loop):
 
             with pytest.raises(ValueError):
                 e.replicate([x], n=0)
+
+            assert y.result() == 3
 
 
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 4)] * 1)
@@ -2971,7 +3034,7 @@ def test_cancel_clears_processing(e, s, *workers):
     while any(v for v in s.processing.values()):
         assert time() < start + 0.2
         yield gen.sleep(0.01)
-    s.validate()
+    s.validate_state()
 
 def test_cancel_stress_sync(loop):
     da = pytest.importorskip('dask.array')
@@ -2990,18 +3053,34 @@ def test_cancel_stress_sync(loop):
 def test_default_get(loop):
     with cluster() as (s, [a, b]):
         pre_get = _globals.get('get')
+        pre_shuffle = _globals.get('shuffle')
         with Executor(('127.0.0.1', s['port']), loop=loop, set_as_default=True) as e:
             assert _globals['get'] == e.get
+            assert _globals['shuffle'] == 'tasks'
+
         assert _globals['get'] is pre_get
+        assert _globals['shuffle'] == pre_shuffle
 
         e = Executor(('127.0.0.1', s['port']), loop=loop, set_as_default=False)
         assert _globals['get'] is pre_get
+        assert _globals['shuffle'] == pre_shuffle
         e.shutdown()
 
         e = Executor(('127.0.0.1', s['port']), loop=loop, set_as_default=True)
+        assert _globals['shuffle'] == 'tasks'
         assert _globals['get'] == e.get
         e.shutdown()
         assert _globals['get'] is pre_get
+        assert _globals['shuffle'] == pre_shuffle
+
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            assert _globals['get'] == e.get
+
+        with Executor(('127.0.0.1', s['port']), loop=loop, set_as_default=False) as e:
+            assert _globals['get'] != e.get
+            dask.set_options(get=e.get)
+            assert _globals['get'] == e.get
+        assert _globals['get'] != e.get
 
 
 @gen_cluster(executor=True)
@@ -3017,11 +3096,46 @@ def test_get_stacks_processing(e, s, a, b):
 
     yield gen.sleep(0.2)
 
-    stacks = yield e.scheduler.stacks()
-    assert stacks == valmap(list, s.stacks)
+    c = yield e.scheduler.stacks()
+    assert c == valmap(list, s.stacks)
 
-    processing = yield e.scheduler.processing()
-    assert processing == valmap(list, s.processing)
+    c = yield e.scheduler.stacks(workers=[a.address])
+    assert c == {a.address: list(s.stacks[a.address])}
+
+    c = yield e.scheduler.processing()
+    assert c == valmap(list, s.processing)
+
+    c = yield e.scheduler.processing(workers=[a.address])
+    assert c == {a.address: list(s.processing[a.address])}
+
+@gen_cluster(executor=True)
+def test_get_foo(e, s, a, b):
+    futures = e.map(inc, range(10))
+    yield _wait(futures)
+
+    c = yield e.scheduler.ncores()
+    assert c == s.ncores
+
+    c = yield e.scheduler.ncores(workers=[a.address])
+    assert c == {a.address: s.ncores[a.address]}
+
+    c = yield e.scheduler.has_what()
+    assert c == valmap(list, s.has_what)
+
+    c = yield e.scheduler.has_what(workers=[a.address])
+    assert c == {a.address: list(s.has_what[a.address])}
+
+    c = yield e.scheduler.nbytes(summary=False)
+    assert c == s.nbytes
+
+    c = yield e.scheduler.nbytes(keys=[futures[0].key], summary=False)
+    assert c == {futures[0].key: s.nbytes[futures[0].key]}
+
+    c = yield e.scheduler.who_has()
+    assert c == valmap(list, s.who_has)
+
+    c = yield e.scheduler.who_has(keys=[futures[0].key])
+    assert c == {futures[0].key: list(s.who_has[futures[0].key])}
 
 
 @gen_cluster(executor=True, Worker=Nanny)
@@ -3069,7 +3183,7 @@ def dont_test_scheduler_falldown(loop):
         s['proc'].terminate()
         s['proc'].join(timeout=2)
         try:
-            s2 = Scheduler(loop=loop)
+            s2 = Scheduler(loop=loop, validate=True)
             loop.add_callback(s2.start, s['port'])
             sleep(0.1)
             with Executor(('127.0.0.1', s['port']), loop=loop) as ee:
@@ -3135,7 +3249,7 @@ def test_forgotten_futures_dont_clean_up_new_futures(e, s, a, b):
 
 def test_get_stops_work_after_error(loop):
     loop2 = IOLoop()
-    s = Scheduler(loop=loop2)
+    s = Scheduler(loop=loop2, validate=True)
     s.start(0)
     w = Worker(s.ip, s.port, loop=loop2)
     w.start(0)
@@ -3166,3 +3280,186 @@ def test_as_completed_list(loop):
             seq = e.map(inc, iter(range(5)))
             seq2 = list(as_completed(seq))
             assert set(e.gather(seq2)) == {1, 2, 3, 4, 5}
+
+
+@pytest.mark.ipython
+def test_start_ipython(loop):
+    from jupyter_client import BlockingKernelClient
+    from ipykernel.kernelapp import IPKernelApp
+    from IPython.core.interactiveshell import InteractiveShell
+
+    with cluster(1) as (s, [a]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            info_dict = e.start_ipython()
+            info = first(info_dict.values())
+            key = info.pop('key')
+            kc = BlockingKernelClient(**info)
+            kc.session.key = key
+            kc.start_channels()
+            msg_id = kc.execute("worker")
+            reply = kc.get_shell_msg(timeout=10)
+            kc.stop_channels()
+
+@pytest.mark.ipython
+def test_start_ipython_magic(loop):
+    ip = mock.Mock()
+    with cluster() as (s, [a, b]):
+        with mock.patch('IPython.get_ipython', lambda : ip), Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            workers = list(e.ncores())[:2]
+            names = [ 'magic%i' % i for i in range(len(workers)) ]
+            e.start_ipython(workers, magic_names=names)
+    assert ip.register_magic_function.call_count == 4
+    expected = [
+        {'magic_kind': 'line', 'magic_name': 'magic0'},
+        {'magic_kind': 'cell', 'magic_name': 'magic0'},
+        {'magic_kind': 'line', 'magic_name': 'magic1'},
+        {'magic_kind': 'cell', 'magic_name': 'magic1'},
+    ]
+    call_kwargs_list = [ kwargs for (args, kwargs) in ip.register_magic_function.call_args_list ]
+    assert call_kwargs_list == expected
+
+
+@pytest.mark.ipython
+def test_start_ipython_qtconsole(loop):
+    Popen = mock.Mock()
+    with cluster() as (s, [a, b]):
+        with mock.patch('distributed._ipython_utils.Popen', Popen), Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            worker = first(e.ncores())
+            e.start_ipython(worker, qtconsole=True)
+            e.start_ipython(worker, qtconsole=True, qtconsole_args=['--debug'])
+    assert Popen.call_count == 2
+    (cmd,), kwargs = Popen.call_args_list[0]
+    assert cmd[:3] == [ 'jupyter', 'qtconsole', '--existing' ]
+    (cmd,), kwargs = Popen.call_args_list[1]
+    assert cmd[-1:] == [ '--debug' ]
+
+
+@gen_cluster(ncores=[], executor=True, timeout=None)
+def test_stress_creation_and_deletion(e, s):
+    # Assertions are handled by the validate mechanism in the scheduler
+    s.allowed_failures = 100000
+    da = pytest.importorskip('dask.array')
+
+    x = da.random.random(size=(2000, 2000), chunks=(100, 100))
+    y = (x + 1).T + (x * 2) - x.mean(axis=1)
+
+    z = e.persist(y)
+
+    @gen.coroutine
+    def create_and_destroy_worker(delay):
+        start = time()
+        while time() < start + 10:
+            n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
+            n.start(0)
+
+            yield gen.sleep(delay)
+
+            yield n._close()
+            print("Killed nanny")
+
+    yield gen.with_timeout(timedelta(minutes=1),
+                          All([create_and_destroy_worker(0.1 * i) for i in
+                              range(10)]))
+
+
+@gen_test()
+def test_status():
+    s = Scheduler()
+    s.start(0)
+
+    e = Executor((s.ip, s.port), start=False)
+    assert e.status != 'running'
+
+    with pytest.raises(Exception):
+        x = e.submit(inc, 1)
+
+    yield e._start()
+    assert e.status == 'running'
+    x = e.submit(inc, 1)
+
+    yield e._shutdown()
+    assert e.status == 'closed'
+
+    yield s.close()
+
+
+@gen_cluster(executor=True)
+def test_persist_optimize_graph(e, s, a, b):
+    i = 10
+    import dask.bag as db
+    for method in [e.persist, e.compute]:
+        b = db.range(i, npartitions=2); i += 1
+        b2 = b.map(inc)
+        b3 = b2.map(inc)
+
+        b4 = method(b3, optimize_graph=False)
+        yield _wait(b4)
+
+        assert set(map(tokey, b3._keys())).issubset(s.tasks)
+
+        b = db.range(i, npartitions=2); i += 1
+        b2 = b.map(inc)
+        b3 = b2.map(inc)
+
+        b4 = method(b3, optimize_graph=True)
+        yield _wait(b4)
+
+        assert not any(tokey(k) in s.tasks for k in b2._keys())
+
+
+@gen_cluster(executor=True, ncores=[])
+def test_scatter_raises_if_no_workers(e, s):
+    with pytest.raises(ValueError):
+        yield e._scatter([1])
+
+
+from distributed.utils_test import popen
+def test_reconnect(loop):
+    w = Worker('127.0.0.1', 9393, loop=loop)
+    w.start()
+    with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
+        e = Executor('localhost:9393', loop=loop)
+        assert len(e.ncores()) == 1
+        x = e.submit(inc, 1)
+        assert x.result() == 2
+
+    start = time()
+    while e.status != 'connecting':
+        assert time() < start + 5
+        sleep(0.01)
+
+    with pytest.raises(Exception):
+        e.ncores()
+
+    assert x.status == 'cancelled'
+    with pytest.raises(CancelledError):
+        x.result()
+
+    with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
+        start = time()
+        while e.status != 'running':
+            sleep(0.01)
+            assert time() < start + 5
+
+        start = time()
+        while len(e.ncores()) != 1:
+            sleep(0.01)
+            assert time() < start + 5
+
+        x = e.submit(inc, 1)
+        assert x.result() == 2
+
+    start = time()
+    while True:
+        try:
+            x.result()
+            assert False
+        except StreamClosedError:
+            continue
+        except CancelledError:
+            break
+        assert time() < start + 5
+        sleep(0.1)
+
+    e.shutdown()
+    sync(loop, w._close)

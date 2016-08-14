@@ -12,12 +12,14 @@ if sys.version_info < (3, 4):
     requires.append('singledispatch')
 
 setup(name='distributed',
-      version='1.11.0',
+      version='1.11.3',
       description='Distributed computing',
       url='http://distributed.readthedocs.io/en/latest/',
       maintainer='Matthew Rocklin',
       maintainer_email='mrocklin@gmail.com',
       license='BSD',
+      package_data={ '': ['templates/index.html'], },
+      include_package_data=True,
       install_requires=requires,
       packages=['distributed',
                 'distributed.cli',
@@ -32,6 +34,8 @@ setup(name='distributed',
       entry_points='''
         [console_scripts]
         dask-ssh=distributed.cli.dask_ssh:go
+        dask-submit=distributed.cli.dask_submit:go
+        dask-remote=distributed.cli.dask_remote:go
         dask-scheduler=distributed.cli.dask_scheduler:go
         dask-worker=distributed.cli.dask_worker:go
         dcenter=distributed.cli.dcenter:go

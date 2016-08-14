@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from datetime import timedelta
 import logging
 import six
+import socket
 import struct
 from time import time
 import traceback
@@ -34,6 +35,10 @@ with ignoring(ImportError):
     import pandas as pd
     pickle_types.append(pd.core.generic.NDFrame)
 pickle_types = tuple(pickle_types)
+
+
+class RPCClosed(IOError):
+    pass
 
 
 def dumps(x):
@@ -151,7 +156,7 @@ class Server(TCPServer):
             try:
                 super(Server, self).listen(port)
                 break
-            except OSError:
+            except (socket.error, OSError):
                 if port:
                     raise
                 else:
@@ -383,11 +388,10 @@ class rpc(object):
         if PY3 and isinstance(ip, bytes):
             ip = ip.decode()
         self.streams = dict()
-        if stream:
-            self.streams[stream] = True
         self.ip = ip
         self.port = port
         self.timeout = timeout
+        self.status = 'running'
         assert self.ip
         assert self.port
 
@@ -410,6 +414,8 @@ class rpc(object):
 
         As is done in __getattr__ below.
         """
+        if self.status == 'closed':
+            raise RPCClosed("RPC Closed")
         to_clear = set()
         open = False
         for stream, open in self.streams.items():
@@ -443,6 +449,10 @@ class rpc(object):
     def __del__(self):
         self.close_streams()
 
+    def close_rpc(self):
+        self.status = 'closed'
+        self.close_streams()
+
 
 def coerce_to_address(o, out=str):
     if PY3 and isinstance(o, bytes):
@@ -457,7 +467,7 @@ def coerce_to_address(o, out=str):
         o = (o[0].decode(), o[1])
 
     if out == str:
-        o = '%s:%d' % o
+        o = '%s:%s' % o
 
     return o
 

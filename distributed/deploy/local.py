@@ -38,7 +38,7 @@ class LocalCluster(object):
     --------
     >>> c = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
     >>> c  # doctest: +SKIP
-    LocalCluster("192.168.1.141:8786", workers=8, ncores=8)
+    LocalCluster("127.0.0.1:8786", workers=8, ncores=8)
 
     >>> e = Executor(c)  # connect to local cluster  # doctest: +SKIP
 
@@ -53,20 +53,26 @@ class LocalCluster(object):
     """
     def __init__(self, n_workers=None, threads_per_worker=None, nanny=True,
             loop=None, start=True, scheduler_port=8786,
-            silence_logs=logging.CRITICAL, diagnostics_port=None, **kwargs):
+            silence_logs=logging.CRITICAL, diagnostics_port=8787,
+            services={'http': HTTPScheduler}, **kwargs):
+        self.status = None
         if silence_logs:
             for l in ['distributed.scheduler',
                       'distributed.worker',
                       'distributed.core',
                       'distributed.nanny']:
                 logging.getLogger(l).setLevel(silence_logs)
-        if n_workers is None:
+        if n_workers is None and threads_per_worker is None:
             if nanny:
                 n_workers = _ncores
                 threads_per_worker = 1
             else:
                 n_workers = 1
                 threads_per_worker = _ncores
+        if n_workers is None and threads_per_worker is not None:
+            n_workers = max(1, _ncores // threads_per_worker)
+        if n_workers is not None and threads_per_worker is None:
+            threads_per_worker = max(1, _ncores // n_workers)
 
         self.loop = loop or IOLoop()
         if not self.loop._running:
@@ -76,10 +82,8 @@ class LocalCluster(object):
             while not self.loop._running:
                 sleep(0.001)
 
-        if diagnostics_port and 'services' not in kwargs:  # bokeh needs http
-            kwargs['services'] = {('http', 0): HTTPScheduler}
-
-        self.scheduler = Scheduler(loop=self.loop, ip='127.0.0.1', **kwargs)
+        self.scheduler = Scheduler(loop=self.loop, ip='127.0.0.1',
+                                   services=services)
         self.scheduler.start(scheduler_port)
         self.workers = []
 
@@ -188,16 +192,15 @@ class LocalCluster(object):
 
     def close(self):
         """ Close the cluster """
-        if self.status == 'closed':
-            return
-        self.status = 'closed'
-        if self.loop._running:
-            sync(self.loop, self._close)
-        if hasattr(self, '_thread'):
-            sync(self.loop, self.loop.stop)
-            self._thread.join(timeout=1)
-            self.loop.close()
-            del self._thread
+        if self.status == 'running':
+            self.status = 'closed'
+            if self.loop._running:
+                sync(self.loop, self._close)
+            if hasattr(self, '_thread'):
+                sync(self.loop, self.loop.stop)
+                self._thread.join(timeout=1)
+                self.loop.close()
+                del self._thread
 
     def __del__(self):
         self.close()
