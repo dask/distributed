@@ -127,8 +127,7 @@ def test_multi_progressbar_widget(s, a, b):
 
     # FIXME: what does it mean if part of the progress has failed? should we
     # report failure or danger?
-
-    assert p.status == 'success'
+    assert p.status == 'danger'
 
     capacities = [int(re.search(r'\d+ / \d+', row.children[0].value)
                     .group().split(' / ')[1])
