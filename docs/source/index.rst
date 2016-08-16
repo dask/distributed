@@ -94,6 +94,7 @@ Contents
    queues
    submitting-applications
    api
+   faq
 
 .. toctree::
    :maxdepth: 1
