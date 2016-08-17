@@ -1366,6 +1366,26 @@ class Scheduler(Server):
                     if v['status'] == 'OK':
                         self.add_keys(address=w, keys=list(gathers[w]))
 
+    @gen.coroutine
+    def synchronize_worker_data(self, stream=None, worker=None):
+        if worker is None:
+            result = yield {w: self.synchronize_worker_data(worker=w)
+                    for w in self.worker_info}
+            raise Return({k: v for k, v in result.items() if any(v.values())})
+        else:
+            keys = yield self.rpc(addr=worker).keys()
+            keys = set(keys)
+            extra = keys - self.has_what[worker] - self.deleted_keys[worker]
+            if extra:
+                yield self.rpc(addr=worker).delete_data(keys=list(extra),
+                        report=False)
+
+            missing = self.has_what[worker] - keys
+            if missing:
+                self.stimulus_missing_data(keys=missing)
+
+            raise Return({'extra': list(extra), 'missing': list(missing)})
+
     def add_keys(self, stream=None, address=None, keys=()):
         """
         Learn that a worker has certain keys

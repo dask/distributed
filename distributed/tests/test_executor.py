@@ -3413,6 +3413,14 @@ def test_scatter_raises_if_no_workers(e, s):
         yield e._scatter([1])
 
 
+@gen_cluster(executor=True)
+def test_synchronize_worker_data(e, s, a, b):
+    a.data['x'] = 1
+    response = yield s.synchronize_worker_data()
+    assert response == {a.address: {'extra': ['x'], 'missing': []}}
+    assert not a.data
+
+
 from distributed.utils_test import popen
 def test_reconnect(loop):
     w = Worker('127.0.0.1', 9393, loop=loop)
