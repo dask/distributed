@@ -12,8 +12,8 @@ from threading import Thread
 from time import sleep, time
 import traceback
 
-
 import mock
+import numpy as np
 import pytest
 from toolz import (identity, isdistinct, first, concat, pluck, valmap,
         partition_all, partial)
@@ -2690,6 +2690,22 @@ def test_work_stealing(e, s, a, b):
     yield _wait(futures)
     assert len(a.data) > 10
     assert len(b.data) > 10
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 5, timeout=50)
+def test_work_steal_adapt_1(e, s, *workers):
+    """ Work stealing should adapt to the number of active workers """
+    n = 10000000  # 10 MB
+    for delay, multiple in [(0.05, True), (0.005, False)]:
+        x = e.submit(np.random.randint, 0, 255, dtype='u1', size=n, pure=False)
+        s.task_duration['slowadd'] = delay
+        yield _wait(x)
+
+        values = [delayed(slowadd)(x, i, delay=delay) for i in range(10)]
+        futures = e.compute(values)
+        yield _wait(futures)
+
+        assert (len(s.who_has[x.key]) > 1) == multiple
 
 
 @gen_cluster(executor=True)

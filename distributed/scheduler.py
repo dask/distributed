@@ -2331,7 +2331,8 @@ class Scheduler(Server):
         transfer_time = nbytes / bandwidth
         try:
             compute_time = self.task_duration[key_split(key)]
-            return transfer_time < compute_time
+            factor = len(self.idle) / len(self.saturated)
+            return transfer_time < compute_time * factor
         except KeyError:
             return False
 
