@@ -1122,7 +1122,7 @@ class Executor(object):
         results2 = pack_data(keys, results)
         return results2
 
-    def compute(self, args, sync=False, optimize_graph=True):
+    def compute(self, args, sync=False, optimize_graph=True, **kwargs):
         """ Compute dask collections on cluster
 
         Parameters
@@ -1131,6 +1131,10 @@ class Executor(object):
             Collections like dask.array or dataframe or dask.value objects
         sync: bool (optional)
             Returns Futures if False (default) or concrete values if True
+        optimize_graph: bool
+            Whether or not to optimize the underlying graphs
+        kwargs:
+            Options to pass to the graph optimize calls
 
         Returns
         -------
@@ -1169,7 +1173,7 @@ class Executor(object):
         if optimize_graph:
             groups = groupby(lambda x: x._optimize, variables)
             dsk = merge([opt(merge([v.dask for v in val]),
-                             [v._keys() for v in val])
+                             [v._keys() for v in val], **kwargs)
                         for opt, val in groups.items()])
         else:
             dsk = merge(c.dask for c in variables)
@@ -1198,7 +1202,7 @@ class Executor(object):
         else:
             return result
 
-    def persist(self, collections, optimize_graph=True):
+    def persist(self, collections, optimize_graph=True, **kwargs):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -1209,6 +1213,10 @@ class Executor(object):
         ----------
         collections: sequence or single dask object
             Collections like dask.array or dataframe or dask.value objects
+        optimize_graph: bool
+            Whether or not to optimize the underlying graphs
+        kwargs:
+            Options to pass to the graph optimize calls
 
         Returns
         -------
@@ -1234,7 +1242,7 @@ class Executor(object):
         if optimize_graph:
             groups = groupby(lambda x: x._optimize, collections)
             dsk = merge([opt(merge([v.dask for v in val]),
-                             [v._keys() for v in val])
+                             [v._keys() for v in val], **kwargs)
                         for opt, val in groups.items()])
         else:
             dsk = merge(c.dask for c in collections)
