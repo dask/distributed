@@ -187,10 +187,12 @@ def progress_plot(**kwargs):
     data = progress_wedge({'all': {}, 'memory': {},
                            'erred': {}, 'released': {}})
     source = ColumnDataSource(data)
+    x_range = Range1d(-0.5, 5.5)
+    y_range = Range1d(-1.55, 0.4)
 
     inner, outer = 0.2, 0.4
 
-    fig = figure(**kwargs)
+    fig = figure(x_range=x_range, y_range=y_range, **kwargs)
     fig.annular_wedge(source=source, x='x', y='y',
                       inner_radius=inner, outer_radius=outer,
                       start_angle=90, end_angle=90.001,

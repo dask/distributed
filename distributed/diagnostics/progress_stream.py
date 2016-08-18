@@ -76,7 +76,7 @@ def progress_quads(msg):
     return d
 
 
-def progress_wedge(msg, row_length=10):
+def progress_wedge(msg, nrows=2, ncols=6):
     """
 
     >>> msg = {'all': {'inc': 4, 'dec': 1},
@@ -96,13 +96,14 @@ def progress_wedge(msg, row_length=10):
      'released-angle': [0, 90],
      'erred-angle': [90, 180]}
     """
-    names = sorted(msg['all'], key=msg['all'].get, reverse=True)
+    names = sorted(msg['all'], key=msg['all'].get, reverse=True)[:nrows * ncols]
     n = len(names)
     d = {k: [v.get(name, 0) for name in names] for k, v in msg.items()}
     d['name'] = names
-    d['x'] = [i % row_length for i in range(n)]
-    d['y'] = [i // row_length for i in range(n)]
-    d['lower-y'] = [y - 0.5 for y in d['y']]
+    d['x'] = [i % ncols for i in range(n)]
+    d['y'] = [-(i // ncols) for i in range(n)]
+    d['lower-y'] = [y - (0.53 if i % 2 == 0 else 0.45)
+                    for i, y in enumerate(d['y'])]
     for state in ['memory', 'erred', 'released', 'all']:
         d[state] = [msg[state].get(name, 0) for name in names]
     d['done'] = [m + r + e for m, r, e in zip(d['memory'], d['released'], d['erred'])]
