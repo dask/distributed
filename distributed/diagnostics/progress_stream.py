@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def counts(scheduler, allprogress):
-    return merge({'all': valmap(len, allprogress.all)},
+    return merge({'all': valmap(len, allprogress.all),
+                  'nbytes': allprogress.nbytes},
                  {state: valmap(len, allprogress.state[state])
                      for state in ['memory', 'erred', 'released']})
 

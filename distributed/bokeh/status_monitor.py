@@ -176,7 +176,7 @@ def nbytes_plot(**kwargs):
     data = {'name': [], 'left': [], 'right': [], 'center': [], 'color': [],
             'percent': [], 'MB': [], 'text': []}
     source = ColumnDataSource(data)
-    fig = figure(tools='', toolbar_location=None, **kwargs)
+    fig = figure(title='Memory Use', tools='', toolbar_location=None, **kwargs)
     fig.quad(source=source, top=1, bottom=0,
              left='left', right='right', color='color', alpha=0.8)
     fig.text(source=source, x='center', y=0.5, text='text',
