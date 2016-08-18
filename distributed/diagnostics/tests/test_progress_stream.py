@@ -44,10 +44,13 @@ def test_progress_stream(e, s, a, b):
 
     stream = yield progress_stream(s.address, interval=0.010)
     msg = yield read(stream)
+    nbytes = msg.pop('nbytes')
     assert msg == {'all': {'div': 10, 'inc': 5, 'finalize': 1},
                    'erred': {'div': 1},
                    'memory': {'div': 9, 'finalize': 1},
                    'released': {'inc': 5}}
+    assert set(nbytes) == set(msg['all'])
+    assert all(v > 0 for v in nbytes.values())
 
     d = progress_quads(msg)
 
