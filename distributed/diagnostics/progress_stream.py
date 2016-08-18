@@ -79,26 +79,22 @@ def progress_quads(msg):
 def progress_wedge(msg, row_length=10):
     """
 
-    Consumes messages like the following::
+    >>> msg = {'all': {'inc': 4, 'dec': 1},
+    ...        'memory': {'inc': 2, 'dec': 0},
+    ...        'erred': {'inc': 0, 'dec': 1},
+    ...        'released': {'inc': 1, 'dec': 0}}
 
-          {'all': {'inc': 4, 'dec': 1},
-           'memory': {'inc': 2, 'dec': 0},
-           'erred': {'inc': 0, 'dec': 1},
-           'released': {'inc': 1, 'dec': 0}}
-
-    Produces result like the following:
-
-        {'x': [0, 1],
-         'y': [0, 0],
-         'lower-y': [-.5, -.5],
-         'name': ['inc', 'dec'],
-         'memory': [2, 0],
-         'released': [1, 0],
-         'erred': [0, 1],
-         'memory-angle': [180, 180]  # start at 90 go clockwise
-         'released-angle': [0, 90],
-         'erred-angle': [90, 180]}
-
+    >>> progress_wedge(msg)  # doctest: +SKIP
+    {'x': [0, 1],
+     'y': [0, 0],
+     'lower-y': [-.5, -.5],
+     'name': ['inc', 'dec'],
+     'memory': [2, 0],
+     'released': [1, 0],
+     'erred': [0, 1],
+     'memory-angle': [180, 180]  # start at 90 go clockwise
+     'released-angle': [0, 90],
+     'erred-angle': [90, 180]}
     """
     names = sorted(msg['all'], key=msg['all'].get, reverse=True)
     n = len(names)
