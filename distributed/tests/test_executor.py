@@ -3421,6 +3421,20 @@ def test_synchronize_worker_data(e, s, a, b):
     assert not a.data
 
 
+@gen_test()
+def test_synchronize_worker_data_callback():
+    s = Scheduler(synchronize_worker_interval=50)
+    s.start(0)
+    a = Worker(s.ip, s.port, name='alice')
+    yield a._start()
+
+    a.data['x'] = 1
+
+    yield gen.sleep(0.200)
+
+    assert not a.data
+
+
 from distributed.utils_test import popen
 def test_reconnect(loop):
     w = Worker('127.0.0.1', 9393, loop=loop)
