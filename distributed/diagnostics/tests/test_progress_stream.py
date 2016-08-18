@@ -69,10 +69,15 @@ def test_progress_stream(e, s, a, b):
 
 def test_nbytes_bar():
     nbytes = {'inc': 1000, 'dec': 3000}
-    expected = {'names': ['dec', 'inc'],
+    expected = {'name': ['dec', 'inc'],
                 'left': [0, 0.75],
                 'center': [0.375, 0.875],
-                'right': [0.75, 1.0]}
+                'right': [0.75, 1.0],
+                'percent': [75, 25],
+                'MB': [0.003, 0.001],
+                'text': ['dec', 'inc']}
 
     result = nbytes_bar(nbytes)
+    color = result.pop('color')
+    assert len(set(color)) == 2
     assert result == expected
