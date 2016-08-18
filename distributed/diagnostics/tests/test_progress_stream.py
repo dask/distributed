@@ -8,7 +8,7 @@ from dask import do
 from distributed.core import read
 from distributed.executor import _wait
 from distributed.diagnostics.progress_stream import (progress_quads,
-        progress_stream)
+        nbytes_bar, progress_stream)
 from distributed.utils_test import inc, div, dec, gen_cluster
 from distributed.worker import dumps_task
 from time import time, sleep
@@ -65,3 +65,14 @@ def test_progress_stream(e, s, a, b):
                  'bottom': [0.3, 1.3, 2.3]}
 
     stream.close()
+
+
+def test_nbytes_bar():
+    nbytes = {'inc': 1000, 'dec': 3000}
+    expected = {'names': ['dec', 'inc'],
+                'left': [0, 0.75],
+                'center': [0.375, 0.875],
+                'right': [0.75, 1.0]}
+
+    result = nbytes_bar(nbytes)
+    assert result == expected

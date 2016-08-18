@@ -50,6 +50,34 @@ def progress_stream(address, interval):
     raise gen.Return(stream)
 
 
+def nbytes_bar(nbytes):
+    """ Convert nbytes message into rectangle placements
+
+    >>> nbytes_bar({'inc': 1000, 'dec': 3000}) # doctest: +NORMALIZE_WHITESPACE
+    {'names': ['dec', 'inc'],
+     'left': [0, 0.75],
+     'center': [0.375, 0.875],
+     'right': [0.75, 1.0]}
+    """
+    total = sum(nbytes.values())
+    names = sorted(nbytes)
+
+    d = {'names': names,
+         'left': [],
+         'right': [],
+         'center': []}
+    right = 0
+    for name in names:
+        left = right
+        right = nbytes[name] / total + left
+        center = (right + left) / 2
+        d['left'].append(left)
+        d['right'].append(right)
+        d['center'].append(center)
+
+    return d
+
+
 def progress_quads(msg):
     """
 
