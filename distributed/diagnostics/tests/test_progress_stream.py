@@ -38,16 +38,16 @@ def test_progress_annular_wedge():
            'released': {'inc': 1, 'dec': 0, 'add': 1}}
     expected = {'x': [0, 1, 2],
                 'y': [0, 0, 0],
-                'lower-y': [-.5, -.5, -.5],
+                'lower-y': [-.53, -.45, -.53],
                 'name': ['inc', 'dec', 'add'],
                 'all': [4, 2, 1],
                 'memory': [2, 0, 0],
                 'released': [1, 0, 1],
                 'erred': [0, 1, 0],
                 'done': [3, 1, 1],
-                'released-angle': [0, 90, 90.001],
-                'memory-angle': [180, 90, 90.001],  # start at 90 go clockwise
-                'erred-angle': [180, 270, 90.001]}
+                'released-angle': [0.0, 90.0, 90.001],
+                'memory-angle': [180.0, 90.0, 90.001],  # start at 90 go clockwise
+                'erred-angle': [180.0, 270.0, 90.001]}
 
     result = progress_wedge(msg)
     assert result == expected
