@@ -8,7 +8,7 @@ from dask import do
 from distributed.core import read
 from distributed.executor import _wait
 from distributed.diagnostics.progress_stream import (progress_quads,
-        progress_stream)
+        progress_stream, progress_wedge)
 from distributed.utils_test import inc, div, dec, gen_cluster
 from distributed.worker import dumps_task
 from time import time, sleep
@@ -29,6 +29,28 @@ def test_progress_quads():
     assert d['released_right'] == [1/5, 0]
     assert d['memory_right'] == [3 / 5, 0]
     assert d['erred_left'] == [1, 0]
+
+
+def test_progress_annular_wedge():
+    msg = {'all': {'inc': 4, 'dec': 2, 'add': 1},
+           'memory': {'inc': 2, 'dec': 0, 'add': 0},
+           'erred': {'inc': 0, 'dec': 1, 'add': 0},
+           'released': {'inc': 1, 'dec': 0, 'add': 1}}
+    expected = {'x': [0, 1, 2],
+                'y': [0, 0, 0],
+                'lower-y': [-.53, -.45, -.53],
+                'name': ['inc', 'dec', 'add'],
+                'all': [4, 2, 1],
+                'memory': [2, 0, 0],
+                'released': [1, 0, 1],
+                'erred': [0, 1, 0],
+                'done': [3, 1, 1],
+                'released-angle': [0.0, 90.0, 90.001],
+                'memory-angle': [180.0, 90.0, 90.001],  # start at 90 go clockwise
+                'erred-angle': [180.0, 270.0, 90.001]}
+
+    result = progress_wedge(msg)
+    assert result == expected
 
 
 @gen_cluster(executor=True, timeout=None)

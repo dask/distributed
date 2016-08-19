@@ -183,32 +183,46 @@ def task_stream_append(lists, msg, workers, palette=task_stream_palette):
 
 
 def progress_plot(**kwargs):
-    from ..diagnostics.progress_stream import progress_quads
-    data = progress_quads({'all': {}, 'memory': {},
+    from ..diagnostics.progress_stream import progress_wedge
+    data = progress_wedge({'all': {}, 'memory': {},
                            'erred': {}, 'released': {}})
-
-    x_range = Range1d(-0.5, 1.5)
-    y_range = Range1d(5.1, -0.1)
     source = ColumnDataSource(data)
-    fig = figure(tools='', toolbar_location=None, y_range=y_range, x_range=x_range, **kwargs)
-    fig.quad(source=source, top='top', bottom='bottom',
-             left=0, right=1, color='#aaaaaa', alpha=0.2)
-    fig.quad(source=source, top='top', bottom='bottom',
-             left=0, right='released_right', color=Spectral9[0], alpha=0.4)
-    fig.quad(source=source, top='top', bottom='bottom',
-             left='released_right', right='memory_right',
-             color=Spectral9[0], alpha=0.8)
-    fig.quad(source=source, top='top', bottom='bottom',
-             left='erred_left', right=1,
-             color='#000000', alpha=0.3)
-    fig.text(source=source, text='fraction', y='center', x=-0.01,
-             text_align='right', text_baseline='middle')
-    fig.text(source=source, text='name', y='center', x=1.01,
-             text_align='left', text_baseline='middle')
-    fig.xgrid.grid_line_color = None
-    fig.ygrid.grid_line_color = None
-    fig.axis.visible = None
-    fig.outline_line_color = None
+    x_range = Range1d(-0.5, 5.5)
+    y_range = Range1d(-1.55, 0.4)
+
+    inner, outer = 0.2, 0.4
+
+    fig = figure(x_range=x_range, y_range=y_range, **kwargs)
+    fig.annular_wedge(source=source, x='x', y='y',
+                      inner_radius=inner, outer_radius=outer,
+                      start_angle=90, end_angle=90.001,
+                      direction='clock', color='#444444', alpha=0.1,
+                      start_angle_units='deg', end_angle_units='deg')
+    fig.annular_wedge(source=source, x='x', y='y',
+                      inner_radius=inner, outer_radius=outer,
+                      start_angle=90, end_angle='released-angle',
+                      direction='clock', color=Spectral9[0], alpha=0.3,
+                      start_angle_units='deg', end_angle_units='deg')
+    fig.annular_wedge(source=source, x='x', y='y',
+                      inner_radius=inner, outer_radius=outer,
+                      start_angle='released-angle', end_angle='memory-angle',
+                      direction='clock', color=Spectral9[0], alpha=0.8,
+                      start_angle_units='deg', end_angle_units='deg')
+    fig.annular_wedge(source=source, x='x', y='y',
+                      inner_radius=inner, outer_radius=outer,
+                      start_angle='memory-angle', end_angle='erred-angle',
+                      direction='clock', color='#000000', alpha=0.3,
+                      start_angle_units='deg', end_angle_units='deg')
+    fig.text(source=source, x='x', y='y', text_align='center',
+             text_baseline='bottom', text='done')
+    fig.text(source=source, x='x', y='y', text_align='center',
+             text_baseline='top', text='all')
+    fig.text(source=source, x='x', y='lower-y', text_align='center',
+             text='name')
+
+    fig.xaxis.visible = False
+    fig.yaxis.visible = False
+    fig.grid.grid_line_alpha = 0
 
     hover = HoverTool()
     fig.add_tools(hover)

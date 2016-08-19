@@ -74,3 +74,48 @@ def progress_quads(msg):
                    for im, r, a in zip(d['memory'], d['released'], d['all'])]
     d['erred_left'] = [1 - e / a for e, a in zip(d['erred'], d['all'])]
     return d
+
+
+def progress_wedge(msg, nrows=2, ncols=6):
+    """
+
+    >>> msg = {'all': {'inc': 4, 'dec': 1},
+    ...        'memory': {'inc': 2, 'dec': 0},
+    ...        'erred': {'inc': 0, 'dec': 1},
+    ...        'released': {'inc': 1, 'dec': 0}}
+
+    >>> progress_wedge(msg)  # doctest: +SKIP
+    {'x': [0, 1],
+     'y': [0, 0],
+     'lower-y': [-.5, -.5],
+     'name': ['inc', 'dec'],
+     'memory': [2, 0],
+     'released': [1, 0],
+     'erred': [0, 1],
+     'memory-angle': [180, 180]  # start at 90 go clockwise
+     'released-angle': [0, 90],
+     'erred-angle': [90, 180]}
+    """
+    names = sorted(msg['all'], key=msg['all'].get, reverse=True)[:nrows * ncols]
+    n = len(names)
+    d = {k: [v.get(name, 0) for name in names] for k, v in msg.items()}
+    d['name'] = names
+    d['x'] = [i % ncols for i in range(n)]
+    d['y'] = [-(i // ncols) for i in range(n)]
+    d['lower-y'] = [y - (0.53 if i % 2 == 0 else 0.45)
+                    for i, y in enumerate(d['y'])]
+    for state in ['memory', 'erred', 'released', 'all']:
+        d[state] = [msg[state].get(name, 0) for name in names]
+    d['done'] = [m + r + e for m, r, e in zip(d['memory'], d['released'], d['erred'])]
+
+    for angle in ['released-angle', 'memory-angle', 'erred-angle']:
+        d[angle] = []
+
+    for a, r, m, e in zip(d['all'], d['released'], d['memory'], d['erred']):
+        ra = (90 - 360 * (r / a)) % 360 if r < a else 90.001
+        ma = (ra - 360 * (m / a)) % 360 if m + r < a else 90.001
+        ea = (ma - 360 * (e / a)) % 360 if e + m + r < a else 90.001
+        d['released-angle'].append(ra)
+        d['memory-angle'].append(ma)
+        d['erred-angle'].append(ea)
+    return d
