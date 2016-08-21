@@ -463,86 +463,7 @@ class Worker(Server):
     @gen.coroutine
     def compute_one(self, data, key=None, function=None, args=None, kwargs=None,
                     report=False, task=None):
-        with log_errors():
-            logger.debug("Compute one on %s", key)
-            diagnostics = dict()
-            try:
-                start = default_timer()
-                function, args, kwargs = self.deserialize(function, args, kwargs,
-                        task)
-                diagnostics['deserialization'] = default_timer() - start
-            except Exception as e:
-                logger.warn("Could not deserialize task", exc_info=True)
-                emsg = error_message(e)
-                emsg['key'] = key
-                raise Return(emsg)
-
-            self.active.add(key)
-            # Fill args with data
-            args2 = pack_data(args, data)
-            kwargs2 = pack_data(kwargs, data)
-
-            if inspect.isgeneratorfunction(function):
-                self.generators[key] = {'gen': function(*args2, **kwargs2),
-                                        'keys': []}
-                result = yield self.executor_submit(key, apply_function,
-                        partial_compute, (self.generators[key]['gen'], None), {})
-                result.update(result.pop('result'))
-            elif key in self.generators:
-                assert len(args2) == 2 and not kwargs2
-                assert args[0] == self.generators[key]['keys'][-1]
-                result = yield self.executor_submit(key, apply_function,
-                        partial_compute, (self.generators[key]['gen'],
-                            args2[1]), {})
-                result.update(result.pop('result'))
-
-            else:
-                result = yield self.executor_submit(key, apply_function, function,
-                                                    args2, kwargs2)
-
-            result['key'] = key
-            result.update(diagnostics)
-
-            if 'tasks' in result:
-                new_key = '%s-%d' % (key, len(self.generators[key]['keys']))
-                result['tasks'][key] = (dummy, new_key, result['arg_key'])
-                result['new_key'] = new_key
-                self.data[new_key] = None
-                self.generators[key]['keys'].append(new_key)
-                result['dependencies'][key] = [new_key, result['arg_key']]
-                result['tasks'] = valmap(dumps_task, result['tasks'])
-                result['dependencies'] = valmap(list, result['dependencies'])
-                # TODO, handle leaves with sync
-
-            elif result['status'] == 'OK':
-                self.data[key] = result.pop('result')
-                if report:
-                    response = yield self.scheduler.add_keys(keys=[key],
-                                            address=(self.ip, self.port))
-                    if not response == 'OK':
-                        logger.warn('Could not report results to scheduler: %s',
-                                    str(response))
-            else:
-                logger.warn(" Compute Failed\n"
-                    "Function: %s\n"
-                    "args:     %s\n"
-                    "kwargs:   %s\n",
-                    str(funcname(function))[:1000],
-                    convert_args_to_str(args, max_len=1000),
-                    convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
-
-            logger.debug("Send compute response to scheduler: %s, %s", key,
-                         result)
-            try:
-                self.active.remove(key)
-            except KeyError:
-                pass
-            raise Return(result)
-
-    @gen.coroutine
-    def compute_coroutine(self, data, key=None, function=None, args=None,
-            kwargs=None, report=False, task=None):
-        logger.debug("Compute coroutine on %s", key)
+        logger.debug("Compute one on %s", key)
         diagnostics = dict()
         try:
             start = default_timer()
@@ -560,14 +481,39 @@ class Worker(Server):
         args2 = pack_data(args, data)
         kwargs2 = pack_data(kwargs, data)
 
-        # Log and compute in separate thread
-        result = yield self.executor_submit(key, apply_function, function,
-                                            args2, kwargs2)
+        if inspect.isgeneratorfunction(function):
+            self.generators[key] = {'gen': function(*args2, **kwargs2),
+                                    'keys': []}
+            result = yield self.executor_submit(key, apply_function,
+                    partial_compute, (self.generators[key]['gen'], None), {})
+            result.update(result.pop('result'))
+        elif key in self.generators:
+            assert len(args2) == 2 and not kwargs2
+            assert args[0] == self.generators[key]['keys'][-1]
+            result = yield self.executor_submit(key, apply_function,
+                    partial_compute, (self.generators[key]['gen'],
+                        args2[1]), {})
+            result.update(result.pop('result'))
+
+        else:
+            result = yield self.executor_submit(key, apply_function, function,
+                                                args2, kwargs2)
 
         result['key'] = key
         result.update(diagnostics)
 
-        if result['status'] == 'OK':
+        if 'tasks' in result:
+            new_key = '%s-%d' % (key, len(self.generators[key]['keys']))
+            result['tasks'][key] = (dummy, new_key, result['arg_key'])
+            result['new_key'] = new_key
+            self.data[new_key] = None
+            self.generators[key]['keys'].append(new_key)
+            result['dependencies'][key] = [new_key, result['arg_key']]
+            result['tasks'] = valmap(dumps_task, result['tasks'])
+            result['dependencies'] = valmap(list, result['dependencies'])
+            # TODO, handle leaves with sync
+
+        elif result['status'] == 'OK':
             self.data[key] = result.pop('result')
             if report:
                 response = yield self.scheduler.add_keys(keys=[key],
@@ -977,17 +923,10 @@ def partial_message_from_values(values):
 
         value = delayed(values)
         dsk = value.dask
-
-        # TODO: unpack_remotedata stuff is unnecessary
-        d = {k: unpack_remotedata(v) for k, v in dsk.items()}
-        extra_keys = set.union(*[v[1] for v in d.values()]) if d else set()
-        dsk2 = str_graph({k: v[0] for k, v in d.items()}, extra_keys)
+        dsk2 = str_graph(dsk, set())
         dsk3 = {k: v for k, v in dsk2.items() if k is not v}
 
-        dependencies = {tokey(k): set(map(tokey, v[1])) for k, v in d.items()}
-
-        for k, v in dsk3.items():
-            dependencies[k] |= set(_deps(dsk3, v))
+        dependencies = {k: set(_deps(dsk3, v)) for k, v in dsk3.items()}
 
         # leaves = {k: v for k, v in dsk.items() if not istask(v)}
 
