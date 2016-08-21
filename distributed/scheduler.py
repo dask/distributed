@@ -606,6 +606,34 @@ class Scheduler(Server):
 
         return recommendations
 
+    def stimulus_task_evolves(self, key=None, worker=None, tasks=None,
+            dependencies=None, arg_key=None, new_key=None, **kwargs):
+        with log_errors():
+            assert self.task_state[key] == 'processing'
+            self.task_state[new_key] = self.task_state.pop(key)
+            self.dependencies[new_key] = self.dependencies.pop(key)
+            for dep in self.dependencies[new_key]:
+                self.dependents[dep].remove(key)
+                self.dependents[dep].add(new_key)
+                self.waiting_data[dep].remove(key)
+                self.waiting_data[dep].add(new_key)
+            self.tasks[new_key] = self.tasks.pop(key)
+            self.waiting_data[new_key] = set()
+            self.rprocessing[new_key] = self.rprocessing.pop(key)
+            for w in self.rprocessing[new_key]:
+                d = self.processing[w]
+                d[new_key] = d.pop(key)
+
+            self.update_graph(client=None, tasks=tasks, keys=[key],
+                    dependencies=dependencies, restrictions={key: [worker]})
+
+            recommendations = self.transition(new_key, 'memory', worker=worker, **kwargs)
+            if self.task_state[new_key] == 'memory':
+                self.who_has[new_key].add(worker)
+                self.has_what[worker].add(new_key)
+
+            return recommendations
+
     def stimulus_task_erred(self, key=None, worker=None,
                         exception=None, traceback=None, **kwargs):
         """ Mark that a task has erred on a particular worker """
@@ -1061,6 +1089,9 @@ class Scheduler(Server):
                             elif msg['status'] == 'missing-data':
                                 r = self.stimulus_missing_data(worker=worker,
                                         ensure=False, **msg)
+                                recommendations.update(r)
+                            elif msg['status'] == 'evolve-task':
+                                r = self.stimulus_task_evolves(worker=worker, **msg)
                                 recommendations.update(r)
                             else:
                                 logger.warn("Unknown message type, %s, %s",

@@ -152,6 +152,7 @@ def is_kernel():
 
 hex_pattern = re.compile('[a-f]+')
 
+
 def key_split(s):
     """
     >>> key_split('x')
