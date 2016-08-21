@@ -1002,8 +1002,13 @@ def partial_message_from_values(values):
 def partial_compute(gen, args=None):
     with log_errors():
         if args is None:  # just started
-            values = next(gen)
-            return partial_message_from_values(values)
+            try:
+                values = next(gen)
+            except StopIteration as e:
+                result = e.args[0]
+                return {'result': result}
+            else:
+                return partial_message_from_values(values)
         else:
             try:
                 values = gen.send(args)
