@@ -503,9 +503,10 @@ class Scheduler(Server):
 
         original_keys = keys
         keys = set(keys)
-        for k in keys:
-            self.who_wants[k].add(client)
-            self.wants_what[client].add(k)
+        if client is not None:
+            for k in keys:
+                self.who_wants[k].add(client)
+                self.wants_what[client].add(k)
 
         n = 0
         while len(tasks) != n:  # walk thorough new tasks, cancel any bad deps
