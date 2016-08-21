@@ -6,6 +6,7 @@ from bisect import bisect
 
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
+from bokeh.models.widgets import Panel, Tabs
 from toolz import valmap
 
 from distributed.bokeh.status_monitor import (progress_plot, task_stream_plot,
@@ -116,7 +117,7 @@ def task_stream_update():
 
 doc.add_periodic_callback(task_stream_update, messages['task-events']['interval'])
 
-layout = column(
+status = Panel(title='Status', child=column(
     row(
         column(resource_plot, network_plot, sizing_mode=SIZING_MODE),
         column(combo_toolbar, sizing_mode=SIZING_MODE),
@@ -125,6 +126,10 @@ layout = column(
     row(nbytes_task_plot, sizing_mode=SIZING_MODE),
     row(task_stream_plot, sizing_mode=SIZING_MODE),
     row(progress_plot, sizing_mode=SIZING_MODE),
-    sizing_mode=SIZING_MODE
-)
-doc.add_root(layout)
+), sizing_mode=SIZING_MODE)
+
+# workers = Panel(title='Workers', child=worker_table)
+
+tabs = Tabs(tabs=[status], sizing_mode=SIZING_MODE)
+
+doc.add_root(tabs)
