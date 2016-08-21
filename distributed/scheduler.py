@@ -625,6 +625,9 @@ class Scheduler(Server):
                 d = self.processing[w]
                 d[new_key] = d.pop(key)
 
+            self.transition_log.append((key, 'processing', 'evolves',
+                                       {new_key: 'memory'}))
+
             self.update_graph(client=None, tasks=tasks, keys=[key],
                     dependencies=dependencies, restrictions={key: [worker]})
 
