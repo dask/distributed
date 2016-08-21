@@ -419,7 +419,8 @@ def test_multi_queues(s, a, b):
                       'dependencies': {'x': [],
                                        'y': ['x'],
                                        'z': ['y']},
-                      'keys': ['z']})
+                      'keys': ['z'],
+                      'client': 'alice'})
 
     while True:
         msg = yield report.get()
@@ -435,7 +436,8 @@ def test_multi_queues(s, a, b):
     sched2.put_nowait({'op': 'update-graph',
                        'tasks': {'a': dumps_task((inc, 10))},
                        'dependencies': {'a': []},
-                       'keys': ['a']})
+                       'keys': ['a'],
+                       'client': 'alice'})
 
     for q in [report, report2]:
         while True:
@@ -497,7 +499,8 @@ def test_server_listens_to_other_ops(s, a, b):
 def test_remove_worker_from_scheduler(s, a, b):
     dsk = {('x', i): (inc, i) for i in range(20)}
     s.update_graph(tasks=valmap(dumps_task, dsk), keys=list(dsk),
-                   dependencies={k: set() for k in dsk})
+                   dependencies={k: set() for k in dsk},
+                   client='alice')
     assert s.ready
     assert not any(stack for stack in s.stacks.values())
 
@@ -593,7 +596,8 @@ def test_scheduler_as_center():
 
     s.update_graph(tasks={'a': dumps_task((inc, 1))},
                    keys=['a'],
-                   dependencies={'a': []})
+                   dependencies={'a': []},
+                   client='alice')
     start = time()
     while not 'a' in s.who_has:
         assert time() - start < 5

@@ -490,9 +490,9 @@ class Worker(Server):
         elif key in self.generators:
             assert len(args2) == 2 and not kwargs2
             assert args[0] == self.generators[key]['keys'][-1]
-            result = yield self.executor_submit(key, apply_function,
-                    partial_compute, (self.generators[key]['gen'],
-                        args2[1]), {})
+            result = yield self.executor_submit(
+                    key, apply_function, partial_compute,
+                    (self.generators[key]['gen'], args2[1]), {})
             result.update(result.pop('result'))
 
         else:
