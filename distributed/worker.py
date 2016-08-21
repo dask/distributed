@@ -512,6 +512,59 @@ class Worker(Server):
         raise Return(result)
 
     @gen.coroutine
+    def compute_coroutine(self, data, key=None, function=None, args=None,
+            kwargs=None, report=False, task=None):
+        logger.debug("Compute coroutine on %s", key)
+        diagnostics = dict()
+        try:
+            start = default_timer()
+            function, args, kwargs = self.deserialize(function, args, kwargs,
+                    task)
+            diagnostics['deserialization'] = default_timer() - start
+        except Exception as e:
+            logger.warn("Could not deserialize task", exc_info=True)
+            emsg = error_message(e)
+            emsg['key'] = key
+            raise Return(emsg)
+
+        self.active.add(key)
+        # Fill args with data
+        args2 = pack_data(args, data)
+        kwargs2 = pack_data(kwargs, data)
+
+        # Log and compute in separate thread
+        result = yield self.executor_submit(key, apply_function, function,
+                                            args2, kwargs2)
+
+        result['key'] = key
+        result.update(diagnostics)
+
+        if result['status'] == 'OK':
+            self.data[key] = result.pop('result')
+            if report:
+                response = yield self.scheduler.add_keys(keys=[key],
+                                        address=(self.ip, self.port))
+                if not response == 'OK':
+                    logger.warn('Could not report results to scheduler: %s',
+                                str(response))
+        else:
+            logger.warn(" Compute Failed\n"
+                "Function: %s\n"
+                "args:     %s\n"
+                "kwargs:   %s\n",
+                str(funcname(function))[:1000],
+                convert_args_to_str(args, max_len=1000),
+                convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
+
+        logger.debug("Send compute response to scheduler: %s, %s", key,
+                     result)
+        try:
+            self.active.remove(key)
+        except KeyError:
+            pass
+        raise Return(result)
+
+    @gen.coroutine
     def compute(self, stream=None, function=None, key=None, args=(), kwargs={},
             task=None, who_has=None, report=True):
         """ Execute function """
@@ -885,3 +938,26 @@ def convert_kwargs_to_str(kwargs, max_len=None):
             return "{{{}".format(", ".join(strs[:i+1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
+
+
+def partial_message_from_values(values):
+    dsk = merge(v.dask for v in values)  # add opt/finalize
+    keys = [finalize(v) for v in values]  # todo
+    leaves = {k: v for k, v in dsk if not istask(v)}
+    self.data.update(leaves)
+    msg = {'status': 'partial-computation',
+           'graph': dsk,
+           'keys': keys,
+           'leaves': list(leaves),
+            }
+    return msg
+
+
+def coroutine_first_step(function, *args, **kwargs):
+    g = function(*args, **kwargs)
+    try:
+        values = next(g)
+        return partial_message_from_values(values)
+    except StopIteration as e:
+        values = e.args
+        return final_message_from_values(values)
