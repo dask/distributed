@@ -3,7 +3,9 @@ from operator import sub
 from dask import delayed
 import pytest
 
-from distributed.utils_test import gen_cluster
+from distributed.utils_test import gen_cluster, cluster, loop
+from distributed import Executor
+
 
 def range(x, y):
     a, b = yield delayed(min)(x, y), delayed(max)(x, y)
@@ -38,6 +40,14 @@ def test_compound(e, s, a, b):
     future = e.submit(fib, 10)
     result = yield future._result()
     assert result == 55
+
+
+def test_compound_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            future = e.submit(fib, 10)
+            result = future.result()
+            assert result == 55
 
 
 @pytest.mark.skipif(True, reason="can not yet reverse graph building")
