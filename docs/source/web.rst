@@ -38,6 +38,30 @@ tasks.  For the most recent 20000 tasks visit
 http://my-scheduler-address:8787/tasks , although beware that this page is not
 updated in real time.
 
+Viewing Web UI when running distributed on remote cluster
+---------------------------------------------------------
+Viewing the Web UI on a local machine when `distributed` is running on a remote
+cluster is possible through SSH port forwarding. Typically, this look something
+like
+
+.. code::
+
+   local$ ssh -L 8000:localhost:8787 user@remote
+   remote$ dask-scheduler
+
+It is then possible to go to ``localhost:8000`` and see Dask Web UI.
+
+This can be used in conjuction with port forwarding on the Jupyter notebook
+port.
+
+.. code::
+
+   local$ ssh -L 8001:localhost:8888 user@remote  # 8888 or whatever port Jupyter is running on
+   remote$ jupyter notebook
+
+Now we can visit ``localhost:8001`` to view the Jupyter notebook running on the remote
+cluster.
+
 .. raw:: html
 
    <iframe width="560"
