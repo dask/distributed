@@ -3576,3 +3576,16 @@ def test_idempotence(s, a, b):
 
     yield e._shutdown()
     yield f._shutdown()
+
+
+@gen_cluster(executor=True)
+def test_key_restrictions(e, s, a, b):
+    np = pytest.importorskip('numpy')
+    [x] = yield e._scatter([np.ones(1000000)], workers=a.address)
+    [y] = yield e._scatter([10], workers=b.address)
+
+    future = e.submit(add, x, y)
+    s.key_restrictions[future.key] = y.key
+    result = yield future._result()
+
+    assert s.who_has[future.key] == {b.address}

@@ -121,6 +121,9 @@ class Scheduler(Server):
     * **loose_retrictions:** ``{key}``:
         Set of keys for which we are allow to violate restrictions (see above)
         if not valid workers are present.
+    * **key_restrictions:** ``{key: key}``
+        Internal use only.  A key must run on the same worker where another key
+        is stored.
     *  **exceptions:** ``{key: Exception}``:
         A dict mapping keys to remote exceptions
     *  **tracebacks:** ``{key: list}``:
@@ -205,6 +208,7 @@ class Scheduler(Server):
         self.task_duration = {prefix: 0.00001 for prefix in fast_task_prefixes}
         self.restrictions = dict()
         self.loose_restrictions = set()
+        self.key_restrictions = dict()
         self.suspicious_tasks = defaultdict(lambda: 0)
         self.stacks = dict()
         self.waiting = dict()
@@ -318,7 +322,8 @@ class Scheduler(Server):
         collections = [self.tasks, self.dependencies, self.dependents,
                 self.waiting, self.waiting_data, self.released, self.priority,
                 self.nbytes, self.restrictions, self.loose_restrictions,
-                self.ready, self.who_wants, self.wants_what]
+                self.key_restrictions, self.ready,
+                self.who_wants, self.wants_what]
         for collection in collections:
             collection.clear()
 
@@ -489,7 +494,7 @@ class Scheduler(Server):
 
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None, priority=None,
-                     loose_restrictions=None):
+                     loose_restrictions=None, key_restrictions=None):
         """
         Add new computations to the internal dask graph
 
@@ -559,6 +564,9 @@ class Scheduler(Server):
             if loose_restrictions:
                 self.loose_restrictions |= set(loose_restrictions)
 
+        if key_restrictions:
+            self.key_restrictions.update(key_restrictions)
+
         for key in sorted(touched | keys, key=self.priority.get):
             if self.task_state[key] == 'released':
                 recommendations[key] = 'waiting'
@@ -623,6 +631,7 @@ class Scheduler(Server):
             self.tasks[new_key] = wrapped_task
             self.waiting_data[new_key] = set()
             self.rprocessing[new_key] = self.rprocessing.pop(key)
+            self.key_restrictions[key] = new_key
             for w in self.rprocessing[new_key]:
                 d = self.processing[w]
                 d[new_key] = d.pop(key)
@@ -1654,11 +1663,13 @@ class Scheduler(Server):
 
             del self.waiting[key]
 
-            if self.dependencies.get(key, None) or key in self.restrictions:
+            if (self.dependencies.get(key, None) or
+                    key in self.restrictions or
+                    key in self.key_restrictions):
                 new_worker = decide_worker(self.dependencies, self.stacks,
                         self.processing, self.who_has, self.has_what,
-                        self.restrictions, self.loose_restrictions, self.nbytes,
-                        key)
+                        self.restrictions, self.key_restrictions,
+                        self.loose_restrictions, self.nbytes, key)
                 if not new_worker:
                     self.unrunnable.add(key)
                     self.task_state[key] = 'no-worker'
@@ -2090,6 +2101,8 @@ class Scheduler(Server):
             del self.dependents[key]
             if key in self.restrictions:
                 del self.restrictions[key]
+            if key in self.key_restrictions:
+                del self.key_restrictions[key]
             if key in self.loose_restrictions:
                 self.loose_restrictions.remove(key)
             if key in self.priority:
@@ -2411,7 +2424,8 @@ class Scheduler(Server):
         bandwidth = bandwidth if bandwidth is not None else BANDWIDTH
         if len(self.dependencies[key]) > 10:
             return False
-        if key in self.restrictions and key not in self.loose_restrictions:
+        if ((key in self.restrictions or key in self.key_restrictions)
+                and key not in self.loose_restrictions):
             return False
 
         nbytes = sum(self.nbytes.get(k, 1000) for k in self.dependencies[key])
@@ -2495,7 +2509,7 @@ class Scheduler(Server):
 
 
 def decide_worker(dependencies, stacks, processing, who_has, has_what, restrictions,
-                  loose_restrictions, nbytes, key):
+                  key_restrictions, loose_restrictions, nbytes, key):
     """ Decide which worker should take task
 
     >>> dependencies = {'c': {'b'}, 'b': {'a'}}
@@ -2505,12 +2519,13 @@ def decide_worker(dependencies, stacks, processing, who_has, has_what, restricti
     >>> has_what = {'alice:8000': {'a'}}
     >>> nbytes = {'a': 100}
     >>> restrictions = {}
+    >>> key_restrictions = {}
     >>> loose_restrictions = set()
 
     We choose the worker that has the data on which 'b' depends (alice has 'a')
 
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, 'b')
+    ...               restrictions, key_restrictions, loose_restrictions, nbytes, 'b')
     'alice:8000'
 
     If both Alice and Bob have dependencies then we choose the less-busy worker
@@ -2518,14 +2533,14 @@ def decide_worker(dependencies, stacks, processing, who_has, has_what, restricti
     >>> who_has = {'a': {'alice:8000', 'bob:8000'}}
     >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'a'}}
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, 'b')
+    ...               restrictions, key_restrictions, loose_restrictions, nbytes, 'b')
     'bob:8000'
 
     Optionally provide restrictions of where jobs are allowed to occur
 
     >>> restrictions = {'b': {'alice', 'charlie'}}
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, 'b')
+    ...               restrictions, key_restrictions, loose_restrictions, nbytes, 'b')
     'alice:8000'
 
     If the task requires data communication, then we choose to minimize the
@@ -2539,25 +2554,35 @@ def decide_worker(dependencies, stacks, processing, who_has, has_what, restricti
     >>> stacks = {'alice:8000': [], 'bob:8000': []}
 
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               {}, set(), nbytes, 'c')
+    ...               {}, set(), {}, nbytes, 'c')
     'bob:8000'
     """
-    with log_errors(): # removeme
+    with log_errors(pdb=True): # removeme
         deps = dependencies[key]
         assert all(d in who_has for d in deps)
         workers = frequencies([w for dep in deps
                                  for w in who_has[dep]])
         if not workers:
             workers = stacks
-        if key in restrictions:
+
+        # Handle restrictions
+        if key in restrictions and key in key_restrictions:
+            r = restrictions[key] & who_has[key_restrictions[key]]
+        elif key in restrictions:
             r = restrictions[key]
+        elif key in key_restrictions:
+            r = who_has[key_restrictions[key]]
+        else:
+            r = None
+
+        if r is not None:
             workers = {w for w in workers if w in r or w.split(':')[0] in r}  # TODO: nonlinear
             if not workers:
                 workers = {w for w in stacks if w in r or w.split(':')[0] in r}
                 if not workers:
                     if key in loose_restrictions:
                         return decide_worker(dependencies, stacks, processing,
-                                who_has, has_what, {}, set(), nbytes, key)
+                                who_has, has_what, {}, {}, set(), nbytes, key)
                     else:
                         return None
         if not workers or not stacks:
