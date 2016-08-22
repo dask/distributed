@@ -500,8 +500,9 @@ class Worker(Server):
         result['key'] = key
         result.update(diagnostics)
 
-        if (isinstance(result['result'], dict) and
-                'tasks' in result['result']):
+        if ('result' in result and
+            isinstance(result['result'], dict) and
+            'tasks' in result['result']):
             result.update(result.pop('result'))
             new_key = '%s-%d' % (key, len(self.generators[key]['keys']))
             result['tasks'][key] = (partial_compute, new_key, result['arg_key'])
