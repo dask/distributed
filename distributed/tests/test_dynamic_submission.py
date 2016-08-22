@@ -2,6 +2,7 @@ from operator import sub
 
 from dask import delayed
 import pytest
+from tornado import gen
 
 from distributed.utils_test import gen_cluster, cluster, loop
 from distributed import Executor
@@ -50,7 +51,6 @@ def test_compound_sync(loop):
             assert result == 55
 
 
-@pytest.mark.skipif(True, reason="can not yet reverse graph building")
 @gen_cluster(executor=True)
 def test_resilience(e, s, a, b):
     future = e.submit(range, 10, 20)

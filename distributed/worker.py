@@ -486,14 +486,12 @@ class Worker(Server):
                                     'keys': []}
             result = yield self.executor_submit(key, apply_function,
                     partial_compute, (self.generators[key]['gen'], None), {})
-            result.update(result.pop('result'))
         elif key in self.generators:
             assert len(args2) == 2 and not kwargs2
             assert args[0] == self.generators[key]['keys'][-1]
             result = yield self.executor_submit(
                     key, apply_function, partial_compute,
                     (self.generators[key]['gen'], args2[1]), {})
-            result.update(result.pop('result'))
 
         else:
             result = yield self.executor_submit(key, apply_function, function,
@@ -502,15 +500,24 @@ class Worker(Server):
         result['key'] = key
         result.update(diagnostics)
 
-        if 'tasks' in result:
+        if (isinstance(result['result'], dict) and
+                'tasks' in result['result']):
+            result.update(result.pop('result'))
             new_key = '%s-%d' % (key, len(self.generators[key]['keys']))
-            result['tasks'][key] = (dummy, new_key, result['arg_key'])
+            result['tasks'][key] = (partial_compute, new_key, result['arg_key'])
             result['new_key'] = new_key
-            self.data[new_key] = None
+            self.data[new_key] = self.generators[key]['gen']
             self.generators[key]['keys'].append(new_key)
             result['dependencies'][key] = [new_key, result['arg_key']]
             result['tasks'] = valmap(dumps_task, result['tasks'])
             result['dependencies'] = valmap(list, result['dependencies'])
+
+            if inspect.isgeneratorfunction(function):  # first time
+                result['wrapped_task'] = dumps_task(
+                        (partial_compute_first, function, args, kwargs))
+            else:
+                result['wrapped_task'] = dumps_task(
+                        (partial_compute_ith,) + args)
             # TODO, handle leaves with sync
 
         elif result['status'] == 'OK':
@@ -945,7 +952,7 @@ def partial_compute(gen, args=None):
                 values = next(gen)
             except StopIteration as e:
                 result = e.args[0]
-                return {'result': result}
+                return result
             else:
                 return partial_message_from_values(values)
         else:
@@ -954,8 +961,15 @@ def partial_compute(gen, args=None):
                 return partial_message_from_values(values)
             except StopIteration as e:
                 result = e.args[0]
-                return {'result': result}
+                return result
 
 
-def dummy(*args, **kwargs):
-    pass
+def partial_compute_first(func, *args, **kwargs):
+    gen = func(*args, **kwargs)
+    result = next(gen)
+    return gen
+
+
+def partial_compute_ith(gen, args):
+    result = gen.send(args)
+    return gen
