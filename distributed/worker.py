@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from importlib import import_module
+import inspect
 import logging
 from multiprocessing.pool import ThreadPool
 import os
@@ -115,6 +116,7 @@ class Worker(Server):
         self.name = name
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
+        self.generators = {}
         self._last_disk_io = None
         self._last_net_io = None
         self._ipython_kernel = None
@@ -479,14 +481,47 @@ class Worker(Server):
         args2 = pack_data(args, data)
         kwargs2 = pack_data(kwargs, data)
 
-        # Log and compute in separate thread
-        result = yield self.executor_submit(key, apply_function, function,
-                                            args2, kwargs2)
+        if inspect.isgeneratorfunction(function):
+            self.generators[key] = {'gen': function(*args2, **kwargs2),
+                                    'keys': []}
+            result = yield self.executor_submit(key, apply_function,
+                    partial_compute, (self.generators[key]['gen'], None), {})
+        elif key in self.generators:
+            assert len(args2) == 2 and not kwargs2
+            assert args[0] == self.generators[key]['keys'][-1]
+            result = yield self.executor_submit(
+                    key, apply_function, partial_compute,
+                    (self.generators[key]['gen'], args2[1]), {})
+
+        else:
+            result = yield self.executor_submit(key, apply_function, function,
+                                                args2, kwargs2)
 
         result['key'] = key
         result.update(diagnostics)
 
-        if result['status'] == 'OK':
+        if ('result' in result and
+            isinstance(result['result'], dict) and
+            'tasks' in result['result']):
+            result.update(result.pop('result'))
+            new_key = '%s-%d' % (key, len(self.generators[key]['keys']))
+            result['tasks'][key] = (partial_compute, new_key, result['arg_key'])
+            result['new_key'] = new_key
+            self.data[new_key] = self.generators[key]['gen']
+            self.generators[key]['keys'].append(new_key)
+            result['dependencies'][key] = [new_key, result['arg_key']]
+            result['tasks'] = valmap(dumps_task, result['tasks'])
+            result['dependencies'] = valmap(list, result['dependencies'])
+
+            if inspect.isgeneratorfunction(function):  # first time
+                result['wrapped_task'] = dumps_task(
+                        (partial_compute_first, function, args, kwargs))
+            else:
+                result['wrapped_task'] = dumps_task(
+                        (partial_compute_ith,) + args)
+            # TODO, handle leaves with sync
+
+        elif result['status'] == 'OK':
             self.data[key] = result.pop('result')
             if report:
                 response = yield self.scheduler.add_keys(keys=[key],
@@ -885,3 +920,57 @@ def convert_kwargs_to_str(kwargs, max_len=None):
             return "{{{}".format(", ".join(strs[:i+1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
+
+
+def partial_message_from_values(values):
+    from dask import delayed, istask
+    from dask.core import _deps
+    from distributed.utils import str_graph, tokey
+    from distributed.client import unpack_remotedata
+    with log_errors():
+
+        value = delayed(values)
+        dsk = value.dask
+        dsk2 = str_graph(dsk, set())
+        dsk3 = {k: v for k, v in dsk2.items() if k is not v}
+
+        dependencies = {k: set(_deps(dsk3, v)) for k, v in dsk3.items()}
+
+        # leaves = {k: v for k, v in dsk.items() if not istask(v)}
+
+        msg = {'status': 'evolve-task',
+               'tasks': dsk,
+               'dependencies': dependencies,
+               'arg_key': tokey(value.key),
+               }
+        return msg
+
+
+def partial_compute(gen, args=None):
+    with log_errors():
+        if args is None:  # just started
+            try:
+                values = next(gen)
+            except StopIteration as e:
+                result = e.args[0]
+                return result
+            else:
+                return partial_message_from_values(values)
+        else:
+            try:
+                values = gen.send(args)
+                return partial_message_from_values(values)
+            except StopIteration as e:
+                result = e.args[0]
+                return result
+
+
+def partial_compute_first(func, *args, **kwargs):
+    gen = func(*args, **kwargs)
+    result = next(gen)
+    return gen
+
+
+def partial_compute_ith(gen, args):
+    result = gen.send(args)
+    return gen

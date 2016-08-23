@@ -85,7 +85,8 @@ def test_progressbar_widget(s, a, b):
                                              'y': (inc, 'x'),
                                              'z': (inc, 'y')}),
                    keys=['z'],
-                   dependencies={'y': {'x'}, 'z': {'y'}})
+                   dependencies={'y': {'x'}, 'z': {'y'}},
+                   client='alice')
 
     progress = ProgressWidget(['z'], scheduler=(s.ip, s.port))
     yield progress.listen()
@@ -109,7 +110,8 @@ def test_multi_progressbar_widget(s, a, b):
                    keys=['e'],
                    dependencies={'x-2': ['x-1'], 'x-3': ['x-2'],
                                  'y-1': ['x-3'], 'y-2': ['y-1'],
-                                 'e': ['y-2']})
+                                 'e': ['y-2']},
+                   client='alice')
 
     p = MultiProgressWidget(['e'], scheduler=(s.ip, s.port))
     yield p.listen()
@@ -145,7 +147,8 @@ def test_multi_progressbar_widget_after_close(s, a, b):
                    keys=['e'],
                    dependencies={'x-2': {'x-1'}, 'x-3': {'x-2'},
                                  'y-1': {'x-3'}, 'y-2': {'y-1'},
-                                 'e': {'y-2'}})
+                                 'e': {'y-2'}},
+                   client='alice')
 
     p = MultiProgressWidget(['x-1', 'x-2', 'x-3'], scheduler=(s.ip, s.port))
     yield p.listen()
@@ -218,7 +221,8 @@ def test_multibar_complete(s, a, b):
                    keys=['e'],
                    dependencies={'x-2': {'x-1'}, 'x-3': {'x-2'},
                                  'y-1': {'x-3'}, 'y-2': {'y-1'},
-                                 'e': {'y-2'}})
+                                 'e': {'y-2'}},
+                   client='alice')
 
     p = MultiProgressWidget(['e'], scheduler=(s.ip, s.port), complete=True)
     yield p.listen()

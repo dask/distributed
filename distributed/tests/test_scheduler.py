@@ -199,7 +199,7 @@ def test_decide_worker_with_many_independent_leaves():
 
     for key in dsk:
         worker = decide_worker(dependencies, stacks, processing, who_has, {},
-                               {}, set(), nbytes, key)
+                               {}, {}, set(), nbytes, key)
         stacks[worker].append(key)
 
     nhits = (len([k for k in stacks[alice] if alice in who_has[('x', k[1])]])
@@ -217,20 +217,20 @@ def test_decide_worker_with_restrictions():
     restrictions = {'x': {'alice', 'charlie'}}
     nbytes = {}
     result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+                           restrictions, {}, set(), nbytes, 'x')
     assert result in {alice, charlie}
 
 
     stacks = {alice: [1, 2, 3], bob: [], charlie: [4, 5, 6]}
     result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+                           restrictions, {}, set(), nbytes, 'x')
     assert result in {alice, charlie}
 
     dependencies = {'x': {'y'}}
     who_has = {'y': {bob}}
     nbytes = {'y': 0}
     result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+                           restrictions, {}, set(), nbytes, 'x')
     assert result in {alice, charlie}
 
 
@@ -244,27 +244,27 @@ def test_decide_worker_with_loose_restrictions():
     restrictions = {'x': {'alice', 'charlie'}}
 
     result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+                           restrictions, {}, set(), nbytes, 'x')
     assert result == charlie
 
     result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, {'x'}, nbytes, 'x')
+                           restrictions, {}, {'x'}, nbytes, 'x')
     assert result == charlie
 
     restrictions = {'x': {'david', 'ethel'}}
     result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+                           restrictions, {}, set(), nbytes, 'x')
     assert result is None
 
     restrictions = {'x': {'david', 'ethel'}}
     result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, {'x'}, nbytes, 'x')
+                           restrictions, {}, {'x'}, nbytes, 'x')
     assert result == bob
 
 
 
 def test_decide_worker_without_stacks():
-    assert not decide_worker({'x': []}, {}, {}, {}, {}, {}, set(), {}, 'x')
+    assert not decide_worker({'x': []}, {}, {}, {}, {}, {}, {}, set(), {}, 'x')
 
 
 def test_validate_state():
@@ -419,7 +419,8 @@ def test_multi_queues(s, a, b):
                       'dependencies': {'x': [],
                                        'y': ['x'],
                                        'z': ['y']},
-                      'keys': ['z']})
+                      'keys': ['z'],
+                      'client': 'alice'})
 
     while True:
         msg = yield report.get()
@@ -435,7 +436,8 @@ def test_multi_queues(s, a, b):
     sched2.put_nowait({'op': 'update-graph',
                        'tasks': {'a': dumps_task((inc, 10))},
                        'dependencies': {'a': []},
-                       'keys': ['a']})
+                       'keys': ['a'],
+                       'client': 'alice'})
 
     for q in [report, report2]:
         while True:
@@ -497,7 +499,8 @@ def test_server_listens_to_other_ops(s, a, b):
 def test_remove_worker_from_scheduler(s, a, b):
     dsk = {('x', i): (inc, i) for i in range(20)}
     s.update_graph(tasks=valmap(dumps_task, dsk), keys=list(dsk),
-                   dependencies={k: set() for k in dsk})
+                   dependencies={k: set() for k in dsk},
+                   client='alice')
     assert s.ready
     assert not any(stack for stack in s.stacks.values())
 
@@ -593,7 +596,8 @@ def test_scheduler_as_center():
 
     s.update_graph(tasks={'a': dumps_task((inc, 1))},
                    keys=['a'],
-                   dependencies={'a': []})
+                   dependencies={'a': []},
+                   client='alice')
     start = time()
     while not 'a' in s.who_has:
         assert time() - start < 5

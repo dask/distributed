@@ -1,0 +1,80 @@
+from operator import sub
+
+from dask import delayed
+import pytest
+from tornado import gen
+
+from distributed.utils_test import gen_cluster, cluster, loop
+from distributed import Executor
+
+
+def range(x, y):
+    a, b = yield delayed(min)(x, y), delayed(max)(x, y)
+    diff = yield delayed(sub)(a, b)
+    return abs(diff)
+
+
+def fib(n):
+    if n in (0, 1):
+        return n
+    else:
+        f = delayed(fib, pure=True)
+        x, y = yield f(n - 1), f(n - 2)
+        return x + y
+
+
+@gen_cluster(executor=True)
+def test_simple(e, s, a, b):
+    x, y = yield e._scatter([10, 20])
+
+    future = e.submit(range, x, y)
+    result = yield future._result()
+    assert result == 10
+
+    assert len(s.task_state) >= 3
+    assert s.dependencies[future.key]
+    assert s.who_wants[future.key] == {e.id}
+
+
+@gen_cluster(executor=True)
+def test_compound(e, s, a, b):
+    future = e.submit(fib, 10)
+    result = yield future._result()
+    assert result == 55
+
+
+def test_compound_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            future = e.submit(fib, 10)
+            result = future.result()
+            assert result == 55
+
+
+@gen_cluster(executor=True)
+def test_resilience(e, s, a, b):
+    future = e.submit(range, 10, 20)
+    result = yield future._result()
+    assert result == 10
+
+    if s.who_has[future.key] == {a.address}:
+        yield a._close()
+    elif s.who_has[future.key] == {b.address}:
+        yield b._close()
+
+    result = yield future._result()
+    assert result == 10
+
+"""
+i-- range_x
+j--/
+
+    min -----\
+i-- range_0 -- range_x
+j-/ max -----/
+
+                 a-\
+    min -----\   b--sub --\
+i-- range_0  --   range_1 -- range_x
+j-/ max -----/
+"""
