@@ -3576,3 +3576,21 @@ def test_idempotence(s, a, b):
 
     yield e._shutdown()
     yield f._shutdown()
+
+
+def vsum(*args):
+    return sum(args)
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 80, timeout=100)
+def test_stress_communication(e, s, *workers):
+    da = pytest.importorskip('dask.array')
+
+    n = 40
+    xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
+    ys = [x + x.T for x in xs]
+    z = da.atop(vsum, 'ij', *concat(zip(ys, ['ij'] * n)))
+
+    future = e.compute(z.sum())
+    result = yield future._result()
+    assert isinstance(result, float)
