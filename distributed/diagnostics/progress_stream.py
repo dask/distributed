@@ -10,7 +10,6 @@ from .progress import AllProgress
 from ..core import connect, write, coerce_to_address
 from ..scheduler import Scheduler
 from ..worker import dumps_function
-from ..utils import log_errors
 
 
 logger = logging.getLogger(__name__)
@@ -114,38 +113,37 @@ def progress_quads(msg, nrows=8, ncols=3):
      'memory-loc': [3 / 5 / .9, .5 / 0.9, 1],
      'erred-loc': [3 / 5 / .9, .5 / 0.9, 1.9]}
     """
-    with log_errors():
-        width = 0.9
-        names = sorted(msg['all'], key=msg['all'].get, reverse=True)
-        names = names[:nrows * ncols]
-        n = len(names)
-        d = {k: [v.get(name, 0) for name in names] for k, v in msg.items()}
+    width = 0.9
+    names = sorted(msg['all'], key=msg['all'].get, reverse=True)
+    names = names[:nrows * ncols]
+    n = len(names)
+    d = {k: [v.get(name, 0) for name in names] for k, v in msg.items()}
 
-        d['name'] = names
-        d['show-name'] = [name if len(name) < 20 else name[:17] + '...'
-                          for name in names]
-        d['left'] = [i // nrows for i in range(n)]
-        d['right'] = [i // nrows + width for i in range(n)]
-        d['top'] = [-(i % nrows) for i in range(n)]
-        d['bottom'] = [-(i % nrows) - 0.8 for i in range(n)]
+    d['name'] = names
+    d['show-name'] = [name if len(name) < 20 else name[:17] + '...'
+                      for name in names]
+    d['left'] = [i // nrows for i in range(n)]
+    d['right'] = [i // nrows + width for i in range(n)]
+    d['top'] = [-(i % nrows) for i in range(n)]
+    d['bottom'] = [-(i % nrows) - 0.8 for i in range(n)]
 
 
-        d['released-loc'] = []
-        d['memory-loc'] = []
-        d['erred-loc'] = []
-        d['done'] = []
-        for r, m, e, a, l in zip(d['released'], d['memory'],
-                                 d['erred'], d['all'], d['left']):
-            rl = width * r / a + l
-            ml = width * (r + m) / a + l
-            el = width * (r + m + e) / a + l
-            done = '%d / %d' % (r + m + e, a)
-            d['released-loc'].append(rl)
-            d['memory-loc'].append(ml)
-            d['erred-loc'].append(el)
-            d['done'].append(done)
+    d['released-loc'] = []
+    d['memory-loc'] = []
+    d['erred-loc'] = []
+    d['done'] = []
+    for r, m, e, a, l in zip(d['released'], d['memory'],
+                             d['erred'], d['all'], d['left']):
+        rl = width * r / a + l
+        ml = width * (r + m) / a + l
+        el = width * (r + m + e) / a + l
+        done = '%d / %d' % (r + m + e, a)
+        d['released-loc'].append(rl)
+        d['memory-loc'].append(ml)
+        d['erred-loc'].append(el)
+        d['done'].append(done)
 
-        return d
+    return d
 
 
 from toolz import memoize
