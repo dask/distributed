@@ -241,12 +241,9 @@ def processing_plot(**kwargs):
 
 
 def processing_update(msg):
-    stacks = list(msg['stacks'].items())
-    if stacks:
-        names, stacks = zip(*stacks)
-    else:
-        names = []
-        stacks = []
+    names = sorted(msg['stacks'])
+    stacks = msg['stacks']
+    stacks = [stacks[name] for name in names]
     names = sorted(names)
     processing = msg['processing']
     processing = [processing[name] for name in names]

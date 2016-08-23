@@ -105,7 +105,8 @@ def test_processing_update():
                 'right': [2, 1, 0],
                 'top': [2, 1, 2],
                 'bottom': [1, 0, 0],
-                'ncores': [4, 4, 8]}
+                'ncores': [4, 4, 8],
+                'alpha': [0.7, 0.7, 0.2]}
 
     assert data == expected
 
