@@ -3431,6 +3431,18 @@ def test_synchronize_worker_data(e, s, a, b):
     assert not a.data
 
 
+@gen_cluster(executor=True)
+def test_synchronize_worker_data_race_condition(e, s, a, b):
+    a.data['x'] = 1
+    s.loop.add_callback(s.synchronize_worker_data)
+    yield gen.sleep(0.1)
+    s.has_what[a.address].add('x')
+    s.who_has['x'] = {a.address}
+
+    yield gen.sleep(1)
+    assert a.data == {'x': 1}
+
+
 @gen_test()
 def test_synchronize_worker_data_callback():
     s = Scheduler(synchronize_worker_interval=50)
