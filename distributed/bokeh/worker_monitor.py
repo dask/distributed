@@ -200,3 +200,62 @@ def worker_table_update(source, d):
     data['processing'] = [sorted(d[w]['processing']) for w in workers]
     data['processes'] = [len(d[w]['ports']) for w in workers]
     source.data.update(data)
+
+
+def processing_plot(**kwargs):
+    data = processing_update({'processing': {}, 'stacks': {}, 'ncores': {}})
+    source = ColumnDataSource(data)
+
+    x_range = Range1d(-1, 1)
+    fig = figure(title='Processing and Pending', tools='', x_range=x_range,
+                 **kwargs)
+    fig.quad(source=source, left=0, right='processing', color=Spectral9[0],
+             top='top', bottom='bottom')
+    fig.quad(source=source, left='left', right=0, color=Spectral9[1],
+             top='top', bottom='bottom')
+
+    fig.xaxis.minor_tick_line_alpha = 0
+    fig.yaxis.visible = False
+    fig.ygrid.visible = False
+
+    hover = HoverTool()
+    fig.add_tools(hover)
+    hover = fig.select(HoverTool)
+    hover.tooltips = """
+    <div>
+        <span style="font-size: 14px; font-weight: bold;">Host:</span>&nbsp;
+        <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+    </div>
+    <div>
+        <span style="font-size: 14px; font-weight: bold;">Stacks:</span>&nbsp;
+        <span style="font-size: 10px; font-family: Monaco, monospace;">@stacks</span>
+    </div>
+    <div>
+        <span style="font-size: 14px; font-weight: bold;">Processing:</span>&nbsp;
+        <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
+    </div>
+    """
+    hover.point_policy = 'follow_mouse'
+    return source, fig
+
+
+def processing_update(msg):
+    stacks = list(msg['stacks'].items())
+    if stacks:
+        names, stacks = zip(*stacks)
+    else:
+        names = []
+        stacks = []
+    processing = msg['processing']
+    processing = [processing[name] for name in names]
+    ncores = msg['ncores']
+    ncores = [ncores[name] for name in names]
+    n = len(names)
+    return {'name': names,
+            'processing': processing,
+            'stacks': stacks,
+            'right': processing,
+            'left': [-s for s in stacks],
+            'top': list(range(n, 0, -1)),
+            'bottom': list(range(n - 1, -1, -1)),
+            'ncores': ncores}
