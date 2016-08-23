@@ -2382,7 +2382,7 @@ class Scheduler(Server):
         Scheduler.work_steal
         """
         bandwidth = bandwidth if bandwidth is not None else BANDWIDTH
-        if len(self.dependencies[key]) > 10:
+        if len(self.dependencies[key]) > 100:
             return False
         if key in self.restrictions and key not in self.loose_restrictions:
             return False
