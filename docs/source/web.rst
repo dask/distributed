@@ -38,16 +38,36 @@ tasks.  For the most recent 20000 tasks visit
 http://my-scheduler-address:8787/tasks , although beware that this page is not
 updated in real time.
 
-Viewing Web UI when running distributed on remote cluster
----------------------------------------------------------
-Viewing the Web UI on a local machine when `distributed` is running on a remote
-cluster is possible through SSH port forwarding. Typically, this look something
-like
+Connecting to Web UI
+--------------------
+
+Default
+~~~~~~~
+
+By default, ``dask-scheduler`` will print out 
 
 .. code::
 
+   INFO -  Bokeh UI at:  http://10.129.39.91:8787/status
+   ...
+   INFO - Starting Bokeh server on port 8787 with applications at paths ['/status', '/tasks']
+   
+Try going to that address. In the majority of cases, this should work.
+
+Port forwarding
+~~~~~~~~~~~~~~~
+
+Running distributed on a remote machine can cause issues with viewing the web
+UI -- this depends on the remote machines network configuration.
+
+One way to get around this is via SSH port forwarding. A typical use case looks
+like
+
+.. code:: bash
+
    local$ ssh -L 8000:localhost:8787 user@remote
-   remote$ dask-scheduler
+   remote$ dask-scheduler  # now, the web UI is visible at localhost:8000
+   remote$ # continue to set up dask if needed -- add workers, etc
 
 It is then possible to go to ``localhost:8000`` and see Dask Web UI.
 
