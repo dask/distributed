@@ -3582,7 +3582,7 @@ def vsum(*args):
     return sum(args)
 
 
-@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 80, timeout=100)
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 80, timeout=400)
 def test_stress_communication(e, s, *workers):
     da = pytest.importorskip('dask.array')
 
