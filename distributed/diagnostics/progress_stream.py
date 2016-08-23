@@ -120,7 +120,7 @@ def progress_quads(msg, nrows=8, ncols=3):
     d = {k: [v.get(name, 0) for name in names] for k, v in msg.items()}
 
     d['name'] = names
-    d['show-name'] = [name if len(name) < 20 else name[:17] + '...'
+    d['show-name'] = [name if len(name) <= 15 else name[:12] + '...'
                       for name in names]
     d['left'] = [i // nrows for i in range(n)]
     d['right'] = [i // nrows + width for i in range(n)]

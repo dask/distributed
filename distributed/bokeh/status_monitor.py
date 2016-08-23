@@ -145,10 +145,9 @@ def progress_plot(**kwargs):
         data = progress_quads({'all': {}, 'memory': {},
                                'erred': {}, 'released': {}})
 
-        x_range = Range1d(0, 3)
         y_range = Range1d(-8, 0)
         source = ColumnDataSource(data)
-        fig = figure(tools='', toolbar_location=None, y_range=y_range, x_range=x_range, **kwargs)
+        fig = figure(tools='', toolbar_location=None, y_range=y_range, **kwargs)
         fig.quad(source=source, top='top', bottom='bottom',
                  left='left', right='right', color='#aaaaaa', alpha=0.2)
         fig.quad(source=source, top='top', bottom='bottom',
@@ -157,9 +156,10 @@ def progress_plot(**kwargs):
                  left='released-loc', right='memory-loc', color=Spectral9[0], alpha=0.8)
         fig.quad(source=source, top='top', bottom='bottom',
                  left='erred-loc', right='erred-loc', color='#000000', alpha=0.3)
-        fig.text(source=source, text='show-name', y='bottom', x='left', x_offset=5)
+        fig.text(source=source, text='show-name', y='bottom', x='left',
+                x_offset=5, text_font_size='10pt')
         fig.text(source=source, text='done', y='bottom', x='right', x_offset=-5,
-                 text_align='right')
+                text_align='right', text_font_size='10pt')
         fig.xaxis.visible = False
         fig.yaxis.visible = False
         fig.grid.grid_line_alpha = 0
