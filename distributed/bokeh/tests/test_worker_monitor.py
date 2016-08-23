@@ -83,7 +83,7 @@ def test_processing_update():
     s = C()
     s.stacks = {'alice': ['inc', 'inc', 'add'], 'bob': ['add', 'add']}
     s.processing = {'alice': {'inc', 'add'}, 'bob': {'inc'}}
-    s.ready = ['a', 'b', 'c']
+    s.ready = ['a', 'b', 'c', 'd', 'e', 'f', 'g']
     s.waiting = {'x': set()}
     s.who_has = {'z': set()}
     s.ncores = {'alice': 4, 'bob': 4}
@@ -92,20 +92,20 @@ def test_processing_update():
 
     assert msg == {'processing': {'alice': 2, 'bob': 1},
                    'stacks': {'alice': 3, 'bob': 2},
-                   'ready': 3,
+                   'ready': 7,
                    'waiting': 1,
                    'memory': 1,
                    'ncores': {'alice': 4, 'bob': 4}}
 
     data = processing_update(msg)
-    expected = {'name': ('alice', 'bob'),
-                'processing': [2, 1],
-                'stacks': (3, 2),
-                'left': [-3, -2],
-                'right': [2, 1],
-                'top': [2, 1],
-                'bottom': [1, 0],
-                'ncores': [4, 4]}
+    expected = {'name': ['alice', 'bob', 'ready'],
+                'processing': [2, 1, 0],
+                'stacks': [3, 2, 7],
+                'left': [-3, -2, -7/2],
+                'right': [2, 1, 0],
+                'top': [2, 1, 2],
+                'bottom': [1, 0, 0],
+                'ncores': [4, 4, 8]}
 
     assert data == expected
 

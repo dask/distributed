@@ -73,7 +73,7 @@ def processing_plot_update():
         data = processing_update(msg)
         x_range = processing_plot.x_range
         max_right = max(data['right'])
-        min_left = min(data['left'])
+        min_left = min(data['left'][:-1])
         cores = max(data['ncores'])
         if min_left < x_range.start:  # not out there enough, jump ahead
             x_range.start = min_left - 2

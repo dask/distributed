@@ -203,16 +203,17 @@ def worker_table_update(source, d):
 
 
 def processing_plot(**kwargs):
-    data = processing_update({'processing': {}, 'stacks': {}, 'ncores': {}})
+    data = processing_update({'processing': {}, 'stacks': {}, 'ncores': {},
+        'ready': 0})
     source = ColumnDataSource(data)
 
     x_range = Range1d(-1, 1)
     fig = figure(title='Processing and Pending', tools='', x_range=x_range,
                  **kwargs)
-    fig.quad(source=source, left=0, right='processing', color=Spectral9[0],
+    fig.quad(source=source, left=0, right='right', color=Spectral9[0],
              top='top', bottom='bottom')
     fig.quad(source=source, left='left', right=0, color=Spectral9[1],
-             top='top', bottom='bottom')
+             top='top', bottom='bottom', alpha='alpha')
 
     fig.xaxis.minor_tick_line_alpha = 0
     fig.yaxis.visible = False
@@ -246,16 +247,30 @@ def processing_update(msg):
     else:
         names = []
         stacks = []
+    names = sorted(names)
     processing = msg['processing']
     processing = [processing[name] for name in names]
     ncores = msg['ncores']
     ncores = [ncores[name] for name in names]
     n = len(names)
-    return {'name': names,
-            'processing': processing,
-            'stacks': stacks,
-            'right': processing,
-            'left': [-s for s in stacks],
-            'top': list(range(n, 0, -1)),
-            'bottom': list(range(n - 1, -1, -1)),
-            'ncores': ncores}
+    d = {'name': list(names),
+         'processing': processing,
+         'stacks': list(stacks),
+         'right': list(processing),
+         'left': [-s for s in stacks],
+         'top': list(range(n, 0, -1)),
+         'bottom': list(range(n - 1, -1, -1)),
+         'ncores': ncores}
+
+    d['name'].append('ready')
+    d['processing'].append(0)
+    d['stacks'].append(msg['ready'])
+    d['left'].append(-msg['ready'] / n if n else 0)
+    d['right'].append(0)
+    d['top'].append(n)
+    d['bottom'].append(0)
+    d['ncores'].append(sum(msg['ncores'].values()))
+
+    d['alpha'] = [0.7] * n + [0.2]
+
+    return d
