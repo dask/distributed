@@ -1410,7 +1410,7 @@ class Scheduler(Server):
 
             extra = keys - self.has_what[worker] - self.deleted_keys[worker]
             if extra:
-                yield gen.sleep(1)  # maybe haven't yet received news of keys?
+                yield gen.sleep(self.synchronize_worker_interval / 1000)  # delay
                 keys = yield self.rpc(addr=worker).keys()  # check again
                 extra &= set(keys)  # make sure the keys are still on worker
                 extra -= self.has_what[worker]  # and still unknown to scheduler
