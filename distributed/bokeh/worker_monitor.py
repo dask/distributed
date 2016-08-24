@@ -208,8 +208,8 @@ def processing_plot(**kwargs):
     source = ColumnDataSource(data)
 
     x_range = Range1d(-1, 1)
-    fig = figure(title='Processing and Pending', tools='', x_range=x_range,
-                 **kwargs)
+    fig = figure(title='Processing and Pending', tools='resize',
+                 x_range=x_range, **kwargs)
     fig.quad(source=source, left=0, right='right', color=Spectral9[0],
              top='top', bottom='bottom')
     fig.quad(source=source, left='left', right=0, color=Spectral9[1],
