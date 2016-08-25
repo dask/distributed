@@ -69,18 +69,12 @@ like
    remote$ dask-scheduler  # now, the web UI is visible at localhost:8000
    remote$ # continue to set up dask if needed -- add workers, etc
 
-It is then possible to go to ``localhost:8000`` and see Dask Web UI.
+It is then possible to go to ``localhost:8000`` and see Dask Web UI. This same approach is
+not specific to dask.distributed, but can be used by any service that operates over a
+network, such as Jupyter notebooks. For example, if we chose to do this we could
+forward port 8888 (the default Jupyter port) to port 8001 with
+``ssh -L 8001:localhost:8888 user@remote``.
 
-This can be used in conjuction with port forwarding on the Jupyter notebook
-port.
-
-.. code::
-
-   local$ ssh -L 8001:localhost:8888 user@remote  # 8888 or whatever port Jupyter is running on
-   remote$ jupyter notebook
-
-Now we can visit ``localhost:8001`` to view the Jupyter notebook running on the remote
-cluster.
 
 .. raw:: html
 
