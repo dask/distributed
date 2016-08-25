@@ -44,24 +44,40 @@ Connecting to Web UI
 Default
 ~~~~~~~
 
-By default, ``dask-scheduler`` will print out 
+By default, ``dask-scheduler`` will print out
 
 .. code::
 
    INFO -  Bokeh UI at:  http://10.129.39.91:8787/status
    ...
    INFO - Starting Bokeh server on port 8787 with applications at paths ['/status', '/tasks']
-   
+
 Try going to that address. In the majority of cases, this should work.
 
-Port forwarding
-~~~~~~~~~~~~~~~
 
+Troubleshooting
+---------------
+
+Some clusters restrict the ports that are visible to the outside world.  These
+ports may include the default port for the web interface, ``8787``.  There are
+a few ways to handle this:
+
+1.  Open port ``8787`` to the outside world.  Often this involves asking your
+    cluster administrator.
+2.  Use a different port that is publicly accessible using the
+    ``--bokeh-port PORT`` option on the ``dask-scheduler`` command.
+3.  Use fancier techniques, like `Port Forwarding`_
+
+.. _`Port Forwarding`: https://en.wikipedia.org/wiki/Port_forwarding
 Running distributed on a remote machine can cause issues with viewing the web
 UI -- this depends on the remote machines network configuration.
 
-One way to get around this is via SSH port forwarding. A typical use case looks
-like
+
+Port Forwarding
+~~~~~~~~~~~~~~~
+
+If you have SSH access then one way to gain access to a blocked port is through
+SSH port forwarding. A typical use case looks like the following:
 
 .. code:: bash
 
@@ -75,6 +91,9 @@ network, such as Jupyter notebooks. For example, if we chose to do this we could
 forward port 8888 (the default Jupyter port) to port 8001 with
 ``ssh -L 8001:localhost:8888 user@remote``.
 
+
+Screencast
+----------
 
 .. raw:: html
 
