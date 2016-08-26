@@ -18,6 +18,7 @@ except ImportError:
 import cloudpickle
 from tornado import gen
 from tornado.gen import Return
+from tornado.locks import Event
 from tornado.tcpserver import TCPServer
 from tornado.tcpclient import TCPClient
 from tornado.ioloop import IOLoop
@@ -134,7 +135,8 @@ class Server(TCPServer):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._port = None
-        self._rpcs = dict()
+        self._rpcs = {}
+        self.rpc = RPCPool()
         super(Server, self).__init__(max_buffer_size=max_buffer_size, **kwargs)
 
     @property
@@ -231,12 +233,6 @@ class Server(TCPServer):
         logger.info("Close connection from %s:%d to %s", address[0], address[1],
                     type(self).__name__)
 
-    def rpc(self, arg=None, ip=None, port=None, addr=None):
-        """ Cached rpc objects """
-        key = arg, ip, port, addr
-        if key not in self._rpcs:
-            self._rpcs[key] = rpc(arg=arg, ip=ip, port=port, addr=addr)
-        return self._rpcs[key]
 
 
 @gen.coroutine
@@ -349,6 +345,22 @@ def send_recv(stream=None, arg=None, ip=None, port=None, addr=None, reply=True, 
         stream.close()
     raise Return(response)
 
+def ip_port_from_args(arg=None, addr=None, ip=None, port=None):
+    if arg:
+        if isinstance(arg, (unicode, bytes)):
+            addr = arg
+        if isinstance(arg, tuple):
+            ip, port = arg
+    if addr:
+        if PY3 and isinstance(addr, bytes):
+            addr = addr.decode()
+        assert not ip and not port
+        ip, port = addr.rsplit(':', 1)
+        port = int(port)
+    if PY3 and isinstance(ip, bytes):
+        ip = ip.decode()
+
+    return ip, port
 
 class rpc(object):
     """ Conveniently interact with a remote server
@@ -373,24 +385,17 @@ class rpc(object):
 
     >>> remote.close_streams()  # doctest: +SKIP
     """
-    def __init__(self, arg=None, stream=None, ip=None, port=None, addr=None, timeout=3):
-        if arg:
-            if isinstance(arg, (unicode, bytes)):
-                addr = arg
-            if isinstance(arg, tuple):
-                ip, port = arg
-        if addr:
-            if PY3 and isinstance(addr, bytes):
-                addr = addr.decode()
-            assert not ip and not port
-            ip, port = addr.rsplit(':', 1)
-            port = int(port)
-        if PY3 and isinstance(ip, bytes):
-            ip = ip.decode()
-        self.streams = dict()
+    def __init__(self, arg=None, stream=None, ip=None, port=None, addr=None,
+            timeout=3, streams=None, connect=connect):
+        ip, port = ip_port_from_args(arg=arg, addr=addr, ip=ip, port=port)
+
+        if streams is None:
+            streams = dict()
+        self.streams = streams
         self.ip = ip
         self.port = port
         self.timeout = timeout
+        self.connect = connect
         self.status = 'running'
         assert self.ip
         assert self.port
@@ -424,12 +429,10 @@ class rpc(object):
             if open:
                 break
         if not open or stream.closed():
-            stream = yield connect(self.ip, self.port, timeout=self.timeout)
-            self.streams[stream] = True
+            stream = yield self.connect(self.ip, self.port, timeout=self.timeout)
         for s in to_clear:
             del self.streams[s]
         self.streams[stream] = False     # mark as taken
-        # assert not stream.closed()
         raise Return(stream)
 
     def close_streams(self):
@@ -452,6 +455,88 @@ class rpc(object):
     def close_rpc(self):
         self.status = 'closed'
         self.close_streams()
+
+
+class RPCPool(object):
+    def __init__(self, limit=512):
+        self._rpcs = {}
+        self.pool = ConnectionPool(limit=limit)
+
+    def __call__(self, arg=None, ip=None, port=None, addr=None):
+        """ Cached rpc objects """
+        ip, port = ip_port_from_args(arg=arg, addr=addr, ip=ip, port=port)
+        key = ip, port
+        if key not in self._rpcs:
+            streams = {}
+            self.pool.streams[ip, port] = streams
+            self._rpcs[key] = rpc(ip=ip, port=port, connect=self.pool.connect,
+                                  streams=streams)
+        return self._rpcs[key]
+
+
+class ConnectionPool(object):
+    """ A maximum sized pool of Tornado IOStreams
+
+    This provides a connect method that mirrors the normal distributed.connect
+    method, but provides connection sharing and limits.
+
+    **Connection Sharing**:
+
+    **Maximum size**: The ``connect`` method will block until currently open
+    streams close.
+    """
+    def __init__(self, limit=512):
+        self.open = 0
+        self.limit = limit
+        self.streams = {}
+        self.addresses = {}
+        self.event = Event()
+
+    @gen.coroutine
+    def connect(self, ip, port, timeout=None):
+        if (ip, port) in self.streams:
+            d = self.streams[ip, port]
+            for stream, available in d.items():
+                if available:
+                    d[stream] = False
+                    raise gen.Return(stream)
+        else:
+            self.streams[ip, port] = {}
+
+        if self.open >= self.limit:
+            self.collect()
+            yield self.event.wait()
+
+        stream = yield connect(ip=ip, port=port, timeout=timeout)
+        stream.set_close_callback(lambda: self.on_close(ip, port, stream))
+        self.open += 1
+        print(self.open)
+        self.streams[ip, port][stream] = False
+        self.addresses[stream] = (ip, port)  # reverse index
+
+        if self.open >= self.limit:
+            self.event.clear()
+
+        raise gen.Return(stream)
+
+    @property
+    def active(self):
+        return sum(v for d in self.streams.values() for v in d.values())
+
+    def on_close(self, ip, port, stream):
+        del self.streams[ip, port][stream]
+        if not self.streams[ip, port]:
+            del self.streams[ip, port]
+        self.open -= 1
+
+        if self.open <= self.limit:
+            self.event.set()
+
+    def collect(self):
+        for (ip, port), d in self.streams.items():
+            for stream, available in list(d.items()):
+                if available:
+                    stream.close()
 
 
 def coerce_to_address(o, out=str):

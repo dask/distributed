@@ -3,13 +3,14 @@ from __future__ import print_function, division, absolute_import
 from functools import partial
 from multiprocessing import Process
 import socket
+from time import time
 
 from tornado import gen, ioloop
 from tornado.iostream import StreamClosedError
 import pytest
 
 from distributed.core import (read, write, pingpong, Server, rpc, connect,
-        coerce_to_rpc, send_recv, coerce_to_address)
+        coerce_to_rpc, send_recv, coerce_to_address, ConnectionPool, RPCPool)
 from distributed.utils_test import slow, loop, gen_test
 
 def test_server(loop):
@@ -219,3 +220,37 @@ def test_coerce_to_address():
                 ('127.0.0.1', 8786),
                 ('127.0.0.1', '8786')]:
         assert coerce_to_address(arg) == '127.0.0.1:8786'
+
+
+@gen_test()
+def test_connection_pool():
+
+    @gen.coroutine
+    def ping(stream=None, delay=0.1):
+        yield gen.sleep(delay)
+        return 'pong'
+
+    servers = [Server({'ping': ping}) for i in range(10)]
+    for server in servers:
+        server.listen(0)
+
+    rpc = RPCPool(limit=5)
+
+    # Reuse connections
+    yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
+    yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
+    yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
+    yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
+    assert sum(map(len, rpc.pool.streams.values())) == 5
+
+    # Clear out connections to make room for more
+    yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[5:]]
+    assert sum(map(len, rpc.pool.streams.values())) == 5
+
+    # Explicitly clear out connections
+    rpc.pool.collect()
+
+    start = time()
+    while any(r.streams for r in rpc._rpcs.values()):
+        yield gen.sleep(0.01)
+        assert time() < start + 2
