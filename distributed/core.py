@@ -136,7 +136,6 @@ class Server(TCPServer):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._port = None
-        self._rpcs = {}
         self.rpc = ConnectionPool()
         super(Server, self).__init__(max_buffer_size=max_buffer_size, **kwargs)
 
@@ -387,16 +386,12 @@ class rpc(object):
     >>> remote.close_streams()  # doctest: +SKIP
     """
     def __init__(self, arg=None, stream=None, ip=None, port=None, addr=None,
-            timeout=3, streams=None, connect=connect):
+            timeout=3):
         ip, port = ip_port_from_args(arg=arg, addr=addr, ip=ip, port=port)
-
-        if streams is None:
-            streams = dict()
-        self.streams = streams
+        self.streams = dict()
         self.ip = ip
         self.port = port
         self.timeout = timeout
-        self.connect = connect
         self.status = 'running'
         assert self.ip
         assert self.port
@@ -430,7 +425,7 @@ class rpc(object):
             if open:
                 break
         if not open or stream.closed():
-            stream = yield self.connect(self.ip, self.port, timeout=self.timeout)
+            stream = yield connect(self.ip, self.port, timeout=self.timeout)
         for s in to_clear:
             del self.streams[s]
         self.streams[stream] = False     # mark as taken
@@ -493,7 +488,7 @@ class ConnectionPool(object):
 
     This object provides an ``rpc`` like interface::
 
-        >>> nrpc = ConnectionPool(limit=512)
+        >>> rpc = ConnectionPool(limit=512)
         >>> scheduler = rpc('127.0.0.1:8786')
         >>> workers = [rpc(ip=ip, port=port) for ip, port in ...]
 
@@ -516,7 +511,6 @@ class ConnectionPool(object):
         self.limit = limit
         self.available = defaultdict(set)
         self.occupied = defaultdict(set)
-        self.streams = {}
         self.event = Event()
 
     def __call__(self, arg=None, ip=None, port=None, addr=None):
@@ -548,7 +542,7 @@ class ConnectionPool(object):
 
     @property
     def active(self):
-        return sum(v for d in self.streams.values() for v in d.values())
+        return sum(map(len, self.occupied.values()))
 
     def on_close(self, ip, port, stream):
         if stream in self.available[ip, port]:

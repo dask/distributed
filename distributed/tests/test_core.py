@@ -243,11 +243,13 @@ def test_connection_pool():
     yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
     assert sum(map(len, rpc.available.values())) == 5
     assert sum(map(len, rpc.occupied.values())) == 0
+    assert rpc.active == 0
+    assert rpc.open == 5
 
     # Clear out connections to make room for more
     yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[5:]]
-    assert sum(map(len, rpc.available.values())) == 5
-    assert sum(map(len, rpc.occupied.values())) == 0
+    assert rpc.active == 0
+    assert rpc.open == 5
 
     s = servers[0]
     yield [rpc(ip='127.0.0.1', port=s.port).ping(delay=0.1) for i in range(3)]
