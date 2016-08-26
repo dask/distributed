@@ -155,7 +155,7 @@ def register_remote_magic(magic_name='remote'):
 
 def connect_qtconsole(connection_info, name=None, extra_args=None):
     """Open a QtConsole connected to a worker who has the given future
-    
+
     - identify worker with who_has
     - start IPython kernel on the worker
     - start qtconsole connected to the kernel

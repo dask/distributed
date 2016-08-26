@@ -1611,7 +1611,8 @@ class Executor(object):
         )
         raise gen.Return((workers, responses))
 
-    def start_ipython(self, workers=None, magic_names=False, qtconsole=False, qtconsole_args=None):
+    def start_ipython(self, workers=None, magic_names=False, qtconsole=False,
+                      qtconsole_args=None):
         """ Start IPython kernels on workers
 
         Parameters
@@ -1656,6 +1657,18 @@ class Executor(object):
                                   extra_args=qtconsole_args,
                 )
         return info_dict
+
+    def start_ipython_scheduler(self, magic_name='scheduler',
+                                qtconsole=False, qtconsole_args=None):
+        info = sync(self.loop, self.scheduler.start_ipython)
+        if magic_name:
+            from ._ipython_utils import register_worker_magic
+            register_worker_magic(info, magic_name)
+        if qtconsole:
+            from ._ipython_utils import connect_qtconsole
+            connect_qtconsole(info, name='dask-scheduler',
+                              extra_args=qtconsole_args,)
+        return info
 
 
 class CompatibleExecutor(Executor):

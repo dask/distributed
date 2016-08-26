@@ -3209,7 +3209,7 @@ def test_as_completed_list(loop):
 
 
 @pytest.mark.ipython
-def test_start_ipython(loop, zmq_ctx):
+def test_start_ipython_workers(loop, zmq_ctx):
     from jupyter_client import BlockingKernelClient
     with cluster(1) as (s, [a]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
@@ -3224,6 +3224,24 @@ def test_start_ipython(loop, zmq_ctx):
             reply = kc.get_shell_msg(timeout=10)
             assert reply['parent_header']['msg_id'] == msg_id
             assert reply['content']['status'] == 'ok'
+            kc.stop_channels()
+
+
+@pytest.mark.ipython
+def test_start_ipython_scheduler(loop):
+    from jupyter_client import BlockingKernelClient
+    from ipykernel.kernelapp import IPKernelApp
+    from IPython.core.interactiveshell import InteractiveShell
+
+    with cluster(1) as (s, [a]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            info = e.start_ipython_scheduler()
+            key = info.pop('key')
+            kc = BlockingKernelClient(**info)
+            kc.session.key = key
+            kc.start_channels()
+            msg_id = kc.execute("scheduler")
+            reply = kc.get_shell_msg(timeout=10)
             kc.stop_channels()
 
 
