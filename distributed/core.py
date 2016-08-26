@@ -433,7 +433,7 @@ class rpc(object):
 
     def close_streams(self):
         for stream in self.streams:
-            with ignoring(OSError, IOError):
+            if stream and not stream.closed():
                 stream.close()
 
     def __getattr__(self, key):

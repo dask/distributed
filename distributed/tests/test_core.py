@@ -228,7 +228,7 @@ def test_connection_pool():
     @gen.coroutine
     def ping(stream=None, delay=0.1):
         yield gen.sleep(delay)
-        return 'pong'
+        raise gen.Return('pong')
 
     servers = [Server({'ping': ping}) for i in range(10)]
     for server in servers:
