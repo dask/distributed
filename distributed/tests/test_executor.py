@@ -3209,7 +3209,7 @@ def test_as_completed_list(loop):
 
 
 @pytest.mark.ipython
-def test_start_ipython(loop):
+def test_start_ipython_workers(loop):
     from jupyter_client import BlockingKernelClient
     from ipykernel.kernelapp import IPKernelApp
     from IPython.core.interactiveshell import InteractiveShell
@@ -3225,6 +3225,25 @@ def test_start_ipython(loop):
             msg_id = kc.execute("worker")
             reply = kc.get_shell_msg(timeout=10)
             kc.stop_channels()
+
+
+@pytest.mark.ipython
+def test_start_ipython_scheduler(loop):
+    from jupyter_client import BlockingKernelClient
+    from ipykernel.kernelapp import IPKernelApp
+    from IPython.core.interactiveshell import InteractiveShell
+
+    with cluster(1) as (s, [a]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
+            info = e.start_ipython_scheduler()
+            key = info.pop('key')
+            kc = BlockingKernelClient(**info)
+            kc.session.key = key
+            kc.start_channels()
+            msg_id = kc.execute("scheduler")
+            reply = kc.get_shell_msg(timeout=10)
+            kc.stop_channels()
+
 
 @pytest.mark.ipython
 def test_start_ipython_magic(loop):
