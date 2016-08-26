@@ -2312,10 +2312,7 @@ class Scheduler(Server):
     def put_key_in_stealable(self, key):
         ratio, loc = self.steal_time_ratio(key)
         if ratio is not None:
-            try:
-                self.stealable[loc].add(key)
-            except Exception as e:
-                import pdb; pdb.set_trace()
+            self.stealable[loc].add(key)
 
     def remove_key_from_stealable(self, key):
         ratio, loc = self.steal_time_ratio(key)
@@ -2387,7 +2384,6 @@ class Scheduler(Server):
                 if stealable:
                     break
             logger.debug('Stolen tasks for %d workers', len(thieves))
-            # import pdb; pdb.set_trace()
             return thieves
 
     def steal_time_ratio(self, key, bandwidth=BANDWIDTH):
@@ -2399,29 +2395,28 @@ class Scheduler(Server):
         ratio: The compute/communication time ratio of the task
         loc: The self.stealable bin into which this key should go
         """
-        with log_errors(pdb=True):
-            if key in self.restrictions and key not in self.loose_restrictions:
-                return None, None  # don't steal
+        if key in self.restrictions and key not in self.loose_restrictions:
+            return None, None  # don't steal
 
-            nbytes = sum(self.nbytes.get(k, 1000) for k in self.dependencies[key])
-            transfer_time = nbytes / bandwidth
-            try:
-                compute_time = self.task_duration[key_split(key)]
-            except KeyError:
-                self.stealable_unknown_durations[key_split(key)].add(key)
-                return None, None
+        nbytes = sum(self.nbytes.get(k, 1000) for k in self.dependencies[key])
+        transfer_time = nbytes / bandwidth
+        try:
+            compute_time = self.task_duration[key_split(key)]
+        except KeyError:
+            self.stealable_unknown_durations[key_split(key)].add(key)
+            return None, None
+        else:
+            if transfer_time:
+                ratio = compute_time / transfer_time
             else:
-                if transfer_time:
-                    ratio = compute_time / transfer_time
-                else:
-                    ratio = 10000
-                if ratio > 8:
-                    loc = 0
-                elif ratio < 2**-8:
-                    loc = -1
-                else:
-                    loc = int(-round(log(ratio) / log(2), 0) + 3)
-                return ratio, loc
+                ratio = 10000
+            if ratio > 8:
+                loc = 0
+            elif ratio < 2**-8:
+                loc = -1
+            else:
+                loc = int(-round(log(ratio) / log(2), 0) + 3)
+            return ratio, loc
 
     def issaturated(self, worker, latency=5e-3):
         """
