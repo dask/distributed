@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+from collections import defaultdict
 from datetime import timedelta
 import logging
 import six
@@ -136,7 +137,7 @@ class Server(TCPServer):
         self.id = str(uuid.uuid1())
         self._port = None
         self._rpcs = {}
-        self.rpc = RPCPool()
+        self.rpc = ConnectionPool()
         super(Server, self).__init__(max_buffer_size=max_buffer_size, **kwargs)
 
     @property
@@ -457,51 +458,78 @@ class rpc(object):
         self.close_streams()
 
 
-class RPCPool(object):
-    def __init__(self, limit=512):
-        self._rpcs = {}
-        self.pool = ConnectionPool(limit=limit)
+class RPCCall(object):
+    """ The result of ConnectionPool()('host:port')
 
-    def __call__(self, arg=None, ip=None, port=None, addr=None):
-        """ Cached rpc objects """
-        ip, port = ip_port_from_args(arg=arg, addr=addr, ip=ip, port=port)
-        key = ip, port
-        if key not in self._rpcs:
-            streams = {}
-            self.pool.streams[ip, port] = streams
-            self._rpcs[key] = rpc(ip=ip, port=port, connect=self.pool.connect,
-                                  streams=streams)
-        return self._rpcs[key]
+    See Also:
+        ConnectionPool
+    """
+    def __init__(self, ip, port, pool):
+        self.ip = ip
+        self.port = port
+        self.pool = pool
+
+    def __getattr__(self, key):
+        @gen.coroutine
+        def send_recv_from_rpc(**kwargs):
+            stream = yield self.pool.connect(self.ip, self.port)
+            self.pool.occupied[self.ip, self.port].add(stream)
+            try:
+                result = yield send_recv(stream=stream, op=key, **kwargs)
+            finally:
+                self.pool.occupied[self.ip, self.port].remove(stream)
+                if not stream.closed():
+                    self.pool.available[self.ip, self.port].add(stream)
+
+            raise gen.Return(result)
+        return send_recv_from_rpc
 
 
 class ConnectionPool(object):
     """ A maximum sized pool of Tornado IOStreams
 
     This provides a connect method that mirrors the normal distributed.connect
-    method, but provides connection sharing and limits.
+    method, but provides connection sharing and tracks connection limits.
 
-    **Connection Sharing**:
+    This object provides an ``rpc`` like interface::
 
-    **Maximum size**: The ``connect`` method will block until currently open
-    streams close.
+        >>> nrpc = ConnectionPool(limit=512)
+        >>> scheduler = rpc('127.0.0.1:8786')
+        >>> workers = [rpc(ip=ip, port=port) for ip, port in ...]
+
+        >>> info = yield scheduler.identity()
+
+    It creates enough streams to satisfy concurrent connections to any
+    particular address::
+
+        >>> a, b = yield [scheduler.who_has(), scheduler.has_what()]
+
+    It reuses existing streams so that we don't have to continuously reconnect.
+
+    It also maintains a stream limit to avoid "too many open file handle"
+    issues.  Whenever this maximum is reached we clear out all idling streams.
+    If that doesn't do the trick then we wait until one of the occupied streams
+    closes.
     """
     def __init__(self, limit=512):
         self.open = 0
         self.limit = limit
+        self.available = defaultdict(set)
+        self.occupied = defaultdict(set)
         self.streams = {}
-        self.addresses = {}
         self.event = Event()
 
+    def __call__(self, arg=None, ip=None, port=None, addr=None):
+        """ Cached rpc objects """
+        ip, port = ip_port_from_args(arg=arg, addr=addr, ip=ip, port=port)
+        return RPCCall(ip, port, self)
+
     @gen.coroutine
-    def connect(self, ip, port, timeout=None):
-        if (ip, port) in self.streams:
-            d = self.streams[ip, port]
-            for stream, available in d.items():
-                if available:
-                    d[stream] = False
-                    raise gen.Return(stream)
-        else:
-            self.streams[ip, port] = {}
+    def connect(self, ip, port, timeout=3):
+        if self.available.get((ip, port)):
+            stream = self.available[ip, port].pop()
+            self.occupied[ip, port].add(stream)
+            raise gen.Return(stream)
 
         if self.open >= self.limit:
             self.collect()
@@ -511,8 +539,7 @@ class ConnectionPool(object):
         stream.set_close_callback(lambda: self.on_close(ip, port, stream))
         self.open += 1
         print(self.open)
-        self.streams[ip, port][stream] = False
-        self.addresses[stream] = (ip, port)  # reverse index
+        self.occupied[ip, port].add(stream)
 
         if self.open >= self.limit:
             self.event.clear()
@@ -524,19 +551,20 @@ class ConnectionPool(object):
         return sum(v for d in self.streams.values() for v in d.values())
 
     def on_close(self, ip, port, stream):
-        del self.streams[ip, port][stream]
-        if not self.streams[ip, port]:
-            del self.streams[ip, port]
+        if stream in self.available[ip, port]:
+            self.available[ip, port].remove(stream)
+        if stream in self.occupied[ip, port]:
+            self.occupied[ip, port].remove(stream)
+
         self.open -= 1
 
         if self.open <= self.limit:
             self.event.set()
 
     def collect(self):
-        for (ip, port), d in self.streams.items():
-            for stream, available in list(d.items()):
-                if available:
-                    stream.close()
+        for k, streams in list(self.available.items()):
+            for stream in streams:
+                stream.close()
 
 
 def coerce_to_address(o, out=str):
