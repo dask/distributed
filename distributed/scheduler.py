@@ -2357,7 +2357,7 @@ class Scheduler(Server):
         """
         with log_errors(pdb=True):
             thieves = set()
-            for level, stealable in enumerate(self.stealable):
+            for level, stealable in enumerate(self.stealable[:-1]):
                 if not stealable:
                     continue
                 if len(self.idle) == len(self.ncores):  # no stacks

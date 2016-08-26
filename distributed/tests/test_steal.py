@@ -114,3 +114,18 @@ def test_steal_related_tasks(e, s, a, b, c):
             nearby += 1
 
     assert nearby > 10
+
+
+@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 10, timeout=1000)
+def test_dont_steal_fast_tasks(e, s, *workers):
+    np = pytest.importorskip('numpy')
+    x = e.submit(np.random.random, 10000000, workers=workers[0].address)
+
+    def do_nothing(x, y=None):
+        pass
+
+    futures = e.map(do_nothing, range(1000), y=x)
+
+    yield _wait(futures)
+
+    assert len(s.has_what[workers[0].address]) == 1001
