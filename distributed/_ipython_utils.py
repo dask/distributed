@@ -15,9 +15,12 @@ except ImportError:
     import Queue as queue
 from subprocess import Popen
 import sys
+from threading import Thread
 from uuid import uuid4
 
 from tornado.gen import TimeoutError
+from tornado.ioloop import IOLoop
+from threading import Event
 
 from IPython import get_ipython
 from jupyter_client import BlockingKernelClient, write_connection_file
@@ -174,3 +177,70 @@ def connect_qtconsole(connection_info, name=None, extra_args=None):
         except OSError:
             pass
     atexit.register(_cleanup_connection_file)
+
+
+def start_ipython(ip=None, ns=None, log=None):
+    """Start an IPython kernel in a thread
+
+    Parameters
+    ----------
+
+    ip: str
+        The IP address to listen on (likely the parent object's ip).
+    ns: dict
+        Any names that should be injected into the IPython namespace.
+    log: logger instance
+        Hook up IPython's logging to an existing logger instead of the default.
+    """
+    from IPython import get_ipython
+    if get_ipython() is not None:
+        raise RuntimeError("Cannot start IPython, it's already running.")
+
+    from zmq.eventloop.ioloop import ZMQIOLoop
+    from ipykernel.kernelapp import IPKernelApp
+    # save the global IOLoop instance
+    # since IPython relies on it, but we are going to put it in a thread.
+    save_inst = IOLoop.instance()
+    IOLoop.clear_instance()
+    zmq_loop = ZMQIOLoop()
+    zmq_loop.install()
+
+    # start IPython, disabling its signal handlers that won't work due to running in a thread:
+    app = IPKernelApp.instance(log=log)
+    # Don't connect to the history database
+    app.config.HistoryManager.hist_file = ':memory:'
+    # listen on all interfaces, so remote clients can connect:
+    if ip:
+        app.ip = ip
+    # disable some signal handling, logging
+    noop = lambda : None
+    app.init_signal = noop
+    app.log_connection_info = noop
+
+    # start IPython in a thread
+    # initialization happens in the thread to avoid threading problems
+    # with the sqlite history
+    evt = Event()
+    def _start():
+        app.initialize([])
+        app.kernel.pre_handler_hook = noop
+        app.kernel.post_handler_hook = noop
+        app.kernel.start()
+        app.kernel.loop = IOLoop.instance()
+        # save self in the IPython namespace as 'worker'
+        # inject things into the IPython namespace
+        if ns:
+            app.kernel.shell.user_ns.update(ns)
+        evt.set()
+        zmq_loop.start()
+
+    zmq_loop_thread = Thread(target=_start)
+    zmq_loop_thread.daemon = True
+    zmq_loop_thread.start()
+    assert evt.wait(timeout=5), "IPython didn't start in a reasonable amount of time."
+
+    # put the global IOLoop instance back:
+    IOLoop.clear_instance()
+    save_inst.install()
+    return app
+
