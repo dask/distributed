@@ -34,7 +34,7 @@ from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
         _test_scheduler, loop, inc, dec, div, throws, gen_cluster, gen_test,
-        double, deep, zmq_ctx)
+        double, deep, zmq_ctx, mock_ipython)
 
 
 @gen_cluster(executor=True, timeout=None)
@@ -3246,14 +3246,9 @@ def test_start_ipython_scheduler(loop, zmq_ctx):
 
 @pytest.mark.ipython
 def test_start_ipython_magic(loop, zmq_ctx):
-    from jupyter_client import BlockingKernelClient
-    ip = mock.Mock()
-    get_ip = lambda : ip
     with cluster(2) as (s, [a, b]):
 
-        with mock.patch('IPython.get_ipython', get_ip), \
-                mock.patch('distributed._ipython_utils.get_ipython', get_ip), \
-                Executor(('127.0.0.1', s['port']), loop=loop) as e:
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e, mock_ipython() as ip:
             workers = list(e.ncores())[:2]
             names = [ 'magic%i' % i for i in range(len(workers)) ]
             info_dict = e.start_ipython(workers, magic_names=names)
@@ -3277,13 +3272,8 @@ def test_start_ipython_magic(loop, zmq_ctx):
 @pytest.mark.ipython
 def test_start_ipython_remote(loop, zmq_ctx):
     from distributed._ipython_utils import remote_magic
-    ip = mock.Mock()
-    ip.user_ns = {}
-    get_ip = lambda : ip
     with cluster(1) as (s, [a]):
-        with mock.patch('IPython.get_ipython', get_ip), \
-                mock.patch('distributed._ipython_utils.get_ipython', get_ip), \
-                Executor(('127.0.0.1', s['port']), loop=loop) as e:
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e, mock_ipython() as ip:
             worker = first(e.ncores())
             ip.user_ns['info'] = e.start_ipython(worker)[worker]
             remote_magic('info 1') # line magic

@@ -13,6 +13,7 @@ import sys
 from time import time, sleep
 import uuid
 
+import mock
 from toolz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop, TimeoutError
@@ -85,6 +86,17 @@ def zmq_ctx():
     ctx = zmq.Context.instance()
     yield ctx
     ctx.destroy(linger=0)
+
+
+@contextmanager
+def mock_ipython():
+    ip = mock.Mock()
+    ip.user_ns = {}
+    ip.kernel = None
+    get_ip = lambda : ip
+    with mock.patch('IPython.get_ipython', get_ip), \
+            mock.patch('distributed._ipython_utils.get_ipython', get_ip):
+        yield ip
 
 
 def inc(x):
