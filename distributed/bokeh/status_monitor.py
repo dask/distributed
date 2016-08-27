@@ -13,6 +13,9 @@ from ..scheduler import Scheduler
 from ..diagnostics.progress_stream import (nbytes_bar, task_stream_palette,
         incrementing_index)
 
+from .progress_bar import ProgressBar
+
+
 try:
     from bokeh.palettes import Spectral11, Spectral9, viridis
     from bokeh.models import ColumnDataSource, DataRange1d, HoverTool, Range1d
@@ -141,47 +144,6 @@ def progress_plot(**kwargs):
         from ..diagnostics.progress_stream import progress_quads
         data = progress_quads({'all': {}, 'memory': {},
                                'erred': {}, 'released': {}})
-
-        y_range = Range1d(-8, 0)
         source = ColumnDataSource(data)
-        fig = figure(tools='', toolbar_location=None, y_range=y_range, **kwargs)
-        fig.quad(source=source, top='top', bottom='bottom',
-                 left='left', right='right', color='#aaaaaa', alpha=0.2)
-        fig.quad(source=source, top='top', bottom='bottom',
-                 left='left', right='released-loc', color=Spectral9[0], alpha=0.4)
-        fig.quad(source=source, top='top', bottom='bottom',
-                 left='released-loc', right='memory-loc', color=Spectral9[0], alpha=0.8)
-        fig.quad(source=source, top='top', bottom='bottom',
-                 left='erred-loc', right='erred-loc', color='#000000', alpha=0.3)
-        fig.text(source=source, text='show-name', y='bottom', x='left',
-                x_offset=5, text_font_size='10pt')
-        fig.text(source=source, text='done', y='bottom', x='right', x_offset=-5,
-                text_align='right', text_font_size='10pt')
-        fig.xaxis.visible = False
-        fig.yaxis.visible = False
-        fig.grid.grid_line_alpha = 0
-
-        hover = HoverTool()
-        fig.add_tools(hover)
-        hover = fig.select(HoverTool)
-        hover.tooltips = """
-        <div>
-            <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-            <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-        </div>
-        <div>
-            <span style="font-size: 14px; font-weight: bold;">All:</span>&nbsp;
-            <span style="font-size: 10px; font-family: Monaco, monospace;">@all</span>
-        </div>
-        <div>
-            <span style="font-size: 14px; font-weight: bold;">Memory:</span>&nbsp;
-            <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
-        </div>
-        <div>
-            <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
-            <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
-        </div>
-        """
-        hover.point_policy = 'follow_mouse'
-
-        return source, fig
+        progress_bar = ProgressBar(source=source)
+        return source, progress_bar
