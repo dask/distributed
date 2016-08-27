@@ -269,6 +269,7 @@ def write(stream, msg):
         try:
             frames = protocol.dumps(msg)
         except Exception as e:
+            logger.info("Unserializable Message: %s", msg)
             logger.exception(e)
             raise
 
@@ -434,7 +435,10 @@ class rpc(object):
     def close_streams(self):
         for stream in self.streams:
             if stream and not stream.closed():
-                stream.close()
+                try:
+                    stream.close()
+                except (OSError, IOError, StreamClosedError):
+                    pass
 
     def __getattr__(self, key):
         @gen.coroutine
@@ -471,10 +475,11 @@ class RPCCall(object):
             self.pool.occupied[self.ip, self.port].add(stream)
             try:
                 result = yield send_recv(stream=stream, op=key, **kwargs)
-            finally:
-                self.pool.occupied[self.ip, self.port].remove(stream)
                 if not stream.closed():
                     self.pool.available[self.ip, self.port].add(stream)
+            finally:
+                if not stream.closed():
+                    self.pool.occupied[self.ip, self.port].remove(stream)
 
             raise gen.Return(result)
         return send_recv_from_rpc
