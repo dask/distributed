@@ -537,7 +537,6 @@ class ConnectionPool(object):
         stream = yield connect(ip=ip, port=port, timeout=timeout)
         stream.set_close_callback(lambda: self.on_close(ip, port, stream))
         self.open += 1
-        print(self.open)
         self.occupied[ip, port].add(stream)
 
         if self.open >= self.limit:
@@ -561,6 +560,7 @@ class ConnectionPool(object):
             self.event.set()
 
     def collect(self):
+        logger.debug("Collecting unused streams")
         for k, streams in list(self.available.items()):
             for stream in streams:
                 stream.close()
