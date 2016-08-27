@@ -3245,7 +3245,24 @@ def test_start_ipython_scheduler(loop, zmq_ctx):
 
 
 @pytest.mark.ipython
-def test_start_ipython_magic(loop, zmq_ctx):
+def test_start_ipython_scheduler_magic(loop, zmq_ctx):
+    with cluster(1) as (s, [a]):
+        with Executor(('127.0.0.1', s['port']), loop=loop) as e, mock_ipython() as ip:
+            info = e.start_ipython_scheduler(magic_name='scheduler')
+
+        expected = [
+            {'magic_kind': 'line', 'magic_name': 'scheduler'},
+            {'magic_kind': 'cell', 'magic_name': 'scheduler'},
+        ]
+
+        call_kwargs_list = [ kwargs for (args, kwargs) in ip.register_magic_function.call_args_list ]
+        assert call_kwargs_list == expected
+        magic = ip.register_magic_function.call_args_list[0][0][0]
+        magic(line="", cell="scheduler")
+
+
+@pytest.mark.ipython
+def test_start_ipython_workers_magic(loop, zmq_ctx):
     with cluster(2) as (s, [a, b]):
 
         with Executor(('127.0.0.1', s['port']), loop=loop) as e, mock_ipython() as ip:
