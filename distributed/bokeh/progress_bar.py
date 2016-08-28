@@ -25,8 +25,6 @@ class ProgressBarView extends Widget.View
             done = data.done[i]
             all = data.all[i]
             percent = parseInt(done/all * 100)
-
-            # Can use bar_class to set other colors
             if percent == 100
                 bar_class = 'bar finished'
             else
@@ -39,7 +37,7 @@ class ProgressBarView extends Widget.View
                         <span class='count'>#{done}/#{all}</span>
                     </div>
                     <div class='meter'>
-                        <span class='#{bar_class}' style='width: #{percent}%'></span>
+                        <span class='#{bar_class}' style='width: #{percent}%; background-color: #{data.color[i]}'></span>
                     </div>
                 </li>
             ")

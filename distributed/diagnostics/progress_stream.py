@@ -113,8 +113,11 @@ def progress_quads(msg, nrows=8, ncols=3):
 
     d['name'] = names
     d['done'] = []
+    d['color'] = []
     for r, m, e in zip(d['released'], d['memory'], d['erred']):
         d['done'].append(r + m + e)
+    for name in names:
+        d['color'].append(task_stream_palette[incrementing_index(name)])
     return d
 
 
