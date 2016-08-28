@@ -5,6 +5,7 @@ from glob import glob
 import logging
 from multiprocessing import Process, Queue
 import os
+import resource
 import shutil
 import signal
 import socket
@@ -451,6 +452,8 @@ def start_cluster(ncores, loop, Worker=Worker):
     done = s.start(0)
     workers = [Worker(s.ip, s.port, ncores=v, ip=k, name=i, loop=loop)
                 for i, (k, v) in enumerate(ncores)]
+    for w in workers:
+        w.rpc = workers[0].rpc
 
     yield [w._start() for w in workers]
 
@@ -552,3 +555,15 @@ def popen(*args, **kwargs):
             proc.wait()
         with ignoring(OSError):
             proc.terminate()
+
+
+@contextmanager
+def rlimit(key, value):
+    import resource
+    old = resource.getrlimit(key)
+    resource.setrlimit(key, value)
+
+    try:
+        yield
+    finally:
+        resource.setrlimit(key, old)
