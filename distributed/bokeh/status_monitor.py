@@ -54,16 +54,11 @@ def task_stream_plot(sizing_mode='scale_width', **kwargs):
     fig.add_tools(hover)
     hover = fig.select(HoverTool)
     hover.tooltips = """
-    <div>
-        <span style="font-size: 12px; font-weight: bold;">@name:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@duration</span>
-        <span style="font-size: 10px;">ms</span>&nbsp;
-    </div>
+        <span class="hover-key">@name:</span>&nbsp;<span class="hover-value">@duration ms</span>
     """
     hover.point_policy = 'follow_mouse'
 
     return source, fig
-
 
 
 def task_stream_append(lists, msg, workers, palette=task_stream_palette):
@@ -103,36 +98,22 @@ def task_stream_append(lists, msg, workers, palette=task_stream_palette):
 
 
 def nbytes_plot(**kwargs):
-    data = {'name': [], 'left': [], 'right': [], 'center': [], 'color': [],
-            'percent': [], 'MB': [], 'text': []}
+    data = {'name': [], 'left': [], 'right': [], 'center': [], 'color': [], 'percent': [], 'MB': []}
     source = ColumnDataSource(data)
-    fig = figure(title='Memory Use', tools='', toolbar_location=None, **kwargs)
-    fig.quad(source=source, top=1, bottom=0,
-             left='left', right='right', color='color', alpha=0.8)
-    fig.text(source=source, x='center', y=0.5, text='text',
-             text_baseline='middle', text_align='center')
-
-    fig.grid.grid_line_color = None
-    fig.grid.grid_line_color = None
-    fig.axis.visible = None
-    fig.outline_line_color = None
+    fig = figure(
+        title='Memory Use', tools='', toolbar_location=None,
+        x_axis_location=None, y_axis_location=None, y_range=(0, 1), x_range=(0, 1),
+        min_border_bottom=30, **kwargs)
+    fig.quad(source=source, top=1, bottom=0, left='left', right='right', color='color')
+    fig.grid.visible = False
 
     hover = HoverTool()
     fig.add_tools(hover)
     hover = fig.select(HoverTool)
     hover.tooltips = """
-    <div>
-        <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-    </div>
-    <div>
-        <span style="font-size: 14px; font-weight: bold;">Percent:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@percent</span>
-    </div>
-    <div>
-        <span style="font-size: 14px; font-weight: bold;">MB:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@MB</span>
-    </div>
+        <div><span class="hover-key">Name:</span>&nbsp;<span class="hover-value">@name</span></div>
+        <div><span class="hover-key">Percent:</span>&nbsp;<span class="hover-value">@percent</span></div>
+        <div><span class="hover-key">MB:</span>&nbsp;<span class="hover-value">@MB</span></div>
     """
     hover.point_policy = 'follow_mouse'
 
@@ -142,8 +123,7 @@ def nbytes_plot(**kwargs):
 def progress_plot(**kwargs):
     with log_errors():
         from ..diagnostics.progress_stream import progress_quads
-        data = progress_quads({'all': {}, 'memory': {},
-                               'erred': {}, 'released': {}})
+        data = progress_quads({'all': {}, 'memory': {}, 'erred': {}, 'released': {}})
         source = ColumnDataSource(data)
         progress_bar = ProgressBar(source=source)
         return source, progress_bar

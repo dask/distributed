@@ -64,7 +64,6 @@ def nbytes_bar(nbytes):
     names = sorted(nbytes)
 
     d = {'name': [],
-         'text': [],
          'left': [],
          'right': [],
          'center': [],
@@ -83,11 +82,6 @@ def nbytes_bar(nbytes):
         d['center'].append(center)
         d['color'].append(task_stream_palette[incrementing_index(name)])
         d['name'].append(name)
-        if right - left > 0.1:
-            d['text'].append(name)
-        else:
-            d['text'].append('')
-
     return d
 
 

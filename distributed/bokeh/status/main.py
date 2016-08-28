@@ -49,7 +49,7 @@ def resource_update():
 doc.add_periodic_callback(resource_update, messages['workers']['interval'])
 
 
-nbytes_task_source, nbytes_task_plot = nbytes_plot(sizing_mode=SIZING_MODE, width=WIDTH, height=60)
+nbytes_task_source, nbytes_task_plot = nbytes_plot(sizing_mode=SIZING_MODE, width=WIDTH, height=85)
 progress_source, progress_plot = progress_plot(sizing_mode=SIZING_MODE, width=WIDTH, height=160)
 
 

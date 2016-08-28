@@ -12,6 +12,7 @@
       html {
         width: 100%;
         height: 100%;
+        min-width: 625px;
       }
       body {
         width: 90%;
@@ -58,6 +59,7 @@
         background: #EEE;
         margin: 0px;
         padding: 0px;
+        padding-left: 32px;
         list-style: none;
       }
 
@@ -116,6 +118,36 @@
       .bar.finished {
         border-top-right-radius: 20px;
         border-bottom-right-radius: 20px;
+      }
+
+      /* Custom hover */
+      .bk-tooltip.bk-tooltip-custom {
+          background-color: white !important;
+          opacity: 0.95;
+          font-size: 0.8em;
+          padding: 0.5em 1.5em;
+          border-color: #D8D8D8 !important; /* WH GRAY */
+      }
+
+      .bk-tooltip.bk-tooltip-custom:before {
+          border: none !important;
+      }
+
+      .bk-tooltip.bk-tooltip-custom:after {
+          border: none !important;
+      }
+
+      .tooltip-text {
+          clear: both;
+          float: left;
+      }
+      .hover-key {
+        font-size: 14px; 
+        font-weight: bold;
+      }
+      .hover-value {
+        font-size: 10px; 
+        font-family: Monaco, monospace;
       }
     </style>
   </head>
