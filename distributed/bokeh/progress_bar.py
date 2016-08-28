@@ -1,4 +1,5 @@
-from bokeh.core.properties import StringSpec, NumberSpec, Instance
+#from bokeh.core.properties import StringSpec, NumberSpec,
+from bokeh.core.properties import Instance
 from bokeh.models import Widget, ColumnDataSource, DataSource
 
 IMPLEMENTATION = """
@@ -19,16 +20,31 @@ class ProgressBarView extends Widget.View
         @$el.empty()
 
         data = @model.source.data
-        $bars = $("<ul></ul>")
+        $bars = $("<ul class='grid'></ul>")
         for i in [0...data.name.length]
-            console.log(i)
+            done = data.done[i]
+            all = data.all[i]
+            percent = parseInt(done/all * 100)
+
+            # Can use bar_class to set other colors
+            if percent == 100
+                bar_class = 'bar finished'
+            else
+                bar_class = 'bar'
+
             $bar = $("
-                <li>
-                    #{data.name[i]} - #{data.done[i]} / #{data.all[i]}
+                <li class='grid-item'>
+                    <div class='description'>
+                        <span class='function-name'>#{data.name[i]}</span>
+                        <span class='count'>#{done}/#{all}</span>
+                    </div>
+                    <div class='meter'>
+                        <span class='#{bar_class}' style='width: #{percent}%'></span>
+                    </div>
                 </li>
             ")
             $bars.prepend($bar)
-        @$el.html($bars)
+            @$el.html($bars)
         return @
 
 class ProgressBar extends Widget.Model
