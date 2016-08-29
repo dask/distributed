@@ -1627,6 +1627,9 @@ class Executor(object):
         qtconsole: bool (optional)
             If True, launch a Jupyter QtConsole connected to the worker(s).
 
+        qtconsole_args: list(str) (optional)
+            Additional arguments to pass to the qtconsole on startup.
+
         Returns
         -------
         iter_connection_info: list
@@ -1658,9 +1661,40 @@ class Executor(object):
                 )
         return info_dict
 
-    def start_ipython_scheduler(self, magic_name='scheduler',
+    def start_ipython_scheduler(self, magic_name='scheduler_if_ipython',
                                 qtconsole=False, qtconsole_args=None):
+        """ Start IPython kernel on the scheduler
+
+        Parameters
+        ----------
+        magic_name: str or None (optional)
+            If defined, register IPython magic with this name for
+            executing code on the scheduler.
+            If not defined, register %scheduler magic if IPython is running.
+
+        qtconsole: bool (optional)
+            If True, launch a Jupyter QtConsole connected to the worker(s).
+
+        qtconsole_args: list(str) (optional)
+            Additional arguments to pass to the qtconsole on startup.
+
+        Returns
+        -------
+        connection_info: dict
+            connection_info dict containing info necessary
+            to connect Jupyter clients to the scheduler.
+        """
         info = sync(self.loop, self.scheduler.start_ipython)
+        if magic_name == 'scheduler_if_ipython':
+            # default to %scheduler if in IPython, no magic otherwise
+            in_ipython = False
+            if 'IPython' in sys.modules:
+                from IPython import get_ipython
+                in_ipython = bool(get_ipython())
+            if in_ipython:
+                magic_name = 'scheduler'
+            else:
+                magic_name = None
         if magic_name:
             from ._ipython_utils import register_worker_magic
             register_worker_magic(info, magic_name)

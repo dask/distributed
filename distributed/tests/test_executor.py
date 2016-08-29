@@ -3234,7 +3234,7 @@ def test_start_ipython_scheduler(loop, zmq_ctx):
 
     with cluster(1) as (s, [a]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            info = e.start_ipython_scheduler(magic_name=None)
+            info = e.start_ipython_scheduler()
             key = info.pop('key')
             kc = BlockingKernelClient(**info)
             kc.session.key = key
@@ -3248,7 +3248,7 @@ def test_start_ipython_scheduler(loop, zmq_ctx):
 def test_start_ipython_scheduler_magic(loop, zmq_ctx):
     with cluster(1) as (s, [a]):
         with Executor(('127.0.0.1', s['port']), loop=loop) as e, mock_ipython() as ip:
-            info = e.start_ipython_scheduler(magic_name='scheduler')
+            info = e.start_ipython_scheduler()
 
         expected = [
             {'magic_kind': 'line', 'magic_name': 'scheduler'},
