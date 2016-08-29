@@ -34,7 +34,7 @@ from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
         _test_scheduler, loop, inc, dec, div, throws, gen_cluster, gen_test,
-        double, deep, zmq_ctx, mock_ipython)
+        double, deep)
 
 
 @gen_cluster(executor=True, timeout=None)
@@ -237,19 +237,6 @@ def test_sync_exceptions(loop):
 
 
 @gen_cluster(executor=True)
-def test_stress_1(e, s, a, b):
-    n = 2**6
-
-    seq = e.map(inc, range(n))
-    while len(seq) > 1:
-        yield gen.sleep(0.1)
-        seq = [e.submit(add, seq[i], seq[i + 1])
-                for i in range(0, len(seq), 2)]
-    result = yield seq[0]._result()
-    assert result == sum(map(inc, range(n)))
-
-
-@gen_cluster(executor=True)
 def test_gather(e, s, a, b):
     x = e.submit(inc, 10)
     y = e.submit(inc, x)
@@ -444,17 +431,6 @@ def test_recompute_released_key(e, s, a, b):
     assert x.key in e.futures
     result2 = yield x._result()
     assert result1 == result2
-
-
-@pytest.mark.parametrize(('func', 'n'), [(slowinc, 100), (inc, 1000)])
-def test_stress_gc(loop, func, n):
-    with cluster() as (s, [a, b]):
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            x = e.submit(func, 1)
-            for i in range(n):
-                x = e.submit(func, x)
-
-            assert x.result() == n + 2
 
 
 @slow
@@ -2933,20 +2909,6 @@ def test_scheduler_saturates_cores_random(e, s, a, b):
             yield gen.sleep(0.01)
 
 
-@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 4, timeout=None)
-def test_cancel_stress(e, s, *workers):
-    da = pytest.importorskip('dask.array')
-    x = da.random.random((40, 40), chunks=(1, 1))
-    x = e.persist(x)
-    yield _wait([x])
-    y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
-    for i in range(5):
-        f = e.compute(y)
-        while len(s.waiting) > (len(y.dask) - len(x.dask)) / 2:
-            yield gen.sleep(0.01)
-        yield e._cancel(f)
-
-
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 4)
 def test_cancel_clears_processing(e, s, *workers):
     da = pytest.importorskip('dask.array')
@@ -2961,19 +2923,6 @@ def test_cancel_clears_processing(e, s, *workers):
         assert time() < start + 0.2
         yield gen.sleep(0.01)
     s.validate_state()
-
-def test_cancel_stress_sync(loop):
-    da = pytest.importorskip('dask.array')
-    x = da.random.random((40, 40), chunks=(1, 1))
-    with cluster() as (s, [a, b]):
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            x = e.persist(x)
-            y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
-            wait(x)
-            for i in range(5):
-                f = e.compute(y)
-                sleep(1)
-                e.cancel(f)
 
 
 def test_default_get(loop):
@@ -3206,145 +3155,6 @@ def test_as_completed_list(loop):
             seq = e.map(inc, iter(range(5)))
             seq2 = list(as_completed(seq))
             assert set(e.gather(seq2)) == {1, 2, 3, 4, 5}
-
-
-@pytest.mark.ipython
-def test_start_ipython_workers(loop, zmq_ctx):
-    from jupyter_client import BlockingKernelClient
-
-    with cluster(1) as (s, [a]):
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            info_dict = e.start_ipython()
-            info = first(info_dict.values())
-            key = info.pop('key')
-            kc = BlockingKernelClient(**info)
-            kc.session.key = key
-            kc.start_channels()
-            kc.wait_for_ready(timeout=10)
-            msg_id = kc.execute("worker")
-            reply = kc.get_shell_msg(timeout=10)
-            assert reply['parent_header']['msg_id'] == msg_id
-            assert reply['content']['status'] == 'ok'
-            kc.stop_channels()
-
-
-@pytest.mark.ipython
-def test_start_ipython_scheduler(loop, zmq_ctx):
-    from jupyter_client import BlockingKernelClient
-
-    with cluster(1) as (s, [a]):
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            info = e.start_ipython_scheduler()
-            key = info.pop('key')
-            kc = BlockingKernelClient(**info)
-            kc.session.key = key
-            kc.start_channels()
-            msg_id = kc.execute("scheduler")
-            reply = kc.get_shell_msg(timeout=10)
-            kc.stop_channels()
-
-
-@pytest.mark.ipython
-def test_start_ipython_scheduler_magic(loop, zmq_ctx):
-    with cluster(1) as (s, [a]):
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e, mock_ipython() as ip:
-            info = e.start_ipython_scheduler()
-
-        expected = [
-            {'magic_kind': 'line', 'magic_name': 'scheduler'},
-            {'magic_kind': 'cell', 'magic_name': 'scheduler'},
-        ]
-
-        call_kwargs_list = [ kwargs for (args, kwargs) in ip.register_magic_function.call_args_list ]
-        assert call_kwargs_list == expected
-        magic = ip.register_magic_function.call_args_list[0][0][0]
-        magic(line="", cell="scheduler")
-
-
-@pytest.mark.ipython
-def test_start_ipython_workers_magic(loop, zmq_ctx):
-    with cluster(2) as (s, [a, b]):
-
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e, mock_ipython() as ip:
-            workers = list(e.ncores())[:2]
-            names = [ 'magic%i' % i for i in range(len(workers)) ]
-            info_dict = e.start_ipython(workers, magic_names=names)
-
-        expected = [
-            {'magic_kind': 'line', 'magic_name': 'remote'},
-            {'magic_kind': 'cell', 'magic_name': 'remote'},
-            {'magic_kind': 'line', 'magic_name': 'magic0'},
-            {'magic_kind': 'cell', 'magic_name': 'magic0'},
-            {'magic_kind': 'line', 'magic_name': 'magic1'},
-            {'magic_kind': 'cell', 'magic_name': 'magic1'},
-        ]
-        call_kwargs_list = [ kwargs for (args, kwargs) in ip.register_magic_function.call_args_list ]
-        assert call_kwargs_list == expected
-        assert ip.register_magic_function.call_count == 6
-        magics = [ args[0][0] for args in ip.register_magic_function.call_args_list[2:] ]
-        magics[-1](line="", cell="worker")
-        [ m.client.stop_channels() for m in magics ]
-
-
-@pytest.mark.ipython
-def test_start_ipython_remote(loop, zmq_ctx):
-    from distributed._ipython_utils import remote_magic
-    with cluster(1) as (s, [a]):
-        with Executor(('127.0.0.1', s['port']), loop=loop) as e, mock_ipython() as ip:
-            worker = first(e.ncores())
-            ip.user_ns['info'] = e.start_ipython(worker)[worker]
-            remote_magic('info 1') # line magic
-            remote_magic('info', 'worker') # cell magic
-
-        expected = [
-            ((remote_magic,), {'magic_kind': 'line', 'magic_name': 'remote'}),
-            ((remote_magic,), {'magic_kind': 'cell', 'magic_name': 'remote'}),
-        ]
-        assert ip.register_magic_function.call_args_list == expected
-        assert ip.register_magic_function.call_count == 2
-
-
-@pytest.mark.ipython
-def test_start_ipython_qtconsole(loop):
-    Popen = mock.Mock()
-    with cluster() as (s, [a, b]):
-        with mock.patch('distributed._ipython_utils.Popen', Popen), Executor(('127.0.0.1', s['port']), loop=loop) as e:
-            worker = first(e.ncores())
-            e.start_ipython(worker, qtconsole=True)
-            e.start_ipython(worker, qtconsole=True, qtconsole_args=['--debug'])
-    assert Popen.call_count == 2
-    (cmd,), kwargs = Popen.call_args_list[0]
-    assert cmd[:3] == [ 'jupyter', 'qtconsole', '--existing' ]
-    (cmd,), kwargs = Popen.call_args_list[1]
-    assert cmd[-1:] == [ '--debug' ]
-
-
-@gen_cluster(ncores=[], executor=True, timeout=None)
-def test_stress_creation_and_deletion(e, s):
-    # Assertions are handled by the validate mechanism in the scheduler
-    s.allowed_failures = 100000
-    da = pytest.importorskip('dask.array')
-
-    x = da.random.random(size=(2000, 2000), chunks=(100, 100))
-    y = (x + 1).T + (x * 2) - x.mean(axis=1)
-
-    z = e.persist(y)
-
-    @gen.coroutine
-    def create_and_destroy_worker(delay):
-        start = time()
-        while time() < start + 10:
-            n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
-            n.start(0)
-
-            yield gen.sleep(delay)
-
-            yield n._close()
-            print("Killed nanny")
-
-    yield gen.with_timeout(timedelta(minutes=1),
-                          All([create_and_destroy_worker(0.1 * i) for i in
-                              range(10)]))
 
 
 @gen_test()
@@ -3741,62 +3551,3 @@ def test_scatter_compute_store_lose_processing(e, s, a, b):
     assert y.status == 'cancelled'
     assert z.status == 'cancelled'
 
-
-@gen_cluster(ncores=[('127.0.0.1', 1)] * 10, executor=True, timeout=60)
-def test_stress_scatter_death(e, s, *workers):
-    import random
-    np = pytest.importorskip('numpy')
-    L = yield e._scatter([np.random.random(10000) for i in range(len(workers))])
-    yield e._replicate(L, n=2)
-
-    adds = [delayed(slowadd, pure=True)(random.choice(L),
-                                        random.choice(L),
-                                        delay=0.05)
-            for i in range(50)]
-
-    adds = [delayed(slowadd, pure=True)(a, b, delay=0.02)
-            for a, b in sliding_window(2, adds)]
-
-    futures = e.compute(adds)
-
-    alive = list(workers)
-
-    from distributed.scheduler import logger
-
-    for i in range(7):
-        yield gen.sleep(0.1)
-        try:
-            s.validate_state()
-        except Exception as e:
-            logger.exception(e)
-            import pdb; pdb.set_trace()
-        w = random.choice(alive)
-        yield w._close()
-        alive.remove(w)
-
-    try:
-        yield gen.with_timeout(timedelta(seconds=10), e._gather(futures))
-    except gen.TimeoutError:
-        import pdb; pdb.set_trace()
-    except CancelledError:
-        pass
-
-
-def vsum(*args):
-    return sum(args)
-
-
-@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 80, timeout=1000)
-def test_stress_communication(e, s, *workers):
-    s.validate = False # very slow otherwise
-    da = pytest.importorskip('dask.array')
-
-    n = 40
-    xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
-    ys = [x + x.T for x in xs]
-    z = da.atop(vsum, 'ij', *concat(zip(ys, ['ij'] * n)))
-
-    future = e.compute(z.sum())
-
-    result = yield future._result()
-    assert isinstance(result, float)
