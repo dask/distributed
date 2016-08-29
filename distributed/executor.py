@@ -989,8 +989,8 @@ class Executor(object):
     @gen.coroutine
     def _publish_dataset(self, data, name):
         keys = [tokey(f.key) for f in futures_of(data)]
-        yield self.scheduler.publish_data(keys=keys, name=tokey(name),
-                                          data=pickle.dumps(data))
+        yield self.scheduler.publish_dataset(keys=keys, name=tokey(name),
+                                             data=pickle.dumps(data))
 
 
     def publish_dataset(self, data, name):
@@ -1024,7 +1024,8 @@ class Executor(object):
 
     @gen.coroutine
     def _get_published_dataset(self, name):
-        out = yield self.scheduler.get_published_data(name=name, client=self.id)
+        out = yield self.scheduler.get_published_dataset(name=name,
+                                                         client=self.id)
         data, keys = out['data'], out['keys']
 
         with temp_default_executor(self):

@@ -264,8 +264,8 @@ class Scheduler(Server):
                          'replicate': self.replicate,
                          'start_ipython': self.start_ipython,
                          'get_published_keys': self.get_published_keys,
-                         'get_published_data': self.get_published_data,
-                         'publish_data': self.publish_data}
+                         'get_published_dataset': self.get_published_dataset,
+                         'publish_dataset': self.publish_dataset}
 
         self.services = {}
         for k, v in (services or {}).items():
@@ -1594,14 +1594,14 @@ class Scheduler(Server):
 
             return result
 
-    def publish_data(self, stream=None, keys=None, data=None, name=None):
+    def publish_dataset(self, stream=None, keys=None, data=None, name=None):
         self.published_data[name] = {'data': data, 'keys': keys}
         # TODO: add guards against deletion of keys?
 
     def get_published_keys(self, *args):
         return list(sorted(self.published_data.keys()))
 
-    def get_published_data(self, stream, name=None, client=None):
+    def get_published_dataset(self, stream, name=None, client=None):
         return self.published_data[name]
 
     #####################
