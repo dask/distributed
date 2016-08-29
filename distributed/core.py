@@ -472,14 +472,13 @@ class RPCCall(object):
         @gen.coroutine
         def send_recv_from_rpc(**kwargs):
             stream = yield self.pool.connect(self.ip, self.port)
-            self.pool.occupied[self.ip, self.port].add(stream)
             try:
                 result = yield send_recv(stream=stream, op=key, **kwargs)
-                if not stream.closed():
-                    self.pool.available[self.ip, self.port].add(stream)
             finally:
                 if not stream.closed():
+                    self.pool.available[self.ip, self.port].add(stream)
                     self.pool.occupied[self.ip, self.port].remove(stream)
+                    self.pool.active -= 1
 
             raise gen.Return(result)
         return send_recv_from_rpc
@@ -513,10 +512,17 @@ class ConnectionPool(object):
     """
     def __init__(self, limit=512):
         self.open = 0
+        self.active = 0
         self.limit = limit
         self.available = defaultdict(set)
         self.occupied = defaultdict(set)
         self.event = Event()
+
+    def __str__(self):
+        return "<ConnectionPool: open=%d, active=%d>" % (self.open,
+                self.active)
+
+    __repr__ = __str__
 
     def __call__(self, arg=None, ip=None, port=None, addr=None):
         """ Cached rpc objects """
@@ -527,16 +533,19 @@ class ConnectionPool(object):
     def connect(self, ip, port, timeout=3):
         if self.available.get((ip, port)):
             stream = self.available[ip, port].pop()
+            self.active += 1
             self.occupied[ip, port].add(stream)
             raise gen.Return(stream)
 
-        if self.open >= self.limit:
+        while self.open >= self.limit:
+            self.event.clear()
             self.collect()
             yield self.event.wait()
 
+        self.open += 1
         stream = yield connect(ip=ip, port=port, timeout=timeout)
         stream.set_close_callback(lambda: self.on_close(ip, port, stream))
-        self.open += 1
+        self.active += 1
         self.occupied[ip, port].add(stream)
 
         if self.open >= self.limit:
@@ -544,23 +553,21 @@ class ConnectionPool(object):
 
         raise gen.Return(stream)
 
-    @property
-    def active(self):
-        return sum(map(len, self.occupied.values()))
-
     def on_close(self, ip, port, stream):
+        self.open -= 1
+
         if stream in self.available[ip, port]:
             self.available[ip, port].remove(stream)
         if stream in self.occupied[ip, port]:
             self.occupied[ip, port].remove(stream)
-
-        self.open -= 1
+            self.active -= 1
 
         if self.open <= self.limit:
             self.event.set()
 
     def collect(self):
-        logger.debug("Collecting unused streams")
+        logger.info("Collecting unused streams.  open: %d, active: %d",
+                    self.open, self.active)
         for k, streams in list(self.available.items()):
             for stream in streams:
                 stream.close()
