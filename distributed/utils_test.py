@@ -5,7 +5,6 @@ from glob import glob
 import logging
 from multiprocessing import Process, Queue
 import os
-import resource
 import shutil
 import signal
 import socket
@@ -555,15 +554,3 @@ def popen(*args, **kwargs):
             proc.wait()
         with ignoring(OSError):
             proc.terminate()
-
-
-@contextmanager
-def rlimit(key, value):
-    import resource
-    old = resource.getrlimit(key)
-    resource.setrlimit(key, value)
-
-    try:
-        yield
-    finally:
-        resource.setrlimit(key, old)

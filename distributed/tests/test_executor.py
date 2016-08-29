@@ -8,7 +8,6 @@ from datetime import timedelta
 import itertools
 from multiprocessing import Process
 from random import random, choice
-import resource
 import sys
 from threading import Thread
 from time import sleep, time
@@ -35,7 +34,7 @@ from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
         _test_scheduler, loop, inc, dec, div, throws, gen_cluster, gen_test,
-        double, deep, rlimit)
+        double, deep)
 
 
 @gen_cluster(executor=True, timeout=None)
@@ -3730,7 +3729,6 @@ def vsum(*args):
 
 @gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 80, timeout=1000)
 def test_stress_communication(e, s, *workers):
-    import resource
     s.validate = False # very slow otherwise
     da = pytest.importorskip('dask.array')
 
