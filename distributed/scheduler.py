@@ -223,6 +223,7 @@ class Scheduler(Server):
         self.exceptions = dict()
         self.tracebacks = dict()
         self.exceptions_blame = dict()
+        self.published_data = dict()
         self.stealable = [set() for i in range(12)]
         self.stealable_unknown_durations = defaultdict(set)
 
@@ -261,7 +262,10 @@ class Scheduler(Server):
                          'add_keys': self.add_keys,
                          'rebalance': self.rebalance,
                          'replicate': self.replicate,
-                         'start_ipython': self.start_ipython}
+                         'start_ipython': self.start_ipython,
+                         'get_published_keys': self.get_published_keys,
+                         'get_published_data': self.get_published_data,
+                         'publish_data': self.publish_data}
 
         self.services = {}
         for k, v in (services or {}).items():
@@ -932,7 +936,7 @@ class Scheduler(Server):
         """
         The master client coroutine.  Handles all inbound messages from clients.
 
-        This runs once per Cleint IOStream or Queue.
+        This runs once per Client IOStream or Queue.
 
         See Also
         --------
@@ -1589,6 +1593,16 @@ class Scheduler(Server):
                 result = out
 
             return result
+
+    def publish_data(self, stream=None, keys=None, data=None, name=None):
+        self.published_data[name] = {'data': data, 'keys': keys}
+        # TODO: add guards against deletion of keys?
+
+    def get_published_keys(self, *args):
+        return list(sorted(self.published_data.keys()))
+
+    def get_published_data(self, stream, name=None, client=None):
+        return self.published_data[name]
 
     #####################
     # State Transitions #

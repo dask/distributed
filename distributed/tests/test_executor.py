@@ -7,6 +7,7 @@ from concurrent.futures import CancelledError
 from datetime import timedelta
 import itertools
 from multiprocessing import Process
+import pickle
 from random import random, choice
 import sys
 from threading import Thread
@@ -28,7 +29,8 @@ from distributed import Worker, Nanny
 from distributed.client import WrappedKey
 from distributed.executor import (Executor, Future, CompatibleExecutor, _wait,
         wait, _as_completed, as_completed, tokenize, _global_executor,
-        default_executor, _first_completed, ensure_default_get, futures_of)
+        default_executor, _first_completed, ensure_default_get, futures_of,
+        temp_default_executor)
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All
@@ -3626,6 +3628,68 @@ def test_threaded_get_within_distributed(loop):
                 future = e.submit(f)
                 assert future.result() == 1
 
+
+@gen_cluster(executor=False)
+def test_publish_simple(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    f = Executor((s.ip, s.port), start=False)
+    yield f._start()
+
+    data = yield e._scatter(range(3))
+    yield e._publish_dataset(data, 'data')
+    assert 'data' in s.published_data
+
+    result = yield e._published_datasets()
+    assert result == ['data']
+
+    result = yield f._published_datasets()
+    assert result == ['data']
+
+
+@gen_cluster(executor=False)
+def test_publish_roundtrip(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    f = Executor((s.ip, s.port), start=False)
+    yield f._start()
+
+    data = yield e._scatter([0, 1, 2])
+    yield e._publish_dataset(data, 'data')
+
+    result = yield f._get_published_dataset('data')
+
+    assert len(result) == len(data)
+    out = yield f._gather(result)
+    assert out == [0, 1, 2]
+
+
+@gen_cluster(executor=False)
+def test_publish_bag(s, a, b):
+    db = pytest.importorskip('dask.bag')
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    f = Executor((s.ip, s.port), start=False)
+    yield f._start()
+
+    bag = db.from_sequence([0, 1, 2])
+    bagp = e.persist(bag)
+
+    assert len(futures_of(bagp)) == 3
+    keys = {f.key for f in futures_of(bagp)}
+    assert keys == set(bag.dask)
+
+    yield e._publish_dataset(bagp, 'data')
+
+    # check that serialization didn't affect original bag's dask
+    assert len(futures_of(bagp)) == 3
+
+    result = yield f._get_published_dataset('data')
+
+    out = yield f.compute(result)._result()
+    assert out == [0, 1, 2]
+
+
 @gen_cluster(executor=True)
 def test_lose_scattered_data(e, s, a, b):
     [x] = yield e._scatter([1], workers=a.address)
@@ -3800,3 +3864,37 @@ def test_stress_communication(e, s, *workers):
 
     result = yield future._result()
     assert isinstance(result, float)
+
+
+@gen_cluster(executor=False)
+def test_serialize_future(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    f = Executor((s.ip, s.port), start=False)
+    yield f._start()
+
+    future = e.submit(lambda: 1)
+    result = yield future._result()
+
+    with temp_default_executor(f):
+        future2 = pickle.loads(pickle.dumps(future))
+        assert future2.executor is f
+        assert tokey(future2.key) in f.futures
+        result2 = yield future2._result()
+        assert result == result2
+
+
+@gen_cluster(executor=False)
+def test_temp_executor(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    f = Executor((s.ip, s.port), start=False)
+    yield f._start()
+
+    with temp_default_executor(e):
+        assert default_executor() is e
+        assert default_executor(f) is f
+
+    with temp_default_executor(f):
+        assert default_executor() is f
+        assert default_executor(e) is e
