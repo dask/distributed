@@ -2786,6 +2786,7 @@ def test_get_foo(e, s, a, b):
     assert c == {futures[0].key: list(s.who_has[futures[0].key])}
 
 
+@slow
 @gen_cluster(executor=True, Worker=Nanny)
 def test_bad_tasks_fail(e, s, a, b):
     f = e.submit(sys.exit, 1)
@@ -2870,6 +2871,7 @@ def test_get_returns_early(e, s, a, b):
     assert x.key in s.tasks
 
 
+@slow
 @gen_cluster(Worker=Nanny, executor=True)
 def test_Executor_clears_references_after_restart(e, s, a, b):
     x = e.submit(inc, 1)
@@ -3042,6 +3044,7 @@ def test_synchronize_missing_data_on_one_worker(e, s, a, b):
 
 
 from distributed.utils_test import popen
+@slow
 def test_reconnect(loop):
     w = Worker('127.0.0.1', 9393, loop=loop)
     w.start()
