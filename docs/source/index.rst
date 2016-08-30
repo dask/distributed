@@ -94,6 +94,7 @@ Contents
    joblib
    ipython
    queues
+   task-launch
    submitting-applications
    api
    faq
