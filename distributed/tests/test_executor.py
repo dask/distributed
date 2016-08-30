@@ -3249,9 +3249,6 @@ def test_publish_roundtrip(s, a, b):
 
     assert 'published-data' not in s.who_wants[data[0].key]
 
-    e = Executor((s.ip, s.port), start=False)
-    yield e._start()
-
 
 @gen_cluster(executor=False)
 def test_unpublish(s, a, b):
