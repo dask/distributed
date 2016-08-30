@@ -6,9 +6,13 @@
     {{ bokeh_css }}
     {{ bokeh_js }}
     <style>
+      * { 
+        box-sizing: border-box; 
+      }
       html {
         width: 100%;
         height: 100%;
+        min-width: 625px;
       }
       body {
         width: 90%;
@@ -48,6 +52,110 @@
       .bk-root .bk-toolbar-box .bk-toolbar-right {
         top: 4px;
         right: 4px;
+      }
+      /* ---- grid ---- */
+
+      .grid {
+        background: #EEE;
+        margin: 0px;
+        padding: 0px;
+        padding-left: 32px;
+        list-style: none;
+      }
+
+      /* ---- grid-item ---- */
+
+      .grid-item {
+        padding: 10px;
+        min-width: 200px;
+        width: 50%;
+        float: left;
+        background: whitesmoke;
+        border: 2px solid white;
+      }
+      @media all and (max-width: 420px) { 
+        .grid-item {
+          width: 100%;
+        }
+      }
+
+      .function-name {
+        word-wrap: break-word;
+      }
+      .count {
+        float: right;
+      }
+
+      .description:after {
+        content: "";
+        display: table;
+        clear: both;
+      }
+
+      .meter { 
+        height: 25px;
+        position: relative;
+        background: white;
+        border-radius: 25px;
+        padding: 2px;
+        margin-top: 5px;
+      }
+
+      .bar {
+        display: block;
+        height: 100%;
+        border-top-right-radius: 8px;
+        border-bottom-right-radius: 8px;
+        border-top-left-radius: 20px;
+        border-bottom-left-radius: 20px;
+        background-color: #C44A28;
+        box-shadow: 
+          inset 0 2px 9px  rgba(255,255,255,0.3),
+          inset 0 -2px 6px rgba(0,0,0,0.4);
+        position: relative;
+        overflow: hidden;
+      }
+      .bar.finished {
+        border-top-right-radius: 20px;
+        border-bottom-right-radius: 20px;
+      }
+
+      /* Custom hover */
+      .bk-tooltip.bk-tooltip-custom {
+          background-color: white !important;
+          opacity: 0.95;
+          font-size: 0.8em;
+          padding: 0.5em 1.5em;
+          border-color: #D8D8D8 !important;
+      }
+
+			.bk-tooltip.bk-tooltip-custom.bk-left::before {
+				border-right-color: #D8D8D8 !important;
+			}
+
+			.bk-tooltip.bk-tooltip-custom.bk-right::after {
+				border-left-color: #D8D8D8 !important;
+			}
+
+			.bk-tooltip.bk-tooltip-custom.bk-above::before {
+				border-bottom-color: #D8D8D8 !important;
+			}
+
+			.bk-tooltip.bk-tooltip-custom.bk-below::after {
+				border-top-color: #D8D8D8 !important;
+			}
+
+      .tooltip-text {
+          clear: both;
+          float: left;
+      }
+      .hover-key {
+        font-size: 14px; 
+        font-weight: bold;
+      }
+      .hover-value {
+        font-size: 10px; 
+        font-family: Monaco, monospace;
       }
     </style>
   </head>

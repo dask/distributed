@@ -64,7 +64,6 @@ def nbytes_bar(nbytes):
     names = sorted(nbytes)
 
     d = {'name': [],
-         'text': [],
          'left': [],
          'right': [],
          'center': [],
@@ -83,11 +82,6 @@ def nbytes_bar(nbytes):
         d['center'].append(center)
         d['color'].append(task_stream_palette[incrementing_index(name)])
         d['name'].append(name)
-        if right - left > 0.1:
-            d['text'].append(name)
-        else:
-            d['text'].append('')
-
     return d
 
 
@@ -99,61 +93,38 @@ def progress_quads(msg, nrows=8, ncols=3):
     ...        'erred': {'inc': 0, 'dec': 1, 'add': 0},
     ...        'released': {'inc': 1, 'dec': 0, 'add': 1}}
 
-    >>> progress_quads(msg, nrows=2)  # doctest: +SKIP
+    >>> progress_quads(msg, nrows=2)
     {'name': ['inc', 'add', 'dec'],
-     'left': [0, 0, 1],
-     'right': [0.9, 0.9, 1.9],
-     'top': [0, -1, 0],
-     'bottom': [-.8, -1.8, -.8],
      'released': [1, 1, 0],
      'memory': [2, 1, 0],
      'erred': [0, 0, 1],
-     'done': ['3 / 5', '2 / 4', '1 / 1'],
-     'released-loc': [.2/.9, .25 / 0.9, 1],
-     'memory-loc': [3 / 5 / .9, .5 / 0.9, 1],
-     'erred-loc': [3 / 5 / .9, .5 / 0.9, 1.9]}
+     'done': [3, 2, 1],
+     'all': [5, 4, 1]}
     """
-    width = 0.9
     names = sorted(msg['all'], key=msg['all'].get, reverse=True)
     names = names[:nrows * ncols]
-    n = len(names)
     d = {k: [v.get(name, 0) for name in names] for k, v in msg.items()}
 
     d['name'] = names
-    d['show-name'] = [name if len(name) <= 15 else name[:12] + '...'
-                      for name in names]
-    d['left'] = [i // nrows for i in range(n)]
-    d['right'] = [i // nrows + width for i in range(n)]
-    d['top'] = [-(i % nrows) for i in range(n)]
-    d['bottom'] = [-(i % nrows) - 0.8 for i in range(n)]
-
-
-    d['released-loc'] = []
-    d['memory-loc'] = []
-    d['erred-loc'] = []
     d['done'] = []
-    for r, m, e, a, l in zip(d['released'], d['memory'],
-                             d['erred'], d['all'], d['left']):
-        rl = width * r / a + l
-        ml = width * (r + m) / a + l
-        el = width * (r + m + e) / a + l
-        done = '%d / %d' % (r + m + e, a)
-        d['released-loc'].append(rl)
-        d['memory-loc'].append(ml)
-        d['erred-loc'].append(el)
-        d['done'].append(done)
-
+    d['color'] = []
+    for r, m, e in zip(d['released'], d['memory'], d['erred']):
+        d['done'].append(r + m + e)
+    for name in names:
+        d['color'].append(task_stream_palette[incrementing_index(name)])
     return d
 
 
 from toolz import memoize
-from bokeh.palettes import Spectral11, Spectral9, viridis
+from bokeh.palettes import viridis
 import random
 task_stream_palette = list(viridis(25))
 random.shuffle(task_stream_palette)
 
 import itertools
 counter = itertools.count()
+
+
 @memoize
 def incrementing_index(o):
     return next(counter)

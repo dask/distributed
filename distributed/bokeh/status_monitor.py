@@ -13,6 +13,9 @@ from ..scheduler import Scheduler
 from ..diagnostics.progress_stream import (nbytes_bar, task_stream_palette,
         incrementing_index)
 
+from .progress_bar import ProgressBar
+
+
 try:
     from bokeh.palettes import Spectral11, Spectral9, viridis
     from bokeh.models import ColumnDataSource, DataRange1d, HoverTool, Range1d
@@ -51,16 +54,11 @@ def task_stream_plot(sizing_mode='scale_width', **kwargs):
     fig.add_tools(hover)
     hover = fig.select(HoverTool)
     hover.tooltips = """
-    <div>
-        <span style="font-size: 12px; font-weight: bold;">@name:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@duration</span>
-        <span style="font-size: 10px;">ms</span>&nbsp;
-    </div>
+        <span class="hover-key">@name:</span>&nbsp;<span class="hover-value">@duration ms</span>
     """
     hover.point_policy = 'follow_mouse'
 
     return source, fig
-
 
 
 def task_stream_append(lists, msg, workers, palette=task_stream_palette):
@@ -100,36 +98,22 @@ def task_stream_append(lists, msg, workers, palette=task_stream_palette):
 
 
 def nbytes_plot(**kwargs):
-    data = {'name': [], 'left': [], 'right': [], 'center': [], 'color': [],
-            'percent': [], 'MB': [], 'text': []}
+    data = {'name': [], 'left': [], 'right': [], 'center': [], 'color': [], 'percent': [], 'MB': []}
     source = ColumnDataSource(data)
-    fig = figure(title='Memory Use', tools='', toolbar_location=None, **kwargs)
-    fig.quad(source=source, top=1, bottom=0,
-             left='left', right='right', color='color', alpha=0.8)
-    fig.text(source=source, x='center', y=0.5, text='text',
-             text_baseline='middle', text_align='center')
-
-    fig.grid.grid_line_color = None
-    fig.grid.grid_line_color = None
-    fig.axis.visible = None
-    fig.outline_line_color = None
+    fig = figure(
+        title='Memory Use', tools='', toolbar_location=None,
+        x_axis_location=None, y_axis_location=None, y_range=(0, 1), x_range=(0, 1),
+        min_border_bottom=30, **kwargs)
+    fig.quad(source=source, top=1, bottom=0, left='left', right='right', color='color')
+    fig.grid.visible = False
 
     hover = HoverTool()
     fig.add_tools(hover)
     hover = fig.select(HoverTool)
     hover.tooltips = """
-    <div>
-        <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-    </div>
-    <div>
-        <span style="font-size: 14px; font-weight: bold;">Percent:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@percent</span>
-    </div>
-    <div>
-        <span style="font-size: 14px; font-weight: bold;">MB:</span>&nbsp;
-        <span style="font-size: 10px; font-family: Monaco, monospace;">@MB</span>
-    </div>
+        <div><span class="hover-key">Name:</span>&nbsp;<span class="hover-value">@name</span></div>
+        <div><span class="hover-key">Percent:</span>&nbsp;<span class="hover-value">@percent</span></div>
+        <div><span class="hover-key">MB:</span>&nbsp;<span class="hover-value">@MB</span></div>
     """
     hover.point_policy = 'follow_mouse'
 
@@ -139,49 +123,7 @@ def nbytes_plot(**kwargs):
 def progress_plot(**kwargs):
     with log_errors():
         from ..diagnostics.progress_stream import progress_quads
-        data = progress_quads({'all': {}, 'memory': {},
-                               'erred': {}, 'released': {}})
-
-        y_range = Range1d(-8, 0)
+        data = progress_quads({'all': {}, 'memory': {}, 'erred': {}, 'released': {}})
         source = ColumnDataSource(data)
-        fig = figure(tools='', toolbar_location=None, y_range=y_range, **kwargs)
-        fig.quad(source=source, top='top', bottom='bottom',
-                 left='left', right='right', color='#aaaaaa', alpha=0.2)
-        fig.quad(source=source, top='top', bottom='bottom',
-                 left='left', right='released-loc', color=Spectral9[0], alpha=0.4)
-        fig.quad(source=source, top='top', bottom='bottom',
-                 left='released-loc', right='memory-loc', color=Spectral9[0], alpha=0.8)
-        fig.quad(source=source, top='top', bottom='bottom',
-                 left='erred-loc', right='erred-loc', color='#000000', alpha=0.3)
-        fig.text(source=source, text='show-name', y='bottom', x='left',
-                x_offset=5, text_font_size='10pt')
-        fig.text(source=source, text='done', y='bottom', x='right', x_offset=-5,
-                text_align='right', text_font_size='10pt')
-        fig.xaxis.visible = False
-        fig.yaxis.visible = False
-        fig.grid.grid_line_alpha = 0
-
-        hover = HoverTool()
-        fig.add_tools(hover)
-        hover = fig.select(HoverTool)
-        hover.tooltips = """
-        <div>
-            <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-            <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-        </div>
-        <div>
-            <span style="font-size: 14px; font-weight: bold;">All:</span>&nbsp;
-            <span style="font-size: 10px; font-family: Monaco, monospace;">@all</span>
-        </div>
-        <div>
-            <span style="font-size: 14px; font-weight: bold;">Memory:</span>&nbsp;
-            <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
-        </div>
-        <div>
-            <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
-            <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
-        </div>
-        """
-        hover.point_policy = 'follow_mouse'
-
-        return source, fig
+        progress_bar = ProgressBar(source=source)
+        return source, progress_bar

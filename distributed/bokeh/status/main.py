@@ -8,8 +8,11 @@ from bokeh.io import curdoc
 from bokeh.layouts import column, row
 from toolz import valmap
 
-from distributed.bokeh.status_monitor import (progress_plot, task_stream_plot,
-        nbytes_plot)
+from distributed.bokeh.status_monitor import (
+    nbytes_plot,
+    progress_plot,
+    task_stream_plot,
+)
 from distributed.bokeh.worker_monitor import resource_profile_plot
 from distributed.diagnostics.progress_stream import progress_quads, nbytes_bar
 from distributed.utils import log_errors
@@ -24,6 +27,8 @@ doc = curdoc()
 
 resource_index = [0]
 resource_source, resource_plot, network_plot, combo_toolbar = resource_profile_plot(sizing_mode=SIZING_MODE, width=WIDTH, height=80)
+
+
 def resource_update():
     with log_errors():
         index = messages['workers']['index']
@@ -44,31 +49,26 @@ def resource_update():
 doc.add_periodic_callback(resource_update, messages['workers']['interval'])
 
 
-nbytes_task_source, nbytes_task_plot = nbytes_plot(sizing_mode=SIZING_MODE,
-        width=WIDTH, height=60)
+nbytes_task_source, nbytes_task_plot = nbytes_plot(sizing_mode=SIZING_MODE, width=WIDTH, height=85)
+progress_source, progress_plot = progress_plot(sizing_mode=SIZING_MODE, width=WIDTH, height=160)
 
-progress_source, progress_plot = progress_plot(sizing_mode=SIZING_MODE,
-        width=WIDTH, height=160)
+
 def progress_update():
     with log_errors():
         msg = messages['progress']
         d = progress_quads(msg)
         progress_source.data.update(d)
-        progress_plot.title.text = ("Progress -- total: %(total)s, "
-            "in-memory: %(in-memory)s, processing: %(processing)s, "
-            "ready: %(ready)s, waiting: %(waiting)s, failed: %(failed)s"
-            % messages['tasks']['deque'][-1])
-
         nb = nbytes_bar(msg['nbytes'])
         nbytes_task_source.data.update(nb)
         nbytes_task_plot.title.text = \
-                "Memory Use: %0.2f MB" % (sum(msg['nbytes'].values()) / 1e6)
+            "Memory Use: %0.2f MB" % (sum(msg['nbytes'].values()) / 1e6)
 doc.add_periodic_callback(progress_update, 50)
 
 
 task_stream_index = [0]
-task_stream_source, task_stream_plot = task_stream_plot(
-        sizing_mode=SIZING_MODE, width=WIDTH, height=300)
+task_stream_source, task_stream_plot = task_stream_plot(sizing_mode=SIZING_MODE, width=WIDTH, height=300)
+
+
 def task_stream_update():
     with log_errors():
         index = messages['task-events']['index']
