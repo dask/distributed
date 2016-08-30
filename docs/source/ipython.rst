@@ -3,10 +3,14 @@ IPython Integration
 
 Dask.distributed integrates with IPython in three ways:
 
-1.  You can launch a Dask.distributed cluster from an IPyParallel cluster
+1.  You can launch a Dask.distributed cluster from an IPyParallel_ cluster
 2.  You can launch IPython kernels from Dask Workers and Schedulers to assist
     with debugging
-3.  They both support the common concurrent.futures interface
+3.  They both support the common concurrent.futures_ interface
+
+.. _IPyParallel: https://ipyparallel.readthedocs.io/en/latest/
+.. _concurrent.futures: https://docs.python.org/3/library/concurrent.futures.html
+
 
 Launch Dask from IPyParallel
 ----------------------------
