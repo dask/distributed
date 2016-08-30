@@ -3217,10 +3217,10 @@ def test_publish_simple(s, a, b):
     assert 'data' in s.published_data
     assert e.id in s.published_data['data']['clients']
 
-    result = yield e._published_datasets()
+    result = yield e.scheduler.get_published_keys()
     assert result == ['data']
 
-    result = yield f._published_datasets()
+    result = yield f.scheduler.get_published_keys()
     assert result == ['data']
 
 
@@ -3235,7 +3235,7 @@ def test_publish_roundtrip(s, a, b):
     yield e._publish_dataset(data, 'data')
 
     assert 'published-data' in s.who_wants[data[0].key]
-    result = yield f._get_published_dataset('data')
+    result = yield f._get_published_dataset(name='data')
 
     assert len(result) == len(data)
     out = yield f._gather(result)
@@ -3260,7 +3260,7 @@ def test_unpublish(s, a, b):
     key = data[0].key
     del data
 
-    yield e._unpublish_dataset(name='data')
+    yield e.scheduler.unpublish_dataset(name='data')
 
     assert 'data' not in s.published_data
     assert not s.who_wants[key]

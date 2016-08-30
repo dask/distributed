@@ -1598,15 +1598,13 @@ class Scheduler(Server):
 
     def publish_dataset(self, stream=None, keys=None, data=None, name=None,
                         client=None):
-        for k in keys:
-            self.who_wants[k].add('published-%s' % name)
+        self.client_wants_keys(keys, 'published-%s' % name)
         self.published_data[name] = {'data': data, 'keys': keys,
                                      'clients': {client}}
 
     def unpublish_dataset(self, stream=None, name=None):
         out = self.published_data.pop(name, {'keys': []})
-        for k in out['keys']:
-            self.who_wants[k].remove('published-%s' % name)
+        self.client_releases_keys(out['keys'], 'published-%s' % name)
 
     def get_published_keys(self, *args):
         return list(sorted(self.published_data.keys()))
@@ -1621,10 +1619,9 @@ class Scheduler(Server):
         for key, data in self.published_data.copy().items():
             with ignoring(KeyError):
                 data['clients'].remove(client)
-                if not(data['clients']):
-                    del self.published_data[key]
-                    for k in data['keys']:
-                        self.who_wants[k].remove('published-%s' % key)
+            if not(data['clients']):
+                del self.published_data[key]
+                self.client_releases_keys(data['keys'], 'published-%s' % key)
 
     #####################
     # State Transitions #

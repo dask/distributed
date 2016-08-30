@@ -990,9 +990,8 @@ class Executor(object):
     def _publish_dataset(self, data, name):
         keys = [tokey(f.key) for f in futures_of(data)]
         yield self.scheduler.publish_dataset(keys=keys, name=tokey(name),
-                                             data=pickle.dumps(data),
+                                             data=dumps(data),
                                              client=self.id)
-
 
     def publish_dataset(self, data, name):
         """
@@ -1002,8 +1001,7 @@ class Executor(object):
         ----------
         data: list of futures or dask collection
         name: str or container
-            handle by which the stored data should be known. If not a string,
-            will be wrapped by tokey() to deterministically turn into one.
+            handle by which the stored data should be known.
 
         Returns
         -------
@@ -1011,27 +1009,18 @@ class Executor(object):
         """
         sync(self.loop, self._publish_dataset, data, name)
 
-    @gen.coroutine
-    def _unpublish_dataset(self, name):
-        yield self.scheduler.unpublish_dataset(name=name)
-
     def unpublish_dataset(self, name):
         """
         Remove reference to data on the scheduler
         """
-        sync(self.loop, self._unpublish_dataset, name)
-
-    @gen.coroutine
-    def _published_datasets(self):
-        resp = yield self.scheduler.get_published_keys()
-        raise Return(resp)
+        sync(self.loop, self.scheduler.unpublish_dataset, name=name)
 
     def published_datasets(self):
         """ Returns list of named datasets referenced in the scheduler
 
         See publish_dataset()
         """
-        return sync(self.loop, self._published_datasets)
+        return sync(self.loop, self.scheduler.get_published_keys)
 
     @gen.coroutine
     def _get_published_dataset(self, name):
@@ -1040,7 +1029,7 @@ class Executor(object):
         data, keys = out['data'], out['keys']
 
         with temp_default_executor(self):
-            data = pickle.loads(data)
+            data = loads(data)
         raise Return(data)
 
     def get_published_dataset(self, name):
