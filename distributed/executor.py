@@ -1012,6 +1012,16 @@ class Executor(object):
         sync(self.loop, self._publish_dataset, data, name)
 
     @gen.coroutine
+    def _unpublish_dataset(self, name):
+        yield self.scheduler.unpublish_dataset(name=name)
+
+    def unpublish_dataset(self, name):
+        """
+        Remove reference to data on the scheduler
+        """
+        sync(self.loop, self._unpublish_dataset, name)
+
+    @gen.coroutine
     def _published_datasets(self):
         resp = yield self.scheduler.get_published_keys()
         raise Return(resp)

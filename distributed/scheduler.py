@@ -265,7 +265,8 @@ class Scheduler(Server):
                          'start_ipython': self.start_ipython,
                          'get_published_keys': self.get_published_keys,
                          'get_published_dataset': self.get_published_dataset,
-                         'publish_dataset': self.publish_dataset}
+                         'publish_dataset': self.publish_dataset,
+                         'unpublish_dataset': self.unpublish_dataset}
 
         self.services = {}
         for k, v in (services or {}).items():
@@ -1597,8 +1598,15 @@ class Scheduler(Server):
 
     def publish_dataset(self, stream=None, keys=None, data=None, name=None,
                         client=None):
+        for k in keys:
+            self.who_wants[k].add('published-%s' % name)
         self.published_data[name] = {'data': data, 'keys': keys,
                                      'clients': {client}}
+
+    def unpublish_dataset(self, stream=None, name=None):
+        out = self.published_data.pop(name, {'keys': []})
+        for k in out['keys']:
+            self.who_wants[k].remove('published-%s' % name)
 
     def get_published_keys(self, *args):
         return list(sorted(self.published_data.keys()))
@@ -1615,6 +1623,8 @@ class Scheduler(Server):
                 data['clients'].remove(client)
                 if not(data['clients']):
                     del self.published_data[key]
+                    for k in data['keys']:
+                        self.who_wants[k].remove('published-%s' % key)
 
     #####################
     # State Transitions #

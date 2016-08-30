@@ -3234,6 +3234,7 @@ def test_publish_roundtrip(s, a, b):
     data = yield e._scatter([0, 1, 2])
     yield e._publish_dataset(data, 'data')
 
+    assert 'published-data' in s.who_wants[data[0].key]
     result = yield f._get_published_dataset('data')
 
     assert len(result) == len(data)
@@ -3245,6 +3246,27 @@ def test_publish_roundtrip(s, a, b):
 
     yield f._shutdown()
     assert 'data' not in s.published_data
+
+    assert 'published-data' not in s.who_wants[data[0].key]
+
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+
+
+@gen_cluster(executor=False)
+def test_unpublish(s, a, b):
+    e = Executor((s.ip, s.port), start=False)
+    yield e._start()
+    data = yield e._scatter([0, 1, 2])
+    yield e._publish_dataset(data, 'data')
+
+    key = data[0].key
+    del data
+
+    yield e._unpublish_dataset(name='data')
+
+    assert 'data' not in s.published_data
+    assert not s.who_wants[key]
 
 
 @gen_cluster(executor=False)
