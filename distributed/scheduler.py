@@ -223,7 +223,7 @@ class Scheduler(Server):
         self.exceptions = dict()
         self.tracebacks = dict()
         self.exceptions_blame = dict()
-        self.published_data = dict()
+        self.datasets = dict()
         self.stealable = [set() for i in range(12)]
         self.stealable_unknown_durations = defaultdict(set)
 
@@ -1599,28 +1599,28 @@ class Scheduler(Server):
     def publish_dataset(self, stream=None, keys=None, data=None, name=None,
                         client=None):
         self.client_wants_keys(keys, 'published-%s' % name)
-        self.published_data[name] = {'data': data, 'keys': keys,
+        self.datasets[name] = {'data': data, 'keys': keys,
                                      'clients': {client}}
 
     def unpublish_dataset(self, stream=None, name=None):
-        out = self.published_data.pop(name, {'keys': []})
+        out = self.datasets.pop(name, {'keys': []})
         self.client_releases_keys(out['keys'], 'published-%s' % name)
 
     def list_datasets(self, *args):
-        return list(sorted(self.published_data.keys()))
+        return list(sorted(self.datasets.keys()))
 
     def get_dataset(self, stream, name=None, client=None):
-        self.published_data[name]['clients'].add(client)
-        data = self.published_data[name].copy()
+        self.datasets[name]['clients'].add(client)
+        data = self.datasets[name].copy()
         del data['clients']
         return data
 
     def check_published_datasets(self, client):
-        for key, data in self.published_data.copy().items():
+        for key, data in self.datasets.copy().items():
             with ignoring(KeyError):
                 data['clients'].remove(client)
             if not(data['clients']):
-                del self.published_data[key]
+                del self.datasets[key]
                 self.client_releases_keys(data['keys'], 'published-%s' % key)
 
     #####################

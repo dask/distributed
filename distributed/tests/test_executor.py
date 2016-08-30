@@ -3214,8 +3214,8 @@ def test_publish_simple(s, a, b):
 
     data = yield e._scatter(range(3))
     yield e._publish_dataset(data, 'data')
-    assert 'data' in s.published_data
-    assert e.id in s.published_data['data']['clients']
+    assert 'data' in s.datasets
+    assert e.id in s.datasets['data']['clients']
 
     result = yield e.scheduler.list_datasets()
     assert result == ['data']
@@ -3242,18 +3242,16 @@ def test_publish_roundtrip(s, a, b):
     assert out == [0, 1, 2]
 
     yield e._shutdown()
-    assert e.id not in s.published_data['data']['clients']
+    assert e.id not in s.datasets['data']['clients']
 
     yield f._shutdown()
-    assert 'data' not in s.published_data
+    assert 'data' not in s.datasets
 
     assert 'published-data' not in s.who_wants[data[0].key]
 
 
-@gen_cluster(executor=False)
-def test_unpublish(s, a, b):
-    e = Executor((s.ip, s.port), start=False)
-    yield e._start()
+@gen_cluster(executor=True)
+def test_unpublish(e, s, a, b):
     data = yield e._scatter([0, 1, 2])
     yield e._publish_dataset(data, 'data')
 
@@ -3262,7 +3260,7 @@ def test_unpublish(s, a, b):
 
     yield e.scheduler.unpublish_dataset(name='data')
 
-    assert 'data' not in s.published_data
+    assert 'data' not in s.datasets
     assert not s.who_wants[key]
 
 
