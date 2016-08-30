@@ -22,6 +22,8 @@ API
    Executor.run
    Executor.scatter
    Executor.shutdown
+   Executor.start_ipython
+   Executor.start_ipython_scheduler
    Executor.submit
    Executor.upload_file
    Executor.who_has

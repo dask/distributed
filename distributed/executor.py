@@ -1630,11 +1630,27 @@ class Executor(object):
         qtconsole_args: list(str) (optional)
             Additional arguments to pass to the qtconsole on startup.
 
+        Examples
+        --------
+        >>> info = e.start_ipython() # doctest: +SKIP
+        >>> %remote info['192.168.1.101:5752'] worker.data  # doctest: +SKIP
+        {'x': 1, 'y': 100}
+
+        >>> e.start_ipython(workers='192.168.1.101:5752', magic_names='w') # doctest: +SKIP
+        >>> %w worker.data  # doctest: +SKIP
+        {'x': 1, 'y': 100}
+
+        >>> e.start_ipython(workers='192.168.1.101:5752', qtconsole=True) # doctest: +SKIP
+
         Returns
         -------
         iter_connection_info: list
             List of connection_info dicts containing info necessary
             to connect Jupyter clients to the workers.
+
+        See Also
+        --------
+        Executor.start_ipython_scheduler: start ipython on the scheduler
         """
 
         if magic_names and isinstance(magic_names, six.string_types):
@@ -1678,11 +1694,24 @@ class Executor(object):
         qtconsole_args: list(str) (optional)
             Additional arguments to pass to the qtconsole on startup.
 
+        Examples
+        --------
+        >>> e.start_ipython_scheduler() # doctest: +SKIP
+        >>> %scheduler scheduler.processing  # doctest: +SKIP
+        {'127.0.0.1:3595': {'inc-1', 'inc-2'},
+         '127.0.0.1:53589': {'inc-2', 'add-5'}}
+
+        >>> e.start_ipython_scheduler(qtconsole=True) # doctest: +SKIP
+
         Returns
         -------
         connection_info: dict
             connection_info dict containing info necessary
             to connect Jupyter clients to the scheduler.
+
+        See Also
+        --------
+        Executor.start_ipython: Start IPython on the workers
         """
         info = sync(self.loop, self.scheduler.start_ipython)
         if magic_name == 'scheduler_if_ipython':
