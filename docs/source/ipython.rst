@@ -45,7 +45,7 @@ methods:
 .. currentmodule:: distributed.executor
 
 .. autosummary::
-   Executor.start_ipython
+   Executor.start_ipython_workers
    Executor.start_ipython_scheduler
 
 These methods start IPython kernels running in a separate thread within the
@@ -62,7 +62,7 @@ Example with IPython Magics
    {'127.0.0.1:3595': ['inc-1', 'inc-2'],
     '127.0.0.1:53589': ['inc-2', 'add-5']}
 
-   >>> info = e.start_ipython()
+   >>> info = e.start_ipython_workers()
    >>> %remote info['127.0.0.1:3595'] worker.active
    {'inc-1', 'inc-2'}
 
@@ -75,6 +75,6 @@ or each of the workers:
 .. code-block:: python
 
    >>> e.start_ipython_scheduler(qtconsole=True)
-   >>> e.start_ipython(qtconsole=True)
+   >>> e.start_ipython_workers(qtconsole=True)
 
 .. _`IPython qt-console`: https://ipython.org/ipython-doc/3/interactive/qtconsole.html

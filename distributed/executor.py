@@ -1594,15 +1594,18 @@ class Executor(object):
                                          'name': '127.0.0.1:40575',
                                          'services': {},
                                          'stored': 0,
-                                         'time-delay': 0.0061032772064208984},
+                                         'time-delay': 0.0061032772064208984}}}
         """
         return sync(self.loop, self.scheduler.identity)
 
     def futures_of(self, futures):
         return futures_of(futures, executor=self)
 
+    def start_ipython(self, *args, **kwargs):
+        raise Exception("Method moved to start_ipython_workers")
+
     @gen.coroutine
-    def _start_ipython(self, workers):
+    def _start_ipython_workers(self, workers):
         if workers is None:
             workers = yield self.scheduler.ncores()
 
@@ -1611,8 +1614,8 @@ class Executor(object):
         )
         raise gen.Return((workers, responses))
 
-    def start_ipython(self, workers=None, magic_names=False, qtconsole=False,
-                      qtconsole_args=None):
+    def start_ipython_workers(self, workers=None, magic_names=False,
+                              qtconsole=False, qtconsole_args=None):
         """ Start IPython kernels on workers
 
         Parameters
@@ -1632,15 +1635,15 @@ class Executor(object):
 
         Examples
         --------
-        >>> info = e.start_ipython() # doctest: +SKIP
+        >>> info = e.start_ipython_workers() # doctest: +SKIP
         >>> %remote info['192.168.1.101:5752'] worker.data  # doctest: +SKIP
         {'x': 1, 'y': 100}
 
-        >>> e.start_ipython(workers='192.168.1.101:5752', magic_names='w') # doctest: +SKIP
+        >>> e.start_ipython_workers('192.168.1.101:5752', magic_names='w') # doctest: +SKIP
         >>> %w worker.data  # doctest: +SKIP
         {'x': 1, 'y': 100}
 
-        >>> e.start_ipython(workers='192.168.1.101:5752', qtconsole=True) # doctest: +SKIP
+        >>> e.start_ipython_workers('192.168.1.101:5752', qtconsole=True) # doctest: +SKIP
 
         Returns
         -------
@@ -1658,7 +1661,7 @@ class Executor(object):
         if isinstance(workers, six.string_types):
             workers = [workers]
 
-        (workers, info_dict) = sync(self.loop, self._start_ipython, workers)
+        (workers, info_dict) = sync(self.loop, self._start_ipython_workers, workers)
 
         if 'IPython' in sys.modules:
             from ._ipython_utils import register_remote_magic
@@ -1711,7 +1714,7 @@ class Executor(object):
 
         See Also
         --------
-        Executor.start_ipython: Start IPython on the workers
+        Executor.start_ipython_workers: Start IPython on the workers
         """
         info = sync(self.loop, self.scheduler.start_ipython)
         if magic_name == 'scheduler_if_ipython':
