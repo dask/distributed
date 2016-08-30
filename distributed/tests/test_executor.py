@@ -3217,10 +3217,10 @@ def test_publish_simple(s, a, b):
     assert 'data' in s.published_data
     assert e.id in s.published_data['data']['clients']
 
-    result = yield e.scheduler.get_published_keys()
+    result = yield e.scheduler.list_datasets()
     assert result == ['data']
 
-    result = yield f.scheduler.get_published_keys()
+    result = yield f.scheduler.list_datasets()
     assert result == ['data']
 
 
@@ -3235,7 +3235,7 @@ def test_publish_roundtrip(s, a, b):
     yield e._publish_dataset(data, 'data')
 
     assert 'published-data' in s.who_wants[data[0].key]
-    result = yield f._get_published_dataset(name='data')
+    result = yield f._get_dataset(name='data')
 
     assert len(result) == len(data)
     out = yield f._gather(result)
@@ -3286,7 +3286,7 @@ def test_publish_bag(s, a, b):
     # check that serialization didn't affect original bag's dask
     assert len(futures_of(bagp)) == 3
 
-    result = yield f._get_published_dataset('data')
+    result = yield f._get_dataset('data')
 
     out = yield f.compute(result)._result()
     assert out == [0, 1, 2]
@@ -3406,66 +3406,6 @@ def test_scatter_compute_store_lose_processing(e, s, a, b):
 
     assert y.status == 'cancelled'
     assert z.status == 'cancelled'
-
-
-@gen_cluster(ncores=[('127.0.0.1', 1)] * 10, executor=True, timeout=60)
-def test_stress_scatter_death(e, s, *workers):
-    import random
-    np = pytest.importorskip('numpy')
-    L = yield e._scatter([np.random.random(10000) for i in range(len(workers))])
-    yield e._replicate(L, n=2)
-
-    adds = [delayed(slowadd, pure=True)(random.choice(L),
-                                        random.choice(L),
-                                        delay=0.05)
-            for i in range(50)]
-
-    adds = [delayed(slowadd, pure=True)(a, b, delay=0.02)
-            for a, b in sliding_window(2, adds)]
-
-    futures = e.compute(adds)
-
-    alive = list(workers)
-
-    from distributed.scheduler import logger
-
-    for i in range(7):
-        yield gen.sleep(0.1)
-        try:
-            s.validate_state()
-        except Exception as e:
-            logger.exception(e)
-            import pdb; pdb.set_trace()
-        w = random.choice(alive)
-        yield w._close()
-        alive.remove(w)
-
-    try:
-        yield gen.with_timeout(timedelta(seconds=10), e._gather(futures))
-    except gen.TimeoutError:
-        import pdb; pdb.set_trace()
-    except CancelledError:
-        pass
-
-
-def vsum(*args):
-    return sum(args)
-
-
-@gen_cluster(executor=True, ncores=[('127.0.0.1', 1)] * 80, timeout=1000)
-def test_stress_communication(e, s, *workers):
-    s.validate = False # very slow otherwise
-    da = pytest.importorskip('dask.array')
-
-    n = 40
-    xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
-    ys = [x + x.T for x in xs]
-    z = da.atop(vsum, 'ij', *concat(zip(ys, ['ij'] * n)))
-
-    future = e.compute(z.sum())
-
-    result = yield future._result()
-    assert isinstance(result, float)
 
 
 @gen_cluster(executor=False)

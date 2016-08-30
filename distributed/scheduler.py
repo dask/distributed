@@ -263,8 +263,8 @@ class Scheduler(Server):
                          'rebalance': self.rebalance,
                          'replicate': self.replicate,
                          'start_ipython': self.start_ipython,
-                         'get_published_keys': self.get_published_keys,
-                         'get_published_dataset': self.get_published_dataset,
+                         'list_datasets': self.list_datasets,
+                         'get_dataset': self.get_dataset,
                          'publish_dataset': self.publish_dataset,
                          'unpublish_dataset': self.unpublish_dataset}
 
@@ -1606,10 +1606,10 @@ class Scheduler(Server):
         out = self.published_data.pop(name, {'keys': []})
         self.client_releases_keys(out['keys'], 'published-%s' % name)
 
-    def get_published_keys(self, *args):
+    def list_datasets(self, *args):
         return list(sorted(self.published_data.keys()))
 
-    def get_published_dataset(self, stream, name=None, client=None):
+    def get_dataset(self, stream, name=None, client=None):
         self.published_data[name]['clients'].add(client)
         data = self.published_data[name].copy()
         del data['clients']

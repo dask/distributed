@@ -1015,16 +1015,16 @@ class Executor(object):
         """
         sync(self.loop, self.scheduler.unpublish_dataset, name=name)
 
-    def published_datasets(self):
+    def list_datasets(self):
         """ Returns list of named datasets referenced in the scheduler
 
         See publish_dataset()
         """
-        return sync(self.loop, self.scheduler.get_published_keys)
+        return sync(self.loop, self.scheduler.list_datasets)
 
     @gen.coroutine
-    def _get_published_dataset(self, name):
-        out = yield self.scheduler.get_published_dataset(name=name,
+    def _get_dataset(self, name):
+        out = yield self.scheduler.get_dataset(name=name,
                                                          client=self.id)
         data, keys = out['data'], out['keys']
 
@@ -1032,8 +1032,12 @@ class Executor(object):
             data = loads(data)
         raise Return(data)
 
-    def get_published_dataset(self, name):
-        return sync(self.loop, self._get_published_dataset, tokey(name))
+    def get_dataset(self, name):
+        """ Fetch named dataset from the scheduler.
+
+        See publish_dataset()
+        """
+        return sync(self.loop, self._get_dataset, tokey(name))
 
     @gen.coroutine
     def _run(self, function, *args, **kwargs):
