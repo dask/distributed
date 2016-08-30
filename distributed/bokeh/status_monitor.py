@@ -105,7 +105,7 @@ def nbytes_plot(**kwargs):
     source = ColumnDataSource(data)
     fig = figure(title='Memory Use', tools='', toolbar_location=None, **kwargs)
     fig.quad(source=source, top=1, bottom=0,
-             left='left', right='right', color='color', alpha=0.8)
+             left='left', right='right', color='color', alpha=1)
 
     fig.grid.grid_line_color = None
     fig.grid.grid_line_color = None
@@ -146,9 +146,9 @@ def progress_plot(**kwargs):
         fig.quad(source=source, top='top', bottom='bottom',
                  left='left', right='right', color='#aaaaaa', alpha=0.2)
         fig.quad(source=source, top='top', bottom='bottom',
-                 left='left', right='released-loc', color='color', alpha=0.4)
+                 left='left', right='released-loc', color='color', alpha=0.6)
         fig.quad(source=source, top='top', bottom='bottom',
-                 left='released-loc', right='memory-loc', color='color', alpha=0.8)
+                 left='released-loc', right='memory-loc', color='color', alpha=1)
         fig.quad(source=source, top='top', bottom='bottom',
                  left='erred-loc', right='erred-loc', color='#000000', alpha=0.3)
         fig.text(source=source, text='show-name', y='bottom', x='left',
