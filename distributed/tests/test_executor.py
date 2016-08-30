@@ -3639,6 +3639,7 @@ def test_publish_simple(s, a, b):
     data = yield e._scatter(range(3))
     yield e._publish_dataset(data, 'data')
     assert 'data' in s.published_data
+    assert e.id in s.published_data['data']['clients']
 
     result = yield e._published_datasets()
     assert result == ['data']
@@ -3662,6 +3663,12 @@ def test_publish_roundtrip(s, a, b):
     assert len(result) == len(data)
     out = yield f._gather(result)
     assert out == [0, 1, 2]
+
+    yield e._shutdown()
+    assert e.id not in s.published_data['data']['clients']
+
+    yield f._shutdown()
+    assert 'data' not in s.published_data
 
 
 @gen_cluster(executor=False)

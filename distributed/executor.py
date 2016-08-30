@@ -990,7 +990,8 @@ class Executor(object):
     def _publish_dataset(self, data, name):
         keys = [tokey(f.key) for f in futures_of(data)]
         yield self.scheduler.publish_dataset(keys=keys, name=tokey(name),
-                                             data=pickle.dumps(data))
+                                             data=pickle.dumps(data),
+                                             client=self.id)
 
 
     def publish_dataset(self, data, name):
