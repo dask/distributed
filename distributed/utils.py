@@ -339,11 +339,12 @@ def str_graph(dsk, extra_values=()):
 
 
 import logging
+from .compatibility import logging_names
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
 
 for name, level in config.get('logging', {}).items():
-    LEVEL = logging._nameToLevel[level.upper()]
+    LEVEL = logging_names[level.upper()]
     logging.getLogger(name).setLevel(LEVEL)
 
 # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr

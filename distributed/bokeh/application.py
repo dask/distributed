@@ -11,6 +11,7 @@ import distributed.bokeh
 from toolz import get_in
 
 from ..utils import ignoring
+from ..compatibility import logging_names
 from ..config import config
 
 dirname = os.path.dirname(distributed.__file__)
@@ -27,7 +28,7 @@ if not os.path.exists(dask_dir):
     os.mkdir(dask_dir)
 
 logging_level = get_in(['logging', 'bokeh'], config, 'critical')
-logging_level = logging._nameToLevel[logging_level.upper()]
+logging_level = logging_names[logging_level.upper()]
 
 
 class BokehWebInterface(object):
