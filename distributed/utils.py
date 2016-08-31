@@ -18,6 +18,7 @@ from tornado import gen
 from tornado.iostream import StreamClosedError
 
 from .compatibility import Queue, PY3
+from .config import config
 
 logger = logging.getLogger(__name__)
 
@@ -340,6 +341,10 @@ def str_graph(dsk, extra_values=()):
 import logging
 logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s',
                     level=logging.INFO)
+
+for name, level in config.get('logging', {}).items():
+    LEVEL = logging._nameToLevel[level.upper()]
+    logging.getLogger(name).setLevel(LEVEL)
 
 # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
 stream = logging.StreamHandler(sys.stderr)
