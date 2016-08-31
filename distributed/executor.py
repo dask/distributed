@@ -992,7 +992,8 @@ class Executor(object):
         out = yield self.scheduler.publish_dataset(keys=keys, name=tokey(name),
                                              data=dumps(data),
                                              client=self.id)
-        raise Return(out)
+        if out['status'] != "OK":
+            raise KeyError(name)
 
     def publish_dataset(self, data, name):
         """
@@ -1008,7 +1009,7 @@ class Executor(object):
         -------
         None
         """
-        return sync(self.loop, self._publish_dataset, data, name)
+        sync(self.loop, self._publish_dataset, data, name)
 
     def unpublish_dataset(self, name):
         """
@@ -1029,7 +1030,7 @@ class Executor(object):
         data, keys = out['data'], out['keys']
 
         if not data:
-            raise Return(None)
+            raise KeyError(name)
         with temp_default_executor(self):
             data = loads(data)
         raise Return(data)

@@ -1598,10 +1598,10 @@ class Scheduler(Server):
     def publish_dataset(self, stream=None, keys=None, data=None, name=None,
                         client=None):
         if name in self.datasets:
-            return {'success': 'false'}
+            return {'status': 'failed'}
         self.client_wants_keys(keys, 'published-%s' % name)
         self.datasets[name] = {'data': data, 'keys': keys}
-        return {'success':  'true'}
+        return {'status':  'OK'}
 
     def unpublish_dataset(self, stream=None, name=None):
         out = self.datasets.pop(name, {'keys': []})
