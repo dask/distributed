@@ -3213,8 +3213,12 @@ def test_publish_simple(s, a, b):
     yield f._start()
 
     data = yield e._scatter(range(3))
-    yield e._publish_dataset(data, 'data')
+    out = yield e._publish_dataset(data, 'data')
+    assert out['success'] == 'true'
     assert 'data' in s.datasets
+
+    out = yield e._publish_dataset(data, 'data')
+    assert out['success'] == 'false'
 
     result = yield e.scheduler.list_datasets()
     assert result == ['data']
@@ -3240,6 +3244,9 @@ def test_publish_roundtrip(s, a, b):
     out = yield f._gather(result)
     assert out == [0, 1, 2]
 
+    result = yield f._get_dataset(name='nonexistent')
+    assert result is None
+
 
 @gen_cluster(executor=True)
 def test_unpublish(e, s, a, b):
@@ -3252,8 +3259,14 @@ def test_unpublish(e, s, a, b):
     yield e.scheduler.unpublish_dataset(name='data')
 
     assert 'data' not in s.datasets
-    assert not s.who_wants[key]
 
+    start = time()
+    while key in s.who_wants:
+        yield gen.sleep(0.01)
+        assert time() < start + 5
+
+    result = yield e._get_dataset(name='data')
+    assert result is None
 
 @gen_cluster(executor=False)
 def test_publish_bag(s, a, b):
