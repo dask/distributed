@@ -929,7 +929,6 @@ class Scheduler(Server):
         """ Remove client from network """
         logger.info("Remove client %s", client)
         self.client_releases_keys(self.wants_what.get(client, ()), client)
-        self.check_published_datasets(client)
         with ignoring(KeyError):
             del self.wants_what[client]
 
@@ -1599,8 +1598,7 @@ class Scheduler(Server):
     def publish_dataset(self, stream=None, keys=None, data=None, name=None,
                         client=None):
         self.client_wants_keys(keys, 'published-%s' % name)
-        self.datasets[name] = {'data': data, 'keys': keys,
-                                     'clients': {client}}
+        self.datasets[name] = {'data': data, 'keys': keys}
 
     def unpublish_dataset(self, stream=None, name=None):
         out = self.datasets.pop(name, {'keys': []})
@@ -1610,18 +1608,7 @@ class Scheduler(Server):
         return list(sorted(self.datasets.keys()))
 
     def get_dataset(self, stream, name=None, client=None):
-        self.datasets[name]['clients'].add(client)
-        data = self.datasets[name].copy()
-        del data['clients']
-        return data
-
-    def check_published_datasets(self, client):
-        for key, data in self.datasets.copy().items():
-            with ignoring(KeyError):
-                data['clients'].remove(client)
-            if not(data['clients']):
-                del self.datasets[key]
-                self.client_releases_keys(data['keys'], 'published-%s' % key)
+        return self.datasets[name]
 
     #####################
     # State Transitions #

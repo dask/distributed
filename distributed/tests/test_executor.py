@@ -3215,7 +3215,6 @@ def test_publish_simple(s, a, b):
     data = yield e._scatter(range(3))
     yield e._publish_dataset(data, 'data')
     assert 'data' in s.datasets
-    assert e.id in s.datasets['data']['clients']
 
     result = yield e.scheduler.list_datasets()
     assert result == ['data']
@@ -3240,14 +3239,6 @@ def test_publish_roundtrip(s, a, b):
     assert len(result) == len(data)
     out = yield f._gather(result)
     assert out == [0, 1, 2]
-
-    yield e._shutdown()
-    assert e.id not in s.datasets['data']['clients']
-
-    yield f._shutdown()
-    assert 'data' not in s.datasets
-
-    assert 'published-data' not in s.who_wants[data[0].key]
 
 
 @gen_cluster(executor=True)
@@ -3285,6 +3276,8 @@ def test_publish_bag(s, a, b):
     assert len(futures_of(bagp)) == 3
 
     result = yield f._get_dataset('data')
+    assert set(result.dask.keys()) == set(bagp.dask.keys())
+    assert [f.key for f in result.dask.values()] == [f.key for f in bagp.dask.values()]
 
     out = yield f.compute(result)._result()
     assert out == [0, 1, 2]
