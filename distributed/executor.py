@@ -1014,7 +1014,6 @@ class Executor(object):
 
         Examples
         --------
-
         Publishing client:
         >>> df = dd.read_csv('s3://...')  # doctest: +SKIP
         >>> df = e.persist(df) # doctest: +SKIP

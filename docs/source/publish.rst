@@ -78,9 +78,6 @@ Publishing too many large datasets can quickly consume a cluster's RAM.
 API
 ---
 
-The full dataset API is as follows:
-
-
 .. currentmodule:: distributed.executor
 
 .. autosummary::

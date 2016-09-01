@@ -3258,8 +3258,8 @@ def test_publish_roundtrip(s, a, b):
     with pytest.raises(KeyError) as exc_info:
         result = yield f._get_dataset(name='nonexistent')
 
-    assert "not found".lower() in str(exc_info.value)
-    assert "nonexistent".lower() in str(exc_info.value)
+    assert "not found" in str(exc_info.value)
+    assert "nonexistent" in str(exc_info.value)
 
 
 @gen_cluster(executor=True)
@@ -3282,8 +3282,8 @@ def test_unpublish(e, s, a, b):
     with pytest.raises(KeyError) as exc_info:
         result = yield e._get_dataset(name='data')
 
-    assert "not found".lower() in str(exc_info.value)
-    assert "data".lower() in str(exc_info.value)
+    assert "not found" in str(exc_info.value)
+    assert "data" in str(exc_info.value)
 
 
 @gen_cluster(executor=True)
