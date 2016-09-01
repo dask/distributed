@@ -998,7 +998,11 @@ class Executor(object):
 
     def publish_dataset(self, **kwargs):
         """
-        Store a named reference to the data in the scheduler for other executors
+        Publish named datasets to scheduler
+
+        This stores a named reference to a dask collection or list of futures
+        on the scheduler.  These references are available to other executors
+        which can download the collection or futures with ``get_dataset``.
 
         Parameters
         ----------
@@ -1031,7 +1035,7 @@ class Executor(object):
 
     def unpublish_dataset(self, name):
         """
-        Remove reference to data on the scheduler
+        Remove named datasets from scheduler
 
         Examples
         --------
@@ -1048,11 +1052,13 @@ class Executor(object):
         return sync(self.loop, self.scheduler.unpublish_dataset, name=name)
 
     def list_datasets(self):
-        """ Returns list of named datasets referenced in the scheduler
+        """
+        List named datasets available on the scheduler
 
         See Also
         --------
         Executor.publish_dataset
+        Executor.get_dataset
         """
         return sync(self.loop, self.scheduler.list_datasets)
 
@@ -1065,11 +1071,13 @@ class Executor(object):
         raise Return(data)
 
     def get_dataset(self, name):
-        """ Fetch named dataset from the scheduler.
+        """
+        Get named dataset from the scheduler
 
         See Also
         --------
         Executor.publish_dataset
+        Executor.list_datasets
         """
         return sync(self.loop, self._get_dataset, tokey(name))
 
