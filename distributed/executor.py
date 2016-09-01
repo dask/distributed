@@ -1004,6 +1004,9 @@ class Executor(object):
         on the scheduler.  These references are available to other executors
         which can download the collection or futures with ``get_dataset``.
 
+        Datasets are not immediately computed.  You may wish to call
+        ``Executor.persist`` prior to publishing a dataset.
+
         Parameters
         ----------
         kwargs: dict
@@ -1014,6 +1017,7 @@ class Executor(object):
 
         Publishing client:
         >>> df = dd.read_csv('s3://...')  # doctest: +SKIP
+        >>> df = e.persist(df) # doctest: +SKIP
         >>> e.publish_dataset(my_dataset=df)  # doctest: +SKIP
 
         Receiving client:
@@ -1030,6 +1034,7 @@ class Executor(object):
         Executor.list_datasets
         Executor.get_dataset
         Executor.unpublish_dataset
+        Executor.persist
         """
         return sync(self.loop, self._publish_dataset, **kwargs)
 
