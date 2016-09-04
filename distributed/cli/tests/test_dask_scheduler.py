@@ -139,8 +139,4 @@ def test_multiple_workers(loop):
                     start = time()
                     while len(e.ncores()) < 2:
                         sleep(0.1)
-                        if time() > start + 10:
-                            for i in range(5):
-                                print('a', a.stderr.readline())
-                                print('b', b.stderr.readline())
-
+                        assert time() < start + 10

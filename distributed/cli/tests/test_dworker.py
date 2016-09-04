@@ -34,9 +34,5 @@ def test_nanny_worker_ports(loop):
 def test_no_nanny(loop):
     with popen(['dask-scheduler']) as sched:
         with popen(['dask-worker', '127.0.0.1:8786', '--no-nanny']) as worker:
-            for i in range(10):
-                line = worker.stderr.readline()
-                print(line)
-                if b'Registered' in line:
-                    break
-            assert i <= 9
+            assert any(b'Registered' in worker.stderr.readline()
+                       for i in range(10))
