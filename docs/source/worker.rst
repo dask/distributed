@@ -44,6 +44,14 @@ maps keys to the results of function calls.
 Spill Excess Data to Disk
 -------------------------
 
+Short version: To enable workers to spill excess data to disk start
+``dask-worker`` with the ``--spill-bytes`` option.  Either giving ``auto`` to
+have it guess how many bytes to keep in memory or an integer, if you know the
+number of bytes it should use::
+
+    $ dask-worker scheduler:port --spill-bytes=auto  # 75% of available RAM
+    $ dask-worker scheduler:port --spill-bytes=2e9  # two gigabytes
+
 Some workloads may produce more data at one time than there is available RAM on
 the cluster.  In these cases Workers may choose to write excess values to disk.
 This causes some performance degradation because writing to and reading from
@@ -65,8 +73,7 @@ It is still possible to run out of RAM on a worker.  Here are a few possible
 issues:
 
 1.  The objects being stored take up more RAM than is stated with the
-    `__sizeof__
-    protocol<https://docs.python.org/3/library/sys.html#sys.getsizeof>`_.
+    `__sizeof__ protocol <https://docs.python.org/3/library/sys.html#sys.getsizeof>`_.
     If you use custom classes then we encourage adding a faithful
     ``__sizeof__`` method to your class that returns an accurate accounting of
     the bytes used.
@@ -83,8 +90,55 @@ Thread Pool
 -----------
 
 Each worker sends computations to a thread in a
-`concurrent.futures.ThreadPoolExecutor<https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ThreadPoolExecutor>`_
-for computation
+`concurrent.futures.ThreadPoolExecutor <https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ThreadPoolExecutor>`_
+for computation.  These computations occur in the same process as the Worker
+communication server so that they can access and share data efficiently between
+each other.  For the purposes of data locality all threads within a worker are
+considered the same worker.
 
+If your computations are mostly numeric in nature (for example NumPy and Pandas
+computations) and release the GIL entirely then it is advisable to run
+``dask-worker`` processes with many threads and one process.  This reduces
+communication costs and generally simplifies deployment.
+
+If your computations are mostly Python code and don't release the GIL then it
+is advisable to run ``dask-worker`` processes with many processes and one
+thread per core::
+
+   $ dask-worker scheduler:8786 --nprocs 8
+
+If your computations are external to Python and long-running and don't release
+the GIL then beware that while the computation is running the worker process
+will not be able to communicate to other workers or to the scheduler.  This
+situation should be avoided.  If you don't link in your own custom C/Fortran
+code then this topic probably doesn't apply to you.
+
+Command Line tool
+-----------------
+
+Use the ``dask-worker`` command line tool to start an individual worker.  Here
+are the available options::
+
+   $ dask-worker --help
+   Usage: dask-worker [OPTIONS] SCHEDULER
+
+   Options:
+     --worker-port INTEGER  Serving worker port, defaults to randomly assigned
+     --http-port INTEGER    Serving http port, defaults to randomly assigned
+     --nanny-port INTEGER   Serving nanny port, defaults to randomly assigned
+     --port INTEGER         Deprecated, see --nanny-port
+     --host TEXT            Serving host. Defaults to an ip address that can
+                            hopefully be visible from the scheduler network.
+     --nthreads INTEGER     Number of threads per process. Defaults to number of
+                            cores
+     --nprocs INTEGER       Number of worker processes.  Defaults to one.
+     --name TEXT            Alias
+     --spill-bytes TEXT     Number of bytes before spilling data to disk
+     --no-nanny
+     --help                 Show this message and exit.
+
+
+API Documentation
+-----------------
 
 .. autoclass:: distributed.worker.Worker

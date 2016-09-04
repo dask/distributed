@@ -52,9 +52,9 @@ class Worker(Server):
     scheduler to gather data from other workers when necessary to perform a
     computation.
 
-    You can start a worker with the ``dworker`` command line application::
+    You can start a worker with the ``dask-worker`` command line application::
 
-        $ dworker scheduler-ip:port
+        $ dask-worker scheduler-ip:port
 
     **State**
 
