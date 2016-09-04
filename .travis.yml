@@ -70,7 +70,7 @@ script:
       elif [[ $TRAVIS_PYTHON_VERSION == '3.4' ]]; then
         coverage run $(which py.test) distributed -m "not avoid_travis" --verbose;
       else
-        py.test -m "not avoid_travis" distributed --verbose -s;
+        py.test -m "not avoid_travis" distributed --verbose;
       fi;
 
 after_success:
