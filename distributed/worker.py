@@ -110,7 +110,10 @@ class Worker(Server):
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
         if spill_bytes:
-            from zict import Buffer, File, Func
+            try:
+                from zict import Buffer, File, Func
+            except ImportError:
+                raise ImportError("Please `pip install zict` for spill-to-disk workers")
             path = os.path.join(self.local_dir, 'storage')
             storage = Func(dumps_to_disk, loads_from_disk, File(path))
             self.data = Buffer({}, storage, int(float(spill_bytes)), weight)
