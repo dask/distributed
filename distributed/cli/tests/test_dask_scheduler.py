@@ -139,4 +139,9 @@ def test_multiple_workers(loop):
                     start = time()
                     while len(e.ncores()) < 2:
                         sleep(0.1)
-                        assert time() < start + 10
+                        if time() > start + 10:
+                            for i in range(5):
+                                print('scheduler', s.stderr.readline())
+                                print('a', a.stderr.readline())
+                                print('b', b.stderr.readline())
+
