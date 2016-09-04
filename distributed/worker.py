@@ -109,7 +109,7 @@ class Worker(Server):
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
-        if spill_bytes is not None:
+        if spill_bytes:
             from zict import Buffer, File, Func
             path = os.path.join(self.local_dir, 'storage')
             storage = Func(dumps_to_disk, loads_from_disk, File(path))
