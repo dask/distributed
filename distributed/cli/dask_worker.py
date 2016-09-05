@@ -52,11 +52,11 @@ def handle_signal(sig, frame):
 @click.option('--nprocs', type=int, default=1,
               help="Number of worker processes.  Defaults to one.")
 @click.option('--name', type=str, default='', help="Alias")
-@click.option('--spill-bytes', default=False,
+@click.option('--memory-limit', default=False,
               help="Number of bytes before spilling data to disk")
 @click.option('--no-nanny', is_flag=True)
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
-        no_nanny, name, port, spill_bytes):
+        no_nanny, name, port, memory_limit):
     if port:
         logger.info("--port is deprecated, use --nanny-port instead")
         assert not nanny_port
@@ -83,13 +83,13 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
     loop = IOLoop.current()
 
-    if spill_bytes == 'auto':
+    if memory_limit == 'auto':
         import psutil
-        spill_bytes = psutil.virtual_memory().total * 0.75
+        memory_limit = psutil.virtual_memory().total * 0.75
 
-    if spill_bytes:
-        spill_bytes = int(float(spill_bytes))
-        spill_bytes /= nprocs
+    if memory_limit:
+        memory_limit = int(float(memory_limit))
+        memory_limit /= nprocs
 
     if no_nanny:
         kwargs = {}
@@ -106,7 +106,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         ip = get_ip(scheduler_ip, scheduler_port)
     nannies = [t(scheduler_ip, scheduler_port, ncores=nthreads, ip=ip,
                  services=services, name=name, loop=loop,
-                 spill_bytes=spill_bytes, **kwargs)
+                 memory_limit=memory_limit, **kwargs)
                for i in range(nprocs)]
 
     for nanny in nannies:

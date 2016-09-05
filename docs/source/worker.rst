@@ -45,12 +45,12 @@ Spill Excess Data to Disk
 -------------------------
 
 Short version: To enable workers to spill excess data to disk start
-``dask-worker`` with the ``--spill-bytes`` option.  Either giving ``auto`` to
+``dask-worker`` with the ``--memory-limit`` option.  Either giving ``auto`` to
 have it guess how many bytes to keep in memory or an integer, if you know the
 number of bytes it should use::
 
-    $ dask-worker scheduler:port --spill-bytes=auto  # 75% of available RAM
-    $ dask-worker scheduler:port --spill-bytes=2e9  # two gigabytes
+    $ dask-worker scheduler:port --memory-limit=auto  # 75% of available RAM
+    $ dask-worker scheduler:port --memory-limit=2e9  # two gigabytes
 
 Some workloads may produce more data at one time than there is available RAM on
 the cluster.  In these cases Workers may choose to write excess values to disk.
@@ -58,7 +58,7 @@ This causes some performance degradation because writing to and reading from
 disk is generally slower than accessing memory, but is better than running out
 of memory entirely, which can cause the system to halt.
 
-If the ``dask-worker --spill-bytes=NBYTES`` keyword is set during
+If the ``dask-worker --memory-limit=NBYTES`` keyword is set during
 initialization then the worker will store at most NBYTES of data (as measured
 with ``sizeof``) in memory.  After that it will start storing least recently
 used (LRU) data in a temporary directory.   Workers serialize data for writing
@@ -82,7 +82,7 @@ issues:
     most expensive function RAM-wise running as many times as there are active
     threads on the machine.
 3.  It is possible to misjudge the amount of RAM on the machine.  Using the
-    ``--spill-bytes=auto`` heuristic sets the value to 75% of the return value
+    ``--memory-limit=auto`` heuristic sets the value to 75% of the return value
     of ``psutil.virtual_memory().total``.
 
 
@@ -133,7 +133,7 @@ are the available options::
                             cores
      --nprocs INTEGER       Number of worker processes.  Defaults to one.
      --name TEXT            Alias
-     --spill-bytes TEXT     Number of bytes before spilling data to disk
+     --memory-limit TEXT     Number of bytes before spilling data to disk
      --no-nanny
      --help                 Show this message and exit.
 
