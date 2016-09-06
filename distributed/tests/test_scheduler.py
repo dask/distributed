@@ -21,7 +21,6 @@ import pytest
 from distributed import Nanny, Worker
 from distributed.batched import BatchedStream
 from distributed.core import connect, read, write, rpc, dumps
-from distributed.client import WrappedKey
 from distributed.scheduler import (validate_state, decide_worker,
         Scheduler)
 from distributed.executor import _wait

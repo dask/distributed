@@ -26,7 +26,7 @@ import dask
 from dask import delayed
 from dask.context import _globals
 from distributed import Worker, Nanny
-from distributed.client import WrappedKey
+from distributed.utils_comm import WrappedKey
 from distributed.executor import (Executor, Future, CompatibleExecutor, _wait,
         wait, _as_completed, as_completed, tokenize, _global_executor,
         default_executor, _first_completed, ensure_default_get, futures_of,
