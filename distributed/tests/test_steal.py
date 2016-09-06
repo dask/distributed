@@ -101,8 +101,8 @@ def test_eventually_steal_unknown_functions(c, s, a, b):
 
 @pytest.mark.xfail(reason='')
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
-def test_steal_related_tasks(c, s, a, b, c):
-    futures = c.map(slowinc, range(20), delay=0.05, workers=a.address,
+def test_steal_related_tasks(e, s, a, b, c):
+    futures = e.map(slowinc, range(20), delay=0.05, workers=a.address,
                     allow_other_workers=True)
 
     yield _wait(futures)
