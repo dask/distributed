@@ -23,10 +23,10 @@ with ignoring(ImportError):
         sk_joblib = None
 
 if joblib:
-    from joblib._parallel_backends import (ParallelBackendBase,
+    from joblib.parallel import (ParallelBackendBase,
         AutoBatchingMixin)
 elif sk_joblib:
-    from sklearn.externals.joblib._parallel_backends import (
+    from sklearn.externals.joblib.parallel import (
         ParallelBackendBase, AutoBatchingMixin)
 else:
     raise RuntimeError("Joblib backend requires either `joblib` >= '0.10.0' "
