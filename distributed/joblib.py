@@ -15,11 +15,11 @@ from .utils import ignoring
 joblib = sk_joblib = None
 with ignoring(ImportError):
     import joblib
-    if LooseVersion(joblib.__version__) < '0.10.0':
+    if LooseVersion(joblib.__version__) < '0.10.2':
         joblib = None
 with ignoring(ImportError):
     import sklearn.externals.joblib as sk_joblib
-    if LooseVersion(sk_joblib.__version__) < '0.10.0':
+    if LooseVersion(sk_joblib.__version__) < '0.10.2':
         sk_joblib = None
 
 if joblib:
@@ -29,7 +29,7 @@ elif sk_joblib:
     from sklearn.externals.joblib.parallel import (
         ParallelBackendBase, AutoBatchingMixin)
 else:
-    raise RuntimeError("Joblib backend requires either `joblib` >= '0.10.0' "
+    raise RuntimeError("Joblib backend requires either `joblib` >= '0.10.2' "
                        " or `sklearn` > '0.17.1'. Please install or upgrade")
 
 
