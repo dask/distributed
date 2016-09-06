@@ -40,7 +40,7 @@ from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
 
 logger = logging.getLogger(__name__)
 
-_global_executor = [None]
+_global_client = [None]
 
 
 class Future(WrappedKey):
@@ -53,9 +53,9 @@ class Future(WrappedKey):
     Examples
     --------
 
-    Futures typically emerge from Executor computations
+    Futures typically emerge from Client computations
 
-    >>> my_future = executor.submit(add, 1, 2)  # doctest: +SKIP
+    >>> my_future = client.submit(add, 1, 2)  # doctest: +SKIP
 
     We can track the progress and results of a future
 
@@ -68,30 +68,34 @@ class Future(WrappedKey):
 
     See Also
     --------
-    Executor:  Creates futures
+    Client:  Creates futures
     """
-    def __init__(self, key, executor):
+    def __init__(self, key, client):
         self.key = key
-        self.executor = executor
-        self.executor._inc_ref(tokey(key))
-        self._generation = self.executor.generation
+        self.client = client
+        self.client._inc_ref(tokey(key))
+        self._generation = self.client.generation
         self._cleared = False
 
         tkey = tokey(key)
 
-        if tkey not in executor.futures:
-            executor.futures[tkey] = {'event': Event(), 'status': 'pending'}
+        if tkey not in client.futures:
+            client.futures[tkey] = {'event': Event(), 'status': 'pending'}
+
+    @property
+    def executor(self):
+        return self.client
 
     @property
     def status(self):
         try:
-            return self.executor.futures[tokey(self.key)]['status']
+            return self.client.futures[tokey(self.key)]['status']
         except KeyError:
             return 'cancelled'
 
     @property
     def event(self):
-        return self.executor.futures[tokey(self.key)]['event']
+        return self.client.futures[tokey(self.key)]['event']
 
     def done(self):
         """ Is the computation complete? """
@@ -99,7 +103,7 @@ class Future(WrappedKey):
 
     def result(self):
         """ Wait until computation completes. Gather result to local process """
-        result = sync(self.executor.loop, self._result, raiseit=False)
+        result = sync(self.client.loop, self._result, raiseit=False)
         if self.status == 'error':
             six.reraise(*result)
         if self.status == 'cancelled':
@@ -110,7 +114,7 @@ class Future(WrappedKey):
     @gen.coroutine
     def _result(self, raiseit=True):
         try:
-            d = self.executor.futures[tokey(self.key)]
+            d = self.client.futures[tokey(self.key)]
         except KeyError:
             exception = CancelledError(self.key)
             if raiseit:
@@ -125,14 +129,14 @@ class Future(WrappedKey):
             else:
                 raise Return(clean_exception(**d))
         else:
-            result = yield self.executor._gather([self])
+            result = yield self.client._gather([self])
             raise gen.Return(result[0])
 
     @gen.coroutine
     def _exception(self):
         yield self.event.wait()
         if self.status == 'error':
-            exception = self.executor.futures[self.key]['exception']
+            exception = self.client.futures[self.key]['exception']
             raise Return(exception)
         else:
             raise Return(None)
@@ -144,21 +148,21 @@ class Future(WrappedKey):
         --------
         Future.traceback
         """
-        return sync(self.executor.loop, self._exception)
+        return sync(self.client.loop, self._exception)
 
     def cancel(self):
         """ Returns True if the future has been cancelled """
-        return self.executor.cancel([self])
+        return self.client.cancel([self])
 
     def cancelled(self):
         """ Returns True if the future has been cancelled """
-        return tokey(self.key) not in self.executor.futures
+        return tokey(self.key) not in self.client.futures
 
     @gen.coroutine
     def _traceback(self):
         yield self.event.wait()
         if self.status == 'error':
-            raise Return(self.executor.futures[tokey(self.key)]['traceback'])
+            raise Return(self.client.futures[tokey(self.key)]['traceback'])
         else:
             raise Return(None)
 
@@ -180,28 +184,28 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
-        return sync(self.executor.loop, self._traceback)
+        return sync(self.client.loop, self._traceback)
 
     @property
     def type(self):
         try:
-            return self.executor.futures[tokey(self.key)]['type']
+            return self.client.futures[tokey(self.key)]['type']
         except KeyError:
             return None
 
     def release(self):
-        if not self._cleared and self.executor.generation == self._generation:
+        if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
-            self.executor._dec_ref(tokey(self.key))
+            self.client._dec_ref(tokey(self.key))
 
     def __getstate__(self):
         return self.key
 
     def __setstate__(self, key):
-        e = default_executor()
-        Future.__init__(self, key, e)
-        e._send_to_scheduler({'op': 'update-graph', 'tasks': {},
-                              'keys': [tokey(self.key)], 'client': e.id})
+        c = default_client()
+        Future.__init__(self, key, c)
+        c._send_to_scheduler({'op': 'update-graph', 'tasks': {},
+                              'keys': [tokey(self.key)], 'client': c.id})
 
     def __del__(self):
         self.release()
@@ -225,10 +229,10 @@ def normalize_future(f):
     return [f.key, type(f)]
 
 
-class Executor(object):
+class Client(object):
     """ Drive computations on a distributed cluster
 
-    The Executor connects users to a distributed compute cluster.  It provides
+    The Client connects users to a distributed compute cluster.  It provides
     an asynchronous user interface around functions and futures.  This class
     resembles executors in ``concurrent.futures`` but also allows ``Future``
     objects within ``submit/map`` calls.
@@ -244,20 +248,20 @@ class Executor(object):
     --------
     Provide cluster's head node address on initialization:
 
-    >>> executor = Executor('127.0.0.1:8787')  # doctest: +SKIP
+    >>> client = Client('127.0.0.1:8787')  # doctest: +SKIP
 
     Use ``submit`` method to send individual computations to the cluster
 
-    >>> a = executor.submit(add, 1, 2)  # doctest: +SKIP
-    >>> b = executor.submit(add, 10, 20)  # doctest: +SKIP
+    >>> a = client.submit(add, 1, 2)  # doctest: +SKIP
+    >>> b = client.submit(add, 10, 20)  # doctest: +SKIP
 
     Continue using submit or map on results to build up larger computations
 
-    >>> c = executor.submit(add, a, b)  # doctest: +SKIP
+    >>> c = client.submit(add, a, b)  # doctest: +SKIP
 
     Gather results with the ``gather`` method.
 
-    >>> executor.gather([c])  # doctest: +SKIP
+    >>> client.gather([c])  # doctest: +SKIP
     33
 
     See Also
@@ -291,11 +295,11 @@ class Executor(object):
     def __str__(self):
         if hasattr(self, '_loop_thread'):
             n = sync(self.loop, self.scheduler.ncores)
-            return '<Executor: scheduler="%s:%d" processes=%d cores=%d>' % (
+            return '<Client: scheduler="%s:%d" processes=%d cores=%d>' % (
                     self.scheduler.ip, self.scheduler.port, len(n),
                     sum(n.values()))
         else:
-            return '<Executor: scheduler="%s:%d">' % (
+            return '<Client: scheduler="%s:%d">' % (
                     self.scheduler.ip, self.scheduler.port)
 
     __repr__ = __str__
@@ -313,7 +317,7 @@ class Executor(object):
                 sleep(0.001)
         pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
         self.loop.add_callback(pc.start)
-        _global_executor[0] = self
+        _global_client[0] = self
         sync(self.loop, self._start, **kwargs)
         self.status = 'running'
 
@@ -323,7 +327,7 @@ class Executor(object):
         elif self.status is 'connecting':
             self._pending_msg_buffer.append(msg)
         else:
-            raise Exception("Executor not running.  Status: %s" % self.status)
+            raise Exception("Client not running.  Status: %s" % self.status)
 
     @gen.coroutine
     def _start(self, timeout=3, **kwargs):
@@ -385,7 +389,7 @@ class Executor(object):
         bstream.start(stream)
         self.scheduler_stream = bstream
 
-        _global_executor[0] = self
+        _global_client[0] = self
         self.status = 'running'
 
         for msg in self._pending_msg_buffer:
@@ -446,7 +450,7 @@ class Executor(object):
 
                 breakout = False
                 for msg in msgs:
-                    logger.debug("Executor receives message %s", msg)
+                    logger.debug("Client receives message %s", msg)
 
                     if msg.get('status') == 'scheduler-error':
                         six.reraise(*clean_exception(**msg))
@@ -501,8 +505,8 @@ class Executor(object):
                 raise Return()
             self._send_to_scheduler({'op': 'close-stream'})
             self.status = 'closed'
-            if _global_executor[0] is self:
-                _global_executor[0] = None
+            if _global_client[0] is self:
+                _global_client[0] = None
             if not fast:
                 with ignoring(TimeoutError):
                     yield [gen.with_timeout(timedelta(seconds=2), f)
@@ -531,8 +535,8 @@ class Executor(object):
             dask.set_options(get=self._previous_get)
         with ignoring(AttributeError):
             dask.set_options(shuffle=self._previous_shuffle)
-        if _global_executor[0] is self:
-            _global_executor[0] = None
+        if _global_client[0] is self:
+            _global_client[0] = None
         if self.get == _globals.get('get'):
             del _globals['get']
         with ignoring(AttributeError):
@@ -558,7 +562,7 @@ class Executor(object):
 
         Examples
         --------
-        >>> c = executor.submit(add, a, b)  # doctest: +SKIP
+        >>> c = client.submit(add, a, b)  # doctest: +SKIP
 
         Returns
         -------
@@ -566,7 +570,7 @@ class Executor(object):
 
         See Also
         --------
-        Executor.map: Submit on many arguments at once
+        Client.map: Submit on many arguments at once
         """
         if not callable(func):
             raise TypeError("First input to submit must be a callable function")
@@ -651,7 +655,7 @@ class Executor(object):
 
         Examples
         --------
-        >>> L = executor.map(func, sequence)  # doctest: +SKIP
+        >>> L = client.map(func, sequence)  # doctest: +SKIP
 
         Returns
         -------
@@ -660,7 +664,7 @@ class Executor(object):
 
         See also
         --------
-        Executor.submit: Submit a single function
+        Client.submit: Submit a single function
         """
         if not callable(func):
             raise TypeError("First input to map must be a callable function")
@@ -816,20 +820,20 @@ class Executor(object):
         Examples
         --------
         >>> from operator import add  # doctest: +SKIP
-        >>> e = Executor('127.0.0.1:8787')  # doctest: +SKIP
-        >>> x = e.submit(add, 1, 2)  # doctest: +SKIP
-        >>> e.gather(x)  # doctest: +SKIP
+        >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
+        >>> x = c.submit(add, 1, 2)  # doctest: +SKIP
+        >>> c.gather(x)  # doctest: +SKIP
         3
-        >>> e.gather([x, [x], x])  # support lists and dicts # doctest: +SKIP
+        >>> c.gather([x, [x], x])  # support lists and dicts # doctest: +SKIP
         [3, [3], 3]
 
-        >>> seq = e.gather(iter([x, x]))  # support iterators # doctest: +SKIP
+        >>> seq = c.gather(iter([x, x]))  # support iterators # doctest: +SKIP
         >>> next(seq)  # doctest: +SKIP
         3
 
         See Also
         --------
-        Executor.scatter: Send data out to cluster
+        Client.scatter: Send data out to cluster
         """
         if isqueue(futures):
             qout = pyQueue(maxsize=maxsize)
@@ -921,31 +925,31 @@ class Executor(object):
 
         Examples
         --------
-        >>> e = Executor('127.0.0.1:8787')  # doctest: +SKIP
-        >>> e.scatter([1, 2, 3])  # doctest: +SKIP
+        >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
+        >>> c.scatter([1, 2, 3])  # doctest: +SKIP
         [<Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
          <Future: status: finished, key: 58e78e1b34eb49a68c65b54815d1b158>,
          <Future: status: finished, key: d3395e15f605bc35ab1bac6341a285e2>]
 
-        >>> e.scatter({'x': 1, 'y': 2, 'z': 3})  # doctest: +SKIP
+        >>> c.scatter({'x': 1, 'y': 2, 'z': 3})  # doctest: +SKIP
         {'x': <Future: status: finished, key: x>,
          'y': <Future: status: finished, key: y>,
          'z': <Future: status: finished, key: z>}
 
         Constrain location of data to subset of workers
-        >>> e.scatter([1, 2, 3], workers=[('hostname', 8788)])   # doctest: +SKIP
+        >>> c.scatter([1, 2, 3], workers=[('hostname', 8788)])   # doctest: +SKIP
 
         Handle streaming sequences of data with iterators or queues
-        >>> seq = e.scatter(iter([1, 2, 3]))  # doctest: +SKIP
+        >>> seq = c.scatter(iter([1, 2, 3]))  # doctest: +SKIP
         >>> next(seq)  # doctest: +SKIP
         <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
 
         Broadcast data to all workers
-        >>> [future] = e.scatter([element], broadcast=True)  # doctest: +SKIP
+        >>> [future] = c.scatter([element], broadcast=True)  # doctest: +SKIP
 
         See Also
         --------
-        Executor.gather: Gather data back to local process
+        Client.gather: Gather data back to local process
         """
         if isqueue(data) or isinstance(data, Iterator):
             logger.debug("Starting thread for streaming data")
@@ -1001,11 +1005,11 @@ class Executor(object):
         Publish named datasets to scheduler
 
         This stores a named reference to a dask collection or list of futures
-        on the scheduler.  These references are available to other executors
+        on the scheduler.  These references are available to other Clients
         which can download the collection or futures with ``get_dataset``.
 
         Datasets are not immediately computed.  You may wish to call
-        ``Executor.persist`` prior to publishing a dataset.
+        ``Client.persist`` prior to publishing a dataset.
 
         Parameters
         ----------
@@ -1016,13 +1020,13 @@ class Executor(object):
         --------
         Publishing client:
         >>> df = dd.read_csv('s3://...')  # doctest: +SKIP
-        >>> df = e.persist(df) # doctest: +SKIP
-        >>> e.publish_dataset(my_dataset=df)  # doctest: +SKIP
+        >>> df = c.persist(df) # doctest: +SKIP
+        >>> c.publish_dataset(my_dataset=df)  # doctest: +SKIP
 
         Receiving client:
-        >>> e.list_datasets()  # doctest: +SKIP
+        >>> c.list_datasets()  # doctest: +SKIP
         ['my_dataset']
-        >>> df2 = e.get_dataset('my_dataset')  # doctest: +SKIP
+        >>> df2 = c.get_dataset('my_dataset')  # doctest: +SKIP
 
         Returns
         -------
@@ -1030,10 +1034,10 @@ class Executor(object):
 
         See Also
         --------
-        Executor.list_datasets
-        Executor.get_dataset
-        Executor.unpublish_dataset
-        Executor.persist
+        Client.list_datasets
+        Client.get_dataset
+        Client.unpublish_dataset
+        Client.persist
         """
         return sync(self.loop, self._publish_dataset, **kwargs)
 
@@ -1043,15 +1047,15 @@ class Executor(object):
 
         Examples
         --------
-        >>> e.list_datasets()  # doctest: +SKIP
+        >>> c.list_datasets()  # doctest: +SKIP
         ['my_dataset']
-        >>> e.unpublish_datasets('my_dataset')  # doctest: +SKIP
-        >>> e.list_datasets()  # doctest: +SKIP
+        >>> c.unpublish_datasets('my_dataset')  # doctest: +SKIP
+        >>> c.list_datasets()  # doctest: +SKIP
         []
 
         See Also
         --------
-        Executor.publish_dataset
+        Client.publish_dataset
         """
         return sync(self.loop, self.scheduler.unpublish_dataset, name=name)
 
@@ -1061,8 +1065,8 @@ class Executor(object):
 
         See Also
         --------
-        Executor.publish_dataset
-        Executor.get_dataset
+        Client.publish_dataset
+        Client.get_dataset
         """
         return sync(self.loop, self.scheduler.list_datasets)
 
@@ -1070,7 +1074,7 @@ class Executor(object):
     def _get_dataset(self, name):
         out = yield self.scheduler.get_dataset(name=name, client=self.id)
 
-        with temp_default_executor(self):
+        with temp_default_client(self):
             data = loads(out['data'])
         raise Return(data)
 
@@ -1080,8 +1084,8 @@ class Executor(object):
 
         See Also
         --------
-        Executor.publish_dataset
-        Executor.list_datasets
+        Client.publish_dataset
+        Client.list_datasets
         """
         return sync(self.loop, self._get_dataset, tokey(name))
 
@@ -1121,7 +1125,7 @@ class Executor(object):
 
         Examples
         --------
-        >>> e.run(os.getpid)  # doctest: +SKIP
+        >>> c.run(os.getpid)  # doctest: +SKIP
         {'192.168.0.100:9000': 1234,
          '192.168.0.101:9000': 4321,
          '192.168.0.102:9000': 5555}
@@ -1129,7 +1133,7 @@ class Executor(object):
         Restrict computation to particular workers with the ``workers=``
         keyword argument.
 
-        >>> e.run(os.getpid, workers=['192.168.0.100:9000',
+        >>> c.run(os.getpid, workers=['192.168.0.100:9000',
         ...                           '192.168.0.101:9000'])  # doctest: +SKIP
         {'192.168.0.100:9000': 1234,
          '192.168.0.101:9000': 4321}
@@ -1216,13 +1220,13 @@ class Executor(object):
         Examples
         --------
         >>> from operator import add  # doctest: +SKIP
-        >>> e = Executor('127.0.0.1:8787')  # doctest: +SKIP
-        >>> e.get({'x': (add, 1, 2)}, 'x')  # doctest: +SKIP
+        >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
+        >>> c.get({'x': (add, 1, 2)}, 'x')  # doctest: +SKIP
         3
 
         See Also
         --------
-        Executor.compute: Compute asynchronous collections
+        Client.compute: Compute asynchronous collections
         """
         futures = self._graph_to_futures(dsk, set(flatten([keys])),
                 restrictions, loose_restrictions)
@@ -1271,7 +1275,7 @@ class Executor(object):
         >>> from operator import add
         >>> x = dask.do(add)(1, 2)
         >>> y = dask.do(add)(x, x)
-        >>> xx, yy = executor.compute([x, y])  # doctest: +SKIP
+        >>> xx, yy = client.compute([x, y])  # doctest: +SKIP
         >>> xx  # doctest: +SKIP
         <Future: status: finished, key: add-8f6e709446674bad78ea8aeecfee188e>
         >>> xx.result()  # doctest: +SKIP
@@ -1281,11 +1285,11 @@ class Executor(object):
 
         Also support single arguments
 
-        >>> xx = executor.compute(x)  # doctest: +SKIP
+        >>> xx = client.compute(x)  # doctest: +SKIP
 
         See Also
         --------
-        Executor.get: Normal synchronous dask.get function
+        Client.get: Normal synchronous dask.get function
         """
         if isinstance(collections, (list, tuple, set, frozenset)):
             singleton = False
@@ -1364,12 +1368,12 @@ class Executor(object):
 
         Examples
         --------
-        >>> xx = executor.persist(x)  # doctest: +SKIP
-        >>> xx, yy = executor.persist([x, y])  # doctest: +SKIP
+        >>> xx = client.persist(x)  # doctest: +SKIP
+        >>> xx, yy = client.persist([x, y])  # doctest: +SKIP
 
         See Also
         --------
-        Executor.compute
+        Client.compute
         """
         if isinstance(collections, (tuple, list, set, frozenset)):
             singleton = False
@@ -1454,9 +1458,9 @@ class Executor(object):
 
         Examples
         --------
-        >>> executor.upload_file('mylibrary.egg')  # doctest: +SKIP
+        >>> client.upload_file('mylibrary.egg')  # doctest: +SKIP
         >>> from mylibrary import myfunc  # doctest: +SKIP
-        >>> L = e.map(myfunc, seq)  # doctest: +SKIP
+        >>> L = c.map(myfunc, seq)  # doctest: +SKIP
         """
         result = sync(self.loop, self._upload_file, filename,
                         raise_on_error=False)
@@ -1522,16 +1526,16 @@ class Executor(object):
 
         Examples
         --------
-        >>> x = e.submit(func, *args)  # doctest: +SKIP
-        >>> e.replicate([x])  # send to all workers  # doctest: +SKIP
-        >>> e.replicate([x], n=3)  # send to three workers  # doctest: +SKIP
-        >>> e.replicate([x], workers=['alice', 'bob'])  # send to specific  # doctest: +SKIP
-        >>> e.replicate([x], n=1, workers=['alice', 'bob'])  # send to one of specific workers  # doctest: +SKIP
-        >>> e.replicate([x], n=1)  # reduce replications # doctest: +SKIP
+        >>> x = c.submit(func, *args)  # doctest: +SKIP
+        >>> c.replicate([x])  # send to all workers  # doctest: +SKIP
+        >>> c.replicate([x], n=3)  # send to three workers  # doctest: +SKIP
+        >>> c.replicate([x], workers=['alice', 'bob'])  # send to specific  # doctest: +SKIP
+        >>> c.replicate([x], n=1, workers=['alice', 'bob'])  # send to one of specific workers  # doctest: +SKIP
+        >>> c.replicate([x], n=1)  # reduce replications # doctest: +SKIP
 
         See also
         --------
-        Executor.rebalance
+        Client.rebalance
         """
         sync(self.loop, self._replicate, futures, n=n, workers=workers,
                 branching_factor=branching_factor)
@@ -1547,7 +1551,7 @@ class Executor(object):
 
         Examples
         --------
-        >>> e.ncores()  # doctest: +SKIP
+        >>> c.ncores()  # doctest: +SKIP
         {'192.168.1.141:46784': 8,
          '192.167.1.142:47548': 8,
          '192.167.1.143:47329': 8,
@@ -1555,8 +1559,8 @@ class Executor(object):
 
         See Also
         --------
-        Executor.who_has
-        Executor.has_what
+        Client.who_has
+        Client.has_what
         """
         if (isinstance(workers, tuple)
             and all(isinstance(i, (str, tuple)) for i in workers)):
@@ -1575,21 +1579,21 @@ class Executor(object):
 
         Examples
         --------
-        >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
         >>> wait([x, y, z])  # doctest: +SKIP
-        >>> e.who_has()  # doctest: +SKIP
+        >>> c.who_has()  # doctest: +SKIP
         {'inc-1c8dd6be1c21646c71f76c16d09304ea': ['192.168.1.141:46784'],
          'inc-1e297fc27658d7b67b3a758f16bcf47a': ['192.168.1.141:46784'],
          'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b': ['192.168.1.141:46784']}
 
-        >>> e.who_has([x, y])  # doctest: +SKIP
+        >>> c.who_has([x, y])  # doctest: +SKIP
         {'inc-1c8dd6be1c21646c71f76c16d09304ea': ['192.168.1.141:46784'],
          'inc-1e297fc27658d7b67b3a758f16bcf47a': ['192.168.1.141:46784']}
 
         See Also
         --------
-        Executor.has_what
-        Executor.ncores
+        Client.has_what
+        Client.ncores
         """
         if futures is not None:
             futures = self.futures_of(futures)
@@ -1608,17 +1612,17 @@ class Executor(object):
 
         Examples
         --------
-        >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
         >>> wait([x, y, z])  # doctest: +SKIP
-        >>> e.has_what()  # doctest: +SKIP
+        >>> c.has_what()  # doctest: +SKIP
         {'192.168.1.141:46784': ['inc-1c8dd6be1c21646c71f76c16d09304ea',
                                  'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b',
                                  'inc-1e297fc27658d7b67b3a758f16bcf47a']}
 
         See Also
         --------
-        Executor.who_has
-        Executor.ncores
+        Client.who_has
+        Client.ncores
         """
         if (isinstance(workers, tuple)
             and all(isinstance(i, (str, tuple)) for i in workers)):
@@ -1637,18 +1641,18 @@ class Executor(object):
 
         Examples
         --------
-        >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
-        >>> e.stacks()  # doctest: +SKIP
+        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> c.stacks()  # doctest: +SKIP
         {'192.168.1.141:46784': ['inc-1c8dd6be1c21646c71f76c16d09304ea',
                                  'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b',
                                  'inc-1e297fc27658d7b67b3a758f16bcf47a']}
 
         See Also
         --------
-        Executor.processing
-        Executor.who_has
-        Executor.has_what
-        Executor.ncores
+        Client.processing
+        Client.who_has
+        Client.has_what
+        Client.ncores
         """
         if (isinstance(workers, tuple)
             and all(isinstance(i, (str, tuple)) for i in workers)):
@@ -1667,18 +1671,18 @@ class Executor(object):
 
         Examples
         --------
-        >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
-        >>> e.processing()  # doctest: +SKIP
+        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> c.processing()  # doctest: +SKIP
         {'192.168.1.141:46784': ['inc-1c8dd6be1c21646c71f76c16d09304ea',
                                  'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b',
                                  'inc-1e297fc27658d7b67b3a758f16bcf47a']}
 
         See Also
         --------
-        Executor.stacks
-        Executor.who_has
-        Executor.has_what
-        Executor.ncores
+        Client.stacks
+        Client.who_has
+        Client.has_what
+        Client.ncores
         """
         if (isinstance(workers, tuple)
             and all(isinstance(i, (str, tuple)) for i in workers)):
@@ -1703,18 +1707,18 @@ class Executor(object):
 
         Examples
         --------
-        >>> x, y, z = e.map(inc, [1, 2, 3])  # doctest: +SKIP
-        >>> e.nbytes(summary=False)  # doctest: +SKIP
+        >>> x, y, z = c.map(inc, [1, 2, 3])  # doctest: +SKIP
+        >>> c.nbytes(summary=False)  # doctest: +SKIP
         {'inc-1c8dd6be1c21646c71f76c16d09304ea': 28,
          'inc-1e297fc27658d7b67b3a758f16bcf47a': 28,
          'inc-fd65c238a7ea60f6a01bf4c8a5fcf44b': 28}
 
-        >>> e.nbytes(summary=True)  # doctest: +SKIP
+        >>> c.nbytes(summary=True)  # doctest: +SKIP
         {'inc': 84}
 
         See Also
         --------
-        Executor.who_has
+        Client.who_has
         """
         return sync(self.loop, self.scheduler.nbytes, keys=keys,
                     summary=summary)
@@ -1724,7 +1728,7 @@ class Executor(object):
 
         Examples
         --------
-        >>> e.scheduler_info()  # doctest: +SKIP
+        >>> c.scheduler_info()  # doctest: +SKIP
         {'id': '2de2b6da-69ee-11e6-ab6a-e82aea155996',
          'services': {},
          'type': 'Scheduler',
@@ -1738,7 +1742,7 @@ class Executor(object):
         return sync(self.loop, self.scheduler.identity)
 
     def futures_of(self, futures):
-        return futures_of(futures, executor=self)
+        return futures_of(futures, client=self)
 
     def start_ipython(self, *args, **kwargs):
         raise Exception("Method moved to start_ipython_workers")
@@ -1774,15 +1778,15 @@ class Executor(object):
 
         Examples
         --------
-        >>> info = e.start_ipython_workers() # doctest: +SKIP
+        >>> info = c.start_ipython_workers() # doctest: +SKIP
         >>> %remote info['192.168.1.101:5752'] worker.data  # doctest: +SKIP
         {'x': 1, 'y': 100}
 
-        >>> e.start_ipython_workers('192.168.1.101:5752', magic_names='w') # doctest: +SKIP
+        >>> c.start_ipython_workers('192.168.1.101:5752', magic_names='w') # doctest: +SKIP
         >>> %w worker.data  # doctest: +SKIP
         {'x': 1, 'y': 100}
 
-        >>> e.start_ipython_workers('192.168.1.101:5752', qtconsole=True) # doctest: +SKIP
+        >>> c.start_ipython_workers('192.168.1.101:5752', qtconsole=True) # doctest: +SKIP
 
         Returns
         -------
@@ -1792,7 +1796,7 @@ class Executor(object):
 
         See Also
         --------
-        Executor.start_ipython_scheduler: start ipython on the scheduler
+        Client.start_ipython_scheduler: start ipython on the scheduler
         """
 
         if magic_names and isinstance(magic_names, six.string_types):
@@ -1838,12 +1842,12 @@ class Executor(object):
 
         Examples
         --------
-        >>> e.start_ipython_scheduler() # doctest: +SKIP
+        >>> c.start_ipython_scheduler() # doctest: +SKIP
         >>> %scheduler scheduler.processing  # doctest: +SKIP
         {'127.0.0.1:3595': {'inc-1', 'inc-2'},
          '127.0.0.1:53589': {'inc-2', 'add-5'}}
 
-        >>> e.start_ipython_scheduler(qtconsole=True) # doctest: +SKIP
+        >>> c.start_ipython_scheduler(qtconsole=True) # doctest: +SKIP
 
         Returns
         -------
@@ -1853,7 +1857,7 @@ class Executor(object):
 
         See Also
         --------
-        Executor.start_ipython_workers: Start IPython on the workers
+        Client.start_ipython_workers: Start IPython on the workers
         """
         info = sync(self.loop, self.scheduler.start_ipython)
         if magic_name == 'scheduler_if_ipython':
@@ -1876,11 +1880,14 @@ class Executor(object):
         return info
 
 
-class CompatibleExecutor(Executor):
-    """ A concurrent.futures-compatible Executor
+Executor = Client
 
-    A subclass of Executor that conforms to concurrent.futures API,
-    allowing swapping in for other Executors.
+
+class CompatibleExecutor(Client):
+    """ A concurrent.futures-compatible Client
+
+    A subclass of Client that conforms to concurrent.futures API,
+    allowing swapping in for other Clients.
     """
 
     def map(self, func, *iterables, **kwargs):
@@ -1893,7 +1900,7 @@ class CompatibleExecutor(Executor):
 
         See Also
         --------
-        Executor.map: for more info
+        Client.map: for more info
         """
         list_of_futures = super(CompatibleExecutor, self).map(
                                 func, *iterables, **kwargs)
@@ -1911,7 +1918,7 @@ def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
             yield All({f.event.wait() for f in fs})
         except KeyError:
             raise CancelledError([f.key for f in fs
-                                        if f.key not in f.executor.futures])
+                                        if f.key not in f.client.futures])
         done, not_done = set(fs), set()
     else:
         raise NotImplementedError("Only return_when='ALL_COMPLETED' supported")
@@ -1933,8 +1940,8 @@ def wait(fs, timeout=None, return_when='ALL_COMPLETED'):
     -------
     Named tuple of completed, not completed
     """
-    executor = default_executor()
-    result = sync(executor.loop, _wait, fs, timeout, return_when)
+    client = default_client()
+    result = sync(client.loop, _wait, fs, timeout, return_when)
     return result
 
 
@@ -1976,10 +1983,10 @@ def as_completed(fs):
     This function does not return futures in the order in which they are input.
     """
     fs = list(fs)
-    if len(set(f.executor for f in fs)) == 1:
-        loop = first(fs).executor.loop
+    if len(set(f.client for f in fs)) == 1:
+        loop = first(fs).client.loop
     else:
-        # TODO: Groupby executor, spawn many _as_completed coroutines
+        # TODO: Groupby client, spawn many _as_completed coroutines
         raise NotImplementedError(
         "as_completed on many event loops not yet supported")
 
@@ -1992,23 +1999,23 @@ def as_completed(fs):
         yield queue.get()
 
 
-def default_executor(e=None):
-    """ Return an executor if exactly one has started """
-    if e:
-        return e
-    if _global_executor[0]:
-        return _global_executor[0]
+def default_client(c=None):
+    """ Return an client if exactly one has started """
+    if c:
+        return c
+    if _global_client[0]:
+        return _global_client[0]
     else:
-        raise ValueError("No executors found\n"
-                "Start an executor and point it to the scheduler address\n"
-                "  from distributed import Executor\n"
-                "  executor = Executor('ip-addr-of-scheduler:8786')\n")
+        raise ValueError("No clients found\n"
+                "Start an client and point it to the scheduler address\n"
+                "  from distributed import Client\n"
+                "  client = Client('ip-addr-of-scheduler:8786')\n")
 
 
-def ensure_default_get(executor):
-    if _globals['get'] != executor.get:
+def ensure_default_get(client):
+    if _globals['get'] != client.get:
         print("Setting global dask scheduler to use distributed")
-        dask.set_options(get=executor.get)
+        dask.set_options(get=client.get)
 
 
 def redict_collection(c, dsk):
@@ -2022,7 +2029,7 @@ def redict_collection(c, dsk):
         return cc
 
 
-def futures_of(o, executor=None):
+def futures_of(o, client=None):
     """ Future objects in a collection """
     stack = [o]
     futures = set()
@@ -2037,7 +2044,7 @@ def futures_of(o, executor=None):
         if hasattr(x, 'dask'):
             stack.extend(x.dask.values())
 
-    if executor is not None:
+    if client is not None:
         bad = {f for f in futures if f.cancelled()}
         if bad:
             raise CancelledError(bad)
@@ -2046,20 +2053,20 @@ def futures_of(o, executor=None):
 
 
 @contextmanager
-def temp_default_executor(e):
-    """ Set the default executor for the duration of the context
+def temp_default_client(c):
+    """ Set the default client for the duration of the context
 
     Parameters
     ----------
-    e : Executor
-        This is what default_executor() will return within the with-block.
+    c : Client
+        This is what default_client() will return within the with-block.
     """
-    old_exec = default_executor()
-    _global_executor[0] = e
+    old_exec = default_client()
+    _global_client[0] = c
     try:
         yield
     finally:
-        _global_executor[0] = old_exec
+        _global_client[0] = old_exec
 
 def get_restrictions(collections, workers, allow_other_workers):
     """ Get restrictions from inputs to compute/persist """
