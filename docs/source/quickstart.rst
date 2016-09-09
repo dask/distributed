@@ -99,6 +99,17 @@ once.
    -285
    >>> client.gather(A) # gather for many futures
    [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+   
+Using external modulers
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Use ``client.upload_file``  to use external Python files or .egg files.
+
+.. code-block:: python
+
+    >>> executor.upload_file('external_module.py')
+    
+See :doc:`executor <executor>` for advanced use.
 
 
 Restart
