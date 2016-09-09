@@ -134,6 +134,8 @@ class Worker(Server):
         self._last_net_io = None
         self._ipython_kernel = None
 
+        self.environments = {}
+
         if self.local_dir not in sys.path:
             sys.path.insert(0, self.local_dir)
 
@@ -160,6 +162,7 @@ class Worker(Server):
                     'ping': pingpong,
                     'health': self.host_health,
                     'upload_file': self.upload_file,
+                    'register_environments': self.register_environments,
                     'start_ipython': self.start_ipython,
                     'keys': self.keys,
                 }
@@ -665,6 +668,17 @@ class Worker(Server):
                 logger.exception(e)
                 return {'status': 'error', 'exception': dumps(e)}
         return {'status': 'OK', 'nbytes': len(data)}
+
+    def register_environments(self, stream=None, environments=None):
+        added = []
+        for name, env in environments.items():
+            if name not in self.environments:
+                env = loads(env)
+                if env.condition():
+                    env.setup()
+                    added.append(name)
+                    self.environments[name] = env
+        return added
 
     def process_health(self, stream=None):
         d = {'active': len(self.active),

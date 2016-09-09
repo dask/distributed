@@ -236,6 +236,10 @@ class Scheduler(Server):
         self.saturated = set()
         self.occupancy = dict()
 
+        # Environment state
+        self.environments = {}
+        self.environment_workers = {}
+
         self.plugins = []
         self.transition_log = deque(maxlen=config.get('transition-log-length',
                                                       100000))
@@ -269,6 +273,7 @@ class Scheduler(Server):
                          'get_dataset': self.get_dataset,
                          'publish_dataset': self.publish_dataset,
                          'unpublish_dataset': self.unpublish_dataset,
+                         'register_environments': self.register_environments,
                          'update_data': self.update_data,
                          'change_worker_cores': self.change_worker_cores}
 
@@ -507,6 +512,10 @@ class Scheduler(Server):
                 if address in r or host in r or name in r:
                     self.transitions({key: 'released'})
 
+            if self.environments:
+                self.loop.add_callback(self.register_environments,
+                                       workers=[address])
+
             self.maybe_idle.add(address)
             self.ensure_occupied()
 
@@ -711,6 +720,9 @@ class Scheduler(Server):
             if address in self.saturated:
                 self.saturated.remove(address)
 
+            for worker_sets in self.environment_workers.values():
+                worker_sets.discard(address)
+
             recommendations = OrderedDict()
 
             in_flight = set(self.processing.pop(address))
@@ -739,7 +751,6 @@ class Scheduler(Server):
                         recommendations[key] = 'released'
                     else:
                         recommendations[key] = 'forgotten'
-
 
             self.transitions(recommendations)
 
@@ -1634,6 +1645,28 @@ class Scheduler(Server):
             return self.datasets[name]
         else:
             raise KeyError("Dataset '%s' not found" % name)
+
+    @gen.coroutine
+    def register_environments(self, stream=None, environments=None, workers=None):
+        if environments is None:
+            environments = self.environments
+        else:
+            for name in environments:
+                if name in self.environments:
+                    raise KeyError("Environment %s already exists" % name)
+            for name, env in environments.items():
+                self.environments[name] = env
+                self.environment_workers[name] = set()
+
+        if workers is None:
+            workers = list(self.worker_info)
+
+        responses = yield [self.rpc(addr=worker).register_environments(environments=environments)
+                           for worker in workers]
+
+        for worker, added in zip(workers, responses):
+            for name in added:
+                self.environment_workers[name].add(worker)
 
     def change_worker_cores(self, stream=None, worker=None, diff=0):
         """ Add or remove cores from a worker

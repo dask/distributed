@@ -35,6 +35,7 @@ from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import (read, write, connect, coerce_to_rpc, dumps,
         clean_exception, loads)
+from .environments import Environment
 from .worker import dumps_function, dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)
@@ -1089,6 +1090,19 @@ class Client(object):
         Client.list_datasets
         """
         return sync(self.loop, self._get_dataset, tokey(name))
+
+    @gen.coroutine
+    def _register_environments(self, environments):
+        envs = {}
+        for name, env in environments.items():
+            if not isinstance(env, Environment):
+                env = Environment(condition=env)
+            envs[name] = dumps(env)
+        yield self.scheduler.register_environments(environments=envs)
+
+    def register_environments(self, **kwargs):
+        """Register environments with the scheduler."""
+        return sync(self.loop, self._register_environments, kwargs)
 
     @gen.coroutine
     def _run(self, function, *args, **kwargs):
