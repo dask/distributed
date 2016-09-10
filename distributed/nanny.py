@@ -263,7 +263,7 @@ def run_worker(environment, ip, scheduler_ip, scheduler_port, ncores,
     executable = os.path.join(environment, 'python')
 
     args = ['-m' 'distributed.cli.dask_worker',
-            '%s:%d' %(scheduler_ip, scheduler_port),
+            '--scheduler', '%s:%d' %(scheduler_ip, scheduler_port),
             '--no-nanny',
             '--host', ip,
             '--worker-port', worker_port,
