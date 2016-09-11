@@ -27,7 +27,7 @@ installed (``conda install bokeh -c bokeh``).  The web interface is normally
 available at  ``http://scheduler-address:8787/status/`` and can be viewed any
 normal web browser.
 
-The available pages are ``http://scheduler-address:8787/<page>/`` where ``<page`` is one of
+The available pages are ``http://scheduler-address:8787/<page>/`` where ``<page>`` is one of
 
 - ``status``
 - ``tasks``
