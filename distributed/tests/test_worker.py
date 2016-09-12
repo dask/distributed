@@ -564,4 +564,4 @@ def test_register_environments():
     assert not response['bad']
     e = loads(response['fails'])
     assert isinstance(e, RuntimeError)
-    assert e.message == 'fails'
+    assert e.args == ('fails',)

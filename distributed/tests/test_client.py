@@ -3403,7 +3403,7 @@ def test_register_environment_errors(c, s, a, b):
     try:
         response = yield c._register_environment('myenv', fails_every_other)
     except RuntimeError as e:
-        assert e.message == 'woops'
+        assert e.args == ('woops',)
 
     assert 'myenv' in s.environments
     assert 'myenv' in s.environment_workers
