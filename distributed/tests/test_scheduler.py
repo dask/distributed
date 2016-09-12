@@ -808,7 +808,7 @@ def test_broadcast(s, a, b):
     result = yield s.broadcast(msg={'op': 'ping'}, workers=[a.address])
     assert result == {a.address: b'pong'}
 
-    result = yield s.broadcast(msg={'op': 'ping'}, hosts=[a.ip])
+    result = yield s.broadcast(msg={'op': 'ping'}, workers=[a.ip])
     assert result == {a.address: b'pong', b.address: b'pong'}
 
 
@@ -823,7 +823,7 @@ def test_broadcast_nanny(s, a, b):
     assert len(result2) == 1
     assert first(result2.values())['id'] == a.id
 
-    result3 = yield s.broadcast(msg={'op': 'identity'}, hosts=[a.ip],
+    result3 = yield s.broadcast(msg={'op': 'identity'}, workers=[a.ip],
                                 nanny=True)
     assert result1 == result3
 
@@ -867,6 +867,29 @@ def test_coerce_address():
     assert s.coerce_address(a.address_tuple) == a.address
     assert s.coerce_address(123) == b.address
     assert s.coerce_address('charlie') == c.address
+
+    yield s.close()
+    yield [w._close() for w in [a, b, c]]
+
+
+@gen_test()
+def test_workers_set():
+    s = Scheduler(validate=True)
+    s.start(0)
+    a = Worker(s.ip, s.port, name='alice', ip='127.0.0.1')
+    b = Worker(s.ip, s.port, name=123, ip='127.0.0.2')
+    c = Worker(s.ip, s.port, name='charlie', ip='127.0.0.2')
+    yield [a._start(), b._start(), c._start()]
+    # Manually setup environment state, just for this test
+    s.environments['test'] = b'not a real pickle string'
+    s.environment_workers['test'] = set([a.address, c.address])
+
+    assert s.workers_set(['alice']) == {a.address}
+    assert s.workers_set([123]) == {b.address}
+    assert s.workers_set(['127.0.0.2']) == {b.address, c.address}
+    assert s.workers_set(['test']) == {a.address, c.address}
+    assert s.workers_set(['localhost']) == {a.address}
+    assert s.workers_set(['localhost', 'charlie']) == {a.address, c.address}
 
     yield s.close()
     yield [w._close() for w in [a, b, c]]

@@ -1197,9 +1197,11 @@ class Scheduler(Server):
         """
         if not self.ncores:
             raise ValueError("No workers yet found.")
+        workers2 = list(self.workers_set(workers))
         if workers is not None:
-            workers = [self.coerce_address(w) for w in workers]
-        ncores = workers if workers is not None else self.ncores
+            ncores = {w: self.ncores[w] for w in workers2}
+        else:
+            ncores = self.ncores
         keys, who_has, nbytes = yield scatter_to_workers(ncores, data,
                                                          report=False,
                                                          serialize=False)
@@ -1211,7 +1213,7 @@ class Scheduler(Server):
                 n = len(ncores)
             else:
                 n = broadcast
-            yield self.replicate(keys=keys, workers=workers, n=n)
+            yield self.replicate(keys=keys, workers=workers2, n=n)
 
         raise gen.Return(keys)
 
@@ -1278,20 +1280,9 @@ class Scheduler(Server):
                     logger.exception(e)
 
     @gen.coroutine
-    def broadcast(self, stream=None, msg=None, workers=None, hosts=None,
-            nanny=False):
+    def broadcast(self, stream=None, msg=None, workers=None, nanny=False):
         """ Broadcast message to workers, return all results """
-        if workers is None:
-            if hosts is None:
-                workers = list(self.ncores)
-            else:
-                workers = []
-        if hosts is not None:
-            for host in hosts:
-                if host in self.host_info:
-                    workers.extend([host + ':' + port
-                            for port in self.host_info[host]['ports']])
-        # TODO replace with worker_list
+        workers = self.workers_set(workers)
 
         if nanny:
             addresses = []
@@ -1312,7 +1303,7 @@ class Scheduler(Server):
         """ Rebalance keys so that each worker stores roughly equal bytes """
         with log_errors():
             keys = set(keys or self.who_has)
-            workers = set(workers or self.ncores)
+            workers = self.workers_set(workers)
 
             if not keys.issubset(self.who_has):
                 raise Return({'status': 'missing-data',
@@ -1402,7 +1393,7 @@ class Scheduler(Server):
         Scheduler.rebalance
         """
         with log_errors():
-            workers = set(self.workers_list(workers))
+            workers = self.workers_set(workers)
             if n is None:
                 n = len(workers)
             n = min(n, len(workers))
@@ -1578,14 +1569,14 @@ class Scheduler(Server):
 
     def get_stacks(self, stream=None, workers=None):
         if workers is not None:
-            workers = set(map(self.coerce_address, workers))
+            workers = self.workers_set(workers)
             return {w: list(self.stacks[w]) for w in workers}
         else:
             return valmap(list, self.stacks)
 
     def get_processing(self, stream=None, workers=None):
         if workers is not None:
-            workers = set(map(self.coerce_address, workers))
+            workers = self.workers_set(workers)
             return {w: list(self.processing[w]) for w in workers}
         else:
             return valmap(list, self.processing)
@@ -1598,14 +1589,14 @@ class Scheduler(Server):
 
     def get_has_what(self, stream=None, workers=None):
         if workers is not None:
-            workers = map(self.coerce_address, workers)
+            workers = self.workers_set(workers)
             return {w: list(self.has_what.get(w, ())) for w in workers}
         else:
             return valmap(list, self.has_what)
 
     def get_ncores(self, stream=None, workers=None):
         if workers is not None:
-            workers = map(self.coerce_address, workers)
+            workers = self.workers_set(workers)
             return {w: self.ncores.get(w, None) for w in workers}
         else:
             return self.ncores
@@ -2693,23 +2684,29 @@ class Scheduler(Server):
             addr = '%s:%d' % (ip, port)
         return addr
 
-    def workers_list(self, workers):
-        """
-        List of qualifying workers
+    def workers_set(self, workers):
+        """Set of qualifying workers.
 
-        Takes a list of worker addresses or hostnames.
-        Returns a list of all worker addresses that match
+        Takes a list of worker addresses, aliases, ip's, hostnames, or
+        environment names. Returns a list of all worker addresses that match
         """
         if workers is None:
-            return list(self.ncores)
+            return set(self.ncores)
 
         out = set()
         for w in workers:
-            if ':' in w:
-                out.add(w)
+            if isinstance(w, list):
+                w = tuple(w)
+            if w in self.environment_workers:
+                out.update(self.environment_workers[w])
             else:
-                out.update({ww for ww in self.ncores if w in ww}) # TODO: quadratic
-        return list(out)
+                w = self.coerce_address(w)
+                if ':' in w:
+                    out.add(w)
+                else:
+                    out.update('%s:%s' % (w, port)
+                               for port in self.host_info[w].get('ports', ()))
+        return out
 
     def start_ipython(self, stream=None):
         """Start an IPython kernel
