@@ -17,6 +17,7 @@ from tornado.ioloop import TimeoutError
 from distributed.batched import BatchedStream
 from distributed.core import rpc, dumps, loads, connect, read, write
 from distributed.client import _wait
+from distributed.environments import Environment
 from distributed.scheduler import Scheduler
 from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger
@@ -540,3 +541,27 @@ def test_run_dask_worker(c, s, a, b):
 
     response = yield c._run(f)
     assert response == {a.address: a.id, b.address: b.id}
+
+
+def test_register_environments():
+    w = Worker('127.0.0.1', 8019)
+
+    def good():
+        return True
+
+    def bad():
+        return False
+
+    def fails():
+        raise RuntimeError('fails')
+
+    environments = {'good': dumps(Environment(good)),
+                    'bad': dumps(Environment(bad)),
+                    'fails': dumps(Environment(fails))}
+
+    response = w.register_environments(environments=environments)
+    assert response['good']
+    assert not response['bad']
+    e = loads(response['fails'])
+    assert isinstance(e, RuntimeError)
+    assert e.message == 'fails'

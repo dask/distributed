@@ -1092,17 +1092,26 @@ class Client(object):
         return sync(self.loop, self._get_dataset, tokey(name))
 
     @gen.coroutine
-    def _register_environments(self, environments):
-        envs = {}
-        for name, env in environments.items():
-            if not isinstance(env, Environment):
-                env = Environment(condition=env)
-            envs[name] = dumps(env)
-        yield self.scheduler.register_environments(environments=envs)
+    def _register_environment(self, name, env):
+        if not isinstance(env, Environment):
+            env = Environment(condition=env)
+        envs = {name: dumps(env)}
+        exceptions = yield self.scheduler.register_environments(environments=envs)
+        if exceptions:
+            raise loads(exceptions[name][0])  # only raise the first exception
 
-    def register_environments(self, **kwargs):
-        """Register environments with the scheduler."""
-        return sync(self.loop, self._register_environments, kwargs)
+    def register_environment(self, name, env):
+        """Register an environment with the scheduler.
+
+        Parameters
+        ----------
+        name : str
+            The name of the environment.
+        env : Environment or callable
+            The environment to register. If a callable, will be used as the
+            ``condition`` method of the environment.
+        """
+        return sync(self.loop, self._register_environment, name, env)
 
     @gen.coroutine
     def _run(self, function, *args, **kwargs):

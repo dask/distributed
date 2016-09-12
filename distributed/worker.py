@@ -670,15 +670,21 @@ class Worker(Server):
         return {'status': 'OK', 'nbytes': len(data)}
 
     def register_environments(self, stream=None, environments=None):
-        added = []
+        result = {}
         for name, env in environments.items():
             if name not in self.environments:
-                env = loads(env)
-                if env.condition():
-                    env.setup()
-                    added.append(name)
-                    self.environments[name] = env
-        return added
+                try:
+                    env = loads(env)
+                    if env.condition():
+                        env.setup()
+                        self.environments[name] = env
+                        result[name] = True
+                    else:
+                        result[name] = False
+                except Exception as e:
+                    logger.exception(e)
+                    result[name] = dumps(e)
+        return result
 
     def process_health(self, stream=None):
         d = {'active': len(self.active),

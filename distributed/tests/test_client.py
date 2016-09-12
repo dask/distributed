@@ -32,6 +32,7 @@ from distributed.client import (Client, Future, CompatibleExecutor, _wait,
         wait, _as_completed, as_completed, tokenize, _global_client,
         default_client, _first_completed, ensure_default_get, futures_of,
         temp_default_client, get_restrictions)
+from distributed.environments import Environment
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All
@@ -3340,6 +3341,82 @@ def test_publish_bag(s, a, b):
 
 
 @gen_cluster(client=True)
+def test_register_environment(c, s, a, b):
+    class MyEnv(Environment):
+        def condition(self):
+            return True
+
+        def setup(self):
+            self.data = 1
+
+    # Register environment
+    yield c._register_environment('myenv', MyEnv())
+    assert len(s.environments) == 1 and 'myenv' in s.environments
+    assert len(s.environment_workers['myenv']) == 2
+    assert 'myenv' in a.environments
+    assert a.environments['myenv'].data == 1
+    assert 'myenv' in b.environments
+    assert b.environments['myenv'].data == 1
+
+    # Register another
+    yield c._register_environment('never_passes', lambda: False)
+    assert len(s.environments) == 2 and 'never_passes' in s.environments
+    assert len(s.environment_workers['never_passes']) == 0
+
+    # Add a worker
+    w = Worker(s.ip, s.port, loop=s.loop, ncores=1)
+    yield w._start(0)
+    start = time()
+    while not 'myenv' in w.environments:
+        yield gen.sleep(0.01)
+        assert time() - start < 5
+
+    assert w.address in s.environment_workers['myenv']
+    assert len(s.environment_workers['never_passes']) == 0
+
+    # Remove worker
+    yield w._close()
+    start = time()
+    while not w.status == 'closed':
+        yield gen.sleep(0.01)
+        assert time() - start < 5
+
+    assert w.address not in s.environment_workers['myenv']
+
+
+# Global flip-flop flag, used to keep state even when serialized
+def flipflop():
+    flipflop.state = not flipflop.state
+    return flipflop.state
+
+flipflop.state = True
+
+
+@gen_cluster(client=True)
+def test_register_environment_errors(c, s, a, b):
+    def fails_every_other():
+        if flipflop():
+            raise RuntimeError("woops")
+        else:
+            return True
+
+    try:
+        response = yield c._register_environment('myenv', fails_every_other)
+    except RuntimeError as e:
+        assert e.message == 'woops'
+
+    assert 'myenv' in s.environments
+    assert 'myenv' in s.environment_workers
+    assert len(s.environment_workers['myenv']) == 1
+    if a.address in s.environment_workers['myenv']:
+        assert 'myenv' in a.environments
+        assert 'myenv' not in b.environments
+    else:
+        assert 'myenv' not in a.environments
+        assert 'myenv' in b.environments
+
+
+@gen_cluster(client=True)
 def test_lose_scattered_data(c, s, a, b):
     [x] = yield c._scatter([1], workers=a.address)
 
@@ -3348,7 +3425,6 @@ def test_lose_scattered_data(c, s, a, b):
 
     assert x.status == 'cancelled'
     assert x.key not in s.task_state
-
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)

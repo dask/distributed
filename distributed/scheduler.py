@@ -1654,19 +1654,28 @@ class Scheduler(Server):
             for name in environments:
                 if name in self.environments:
                     raise KeyError("Environment %s already exists" % name)
-            for name, env in environments.items():
-                self.environments[name] = env
-                self.environment_workers[name] = set()
 
         if workers is None:
             workers = list(self.worker_info)
 
-        responses = yield [self.rpc(addr=worker).register_environments(environments=environments)
-                           for worker in workers]
+        results = yield [self.rpc(addr=worker).register_environments(environments=environments)
+                         for worker in workers]
 
-        for worker, added in zip(workers, responses):
-            for name in added:
-                self.environment_workers[name].add(worker)
+        exceptions = {}
+        for worker, result in zip(workers, results):
+            for name, val in result.items():
+                if isinstance(val, bool):
+                    if name not in self.environments:
+                        self.environments[name] = environments[name]
+                        self.environment_workers[name] = set()
+                    if val:
+                        self.environment_workers[name].add(worker)
+                else:
+                    if name not in exceptions:
+                        exceptions[name] = [val]
+                    else:
+                        exceptions[name].append(val)
+        raise Return(exceptions)
 
     def change_worker_cores(self, stream=None, worker=None, diff=0):
         """ Add or remove cores from a worker
