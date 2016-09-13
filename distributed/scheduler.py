@@ -341,7 +341,8 @@ class Scheduler(Server):
              'id': str(self.id),
              'workers': list(self.ncores),
              'services': {key: v.port for (key, v) in self.services.items()},
-             'workers': dict(self.worker_info)}
+             'workers': dict(self.worker_info),
+             'environments': valmap(set, self.environment_workers)}
         return d
 
     def start(self, port=8786, start_queues=True):
@@ -507,20 +508,27 @@ class Scheduler(Server):
             if self.ncores[address] > len(self.processing[address]):
                 self.idle.add(address)
 
-            for key in list(self.unrunnable):
-                r = self.restrictions.get(key, [])
-                if address in r or host in r or name in r:
-                    self.transitions({key: 'released'})
-
             if self.environments:
                 self.loop.add_callback(self.register_environments,
                                        workers=[address])
+            else:
+                # Called by `register_environments`, no need to call here
+                self._maybe_transition_unrunnable_release([address])
 
             self.maybe_idle.add(address)
             self.ensure_occupied()
 
             logger.info("Register %s", str(address))
             return 'OK'
+
+    def _maybe_transition_unrunnable_release(self, workers):
+        recommendations = {}
+        for key in self.unrunnable:
+            if key in self.restrictions:
+                if self.workers_set(self.restrictions[key]).intersection(workers):
+                    recommendations[key] = 'released'
+        if recommendations:
+            self.transitions(recommendations)
 
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None, priority=None,
@@ -586,10 +594,9 @@ class Scheduler(Server):
                 self.priority[key] = (self.generation, new_priority[key]) # prefer old
 
         if restrictions:
-            restrictions = {k: set(map(self.coerce_address, v))
+            restrictions = {k: set(tuple(r) if isinstance(r, list) else r for r in v)
                             for k, v in restrictions.items()}
             self.restrictions.update(restrictions)
-
             if loose_restrictions:
                 self.loose_restrictions |= set(loose_restrictions)
 
@@ -1642,9 +1649,11 @@ class Scheduler(Server):
         if environments is None:
             environments = self.environments
         else:
-            for name in environments:
-                if name in self.environments:
+            for name, env in environments.items():
+                if name in self.environments and self.environments[name] != env:
                     raise KeyError("Environment %s already exists" % name)
+                self.environments[name] = env
+                self.environment_workers[name] = set()
 
         if workers is None:
             workers = list(self.worker_info)
@@ -1655,17 +1664,16 @@ class Scheduler(Server):
         exceptions = {}
         for worker, result in zip(workers, results):
             for name, val in result.items():
-                if isinstance(val, bool):
-                    if name not in self.environments:
-                        self.environments[name] = environments[name]
-                        self.environment_workers[name] = set()
-                    if val:
-                        self.environment_workers[name].add(worker)
-                else:
+                if val is True:
+                    self.environment_workers[name].add(worker)
+                elif isinstance(val, str):
                     if name not in exceptions:
                         exceptions[name] = [val]
                     else:
                         exceptions[name].append(val)
+
+        self._maybe_transition_unrunnable_release(workers)
+
         raise Return(exceptions)
 
     def change_worker_cores(self, stream=None, worker=None, diff=0):
@@ -1755,10 +1763,15 @@ class Scheduler(Server):
             del self.waiting[key]
 
             if self.dependencies.get(key, None) or key in self.restrictions:
+                if key in self.restrictions:
+                    restrictions = self.workers_set(self.restrictions[key])
+                    loose = key in self.loose_restrictions
+                else:
+                    loose = restrictions = None
                 new_worker = decide_worker(self.dependencies, self.stacks,
-                        self.processing, self.who_has, self.has_what,
-                        self.restrictions, self.loose_restrictions, self.nbytes,
-                        key)
+                                           self.processing, self.who_has,
+                                           self.has_what, restrictions, loose,
+                                           self.nbytes, key)
                 if not new_worker:
                     self.unrunnable.add(key)
                     self.task_state[key] = 'no-worker'
@@ -2700,7 +2713,10 @@ class Scheduler(Server):
             if w in self.environment_workers:
                 out.update(self.environment_workers[w])
             else:
-                w = self.coerce_address(w)
+                try:
+                    w = self.coerce_address(w)
+                except Exception:
+                    continue
                 if ':' in w:
                     out.add(w)
                 else:
@@ -2724,7 +2740,7 @@ class Scheduler(Server):
 
 
 def decide_worker(dependencies, stacks, processing, who_has, has_what, restrictions,
-                  loose_restrictions, nbytes, key):
+                  loose, nbytes, key):
     """ Decide which worker should take task
 
     >>> dependencies = {'c': {'b'}, 'b': {'a'}}
@@ -2733,8 +2749,8 @@ def decide_worker(dependencies, stacks, processing, who_has, has_what, restricti
     >>> who_has = {'a': {'alice:8000'}}
     >>> has_what = {'alice:8000': {'a'}}
     >>> nbytes = {'a': 100}
-    >>> restrictions = {}
-    >>> loose_restrictions = set()
+    >>> restrictions = None
+    >>> loose = None
 
     We choose the worker that has the data on which 'b' depends (alice has 'a')
 
@@ -2778,15 +2794,15 @@ def decide_worker(dependencies, stacks, processing, who_has, has_what, restricti
                                  for w in who_has[dep]])
         if not workers:
             workers = stacks
-        if key in restrictions:
-            r = restrictions[key]
-            workers = {w for w in workers if w in r or w.split(':')[0] in r}  # TODO: nonlinear
+        if restrictions is not None:
+            workers = restrictions.intersection(workers)
             if not workers:
-                workers = {w for w in stacks if w in r or w.split(':')[0] in r}
+                workers = restrictions.intersection(stacks)
                 if not workers:
-                    if key in loose_restrictions:
+                    if loose:
                         return decide_worker(dependencies, stacks, processing,
-                                who_has, has_what, {}, set(), nbytes, key)
+                                             who_has, has_what, {}, False,
+                                             nbytes, key)
                     else:
                         return None
         if not workers or not stacks:

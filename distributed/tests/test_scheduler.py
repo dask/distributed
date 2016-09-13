@@ -845,10 +845,8 @@ def test_worker_name():
     yield w._close()
 
 
-@gen_test()
-def test_coerce_address():
-    s = Scheduler(validate=True)
-    s.start(0)
+@gen_cluster(ncores=[])
+def test_coerce_address(s):
     a = Worker(s.ip, s.port, name='alice')
     b = Worker(s.ip, s.port, name=123)
     c = Worker(s.ip, s.port, name='charlie', ip='127.0.0.2')
@@ -872,10 +870,8 @@ def test_coerce_address():
     yield [w._close() for w in [a, b, c]]
 
 
-@gen_test()
-def test_workers_set():
-    s = Scheduler(validate=True)
-    s.start(0)
+@gen_cluster(ncores=[])
+def test_workers_set(s):
     a = Worker(s.ip, s.port, name='alice', ip='127.0.0.1')
     b = Worker(s.ip, s.port, name=123, ip='127.0.0.2')
     c = Worker(s.ip, s.port, name='charlie', ip='127.0.0.2')
