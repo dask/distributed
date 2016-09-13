@@ -14,9 +14,3 @@ class Environment(object):
     def setup(self):
         if self._setup:
             self._setup()
-
-    def __getstate__(self):
-        return (self._condition, self._setup)
-
-    def __setstate__(self, state):
-        self._condition, self._setup = state
