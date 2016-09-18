@@ -509,3 +509,14 @@ def divide_n_among_bins(n, bins):
 def mean(seq):
     seq = list(seq)
     return sum(seq) / len(seq)
+
+
+SSL_ENABLED = config.get('ssl-enabled') or os.environ.get('DASK_SSL_ENABLED', False)
+SSL_KEY_FILE = config.get('ssl-key-file') or os.environ.get('DASK_SSL_KEY_FILE', False)
+SSL_CERT_FILE = config.get('ssl-cert-file') or os.environ.get('DASK_SSL_CERT_FILE', False)
+
+
+def create_ssl_context(ssl_enabled=SSL_ENABLED, ssl_key_file=SSL_KEY_FILE, ssl_cert_file=SSL_CERT_FILE):
+    if ssl_enabled:
+        return {'certfile': ssl_cert_file, 'keyfile': ssl_key_file}
+    return None

@@ -11,7 +11,7 @@ import pytest
 
 from distributed.core import (read, write, pingpong, Server, rpc, connect,
         coerce_to_rpc, send_recv, coerce_to_address, ConnectionPool)
-from distributed.utils_test import slow, loop, gen_test
+from distributed.utils_test import slow, loop, gen_test, certs
 
 def test_server(loop):
     @gen.coroutine
@@ -163,7 +163,6 @@ def test_errors(loop):
     except OSError as e:
         assert '.listen' in str(e)
 
-
 def test_coerce_to_rpc():
     r = coerce_to_rpc(('127.0.0.1', 8000))
     assert (r.ip, r.port) == ('127.0.0.1', 8000)
@@ -172,9 +171,9 @@ def test_coerce_to_rpc():
     r = coerce_to_rpc('foo:bar:8000')
     assert (r.ip, r.port) == ('foo:bar', 8000)
 
-
 def stream_div(stream=None, x=None, y=None):
     return x / y
+
 
 @gen_test()
 def test_errors():
@@ -186,7 +185,6 @@ def test_errors():
         yield r.div(x=1, y=0)
 
     r.close_streams()
-
 
 @gen_test()
 def test_connect_raises():
@@ -220,6 +218,11 @@ def test_coerce_to_address():
                 ('127.0.0.1', 8786),
                 ('127.0.0.1', '8786')]:
         assert coerce_to_address(arg) == '127.0.0.1:8786'
+
+
+def test_ssl(certs):
+    s= Server({}, ssl_context_creator=lambda: {'certfile': str(certs)})
+    assert s.ssl_options == {'certfile': str(certs)}
 
 
 @gen_test()

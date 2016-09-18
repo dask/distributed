@@ -46,6 +46,11 @@ def invalid_python_script(tmpdir_factory):
     local_file.write("a+1")
     return local_file
 
+@pytest.fixture(scope='session')
+def certs(tmpdir_factory):
+    local_file = tmpdir_factory.mktemp('data').join('test.cert')
+    local_file.write("test")
+    return local_file
 
 @pytest.yield_fixture
 def current_loop():

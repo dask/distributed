@@ -15,8 +15,9 @@ from tornado.locks import Event
 
 import dask
 from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
-        truncate_exception, get_traceback, queue_to_iterator,
-        iterator_to_queue, _maybe_complex, read_block, seek_delimiter, funcname)
+                               truncate_exception, get_traceback, queue_to_iterator,
+                               iterator_to_queue, _maybe_complex, read_block, seek_delimiter, funcname,
+                               create_ssl_context)
 from distributed.utils_test import loop, inc, throws, div
 from distributed.compatibility import Queue, isqueue
 
@@ -138,7 +139,7 @@ def test_ensure_ip():
 
 
 def test_truncate_exception():
-    e = ValueError('a'*1000)
+    e = ValueError('a' * 1000)
     assert len(str(e)) >= 1000
     f = truncate_exception(e, 100)
     assert type(f) == type(e)
@@ -271,3 +272,13 @@ def test_funcname():
     assert funcname(f) == 'f'
     assert funcname(partial(f)) == 'f'
     assert funcname(partial(partial(f))) == 'f'
+
+
+def test_create_ssl_context_enabled():
+    output = create_ssl_context(True,  'test.key','test.cert')
+    assert output == {'certfile': 'test.cert', 'keyfile': 'test.key'}
+
+
+def test_create_ssl_context_disabled():
+    output = create_ssl_context(False,  'test.key', 'test.cert',)
+    assert output == None

@@ -11,3 +11,7 @@ allowed-failures: 3     # number of retries before a task is considered bad
 pdb-on-err: False       # enter debug mode on scheduling error
 transition-log-length: 100000 
 
+# SSL Options
+ssl-enabled: False
+ssl-key-file:
+ssl-cert-file:
