@@ -35,6 +35,8 @@ from dask.compatibility import apply
 alice = 'alice:1234'
 bob = 'bob:1234'
 
+stack_duration = defaultdict(lambda: 0)
+
 
 @gen_cluster()
 def test_administration(s, a, b):
@@ -201,8 +203,8 @@ def test_decide_worker_with_many_independent_leaves():
     nbytes = {k: 0 for k in who_has}
 
     for key in dsk:
-        worker = decide_worker(dependencies, stacks, processing, who_has, {},
-                               {}, set(), nbytes, key)
+        worker = decide_worker(dependencies, stacks, stack_duration, processing,
+                               who_has, {}, {}, set(), nbytes, key)
         stacks[worker].append(key)
 
     nhits = (len([k for k in stacks[alice] if alice in who_has[('x', k[1])]])
@@ -219,21 +221,21 @@ def test_decide_worker_with_restrictions():
     who_has = {}
     restrictions = {'x': {'alice', 'charlie'}}
     nbytes = {}
-    result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+    result = decide_worker(dependencies, stacks, stack_duration, processing,
+                           who_has, {}, restrictions, set(), nbytes, 'x')
     assert result in {alice, charlie}
 
 
     stacks = {alice: [1, 2, 3], bob: [], charlie: [4, 5, 6]}
-    result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+    result = decide_worker(dependencies, stacks, stack_duration, processing,
+                           who_has, {}, restrictions, set(), nbytes, 'x')
     assert result in {alice, charlie}
 
     dependencies = {'x': {'y'}}
     who_has = {'y': {bob}}
     nbytes = {'y': 0}
-    result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+    result = decide_worker(dependencies, stacks, stack_duration, processing,
+                           who_has, {}, restrictions, set(), nbytes, 'x')
     assert result in {alice, charlie}
 
 
@@ -246,28 +248,29 @@ def test_decide_worker_with_loose_restrictions():
     nbytes = {}
     restrictions = {'x': {'alice', 'charlie'}}
 
-    result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+    result = decide_worker(dependencies, stacks, stack_duration, processing,
+                           who_has, {}, restrictions, set(), nbytes, 'x')
     assert result == charlie
 
-    result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, {'x'}, nbytes, 'x')
+    result = decide_worker(dependencies, stacks, stack_duration, processing,
+                           who_has, {}, restrictions, {'x'}, nbytes, 'x')
     assert result == charlie
 
     restrictions = {'x': {'david', 'ethel'}}
-    result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, set(), nbytes, 'x')
+    result = decide_worker(dependencies, stacks, stack_duration, processing,
+                           who_has, {}, restrictions, set(), nbytes, 'x')
     assert result is None
 
     restrictions = {'x': {'david', 'ethel'}}
-    result = decide_worker(dependencies, stacks, processing, who_has, {},
-                           restrictions, {'x'}, nbytes, 'x')
+    result = decide_worker(dependencies, stacks, stack_duration, processing,
+                           who_has, {}, restrictions, {'x'}, nbytes, 'x')
+
     assert result == bob
 
 
 
 def test_decide_worker_without_stacks():
-    assert not decide_worker({'x': []}, {}, {}, {}, {}, {}, set(), {}, 'x')
+    assert not decide_worker({'x': []}, {}, {}, {}, {}, {}, {}, set(), {}, 'x')
 
 
 def test_validate_state():
