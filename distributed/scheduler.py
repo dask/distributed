@@ -2177,11 +2177,13 @@ class Scheduler(Server):
             if self.task_state[key] == 'stacks':  # TODO: non-linear
                 for w in self.stacks:
                     if key in self.stacks[w]:
-                        i = self.stacks[w].index(key)
-                        del self.stacks[w][i]
-                        duration = self.stack_durations[w][i]
-                        del self.stack_durations[w][i]
-                        self.stack_duration[w] -= duration
+                        for i, k in enumerate(self.stacks[w]):
+                            if k == key:
+                                del self.stacks[w][i]
+                                duration = self.stack_durations[w][i]
+                                del self.stack_durations[w][i]
+                                self.stack_duration[w] -= duration
+                            break
 
             self.released.add(key)
             self.task_state[key] = 'released'
