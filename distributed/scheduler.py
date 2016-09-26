@@ -2892,21 +2892,19 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     if len(workers) == 1:
         return first(workers)
 
-    commbytes = {w: sum([nbytes.get(k, 1000) for k in dependencies[key]
-                                   if w not in who_has[k]])
-                 for w in workers}
+    # Select worker that will finish task first
+    best_time = 1e100
+    best_worker = None
+    for w in workers:
+        comm_bytes = sum([nbytes.get(k, 1000) for k in dependencies[key]
+                          if w not in who_has[k]])
+        stack_time = stack_duration[w] / ncores[w]
+        start_time = comm_bytes / BANDWIDTH + stack_time
+        if start_time < best_time:
+            best_time = start_time
+            best_worker = w
 
-    start_times = {w: cb / BANDWIDTH + stack_duration[w] / ncores[w]
-                    for w, cb in commbytes.items()}
-
-    start_time = min(start_times.values())
-    workers = {w for w, st in start_times.items() if st == start_time}
-
-    def objective(w):
-        return (len(stacks[w]) + len(processing[w]),
-                len(has_what.get(w, ())))
-    worker = min(workers, key=objective)
-    return worker
+    return best_worker
 
 
 def validate_state(dependencies, dependents, waiting, waiting_data, ready,

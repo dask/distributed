@@ -245,6 +245,7 @@ def test_decide_worker_with_loose_restrictions():
     dependencies = {'x': set()}
     alice, bob, charlie = 'alice:8000', 'bob:8000', 'charlie:8000'
     stacks = {alice: [1, 2, 3], bob: [], charlie: [1]}
+    stack_duration = {alice: 3, bob: 0, charlie: 1}
     processing = {alice: dict(), bob: dict(), charlie: dict()}
     who_has = {}
     nbytes = {}
