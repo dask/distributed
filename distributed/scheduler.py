@@ -1834,7 +1834,7 @@ class Scheduler(Server):
                 new_worker = decide_worker(self.dependencies, self.stacks,
                         self.stack_duration, self.processing, self.who_has,
                         self.has_what, self.restrictions,
-                        self.loose_restrictions, self.nbytes, key)
+                        self.loose_restrictions, self.nbytes, self.ncores, key)
                 if not new_worker:
                     self.unrunnable.add(key)
                     self.task_state[key] = 'no-worker'
@@ -2819,7 +2819,7 @@ class Scheduler(Server):
 
 
 def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
-        has_what, restrictions, loose_restrictions, nbytes, key):
+        has_what, restrictions, loose_restrictions, nbytes, ncores, key):
 
     """ Decide which worker should take task
 
@@ -2829,13 +2829,14 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     >>> who_has = {'a': {'alice:8000'}}
     >>> has_what = {'alice:8000': {'a'}}
     >>> nbytes = {'a': 100}
+    >>> ncores = {'alice:8000': 1, 'bob:8000': 1}
     >>> restrictions = {}
     >>> loose_restrictions = set()
 
     We choose the worker that has the data on which 'b' depends (alice has 'a')
 
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, 'b')
+    ...               restrictions, loose_restrictions, nbytes, ncores, 'b')
     'alice:8000'
 
     If both Alice and Bob have dependencies then we choose the less-busy worker
@@ -2843,14 +2844,14 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     >>> who_has = {'a': {'alice:8000', 'bob:8000'}}
     >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'a'}}
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, 'b')
+    ...               restrictions, loose_restrictions, nbytes, ncores, 'b')
     'bob:8000'
 
     Optionally provide restrictions of where jobs are allowed to occur
 
     >>> restrictions = {'b': {'alice', 'charlie'}}
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, 'b')
+    ...               restrictions, loose_restrictions, nbytes, ncores, 'b')
     'alice:8000'
 
     If the task requires data communication, then we choose to minimize the
@@ -2864,7 +2865,7 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     >>> stacks = {'alice:8000': [], 'bob:8000': []}
 
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               {}, set(), nbytes, 'c')
+    ...               {}, set(), nbytes, ncores, 'c')
     'bob:8000'
     """
     deps = dependencies[key]
@@ -2882,7 +2883,7 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
                 if key in loose_restrictions:
                     return decide_worker(dependencies, stacks, stack_duration,
                             processing, who_has, has_what, {}, set(), nbytes,
-                            key)
+                            ncores, key)
                 else:
                     return None
     if not workers or not stacks:
@@ -2895,7 +2896,7 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
                                    if w not in who_has[k]])
                  for w in workers}
 
-    start_times = {w: cb / BANDWIDTH + stack_duration[w]
+    start_times = {w: cb / BANDWIDTH + stack_duration[w] / ncores[w]
                     for w, cb in commbytes.items()}
 
     start_time = min(start_times.values())
