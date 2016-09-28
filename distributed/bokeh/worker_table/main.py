@@ -9,13 +9,12 @@ from distributed.bokeh.worker_monitor import (
 from distributed.utils import log_errors
 import distributed.bokeh
 
-SIZING_MODE = 'stretch_both'
 WIDTH = 600
 
 messages = distributed.bokeh.messages  # global message store
 doc = curdoc()
 
-worker_source, [worker_plot, _] = worker_table_plot(sizing_mode=SIZING_MODE, width=WIDTH)
+worker_source, [_, worker_table] = worker_table_plot(width=WIDTH)
 
 def worker_update():
     with log_errors():
@@ -27,4 +26,4 @@ def worker_update():
 
 doc.add_periodic_callback(worker_update, messages['workers']['interval'])
 
-doc.add_root(worker_plot)
+doc.add_root(worker_table)
