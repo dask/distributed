@@ -3,9 +3,7 @@
 from __future__ import print_function, division, absolute_import
 
 from bisect import bisect
-
 from bokeh.io import curdoc
-from bokeh.layouts import column, row
 from toolz import valmap
 
 from distributed.bokeh.worker_monitor import resource_profile_plot
@@ -18,8 +16,12 @@ WIDTH = 600
 messages = distributed.bokeh.messages  # global message store
 doc = curdoc()
 
-resource_index = [0]
 resource_source, _, network_plot, _ = resource_profile_plot(sizing_mode=SIZING_MODE, width=WIDTH, height=80)
+
+# because it was hidden for the combo toolbar
+network_plot.toolbar_location = 'right'
+
+resource_index = [0]
 def resource_update():
     with log_errors():
         index = messages['workers']['index']
@@ -36,9 +38,6 @@ def resource_update():
         data = {k: [v[i] for i in indexes] for k, v in data.items()}
         resource_index[0] = index[-1]
         resource_source.stream(data, 1000)
-
-# because it was hidden for the combo toolbar
-network_plot.toolbar_location = 'right'
 
 doc.add_periodic_callback(resource_update, messages['workers']['interval'])
 
