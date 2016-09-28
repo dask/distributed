@@ -15,7 +15,10 @@ from ..utils import ignoring
 from ..compatibility import logging_names
 from ..config import config
 
-dask_labextension_paths = ['resource_profile', 'network_profile', 'memory_usage']
+dask_labextension_paths = [
+    'resource_profile', 'network_profile', 'memory_usage', 'task_stream',
+    'progress_stream',
+    ]
 
 dirname = os.path.dirname(distributed.__file__)
 paths = [os.path.join(dirname, 'bokeh', name)
