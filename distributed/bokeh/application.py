@@ -17,7 +17,7 @@ from ..config import config
 
 dask_labextension_paths = [
     'resource_profile', 'network_profile', 'memory_usage', 'task_stream',
-    'progress_stream',
+    'progress_stream', 'processing', 'worker_memory',
     ]
 
 dirname = os.path.dirname(distributed.__file__)

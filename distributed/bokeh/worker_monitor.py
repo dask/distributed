@@ -159,8 +159,8 @@ def worker_table_plot(**kwargs):
         x_range = Range1d(0, 1)
         y_range = Range1d(-.1, .1)
         mem_plot = figure(title="Memory Usage (%)", tools='box_select',
-                          height=90, width=600, x_range=x_range, y_range=y_range,
-                          toolbar_location=None, id='bk-memory-usage-plot')
+                          height=90, x_range=x_range, y_range=y_range,
+                          toolbar_location=None, id='bk-memory-usage-plot', **kwargs)
         mem_plot.circle(source=source, x='memory_percent', y=0, size=10,
                         alpha=0.5)
         mem_plot.yaxis.visible = False
