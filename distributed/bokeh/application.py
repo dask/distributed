@@ -15,14 +15,9 @@ from ..utils import ignoring
 from ..compatibility import logging_names
 from ..config import config
 
-dask_labextension_paths = [
-    'resource_profile', 'network_profile', 'memory_usage', 'task_stream',
-    'progress_stream', 'processing', 'worker_memory', 'worker_table',
-    ]
-
 dirname = os.path.dirname(distributed.__file__)
 paths = [os.path.join(dirname, 'bokeh', name)
-         for name in ['status', 'tasks', 'workers', *dask_labextension_paths]]
+         for name in ['status', 'tasks', 'workers']]
 
 logger = logging.getLogger(__file__)
 

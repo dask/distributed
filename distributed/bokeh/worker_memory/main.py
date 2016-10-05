@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+"""
+This app route is used by the dask-labextension.
+"""
 
 from __future__ import print_function, division, absolute_import
 
