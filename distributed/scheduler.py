@@ -334,9 +334,6 @@ class Scheduler(Server):
 
     __repr__ = __str__
 
-    def __del__(self):
-        self.close_streams()
-
     @property
     def address(self):
         return '%s:%d' % (self.ip, self.port)
