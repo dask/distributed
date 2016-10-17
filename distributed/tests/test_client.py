@@ -3678,3 +3678,18 @@ def test_add_done_callback(c, s, a, b):
     yield _wait(x)
 
     assert L == [x.key, x.status]
+
+
+@gen_cluster(client=True)
+def test_normalize_collection(c, s, a, b):
+    x = delayed(inc)(1)
+    y = delayed(inc)(x)
+    z = delayed(inc)(y)
+
+    yy = c.persist(y)
+
+    zz = c.normalize_collection(z)
+    assert len(z.dask) == len(y.dask) + 1
+
+    assert isinstance(zz.dask[y.key], Future)
+    assert len(zz.dask) < len(z.dask)

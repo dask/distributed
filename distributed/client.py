@@ -1290,6 +1290,50 @@ class Client(object):
         results2 = pack_data(keys, results)
         return results2
 
+    def _optimize(self, dsk, keys):
+        dsk, _ = dask.optimize.cull(dsk, keys)
+        changed = False
+        for key in dsk:
+            if key in self.futures:
+                if not changed:
+                    changed = True
+                    dsk = dsk.copy()
+                del dsk[key]
+
+        return dsk
+
+    def normalize_collection(self, collection):
+        """
+        Replace collection's tasks by already existing futures if they exist
+
+        This normalizes the tasks within a collections task graph against the
+        known futures within the scheduler.  It returns a copy of the
+        collection with a task graph that includes the overlapping futures.
+
+        Examples
+        --------
+        >>> len(x.dask)  # x is a dask collection with 100 tasks
+        100
+        >>> set(client.futures).intersection(x.dask)  # some overlap exists
+        10
+
+        >>> x = client.normalize_collection(x)
+        >>> len(x.dask)  # smaller computational graph
+        20
+
+        See Also
+        --------
+        Client.persist: trigger computation of collection's tasks
+        """
+        dsk = copy.copy(collection.dask)
+        for key in list(dsk):
+            if key in self.futures:
+                dsk[key] = Future(key, self)
+
+        dsk, _ = dask.optimize.cull(dsk, collection._keys())
+
+        return redict_collection(collection, dsk)
+
     def compute(self, collections, sync=False, optimize_graph=True,
             workers=None, allow_other_workers=False, **kwargs):
         """ Compute dask collections on cluster
@@ -2132,8 +2176,7 @@ def ensure_default_get(client):
 def redict_collection(c, dsk):
     from dask.delayed import Delayed
     if isinstance(c, Delayed):
-        assert len(dsk) == 1
-        return Delayed(first(dsk), [dsk])
+        return Delayed(c.key, [dsk])
     else:
         cc = copy.copy(c)
         cc.dask = dsk
