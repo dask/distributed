@@ -21,7 +21,7 @@ from tornado import gen
 from tornado.gen import Return
 from tornado.queues import Queue
 from tornado.ioloop import IOLoop, PeriodicCallback
-from tornado.iostream import StreamClosedError, IOStream
+from tornado.iostream import StreamClosedError, IOStream, SSLIOStream
 
 from dask.compatibility import PY3, unicode
 from dask.core import reverse_dict
@@ -974,14 +974,14 @@ class Scheduler(Server):
         with log_errors(pdb=LOG_PDB):
             if isinstance(in_queue, Queue):
                 next_message = in_queue.get
-            elif isinstance(in_queue, IOStream):
+            elif isinstance(in_queue, IOStream) or isinstance(in_queue, SSLIOStream):
                 next_message = lambda: read(in_queue)
             else:
                 raise NotImplementedError()
 
             if isinstance(report, Queue):
                 put = report.put_nowait
-            elif isinstance(report, IOStream):
+            elif isinstance(report, IOStream) or isinstance(report, SSLIOStream):
                 put = lambda msg: write(report, msg)
             elif isinstance(report, BatchedSend):
                 put = report.send

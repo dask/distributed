@@ -22,10 +22,10 @@ from tornado.locks import Event
 from tornado.tcpserver import TCPServer
 from tornado.tcpclient import TCPClient
 from tornado.ioloop import IOLoop
-from tornado.iostream import IOStream, StreamClosedError
+from tornado.iostream import IOStream, StreamClosedError, SSLIOStream
 
 from .compatibility import PY3, unicode, WINDOWS
-from .utils import get_traceback, truncate_exception, ignoring
+from .utils import get_traceback, truncate_exception, ignoring, create_ssl_context
 from . import protocol
 
 pickle_types = [str, bytes]
@@ -132,12 +132,12 @@ class Server(TCPServer):
     default_port = 0
 
     def __init__(self, handlers, max_buffer_size=MAX_BUFFER_SIZE,
-            connection_limit=512, **kwargs):
+            connection_limit=512, ssl_context_creator= create_ssl_context, **kwargs):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._port = None
         self.rpc = ConnectionPool(limit=connection_limit)
-        super(Server, self).__init__(max_buffer_size=max_buffer_size, **kwargs)
+        super(Server, self).__init__(max_buffer_size=max_buffer_size, ssl_options=ssl_context_creator(), **kwargs)
 
     @property
     def port(self):
@@ -299,7 +299,7 @@ def connect(ip, port, timeout=3):
     client = TCPClient()
     start = time()
     while True:
-        future = client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE)
+        future = client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE, ssl_options=create_ssl_context())
         try:
             stream = yield gen.with_timeout(timedelta(seconds=timeout), future)
             stream.set_nodelay(True)
@@ -628,7 +628,7 @@ def coerce_to_rpc(o, **kwargs):
     if isinstance(o, (bytes, str, tuple, list)):
         ip, port = coerce_to_address(o, out=tuple)
         return rpc(ip=ip, port=int(port), **kwargs)
-    elif isinstance(o, IOStream):
+    elif isinstance(o, IOStream) or isinstance(o, SSLIOStream):
         return rpc(stream=o, **kwargs)
     elif isinstance(o, rpc):
         return o
