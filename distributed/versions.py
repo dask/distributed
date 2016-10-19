@@ -14,6 +14,11 @@ def get_versions():
     """ Return basic information on our software installation,
     and out installed versions of packages. """
 
+    d = {'host': get_system_info(),
+         'packages': get_package_info()}
+    return d
+
+def get_system_info():
     try:
         (sysname, nodename, release,
          version, machine, processor) = platform.uname()
@@ -32,6 +37,11 @@ def get_versions():
     except:
         host = []
 
+    return host
+
+
+def get_package_info():
+
     packages = [('dask', lambda p: p.__version__),
                  ('distributed', lambda p: p.__version__),
                  ('msgpack', lambda p: '.'.join([str(v) for v in p.version])),
@@ -49,6 +59,4 @@ def get_versions():
         except:
             pversions.append((modname, None))
 
-    d = {'host': host,
-         'packages': pversions}
-    return d
+    return pversions
