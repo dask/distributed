@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
+import gc
 from glob import glob
 import logging
 from multiprocessing import Process, Queue
@@ -365,11 +366,13 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
         cor = gen.coroutine(func)
 
         def test_func():
-            rpc_active = rpc.active
             IOLoop.clear_instance()
             loop = IOLoop()
             loop.make_current()
 
+            if rpc.active != 0:
+                gc.collect()
+            rpc_active = rpc.active
             s, workers = loop.run_sync(lambda: start_cluster(ncores, loop,
                             Worker=Worker, scheduler_kwargs=scheduler_kwargs))
             args = [s] + workers
@@ -386,6 +389,9 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
                 loop.run_sync(lambda: end_cluster(s, workers))
                 loop.stop()
                 loop.close(all_fds=True)
+
+            if rpc.active != rpc_active:
+                gc.collect()
             assert rpc.active == rpc_active
 
         return test_func

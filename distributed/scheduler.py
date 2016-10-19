@@ -1123,8 +1123,8 @@ class Scheduler(Server):
                     self.transitions(recommendations)
 
                     if self.validate:
-                        logger.info("Messages: %s\nRecommendations: %s",
-                                    msgs, recommendations)
+                        logger.debug("Messages: %s\nRecommendations: %s",
+                                     msgs, recommendations)
                 self.ensure_occupied()
 
         except (StreamClosedError, IOError, OSError):
@@ -2448,8 +2448,8 @@ class Scheduler(Server):
             finish2 = self.task_state.get(key, 'forgotten')
             self.transition_log.append((key, start, finish2, recommendations))
             if self.validate:
-                logger.info("Transition %s->%s: %s New: %s",
-                            start, finish2, key, recommendations)
+                logger.debug("Transition %s->%s: %s New: %s",
+                             start, finish2, key, recommendations)
             for plugin in self.plugins:
                 try:
                     plugin.transition(key, start, finish2, *args, **kwargs)
