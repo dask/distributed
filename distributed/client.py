@@ -38,6 +38,7 @@ from .core import (read, write, connect, coerce_to_rpc, dumps,
 from .worker import dumps_function, dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)
+from .versions import get_versions
 
 logger = logging.getLogger(__name__)
 
@@ -1858,6 +1859,63 @@ class Client(object):
                                          'time-delay': 0.0061032772064208984}}}
         """
         return sync(self.loop, self.scheduler.identity)
+
+    def get_versions(self):
+        """ Return version info for the scheduler, all workers and myself
+
+        Examples
+        --------
+        >>> c.get_versions()  # doctest: +SKIP
+       {'client': {'host': [('python', '2.7.11.final.0'),
+                     ('python-bits', 64),
+                     ('OS', 'Darwin'),
+                     ('OS-release', '15.4.0'),
+                     ('machine', 'x86_64'),
+                     ('processor', 'i386'),
+                     ('byteorder', 'little'),
+                     ('LC_ALL', 'en_US.UTF-8'),
+                     ('LANG', 'en_US.UTF-8'),
+                     ('LOCALE', 'None.None')],
+            'packages': [('dask', u'0.11.1'),
+                         ('distributed', '1.13.3'),
+                         ('msgpack', '0.4.7'),
+                         ('cloudpickle', '0.2.1')]},
+        'scheduler': {'host': [['python', '2.7.11.final.0'],
+                        ['python-bits', 64],
+                        ['OS', 'Darwin'],
+                        ['OS-release', '15.4.0'],
+                        ['machine', 'x86_64'],
+                        ['processor', 'i386'],
+                        ['byteorder', 'little'],
+                        ['LC_ALL', 'en_US.UTF-8'],
+                        ['LANG', 'en_US.UTF-8'],
+                        ['LOCALE', 'None.None']],
+               'packages': [['dask', u'0.11.1'],
+                            ['distributed', '1.13.3'],
+                            ['msgpack', '0.4.7'],
+                            ['cloudpickle', '0.2.1']]},
+        'workers': {'127.0.0.1:51051': {'host': [('python', '2.7.11.final.0'),
+                                          ('python-bits', 64),
+                                          ('OS', 'Darwin'),
+                                          ('OS-release', '15.4.0'),
+                                          ('machine', 'x86_64'),
+                                          ('processor', 'i386'),
+                                          ('byteorder', 'little'),
+                                          ('LC_ALL', 'en_US.UTF-8'),
+                                          ('LANG', 'en_US.UTF-8'),
+                                          ('LOCALE', 'None.None')],
+                                 'packages': [('dask', u'0.11.1'),
+                                              ('distributed', '1.13.3'),
+                                              ('msgpack', '0.4.7'),
+                                              ('cloudpickle', '0.2.1')]}}}
+        """
+        client = get_versions()
+        try:
+            scheduler = sync(self.loop, self.scheduler.versions)
+        except KeyError:
+            scheduler = None
+        workers = sync(self.loop, self._run, get_versions)
+        return {'scheduler': scheduler, 'workers': workers, 'client': client}
 
     def futures_of(self, futures):
         return futures_of(futures, client=self)
