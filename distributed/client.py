@@ -1872,7 +1872,17 @@ class Client(object):
             scheduler = sync(self.loop, self.scheduler.versions)
         except KeyError:
             scheduler = None
-        workers = sync(self.loop, self._run, get_versions)
+
+        def f(worker=None):
+
+            # use our local version
+            try:
+                from distributed.versions import get_versions
+                return get_versions()
+            except ImportError:
+                return None
+
+        workers = sync(self.loop, self._run, f)
         return {'scheduler': scheduler, 'workers': workers, 'client': client}
 
     def futures_of(self, futures):

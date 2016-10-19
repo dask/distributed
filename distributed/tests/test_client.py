@@ -3262,6 +3262,8 @@ def test_get_versions(loop):
             assert v['scheduler'] is not None
             assert v['client'] is not None
             assert len(v['workers']) == 2
+            for k, v in v['workers'].items():
+                assert v is not None
 
 
 def test_threaded_get_within_distributed(loop):
