@@ -10,12 +10,23 @@ import locale
 import importlib
 
 
+required_packages = [('dask', lambda p: p.__version__),
+                     ('distributed', lambda p: p.__version__),
+                     ('msgpack', lambda p: '.'.join([str(v) for v in p.version])),
+                     ('cloudpickle', lambda p: p.__version__),
+                     ('toolz', lambda p: p.__version__)]
+
+optional_packages = [('numpy', lambda p: p.__version__),
+                     ('pandas', lambda p: p.__version__)]
+
 def get_versions():
     """ Return basic information on our software installation,
     and out installed versions of packages. """
 
     d = {'host': get_system_info(),
-         'packages': get_package_info()}
+         'packages': {'required': get_package_info(required_packages),
+                      'optional': get_package_info(optional_packages)}
+         }
     return d
 
 
@@ -41,15 +52,11 @@ def get_system_info():
     return host
 
 
-def get_package_info():
-
-    packages = [('dask', lambda p: p.__version__),
-                ('distributed', lambda p: p.__version__),
-                ('msgpack', lambda p: '.'.join([str(v) for v in p.version])),
-                ('cloudpickle', lambda p: p.__version__)]
+def get_package_info(pkgs):
+    """ get package versions for the passed required & optional packages """
 
     pversions = []
-    for (modname, ver_f) in packages:
+    for (modname, ver_f) in pkgs:
         try:
             if modname in sys.modules:
                 mod = sys.modules[modname]
