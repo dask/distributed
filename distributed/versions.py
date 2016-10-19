@@ -18,6 +18,7 @@ def get_versions():
          'packages': get_package_info()}
     return d
 
+
 def get_system_info():
     try:
         (sysname, nodename, release,
@@ -43,9 +44,9 @@ def get_system_info():
 def get_package_info():
 
     packages = [('dask', lambda p: p.__version__),
-                 ('distributed', lambda p: p.__version__),
-                 ('msgpack', lambda p: '.'.join([str(v) for v in p.version])),
-                 ('cloudpickle', lambda p: p.__version__)]
+                ('distributed', lambda p: p.__version__),
+                ('msgpack', lambda p: '.'.join([str(v) for v in p.version])),
+                ('cloudpickle', lambda p: p.__version__)]
 
     pversions = []
     for (modname, ver_f) in packages:
