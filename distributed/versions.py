@@ -31,23 +31,19 @@ def get_versions():
 
 
 def get_system_info():
-    try:
-        (sysname, nodename, release,
-         version, machine, processor) = platform.uname()
-        host = [("python", "%d.%d.%d.%s.%s" % sys.version_info[:]),
-                ("python-bits", struct.calcsize("P") * 8),
-                ("OS", "%s" % (sysname)),
-                ("OS-release", "%s" % (release)),
-                # ("Version", "%s" % (version)),
-                ("machine", "%s" % (machine)),
-                ("processor", "%s" % (processor)),
-                ("byteorder", "%s" % sys.byteorder),
-                ("LC_ALL", "%s" % os.environ.get('LC_ALL', "None")),
-                ("LANG", "%s" % os.environ.get('LANG', "None")),
-                ("LOCALE", "%s.%s" % locale.getlocale()),
-                ]
-    except:
-        host = []
+    (sysname, nodename, release,
+     version, machine, processor) = platform.uname()
+    host = [("python", "%d.%d.%d.%s.%s" % sys.version_info[:]),
+            ("python-bits", struct.calcsize("P") * 8),
+            ("OS", "%s" % (sysname)),
+            ("OS-release", "%s" % (release)),
+            ("machine", "%s" % (machine)),
+            ("processor", "%s" % (processor)),
+            ("byteorder", "%s" % sys.byteorder),
+            ("LC_ALL", "%s" % os.environ.get('LC_ALL', "None")),
+            ("LANG", "%s" % os.environ.get('LANG', "None")),
+            ("LOCALE", "%s.%s" % locale.getlocale()),
+            ]
 
     return host
 
@@ -58,10 +54,7 @@ def get_package_info(pkgs):
     pversions = []
     for (modname, ver_f) in pkgs:
         try:
-            if modname in sys.modules:
-                mod = sys.modules[modname]
-            else:
-                mod = importlib.import_module(modname)
+            mod = importlib.import_module(modname)
             ver = ver_f(mod)
             pversions.append((modname, ver))
         except:
