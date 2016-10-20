@@ -3693,3 +3693,27 @@ def test_normalize_collection(c, s, a, b):
 
     assert isinstance(zz.dask[y.key], Future)
     assert len(zz.dask) < len(z.dask)
+
+
+@gen_cluster(client=True)
+def test_normalize_collection_dask_array(c, s, a, b):
+    da = pytest.importorskip('dask.array')
+
+    x = da.ones(10, chunks=(5,))
+    y = x + 1
+    yy = c.persist(y)
+
+    z = y.sum()
+    zdsk = z.dask.copy()
+    zz = c.normalize_collection(z)
+    assert z.dask == zdsk  # do not mutate input
+
+    assert len(z.dask) > len(zz.dask)
+    assert any(isinstance(v, Future) for v in zz.dask.values())
+
+    for k, v in yy.dask.items():
+        assert zz.dask[k].key == v.key
+
+    result1 = yield c.compute(z)._result()
+    result2 = yield c.compute(zz)._result()
+    assert result1 == result2

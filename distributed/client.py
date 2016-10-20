@@ -1290,15 +1290,17 @@ class Client(object):
         results2 = pack_data(keys, results)
         return results2
 
-    def _optimize(self, dsk, keys):
-        dsk, _ = dask.optimize.cull(dsk, keys)
+    def _insert_futures_to_graph(self, dsk, keys):
         changed = False
-        for key in dsk:
-            if key in self.futures:
+        for key in list(dsk):
+            if tokey(key) in self.futures:
                 if not changed:
                     changed = True
                     dsk = dsk.copy()
-                del dsk[key]
+                dsk[key] = Future(key, self)
+
+        if changed:
+            dsk, _ = dask.optimize.cull(dsk, keys)
 
         return dsk
 
@@ -1325,14 +1327,12 @@ class Client(object):
         --------
         Client.persist: trigger computation of collection's tasks
         """
-        dsk = copy.copy(collection.dask)
-        for key in list(dsk):
-            if key in self.futures:
-                dsk[key] = Future(key, self)
+        dsk = self._insert_futures_to_graph(collection.dask, collection._keys())
 
-        dsk, _ = dask.optimize.cull(dsk, collection._keys())
-
-        return redict_collection(collection, dsk)
+        if dsk is collection.dask:
+            return collection
+        else:
+            return redict_collection(collection, dsk)
 
     def compute(self, collections, sync=False, optimize_graph=True,
             workers=None, allow_other_workers=False, **kwargs):
