@@ -1393,17 +1393,9 @@ class Client(object):
 
         variables = [a for a in collections if isinstance(a, Base)]
 
-        if optimize_graph:
-            groups = groupby(lambda x: x._optimize, variables)
-            dsk = merge([opt(merge([v.dask for v in val]),
-                             [v._keys() for v in val], **kwargs)
-                        for opt, val in groups.items()])
-        else:
-            dsk = merge(c.dask for c in variables)
-
+        dsk = collections_to_dsk(variables, optimize_graph, **kwargs)
         names = ['finalize-%s' % tokenize(v) for v in variables]
         dsk2 = {name: (v._finalize, v._keys()) for name, v in zip(names, variables)}
-
 
         restrictions, loose_restrictions = get_restrictions(collections,
                 workers, allow_other_workers)
@@ -1478,13 +1470,7 @@ class Client(object):
 
         assert all(isinstance(c, Base) for c in collections)
 
-        if optimize_graph:
-            groups = groupby(lambda x: x._optimize, collections)
-            dsk = merge([opt(merge([v.dask for v in val]),
-                             [v._keys() for v in val], **kwargs)
-                        for opt, val in groups.items()])
-        else:
-            dsk = merge(c.dask for c in collections)
+        dsk = collections_to_dsk(collections, optimize_graph, **kwargs)
 
         names = {k for c in collections for k in flatten(c._keys())}
 
@@ -2249,3 +2235,24 @@ def get_restrictions(collections, workers, allow_other_workers):
         loose_restrictions = []
 
     return restrictions, loose_restrictions
+
+
+def collections_to_dsk(collections, optimize_graph=True, **kwargs):
+    """
+    Convert many collections into a single dask graph, after optimization
+    """
+    optimizations = _globals.get('optimizations', [])
+    if optimize_graph:
+        groups = groupby(lambda x: x._optimize, collections)
+        groups = {opt: [merge([v.dask for v in val]),
+                       [v._keys() for v in val]]
+                  for opt, val in groups.items()}
+        for opt in optimizations:
+            groups = {k: [opt(dsk, keys), keys]
+                      for k, (dsk, keys) in groups.items()}
+        dsk = merge([opt(dsk, keys, **kwargs)
+                     for opt, (dsk, keys) in groups.items()])
+    else:
+        dsk = merge(c.dask for c in collections)
+
+    return dsk

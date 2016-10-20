@@ -3717,3 +3717,46 @@ def test_normalize_collection_dask_array(c, s, a, b):
     result1 = yield c.compute(z)._result()
     result2 = yield c.compute(zz)._result()
     assert result1 == result2
+
+@gen_cluster(client=True)
+def test_auto_normalize_collection(c, s, a, b):
+    da = pytest.importorskip('dask.array')
+
+    x = da.ones(10, chunks=5)
+    assert len(x.dask) == 2
+
+    with dask.set_options(optimizations=[c._insert_futures_to_graph]):
+        y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
+        yy = c.persist(y)
+
+        yield _wait(yy)
+
+        start = time()
+        future = c.compute(y.sum())
+        yield future._result()
+        end = time()
+        assert end - start < 1
+
+        start = time()
+        z = c.persist(y + 1)
+        yield _wait(z)
+        end = time()
+        assert end - start < 1
+
+
+def test_auto_normalize_collection_sync(loop):
+    da = pytest.importorskip('dask.array')
+    with cluster() as (s, [a, b]):
+        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+            x = da.ones(10, chunks=5)
+
+            y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
+            yy = c.persist(y)
+
+            wait(yy)
+
+            with dask.set_options(optimizations=[c._insert_futures_to_graph]):
+                start = time()
+                y.sum().compute()
+                end = time()
+                assert end - start < 1
