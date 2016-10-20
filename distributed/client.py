@@ -1290,7 +1290,7 @@ class Client(object):
         results2 = pack_data(keys, results)
         return results2
 
-    def _insert_futures_to_graph(self, dsk, keys):
+    def _optimize_insert_futures(self, dsk, keys):
         """ Replace known keys in dask graph with Futures
 
         When given a Dask graph that might have overlapping keys with our known
@@ -1336,7 +1336,7 @@ class Client(object):
         --------
         Client.persist: trigger computation of collection's tasks
         """
-        dsk = self._insert_futures_to_graph(collection.dask, collection._keys())
+        dsk = self._optimize_insert_futures(collection.dask, collection._keys())
 
         if dsk is collection.dask:
             return collection

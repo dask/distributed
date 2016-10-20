@@ -3725,7 +3725,7 @@ def test_auto_normalize_collection(c, s, a, b):
     x = da.ones(10, chunks=5)
     assert len(x.dask) == 2
 
-    with dask.set_options(optimizations=[c._insert_futures_to_graph]):
+    with dask.set_options(optimizations=[c._optimize_insert_futures]):
         y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
         yy = c.persist(y)
 
@@ -3755,7 +3755,7 @@ def test_auto_normalize_collection_sync(loop):
 
             wait(yy)
 
-            with dask.set_options(optimizations=[c._insert_futures_to_graph]):
+            with dask.set_options(optimizations=[c._optimize_insert_futures]):
                 start = time()
                 y.sum().compute()
                 end = time()
