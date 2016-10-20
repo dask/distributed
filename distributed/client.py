@@ -1291,6 +1291,15 @@ class Client(object):
         return results2
 
     def _insert_futures_to_graph(self, dsk, keys):
+        """ Replace known keys in dask graph with Futures
+
+        When given a Dask graph that might have overlapping keys with our known
+        results we replace the values of that graph with futures.  This can be
+        used as an optimization to avoid recomputation.
+
+        This returns the same graph if unchanged but a new graph if any changes
+        were necessary.
+        """
         changed = False
         for key in list(dsk):
             if tokey(key) in self.futures:
