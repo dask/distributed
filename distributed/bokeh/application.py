@@ -76,7 +76,6 @@ class BokehWebInterface(object):
                          'bokeh-port': bokeh_port}
 
         args.extend(['--args'] + list(map(str, concat(bokeh_options.items()))))
-        print(args)
 
         import subprocess
         process = subprocess.Popen(args)

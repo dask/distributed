@@ -8,7 +8,6 @@ import os
 import sys
 from time import time
 
-from toolz import partition_all
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient, HTTPError
 from tornado.iostream import StreamClosedError
