@@ -76,8 +76,6 @@ def gather_from_workers(who_has, deserialize=True, rpc=rpc, close=True,
         bad_addresses |= {v for k, v in rev.items() if k not in response}
         results.update(merge(response))
 
-    if deserialize:
-        results = valmap(loads, results)
     if permissive:
         raise Return((results, all_bad_keys))
     else:

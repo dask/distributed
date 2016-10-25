@@ -324,7 +324,7 @@ class Scheduler(Server):
 
         super(Scheduler, self).__init__(handlers=self.handlers,
                 max_buffer_size=max_buffer_size, io_loop=self.loop,
-                connection_limit=connection_limit, **kwargs)
+                connection_limit=connection_limit, deserialize=False, **kwargs)
 
     ##################
     # Administration #
@@ -1657,26 +1657,27 @@ class Scheduler(Server):
         eventually be phased out.  It is mostly used by diagnostics.
         """
         import pickle
-        if function:
-            function = pickle.loads(function)
-        if setup:
-            setup = pickle.loads(setup)
-        if teardown:
-            teardown = pickle.loads(teardown)
-        state = setup(self) if setup else None
-        if isinstance(state, gen.Future):
-            state = yield state
-        try:
-            while True:
-                if state is None:
-                    response = function(self)
-                else:
-                    response = function(self, state)
-                yield write(stream, response)
-                yield gen.sleep(interval)
-        except (OSError, IOError, StreamClosedError):
+        with log_errors(pdb=True):
+            if function:
+                function = pickle.loads(function)
+            if setup:
+                setup = pickle.loads(setup)
             if teardown:
-                teardown(self, state)
+                teardown = pickle.loads(teardown)
+            state = setup(self) if setup else None
+            if isinstance(state, gen.Future):
+                state = yield state
+            try:
+                while True:
+                    if state is None:
+                        response = function(self)
+                    else:
+                        response = function(self, state)
+                    yield write(stream, response)
+                    yield gen.sleep(interval)
+            except (OSError, IOError, StreamClosedError):
+                if teardown:
+                    teardown(self, state)
 
     def get_stacks(self, stream=None, workers=None):
         if workers is not None:

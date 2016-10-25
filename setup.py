@@ -29,6 +29,7 @@ setup(name='distributed',
                 'distributed.bokeh.tasks',
                 'distributed.bokeh.workers',
                 'distributed.deploy',
+                'distributed.serialize',
                 'distributed.http'],
       long_description=(open('README.md').read() if os.path.exists('README.md')
                         else ''),

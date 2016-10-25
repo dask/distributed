@@ -26,18 +26,22 @@ outside of this module though and is not baked in.
 """
 from __future__ import print_function, division, absolute_import
 
-import random
+from functools import partial
 from copy import deepcopy
+import random
 
 try:
     import pandas.msgpack as msgpack
 except ImportError:
     import msgpack
 
-from toolz import identity, get_in
+from toolz import identity, get_in, valmap
 
+from . import core
 from .utils import ignoring
+from .serialize import serialize, deserialize, Serialize, Serialized
 
+_deserialize = deserialize
 
 compressions = {None: {'compress': identity,
                        'decompress': identity}}
@@ -62,6 +66,12 @@ with ignoring(ImportError):
                            'decompress': lz4.LZ4_uncompress}
     default_compression = 'lz4'
 
+with ignoring(ImportError):
+    import blosc
+    compressions['blosc'] = {'compress': partial(blosc.compress, clevel=5,
+                                                 cname='lz4'),
+                             'decompress': blosc.decompress}
+
 
 from .config import config
 default = config.get('compression', 'auto')
@@ -74,93 +84,132 @@ if default != 'auto':
                     default, ', '.join(sorted(map(str, compressions)))))
 
 
-BIG_BYTES_SIZE = 2**20
+to_serialize = Serialize
+
+
 BIG_BYTES_SHARD_SIZE = 2**28
 
 
-def extract_big_bytes(x):
-    big = {}
-    _extract_big_bytes(x, big)
-    if big:
+def extract_serialize(x):
+    ser = {}
+    _extract_serialize(x, ser)
+    if ser:
         x = deepcopy(x)
-        for path in big:
+        for path in ser:
             t = get_in(path[:-1], x)
             if isinstance(t, dict):
                 del t[path[-1]]
             else:
                 t[path[-1]] = None
-    return x, big
+    return x, ser
 
 
-def _extract_big_bytes(x, big, path=()):
+def _extract_serialize(x, ser, path=()):
     if type(x) is dict:
         for k, v in x.items():
             if isinstance(v, (list, dict)):
-                _extract_big_bytes(v, big, path + (k,))
-            elif type(v) is bytes and len(v) >= BIG_BYTES_SIZE:
-                big[path + (k,)] = v
+                _extract_serialize(v, ser, path + (k,))
+            elif type(v) is Serialize or type(v) is Serialized:
+                ser[path + (k,)] = v
     elif type(x) is list:
         for k, v in enumerate(x):
             if isinstance(v, (list, dict)):
-                _extract_big_bytes(v, big, path + (k,))
-            elif type(v) is bytes and len(v) >= BIG_BYTES_SIZE:
-                big[path + (k,)] = v
+                _extract_serialize(v, ser, path + (k,))
+            elif type(v) is Serialize or type(v) is Serialized:
+                ser[path + (k,)] = v
+
+
+def frame_split_size(frames, n=BIG_BYTES_SHARD_SIZE):
+    """ Split a list of frames into a list of frames of maximum size
+
+    Examples
+    --------
+    >>> frame_split_size([b'12345', b'678'], n=3)
+    [b'123', b'45', b'678']
+    """
+    if max(map(len, frames)) <= n:
+        return frames
+
+    out = []
+    for frame in frames:
+        if len(frame) > n:
+            if isinstance(frame, bytes):
+                frame = memoryview(frame)
+            for i in range(0, len(frame), n):
+                out.append(frame[i: i + n])
+        else:
+            out.append(frame)
+    return out
 
 
 def dumps(msg):
     """ Transform Python value to bytestream suitable for communication """
-    big = {}
-    # Only lists and dicts can contain big values
+    data = {}
+    # Only lists and dicts can contain serialized values
     if isinstance(msg, (list, dict)):
-        msg, big = extract_big_bytes(msg)
+        msg, data = extract_serialize(msg)
     small_header, small_payload = dumps_msgpack(msg)
-    if not big:
+
+    if not data:  # fast path without serialized data
         return small_header, small_payload
 
-    # Shard the big segments
-    shards = []
-    res = {}
-    for k, v in list(big.items()):
-        L = []
-        for i, j in enumerate(range(0, len(v), BIG_BYTES_SHARD_SIZE)):
-            key = '.shard-%d-%s' % (i, k)
-            res[key] = v[j: j + BIG_BYTES_SHARD_SIZE]
-            L.append(key)
-        shards.append((k, L))
+    pre = {key: (value.header, value.frames)
+           for key, value in data.items()
+           if type(value) is Serialized}
 
-    keys, values = zip(*res.items())
+    data = {key: serialize(value.data)
+                 for key, value in data.items()
+                 if type(value) is Serialize}
 
-    compression = []
-    values2 = []
-    for v in values:
-        fmt, vv = maybe_compress(v)
-        compression.append(fmt)
-        values2.append(vv)
+    header = {'headers': {},
+              'keys': []}
+    out_frames = []
 
-    header = {'encoding': 'big-byte-dict',
-              'keys': keys,
-              'compression': compression,
-              'shards': shards}
+    for key, (head, frames) in data.items():
+        if 'compression' not in head:
+            frames = frame_split_size(frames)
+            compression, frames = zip(*map(maybe_compress, frames))
+            head['compression'] = compression
+        head['lengths'] = list(map(len, frames))
+        header['headers'][key] = head
+        header['keys'].append(key)
+        out_frames.extend(frames)
+
+    for key, (head, frames) in pre.items():
+        head['lengths'] = list(map(len, frames))
+        header['headers'][key] = head
+        header['keys'].append(key)
+        out_frames.extend(frames)
 
     return [small_header, small_payload,
-            msgpack.dumps(header, use_bin_type=True)] + values2
+            msgpack.dumps(header, use_bin_type=True)] + out_frames
 
 
-def loads(frames):
+def loads(frames, deserialize=True):
     """ Transform bytestream back into Python value """
     small_header, small_payload, frames = frames[0], frames[1], frames[2:]
     msg = loads_msgpack(small_header, small_payload)
+    if not frames:
+        return msg
 
-    if frames:
-        header = msgpack.loads(frames[0], encoding='utf8')
+    header, frames = frames[0], frames[1:]
+    header = msgpack.loads(header, encoding='utf8', use_list=False)
+    keys = header['keys']
+    headers = header['headers']
 
-        values2 = [compressions[c]['decompress'](v)
-                   for c, v in zip(header['compression'], frames[1:])]
-        lk = dict(zip(header['keys'], values2))
+    for key in keys:
+        head = headers[key]
+        lengths = head['lengths']
+        fs, frames = frames[:len(lengths)], frames[len(lengths):]
+        # assert all(len(f) == l for f, l in zip(frames, lengths))
 
-        for k, keys in header['shards']:
-            v = b''.join(lk.pop(kk) for kk in keys)
-            get_in(k[:-1], msg)[k[-1]] = v
+        if deserialize:
+            fs = decompress(head, fs)
+            value = _deserialize(head, fs)
+        else:
+            value = Serialized(head, fs)
+
+        get_in(key[:-1], msg)[key[-1]] = value
 
     return msg
 
@@ -254,3 +303,8 @@ def loads_msgpack(header, payload):
                              " installed" % header['compression'].decode())
 
     return msgpack.loads(payload, encoding='utf8')
+
+
+def decompress(header, frames):
+    return [compressions[c]['decompress'](frame)
+            for c, frame in zip(header['compression'], frames)]

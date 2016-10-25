@@ -324,7 +324,7 @@ def test_upload_file(s, a, b):
     yield aa.compute(function=dumps(g),
                      key='x')
     result = yield aa.get_data(keys=['x'])
-    assert result == {'x': dumps(123)}
+    assert result == {'x': 123}
 
     yield a._close()
     yield b._close()
@@ -357,7 +357,7 @@ def test_upload_egg(s, a, b):
 
     yield aa.compute(function=dumps(g), key='x', args=dumps((10,)))
     result = yield aa.get_data(keys=['x'])
-    assert result == {'x': dumps(10 + 1)}
+    assert result == {'x': 10 + 1}
 
     yield a._close()
     yield b._close()

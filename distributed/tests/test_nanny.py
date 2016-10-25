@@ -125,6 +125,6 @@ def test_run(s):
     with rpc(n.address) as nn:
         response = yield nn.run(function=dumps(lambda: 1))
         assert response['status'] == 'OK'
-        assert loads(response['result']) == 1
+        assert response['result'] == 1
 
     yield n._close()

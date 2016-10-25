@@ -35,6 +35,7 @@ from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import (read, write, connect, coerce_to_rpc, dumps,
         clean_exception, loads)
+from .protocol import to_serialize
 from .worker import dumps_function, dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)
@@ -825,7 +826,7 @@ class Client(object):
         if bad_data and errors == 'skip' and isinstance(futures2, list):
             futures2 = [f for f in futures2 if f not in bad_data]
 
-        data = valmap(loads, response['data'])
+        data = response['data']
         result = pack_data(futures2, merge(data, bad_data))
         raise gen.Return(result)
 
@@ -892,13 +893,13 @@ class Client(object):
             raise gen.Return({k: d[tokey(k)] for k in data})
 
         if isinstance(data, dict):
-            data2 = valmap(dumps, data)
+            data2 = valmap(to_serialize, data)
             types = valmap(type, data)
         elif isinstance(data, (list, tuple, set, frozenset)):
-            data2 = list(map(dumps, data))
+            data2 = list(map(to_serialize, data))
             types = list(map(type, data))
         elif isinstance(data, (Iterable, Iterator)):
-            data2 = list(map(dumps, data))
+            data2 = list(map(to_serialize, data))
             types = list(map(type, data))
         else:
             raise TypeError("Don't know how to scatter %s" % type(data))
@@ -1157,7 +1158,7 @@ class Client(object):
         results = {}
         for key, resp in responses.items():
             if resp['status'] == 'OK':
-                results[key] = loads(resp['result'])
+                results[key] = resp['result']
             elif resp['status'] == 'error':
                 raise loads(resp['exception'])
         raise Return(results)
@@ -1563,7 +1564,7 @@ class Client(object):
         _, fn = os.path.split(filename)
         d = yield self.scheduler.broadcast(msg={'op': 'upload_file',
                                                 'filename': fn,
-                                                'data': data})
+                                                'data': to_serialize(data)})
 
         if any(v['status'] == 'error' for v in d.values()):
             exceptions = [loads(v['exception']) for v in d.values()

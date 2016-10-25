@@ -287,7 +287,7 @@ class Worker(Server):
             self.data.update(result)
             raise Return({'status': 'OK'})
 
-    def deserialize(self, function=None, args=None, kwargs=None, task=None):
+    def _deserialize(self, function=None, args=None, kwargs=None, task=None):
         """ Deserialize task inputs and regularize to func, args, kwargs """
         if task is not None:
             task = loads(task)
@@ -384,7 +384,7 @@ class Worker(Server):
 
         try:
             start = default_timer()
-            function, args, kwargs = self.deserialize(function, args, kwargs,
+            function, args, kwargs = self._deserialize(function, args, kwargs,
                     task)
             diagnostics['deserialization'] = default_timer() - start
         except Exception as e:
@@ -503,7 +503,7 @@ class Worker(Server):
         diagnostics = dict()
         try:
             start = default_timer()
-            function, args, kwargs = self.deserialize(function, args, kwargs,
+            function, args, kwargs = self._deserialize(function, args, kwargs,
                     task)
             diagnostics['deserialization'] = default_timer() - start
         except Exception as e:
@@ -607,8 +607,8 @@ class Worker(Server):
 
     @gen.coroutine
     def update_data(self, stream=None, data=None, report=True, deserialize=True):
-        if deserialize:
-            data = valmap(loads, data)
+        if deserialize == False:
+            import pdb; pdb.set_trace()
         self.data.update(data)
         if report:
             response = yield self.scheduler.add_keys(
@@ -633,7 +633,7 @@ class Worker(Server):
         raise Return('OK')
 
     def get_data(self, stream, keys=None):
-        return {k: dumps(self.data[k]) for k in keys if k in self.data}
+        return {k: to_serialize(self.data[k]) for k in keys if k in self.data}
 
     def start_ipython(self, stream):
         """Start an IPython kernel
@@ -873,7 +873,7 @@ def convert_kwargs_to_str(kwargs, max_len=None):
         return "{{{}}}".format(", ".join(strs))
 
 
-from .protocol import compressions, default_compression
+from .protocol import compressions, default_compression, to_serialize
 
 # TODO: use protocol.maybe_compress and proper file/memoryview objects
 
@@ -919,6 +919,6 @@ def run(worker, stream, function=None, args=(), kwargs={}):
     else:
         response = {
             'status': 'OK',
-            'result': dumps(result),
+            'result': to_serialize(result),
         }
     raise Return(response)
