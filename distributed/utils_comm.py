@@ -14,8 +14,9 @@ from tornado.iostream import StreamClosedError
 from dask.base import tokenize
 from toolz import merge, concat, groupby, drop, valmap
 
-from .core import rpc, coerce_to_rpc, loads, coerce_to_address, dumps
+from .core import rpc, coerce_to_rpc, coerce_to_address
 from .utils import ignore_exceptions, All, log_errors, tokey, sync
+from .serialize import dumps, loads
 
 
 no_default = '__no_default__'

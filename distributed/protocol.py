@@ -37,7 +37,6 @@ except ImportError:
 
 from toolz import identity, get_in, valmap
 
-from . import core
 from .utils import ignoring
 from .serialize import serialize, deserialize, Serialize, Serialized
 

@@ -27,8 +27,9 @@ from tornado.iostream import StreamClosedError
 from .batched import BatchedSend
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
-from .core import (rpc, Server, pingpong, dumps, loads, coerce_to_address,
+from .core import (rpc, Server, pingpong, coerce_to_address,
         error_message, read, RPCClosed)
+from .serialize import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import funcname, get_ip, _maybe_complex, log_errors, All, ignoring

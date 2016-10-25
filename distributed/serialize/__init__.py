@@ -1,4 +1,4 @@
-from .core import serialize, deserialize, Serialize, Serialized
+from .core import serialize, deserialize, Serialize, Serialized, dumps, loads
 
 from ..utils import ignoring
 

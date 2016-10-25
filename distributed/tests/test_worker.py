@@ -15,9 +15,10 @@ from tornado import gen
 from tornado.ioloop import TimeoutError
 
 from distributed.batched import BatchedStream
-from distributed.core import rpc, dumps, loads, connect, read, write
+from distributed.core import rpc, connect, read, write
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
+from distributed.serialize import dumps, loads
 from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger
 from distributed.utils import ignoring

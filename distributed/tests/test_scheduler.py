@@ -21,10 +21,11 @@ import pytest
 
 from distributed import Nanny, Worker
 from distributed.batched import BatchedStream
-from distributed.core import connect, read, write, rpc, dumps
+from distributed.core import connect, read, write, rpc
 from distributed.scheduler import (validate_state, decide_worker,
         Scheduler)
 from distributed.client import _wait
+from distributed.serialize import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
         loop)

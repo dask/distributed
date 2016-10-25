@@ -26,7 +26,7 @@ from tornado.iostream import IOStream, StreamClosedError
 
 from .compatibility import PY3, unicode, WINDOWS
 from .utils import get_traceback, truncate_exception, ignoring
-from . import protocol
+from . import protocol, serialize
 
 pickle_types = [str, bytes]
 with ignoring(ImportError):
@@ -40,41 +40,6 @@ pickle_types = tuple(pickle_types)
 
 class RPCClosed(IOError):
     pass
-
-
-def dumps(x):
-    """ Manage between cloudpickle and pickle
-
-    1.  Try pickle
-    2.  If it is short then check if it contains __main__
-    3.  If it is long, then first check type, then check __main__
-    """
-    try:
-        result = pickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-        if len(result) < 1000:
-            if b'__main__' in result:
-                return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-            else:
-                return result
-        else:
-            if isinstance(x, pickle_types) or b'__main__' not in result:
-                return result
-            else:
-                return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-    except:
-        try:
-            return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-        except Exception:
-            logger.info("Failed to serialize %s", x, exc_info=True)
-            raise
-
-
-def loads(x):
-    try:
-        return pickle.loads(x)
-    except Exception:
-        logger.info("Failed to deserialize %s", x[:10000], exc_info=True)
-        raise
 
 
 logger = logging.getLogger(__name__)
@@ -668,16 +633,16 @@ def error_message(e, status='error'):
     tb = get_traceback()
     e2 = truncate_exception(e, 1000)
     try:
-        e3 = dumps(e2)
-        loads(e3)
+        e3 = serialize.dumps(e2)
+        serialize.loads(e3)
     except Exception:
         e3 = Exception(str(e2))
-        e3 = dumps(e3)
+        e3 = serialize.dumps(e3)
     try:
-        tb2 = dumps(tb)
+        tb2 = serialize.dumps(tb)
     except Exception:
         tb2 = ''.join(traceback.format_tb(tb))
-        tb2 = dumps(tb2)
+        tb2 = serialize.dumps(tb2)
 
     if len(tb2) > 10000:
         tb2 = None
@@ -693,9 +658,9 @@ def clean_exception(exception, traceback, **kwargs):
     error_message: create and serialize errors into message
     """
     if isinstance(exception, bytes):
-        exception = loads(exception)
+        exception = serialize.loads(exception)
     if isinstance(traceback, bytes):
-        traceback = loads(traceback)
+        traceback = serialize.loads(traceback)
     if isinstance(traceback, str):
         traceback = None
     return type(exception), exception, traceback
