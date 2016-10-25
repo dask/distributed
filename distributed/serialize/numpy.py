@@ -4,6 +4,7 @@ import numpy as np
 
 try:
     import blosc
+    n = blosc.set_nthreads(2)
 except ImportError:
     blosc = False
 
