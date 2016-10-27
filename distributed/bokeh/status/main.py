@@ -5,17 +5,17 @@ from __future__ import print_function, division, absolute_import
 from bokeh.io import curdoc
 from bokeh.layouts import column, row
 
+from distributed.bokeh.components import (
+    TaskStream, TaskProgress, MemoryUsage, ResourceProfiles
+    )
 import distributed.bokeh
 
 SIZING_MODE = 'scale_width'
 WIDTH = 600
 
 messages = distributed.bokeh.messages  # global message store
-doc = curdoc()
 
-from distributed.bokeh.components import (
-    TaskStream, TaskProgress, MemoryUsage, ResourceProfiles
-)
+doc = curdoc()
 
 task_stream = TaskStream(sizing_mode=SIZING_MODE, width=WIDTH, height=300)
 doc.add_periodic_callback(lambda: task_stream.update(messages), messages['task-events']['interval'])

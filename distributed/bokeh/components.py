@@ -29,7 +29,7 @@ class DashboardComponent(object):
 
     def update(self, messages):
         """
-        Callback that reads from messages and updates self.source
+        Callback that reads from bokeh.distributed.messages and updates self.source
         """
         pass
 
@@ -43,8 +43,8 @@ class TaskStream(DashboardComponent):
 
         self.source = ColumnDataSource(data=dict(
             start=[], duration=[], key=[], name=[], color=[],
-            worker=[], y=[], worker_thread=[], alpha=[]
-        ))
+            worker=[], y=[], worker_thread=[], alpha=[])
+        )
 
         x_range = DataRange1d()
         y_range = DataRange1d(range_padding=0)
@@ -117,12 +117,6 @@ class TaskProgress(DashboardComponent):
 
         data = progress_quads(dict(all={}, memory={}, erred={}, released={}))
         self.source = ColumnDataSource(data=data)
-
-        # self.source = ColumnDataSource(data={
-        #     "name":[], "left":[], "right":[], "top":[], "bottom":[],
-        #     "released":[], "memory":[], "erred":[], "done":[], "released-loc":[],
-        #     "memory-loc":[], "erred-loc":[], "color": []
-        # })
 
         x_range = DataRange1d()
         y_range = Range1d(-8, 0)
@@ -290,11 +284,12 @@ class ResourceProfiles(DashboardComponent):
             'left'
         )
 
+        legend_opts = dict(
+            location='top_left', orientation='horizontal', padding=5, margin=5,
+            label_height=5)
+
         resource_plot.add_layout(
-            Legend(items=[('Memory', [g1]), ('CPU', [g2])],
-                   orientation='horizontal',
-                   location='top_left'
-           )
+            Legend(items=[('Memory', [g1]), ('CPU', [g2])], **legend_opts)
         )
 
         network_plot = Plot(
@@ -313,10 +308,7 @@ class ResourceProfiles(DashboardComponent):
         network_plot.add_layout(DatetimeAxis(axis_label="Time"), "below")
         network_plot.add_layout(LinearAxis(axis_label="MB/s"), 'left')
         network_plot.add_layout(
-            Legend(items=[('Network Send', [g1]), ('Network Recv', [g2])],
-                   orientation='horizontal',
-                   location='top_left'
-           )
+            Legend(items=[('Network Send', [g1]), ('Network Recv', [g2])], **legend_opts)
         )
 
         tools = [
@@ -339,7 +331,7 @@ class ResourceProfiles(DashboardComponent):
             **sizing_mode
         )
 
-        # needed for update
+        # Required for update callback
         self.resource_index = [0]
 
     def update(self, messages):
