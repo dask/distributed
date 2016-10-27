@@ -69,10 +69,15 @@ def progress_update():
 doc.add_periodic_callback(progress_update, 50)
 
 
-from distributed.bokeh.plots.status import TaskStream
+from distributed.bokeh.components import TaskStream, TaskProgress, MemoryUsage
 task_stream = TaskStream(sizing_mode=SIZING_MODE, width=WIDTH, height=300)
 doc.add_periodic_callback(lambda: task_stream.update(messages), messages['task-events']['interval'])
 
+task_progress = TaskProgress(sizing_mode=SIZING_MODE, width=WIDTH, height=160)
+doc.add_periodic_callback(lambda: task_progress.update(messages), 50)
+
+memory_usage = MemoryUsage(sizing_mode=SIZING_MODE, width=WIDTH, height=60)
+doc.add_periodic_callback(lambda: memory_usage.update(messages), 50)
 
 layout = column(
     row(
@@ -80,9 +85,9 @@ layout = column(
         column(combo_toolbar, sizing_mode=SIZING_MODE),
         sizing_mode=SIZING_MODE
     ),
-    row(nbytes_task_plot, sizing_mode=SIZING_MODE),
+    row(memory_usage.root, sizing_mode=SIZING_MODE),
     row(task_stream.root, sizing_mode=SIZING_MODE),
-    row(progress_plot, sizing_mode=SIZING_MODE),
+    row(task_progress.root, sizing_mode=SIZING_MODE),
     sizing_mode=SIZING_MODE
 )
 doc.add_root(layout)
