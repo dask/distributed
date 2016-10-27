@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 from datetime import timedelta
 from importlib import import_module
 import logging
-from multiprocessing.pool import ThreadPool
+import multiprocessing
 import os
 import pkg_resources
 import tempfile
@@ -33,7 +33,7 @@ from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import funcname, get_ip, _maybe_complex, log_errors, All, ignoring
 
-_ncores = ThreadPool()._processes
+_ncores = multiprocessing.cpu_count()
 
 thread_state = local()
 
