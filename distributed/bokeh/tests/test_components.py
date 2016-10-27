@@ -1,6 +1,11 @@
+from __future__ import print_function, division, absolute_import
+
+from bokeh.layouts import Row
 from bokeh.models import Plot, ColumnDataSource
 
-from distributed.bokeh.components import TaskStream, TaskProgress, MemoryUsage
+from distributed.bokeh.components import (
+    TaskStream, TaskProgress, MemoryUsage, ResourceProfiles
+)
 
 def test_TaskStream_initialization():
     task_stream = TaskStream()
@@ -25,3 +30,11 @@ def test_MemoryUsage_initialization():
 
 def test_TaskProgress_update():
     memory_usage = MemoryUsage()
+
+def test_ResourceProfiles_initialization():
+    resource_profiles = ResourceProfiles()
+    assert isinstance(resource_profiles.root, Row)
+    assert isinstance(resource_profiles.source, ColumnDataSource)
+
+def test_ResourceProfiles_update():
+    resource_profiles = ResourceProfiles()
