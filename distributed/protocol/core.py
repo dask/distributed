@@ -1,29 +1,3 @@
-"""
-The distributed message protocol consists of the following parts:
-
-1.  The length of the header, stored as a uint32
-2.  The header, stored as msgpack.
-    If there are no fields in the header then we skip it entirely.
-3.  The payload, stored as possibly compressed msgpack
-4.  A sentinel value
-
-**Header**
-
-The Header contains the following fields:
-
-* **compression**: string, optional
-    One of the following: ``'snappy', 'lz4', 'zlib'`` or missing for None
-
-**Payload**
-
-The payload is any msgpack serializable value.  It may be compressed based
-on the header.
-
-**Sentinel**
-
-We often terminate each message with a sentinel value.  This happens
-outside of this module though and is not baked in.
-"""
 from __future__ import print_function, division, absolute_import
 
 from copy import deepcopy
