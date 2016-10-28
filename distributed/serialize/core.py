@@ -5,6 +5,8 @@ import pickle
 
 import cloudpickle
 
+from dask.base import normalize_token
+
 
 def dumps(x):
     """ Manage between cloudpickle and pickle
@@ -92,7 +94,6 @@ class Serialized(object):
         self.header = header
         self.frames = frames
 
-from dask.base import normalize_token
 
 @partial(normalize_token.register, Serialized)
 def normalize_Serialized(o):
@@ -101,4 +102,3 @@ def normalize_Serialized(o):
 
 register_serialization(bytes, lambda b: ({}, [b]),
                               lambda header, frames: b''.join(frames))
-
