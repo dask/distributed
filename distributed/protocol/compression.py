@@ -1,3 +1,8 @@
+"""
+Record known compressors
+
+Includes utilities for determining whether or not to compress
+"""
 from __future__ import print_function, division, absolute_import
 
 import logging
@@ -53,7 +58,16 @@ if default != 'auto':
 
 
 def byte_sample(b, size, n):
-    """ Sample a bytestring from many locations """
+    """ Sample a bytestring from many locations
+
+    Parameters
+    ----------
+    b: bytes or memoryview
+    size: int
+        size of each sample to collect
+    n: int
+        number of samples to collect
+    """
     starts = [random.randint(0, len(b) - size) for j in range(n)]
     ends = []
     for i, start in enumerate(starts[:-1]):
@@ -65,7 +79,8 @@ def byte_sample(b, size, n):
 
 def maybe_compress(payload, compression=default_compression, min_size=1e4,
                    sample_size=1e4, nsamples=5):
-    """ Maybe compress payload
+    """
+    Maybe compress payload
 
     1.  We don't compress small messages
     2.  We sample the payload in a few spots, compress that, and if it doesn't

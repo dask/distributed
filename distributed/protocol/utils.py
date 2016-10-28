@@ -2,11 +2,14 @@ BIG_BYTES_SHARD_SIZE = 2**28
 
 
 def frame_split_size(frames, n=BIG_BYTES_SHARD_SIZE):
-    """ Split a list of frames into a list of frames of maximum size
+    """
+    Split a list of frames into a list of frames of maximum size
+
+    This helps us to avoid passing around very large bytestrings.
 
     Examples
     --------
-    >>> frame_split_size([b'12345', b'678'], n=3)
+    >>> frame_split_size([b'12345', b'678'], n=3)  # doctest: +SKIP
     [b'123', b'45', b'678']
     """
     if max(map(len, frames)) <= n:

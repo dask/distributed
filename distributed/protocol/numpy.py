@@ -20,7 +20,7 @@ def serialize_numpy_ndarray(x):
     else:
         dt = x.dtype.str
 
-    x = np.ascontiguousarray(x)
+    x = np.ascontiguousarray(x)  # np.frombuffer requires this
 
     header = {'dtype': dt,
               'strides': x.strides,
@@ -38,7 +38,7 @@ def serialize_numpy_ndarray(x):
 
 
 def deserialize_numpy_ndarray(header, frames):
-    with log_errors(pdb=True):
+    with log_errors():
         assert len(frames) == 1
 
         dt = header['dtype']
