@@ -17,7 +17,7 @@ from tornado.ioloop import IOLoop
 
 from distributed.core import read
 from distributed.diagnostics.eventstream import eventstream
-from distributed.bokeh.status_monitor import task_stream_append
+from distributed.diagnostics.progress_stream import task_stream_append
 import distributed.bokeh
 from distributed.bokeh.utils import parse_args
 
