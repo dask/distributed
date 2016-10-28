@@ -26,7 +26,7 @@ from tornado.iostream import IOStream, StreamClosedError
 
 from .compatibility import PY3, unicode, WINDOWS
 from .utils import get_traceback, truncate_exception, ignoring
-from . import protocol, serialize
+from . import protocol
 
 pickle_types = [str, bytes]
 with ignoring(ImportError):
@@ -633,16 +633,16 @@ def error_message(e, status='error'):
     tb = get_traceback()
     e2 = truncate_exception(e, 1000)
     try:
-        e3 = serialize.pickle.dumps(e2)
-        serialize.pickle.loads(e3)
+        e3 = protocol.pickle.dumps(e2)
+        protocol.pickle.loads(e3)
     except Exception:
         e3 = Exception(str(e2))
-        e3 = serialize.pickle.dumps(e3)
+        e3 = protocol.pickle.dumps(e3)
     try:
-        tb2 = serialize.pickle.dumps(tb)
+        tb2 = protocol.pickle.dumps(tb)
     except Exception:
         tb2 = ''.join(traceback.format_tb(tb))
-        tb2 = serialize.pickle.dumps(tb2)
+        tb2 = protocol.pickle.dumps(tb2)
 
     if len(tb2) > 10000:
         tb2 = None
@@ -658,9 +658,9 @@ def clean_exception(exception, traceback, **kwargs):
     error_message: create and serialize errors into message
     """
     if isinstance(exception, bytes):
-        exception = serialize.pickle.loads(exception)
+        exception = protocol.pickle.loads(exception)
     if isinstance(traceback, bytes):
-        traceback = serialize.pickle.loads(traceback)
+        traceback = protocol.pickle.loads(traceback)
     if isinstance(traceback, str):
         traceback = None
     return type(exception), exception, traceback

@@ -1,7 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from distributed.protocol import loads, dumps, msgpack, maybe_compress
-from distributed.serialize import Serialize, Serialized, deserialize
+from distributed.protocol.serialize import Serialize, Serialized, deserialize
 import pytest
 
 

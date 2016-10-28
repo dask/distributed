@@ -29,7 +29,6 @@ from __future__ import print_function, division, absolute_import
 from copy import deepcopy
 from functools import partial
 import logging
-import random
 
 try:
     import pandas.msgpack as msgpack
@@ -38,58 +37,17 @@ except ImportError:
 
 from toolz import identity, get_in, valmap
 
-from .utils import ignoring
-from .serialize import serialize, deserialize, Serialize, Serialized
+from .compression import compressions, maybe_compress
+from .serialize import (serialize, deserialize, Serialize, Serialized,
+        to_serialize)
+from .utils import frame_split_size
+
+from ..utils import ignoring
 
 _deserialize = deserialize
 
-compressions = {None: {'compress': identity,
-                       'decompress': identity}}
-
-default_compression = None
 
 logger = logging.getLogger(__file__)
-
-
-with ignoring(ImportError):
-    import zlib
-    compressions['zlib'] = {'compress': zlib.compress,
-                            'decompress': zlib.decompress}
-
-with ignoring(ImportError):
-    import snappy
-    compressions['snappy'] = {'compress': snappy.compress,
-                              'decompress': snappy.decompress}
-    default_compression = 'snappy'
-
-with ignoring(ImportError):
-    import lz4
-    compressions['lz4'] = {'compress': lz4.LZ4_compress,
-                           'decompress': lz4.LZ4_uncompress}
-    default_compression = 'lz4'
-
-with ignoring(ImportError):
-    import blosc
-    compressions['blosc'] = {'compress': partial(blosc.compress, clevel=5,
-                                                 cname='lz4'),
-                             'decompress': blosc.decompress}
-
-
-from .config import config
-default = config.get('compression', 'auto')
-if default != 'auto':
-    if default in compressions:
-        default_compression = default
-    else:
-        raise ValueError("Default compression '%s' not found.\n"
-                "Choices include auto, %s" % (
-                    default, ', '.join(sorted(map(str, compressions)))))
-
-
-to_serialize = Serialize
-
-
-BIG_BYTES_SHARD_SIZE = 2**28
 
 
 def extract_serialize(x):
@@ -119,29 +77,6 @@ def _extract_serialize(x, ser, path=()):
                 _extract_serialize(v, ser, path + (k,))
             elif type(v) is Serialize or type(v) is Serialized:
                 ser[path + (k,)] = v
-
-
-def frame_split_size(frames, n=BIG_BYTES_SHARD_SIZE):
-    """ Split a list of frames into a list of frames of maximum size
-
-    Examples
-    --------
-    >>> frame_split_size([b'12345', b'678'], n=3)
-    [b'123', b'45', b'678']
-    """
-    if max(map(len, frames)) <= n:
-        return frames
-
-    out = []
-    for frame in frames:
-        if len(frame) > n:
-            if isinstance(frame, bytes):
-                frame = memoryview(frame)
-            for i in range(0, len(frame), n):
-                out.append(frame[i: i + n])
-        else:
-            out.append(frame)
-    return out
 
 
 def dumps(msg):
@@ -224,52 +159,6 @@ def loads(frames, deserialize=True):
     except Exception as e:
         logger.critical("Failed to deerialize", exc_info=True)
         raise
-
-
-def byte_sample(b, size, n):
-    """ Sample a bytestring from many locations """
-    starts = [random.randint(0, len(b) - size) for j in range(n)]
-    ends = []
-    for i, start in enumerate(starts[:-1]):
-        ends.append(min(start + size, starts[i + 1]))
-    ends.append(starts[-1] + size)
-
-    return b''.join([b[start:end] for start, end in zip(starts, ends)])
-
-
-def maybe_compress(payload, compression=default_compression, min_size=1e4,
-                   sample_size=1e4, nsamples=5):
-    """ Maybe compress payload
-
-    1.  We don't compress small messages
-    2.  We sample the payload in a few spots, compress that, and if it doesn't
-        do any good we return the original
-    3.  We then compress the full original, it it doesn't compress well then we
-        return the original
-    4.  We return the compressed result
-    """
-    if not compression:
-        return None, payload
-    if len(payload) < min_size:
-        return None, payload
-    if len(payload) > 2**31:
-        return None, payload
-
-    min_size = int(min_size)
-    sample_size = int(sample_size)
-
-    compress = compressions[compression]['compress']
-
-    # Compress a sample, return original if not very compressed
-    sample = byte_sample(payload, sample_size, nsamples)
-    if len(compress(sample)) > 0.9 * len(sample):  # not very compressible
-        return None, payload
-
-    compressed = compress(payload)
-    if len(compressed) > 0.9 * len(payload):  # not very compressible
-        return None, payload
-    else:
-        return compression, compressed
 
 
 def dumps_msgpack(msg):

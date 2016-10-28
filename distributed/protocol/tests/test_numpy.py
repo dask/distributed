@@ -3,10 +3,10 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 import pytest
 
-from distributed.serialize.core import serialize, deserialize
-from distributed.protocol import decompress
+from distributed.protocol import serialize, deserialize, decompress
 
-import distributed.serialize.numpy
+import distributed.protocol.numpy
+
 
 def test_serialize():
     x = np.ones((5, 5))
@@ -24,7 +24,7 @@ def test_serialize():
         [np.ones(5),
          np.asfortranarray(np.random.random((5, 5))),
          np.random.random(5).astype('f4'),
-         np.empty(shape=(5, 3), dtype=[('total', '<f8'), ('n', '<f8')])])
+         np.ones(shape=(5, 6)).astype(dtype=[('total', '<f8'), ('n', '<f8')])])
 def test_dumps_serialize_numpy(x):
     header, frames = serialize(x)
     if 'compression' in header:

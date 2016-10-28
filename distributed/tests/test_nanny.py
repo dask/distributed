@@ -13,7 +13,7 @@ from tornado import gen
 
 from distributed import Nanny, rpc, Scheduler
 from distributed.core import connect, read, write
-from distributed.serialize.pickle import dumps, loads
+from distributed.protocol.pickle import dumps, loads
 from distributed.utils import ignoring
 from distributed.utils_test import gen_cluster
 from distributed.nanny import isalive

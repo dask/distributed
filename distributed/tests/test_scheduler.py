@@ -25,7 +25,7 @@ from distributed.core import connect, read, write, rpc
 from distributed.scheduler import (validate_state, decide_worker,
         Scheduler)
 from distributed.client import _wait
-from distributed.serialize.pickle import dumps
+from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
         loop)

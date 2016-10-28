@@ -7,7 +7,6 @@ from dask.base import normalize_token
 from . import pickle
 
 
-
 serializers = {}
 deserializers = {None: lambda header, frames: pickle.loads(b''.join(frames))}
 
@@ -52,6 +51,9 @@ class Serialize(object):
         return "<Serialize: %s>" % self.data
 
     __repr__ = __str__
+
+
+to_serialize = Serialize
 
 
 class Serialized(object):

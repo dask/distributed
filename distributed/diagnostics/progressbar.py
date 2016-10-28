@@ -13,7 +13,7 @@ from .progress import format_time, Progress, MultiProgress
 
 from ..core import connect, read, write
 from ..client import default_client, futures_of
-from ..serialize.pickle import dumps
+from ..protocol.pickle import dumps
 from ..utils import sync, ignoring, key_split, is_kernel
 
 

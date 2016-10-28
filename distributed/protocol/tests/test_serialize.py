@@ -5,7 +5,7 @@ import pickle
 import numpy as np
 import pytest
 
-from distributed.serialize.core import (register_serialization, serialize,
+from distributed.protocol import (register_serialization, serialize,
         deserialize, Serialize, Serialized)
 from distributed.protocol import decompress
 

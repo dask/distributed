@@ -8,8 +8,10 @@ try:
 except ImportError:
     blosc = False
 
-from ..protocol import frame_split_size
-from .core import register_serialization
+from .utils import frame_split_size
+from .serialize import register_serialization
+
+from ..utils import log_errors
 
 
 def serialize_numpy_ndarray(x):
@@ -36,16 +38,20 @@ def serialize_numpy_ndarray(x):
 
 
 def deserialize_numpy_ndarray(header, frames):
-    assert len(frames) == 1
+    with log_errors(pdb=True):
+        assert len(frames) == 1
 
-    dt = np.dtype(header['dtype'])
+        dt = header['dtype']
+        if isinstance(dt, tuple):
+            dt = list(dt)
+        dt = np.dtype(dt)
 
-    buffer = frames[0]
+        buffer = frames[0]
 
-    x = np.frombuffer(buffer, dt)
-    x = np.lib.stride_tricks.as_strided(x, header['shape'], header['strides'])
+        x = np.frombuffer(buffer, dt)
+        x = np.lib.stride_tricks.as_strided(x, header['shape'], header['strides'])
 
-    return x
+        return x
 
 
 register_serialization(np.ndarray, serialize_numpy_ndarray, deserialize_numpy_ndarray)

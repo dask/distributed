@@ -15,7 +15,7 @@ from tornado.ioloop import IOLoop
 
 from distributed.compatibility import ConnectionRefusedError
 from distributed.core import read, connect, write
-from distributed.serialize.pickle import dumps
+from distributed.protocol.pickle import dumps
 from distributed.diagnostics.progress_stream import progress_stream
 from distributed.bokeh.worker_monitor import resource_append
 import distributed.bokeh
