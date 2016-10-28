@@ -474,11 +474,12 @@ class Worker(Server):
     def compute_many(self, bstream, msgs, report=False):
         good, bad, data, num_transferred, diagnostics = yield self.gather_many(msgs)
 
+        if bad:
+            logger.warn("Could not find data for %s", sorted(bad))
+
         for msg in msgs:
             msg.pop('who_has', None)
 
-        if bad:
-            logger.warn("Could not find data for %s", sorted(bad))
         for k, v in bad.items():
             bstream.send({'status': 'missing-data',
                           'key': k,

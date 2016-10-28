@@ -26,8 +26,9 @@ outside of this module though and is not baked in.
 """
 from __future__ import print_function, division, absolute_import
 
-from functools import partial
 from copy import deepcopy
+from functools import partial
+import logging
 import random
 
 try:
@@ -46,6 +47,8 @@ compressions = {None: {'compress': identity,
                        'decompress': identity}}
 
 default_compression = None
+
+logger = logging.getLogger(__file__)
 
 
 with ignoring(ImportError):
@@ -143,74 +146,84 @@ def frame_split_size(frames, n=BIG_BYTES_SHARD_SIZE):
 
 def dumps(msg):
     """ Transform Python value to bytestream suitable for communication """
-    data = {}
-    # Only lists and dicts can contain serialized values
-    if isinstance(msg, (list, dict)):
-        msg, data = extract_serialize(msg)
-    small_header, small_payload = dumps_msgpack(msg)
+    try:
+        data = {}
+        # Only lists and dicts can contain serialized values
+        if isinstance(msg, (list, dict)):
+            msg, data = extract_serialize(msg)
+        small_header, small_payload = dumps_msgpack(msg)
 
-    if not data:  # fast path without serialized data
-        return small_header, small_payload
+        if not data:  # fast path without serialized data
+            return small_header, small_payload
 
-    pre = {key: (value.header, value.frames)
-           for key, value in data.items()
-           if type(value) is Serialized}
+        pre = {key: (value.header, value.frames)
+               for key, value in data.items()
+               if type(value) is Serialized}
 
-    data = {key: serialize(value.data)
-                 for key, value in data.items()
-                 if type(value) is Serialize}
+        data = {key: serialize(value.data)
+                     for key, value in data.items()
+                     if type(value) is Serialize}
 
-    header = {'headers': {},
-              'keys': []}
-    out_frames = []
+        header = {'headers': {},
+                  'keys': []}
+        out_frames = []
 
-    for key, (head, frames) in data.items():
-        if 'compression' not in head:
-            frames = frame_split_size(frames)
-            compression, frames = zip(*map(maybe_compress, frames))
-            head['compression'] = compression
-        head['lengths'] = list(map(len, frames))
-        header['headers'][key] = head
-        header['keys'].append(key)
-        out_frames.extend(frames)
+        for key, (head, frames) in data.items():
+            if 'compression' not in head:
+                frames = frame_split_size(frames)
+                compression, frames = zip(*map(maybe_compress, frames))
+                head['compression'] = compression
+            head['lengths'] = list(map(len, frames))
+            header['headers'][key] = head
+            header['keys'].append(key)
+            out_frames.extend(frames)
 
-    for key, (head, frames) in pre.items():
-        head['lengths'] = list(map(len, frames))
-        header['headers'][key] = head
-        header['keys'].append(key)
-        out_frames.extend(frames)
+        for key, (head, frames) in pre.items():
+            head['lengths'] = list(map(len, frames))
+            header['headers'][key] = head
+            header['keys'].append(key)
+            out_frames.extend(frames)
 
-    return [small_header, small_payload,
-            msgpack.dumps(header, use_bin_type=True)] + out_frames
+        out_frames = [bytes(f) for f in out_frames]
+
+        return [small_header, small_payload,
+                msgpack.dumps(header, use_bin_type=True)] + out_frames
+    except Exception as e:
+        logger.critical("Failed to Serialize", exc_info=True)
+        raise
 
 
 def loads(frames, deserialize=True):
     """ Transform bytestream back into Python value """
-    small_header, small_payload, frames = frames[0], frames[1], frames[2:]
-    msg = loads_msgpack(small_header, small_payload)
-    if not frames:
+    try:
+        small_header, small_payload, frames = frames[0], frames[1], frames[2:]
+        msg = loads_msgpack(small_header, small_payload)
+        if not frames:
+            return msg
+
+        header, frames = frames[0], frames[1:]
+        header = msgpack.loads(header, encoding='utf8', use_list=False)
+        keys = header['keys']
+        headers = header['headers']
+
+        for key in keys:
+            head = headers[key]
+            lengths = head['lengths']
+            fs, frames = frames[:len(lengths)], frames[len(lengths):]
+            # assert all(len(f) == l for f, l in zip(frames, lengths))
+
+            if deserialize:
+                fs = decompress(head, fs)
+                value = _deserialize(head, fs)
+            else:
+                value = Serialized(head, fs)
+
+            get_in(key[:-1], msg)[key[-1]] = value
+
         return msg
-
-    header, frames = frames[0], frames[1:]
-    header = msgpack.loads(header, encoding='utf8', use_list=False)
-    keys = header['keys']
-    headers = header['headers']
-
-    for key in keys:
-        head = headers[key]
-        lengths = head['lengths']
-        fs, frames = frames[:len(lengths)], frames[len(lengths):]
-        # assert all(len(f) == l for f, l in zip(frames, lengths))
-
-        if deserialize:
-            fs = decompress(head, fs)
-            value = _deserialize(head, fs)
-        else:
-            value = Serialized(head, fs)
-
-        get_in(key[:-1], msg)[key[-1]] = value
-
-    return msg
+    except Exception as e:
+        logger.critical("Failed to deerialize", exc_info=True)
+        raise
 
 
 def byte_sample(b, size, n):

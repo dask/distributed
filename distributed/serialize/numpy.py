@@ -18,8 +18,7 @@ def serialize_numpy_ndarray(x):
     else:
         dt = x.dtype.str
 
-    if blosc:
-        x = np.ascontiguousarray(x)
+    x = np.ascontiguousarray(x)
 
     header = {'dtype': dt,
               'strides': x.strides,

@@ -2005,6 +2005,7 @@ def test__persist(c, s, a, b):
     assert yy._keys() == y._keys()
 
     g, h = c.compute([y, yy])
+
     gg, hh = yield c._gather([g, h])
     assert (gg == hh).all()
 
