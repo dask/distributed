@@ -17,8 +17,8 @@ def test_TaskStream_update():
 
 def test_TaskProgress_initialization():
     task_progress = TaskProgress()
-    assert isinstance(task_stream.root, Plot)
-    assert isinstance(task_stream.source, ColumnDataSource)
+    assert isinstance(task_progress.root, Plot)
+    assert isinstance(task_progress.source, ColumnDataSource)
 
 def test_TaskProgress_update():
     task_stream = TaskProgress()
