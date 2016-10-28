@@ -12,24 +12,36 @@ deserializers = {None: lambda header, frames: pickle.loads(b''.join(frames))}
 
 
 def register_serialization(cls, serialize, deserialize):
-    """ Register a new class for serialiation
+    """ Register a new class for custom serialization
+
+    Parameters
+    ----------
+    cls: type
+    serialize: function
+    deserialize: function
 
     Examples
     --------
-    >>> class MyType(object):
-    ...     pass
+    >>> class Human(object):
+    ...     def __init__(self, name):
+    ...         self.name = name
 
-    >>> def serialize(myobj):
+    >>> def serialize(human):
     ...     header = {}
-    ...     frames = [b'']
+    ...     frames = [human.name.encode()]
     ...     return header, frames
 
     >>> def deserialize(header, frames):
-    ...     return MyType()
+    ...     return Human(frames[0].decode())
 
-    >>> register_serialization(MyType, serialize, deserialize)
-    >>> serialize(MyType())
-    ({}, [b''])
+    >>> register_serialization(Human, serialize, deserialize)
+    >>> serialize(Human('Alice'))
+    ({}, [b'Alice'])
+
+    See Also
+    --------
+    serialize
+    deserialize
     """
     name = typename(cls)
     serializers[name] = serialize
@@ -50,7 +62,7 @@ def typename(typ):
 
 def serialize(x):
     r"""
-    Convert object to a header and sequence of bytes
+    Convert object to a header and list of bytestrings
 
     This takes in an arbitrary Python object and returns a msgpack serializable
     header and a list of bytes or memoryview objects.  By default this uses
@@ -70,8 +82,8 @@ def serialize(x):
 
     Returns
     -------
-    header: dict
-    frames: list of bytes or memoryviews
+    header: dictionary containing any msgpack-serializable metadata
+    frames: list of bytes or memoryviews, commonly of length one
 
     See Also
     --------
@@ -94,7 +106,7 @@ def serialize(x):
 
 def deserialize(header, frames):
     """
-    Convert serialized data back to Python object
+    Convert serialized header and list of bytestrings back to a Python object
 
     Parameters
     ----------
@@ -115,7 +127,7 @@ class Serialize(object):
     Example
     -------
     >>> msg = {'op': 'update', 'data': to_serialize(123)}
-    >>> msg
+    >>> msg  # doctest: +SKIP
     {'op': 'update', 'data': <Serialize: 123>}
 
     See also
@@ -153,5 +165,12 @@ def normalize_Serialized(o):
 
 
 # Teach serialize how to handle bytestrings
-register_serialization(bytes, lambda b: ({}, [b]),
-                              lambda header, frames: b''.join(frames))
+def serialize_bytes(obj):
+    header = {}  # no special metadata
+    frames = [obj]
+    return header, frames
+
+def deserialize_bytes(header, frames):
+    return b''.join(frames)  # the frames may be cut up in transit
+
+register_serialization(bytes, serialize_bytes, deserialize_bytes)
