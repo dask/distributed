@@ -134,7 +134,14 @@ def test_loads_deserialize_False():
     assert result == 123
 
 
-def test_dumps_laods_Serialize():
+def eq_frames(a, b):
+    if b'headers' in a:
+        return (msgpack.loads(a, use_list=False)
+             == msgpack.loads(b, use_list=False))
+    else:
+        return a == b
+
+def test_dumps_loads_Serialize():
     msg = {'x': 1, 'data': Serialize(123)}
     frames = dumps(msg)
     assert len(frames) > 2
@@ -149,7 +156,7 @@ def test_dumps_laods_Serialize():
                for b in frames)
 
     frames2 = dumps(result2)
-    assert frames == frames2
+    assert all(map(eq_frames, frames, frames2))
 
     result3 = loads(frames2)
     assert result == result3
