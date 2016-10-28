@@ -28,14 +28,14 @@ from dask.core import reverse_dict
 from dask.order import order
 
 from .batched import BatchedSend
-from .utils_comm import (scatter_to_workers, gather_from_workers)
+from .config import config
 from .core import (rpc, connect, read, write, MAX_BUFFER_SIZE,
         Server, send_recv, coerce_to_address, error_message)
 from .utils import (All, ignoring, clear_queue, get_ip, ignore_exceptions,
         ensure_ip, get_fileno_limit, log_errors, key_split, mean,
         divide_n_among_bins)
+from .utils_comm import (scatter_to_workers, gather_from_workers)
 from .versions import get_versions
-from .config import config
 
 
 logger = logging.getLogger(__name__)

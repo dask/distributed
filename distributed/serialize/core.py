@@ -1,50 +1,15 @@
 from __future__ import print_function, division, absolute_import
 
 from functools import partial
-import pickle
-
-import cloudpickle
 
 from dask.base import normalize_token
 
+from . import pickle
 
-def dumps(x):
-    """ Manage between cloudpickle and pickle
-
-    1.  Try pickle
-    2.  If it is short then check if it contains __main__
-    3.  If it is long, then first check type, then check __main__
-    """
-    try:
-        result = pickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-        if len(result) < 1000:
-            if b'__main__' in result:
-                return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-            else:
-                return result
-        else:
-            if isinstance(x, pickle_types) or b'__main__' not in result:
-                return result
-            else:
-                return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-    except:
-        try:
-            return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-        except Exception:
-            logger.info("Failed to serialize %s", x, exc_info=True)
-            raise
-
-
-def loads(x):
-    try:
-        return pickle.loads(x)
-    except Exception:
-        logger.info("Failed to deserialize %s", x[:10000], exc_info=True)
-        raise
 
 
 serializers = {}
-deserializers = {None: lambda header, frames: loads(b''.join(frames))}
+deserializers = {None: lambda header, frames: pickle.loads(b''.join(frames))}
 
 
 def register_serialization(cls, serialize, deserialize):
@@ -69,7 +34,7 @@ def serialize(x):
         header, frames = serializers[name](x)
         header['type'] = name
     else:
-        header, frames = {}, [dumps(x)]
+        header, frames = {}, [pickle.dumps(x)]
 
     return header, frames
 

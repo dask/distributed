@@ -633,16 +633,16 @@ def error_message(e, status='error'):
     tb = get_traceback()
     e2 = truncate_exception(e, 1000)
     try:
-        e3 = serialize.dumps(e2)
-        serialize.loads(e3)
+        e3 = serialize.pickle.dumps(e2)
+        serialize.pickle.loads(e3)
     except Exception:
         e3 = Exception(str(e2))
-        e3 = serialize.dumps(e3)
+        e3 = serialize.pickle.dumps(e3)
     try:
-        tb2 = serialize.dumps(tb)
+        tb2 = serialize.pickle.dumps(tb)
     except Exception:
         tb2 = ''.join(traceback.format_tb(tb))
-        tb2 = serialize.dumps(tb2)
+        tb2 = serialize.pickle.dumps(tb2)
 
     if len(tb2) > 10000:
         tb2 = None
@@ -658,9 +658,9 @@ def clean_exception(exception, traceback, **kwargs):
     error_message: create and serialize errors into message
     """
     if isinstance(exception, bytes):
-        exception = serialize.loads(exception)
+        exception = serialize.pickle.loads(exception)
     if isinstance(traceback, bytes):
-        traceback = serialize.loads(traceback)
+        traceback = serialize.pickle.loads(traceback)
     if isinstance(traceback, str):
         traceback = None
     return type(exception), exception, traceback

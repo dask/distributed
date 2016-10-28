@@ -10,7 +10,6 @@ from glob import glob
 import logging
 import os
 import sys
-import pickle
 from time import sleep
 import uuid
 from threading import Thread
@@ -35,7 +34,7 @@ from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import (read, write, connect, coerce_to_rpc, clean_exception)
 from .protocol import to_serialize
-from .serialize import dumps, loads
+from .serialize.pickle import dumps, loads
 from .worker import dumps_function, dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)

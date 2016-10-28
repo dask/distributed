@@ -2030,7 +2030,7 @@ def test_persist(loop):
 
 @gen_cluster(timeout=60, client=True)
 def test_long_traceback(c, s, a, b):
-    from distributed.serialize import dumps
+    from distributed.serialize.pickle import dumps
 
     n = sys.getrecursionlimit()
     sys.setrecursionlimit(500)

@@ -16,7 +16,7 @@ from toolz import merge, concat, groupby, drop, valmap
 
 from .core import rpc, coerce_to_rpc, coerce_to_address
 from .utils import ignore_exceptions, All, log_errors, tokey, sync
-from .serialize import dumps, loads
+from .serialize.pickle import dumps, loads
 
 
 no_default = '__no_default__'
