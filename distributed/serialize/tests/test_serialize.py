@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 import pickle
 
 import numpy as np
+import pytest
 
 from distributed.serialize.core import (register_serialization, serialize,
         deserialize, Serialize, Serialized)
@@ -54,6 +55,19 @@ def test_dumps_serialize():
 
     result = deserialize(header, frames)
     assert result.data == x.data
+
+
+@pytest.mark.parametrize('x',
+        [np.ones(5),
+         np.asfortranarray(np.random.random((5, 5))),
+         np.random.random(5).astype('f4'),
+         np.empty(shape=(5, 3), dtype=[('total', '<f8'), ('n', '<f8')])])
+def test_dumps_serialize_numpy(x):
+    header, frames = serialize(x)
+    frames = decompress(header, frames)
+    y = deserialize(header, frames)
+
+    np.testing.assert_equal(x, y)
 
 
 def test_serialize_bytes():

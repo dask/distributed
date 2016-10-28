@@ -13,7 +13,15 @@ from .core import register_serialization
 
 
 def serialize_numpy_ndarray(x):
-    header = {'dtype': x.dtype.str,
+    if x.dtype.kind == 'V':
+        dt = x.dtype.descr
+    else:
+        dt = x.dtype.str
+
+    if blosc:
+        x = np.ascontiguousarray(x)
+
+    header = {'dtype': dt,
               'strides': x.strides,
               'shape': x.shape}
 
@@ -31,11 +39,7 @@ def serialize_numpy_ndarray(x):
 def deserialize_numpy_ndarray(header, frames):
     assert len(frames) == 1
 
-    dt = header['dtype']
-    if dt.startswith('['):
-        dt = np.dtype(eval(dt))  # dangerous
-    else:
-        dt = np.dtype(dt)
+    dt = np.dtype(header['dtype'])
 
     buffer = frames[0]
 
