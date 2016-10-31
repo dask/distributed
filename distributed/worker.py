@@ -290,8 +290,6 @@ class Worker(Server):
 
     def _deserialize(self, function=None, args=None, kwargs=None, task=None):
         """ Deserialize task inputs and regularize to func, args, kwargs """
-        if task is not None:
-            task = loads(task)
         if function is not None:
             function = loads(function)
         if args:
@@ -787,7 +785,7 @@ def dumps_task(task):
         elif not any(map(_maybe_complex, task[1:])):
             return {'function': dumps_function(task[0]),
                         'args': dumps(task[1:])}
-    return {'task': dumps(task)}
+    return to_serialize(task)
 
 
 def apply_function(function, args, kwargs, execution_state, key):

@@ -4,6 +4,7 @@ import pickle
 
 import numpy as np
 import pytest
+from toolz import identity
 
 from distributed.protocol import (register_serialization, serialize,
         deserialize, Serialize, Serialized)
@@ -16,6 +17,9 @@ class MyObj(object):
 
     def __getstate__(self):
         raise Exception('Not picklable')
+
+    def __deepcopy__(self, _):
+        return self
 
 
 def serialize_myobj(x):
@@ -50,3 +54,29 @@ def test_serialize_bytes():
     b = b'123'
     header, frames = serialize(b)
     assert frames[0] is b
+
+
+def test_Serialize():
+    s = Serialize(123)
+    assert '123' in str(s)
+    assert s.data == 123
+
+    s = Serialize((1, 2))
+    assert str(s)
+
+
+from distributed.utils_test import gen_cluster
+from dask import delayed
+
+
+@gen_cluster(client=True)
+def test_object_in_graph(c, s, a, b):
+    o = MyObj(123)
+    v = delayed(o)
+    v2 = delayed(identity)(v)
+
+    future = c.compute(v2)
+    result = yield future._result()
+
+    assert isinstance(result, MyObj)
+    assert result.data == 123

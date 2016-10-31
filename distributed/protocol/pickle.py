@@ -1,8 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
+import logging
 import pickle
 
 import cloudpickle
+
+logger = logging.getLogger(__file__)
 
 
 def dumps(x):

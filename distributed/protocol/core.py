@@ -171,6 +171,7 @@ def extract_serialize(x):
                 del t[path[-1]]
             else:
                 t[path[-1]] = None
+
     return x, ser
 
 

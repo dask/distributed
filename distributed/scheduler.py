@@ -981,7 +981,7 @@ class Scheduler(Server):
             if isinstance(in_queue, Queue):
                 next_message = in_queue.get
             elif isinstance(in_queue, IOStream):
-                next_message = lambda: read(in_queue)
+                next_message = lambda: read(in_queue, deserialize=self.deserialize)
             else:
                 raise NotImplementedError()
 

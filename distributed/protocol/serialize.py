@@ -138,7 +138,7 @@ class Serialize(object):
         self.data = data
 
     def __str__(self):
-        return "<Serialize: %s>" % self.data
+        return "<Serialize: %s>" % str(self.data)
 
     __repr__ = __str__
 
