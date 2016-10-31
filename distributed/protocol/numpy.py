@@ -1,5 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
+import sys
+
 import numpy as np
 
 try:
@@ -11,7 +13,7 @@ except ImportError:
 from .utils import frame_split_size
 from .serialize import register_serialization
 
-from ..utils import log_errors
+from ..utils import log_errors, ensure_bytes
 
 
 def serialize_numpy_ndarray(x):
@@ -28,6 +30,8 @@ def serialize_numpy_ndarray(x):
 
     if blosc:
         frames = frame_split_size([x.data])
+        if sys.version_info.major == 2:
+            frames = [ensure_bytes(frame) for frame in frames]
         frames = [blosc.compress(frame, typesize=x.dtype.itemsize,
                                  cname='lz4', clevel=5) for frame in frames]
         header['compression'] = ['blosc'] * len(frames)

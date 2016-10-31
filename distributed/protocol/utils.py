@@ -1,3 +1,7 @@
+from __future__ import print_function, division, absolute_import
+
+from ..utils import ensure_bytes
+
 BIG_BYTES_SHARD_SIZE = 2**28
 
 
@@ -59,6 +63,6 @@ def merge_frames(header, frames):
                 L.append(mv[:l])
                 frames.append(mv[l:])
                 l = 0
-        out.append(b''.join(L))
+        out.append(b''.join(map(ensure_bytes, L)))
     return out
 

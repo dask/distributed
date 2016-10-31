@@ -42,7 +42,7 @@ def test_dumps_serialize_numpy_large():
     psutil = pytest.importorskip('psutil')
     if psutil.virtual_memory().total < 4e9:
         return
-    x = np.random.randint(0, 255, size=int(BIG_BYTES_SHARD_SIZE * 2), dtype='u1')
+    x = np.random.randint(0, 255, size=int(BIG_BYTES_SHARD_SIZE * 2)).astype('u1')
     frames = dumps([to_serialize(x)])
     [y] = loads(frames)
 

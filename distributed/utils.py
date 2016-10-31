@@ -492,6 +492,10 @@ def ensure_bytes(s):
     """
     if isinstance(s, bytes):
         return s
+    if isinstance(s, memoryview):
+        return s.tobytes()
+    if isinstance(s, buffer):
+        return bytes(s)
     if hasattr(s, 'encode'):
         return s.encode()
     raise TypeError(

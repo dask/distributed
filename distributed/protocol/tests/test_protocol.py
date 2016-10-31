@@ -1,10 +1,13 @@
 from __future__ import print_function, division, absolute_import
 
+import sys
+
+import pytest
+
 from distributed.protocol import (loads, dumps, msgpack, maybe_compress,
         to_serialize)
 from distributed.protocol.serialize import Serialize, Serialized, deserialize
 from distributed.utils_test import slow
-import pytest
 
 
 def test_protocol():
@@ -58,7 +61,7 @@ def test_small_and_big():
 
 def dont_test_big_bytes_protocol():
     np = pytest.importorskip('numpy')
-    data = np.random.randint(0, 255, dtype='u1', size=2**21).tobytes()
+    data = np.random.randint(0, 255, size=2**21).astype('u1').tobytes()
 
     d = {'x': data, 'y': 'foo'}
     frames = dumps(d)
@@ -97,7 +100,7 @@ def test_maybe_compress():
 def test_maybe_compress_sample():
     np = pytest.importorskip('numpy')
     lz4 = pytest.importorskip('lz4')
-    payload = np.random.randint(0, 255, dtype='u1', size=10000).tobytes()
+    payload = np.random.randint(0, 255, size=10000).astype('u1').tobytes()
     fmt, compressed = maybe_compress(payload, 'lz4')
     assert fmt == None
     assert compressed == payload
@@ -110,6 +113,9 @@ def test_large_messages():
     pytest.importorskip('lz4')
     if psutil.virtual_memory().total < 8e9:
         return
+
+    if sys.version_info.major == 2:
+        return 2
 
     x = np.random.randint(0, 255, size=200000000, dtype='u1')
 
