@@ -27,9 +27,11 @@ def counts(scheduler, allprogress):
                  {state: valmap(len, allprogress.state[state])
                      for state in ['memory', 'erred', 'released']})
 
+
+counter = itertools.count()
 @memoize
 def incrementing_index(o):
-    return next(itertools.count())
+    return next(counter)
 
 
 @gen.coroutine

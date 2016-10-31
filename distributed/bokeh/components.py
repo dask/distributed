@@ -14,6 +14,7 @@ from bokeh.models import (
 from distributed.diagnostics.progress_stream import progress_quads, nbytes_bar
 from distributed.utils import log_errors
 
+
 class DashboardComponent(object):
     """ Base class for Distributed UI dashboard components. """
 
@@ -32,6 +33,7 @@ class DashboardComponent(object):
         Callback that reads from bokeh.distributed.messages and updates self.source
         """
         pass
+
 
 class TaskStream(DashboardComponent):
     """ Task Stream """
