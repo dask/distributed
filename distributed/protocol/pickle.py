@@ -5,7 +5,18 @@ import pickle
 
 import cloudpickle
 
+from ..utils import ignoring
+
 logger = logging.getLogger(__file__)
+
+pickle_types = [str, bytes]
+with ignoring(ImportError):
+    import numpy as np
+    pickle_types.append(np.ndarray)
+with ignoring(ImportError):
+    import pandas as pd
+    pickle_types.append(pd.core.generic.NDFrame)
+pickle_types = tuple(pickle_types)
 
 
 def dumps(x):

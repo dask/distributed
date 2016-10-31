@@ -28,15 +28,6 @@ from .compatibility import PY3, unicode, WINDOWS
 from .utils import get_traceback, truncate_exception, ignoring
 from . import protocol
 
-pickle_types = [str, bytes]
-with ignoring(ImportError):
-    import numpy as np
-    pickle_types.append(np.ndarray)
-with ignoring(ImportError):
-    import pandas as pd
-    pickle_types.append(pd.core.generic.NDFrame)
-pickle_types = tuple(pickle_types)
-
 
 class RPCClosed(IOError):
     pass
