@@ -1,4 +1,5 @@
 from collections import deque
+from time import time
 
 messages = {}
 
@@ -21,3 +22,12 @@ messages['progress'] = {}
 
 messages['processing'] = {'stacks': {}, 'processing': {},
                           'memory': 0, 'waiting': 0, 'ready': 0}
+
+messages['task-events'] = {'interval': 200,
+                           'deque': deque(maxlen=n),
+                           'times': deque(maxlen=n),
+                           'index': deque(maxlen=n),
+                           'rectangles':{name: deque(maxlen=n) for name in
+                                        'start duration key name color worker worker_thread y alpha'.split()},
+                           'workers': dict(),
+                           'last_seen': [time()]}

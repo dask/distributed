@@ -1,55 +1,41 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import deque
+import pytest
 
-from bokeh.layouts import Row
-from bokeh.models import Plot, ColumnDataSource
+from bokeh.models import ColumnDataSource, Model
 
 from distributed.bokeh import messages
 
 from distributed.bokeh.components import (
-    TaskStream, TaskProgress, MemoryUsage, ResourceProfiles
+    TaskStream, TaskProgress, MemoryUsage, ResourceProfiles, WorkerTable,
+    ProcessingStacks
 )
 
-def test_TaskStream_initialization():
-    task_stream = TaskStream()
-    assert isinstance(task_stream.root, Plot)
-    assert isinstance(task_stream.source, ColumnDataSource)
+@pytest.mark.parametrize('Component', [TaskStream,
+                                       TaskProgress,
+                                       MemoryUsage,
+                                       ResourceProfiles,
+                                       WorkerTable,
+                                       ProcessingStacks])
+def test_basic(Component):
+    c = Component()
+    assert isinstance(c.source, ColumnDataSource)
+    assert isinstance(c.root, Model)
+    c.update(messages)
 
 
-def test_TaskStream_update():
-    task_stream = TaskStream()
-    task_stream.update(messages)
+from distributed.utils_test import gen_cluster
+from tornado import gen
+from distributed.diagnostics.scheduler import workers
 
+@gen_cluster()
+def test_worker_table(s, a, b):
+    while any('last-seen' not in v for v in s.host_info.values()):
+        yield gen.sleep(0.01)
+    data = workers(s)
 
-def test_TaskProgress_initialization():
-    task_progress = TaskProgress()
-    assert isinstance(task_progress.root, Plot)
-    assert isinstance(task_progress.source, ColumnDataSource)
+    messages = {'workers': {'deque': [data]}}
 
-def test_TaskProgress_update():
-    component = TaskProgress()
-    component.update(messages)
-
-def test_MemoryUsage_initialization():
-    memory_usage = MemoryUsage()
-    assert isinstance(memory_usage.root, Plot)
-    assert isinstance(memory_usage.source, ColumnDataSource)
-
-def test_TaskProgress_update():
-    memory_usage = MemoryUsage()
-    messages = {'progress': {'all': {'inc': 2},
-                             'nbytes': {'inc': 100},
-                             'memory': {'inc': 1},
-                             'erred': {'inc': 0},
-                             'released': {'inc': 1}}}
-    memory_usage.update(messages)
-
-def test_ResourceProfiles_initialization():
-    resource_profiles = ResourceProfiles()
-    assert isinstance(resource_profiles.root, Row)
-    assert isinstance(resource_profiles.source, ColumnDataSource)
-
-def test_ResourceProfiles_update():
-    resource_profiles = ResourceProfiles()
-    resource_profiles.update(messages)
+    c = WorkerTable()
+    c.update(messages)
+    assert c.source.data['host'] == ['127.0.0.1']
