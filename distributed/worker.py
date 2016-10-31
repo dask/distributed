@@ -129,11 +129,18 @@ class Worker(Server):
         self.memory_limit = memory_limit
         if memory_limit:
             try:
-                from zict import Buffer, File, Func
+                from zict import Buffer, File, Func, LMDB, Sieve
             except ImportError:
                 raise ImportError("Please `pip install zict` for spill-to-disk workers")
             path = os.path.join(self.local_dir, 'storage')
-            storage = Func(dumps_to_disk, loads_from_disk, File(path))
+            file_storage = Func(dumps_to_disk, loads_from_disk, File(path))
+            lmdb_path = os.path.join(self.local_dir, 'lmdb')
+            lmdb = Func(dumps_to_disk, loads_from_disk, LMDB(lmdb_path))
+            def sieve_func(k, v):
+                return 'small' if sys.getsizeof(v) < 32 * 1024 else 'large'
+            storage = Sieve({'small': lmdb,
+                             'large': file_storage},
+                            sieve_func)
             self.data = Buffer({}, storage, int(float(memory_limit)), weight)
         else:
             self.data = dict()
@@ -272,6 +279,8 @@ class Worker(Server):
         for k, v in self.services.items():
             v.stop()
         self.rpc.close()
+        if hasattr(self.data, "close"):
+            self.data.close()
         self.status = 'closed'
         self.stop()
 

@@ -521,6 +521,37 @@ def test_spill_to_disk(e, s):
     yield w._close()
 
 
+@gen_cluster(client=True, ncores=[])
+def test_spill_to_disk_storage(e, s):
+    np = pytest.importorskip('numpy')
+
+    w = Worker(s.ip, s.port, loop=s.loop, memory_limit=100)
+    yield w._start()
+
+    x = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')
+    yield _wait(x)
+    y = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='y')
+    yield _wait(y)
+    z = e.submit(np.random.randint, 0, 255, size=1000000, dtype='u1', key='z')
+    yield _wait(z)
+
+    assert set(w.data) == {x.key, y.key, z.key}
+    assert set(w.data.fast) == set()
+    assert set(w.data.slow) == {x.key, y.key, z.key}
+    assert set(w.data.slow.mappings['small']) == {x.key, y.key}
+    assert set(w.data.slow.mappings['large']) == {z.key}
+
+    def get_files(path):
+        print(os.listdir(path))
+        return [s for s in os.listdir(path)
+                if os.path.isfile(os.path.join(path, s))]
+
+    files = get_files(os.path.join(w.local_dir, 'storage'))
+    assert files == ['z']
+
+    yield w._close()
+
+
 @gen_cluster(client=True)
 def test_access_key(c, s, a, b):
     def f(i):
