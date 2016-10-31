@@ -138,6 +138,7 @@ def test_loads_deserialize_False():
 
 
 def test_loads_without_deserialization_avoids_compression():
+    pytest.importorskip('lz4')
     b = b'0' * 100000
 
     msg = {'x': 1, 'data': to_serialize(b)}
@@ -154,13 +155,13 @@ def test_loads_without_deserialization_avoids_compression():
     assert msg4 == {'x': 1, 'data': b'0' * 100000}
 
 
-
 def eq_frames(a, b):
     if b'headers' in a:
         return (msgpack.loads(a, use_list=False)
              == msgpack.loads(b, use_list=False))
     else:
         return a == b
+
 
 def test_dumps_loads_Serialize():
     msg = {'x': 1, 'data': Serialize(123)}
