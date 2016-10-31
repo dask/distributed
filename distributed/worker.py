@@ -137,7 +137,7 @@ class Worker(Server):
             lmdb_path = os.path.join(self.local_dir, 'lmdb')
             lmdb = Func(dumps_to_disk, loads_from_disk, LMDB(lmdb_path))
             def sieve_func(k, v):
-                return 'small' if sys.getsizeof(v) < 32 * 1024 else 'large'
+                return 'small' if sizeof(v) < 32 * 1024 else 'large'
             storage = Sieve({'small': lmdb,
                              'large': file_storage},
                             sieve_func)
