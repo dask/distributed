@@ -19,31 +19,34 @@ from distributed.utils import log_errors
 
 
 class DashboardComponent(object):
-    """ Base class for Distributed UI dashboard components. """
+    """ Base class for Dask.distributed UI dashboard components.
 
+    This class must have two attributes, ``root`` and ``source``, and one
+    method ``update``:
+
+    *  source: a Bokeh ColumnDataSource
+    *  root: a Bokeh Model
+    *  update: a method that consumes the messages dictionary found in
+               distributed.bokeh.messages
+    """
     def __init__(self):
-        """
-        Should be overridden by subclasses.
-
-        self.source ColumnDataSource
-        self.root should a layout-able object, a Plot, Layout, Widget or WidgetBox
-        """
         self.source = None
         self.root = None
 
     def update(self, messages):
-        """
-        Callback that reads from bokeh.distributed.messages and updates self.source
-        """
+        """ Reads from bokeh.distributed.messages and updates self.source """
         pass
 
 
 class TaskStream(DashboardComponent):
-    """ Task Stream """
+    """ Task Stream
+
+    The start and stop time of tasks as they occur on each core of the cluster.
+    """
 
     def __init__(self, **kwargs):
         """
-        kwargs are applied to bokeh.models.plots.Plot constructor
+        kwargs are applied to the bokeh.models.plots.Plot constructor
         """
 
         self.source = ColumnDataSource(data=dict(
@@ -91,7 +94,6 @@ class TaskStream(DashboardComponent):
         self.task_stream_index = [0]
 
     def update(self, messages):
-        """" Update callback """
         with log_errors():
             index = messages['task-events']['index']
             old = rectangles = messages['task-events']['rectangles']
@@ -115,11 +117,9 @@ class TaskStream(DashboardComponent):
 
 
 class TaskProgress(DashboardComponent):
-    """ task completion progress bars """
+    """ Progress bars per task type """
 
     def __init__(self, **kwargs):
-        """ stuff happens """
-
         data = progress_quads(dict(all={}, memory={}, erred={}, released={}))
         self.source = ColumnDataSource(data=data)
 
@@ -187,7 +187,6 @@ class TaskProgress(DashboardComponent):
         self.root.add_tools(hover)
 
     def update(self, messages):
-        """ updates stuff """
         with log_errors():
             msg = messages['progress']
             if not msg:
@@ -202,11 +201,8 @@ class TaskProgress(DashboardComponent):
 
 
 class MemoryUsage(DashboardComponent):
-    """ stuff and things """
-
+    """ The memory usage across the cluster, grouped by task type """
     def __init__(self, **kwargs):
-        """ stuff and things """
-
         self.source = ColumnDataSource(data=dict(
             name=[], left=[], right=[], center=[], color=[],
             percent=[], MB=[], text=[])
@@ -246,8 +242,6 @@ class MemoryUsage(DashboardComponent):
         self.root.add_tools(hover)
 
     def update(self, messages):
-        """ do the thing """
-
         with log_errors():
             msg = messages['progress']
             if not msg:
@@ -259,10 +253,11 @@ class MemoryUsage(DashboardComponent):
 
 
 class ResourceProfiles(DashboardComponent):
-    """ things and stuff """
+    """ Time plots of the current resource usage on the cluster
 
+    This is two plots, one for CPU and Memory and another for Network I/O
+    """
     def __init__(self, **kwargs):
-
         self.source = ColumnDataSource(data={'time': [], 'cpu': [],
             'memory_percent':[], 'network-send':[], 'network-recv':[]}
         )
@@ -340,8 +335,6 @@ class ResourceProfiles(DashboardComponent):
         self.resource_index = [0]
 
     def update(self, messages):
-        """ stuff and things """
-
         with log_errors():
             index = messages['workers']['index']
             data = messages['workers']['plot-data']
@@ -360,11 +353,12 @@ class ResourceProfiles(DashboardComponent):
 
 
 class WorkerTable(DashboardComponent):
-    """ Column data source and plot for host table """
+    """ Status of the current workers
+
+    This is two plots, a text-based table for each host and a thin horizontal
+    plot laying out hosts by their current memory use.
+    """
     def __init__(self, **kwargs):
-        # names = ['host', 'cpu', 'memory_percent', 'memory', 'cores', 'processes',
-        #          'processing', 'latency', 'last-seen', 'disk-read', 'disk-write',
-        #          'network-send', 'network-recv']
         with log_errors():
             names = ['processes', 'disk-read', 'cores', 'cpu', 'disk-write',
                      'memory', 'last-seen', 'memory_percent', 'host']
@@ -450,6 +444,11 @@ class WorkerTable(DashboardComponent):
 
 
 class ProcessingStacks(DashboardComponent):
+    """ Processing and Stacks distribution per core
+
+    This shows how many tasks are actively running on each worker and how many
+    tasks are enqueued for each worker and how many are in the common pool
+    """
     def __init__(self, **kwargs):
         with log_errors():
             data = self.processing_update({'processing': {}, 'stacks': {},
