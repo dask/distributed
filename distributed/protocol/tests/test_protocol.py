@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
-from distributed.protocol import loads, dumps, msgpack, maybe_compress
+from distributed.protocol import (loads, dumps, msgpack, maybe_compress,
+        to_serialize)
 from distributed.protocol.serialize import Serialize, Serialized, deserialize
 import pytest
 
@@ -132,6 +133,24 @@ def test_loads_deserialize_False():
 
     result = deserialize(msg['data'].header, msg['data'].frames)
     assert result == 123
+
+
+def test_loads_without_deserialization_avoids_compression():
+    b = b'0' * 100000
+
+    msg = {'x': 1, 'data': to_serialize(b)}
+    frames = dumps(msg)
+
+    assert sum(map(len, frames)) < 10000
+
+    msg2 = loads(frames, deserialize=False)
+    assert sum(map(len, msg2['data'].frames)) < 10000
+
+    msg3 = dumps(msg2)
+    msg4 = loads(msg3)
+
+    assert msg4 == {'x': 1, 'data': b'0' * 100000}
+
 
 
 def eq_frames(a, b):
