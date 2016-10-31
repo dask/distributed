@@ -2,6 +2,7 @@ from collections import deque
 from time import time
 
 n = 60
+m = 100000
 
 messages = {
     'workers': {'interval': 1000,
@@ -24,10 +25,10 @@ messages = {
                    'memory': 0, 'waiting': 0, 'ready': 0},
 
     'task-events': {'interval': 200,
-                    'deque': deque(maxlen=n),
-                    'times': deque(maxlen=n),
-                    'index': deque(maxlen=n),
-                    'rectangles':{name: deque(maxlen=n) for name in
+                    'deque': deque(maxlen=m),
+                    'times': deque(maxlen=m),
+                    'index': deque(maxlen=m),
+                    'rectangles':{name: deque(maxlen=m) for name in
                                  'start duration key name color worker worker_thread y alpha'.split()},
                     'workers': dict(),
                     'last_seen': [time()]}

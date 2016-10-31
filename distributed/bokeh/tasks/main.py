@@ -10,7 +10,9 @@ import distributed.bokeh
 messages = distributed.bokeh.messages  # global message store
 doc = curdoc()
 
-task_stream = TaskStream(sizing_mode='stretch_both')
+task_stream = TaskStream(100000, sizing_mode='stretch_both')
 task_stream.update(messages)
+
+doc.add_periodic_callback(lambda: task_stream.update(messages), 2000)
 
 doc.add_root(task_stream.root)
