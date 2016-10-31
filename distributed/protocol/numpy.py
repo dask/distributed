@@ -34,12 +34,15 @@ def serialize_numpy_ndarray(x):
     else:
         frames = [x.data]
 
+    header['lengths'] = [x.nbytes]
+
     return header, frames
 
 
 def deserialize_numpy_ndarray(header, frames):
     with log_errors():
-        assert len(frames) == 1
+        if len(frames) != 1:
+            import pdb; pdb.set_trace()
 
         dt = header['dtype']
         if isinstance(dt, tuple):

@@ -30,7 +30,7 @@ already a sequnce of bytes.
        return header, frames
 
    def deserialize_bytes(header, frames):
-       return b''.join(frames)  # the frames may be cut up in transit
+       return frames[0]
 
    register_serialization(bytes, serialize_bytes, deserialize_bytes)
 

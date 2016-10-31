@@ -14,7 +14,7 @@ from toolz import identity, get_in, valmap
 from .compression import compressions, maybe_compress
 from .serialize import (serialize, deserialize, Serialize, Serialized,
         to_serialize)
-from .utils import frame_split_size
+from .utils import frame_split_size, merge_frames
 
 from ..utils import ignoring
 
@@ -49,17 +49,21 @@ def dumps(msg):
         out_frames = []
 
         for key, (head, frames) in data.items():
+            if 'lengths' not in head:
+                head['lengths'] = list(map(len, frames))
             if 'compression' not in head:
                 frames = frame_split_size(frames)
                 compression, frames = zip(*map(maybe_compress, frames))
                 head['compression'] = compression
-            head['lengths'] = list(map(len, frames))
+            head['count'] = len(frames)
             header['headers'][key] = head
             header['keys'].append(key)
             out_frames.extend(frames)
 
         for key, (head, frames) in pre.items():
-            head['lengths'] = list(map(len, frames))
+            if 'lengths' not in head:
+                head['lengths'] = list(map(len, frames))
+            head['count'] = len(frames)
             header['headers'][key] = head
             header['keys'].append(key)
             out_frames.extend(frames)
@@ -89,11 +93,12 @@ def loads(frames, deserialize=True):
         for key in keys:
             head = headers[key]
             lengths = head['lengths']
-            fs, frames = frames[:len(lengths)], frames[len(lengths):]
-            # assert all(len(f) == l for f, l in zip(frames, lengths))
+            count = head['count']
+            fs, frames = frames[:count], frames[count:]
 
             if deserialize:
                 fs = decompress(head, fs)
+                fs = merge_frames(head, fs)
                 value = _deserialize(head, fs)
             else:
                 value = Serialized(head, fs)

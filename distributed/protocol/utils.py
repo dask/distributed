@@ -26,3 +26,39 @@ def frame_split_size(frames, n=BIG_BYTES_SHARD_SIZE):
             out.append(frame)
     return out
 
+
+def merge_frames(header, frames):
+    """ Merge frames into original lengths
+
+    Examples
+    --------
+    >>> merge_frames({'lengths': [3, 3]}, [b'123456'])
+    [b'123', b'456']
+    >>> merge_frames({'lengths': [6]}, [b'123', b'456'])
+    [b'123456']
+    """
+    lengths = list(header['lengths'])[::-1]
+    frames = list(frames)[::-1]
+
+    assert sum(lengths) == sum(map(len, frames))
+
+    if all(len(f) == l for f, l in zip(frames, lengths)):
+        return frames
+
+    out = []
+    while lengths:
+        l = lengths.pop()
+        L = []
+        while l:
+            frame = frames.pop()
+            if len(frame) <= l:
+                L.append(frame)
+                l -= len(frame)
+            else:
+                mv = memoryview(frame)
+                L.append(mv[:l])
+                frames.append(mv[l:])
+                l = 0
+        out.append(b''.join(L))
+    return out
+

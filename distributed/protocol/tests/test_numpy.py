@@ -3,7 +3,9 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 import pytest
 
-from distributed.protocol import serialize, deserialize, decompress
+from distributed.protocol import (serialize, deserialize, decompress, dumps,
+        loads, to_serialize)
+from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 
 import distributed.protocol.numpy
 
@@ -33,3 +35,10 @@ def test_dumps_serialize_numpy(x):
 
     np.testing.assert_equal(x, y)
 
+
+def test_dumps_serialize_numpy_large():
+    x = np.random.randint(0, 255, size=int(BIG_BYTES_SHARD_SIZE * 2), dtype='u1')
+    frames = dumps([to_serialize(x)])
+    [y] = loads(frames)
+
+    np.testing.assert_equal(x, y)
