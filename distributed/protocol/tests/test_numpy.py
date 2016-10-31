@@ -6,6 +6,7 @@ import pytest
 from distributed.protocol import (serialize, deserialize, decompress, dumps,
         loads, to_serialize)
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
+from distributed.utils_test import slow
 
 import distributed.protocol.numpy
 
@@ -36,7 +37,11 @@ def test_dumps_serialize_numpy(x):
     np.testing.assert_equal(x, y)
 
 
+@slow
 def test_dumps_serialize_numpy_large():
+    psutil = pytest.importorskip('psutil')
+    if psutil.virtual_memory().total < 4e9:
+        return
     x = np.random.randint(0, 255, size=int(BIG_BYTES_SHARD_SIZE * 2), dtype='u1')
     frames = dumps([to_serialize(x)])
     [y] = loads(frames)

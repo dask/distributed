@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from distributed.protocol import (loads, dumps, msgpack, maybe_compress,
         to_serialize)
 from distributed.protocol.serialize import Serialize, Serialized, deserialize
+from distributed.utils_test import slow
 import pytest
 
 
@@ -102,6 +103,7 @@ def test_maybe_compress_sample():
     assert compressed == payload
 
 
+@slow
 def test_large_messages():
     np = pytest.importorskip('numpy')
     psutil = pytest.importorskip('psutil')
