@@ -80,3 +80,23 @@ def test_object_in_graph(c, s, a, b):
 
     assert isinstance(result, MyObj)
     assert result.data == 123
+
+
+@gen_cluster(client=True)
+def test_scatter(c, s, a, b):
+    o = MyObj(123)
+    [future] = yield c._scatter([o])
+    yield c._replicate(o)
+    o2 = yield c._gather(future)
+    assert isinstance(o2, MyObj)
+    assert o2.data == 123
+
+
+@gen_cluster(client=True)
+def test_inter_worker_comms(c, s, a, b):
+    o = MyObj(123)
+    [future] = yield c._scatter([o], workers=a.address)
+    future2 = c.submit(identity, future, workers=b.address)
+    o2 = yield c._gather(future2)
+    assert isinstance(o2, MyObj)
+    assert o2.data == 123
