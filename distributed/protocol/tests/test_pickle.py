@@ -6,7 +6,6 @@ from operator import add
 from functools import partial
 
 
-
 def test_pickle_data():
     data = [1, b'123', '123', [123], {}, set()]
     for d in data:
@@ -29,5 +28,3 @@ def test_pickle_functions():
 
     for func in [f, lambda x: x + 1, partial(add, 1)]:
         assert loads(dumps(func))(1) == func(1)
-
-

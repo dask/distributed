@@ -59,32 +59,6 @@ def test_small_and_big():
     # assert loads([big_header, big]) == {'y': d['y']}
 
 
-def dont_test_big_bytes_protocol():
-    np = pytest.importorskip('numpy')
-    data = np.random.randint(0, 255, size=2**21).astype('u1').tobytes()
-
-    d = {'x': data, 'y': 'foo'}
-    frames = dumps(d)
-    assert len(frames) == 4     # Only `data` is extracted
-    assert data is frames[3]    # `data` isn't sharded as it's too short
-    dd = loads(frames)
-    assert dd == d
-
-    d = {'x': [data], 'y': 'foo'}
-    frames = dumps(d)
-    assert len(frames) == 4
-    assert data is frames[3]
-    dd = loads(frames)
-    assert dd == d
-
-    d = {'x': {'z': [data, 'small_data']}, 'y': 'foo'}
-    frames = dumps(d)
-    assert len(frames) == 4
-    assert data is frames[3]
-    dd = loads(frames)
-    assert dd == d
-
-
 def test_maybe_compress():
     import zlib
     payload = b'123'

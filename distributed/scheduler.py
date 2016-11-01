@@ -1657,7 +1657,7 @@ class Scheduler(Server):
         eventually be phased out.  It is mostly used by diagnostics.
         """
         import pickle
-        with log_errors(pdb=True):
+        with log_errors():
             if function:
                 function = pickle.loads(function)
             if setup:

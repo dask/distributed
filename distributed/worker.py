@@ -606,9 +606,7 @@ class Worker(Server):
         return run(self, stream, function=function, args=args, kwargs=kwargs)
 
     @gen.coroutine
-    def update_data(self, stream=None, data=None, report=True, deserialize=True):
-        if deserialize == False:
-            import pdb; pdb.set_trace()
+    def update_data(self, stream=None, data=None, report=True):
         self.data.update(data)
         if report:
             response = yield self.scheduler.add_keys(

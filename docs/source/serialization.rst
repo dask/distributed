@@ -6,14 +6,14 @@ sequence of bytes that can be communicated across the network.
 
 Dask can convert data to bytes using the standard solutions of Pickle and
 Cloudpickle.  However, sometimes pickle and cloudpickle are suboptimal so Dask
-also support custom serialization formats based on the type of the object.
-This helps Dask be faster on common formats like NumPy and Pandas and gives
-power users more control about how their objects get moved around on the
-network if they want to extend the system.
+also supports custom serialization formats for special types.  This helps Dask
+to be faster on common formats like NumPy and Pandas and gives power-users more
+control about how their objects get moved around on the network if they want to
+extend the system.
 
-We include an example and then the full API documentation describing the
-``serialize`` and ``deserialize`` functions, which convert objects into a
-msgpack header and a list of bytestrings or memoryviews and back.
+We include a small example and then follow with the full API documentation
+describing the ``serialize`` and ``deserialize`` functions, which convert
+objects into a msgpack header and a list of bytestrings and back.
 
 Example
 -------
