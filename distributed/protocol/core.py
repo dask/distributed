@@ -151,7 +151,7 @@ def loads_msgpack(header, payload):
             payload = decompress(payload)
         except KeyError:
             raise ValueError("Data is compressed as %s but we don't have this"
-                             " installed" % header['compression'].decode())
+                             " installed" % str(header['compression']))
 
     return msgpack.loads(payload, encoding='utf8')
 
