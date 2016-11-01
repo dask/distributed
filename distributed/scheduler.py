@@ -1246,8 +1246,7 @@ class Scheduler(Server):
         who_has = {key: self.who_has.get(key, ()) for key in keys}
 
         try:
-            data = yield gather_from_workers(who_has, deserialize=False,
-                    rpc=self.rpc, close=False)
+            data = yield gather_from_workers(who_has, rpc=self.rpc, close=False)
             result = {'status': 'OK', 'data': data}
         except KeyError as e:
             logger.debug("Couldn't gather keys %s", e)

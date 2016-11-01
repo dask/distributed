@@ -23,8 +23,7 @@ no_default = '__no_default__'
 
 
 @gen.coroutine
-def gather_from_workers(who_has, deserialize=True, rpc=rpc, close=True,
-                        permissive=False):
+def gather_from_workers(who_has, rpc=rpc, close=True, permissive=False):
     """ Gather data directly from peers
 
     Parameters
