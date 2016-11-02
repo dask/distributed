@@ -500,7 +500,7 @@ def test_io_loop(loop):
 @gen_cluster(client=True, ncores=[])
 def test_spill_to_disk(e, s):
     np = pytest.importorskip('numpy')
-    w = Worker(s.ip, s.port, loop=s.loop, memory_limit=1000)
+    w = Worker(s.ip, s.port, loop=s.loop, memory_limit=1200)
     yield w._start()
 
     x = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')
@@ -513,6 +513,7 @@ def test_spill_to_disk(e, s):
 
     z = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='z')
     yield _wait(z)
+    # x is oldest and was evicted because of the memory limit
     assert set(w.data) == {x.key, y.key, z.key}
     assert set(w.data.fast) == {y.key, z.key}
     assert set(w.data.slow) == {x.key}
@@ -531,11 +532,9 @@ def test_spill_to_disk_storage(e, s):
     yield w._start()
 
     x = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')
-    yield _wait(x)
     y = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='y')
-    yield _wait(y)
-    z = e.submit(np.random.randint, 0, 255, size=1000000, dtype='u1', key='z')
-    yield _wait(z)
+    z = e.submit(np.random.randint, 0, 255, size=15000000, dtype='u1', key='z')
+    yield _wait([x, y, z])
 
     assert set(w.data) == {x.key, y.key, z.key}
     assert set(w.data.fast) == set()

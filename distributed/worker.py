@@ -128,23 +128,7 @@ class Worker(Server):
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
         self.memory_limit = memory_limit
-        if memory_limit:
-            try:
-                from zict import Buffer, File, Func, LMDB, Sieve
-            except ImportError:
-                raise ImportError("Please `pip install zict` for spill-to-disk workers")
-            path = os.path.join(self.local_dir, 'storage')
-            file_storage = Func(dumps_to_disk, loads_from_disk, File(path))
-            lmdb_path = os.path.join(self.local_dir, 'lmdb')
-            lmdb = Func(dumps_to_disk, loads_from_disk, LMDB(lmdb_path))
-            def sieve_func(k, v):
-                return 'small' if sizeof(v) < 32 * 1024 else 'large'
-            storage = Sieve({'small': lmdb,
-                             'large': file_storage},
-                            sieve_func)
-            self.data = Buffer({}, storage, int(float(memory_limit)), weight)
-        else:
-            self.data = dict()
+        self.data = self._get_storage(memory_limit)
         self.loop = loop or IOLoop.current()
         self.status = None
         self.executor = executor or ThreadPoolExecutor(self.ncores)
@@ -196,6 +180,25 @@ class Worker(Server):
                                                    self.heartbeat_interval,
                                                    io_loop=self.loop)
         self.loop.add_callback(self.heartbeat_callback.start)
+
+    def _get_storage(self, memory_limit):
+        if not memory_limit:
+            return {}
+        try:
+            from zict import Buffer, File, Func, LMDB, Sieve
+        except ImportError as e:
+            raise ImportError("Please `pip install zict` for "
+                              "spill-to-disk workers:\n" + str(e))
+        path = os.path.join(self.local_dir, 'storage')
+        file_storage = Func(dumps_to_disk, loads_from_disk, File(path))
+        lmdb_path = os.path.join(self.local_dir, 'lmdb')
+        lmdb = Func(dumps_to_disk, loads_from_disk, LMDB(lmdb_path))
+        def sieve_func(k, v):
+            return 'small' if sizeof(v) < 10 * 1024 * 1024 else 'large'
+        storage = Sieve({'small': lmdb,
+                         'large': file_storage},
+                        sieve_func)
+        return Buffer({}, storage, int(float(memory_limit)), weight)
 
     @property
     def worker_address(self):
