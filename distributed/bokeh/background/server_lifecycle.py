@@ -14,7 +14,8 @@ from tornado.iostream import StreamClosedError
 from tornado.ioloop import IOLoop
 
 from distributed.compatibility import ConnectionRefusedError
-from distributed.core import read, connect, write, dumps
+from distributed.core import read, connect, write
+from distributed.protocol.pickle import dumps
 from distributed.diagnostics.eventstream import eventstream
 from distributed.diagnostics.progress_stream import (progress_stream,
         task_stream_append)
