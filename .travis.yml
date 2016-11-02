@@ -34,7 +34,7 @@ before_install:
         popd
         docker run -d -p 8020:8020 -p 50070:50070 -v $(pwd):/distributed distributed-hdfs
         export CONTAINER_ID=$(docker ps -l -q)
-        sleep 60  # Wait for namenode and datanode
+        sleep 10  # Wait for namenode and datanode
     fi;
 
 install:
@@ -54,6 +54,7 @@ install:
   - pip install git+https://github.com/joblib/joblib.git --upgrade
   - pip install git+https://github.com/dask/s3fs.git --upgrade
   - pip install git+https://github.com/dask/zict.git --upgrade
+  - pip install pytest-timeout pytest-faulthandler
 
   # Install distributed
   - python setup.py install
@@ -65,14 +66,16 @@ install:
     fi;
 
 script:
+    # Ensure we timeout tests that would otherwise stall
+    - export PYTEST_ARGS='--verbose --timeout=30 --timeout-method=thread --faulthandler-timeout=35'
     - |
       if [[ $HDFS == true ]]; then
         pwd
-        docker exec -it $CONTAINER_ID $DOCKER_ENV/bin/py.test distributed/tests/test_hdfs.py --verbose
+        docker exec -it $CONTAINER_ID $DOCKER_ENV/bin/py.test distributed/tests/test_hdfs.py $PYTEST_ARGS -m "not avoid_travis"
       elif [[ $TRAVIS_PYTHON_VERSION == '3.4' ]]; then
-        coverage run $(which py.test) distributed -m "not avoid_travis" --verbose;
+        coverage run $(which py.test) distributed $PYTEST_ARGS -m "not avoid_travis";
       else
-        py.test -m "not avoid_travis" distributed --verbose;
+        py.test distributed $PYTEST_ARGS -m "not avoid_travis";
       fi;
 
 after_success:
