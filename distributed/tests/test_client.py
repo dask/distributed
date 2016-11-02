@@ -5,6 +5,7 @@ from operator import add
 from collections import Iterator
 from concurrent.futures import CancelledError
 from datetime import timedelta
+import gc
 import itertools
 from multiprocessing import Process
 import os
@@ -224,15 +225,16 @@ def test_gc(s, a, b):
     yield c._start()
 
     x = c.submit(inc, 10)
+    key = x.key
     yield x._result()
 
-    assert s.who_has[x.key]
-
-    x.__del__()
+    assert s.who_has[key]
+    del x
+    gc.collect()
 
     yield c._shutdown()
 
-    assert x.key not in s.who_has
+    assert key not in s.who_has
 
 
 def test_thread(loop):
@@ -399,45 +401,53 @@ def test_wait_sync(loop):
             assert x.status == y.status == 'finished'
 
 
+@gen.coroutine
+def wait_until(cond, timeout=3):
+    start = time()
+    while True:
+        if cond():
+            return
+        else:
+            assert time() < start + timeout
+            yield gen.sleep(0.1)
+
+
 @gen_cluster(client=True)
 def test_garbage_collection(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(inc, 1)
 
-    assert c.refcount[x.key] == 2
-    x.__del__()
-    assert c.refcount[x.key] == 1
+    xkey = x.key
+    assert c.refcount[xkey] == 2
+    del x
+    gc.collect()
+    wait_until(lambda: c.refcount[xkey] == 1)
 
     z = c.submit(inc, y)
-    y.__del__()
+    ykey = y.key
+    del y
 
     result = yield z._result()
     assert result == 3
 
-    ykey = y.key
-    y.__del__()
-    assert ykey not in c.futures
+    gc.collect()
+    wait_until(lambda: ykey not in c.futures)
 
 
 @gen_cluster(client=True)
 def test_garbage_collection_with_scatter(c, s, a, b):
     [a] = yield c._scatter([1])
-    assert a.key in c.futures
+    key = a.key
+    assert key in c.futures
     assert a.status == 'finished'
     assert a.event.is_set()
-    assert s.who_wants[a.key] == {c.id}
+    assert s.who_wants[key] == {c.id}
 
-    assert c.refcount[a.key] == 1
-    a.__del__()
-    assert c.refcount[a.key] == 0
-
-    start = time()
-    while True:
-        if a.key not in s.who_has:
-            break
-        else:
-            assert time() < start + 3
-            yield gen.sleep(0.1)
+    assert c.refcount[key] == 1
+    del a
+    gc.collect()
+    wait_until(lambda: c.refcount[key] == 0)
+    wait_until(lambda: key not in s.who_has)
 
 
 @gen_cluster(timeout=1000, client=True)
@@ -446,8 +456,8 @@ def test_recompute_released_key(c, s, a, b):
     result1 = yield x._result()
     xkey = x.key
     del x
-    import gc; gc.collect()
-    assert c.refcount[xkey] == 0
+    gc.collect()
+    wait_until(lambda: c.refcount[xkey] == 0)
 
     # 1 second batching needs a second action to trigger
     while xkey in s.who_has or xkey in a.data or xkey in b.data:
@@ -793,8 +803,8 @@ def test_scatter_hash(c, s, a, b):
 @gen_cluster(client=True)
 def test_get_releases_data(c, s, a, b):
     [x] = yield c._get({'x': (inc, 1)}, ['x'])
-    import gc; gc.collect()
-    assert c.refcount['x'] == 0
+    gc.collect()
+    wait_until(lambda: c.refcount['x'] == 0)
 
 
 def test_global_clients(loop):
@@ -1644,7 +1654,7 @@ def test_multi_garbage_collection(s, a, b):
 
     yield _wait([x, y])
 
-    x.__del__()
+    x._finalizer()
     start = time()
     while x.key in a.data or x.key in b.data:
         yield gen.sleep(0.01)
@@ -1653,7 +1663,7 @@ def test_multi_garbage_collection(s, a, b):
     assert s.wants_what == {c.id: {y.key}, f.id: {y.key}}
     assert s.who_wants == {y.key: {c.id, f.id}}
 
-    y.__del__()
+    y._finalizer()
     start = time()
     while x.key in s.wants_what[f.id]:
         yield gen.sleep(0.01)
@@ -1664,7 +1674,7 @@ def test_multi_garbage_collection(s, a, b):
     assert s.wants_what == {c.id: {y.key}, f.id: set()}
     assert s.who_wants == {y.key: {c.id}}
 
-    y2.__del__()
+    y2._finalizer()
     start = time()
     while y.key in a.data or y.key in b.data:
         yield gen.sleep(0.01)
@@ -2098,7 +2108,8 @@ def test_futures_of_cancelled_raises(c, s, a, b):
 def test_dont_delete_recomputed_results(c, s, w):
     x = c.submit(inc, 1)                        # compute first time
     yield _wait([x])
-    x.__del__()                                 # trigger garbage collection
+    del x
+    gc.collect()
     xx = c.submit(inc, 1)                       # compute second time
 
     start = time()
@@ -2918,12 +2929,9 @@ def test_get_returns_early(c, s, a, b):
     with ignoring(Exception):
         result = yield c._get({'x': (throws, 1), 'y': (sleep, 1)}, ['x', 'y'])
     assert time() < start + 0.5
-    assert not c.futures
 
-    start = time()
-    while 'y' in s.tasks:
-        yield gen.sleep(0.01)
-        assert time() < start + 3
+    wait_until(lambda: not c.futures)
+    wait_until(lambda: 'y' not in s.tasks)
 
     x = c.submit(inc, 1)
     yield x._result()
