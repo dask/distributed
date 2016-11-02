@@ -7,6 +7,7 @@ import sys
 import json
 import os
 import logging
+import sys
 from time import time
 
 from tornado import gen
@@ -16,8 +17,9 @@ from tornado.ioloop import IOLoop
 
 from distributed.core import read
 from distributed.diagnostics.eventstream import eventstream
-from distributed.bokeh.status_monitor import task_stream_append
+from distributed.diagnostics.progress_stream import task_stream_append
 import distributed.bokeh
+from distributed.bokeh.utils import parse_args
 
 
 logger = logging.getLogger(__name__)
@@ -26,17 +28,7 @@ client = AsyncHTTPClient()
 
 messages = distributed.bokeh.messages  # monkey-patching
 
-
-dask_dir = os.path.join(os.path.expanduser('~'), '.dask')
-options_path = os.path.join(dask_dir, '.dask-web-ui.json')
-
-if os.path.exists(options_path):
-    with open(options_path, 'r') as f:
-        options = json.load(f)
-else:
-    options = {'host': '127.0.0.1',
-               'tcp-port': 8786,
-               'http-port': 9786}
+options = parse_args(sys.argv[1:])
 
 
 @gen.coroutine
@@ -77,12 +69,4 @@ def task_events(interval, deque, times, index, rectangles, workers, last_seen):
 n = 100000
 
 def on_server_loaded(server_context):
-    messages['task-events'] = {'interval': 200,
-                               'deque': deque(maxlen=n),
-                               'times': deque(maxlen=n),
-                               'index': deque(maxlen=n),
-                               'rectangles':{name: deque(maxlen=n) for name in
-                                            'start duration key name color worker worker_thread y alpha'.split()},
-                               'workers': dict(),
-                               'last_seen': [time()]}
     IOLoop.current().add_callback(task_events, **messages['task-events'])

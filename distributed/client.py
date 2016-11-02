@@ -10,7 +10,6 @@ from glob import glob
 import logging
 import os
 import sys
-import pickle
 from time import sleep
 import uuid
 from threading import Thread
@@ -19,7 +18,7 @@ import socket
 
 import dask
 from dask.base import tokenize, normalize_token, Base
-from dask.core import flatten, _deps
+from dask.core import flatten, get_dependencies
 from dask.compatibility import apply
 from dask.context import _globals
 from toolz import first, groupby, merge, valmap, keymap
@@ -33,11 +32,13 @@ from tornado.queues import Queue
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
-from .core import (read, write, connect, coerce_to_rpc, dumps,
-        clean_exception, loads)
+from .core import (read, write, connect, coerce_to_rpc, clean_exception)
+from .protocol import to_serialize
+from .protocol.pickle import dumps, loads
 from .worker import dumps_function, dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)
+from .versions import get_versions
 
 logger = logging.getLogger(__name__)
 
@@ -824,7 +825,7 @@ class Client(object):
         if bad_data and errors == 'skip' and isinstance(futures2, list):
             futures2 = [f for f in futures2 if f not in bad_data]
 
-        data = valmap(loads, response['data'])
+        data = response['data']
         result = pack_data(futures2, merge(data, bad_data))
         raise gen.Return(result)
 
@@ -891,13 +892,13 @@ class Client(object):
             raise gen.Return({k: d[tokey(k)] for k in data})
 
         if isinstance(data, dict):
-            data2 = valmap(dumps, data)
+            data2 = valmap(to_serialize, data)
             types = valmap(type, data)
         elif isinstance(data, (list, tuple, set, frozenset)):
-            data2 = list(map(dumps, data))
+            data2 = list(map(to_serialize, data))
             types = list(map(type, data))
         elif isinstance(data, (Iterable, Iterator)):
-            data2 = list(map(dumps, data))
+            data2 = list(map(to_serialize, data))
             types = list(map(type, data))
         else:
             raise TypeError("Don't know how to scatter %s" % type(data))
@@ -1156,7 +1157,7 @@ class Client(object):
         results = {}
         for key, resp in responses.items():
             if resp['status'] == 'OK':
-                results[key] = loads(resp['result'])
+                results[key] = resp['result']
             elif resp['status'] == 'error':
                 raise loads(resp['exception'])
         raise Return(results)
@@ -1228,7 +1229,7 @@ class Client(object):
                     raise CancelledError(v)
 
         for k, v in dsk3.items():
-            dependencies[k] |= set(_deps(dsk3, v))
+            dependencies[k] |= get_dependencies(dsk3, task=v)
 
         self._send_to_scheduler({'op': 'update-graph',
                                  'tasks': valmap(dumps_task, dsk3),
@@ -1297,6 +1298,59 @@ class Client(object):
         results2 = pack_data(keys, results)
         return results2
 
+    def _optimize_insert_futures(self, dsk, keys):
+        """ Replace known keys in dask graph with Futures
+
+        When given a Dask graph that might have overlapping keys with our known
+        results we replace the values of that graph with futures.  This can be
+        used as an optimization to avoid recomputation.
+
+        This returns the same graph if unchanged but a new graph if any changes
+        were necessary.
+        """
+        changed = False
+        for key in list(dsk):
+            if tokey(key) in self.futures:
+                if not changed:
+                    changed = True
+                    dsk = dsk.copy()
+                dsk[key] = Future(key, self)
+
+        if changed:
+            dsk, _ = dask.optimize.cull(dsk, keys)
+
+        return dsk
+
+    def normalize_collection(self, collection):
+        """
+        Replace collection's tasks by already existing futures if they exist
+
+        This normalizes the tasks within a collections task graph against the
+        known futures within the scheduler.  It returns a copy of the
+        collection with a task graph that includes the overlapping futures.
+
+        Examples
+        --------
+        >>> len(x.dask)  # x is a dask collection with 100 tasks
+        100
+        >>> set(client.futures).intersection(x.dask)  # some overlap exists
+        10
+
+        >>> x = client.normalize_collection(x)
+        >>> len(x.dask)  # smaller computational graph
+        20
+
+        See Also
+        --------
+        Client.persist: trigger computation of collection's tasks
+        """
+        dsk = self._optimize_insert_futures(collection.dask, collection._keys())
+
+        if dsk is collection.dask:
+            return collection
+        else:
+            return redict_collection(collection, dsk)
+
     def compute(self, collections, sync=False, optimize_graph=True,
             workers=None, allow_other_workers=False, **kwargs):
         """ Compute dask collections on cluster
@@ -1356,17 +1410,9 @@ class Client(object):
 
         variables = [a for a in collections if isinstance(a, Base)]
 
-        if optimize_graph:
-            groups = groupby(lambda x: x._optimize, variables)
-            dsk = merge([opt(merge([v.dask for v in val]),
-                             [v._keys() for v in val], **kwargs)
-                        for opt, val in groups.items()])
-        else:
-            dsk = merge(c.dask for c in variables)
-
+        dsk = collections_to_dsk(variables, optimize_graph, **kwargs)
         names = ['finalize-%s' % tokenize(v) for v in variables]
         dsk2 = {name: (v._finalize, v._keys()) for name, v in zip(names, variables)}
-
 
         restrictions, loose_restrictions = get_restrictions(collections,
                 workers, allow_other_workers)
@@ -1441,13 +1487,7 @@ class Client(object):
 
         assert all(isinstance(c, Base) for c in collections)
 
-        if optimize_graph:
-            groups = groupby(lambda x: x._optimize, collections)
-            dsk = merge([opt(merge([v.dask for v in val]),
-                             [v._keys() for v in val], **kwargs)
-                        for opt, val in groups.items()])
-        else:
-            dsk = merge(c.dask for c in collections)
+        dsk = collections_to_dsk(collections, optimize_graph, **kwargs)
 
         names = {k for c in collections for k in flatten(c._keys())}
 
@@ -1523,7 +1563,7 @@ class Client(object):
         _, fn = os.path.split(filename)
         d = yield self.scheduler.broadcast(msg={'op': 'upload_file',
                                                 'filename': fn,
-                                                'data': data})
+                                                'data': to_serialize(data)})
 
         if any(v['status'] == 'error' for v in d.values()):
             exceptions = [loads(v['exception']) for v in d.values()
@@ -1859,6 +1899,31 @@ class Client(object):
         """
         return sync(self.loop, self.scheduler.identity)
 
+    def get_versions(self):
+        """ Return version info for the scheduler, all workers and myself
+
+        Examples
+        --------
+        >>> c.get_versions()  # doctest: +SKIP
+        """
+        client = get_versions()
+        try:
+            scheduler = sync(self.loop, self.scheduler.versions)
+        except KeyError:
+            scheduler = None
+
+        def f(worker=None):
+
+            # use our local version
+            try:
+                from distributed.versions import get_versions
+                return get_versions()
+            except ImportError:
+                return None
+
+        workers = sync(self.loop, self._run, f)
+        return {'scheduler': scheduler, 'workers': workers, 'client': client}
+
     def futures_of(self, futures):
         return futures_of(futures, client=self)
 
@@ -2139,8 +2204,7 @@ def ensure_default_get(client):
 def redict_collection(c, dsk):
     from dask.delayed import Delayed
     if isinstance(c, Delayed):
-        assert len(dsk) == 1
-        return Delayed(first(dsk), [dsk])
+        return Delayed(c.key, [dsk])
     else:
         cc = copy.copy(c)
         cc.dask = dsk
@@ -2213,3 +2277,24 @@ def get_restrictions(collections, workers, allow_other_workers):
         loose_restrictions = []
 
     return restrictions, loose_restrictions
+
+
+def collections_to_dsk(collections, optimize_graph=True, **kwargs):
+    """
+    Convert many collections into a single dask graph, after optimization
+    """
+    optimizations = _globals.get('optimizations', [])
+    if optimize_graph:
+        groups = groupby(lambda x: x._optimize, collections)
+        groups = {opt: [merge([v.dask for v in val]),
+                       [v._keys() for v in val]]
+                  for opt, val in groups.items()}
+        for opt in optimizations:
+            groups = {k: [opt(dsk, keys), keys]
+                      for k, (dsk, keys) in groups.items()}
+        dsk = merge([opt(dsk, keys, **kwargs)
+                     for opt, (dsk, keys) in groups.items()])
+    else:
+        dsk = merge(c.dask for c in collections)
+
+    return dsk

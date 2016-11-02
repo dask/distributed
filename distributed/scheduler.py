@@ -28,13 +28,14 @@ from dask.core import reverse_dict
 from dask.order import order
 
 from .batched import BatchedSend
-from .utils_comm import (scatter_to_workers, gather_from_workers)
+from .config import config
 from .core import (rpc, connect, read, write, MAX_BUFFER_SIZE,
         Server, send_recv, coerce_to_address, error_message)
 from .utils import (All, ignoring, clear_queue, get_ip, ignore_exceptions,
         ensure_ip, get_fileno_limit, log_errors, key_split, mean,
         divide_n_among_bins)
-from .config import config
+from .utils_comm import (scatter_to_workers, gather_from_workers)
+from .versions import get_versions
 
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,7 @@ class Scheduler(Server):
                          'stacks': self.get_stacks,
                          'processing': self.get_processing,
                          'nbytes': self.get_nbytes,
+                         'versions': self.get_versions,
                          'add_keys': self.add_keys,
                          'rebalance': self.rebalance,
                          'replicate': self.replicate,
@@ -322,7 +324,7 @@ class Scheduler(Server):
 
         super(Scheduler, self).__init__(handlers=self.handlers,
                 max_buffer_size=max_buffer_size, io_loop=self.loop,
-                connection_limit=connection_limit, **kwargs)
+                connection_limit=connection_limit, deserialize=False, **kwargs)
 
     ##################
     # Administration #
@@ -350,6 +352,10 @@ class Scheduler(Server):
              'services': {key: v.port for (key, v) in self.services.items()},
              'workers': dict(self.worker_info)}
         return d
+
+    def get_versions(self, stream):
+        """ Basic information about ourselves and our cluster """
+        return get_versions()
 
     def start(self, port=8786, start_queues=True):
         """ Clear out old state and restart all running coroutines """
@@ -975,7 +981,7 @@ class Scheduler(Server):
             if isinstance(in_queue, Queue):
                 next_message = in_queue.get
             elif isinstance(in_queue, IOStream):
-                next_message = lambda: read(in_queue)
+                next_message = lambda: read(in_queue, deserialize=self.deserialize)
             else:
                 raise NotImplementedError()
 
@@ -1240,8 +1246,7 @@ class Scheduler(Server):
         who_has = {key: self.who_has.get(key, ()) for key in keys}
 
         try:
-            data = yield gather_from_workers(who_has, deserialize=False,
-                    rpc=self.rpc, close=False)
+            data = yield gather_from_workers(who_has, rpc=self.rpc, close=False)
             result = {'status': 'OK', 'data': data}
         except KeyError as e:
             logger.debug("Couldn't gather keys %s", e)
@@ -1651,26 +1656,27 @@ class Scheduler(Server):
         eventually be phased out.  It is mostly used by diagnostics.
         """
         import pickle
-        if function:
-            function = pickle.loads(function)
-        if setup:
-            setup = pickle.loads(setup)
-        if teardown:
-            teardown = pickle.loads(teardown)
-        state = setup(self) if setup else None
-        if isinstance(state, gen.Future):
-            state = yield state
-        try:
-            while True:
-                if state is None:
-                    response = function(self)
-                else:
-                    response = function(self, state)
-                yield write(stream, response)
-                yield gen.sleep(interval)
-        except (OSError, IOError, StreamClosedError):
+        with log_errors():
+            if function:
+                function = pickle.loads(function)
+            if setup:
+                setup = pickle.loads(setup)
             if teardown:
-                teardown(self, state)
+                teardown = pickle.loads(teardown)
+            state = setup(self) if setup else None
+            if isinstance(state, gen.Future):
+                state = yield state
+            try:
+                while True:
+                    if state is None:
+                        response = function(self)
+                    else:
+                        response = function(self, state)
+                    yield write(stream, response)
+                    yield gen.sleep(interval)
+            except (OSError, IOError, StreamClosedError):
+                if teardown:
+                    teardown(self, state)
 
     def get_stacks(self, stream=None, workers=None):
         if workers is not None:

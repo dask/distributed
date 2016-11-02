@@ -1,13 +1,14 @@
 from __future__ import print_function, division, absolute_import
 
+from concurrent.futures import ThreadPoolExecutor
+import logging
 from numbers import Integral
 from operator import add
 import os
+import re
 import shutil
 import sys
 import traceback
-import logging
-import re
 
 import pytest
 from toolz import pluck
@@ -15,9 +16,11 @@ from tornado import gen
 from tornado.ioloop import TimeoutError
 
 from distributed.batched import BatchedStream
-from distributed.core import rpc, dumps, loads, connect, read, write
+from distributed.core import rpc, connect, read, write
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
+from distributed.protocol import to_serialize
+from distributed.protocol.pickle import dumps, loads
 from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger
 from distributed.utils import ignoring
@@ -329,7 +332,7 @@ def test_upload_file(s, a, b):
     yield aa.compute(function=dumps(g),
                      key='x')
     result = yield aa.get_data(keys=['x'])
-    assert result == {'x': dumps(123)}
+    assert result == {'x': 123}
 
     yield a._close()
     yield b._close()
@@ -362,7 +365,7 @@ def test_upload_egg(s, a, b):
 
     yield aa.compute(function=dumps(g), key='x', args=dumps((10,)))
     result = yield aa.get_data(keys=['x'])
-    assert result == {'x': dumps(10 + 1)}
+    assert result == {'x': 10 + 1}
 
     yield a._close()
     yield b._close()
@@ -404,14 +407,14 @@ def test_worker_waits_for_center_to_come_up(current_loop):
 @gen_cluster()
 def test_worker_task(s, a, b):
     with rpc(ip=a.ip, port=a.port) as aa:
-        yield aa.compute(task=dumps((inc, 1)), key='x', report=False)
+        yield aa.compute(task=to_serialize((inc, 1)), key='x', report=False)
         assert a.data['x'] == 2
 
 
 @gen_cluster()
 def test_worker_task_data(s, a, b):
     with rpc(ip=a.ip, port=a.port) as aa:
-        yield aa.compute(task=dumps(2), key='x', report=False)
+        yield aa.compute(task=2, key='x', report=False)
 
     assert a.data['x'] == 2
 
@@ -419,7 +422,7 @@ def test_worker_task_data(s, a, b):
 @gen_cluster()
 def test_worker_task_bytes(s, a, b):
     with rpc(ip=a.ip, port=a.port) as aa:
-        yield aa.compute(task=dumps((inc, 1)), key='x', report=False)
+        yield aa.compute(task=to_serialize((inc, 1)), key='x', report=False)
         assert a.data['x'] == 2
 
         yield aa.compute(function=dumps(inc), args=dumps((10,)), key='y',
@@ -543,3 +546,19 @@ def test_run_dask_worker(c, s, a, b):
 
     response = yield c._run(f)
     assert response == {a.address: a.id, b.address: b.id}
+
+
+@gen_cluster(client=True, ncores=[])
+def test_Executor(c, s):
+    with ThreadPoolExecutor(2) as e:
+        w = Worker(s.ip, s.port, executor=e)
+        assert w.executor is e
+        yield w._start()
+
+        future = c.submit(inc, 1)
+        result = yield future._result()
+        assert result == 2
+
+        assert e._threads  # had to do some work
+
+        yield w._close()
