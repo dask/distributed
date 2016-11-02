@@ -360,7 +360,7 @@ def str_graph(dsk, extra_values=()):
 import logging
 from .compatibility import logging_names
 
-handler = logging.StreamHandler()
+handler = logging.StreamHandler(sys.stdout)
 handler.setLevel(logging.INFO)
 fmt = logging.Formatter('%(name)s - %(levelname)s - %(message)s')
 handler.setFormatter(fmt)
