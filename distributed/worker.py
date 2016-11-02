@@ -27,8 +27,9 @@ from tornado.iostream import StreamClosedError
 from .batched import BatchedSend
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
-from .core import (rpc, Server, pingpong, dumps, loads, coerce_to_address,
+from .core import (rpc, Server, pingpong, coerce_to_address,
         error_message, read, RPCClosed)
+from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import funcname, get_ip, _maybe_complex, log_errors, All, ignoring
@@ -312,10 +313,8 @@ class Worker(Server):
             self.data.update(result)
             raise Return({'status': 'OK'})
 
-    def deserialize(self, function=None, args=None, kwargs=None, task=None):
+    def _deserialize(self, function=None, args=None, kwargs=None, task=None):
         """ Deserialize task inputs and regularize to func, args, kwargs """
-        if task is not None:
-            task = loads(task)
         if function is not None:
             function = loads(function)
         if args:
@@ -409,7 +408,7 @@ class Worker(Server):
 
         try:
             start = default_timer()
-            function, args, kwargs = self.deserialize(function, args, kwargs,
+            function, args, kwargs = self._deserialize(function, args, kwargs,
                     task)
             diagnostics['deserialization'] = default_timer() - start
         except Exception as e:
@@ -498,11 +497,12 @@ class Worker(Server):
     def compute_many(self, bstream, msgs, report=False):
         good, bad, data, num_transferred, diagnostics = yield self.gather_many(msgs)
 
+        if bad:
+            logger.warn("Could not find data for %s", sorted(bad))
+
         for msg in msgs:
             msg.pop('who_has', None)
 
-        if bad:
-            logger.warn("Could not find data for %s", sorted(bad))
         for k, v in bad.items():
             bstream.send({'status': 'missing-data',
                           'key': k,
@@ -528,7 +528,7 @@ class Worker(Server):
         diagnostics = dict()
         try:
             start = default_timer()
-            function, args, kwargs = self.deserialize(function, args, kwargs,
+            function, args, kwargs = self._deserialize(function, args, kwargs,
                     task)
             diagnostics['deserialization'] = default_timer() - start
         except Exception as e:
@@ -631,9 +631,7 @@ class Worker(Server):
         return run(self, stream, function=function, args=args, kwargs=kwargs)
 
     @gen.coroutine
-    def update_data(self, stream=None, data=None, report=True, deserialize=True):
-        if deserialize:
-            data = valmap(loads, data)
+    def update_data(self, stream=None, data=None, report=True):
         self.data.update(data)
         if report:
             response = yield self.scheduler.add_keys(
@@ -658,7 +656,7 @@ class Worker(Server):
         raise Return('OK')
 
     def get_data(self, stream, keys=None):
-        return {k: dumps(self.data[k]) for k in keys if k in self.data}
+        return {k: to_serialize(self.data[k]) for k in keys if k in self.data}
 
     def start_ipython(self, stream):
         """Start an IPython kernel
@@ -810,7 +808,7 @@ def dumps_task(task):
         elif not any(map(_maybe_complex, task[1:])):
             return {'function': dumps_function(task[0]),
                         'args': dumps(task[1:])}
-    return {'task': dumps(task)}
+    return to_serialize(task)
 
 
 def apply_function(function, args, kwargs, execution_state, key):
@@ -898,7 +896,7 @@ def convert_kwargs_to_str(kwargs, max_len=None):
         return "{{{}}}".format(", ".join(strs))
 
 
-from .protocol import compressions, default_compression
+from .protocol import compressions, default_compression, to_serialize
 
 # TODO: use protocol.maybe_compress and proper file/memoryview objects
 
@@ -944,6 +942,6 @@ def run(worker, stream, function=None, args=(), kwargs={}):
     else:
         response = {
             'status': 'OK',
-            'result': dumps(result),
+            'result': to_serialize(result),
         }
     raise Return(response)
