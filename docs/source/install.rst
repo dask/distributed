@@ -31,6 +31,19 @@ To install distributed from source, clone the repository from `github
     python setup.py install
 
 
+Optional Dependencies
+---------------------
+
+To use the :ref:`spill-to-disk <spill-to-disk>` feature, you'll need
+to install the Python bindings to the LMDB database.  Using ``conda``::
+
+   conda install -c conda-forge python-lmdb
+
+Or using ``pip``::
+
+   pip install lmdb
+
+
 Notes
 -----
 

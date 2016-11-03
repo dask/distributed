@@ -121,4 +121,5 @@ Contents
    foundations
    journey
    protocol
+   serialization
    plugins

@@ -175,7 +175,7 @@ For administrative messages like updating status msgpack is sufficient.
 However for large results or Python specific data, like NumPy arrays or Pandas Dataframes, or
 for larger results we need to use something else to convert Python objects to
 bytestrings.  Exactly how we do this is described more in the
-`:doc:Serialization documentation <serialize.rst>`.
+:doc:`Serialization documentation <serialization>`.
 
 The application code marks Python specific results with the ``to_serialize``
 function:
