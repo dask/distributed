@@ -34,7 +34,7 @@ before_install:
         popd
         docker run -d -p 8020:8020 -p 50070:50070 -v $(pwd):/distributed distributed-hdfs
         export CONTAINER_ID=$(docker ps -l -q)
-        sleep 10  # Wait for namenode and datanode
+        sleep 60  # Wait for namenode and datanode
     fi;
 
 install:
