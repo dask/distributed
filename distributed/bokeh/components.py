@@ -61,7 +61,7 @@ class TaskStream(DashboardComponent):
         self.root = Plot(
             title=Title(text="Task Stream"), id='bk-task-stream-plot',
             x_range=x_range, y_range=y_range, toolbar_location="above",
-            min_border_right=35, **kwargs
+            min_border_right=35, plot_height=300, **kwargs
         )
 
         self.root.add_glyph(
@@ -277,7 +277,7 @@ class ResourceProfiles(DashboardComponent):
         )
         g2 = resource_plot.add_glyph(
             self.source,
-            Line(x='time', y='cpu', line_color="#1f78b4"    , **line_opts)
+            Line(x='time', y='cpu', line_color="#1f78b4", **line_opts)
         )
 
         resource_plot.add_layout(
@@ -392,7 +392,7 @@ class WorkerTable(DashboardComponent):
         mem_plot = Plot(
             title=Title(text="Memory Usage (%)"), toolbar_location=None,
             x_range=Range1d(start=0, end=1), y_range=Range1d(start=-0.1, end=0.1),
-            **kwargs
+            plot_height=80, **kwargs
         )
 
         mem_plot.add_glyph(
@@ -402,6 +402,7 @@ class WorkerTable(DashboardComponent):
 
         mem_plot.add_layout(LinearAxis(), 'left')
         mem_plot.add_layout(LinearAxis(), 'below')
+        mem_plot.yaxis.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
