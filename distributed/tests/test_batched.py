@@ -5,7 +5,7 @@ import random
 from time import time
 
 import pytest
-from toolz import first
+from toolz import first, assoc
 from tornado import gen
 from tornado.tcpserver import TCPServer
 from tornado.tcpclient import TCPClient
@@ -32,9 +32,15 @@ class EchoServer(TCPServer):
     @gen.coroutine
     def handle_stream(self, stream, address):
         while True:
-            msg = yield read(stream)
-            self.count += 1
-            yield write(stream, msg)
+            try:
+                msg = yield read(stream)
+                self.count += 1
+                yield write(stream, msg)
+            except StreamClosedError as e:
+                pass
+            except Exception as e:
+                import pdb; pdb.set_trace()
+                raise
 
     def listen(self, port=0):
         while True:
@@ -238,3 +244,39 @@ def test_stress():
 
         assert L == list(range(0, 10000, 1))
         stream.close()
+
+
+@gen_test(timeout=20)
+def test_sending_traffic_jam():
+    np = pytest.importorskip('numpy')
+    from distributed.protocol import to_serialize
+    data = np.random.randint(0, 255, dtype='u1',
+            size=(300000,)).data.tobytes()
+    with echo_server() as e:
+        client = TCPClient()
+        stream = yield client.connect('127.0.0.1', e.port)
+
+        b = BatchedSend(interval=0.001)
+        b.start(stream)
+        yield b.last_send
+
+        n = 50
+
+        msg = {'x': to_serialize(data)}
+        for i in range(n):
+            b.send(assoc(msg, 'i', i))
+            yield gen.sleep(0.005)
+
+        results = []
+        count = 0
+        while len(results) < n:
+            L = yield gen.with_timeout(timedelta(seconds=5), read(stream))
+            count += 1
+            results.extend(L)
+
+        assert count == b.count == e.count
+
+        assert [r['i'] for r in results] == list(range(50))
+
+        stream.close()
+        yield b.close(ignore_closed=True)

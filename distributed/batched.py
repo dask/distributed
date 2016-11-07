@@ -43,6 +43,7 @@ class BatchedSend(object):
         self.stream = None
         self.last_payload = []
         self.last_send = gen.sleep(0)
+        self.count = 0
 
     def start(self, stream):
         self.stream = stream
@@ -63,17 +64,21 @@ class BatchedSend(object):
                                 self.interval)
                 yield gen.sleep(wait_time)
             while self.stream._write_buffer:
+                print('waiting')
                 try:
                     yield gen.with_timeout(timedelta(milliseconds=10),
                                            self.last_send)  # hangs otherwise?
                 except gen.TimeoutError:
                     pass
+            print('cleared')
             self.buffer, payload = [], self.buffer
             self.last_payload = payload
             self.last_transmission = now
+            self.count += 1
             self.last_send = write(self.stream, payload)
         except Exception as e:
             logger.exception(e)
+            raise
 
     @gen.coroutine
     def _write(self, payload):
