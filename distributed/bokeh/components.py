@@ -61,7 +61,7 @@ class TaskStream(DashboardComponent):
         self.root = Plot(
             title=Title(text="Task Stream"), id='bk-task-stream-plot',
             x_range=x_range, y_range=y_range, toolbar_location="above",
-            min_border_right=35, plot_height=300, **kwargs
+            min_border_right=35, **kwargs
         )
 
         self.root.add_glyph(
