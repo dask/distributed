@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+from datetime import timedelta
 import logging
 from timeit import default_timer
 
@@ -62,8 +63,11 @@ class BatchedSend(object):
                                 self.interval)
                 yield gen.sleep(wait_time)
             while self.stream._write_buffer:
-                yield gen.with_timeout(timedelta(milliseconds=10),
-                                       self.last_send)  # hangs otherwise?
+                try:
+                    yield gen.with_timeout(timedelta(milliseconds=10),
+                                           self.last_send)  # hangs otherwise?
+                except gen.TimeoutError:
+                    pass
             self.buffer, payload = [], self.buffer
             self.last_payload = payload
             self.last_transmission = now
