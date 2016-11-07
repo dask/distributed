@@ -38,9 +38,6 @@ class EchoServer(TCPServer):
                 yield write(stream, msg)
             except StreamClosedError as e:
                 pass
-            except Exception as e:
-                import pdb; pdb.set_trace()
-                raise
 
     def listen(self, port=0):
         while True:
@@ -235,7 +232,6 @@ def test_stress():
         def recv():
             while True:
                 result = yield gen.with_timeout(timedelta(seconds=1), read(stream))
-                print(result)
                 L.extend(result)
                 if result[-1] == 9999:
                     break
@@ -246,7 +242,7 @@ def test_stress():
         stream.close()
 
 
-@gen_test(timeout=20)
+@gen_test()
 def test_sending_traffic_jam():
     np = pytest.importorskip('numpy')
     from distributed.protocol import to_serialize
@@ -256,7 +252,7 @@ def test_sending_traffic_jam():
         client = TCPClient()
         stream = yield client.connect('127.0.0.1', e.port)
 
-        b = BatchedSend(interval=0.001)
+        b = BatchedSend(interval=0.01)
         b.start(stream)
         yield b.last_send
 
@@ -265,18 +261,23 @@ def test_sending_traffic_jam():
         msg = {'x': to_serialize(data)}
         for i in range(n):
             b.send(assoc(msg, 'i', i))
-            yield gen.sleep(0.005)
+            print(len(b.buffer))
+            yield gen.sleep(0.001)
 
         results = []
         count = 0
         while len(results) < n:
+            # If this times out then I think it's a backpressure issue
+            # Somehow we're able to flood the socket so that the receiving end
+            # loses some of our messages
             L = yield gen.with_timeout(timedelta(seconds=5), read(stream))
             count += 1
             results.extend(L)
 
-        assert count == b.count == e.count
+        assert count == b.batch_count == e.count
+        assert b.message_count == n
 
         assert [r['i'] for r in results] == list(range(50))
 
-        stream.close()
+        stream.close()  # external closing
         yield b.close(ignore_closed=True)
