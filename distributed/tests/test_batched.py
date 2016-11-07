@@ -246,8 +246,7 @@ def test_stress():
 def test_sending_traffic_jam():
     np = pytest.importorskip('numpy')
     from distributed.protocol import to_serialize
-    data = np.random.randint(0, 255, dtype='u1',
-            size=(300000,)).data.tobytes()
+    data = bytes(np.random.randint(0, 255, size=(300000,)).astype('u1').data)
     with echo_server() as e:
         client = TCPClient()
         stream = yield client.connect('127.0.0.1', e.port)
