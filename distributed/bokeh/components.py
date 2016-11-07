@@ -88,7 +88,10 @@ class TaskStream(DashboardComponent):
         )
 
         self.root.add_tools(
-            hover, ResetTool(), PanTool(dimensions="width"), WheelZoomTool(dimensions="width")
+            hover,
+            ResetTool(reset_size=False),
+            PanTool(dimensions="width"),
+            WheelZoomTool(dimensions="width")
         )
 
         # Required for update callback
@@ -392,7 +395,7 @@ class WorkerTable(DashboardComponent):
         mem_plot = Plot(
             title=Title(text="Memory Usage (%)"), toolbar_location=None,
             x_range=Range1d(start=0, end=1), y_range=Range1d(start=-0.1, end=0.1),
-            plot_height=80, **kwargs
+            **kwargs
         )
 
         mem_plot.add_glyph(
@@ -400,9 +403,7 @@ class WorkerTable(DashboardComponent):
             Circle(x='memory_percent', y=0, size=10, fill_alpha=0.5)
         )
 
-        mem_plot.add_layout(LinearAxis(), 'left')
         mem_plot.add_layout(LinearAxis(), 'below')
-        mem_plot.yaxis.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
