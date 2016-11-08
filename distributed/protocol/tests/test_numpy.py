@@ -32,6 +32,8 @@ def test_serialize():
          np.random.random(5).astype('f4'),
          np.arange(5).astype('M8[us]'),
          np.arange(5).astype('M8[ms]'),
+         np.arange(5).astype('m8'),
+         np.arange(5).astype('m8[s]'),
          np.arange(5).astype('c16'),
          np.arange(5).astype('c8'),
          np.array([True, False, True]),
