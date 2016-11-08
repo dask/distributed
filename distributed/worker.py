@@ -119,8 +119,8 @@ class Worker(Server):
 
     def __init__(self, scheduler_ip, scheduler_port, ip=None, ncores=None,
                  loop=None, local_dir=None, services=None, service_ports=None,
-                 name=None, heartbeat_interval=5000, memory_limit=TOTAL_MEMORY,
-                 executor=None, **kwargs):
+                 name=None, heartbeat_interval=5000,
+                 memory_limit=int(TOTAL_MEMORY * 0.6), executor=None, **kwargs):
         self.ip = ip or get_ip()
         self._port = 0
         self.ncores = ncores or _ncores
@@ -200,6 +200,11 @@ class Worker(Server):
                         sieve_func)
         return Buffer({}, storage, int(float(memory_limit)), weight)
 
+    def __str__(self):
+        return "<Worker: %s, threads: %d>" % (self.address, self.ncores)
+
+    __repr__ = __str__
+
     @property
     def worker_address(self):
         """ For API compatibility with Nanny """
@@ -236,6 +241,12 @@ class Worker(Server):
             logger.info('  %16s at: %20s:%d' % (k, self.ip, v))
         logger.info('Waiting to connect to: %20s:%d',
                     self.scheduler.ip, self.scheduler.port)
+        logger.info('-' * 49)
+        logger.info('              Threads: %26d', self.ncores)
+        if self.memory_limit:
+            logger.info('               Memory: %23.2f GB', self.memory_limit / 1e9)
+        logger.info('      Local Directory: %26s', self.local_dir)
+        logger.info('-' * 49)
         while True:
             try:
                 resp = yield self.scheduler.register(
@@ -255,6 +266,7 @@ class Worker(Server):
             raise ValueError(resp)
         logger.info('        Registered to: %20s:%d',
                     self.scheduler.ip, self.scheduler.port)
+        logger.info('-' * 49)
         self.status = 'running'
 
     def start(self, port=0):

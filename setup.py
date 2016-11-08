@@ -12,7 +12,7 @@ if sys.version_info < (3, 4):
     requires.append('singledispatch')
 
 setup(name='distributed',
-      version='1.13.3',
+      version='1.14.1',
       description='Distributed computing',
       url='https://distributed.readthedocs.io/en/latest/',
       maintainer='Matthew Rocklin',
@@ -23,6 +23,7 @@ setup(name='distributed',
       install_requires=requires,
       packages=['distributed',
                 'distributed.bokeh',
+                'distributed.bokeh.background',
                 'distributed.bokeh.status',
                 'distributed.bokeh.tasks',
                 'distributed.bokeh.workers',

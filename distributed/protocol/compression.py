@@ -11,7 +11,7 @@ import random
 from toolz import identity, partial
 
 from ..config import config
-from ..utils import ignoring
+from ..utils import ignoring, ensure_bytes
 
 
 compressions = {None: {'compress': identity,
@@ -74,7 +74,8 @@ def byte_sample(b, size, n):
         ends.append(min(start + size, starts[i + 1]))
     ends.append(starts[-1] + size)
 
-    return b''.join([b[start:end] for start, end in zip(starts, ends)])
+    parts = [b[start:end] for start, end in zip(starts, ends)]
+    return b''.join(map(ensure_bytes, parts))
 
 
 def maybe_compress(payload, compression=default_compression, min_size=1e4,
@@ -106,7 +107,7 @@ def maybe_compress(payload, compression=default_compression, min_size=1e4,
     if len(compress(sample)) > 0.9 * len(sample):  # not very compressible
         return None, payload
 
-    compressed = compress(payload)
+    compressed = compress(ensure_bytes(payload))
     if len(compressed) > 0.9 * len(payload):  # not very compressible
         return None, payload
     else:
