@@ -24,11 +24,19 @@ class ExportToolView extends ActionTool.View
 
   export: () ->
     if @model.content?
-      myWindow = window.open(
-        "data:text/html," + encodeURIComponent(@model.content),
-        "_blank"
-      );
-      myWindow.focus();
+      blob = new Blob([@model.content], {type: "text/plain"})
+      url = window.URL.createObjectURL(blob);
+
+      a = document.createElement("a")
+      a.id = "bk-export-tool-link"
+      a.style = "display: none"
+      a.href = url
+      a.download = 'task-stream.html'
+      document.body.appendChild(a)
+      a.click()
+
+      document.getElementById('bk-export-tool-link').remove()
+      window.URL.revokeObjectURL(url);
 
 class ExportTool extends ActionTool.Model
   default_view: ExportToolView
