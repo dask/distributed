@@ -23,10 +23,12 @@ class ExportToolView extends ActionTool.View
     @model.event = @model.event + 1
 
   export: () ->
-    x = window.open()
-    x.document.open()
-    x.document.write(@model.content)
-    x.document.close()
+    if @model.content?
+      myWindow = window.open(
+        "data:text/html," + encodeURIComponent(@model.content),
+        "_blank"
+      );
+      myWindow.focus();
 
 class ExportTool extends ActionTool.Model
   default_view: ExportToolView
@@ -53,7 +55,8 @@ class ExportTool(Tool):
     def register_plot(self, plot):
         def export_callback(attr, old, new):
             # really, export the doc as JSON
-            html = 'Hello, world!' # file_html(plot, CDN, "Task Stream")
+            self.content = None
+            html = file_html(plot, CDN, "Task Stream")
             self.content = html
 
         self.on_change('event', export_callback)
