@@ -32,6 +32,9 @@ def test_serialize():
          np.random.random(5).astype('f4'),
          np.arange(5).astype('M8[us]'),
          np.arange(5).astype('M8[ms]'),
+         np.arange(5).astype('c16'),
+         np.arange(5).astype('c8'),
+         np.array([True, False, True]),
          np.ones(shape=5, dtype=[('a', 'i4'), ('b', 'M8[us]')]),
          np.array(['abc'], dtype='S3'),
          np.array(['abc'], dtype='U3'),
@@ -78,6 +81,8 @@ def test_dumps_serialize_numpy_large():
 
 @pytest.mark.parametrize('dt,size', [('f8', 8),
                                      ('i4', 4),
+                                     ('c16', 16),
+                                     ('b', 1),
                                      ('S3', 3),
                                      ('M8[us]', 8),
                                      ('M8[s]', 8),
