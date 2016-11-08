@@ -28,8 +28,11 @@ def test_serialize():
 
 @pytest.mark.parametrize('x',
         [np.ones(5),
+         np.array(5),
          np.asfortranarray(np.random.random((5, 5))),
          np.random.random(5).astype('f4'),
+         np.random.random(5).astype('>i8'),
+         np.random.random(5).astype('<i8'),
          np.arange(5).astype('M8[us]'),
          np.arange(5).astype('M8[ms]'),
          np.arange(5).astype('m8'),
