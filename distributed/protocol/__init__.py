@@ -15,3 +15,6 @@ with ignoring(ImportError):
 
 with ignoring(ImportError):
     from . import netcdf4
+
+with ignoring(ImportError):
+    from . import pandas
