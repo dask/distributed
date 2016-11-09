@@ -13,23 +13,6 @@ import traceback
 from weakref import ref
 
 
-_CleanupTask = collections.namedtuple('_CleanupTask', ('func', 'completion'))
-
-
-@contextlib.contextmanager
-def disable_gc():
-    """A context manager to disable the GC temporarily.
-    """
-    if gc.isenabled():
-        gc.disable()
-        try:
-            yield
-        finally:
-            gc.enable()
-    else:
-        yield
-
-
 class CleanupThread(object):
     """
     Delegate cleanup functions to a dedicated thread, without deadlocks
@@ -83,7 +66,7 @@ class CleanupThread(object):
         tasks = collections.deque()
 
         while True:
-            self._wakeup.wait()
+            self._wakeup.wait(timeout=10)
             if self._please_shutdown or shutting_down():
                 break
             self._wakeup.clear()
@@ -92,10 +75,9 @@ class CleanupThread(object):
                 tasks.append(self._tasks.popleft())
 
             while tasks:
-                func, completion = tasks.popleft()
+                func = tasks.popleft()
                 try:
-                    with disable_gc():
-                        func()
+                    func()
                 except BaseException:
                     # XXX LOG
                     print("!" * 80)
@@ -103,9 +85,8 @@ class CleanupThread(object):
                     traceback.print_exc(file=sys.stdout)
                     print("!" * 80)
                 finally:
-                    # Lose any reference before waking up
+                    # Lose any reference to the callback
                     func = None
-                    completion.set()
 
     def stop(self):
         self._please_shutdown = True
@@ -119,23 +100,8 @@ class CleanupThread(object):
             return lambda: True
 
         self.start()
-
-        if self._thread is threading.current_thread():
-            # XXX LOG
-            print("ALERT: enqueue_task from same thread!")
-            func()
-            return lambda: True
-        else:
-            completion = threading.Event()
-            self._tasks.append(_CleanupTask(func, completion))
-            self._wakeup.set()
-
-            def wait():
-                while not shutting_down():
-                    if completion.wait(timeout=0.5):
-                        return
-
-            return wait
+        self._tasks.append(func)
+        self._wakeup.set()
 
 
 cleanup_thread = CleanupThread()
@@ -305,29 +271,13 @@ finalize(lambda: None, lambda: None)
 assert finalize._registered_with_atexit
 
 
-class AsyncDel(object):
-    # XXX unused
-
-    def _async_del(self):
-        raise NotImplementedError("should be implemented in subclass")
-
-    def __del__(self):
-        if shutting_down():
-            return
-        func = self._async_del()
-        if func is not None:
-            assert callable(func)
-            # Ensure all references to `self` are lost before returning,
-            # otherwise the object will be resurrected.
-            # Note `func` will often be a bound method of `self`...
-            try:
-                wait = cleanup_thread.enqueue_task(func)
-                wait()
-            finally:
-                func = None
-
-
 class AsyncFinalize(finalize):
+    """An asynchronous variant of the finalize() object.
+
+    The finalizer callback will be executed in the background cleanup
+    thread, to avoid deadlocks or oddities depending on where __del__
+    is called from.
+    """
 
     def __init__(self, obj, func, *args, **kwargs):
         assert callable(func)
