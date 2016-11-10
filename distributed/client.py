@@ -157,7 +157,18 @@ class Future(WrappedKey):
 
         The callback ``fn`` should take the future as its only argument.  This
         will be called regardless of if the future completes successfully,
-        errs, or is cancelled
+        errs, or is cancelled.
+
+        The callback is called from the event loop, so it should only
+        use coroutine variants of blocking methods, e.g.::
+
+            @gen.coroutine
+            def cb(fut):
+                res = yield fut._result()
+                print("Got result:", res)
+
+            my_future.add_done_callback(cb)
+
         """
         self.client.loop.add_callback(done_callback, self, fn)
 
