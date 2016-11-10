@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from concurrent.futures import CancelledError
 from operator import add
+import gc
 import os
 from time import time, sleep
 
@@ -250,7 +251,7 @@ def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     yield c._restart()
     y = c.submit(inc, 1)
     del x
-    import gc; gc.collect()
+    gc.collect()
     yield gen.sleep(0.1)
     yield y._result()
 
@@ -281,6 +282,7 @@ def test_broken_worker_during_computation(c, s, a, b):
     assert isinstance(result[0], int)
 
     yield n._close()
+    yield gen.sleep(0.5)
 
 
 @gen_cluster(client=True, Worker=Nanny)

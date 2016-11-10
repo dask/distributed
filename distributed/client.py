@@ -33,6 +33,7 @@ from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import (read, write, connect, coerce_to_rpc, clean_exception)
+from .finalize import AsyncFinalize
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .worker import dumps_function, dumps_task
@@ -83,6 +84,17 @@ class Future(WrappedKey):
 
         if tkey not in client.futures:
             client.futures[tkey] = {'event': Event(), 'status': 'pending'}
+
+        def finalize(client, key, generation):
+            if client.generation == generation:
+                client._dec_ref(key)
+        self._finalizer = AsyncFinalize(self, finalize,
+                                        client, tkey, self._generation)
+
+    def release(self):
+        if not self._cleared:
+            self._cleared = True
+            self._finalizer()
 
     @property
     def executor(self):
@@ -204,11 +216,6 @@ class Future(WrappedKey):
         except KeyError:
             return None
 
-    def release(self):
-        if not self._cleared and self.client.generation == self._generation:
-            self._cleared = True
-            self.client._dec_ref(tokey(self.key))
-
     def __getstate__(self):
         return self.key
 
@@ -217,9 +224,6 @@ class Future(WrappedKey):
         Future.__init__(self, key, c)
         c._send_to_scheduler({'op': 'update-graph', 'tasks': {},
                               'keys': [tokey(self.key)], 'client': c.id})
-
-    def __del__(self):
-        self.release()
 
     def __str__(self):
         if self.type:

@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from collections import Iterator
 from functools import partial
+import gc
 import io
 from time import time, sleep
 from threading import Thread
@@ -14,6 +15,7 @@ from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 import dask
+from distributed.finalize import AsyncFinalize
 from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
         truncate_exception, get_traceback, queue_to_iterator,
         iterator_to_queue, _maybe_complex, read_block, seek_delimiter,
@@ -282,3 +284,32 @@ def test_ensure_bytes():
         result = ensure_bytes(d)
         assert isinstance(result, bytes)
         assert result == b'1'
+
+
+class Fin(object):
+    def __init__(self, f, *args, **kwargs):
+        self._finalizer = AsyncFinalize(self, partial(f, *args, **kwargs))
+
+
+def test_finalize():
+    L = []
+    Fin(L.append, 42)
+
+    while len(L) < 1:
+        gc.collect()
+        sleep(0.05)
+    assert L == [42]
+
+    def f(val):
+        L.append(val)
+        # Re-entrantly trigger another finalizer
+        Fin(L.append, val + 1)
+        gc.collect()
+
+    L = []
+    Fin(f, 5)
+
+    while len(L) < 2:
+        gc.collect()
+        sleep(0.05)
+    assert L == [5, 6]
