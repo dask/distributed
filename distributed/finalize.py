@@ -38,7 +38,9 @@ class CleanupThread(object):
         if self._pid != os.getpid():
             self._reinit()
         if self._thread is None:
-            threading.Thread(target=self.run, daemon=True).start()
+            t = threading.Thread(target=self.run)
+            t.daemon = True
+            t.start()
             self._thread_start_event.wait()
             # May not be the one we just started...
             assert self._thread is not None
