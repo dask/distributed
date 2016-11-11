@@ -1,3 +1,7 @@
+from __future__ import print_function, division, absolute_import
+
+import os
+
 from bokeh.core.properties import Int, String
 from bokeh.driving import cosine
 from bokeh.embed import file_html
@@ -6,6 +10,7 @@ from bokeh.models import Tool
 from bokeh.plotting import figure
 from bokeh.resources import CDN
 from bokeh.util.compiler import JavaScript
+
 
 fn = __file__
 fn = os.path.join(os.path.dirname(fn), 'export_tool.js')
