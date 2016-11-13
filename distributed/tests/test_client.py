@@ -11,7 +11,7 @@ import os
 import pickle
 from random import random, choice
 import sys
-from threading import Thread
+from threading import Thread, Event
 from time import sleep, time
 import traceback
 
@@ -19,7 +19,7 @@ import mock
 import pytest
 from toolz import (identity, isdistinct, first, concat, pluck, valmap,
         partition_all, partial, sliding_window)
-from tornado import gen
+from tornado import gen, locks
 from tornado.ioloop import IOLoop
 from tornado.iostream import StreamClosedError
 
@@ -3706,6 +3706,33 @@ def test_add_done_callback(c, s, a, b):
     yield _wait(x)
 
     assert L == [x.key, x.status]
+
+
+@gen_cluster(client=True)
+def test_add_done_callback_coroutine(c, s, a, b):
+    done = locks.Event()
+    L = []
+    @gen.coroutine
+    def f(future):
+        try:
+            res = yield future._result()
+        except Exception as e:
+            L.append((False, str(e)))
+        else:
+            L.append((True, res))
+        done.set()
+
+    x = c.submit(inc, 42)
+    x.add_done_callback(f)
+    yield done.wait()
+    assert L == [(True, 43)]
+
+    done.clear()
+    L[:] = []
+    x = c.submit(throws, 5)
+    x.add_done_callback(f)
+    yield done.wait()
+    assert L == [(False, "hello!")]
 
 
 @gen_cluster(client=True)
