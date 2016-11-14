@@ -2877,11 +2877,30 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     'bob:8000'
     """
     deps = dependencies[key]
-    assert all(d in who_has for d in deps)
-    workers = frequencies([w for dep in deps
-                             for w in who_has[dep]])
+    if not deps:
+        workers = []
+    else:
+        assert all(d in who_has for d in deps)
+
+        has_bytes = defaultdict(lambda: 0)  # Count nbytes owned by each worker
+        total_bytes = 0
+        for dep in deps:
+            nb = nbytes.get(dep, 1000)
+            total_bytes += nb
+            for w in who_has[dep]:
+                has_bytes[w] += nb
+
+        if len(has_bytes) == 1:  # fast path common case
+            workers = list(has_bytes)
+        if not has_bytes:
+            workers = []
+        else:
+            limit = total_bytes / len(has_bytes) / 5  # minimum bytes to own key
+            workers = [w for w, nb in has_bytes.items() if nb >= limit]
+
     if not workers:
         workers = stacks
+
     if key in restrictions:
         r = restrictions[key]
         workers = {w for w in workers if w in r or w.split(':')[0] in r}  # TODO: nonlinear
@@ -2894,6 +2913,7 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
                             ncores, key)
                 else:
                     return None
+
     if not workers or not stacks:
         return None
 

@@ -15,20 +15,21 @@ from toolz import merge, concat, valmap, first
 from tornado.queues import Queue
 from tornado.iostream import StreamClosedError
 from tornado.gen import TimeoutError
-from tornado import gen
+from tornado import gen, locks
 
 import pytest
 
 from distributed import Nanny, Worker
 from distributed.batched import BatchedStream
 from distributed.core import connect, read, write, rpc
+from distributed.diagnostics.plugin import SchedulerPlugin
 from distributed.scheduler import (validate_state, decide_worker,
         Scheduler)
 from distributed.client import _wait
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
-        loop)
+        loop, slowidentity)
 from distributed.utils import All
 from dask.compatibility import apply
 
@@ -1057,3 +1058,26 @@ def test_retire_workers(c, s, a, b):
 
     workers = yield s.retire_workers()
     assert not workers
+
+
+@gen_cluster(client=True)
+def test_tiny_data_doesnt_decide_worker(c, s, a, b):
+    future = c.submit(slowidentity, 1, delay=0.1)
+    [x] = yield c._scatter([b'0' * 1000000], workers=a.address)
+
+    yield _wait(future)  # learn slowidentity is slow
+
+    small_futures = yield c._scatter(list(range(10)), workers=b.address)
+
+    event = locks.Event()
+
+    class MyPlugin(SchedulerPlugin):
+        def update_graph(self, scheduler, *args, **kwargs):
+            assert s.stacks[a.address]
+            assert not s.stacks[b.address]
+            event.set()
+
+    s.add_plugin(MyPlugin())
+
+    futures = c.map(slowidentity, [x] * 10, small_futures, delay=0.1)
+    yield gen.with_timeout(timedelta(seconds=1), event.wait())
