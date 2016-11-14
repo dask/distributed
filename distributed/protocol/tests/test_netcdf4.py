@@ -3,6 +3,8 @@ import pytest
 netCDF4 = pytest.importorskip('netCDF4')
 np = pytest.importorskip('numpy')
 
+import dask.array as da
+
 from distributed.protocol import serialize, deserialize, dumps, loads
 
 from distributed.utils import tmpfile
@@ -80,6 +82,20 @@ from distributed.client import _wait
 from tornado import gen
 
 import dask.array as da
+
+
+@gen_cluster(client=True)
+def test_serialize_deserialize_dask(c, s, a, b):
+    with tmpfile() as fn:
+        create_test_dataset(fn)
+        with netCDF4.Dataset(fn, mode='r') as f:
+            x = da.from_array(f.variables['x'],
+                              chunks=f.variables['x'].ndim * (1,))
+            y = deserialize(*serialize(x))
+
+            assert isinstance(y, da.core.Array)
+            assert x.dtype == y.dtype
+            assert c.compute((x == y).all())
 
 
 @gen_cluster(client=True)

@@ -3,6 +3,8 @@ from __future__ import print_function, division, absolute_import
 import numpy as np
 import pytest
 
+import dask.array as da
+
 from distributed.protocol import (serialize, deserialize, decompress, dumps,
         loads, to_serialize)
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
@@ -113,3 +115,20 @@ def test_compress_memoryview():
     compression, compressed = maybe_compress(mv)
     if compression:
         assert len(compressed) < len(mv)
+
+
+from distributed.utils_test import gen_cluster
+from distributed.client import _wait
+
+from tornado import gen
+
+
+@gen_cluster(client=True)
+def test_serialize_deserialize_dask(c, s, a, b):
+    x = da.from_array(np.ones(5), chunks=(1,))
+    header, frames = serialize(x)
+    if 'compression' in header:
+        frames = decompress(header, frames)
+    y = deserialize(header, frames)
+
+    assert c.compute((x == y).all())

@@ -2,6 +2,8 @@ import pytest
 
 h5py = pytest.importorskip('h5py')
 
+import dask.array as da
+
 from distributed.protocol import serialize, deserialize, dumps, loads
 
 from distributed.utils import tmpfile
@@ -63,7 +65,22 @@ from distributed.client import _wait
 
 from tornado import gen
 
-import dask.array as da
+
+@gen_cluster(client=True)
+def test_serialize_deserialize_dask(c, s, a, b):
+    with tmpfile() as fn:
+        with h5py.File(fn, mode='a') as f:
+            x = f.create_dataset('/group1/group2/x',
+                                 shape=(2, 2),
+                                 dtype='i4',
+                                 chunks=True)
+        with h5py.File(fn, mode='r') as f:
+            d = f['group1/group2/x']
+            x = da.from_array(d, chunks=d.chunks)
+            y = deserialize(*serialize(x))
+            assert isinstance(y, da.core.Array)
+            assert c.compute((x == y).all())
+
 
 @gen_cluster(client=True)
 def test_h5py_serialize(c, s, a, b):
