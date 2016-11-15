@@ -758,13 +758,12 @@ class Scheduler(Server):
             del self.worker_bytes[address]
 
             for key in self.has_what.pop(address):
-                if key in self.who_has:
-                    self.who_has[key].remove(address)
-                    if not self.who_has[key]:
-                        if key in self.tasks:
-                            recommendations[key] = 'released'
-                        else:
-                            recommendations[key] = 'forgotten'
+                self.who_has[key].remove(address)
+                if not self.who_has[key]:
+                    if key in self.tasks:
+                        recommendations[key] = 'released'
+                    else:
+                        recommendations[key] = 'forgotten'
 
             self.transitions(recommendations)
 
