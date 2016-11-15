@@ -7,6 +7,8 @@ from functools import partial
 
 from tornado import gen, ioloop
 
+from distributed.utils_test import gen_test
+
 
 @gen.coroutine
 def coro():
@@ -51,6 +53,7 @@ def test_global_coroutine():
     assert len(data) < 80
 
 
+@gen_test()
 def test_local_coroutine():
     @gen.coroutine
     def f(x, y):
@@ -66,16 +69,16 @@ def test_local_coroutine():
     f = g = None
     g2, g3 = loads(data)
     assert g2 is g3
-    loop = ioloop.IOLoop.current()
-    res = loop.run_sync(partial(g2, 5))
+    res = yield g2(5)
     assert res == 7
 
 
+@gen_test()
 def test_coroutine_method():
     obj = CoroObject()
     data = dumps(obj.f)
     del obj
     f2 = loads(data)
     loop = ioloop.IOLoop.current()
-    res = loop.run_sync(partial(f2, 5))
+    res = yield f2(5)
     assert res == 6
