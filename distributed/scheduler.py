@@ -33,7 +33,7 @@ from .core import (rpc, connect, read, write, MAX_BUFFER_SIZE,
         Server, send_recv, coerce_to_address, error_message)
 from .utils import (All, ignoring, clear_queue, get_ip, ignore_exceptions,
         ensure_ip, get_fileno_limit, log_errors, key_split, mean,
-        divide_n_among_bins)
+        divide_n_among_bins, validate_key)
 from .utils_comm import (scatter_to_workers, gather_from_workers)
 from .versions import get_versions
 
@@ -758,12 +758,13 @@ class Scheduler(Server):
             del self.worker_bytes[address]
 
             for key in self.has_what.pop(address):
-                self.who_has[key].remove(address)
-                if not self.who_has[key]:
-                    if key in self.tasks:
-                        recommendations[key] = 'released'
-                    else:
-                        recommendations[key] = 'forgotten'
+                if key in self.who_has:
+                    self.who_has[key].remove(address)
+                    if not self.who_has[key]:
+                        if key in self.tasks:
+                            recommendations[key] = 'released'
+                        else:
+                            recommendations[key] = 'forgotten'
 
             self.transitions(recommendations)
 
@@ -1089,7 +1090,12 @@ class Scheduler(Server):
         """
         yield gen.sleep(0)
         ip, port = coerce_to_address(worker, out=tuple)
-        stream = yield connect(ip, port)
+        try:
+            stream = yield connect(ip, port)
+        except Exception as e:
+            logger.error("Failed to connect to worker '%s:%s': %s",
+                         ip, port, e)
+            return
         yield write(stream, {'op': 'compute-stream'})
         self.worker_streams[worker].start(stream)
         logger.info("Starting worker compute stream, %s", worker)
@@ -1112,6 +1118,7 @@ class Scheduler(Server):
                         self.correct_time_delay(worker, msg)
 
                         key = msg['key']
+                        validate_key(key)
                         if msg['status'] == 'OK':
                             r = self.stimulus_task_finished(worker=worker, **msg)
                             recommendations.update(r)
