@@ -161,6 +161,13 @@ def slowadd(x, y, delay=0.02):
     return x + y
 
 
+def slowidentity(*args, **kwargs):
+    delay = kwargs.get('delay', 0.02)
+    from time import sleep
+    sleep(delay)
+    return args
+
+
 def run_scheduler(q, scheduler_port=0, **kwargs):
     from distributed import Scheduler
     from tornado.ioloop import IOLoop, PeriodicCallback
