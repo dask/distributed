@@ -32,7 +32,8 @@ from .core import (rpc, Server, pingpong, coerce_to_address,
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
-from .utils import funcname, get_ip, _maybe_complex, log_errors, All, ignoring
+from .utils import (funcname, get_ip, _maybe_complex, log_errors, All,
+                    ignoring, validate_key)
 
 _ncores = multiprocessing.cpu_count()
 
@@ -119,7 +120,7 @@ class Worker(Server):
 
     def __init__(self, scheduler_ip, scheduler_port, ip=None, ncores=None,
                  loop=None, local_dir=None, services=None, service_ports=None,
-                 name=None, heartbeat_interval=5000,
+                 name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit=int(TOTAL_MEMORY * 0.6), executor=None, **kwargs):
         self.ip = ip or get_ip()
         self._port = 0
@@ -140,6 +141,7 @@ class Worker(Server):
             self.data = dict()
         self.loop = loop or IOLoop.current()
         self.status = None
+        self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
         self.scheduler = rpc(ip=scheduler_ip, port=scheduler_port)
         self.active = set()
@@ -469,13 +471,19 @@ class Worker(Server):
                 try:
                     msgs = yield read(stream)
                 except StreamClosedError:
-                    break
+                    if self.reconnect:
+                        break
+                    else:
+                        yield self._close(report=False)
+                        break
                 if not isinstance(msgs, list):
                     msgs = [msgs]
 
                 batch = []
                 for msg in msgs:
                     op = msg.pop('op', None)
+                    if 'key' in msg:
+                        validate_key(msg['key'])
                     if op == 'close':
                         closed = True
                         break

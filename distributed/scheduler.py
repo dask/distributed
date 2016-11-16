@@ -33,7 +33,7 @@ from .core import (rpc, connect, read, write, MAX_BUFFER_SIZE,
         Server, send_recv, coerce_to_address, error_message)
 from .utils import (All, ignoring, clear_queue, get_ip, ignore_exceptions,
         ensure_ip, get_fileno_limit, log_errors, key_split, mean,
-        divide_n_among_bins)
+        divide_n_among_bins, validate_key)
 from .utils_comm import (scatter_to_workers, gather_from_workers)
 from .versions import get_versions
 
@@ -395,9 +395,9 @@ class Scheduler(Server):
             self.listen(port)
 
             self.status = 'running'
-            logger.info("Scheduler at: %20s:%s", self.ip, self.port)
+            logger.info("  Scheduler at: %20s:%s", self.ip, self.port)
             for k, v in self.services.items():
-                logger.info("%9s at: %20s:%s", k, self.ip, v.port)
+                logger.info("%11s at: %20s:%s", k, self.ip, v.port)
 
         return self.finished()
 
@@ -646,9 +646,9 @@ class Scheduler(Server):
             recommendations = {}
 
         if self.task_state[key] == 'memory':
-            self.who_has[key].add(worker)
             if key not in self.has_what[worker]:
                 self.worker_bytes[worker] += self.nbytes.get(key, 1000)
+            self.who_has[key].add(worker)
             self.has_what[worker].add(key)
 
         return recommendations
@@ -913,6 +913,14 @@ class Scheduler(Server):
             assert abs(sum(self.stack_durations[w]) - self.stack_duration[w]) < 1e-8
             assert len(self.stack_durations[w]) == len(self.stacks[w])
 
+        for key, workers in self.who_has.items():
+            for worker in workers:
+                assert key in self.has_what[worker]
+
+        for worker, keys in self.has_what.items():
+            for key in keys:
+                assert worker in self.who_has[key]
+
     ###################
     # Manage Messages #
     ###################
@@ -1089,7 +1097,12 @@ class Scheduler(Server):
         """
         yield gen.sleep(0)
         ip, port = coerce_to_address(worker, out=tuple)
-        stream = yield connect(ip, port)
+        try:
+            stream = yield connect(ip, port)
+        except Exception as e:
+            logger.error("Failed to connect to worker '%s:%s': %s",
+                         ip, port, e)
+            return
         yield write(stream, {'op': 'compute-stream'})
         self.worker_streams[worker].start(stream)
         logger.info("Starting worker compute stream, %s", worker)
@@ -1112,6 +1125,7 @@ class Scheduler(Server):
                         self.correct_time_delay(worker, msg)
 
                         key = msg['key']
+                        validate_key(key)
                         if msg['status'] == 'OK':
                             r = self.stimulus_task_finished(worker=worker, **msg)
                             recommendations.update(r)
@@ -1622,11 +1636,13 @@ class Scheduler(Server):
                 if key not in self.dependencies:
                     self.dependencies[key] = set()
                 self.task_state[key] = 'memory'
-                self.who_has[key] = set(workers)
+                if key not in self.who_has:
+                    self.who_has[key] = set()
                 for w in workers:
                     if key not in self.has_what[w]:
                         self.worker_bytes[w] += self.nbytes.get(key, 1000)
                     self.has_what[w].add(key)
+                    self.who_has[key].add(w)
                 self.waiting_data[key] = set()
                 self.report({'op': 'key-in-memory',
                              'key': key,
