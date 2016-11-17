@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from collections import Iterable
 from contextlib import contextmanager
 import logging
+import multiprocessing
 import os
 import re
 import shutil
@@ -27,6 +28,12 @@ from .compatibility import Queue, PY3, PY2
 from .config import config
 
 logger = logging.getLogger(__name__)
+
+
+if PY3 and not sys.platform.startswith('win'):
+    mp_context = multiprocessing.get_context('forkserver')
+else:
+    mp_context = multiprocessing
 
 
 def funcname(func):
