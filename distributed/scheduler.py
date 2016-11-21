@@ -216,7 +216,8 @@ class Scheduler(Server):
         self.processing = dict()
         self.rprocessing = defaultdict(set)
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
-        self.restrictions = dict()
+        self.host_restrictions = dict()
+        self.worker_restrictions = dict()
         self.loose_restrictions = set()
         self.suspicious_tasks = defaultdict(lambda: 0)
         self.stacks = dict()
@@ -361,8 +362,9 @@ class Scheduler(Server):
         """ Clear out old state and restart all running coroutines """
         collections = [self.tasks, self.dependencies, self.dependents,
                 self.waiting, self.waiting_data, self.released, self.priority,
-                self.nbytes, self.restrictions, self.loose_restrictions,
-                self.ready, self.who_wants, self.wants_what]
+                self.nbytes, self.host_restrictions, self.worker_restrictions,
+                self.loose_restrictions, self.ready, self.who_wants,
+                self.wants_what]
         for collection in collections:
             collection.clear()
 
@@ -522,9 +524,12 @@ class Scheduler(Server):
                 self.idle.add(address)
 
             for key in list(self.unrunnable):
-                r = self.restrictions.get(key, [])
-                if address in r or host in r or name in r:
+                if address in self.worker_restrictions.get(key, []):
                     self.transitions({key: 'released'})
+                else:
+                    r = self.host_restrictions.get(key, [])
+                    if name in r or host in r:
+                        self.transitions({key: 'released'})
 
             self.maybe_idle.add(address)
             self.ensure_occupied()
@@ -598,7 +603,12 @@ class Scheduler(Server):
         if restrictions:
             restrictions = {k: set(map(self.coerce_address, v))
                             for k, v in restrictions.items()}
-            self.restrictions.update(restrictions)
+            worker_restrictions = {k: {w for w in s if ':' in w}
+                                    for k, s in restrictions.items()}
+            host_restrictions = {k: {w for w in s if ':' not in w}
+                                 for k, s in restrictions.items()}
+            self.worker_restrictions.update(worker_restrictions)
+            self.host_restrictions.update(host_restrictions)
 
             if loose_restrictions:
                 self.loose_restrictions |= set(loose_restrictions)
@@ -704,7 +714,7 @@ class Scheduler(Server):
         appears to be unresponsive.  This may send its tasks back to a released
         state.
         """
-        with log_errors(pdb=LOG_PDB):
+        with log_errors():
             address = self.coerce_address(address)
             logger.info("Remove worker %s", address)
             if address not in self.processing:
@@ -1852,11 +1862,12 @@ class Scheduler(Server):
 
             del self.waiting[key]
 
-            if self.dependencies.get(key, None) or key in self.restrictions:
+            valid_workers = self.valid_workers(key)
+            if self.dependencies.get(key, None) or valid_workers is not True:
                 new_worker = decide_worker(self.dependencies, self.stacks,
                         self.stack_duration, self.processing, self.who_has,
-                        self.has_what, self.restrictions,
-                        self.loose_restrictions, self.nbytes, self.ncores, key)
+                        self.has_what, valid_workers, self.loose_restrictions,
+                        self.nbytes, self.ncores, key)
                 if not new_worker:
                     self.unrunnable.add(key)
                     self.task_state[key] = 'no-worker'
@@ -2296,8 +2307,10 @@ class Scheduler(Server):
         if key in self.dependencies:
             del self.dependencies[key]
         del self.dependents[key]
-        if key in self.restrictions:
-            del self.restrictions[key]
+        if key in self.worker_restrictions:
+            del self.worker_restrictions[key]
+        if key in self.host_restrictions:
+            del self.host_restrictions[key]
         if key in self.loose_restrictions:
             self.loose_restrictions.remove(key)
         if key in self.priority:
@@ -2732,7 +2745,8 @@ class Scheduler(Server):
         ratio: The compute/communication time ratio of the task
         loc: The self.stealable bin into which this key should go
         """
-        if key in self.restrictions and key not in self.loose_restrictions:
+        if ((key in self.worker_restrictions or key in self.host_restrictions)
+            and key not in self.loose_restrictions):
             return None, None  # don't steal
 
         nbytes = sum(self.nbytes.get(k, 1000) for k in self.dependencies[key])
@@ -2778,6 +2792,22 @@ class Scheduler(Server):
             self.idle.add(worker)
         elif worker in self.idle:
             self.idle.remove(worker)
+
+    def valid_workers(self, key):
+        """ Return set of currently valid worker addresses for key
+
+        If all workers are valid then this returns ``True``
+        """
+        s = True
+        if key in self.worker_restrictions:
+            s = {w for w in self.worker_restrictions[key] if w in
+                    self.worker_info}
+        if key in self.host_restrictions:
+            hr = self.host_restrictions[key]
+            if s is True:
+                s = set()  # TODO: nonlinear
+            s |= {w for w in self.worker_info if w.split(':')[0] in hr}
+        return s
 
     #####################
     # Utility functions #
@@ -2845,7 +2875,7 @@ class Scheduler(Server):
 
 
 def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
-        has_what, restrictions, loose_restrictions, nbytes, ncores, key):
+        has_what, valid_workers, loose_restrictions, nbytes, ncores, key):
     """
     Decide which worker should take task
 
@@ -2856,13 +2886,13 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     >>> has_what = {'alice:8000': {'a'}}
     >>> nbytes = {'a': 100}
     >>> ncores = {'alice:8000': 1, 'bob:8000': 1}
-    >>> restrictions = {}
+    >>> valid_workers = True
     >>> loose_restrictions = set()
 
     We choose the worker that has the data on which 'b' depends (alice has 'a')
 
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, ncores, 'b')
+    ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
     'alice:8000'
 
     If both Alice and Bob have dependencies then we choose the less-busy worker
@@ -2870,14 +2900,14 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     >>> who_has = {'a': {'alice:8000', 'bob:8000'}}
     >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'a'}}
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, ncores, 'b')
+    ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
     'bob:8000'
 
-    Optionally provide restrictions of where jobs are allowed to occur
+    Optionally provide valid workers of where jobs are allowed to occur
 
-    >>> restrictions = {'b': {'alice', 'charlie'}}
+    >>> valid_workers = {'alice:8000', 'charlie:8000'}
     >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
-    ...               restrictions, loose_restrictions, nbytes, ncores, 'b')
+    ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
     'alice:8000'
 
     If the task requires data communication, then we choose to minimize the
@@ -2900,15 +2930,14 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
                              for w in who_has[dep]])
     if not workers:
         workers = stacks
-    if key in restrictions:
-        r = restrictions[key]
-        workers = {w for w in workers if w in r or w.split(':')[0] in r}  # TODO: nonlinear
+    if valid_workers is not True:
+        workers = valid_workers & set(workers)
         if not workers:
-            workers = {w for w in stacks if w in r or w.split(':')[0] in r}
+            workers = valid_workers
             if not workers:
                 if key in loose_restrictions:
                     return decide_worker(dependencies, stacks, stack_duration,
-                            processing, who_has, has_what, {}, set(), nbytes,
+                            processing, who_has, has_what, True, set(), nbytes,
                             ncores, key)
                 else:
                     return None
