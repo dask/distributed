@@ -15,14 +15,14 @@ conda remove --all -q -y -n %CONDA_ENV%
 
 @rem Create test environment
 @rem (note: no cytoolz as it seems to prevent faulthandler tracebacks on crash)
-conda create -n %CONDA_ENV% -q -y python=%PYTHON% pytest toolz dill futures dask ipywidgets psutil bokeh requests joblib mock ipykernel jupyter_client tblib msgpack-python cloudpickle locket click zict
+conda create -n %CONDA_ENV% -q -y python=%PYTHON% pytest toolz dill futures dask ipywidgets psutil bokeh requests joblib mock ipykernel jupyter_client tblib msgpack-python cloudpickle locket click zict lz4
 
 call activate %CONDA_ENV%
 
 %PIP_INSTALL% git+https://github.com/dask/dask --upgrade
 %PIP_INSTALL% git+https://github.com/joblib/joblib.git --upgrade
 
-%PIP_INSTALL% pytest-timeout
+%PIP_INSTALL% pytest-timeout pytest-faulthandler
 
 @rem Display final environment (for reproducing)
 %CONDA% list
