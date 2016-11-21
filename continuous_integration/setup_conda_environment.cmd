@@ -19,6 +19,7 @@ conda create -n %CONDA_ENV% -q -y python=%PYTHON% pytest toolz dill futures dask
 
 call activate %CONDA_ENV%
 
+conda uninstall -q -y --force dask joblib
 %PIP_INSTALL% git+https://github.com/dask/dask --upgrade
 %PIP_INSTALL% git+https://github.com/joblib/joblib.git --upgrade
 
@@ -27,4 +28,5 @@ call activate %CONDA_ENV%
 @rem Display final environment (for reproducing)
 %CONDA% list
 %CONDA% list --explicit
+pip list
 python -m site
