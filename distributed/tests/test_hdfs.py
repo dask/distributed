@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import socket
+import sys
 from toolz import concat
 from tornado import gen
 
@@ -20,6 +21,14 @@ from distributed.client import _wait, Future
 
 hdfs3 = pytest.importorskip('hdfs3')
 from dask.bytes.core import read_bytes, write_bytes
+
+
+_orig_cluster = cluster
+
+def cluster(*args, **kwargs):
+    if sys.version_info < (3,) and not sys.platform.startswith('win'):
+        pytest.skip("hdfs3 is not fork safe, test can hang on Python 2")
+    return _orig_cluster(*args, **kwargs)
 
 
 ip = get_ip()
