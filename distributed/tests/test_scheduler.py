@@ -185,24 +185,19 @@ def test_update_state_supports_recomputing_released_results(s):
     assert set(s.processing[alice]) == {'x'}
 
 
-def test_decide_worker_with_many_independent_leaves():
-    dsk = merge({('y', i): (inc, ('x', i)) for i in range(100)},
-                {('x', i): i for i in range(100)})
-    dependencies, dependents = get_deps(dsk)
-    stacks = {alice: [], bob: []}
-    processing = {alice: dict(), bob: dict()}
-    who_has = merge({('x', i * 2): {alice} for i in range(50)},
-                    {('x', i * 2 + 1): {bob} for i in range(50)})
-    nbytes = {k: 0 for k in who_has}
-    ncores = {alice: 1, bob: 1}
+@gen_cluster(client=True)
+def test_decide_worker_with_many_independent_leaves(c, s, a, b):
+    dinc = delayed(inc)
+    xs = yield [c._scatter(list(range(0, 100, 2)), workers=a.address),
+                c._scatter(list(range(1, 100, 2)), workers=b.address)]
+    xs = list(concat(zip(*xs)))
+    ys = [delayed(inc)(x) for x in xs]
 
-    for key in dsk:
-        worker = decide_worker(dependencies, stacks, stack_duration, processing,
-                               who_has, {}, {}, set(), nbytes, ncores, key)
-        stacks[worker].append(key)
+    y2s = c.persist(ys)
+    yield _wait(y2s)
 
-    nhits = (len([k for k in stacks[alice] if alice in who_has[('x', k[1])]])
-             + len([k for k in stacks[bob] if bob in who_has[('x', k[1])]]))
+    nhits = (sum(y.key in a.data for y in y2s[::2]) +
+             sum(y.key in b.data for y in y2s[1::2]))
 
     assert nhits > 90
 

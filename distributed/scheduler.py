@@ -2846,8 +2846,8 @@ class Scheduler(Server):
 
 def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
         has_what, restrictions, loose_restrictions, nbytes, ncores, key):
-
-    """ Decide which worker should take task
+    """
+    Decide which worker should take task
 
     >>> dependencies = {'c': {'b'}, 'b': {'a'}}
     >>> stacks = {'alice:8000': ['z'], 'bob:8000': []}
