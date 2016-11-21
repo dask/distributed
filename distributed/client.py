@@ -662,6 +662,7 @@ class Client(object):
         key = kwargs.pop('key', None)
         pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
+        resources = kwargs.pop('resources', None)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers not in (True, False, None):
@@ -696,7 +697,8 @@ class Client(object):
             dsk = {skey: (func,) + tuple(args)}
 
         futures = self._graph_to_futures(dsk, [skey], restrictions,
-                loose_restrictions, priority={skey: 0})
+                loose_restrictions, priority={skey: 0},
+                resources={skey: resources})
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -1255,7 +1257,8 @@ class Client(object):
         return sync(self.loop, self._run, function, *args, **kwargs)
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
-            loose_restrictions=None, allow_other_workers=True, priority=None):
+            loose_restrictions=None, allow_other_workers=True, priority=None,
+            resources=None):
 
         keyset = set(keys)
         flatkeys = list(map(tokey, keys))
@@ -1295,7 +1298,8 @@ class Client(object):
                                  'restrictions': restrictions or {},
                                  'loose_restrictions': loose_restrictions,
                                  'client': self.id,
-                                 'priority': priority})
+                                 'priority': priority,
+                                 'resources': resources})
 
         return futures
 

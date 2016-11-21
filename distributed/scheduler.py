@@ -121,11 +121,17 @@ class Scheduler(Server):
         Set of keys that are known, but released from memory
     * **unrunnable:** ``{key}``
         Keys that we are unable to run
-    * **restrictions:** ``{key: {hostnames}}``:
+    * **host_restrictions:** ``{key: {hostnames}}``:
         A set of hostnames per key of where that key can be run.  Usually this
         is empty unless a key has been specifically restricted to only run on
-        certain hosts.  These restrictions don't include a worker port.  Any
-        worker on that hostname is deemed valid.
+        certain hosts.
+    * **worker_restrictions:** ``{key: {workers}}``:
+        Like host_restrictions except that these include specific host:port
+        worker names
+    * **resource_restrictions:** ``{key: {str: Number}}``:
+        Resources required by a task, such as ``{'GPU': 1}`` or
+        ``{'memory': 1e9}``.  These names must match resources specified when
+        creating workers.
     * **loose_restrictions:** ``{key}``:
         Set of keys for which we are allow to violate restrictions (see above)
         if not valid workers are present.
@@ -218,6 +224,7 @@ class Scheduler(Server):
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
         self.host_restrictions = dict()
         self.worker_restrictions = dict()
+        self.resource_restrictions = dict()
         self.loose_restrictions = set()
         self.suspicious_tasks = defaultdict(lambda: 0)
         self.stacks = dict()
@@ -247,7 +254,7 @@ class Scheduler(Server):
         self.worker_info = dict()
         self.host_info = defaultdict(dict)
         self.worker_resources = dict()
-        self.resources = dict()
+        self.resources = defaultdict(dict)
         self.aliases = dict()
         self.saturated = set()
         self.occupancy = dict()
@@ -530,6 +537,9 @@ class Scheduler(Server):
             for key in list(self.unrunnable):
                 if address in self.worker_restrictions.get(key, []):
                     self.transitions({key: 'released'})
+                elif (key in self.resource_restrictions and  # TODO: slow
+                      address in self.valid_workers(key)):
+                    self.transitions({key: 'released'})
                 else:
                     r = self.host_restrictions.get(key, [])
                     if name in r or host in r:
@@ -543,7 +553,7 @@ class Scheduler(Server):
 
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None, priority=None,
-                     loose_restrictions=None):
+                     loose_restrictions=None, resources=None):
         """
         Add new computations to the internal dask graph
 
@@ -616,6 +626,9 @@ class Scheduler(Server):
 
             if loose_restrictions:
                 self.loose_restrictions |= set(loose_restrictions)
+
+        if resources:
+            self.resource_restrictions.update(resources)
 
         for key in sorted(touched | keys, key=self.priority.get):
             if self.task_state[key] == 'released':
@@ -2332,6 +2345,8 @@ class Scheduler(Server):
             del self.suspicious_tasks[key]
         if key in self.nbytes:
             del self.nbytes[key]
+        if key in self.resource_restrictions:
+            del self.resource_restrictions[key]
 
     def transition_memory_forgotten(self, key):
         try:
@@ -2812,6 +2827,18 @@ class Scheduler(Server):
             if s is True:
                 s = set()  # TODO: nonlinear
             s |= {w for w in self.worker_info if w.split(':')[0] in hr}
+        if self.resource_restrictions.get(key):
+            w = {resource: {w for w, supplied in self.resources[resource].items()
+                              if supplied >= required}
+                 for resource, required in self.resource_restrictions[key].items()}
+
+            ww = set.intersection(*w.values())
+
+            if s is True:
+                s = ww
+            else:
+                s &= ww
+
         return s
 
     #####################
@@ -2824,8 +2851,6 @@ class Scheduler(Server):
 
         self.worker_resources[worker] = resources
         for resource, quantity in resources.items():
-            if resource not in self.resources:
-                self.resources[resource] = {}
             self.resources[resource][worker] = quantity
 
         # TODO: add host_resources
