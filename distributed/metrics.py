@@ -7,7 +7,7 @@ from functools import wraps
 _empty_namedtuple = collections.namedtuple("_empty_namedtuple", ())
 
 
-def _psutil_runner(method_name, default=_empty_namedtuple):
+def _psutil_caller(method_name, default=_empty_namedtuple):
     try:
         import psutil
     except ImportError:
@@ -25,7 +25,7 @@ def _psutil_runner(method_name, default=_empty_namedtuple):
     return wrapper
 
 
-disk_io_counters = _psutil_runner("disk_io_counters")
+disk_io_counters = _psutil_caller("disk_io_counters")
 
-net_io_counters = _psutil_runner("net_io_counters")
+net_io_counters = _psutil_caller("net_io_counters")
 
