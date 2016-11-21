@@ -154,6 +154,7 @@ def test_future(c, s, a, b):
     x = c.submit(inc, 10)
     assert str(x.key) in repr(x)
     assert str(x.status) in repr(x)
+    assert str(x.status) in c.futures[x.key]
 
 
 @gen_cluster(client=True)
