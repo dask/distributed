@@ -198,7 +198,7 @@ class Worker(Server):
         self.loop.add_callback(self.heartbeat_callback.start)
 
     def __str__(self):
-        return "<Worker: %s, threads: %d>" % (self.address, self.ncores)
+        return "<Worker: %s, threads: %d/%d>" % (self.address, len(self.active), self.ncores)
 
     __repr__ = __str__
 
