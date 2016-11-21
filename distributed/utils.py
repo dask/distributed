@@ -32,6 +32,8 @@ logger = logging.getLogger(__name__)
 
 if PY3 and not sys.platform.startswith('win'):
     mp_context = multiprocessing.get_context('forkserver')
+    # Makes the test suite much faster
+    mp_context.set_forkserver_preload(['distributed'])
 else:
     mp_context = multiprocessing
 
