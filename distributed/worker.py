@@ -120,11 +120,12 @@ class Worker(Server):
     def __init__(self, scheduler_ip, scheduler_port, ip=None, ncores=None,
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
-                 memory_limit='auto', executor=None, **kwargs):
+                 memory_limit='auto', executor=None, resources=None, **kwargs):
         self.ip = ip or get_ip()
         self._port = 0
         self.ncores = ncores or _ncores
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
+        self.resources = resources or {}
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
 
@@ -219,6 +220,7 @@ class Worker(Server):
                                         host_info=self.host_health(),
                                         services=self.service_ports,
                                         memory_limit=self.memory_limit,
+                                        resources=self.resources,
                                         **self.process_health())
             finally:
                 self.heartbeat_active = False
@@ -254,6 +256,7 @@ class Worker(Server):
                         host_info=self.host_health(),
                         services=self.service_ports,
                         memory_limit=self.memory_limit,
+                        resources=self.resources,
                         **self.process_health())
                 break
             except (OSError, StreamClosedError):

@@ -246,6 +246,8 @@ class Scheduler(Server):
         self.ncores = dict()
         self.worker_info = dict()
         self.host_info = defaultdict(dict)
+        self.worker_resources = dict()
+        self.resources = dict()
         self.aliases = dict()
         self.saturated = set()
         self.occupancy = dict()
@@ -459,7 +461,7 @@ class Scheduler(Server):
 
     def add_worker(self, stream=None, address=None, keys=(), ncores=None,
                    name=None, coerce_address=True, nbytes=None, now=None,
-                   host_info=None, **info):
+                   resources=None, host_info=None, **info):
         """ Add a new worker to the cluster """
         with log_errors():
             local_now = time()
@@ -483,6 +485,8 @@ class Scheduler(Server):
             delay = time() - now
             self.worker_info[address]['time-delay'] = delay
             self.worker_info[address]['last-seen'] = time()
+            if resources:
+                self.add_resources(address, resources)
 
             if address in self.ncores:
                 return 'OK'
@@ -765,6 +769,7 @@ class Scheduler(Server):
 
             del self.occupancy[address]
             del self.worker_bytes[address]
+            self.remove_resources(address)
 
             for key in self.has_what.pop(address):
                 self.who_has[key].remove(address)
@@ -2812,6 +2817,23 @@ class Scheduler(Server):
     #####################
     # Utility functions #
     #####################
+
+    def add_resources(self, worker, resources):
+        if self.worker_resources.get(worker) == resources:
+            return
+
+        self.worker_resources[worker] = resources
+        for resource, quantity in resources.items():
+            if resource not in self.resources:
+                self.resources[resource] = {}
+            self.resources[resource][worker] = quantity
+
+        # TODO: add host_resources
+
+    def remove_resources(self, worker):
+        if worker in self.worker_resources:
+            for resource, quantity in self.worker_resources.pop(worker).items():
+                del self.resources[resource][worker]
 
     def coerce_address(self, addr):
         """
