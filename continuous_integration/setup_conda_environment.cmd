@@ -19,9 +19,10 @@ call deactivate
 
 call activate %CONDA_ENV%
 
-%CONDA% uninstall -q -y --force dask joblib
+%CONDA% uninstall -q -y --force dask joblib zict
 %PIP_INSTALL% git+https://github.com/dask/dask --upgrade
 %PIP_INSTALL% git+https://github.com/joblib/joblib.git --upgrade
+%PIP_INSTALL% git+https://github.com/dask/zict --upgrade
 
 %PIP_INSTALL% pytest-timeout pytest-faulthandler
 
