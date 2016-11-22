@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
-import errno
 import gc
 from glob import glob
 import logging
@@ -531,35 +530,21 @@ def popen(*args, **kwargs):
                     line = proc.stdout.readline()
 
 
-def wait_for_ports(addresses, timeout=5):
-    addresses = [coerce_to_address(addr, out=tuple) for addr in addresses]
-    socks = {addr: socket.socket() for addr in addresses}
-    for sock in socks.values():
-        sock.setblocking(False)
+def wait_for_port(address, timeout=5):
+    address = coerce_to_address(address, out=tuple)
     deadline = time() + timeout
-
-    allowed_errnos = (errno.EAGAIN, errno.EINPROGRESS, errno.EWOULDBLOCK,
-                      errno.ECONNREFUSED, errno.EALREADY, errno.EINVAL)
 
     while True:
         timeout = deadline - time()
         if timeout < 0:
+            raise RuntimeError("Failed to connect to %s" % (address,))
+        try:
+            sock = socket.create_connection(address, timeout=timeout)
+        except EnvironmentError:
+            pass
+        else:
+            sock.close()
             break
-        for addr, sock in sorted(socks.items()):
-            try:
-                sock.connect(addr)
-            except EnvironmentError as e:
-                if e.errno not in allowed_errnos:
-                    raise
-            else:
-                del socks[addr]
-                sock.close()
-        if not socks:
-            break
-        sleep(0.1)
-
-    if socks:
-        raise RuntimeError("could not connect to %s" % sorted(socks))
 
 
 @contextmanager

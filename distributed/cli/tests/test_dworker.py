@@ -13,7 +13,7 @@ from distributed.core import rpc
 from distributed.nanny import isalive
 from distributed.utils import sync, ignoring
 from distributed.utils_test import (loop, popen, slow, terminate_process,
-                                    wait_for_ports)
+                                    wait_for_port)
 
 
 def test_nanny_worker_ports(loop):
@@ -43,7 +43,7 @@ def test_no_nanny(loop):
 @pytest.mark.parametrize('nanny', ['--nanny', '--no-nanny'])
 def test_no_reconnect(nanny, loop):
     with popen(['dask-scheduler']) as sched:
-        wait_for_ports(['127.0.0.1:8786'])
+        wait_for_port('127.0.0.1:8786')
         with popen(['dask-worker', '127.0.0.1:8786', '--no-reconnect', nanny]) as worker:
             sleep(2)
             terminate_process(sched)
