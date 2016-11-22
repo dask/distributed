@@ -2778,7 +2778,9 @@ class Scheduler(Server):
         ratio: The compute/communication time ratio of the task
         loc: The self.stealable bin into which this key should go
         """
-        if ((key in self.worker_restrictions or key in self.host_restrictions)
+        if ((key in self.worker_restrictions or
+            key in self.host_restrictions or
+            key in self.resource_restrictions)
             and key not in self.loose_restrictions):
             return None, None  # don't steal
 

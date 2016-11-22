@@ -2,7 +2,7 @@ from distributed import Worker
 from distributed.client import _wait
 
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
-        loop, readone)
+        loop, readone, slowinc, slowadd)
 
 
 @gen_cluster(client=True, ncores=[])
@@ -68,5 +68,40 @@ def test_submit_many_non_overlapping(c, s):
 
     assert len(a.data) == 5
     assert len(b.data) == 0
+
+    yield [a._close(), b._close()]
+
+
+@gen_cluster(client=True, ncores=[])
+def test_move(c, s):
+    a = Worker(s.ip, s.port, loop=s.loop, resources={'A': 1})
+    b = Worker(s.ip, s.port, loop=s.loop, resources={'B': 1})
+
+    yield [a._start(), b._start()]
+
+    [x] = yield c._scatter([1], workers=b.address)
+
+    future = c.submit(inc, x, resources={'A': 1})
+
+    yield _wait(future)
+    assert a.data[future.key] == 2
+
+    yield [a._close(), b._close()]
+
+
+@gen_cluster(client=True, ncores=[])
+def test_dont_work_steal(c, s):
+    a = Worker(s.ip, s.port, loop=s.loop, resources={'A': 1}, ncores=1)
+    b = Worker(s.ip, s.port, loop=s.loop, resources={'B': 1}, ncores=1)
+
+    yield [a._start(), b._start()]
+
+    [x] = yield c._scatter([1], workers=a.address)
+
+    futures = [c.submit(slowadd, x, i, resources={'A': 1}, delay=0.05)
+              for i in range(10)]
+
+    yield _wait(futures)
+    assert all(f.key in a.data for f in futures)
 
     yield [a._close(), b._close()]
