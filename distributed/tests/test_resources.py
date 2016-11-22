@@ -28,13 +28,9 @@ def test_resources(c, s):
     yield a._close()
 
 
-@gen_cluster(client=True, ncores=[])
-def test_resource_submit(c, s):
-    a = Worker(s.ip, s.port, loop=s.loop, resources={'A': 5})
-    b = Worker(s.ip, s.port, loop=s.loop, resources={'A': 1, 'B': 1})
-
-    yield [a._start(), b._start()]
-
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 5}}),
+                                  ('127.0.0.1', 1, {'resources': {'A': 1, 'B': 1}})])
+def test_resource_submit(c, s, a, b):
     x = c.submit(inc, 1, resources={'A': 3})
     y = c.submit(inc, 2, resources={'B': 1})
     z = c.submit(inc, 3, resources={'C': 2})
@@ -53,32 +49,22 @@ def test_resource_submit(c, s):
     yield _wait(z)
     assert z.key in d.data
 
-    yield [a._close(), b._close(), d._close()]
+    yield d._close()
 
 
-@gen_cluster(client=True, ncores=[])
-def test_submit_many_non_overlapping(c, s):
-    a = Worker(s.ip, s.port, loop=s.loop, resources={'A': 1})
-    b = Worker(s.ip, s.port, loop=s.loop, resources={'B': 1})
-
-    yield [a._start(), b._start()]
-
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 1}}),
+                                  ('127.0.0.1', 1, {'resources': {'B': 1}})])
+def test_submit_many_non_overlapping(c, s, a, b):
     futures = [c.submit(inc, i, resources={'A': 1}) for i in range(5)]
     yield _wait(futures)
 
     assert len(a.data) == 5
     assert len(b.data) == 0
 
-    yield [a._close(), b._close()]
 
-
-@gen_cluster(client=True, ncores=[])
-def test_move(c, s):
-    a = Worker(s.ip, s.port, loop=s.loop, resources={'A': 1})
-    b = Worker(s.ip, s.port, loop=s.loop, resources={'B': 1})
-
-    yield [a._start(), b._start()]
-
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 1}}),
+                                  ('127.0.0.1', 1, {'resources': {'B': 1}})])
+def test_move(c, s, a, b):
     [x] = yield c._scatter([1], workers=b.address)
 
     future = c.submit(inc, x, resources={'A': 1})
@@ -86,16 +72,10 @@ def test_move(c, s):
     yield _wait(future)
     assert a.data[future.key] == 2
 
-    yield [a._close(), b._close()]
 
-
-@gen_cluster(client=True, ncores=[])
-def test_dont_work_steal(c, s):
-    a = Worker(s.ip, s.port, loop=s.loop, resources={'A': 1}, ncores=1)
-    b = Worker(s.ip, s.port, loop=s.loop, resources={'B': 1}, ncores=1)
-
-    yield [a._start(), b._start()]
-
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 1}}),
+                                  ('127.0.0.1', 1, {'resources': {'B': 1}})])
+def test_dont_work_steal(c, s, a, b):
     [x] = yield c._scatter([1], workers=a.address)
 
     futures = [c.submit(slowadd, x, i, resources={'A': 1}, delay=0.05)
@@ -103,5 +83,3 @@ def test_dont_work_steal(c, s):
 
     yield _wait(futures)
     assert all(f.key in a.data for f in futures)
-
-    yield [a._close(), b._close()]
