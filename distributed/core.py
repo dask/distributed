@@ -6,6 +6,7 @@ import logging
 import six
 import socket
 import struct
+import sys
 from time import time
 import traceback
 import uuid
@@ -136,6 +137,7 @@ class Server(TCPServer):
         Coroutines should expect a single IOStream object.
         """
         stream.set_nodelay(True)
+        set_tcp_timeout(stream)
         ip, port = address
         logger.debug("Connection from %s:%d to %s", ip, port,
                      type(self).__name__)
@@ -191,6 +193,47 @@ class Server(TCPServer):
                 logger.warn("Failed while closing writer", exc_info=True)
         logger.debug("Close connection from %s:%d to %s", address[0], address[1],
                      type(self).__name__)
+
+
+def set_tcp_timeout(stream, timeout=20, nprobes=5):
+    """
+    Set kernel-level TCP transmission timeout on the stream.
+    """
+    sock = stream.socket
+
+    if sys.platform.startswith("win"):
+        # https://msdn.microsoft.com/en-us/library/windows/desktop/dd877220(v=vs.85).aspx
+        nprobes = 10
+    idle = max(2, timeout // 4)
+    interval = max(1, (timeout - idle) // nprobes)
+
+    try:
+        if sys.platform.startswith("win"):
+            sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, idle * 1000, interval * 1000))
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            try:
+                TCP_KEEPIDLE = socket.TCP_KEEPIDLE
+                TCP_KEEPINTVL = socket.TCP_KEEPINTVL
+                TCP_KEEPCNT = socket.TCP_KEEPCNT
+            except AttributeError:
+                if sys.platform == "darwin":
+                    TCP_KEEPIDLE = 0x10  # (named "TCP_KEEPALIVE" in C)
+                    TCP_KEEPINTVL = 0x101
+                    TCP_KEEPCNT = 0x102
+                else:
+                    TCP_KEEPIDLE = None
+
+            if TCP_KEEPIDLE is not None:
+                sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPCNT, nprobes)
+                sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPIDLE, idle)
+                sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPINTVL, interval)
+
+        if sys.platform.startswith("linux"):
+            TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
+            sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
+    except EnvironmentError as e:
+        logger.warn("Could not set timeout on TCP stream: %s", e)
 
 
 @gen.coroutine
@@ -267,6 +310,7 @@ def connect(ip, port, timeout=3):
         try:
             stream = yield gen.with_timeout(timedelta(seconds=timeout), future)
             stream.set_nodelay(True)
+            set_tcp_timeout(stream)
             raise gen.Return(stream)
         except StreamClosedError:
             if time() - start < timeout:
