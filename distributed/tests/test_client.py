@@ -35,7 +35,8 @@ from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All, mp_context
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
-        loop, inc, dec, div, throws, gen_cluster, gen_test, double, deep)
+        loop, inc, dec, div, throws, gen_cluster, gen_test, double, deep,
+        popen)
 
 
 @gen_cluster(client=True, timeout=None)
@@ -3111,7 +3112,6 @@ def test_synchronize_missing_data_on_one_worker(c, s, a, b):
     # assert set(s.has_what[b.address]) == set(a.data)
 
 
-from distributed.utils_test import popen
 @slow
 def test_reconnect(loop):
     w = Worker('127.0.0.1', 9393, loop=loop)
@@ -3141,16 +3141,16 @@ def test_reconnect(loop):
     with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
         start = time()
         while c.status != 'running':
-            sleep(0.01)
+            sleep(0.1)
             assert time() < start + 5
-
         start = time()
         while len(c.ncores()) != 1:
-            sleep(0.01)
-            assert time() < start + 5
+            sleep(0.05)
+            assert time() < start + 15
 
         x = c.submit(inc, 1)
         assert x.result() == 2
+        print(c.status, c.ncores())
 
     start = time()
     while True:

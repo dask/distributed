@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
+import errno
 import gc
 from glob import glob
 import logging
@@ -20,7 +21,7 @@ from tornado import gen, queues
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado.iostream import StreamClosedError
 
-from .core import connect, read, write, close, rpc
+from .core import connect, read, write, close, rpc, coerce_to_address
 from .utils import ignoring, log_errors, sync, mp_context
 import pytest
 
@@ -478,6 +479,23 @@ def raises(func, exc=Exception):
         return True
 
 
+def terminate_process(proc):
+    if proc.poll() is None:
+        if sys.platform.startswith('win'):
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            proc.send_signal(signal.SIGINT)
+        try:
+            if sys.version_info[0] == 3:
+                proc.wait(10)
+            else:
+                proc.wait()
+        finally:
+            # Make sure we don't leave the process lingering around
+            with ignoring(OSError):
+                proc.kill()
+
+
 @contextmanager
 def popen(*args, **kwargs):
     kwargs['stdout'] = subprocess.PIPE
@@ -494,20 +512,9 @@ def popen(*args, **kwargs):
         raise
 
     finally:
-        if sys.platform.startswith('win'):
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
-        else:
-            proc.send_signal(signal.SIGINT)
         try:
-            if sys.version_info[0] == 3:
-                proc.wait(10)
-            else:
-                proc.wait()
+            terminate_process(proc)
         finally:
-            # Make sure we don't leave the process lingering around
-            with ignoring(OSError):
-                proc.kill()
-
             # XXX Also dump stdout if return code != 0 ?
             if dump_stdout:
                 line = '\n\nPrint from stderr\n=================\n'
@@ -519,6 +526,38 @@ def popen(*args, **kwargs):
                 while line:
                     print(line)
                     line = proc.stdout.readline()
+
+
+def wait_for_ports(addresses, timeout=5):
+    addresses = [coerce_to_address(addr, out=tuple) for addr in addresses]
+    socks = {addr: socket.socket() for addr in addresses}
+    for sock in socks.values():
+        sock.setblocking(False)
+    deadline = time() + timeout
+
+    allowed_errnos = (errno.EAGAIN, errno.EINPROGRESS, errno.ECONNREFUSED)
+    if hasattr(errno, "WSAEINPROGRESS"):
+        allowed_errnos += (errno.WSAEINPROGRESS,)
+
+    while True:
+        timeout = deadline - time()
+        if timeout < 0:
+            break
+        for addr, sock in sorted(socks.items()):
+            try:
+                sock.connect(addr)
+            except EnvironmentError as e:
+                if e.errno not in allowed_errnos:
+                    raise
+            else:
+                del socks[addr]
+                sock.close()
+        if not socks:
+            break
+        sleep(0.1)
+
+    if socks:
+        raise RuntimeError("could not connect to %s" % sorted(socks))
 
 
 @contextmanager
