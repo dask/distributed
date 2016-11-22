@@ -495,6 +495,7 @@ class Scheduler(Server):
             self.worker_info[address]['last-seen'] = time()
             if resources:
                 self.add_resources(address, resources)
+                self.worker_info[address]['resources'] = resources
 
             if address in self.ncores:
                 return 'OK'
