@@ -254,6 +254,7 @@ class Scheduler(Server):
         self.worker_info = dict()
         self.host_info = defaultdict(dict)
         self.worker_resources = dict()
+        self.available_resources = dict()
         self.resources = defaultdict(dict)
         self.aliases = dict()
         self.saturated = set()
@@ -1926,6 +1927,7 @@ class Scheduler(Server):
             self.occupancy[worker] += duration
             self.task_state[key] = 'processing'
             self.remove_key_from_stealable(key)
+            self.consume_resources(key, worker)
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
@@ -1993,6 +1995,7 @@ class Scheduler(Server):
                 self.nbytes[key] = nbytes
 
             self.who_has[key] = set()
+            self.release_resources(key, worker)
 
             if worker:
                 self.who_has[key].add(worker)
@@ -2187,6 +2190,7 @@ class Scheduler(Server):
 
             for w in self.rprocessing.pop(key):
                 self.occupancy[w] -= self.processing[w].pop(key)
+                self.release_resources(key, w)
 
             self.released.add(key)
             self.task_state[key] = 'released'
@@ -2298,6 +2302,7 @@ class Scheduler(Server):
 
             for w in self.rprocessing.pop(key):
                 self.occupancy[w] -= self.processing[w].pop(key)
+                self.release_resources(key, w)
 
             del self.waiting_data[key]  # do anything with this?
 
@@ -2816,17 +2821,27 @@ class Scheduler(Server):
     def valid_workers(self, key):
         """ Return set of currently valid worker addresses for key
 
-        If all workers are valid then this returns ``True``
+        If all workers are valid then this returns ``True``.
+        This checks tracks the following state:
+
+        *  worker_restrictions
+        *  host_restrictions
+        *  resource_restrictions
         """
         s = True
+
         if key in self.worker_restrictions:
             s = {w for w in self.worker_restrictions[key] if w in
                     self.worker_info}
+
         if key in self.host_restrictions:
             hr = self.host_restrictions[key]
+            ss = {w for w in self.worker_info if w.split(':')[0] in hr}
             if s is True:
-                s = set()  # TODO: nonlinear
-            s |= {w for w in self.worker_info if w.split(':')[0] in hr}
+                s = ss
+            else:
+                s |= ss
+
         if self.resource_restrictions.get(key):
             w = {resource: {w for w, supplied in self.resources[resource].items()
                               if supplied >= required}
@@ -2841,22 +2856,36 @@ class Scheduler(Server):
 
         return s
 
+    def consume_resources(self, key, worker):
+        if key in self.resource_restrictions:
+            for r, required in self.resource_restrictions[key].items():
+                self.available_resources[worker][r] -= required
+                if self.validate:
+                    assert self.available_resources[worker][r] >= 0
+
+    def release_resources(self, key, worker):
+        if key in self.resource_restrictions:
+            for r, required in self.resource_restrictions[key].items():
+                if self.validate:
+                    assert self.available_resources[worker][r] >= 0
+                self.available_resources[worker][r] += required
+
     #####################
     # Utility functions #
     #####################
 
     def add_resources(self, worker, resources):
-        if self.worker_resources.get(worker) == resources:
-            return
-
-        self.worker_resources[worker] = resources
-        for resource, quantity in resources.items():
-            self.resources[resource][worker] = quantity
+        if worker not in self.worker_resources:
+            self.worker_resources[worker] = resources
+            self.available_resources[worker] = resources
+            for resource, quantity in resources.items():
+                self.resources[resource][worker] = quantity
 
         # TODO: add host_resources
 
     def remove_resources(self, worker):
         if worker in self.worker_resources:
+            del self.available_resources[worker]
             for resource, quantity in self.worker_resources.pop(worker).items():
                 del self.resources[resource][worker]
 

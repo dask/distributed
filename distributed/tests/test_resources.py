@@ -54,3 +54,17 @@ def test_resource_submit(c, s):
     assert z.key in d.data
 
     yield [a._close(), b._close(), d._close()]
+
+
+@gen_cluster(client=True, ncores=[])
+def test_submit_many_non_overlapping(c, s):
+    a = Worker(s.ip, s.port, loop=s.loop, resources={'A': 1})
+    b = Worker(s.ip, s.port, loop=s.loop, resources={'B': 1})
+
+    yield [a._start(), b._start()]
+
+    futures = [c.submit(inc, i, resources={'A': 1}) for i in range(5)]
+    yield _wait(futures)
+
+    assert len(a.data) == 5
+    assert len(b.data) == 0
