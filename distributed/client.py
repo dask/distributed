@@ -698,7 +698,7 @@ class Client(object):
 
         futures = self._graph_to_futures(dsk, [skey], restrictions,
                 loose_restrictions, priority={skey: 0},
-                resources={skey: resources})
+                resources={skey: resources} if resources else None)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
