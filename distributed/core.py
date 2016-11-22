@@ -230,9 +230,9 @@ def set_tcp_timeout(stream, timeout=20, nprobes=5):
                     TCP_KEEPIDLE = None
 
             if TCP_KEEPIDLE is not None:
-                sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPCNT, nprobes)
-                sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPIDLE, idle)
-                sock.setsockopt(socket.SOL_TCP, socket.TCP_KEEPINTVL, interval)
+                sock.setsockopt(socket.SOL_TCP, TCP_KEEPCNT, nprobes)
+                sock.setsockopt(socket.SOL_TCP, TCP_KEEPIDLE, idle)
+                sock.setsockopt(socket.SOL_TCP, TCP_KEEPINTVL, interval)
 
         if sys.platform.startswith("linux"):
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
