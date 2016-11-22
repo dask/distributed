@@ -68,3 +68,5 @@ def test_submit_many_non_overlapping(c, s):
 
     assert len(a.data) == 5
     assert len(b.data) == 0
+
+    yield [a._close(), b._close()]

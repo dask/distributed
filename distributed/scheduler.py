@@ -2659,6 +2659,14 @@ class Scheduler(Server):
                (self.ncores[worker] > len(self.processing[worker]) or
                 self.occupancy[worker] < latency * self.ncores[worker])):
             key = stack.pop()
+
+            # TODO: Move this logic to the worker.
+            # This blocks all activity on the worker until resources clear
+            if (key in self.resource_restrictions and not
+                self.check_resources(key, worker)):
+                stack.append(key)
+                break
+
             duration = self.stack_durations[worker].pop()
             self.stack_duration[worker] -= duration
 
@@ -2869,6 +2877,14 @@ class Scheduler(Server):
                 if self.validate:
                     assert self.available_resources[worker][r] >= 0
                 self.available_resources[worker][r] += required
+
+    def check_resources(self, key, worker):
+        resources = self.available_resources[worker]
+        if key in self.resource_restrictions:
+            for r, required in self.resource_restrictions[key].items():
+                if required > resources.get(r, 0):
+                    return False
+        return True
 
     #####################
     # Utility functions #

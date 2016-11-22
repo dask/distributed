@@ -523,9 +523,9 @@ class Worker(Server):
             msg.pop('who_has', None)
 
         for k, v in bad.items():
-            bstream.send({'status': 'missing-data',
-                          'key': k,
-                          'keys': list(v)})
+            send({'status': 'missing-data',
+                  'key': k,
+                  'keys': list(v)})
 
         out = []
         if good:
