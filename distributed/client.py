@@ -774,6 +774,7 @@ class Client(object):
         key = key or funcname(func)
         pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
+        resources = kwargs.pop('resources', None)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers and workers is None:
@@ -821,8 +822,13 @@ class Client(object):
 
         priority = dict(zip(keys, range(len(keys))))
 
+        if resources:
+            resources = {key: resources for key in keys}
+        else:
+            resources = None
+
         futures = self._graph_to_futures(dsk, keys, restrictions,
-                loose_restrictions, priority=priority)
+                loose_restrictions, priority=priority, resources=resources)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(key)] for key in keys]
@@ -1304,8 +1310,10 @@ class Client(object):
         return futures
 
     @gen.coroutine
-    def _get(self, dsk, keys, restrictions=None, raise_on_error=True):
-        futures = self._graph_to_futures(dsk, set(flatten([keys])), restrictions)
+    def _get(self, dsk, keys, restrictions=None, raise_on_error=True,
+            resources=None):
+        futures = self._graph_to_futures(dsk, set(flatten([keys])),
+                restrictions, resources=resources)
 
         packed = pack_data(keys, futures)
         try:
@@ -1324,7 +1332,7 @@ class Client(object):
         raise gen.Return(result)
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-            **kwargs):
+            resources=None, **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -1347,7 +1355,7 @@ class Client(object):
         Client.compute: Compute asynchronous collections
         """
         futures = self._graph_to_futures(dsk, set(flatten([keys])),
-                restrictions, loose_restrictions)
+                restrictions, loose_restrictions, resources=resources)
 
         try:
             results = self.gather(futures)
@@ -1413,7 +1421,7 @@ class Client(object):
             return redict_collection(collection, dsk)
 
     def compute(self, collections, sync=False, optimize_graph=True,
-            workers=None, allow_other_workers=False, **kwargs):
+            workers=None, allow_other_workers=False, resources=None, **kwargs):
         """ Compute dask collections on cluster
 
         Parameters
@@ -1478,8 +1486,12 @@ class Client(object):
         restrictions, loose_restrictions = get_restrictions(collections,
                 workers, allow_other_workers)
 
+        if resources:
+            resources = expand_resources(resources)
+
         futures_dict = self._graph_to_futures(merge(dsk2, dsk), names,
-                                              restrictions, loose_restrictions)
+                                              restrictions, loose_restrictions,
+                                              resources=resources)
 
         i = 0
         futures = []
@@ -1501,7 +1513,7 @@ class Client(object):
             return result
 
     def persist(self, collections, optimize_graph=True, workers=None,
-                allow_other_workers=None, **kwargs):
+                allow_other_workers=None, resources=None, **kwargs):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -1555,8 +1567,11 @@ class Client(object):
         restrictions, loose_restrictions = get_restrictions(collections,
                 workers, allow_other_workers)
 
+        if resources:
+            resources = expand_resources(resources)
+
         futures = self._graph_to_futures(dsk, names, restrictions,
-                loose_restrictions)
+                loose_restrictions, resources=resources)
 
         result = [redict_collection(c, {k: futures[k]
                                         for k in flatten(c._keys())})
@@ -2323,6 +2338,19 @@ def temp_default_client(c):
         yield
     finally:
         _global_client[0] = old_exec
+
+
+def expand_resources(resources):
+    assert isinstance(resources, dict)
+    out = {}
+    for k, v in resources.items():
+        if hasattr(k, '_keys'):
+            for kk in k._keys():
+                out[tokey(kk)] = v
+        else:
+            out[tokey(k)] = v
+    return out
+
 
 def get_restrictions(collections, workers, allow_other_workers):
     """ Get restrictions from inputs to compute/persist """

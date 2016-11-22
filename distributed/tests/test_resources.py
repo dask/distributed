@@ -1,3 +1,7 @@
+from __future__ import print_function, division, absolute_import
+
+from dask import delayed
+
 from distributed import Worker
 from distributed.client import _wait
 
@@ -83,3 +87,47 @@ def test_dont_work_steal(c, s, a, b):
 
     yield _wait(futures)
     assert all(f.key in a.data for f in futures)
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 1}}),
+                                  ('127.0.0.1', 1, {'resources': {'B': 1}})])
+def test_map(c, s, a, b):
+    futures = c.map(inc, range(10), resources={'B': 1})
+    yield _wait(futures)
+    assert set(b.data) == {f.key for f in futures}
+    assert not a.data
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 1}}),
+                                  ('127.0.0.1', 1, {'resources': {'B': 1}})])
+def test_persist(c, s, a, b):
+    x = delayed(inc)(1)
+    y = delayed(inc)(x)
+
+    xx, yy = c.persist([x, y], resources={x: {'A': 1}, y: {'B': 1}})
+
+    yield _wait([xx, yy])
+
+    assert x.key in a.data
+    assert y.key in b.data
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 1}}),
+                                  ('127.0.0.1', 1, {'resources': {'B': 1}})])
+def test_compute(c, s, a, b):
+    x = delayed(inc)(1)
+    y = delayed(inc)(x)
+
+    yy = c.compute(y, resources={x: {'A': 1}, y: {'B': 1}})
+    yield _wait(yy)
+
+    assert b.data
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 1}}),
+                                  ('127.0.0.1', 1, {'resources': {'B': 1}})])
+def test__get(c, s, a, b):
+    dsk = {'x': (inc, 1), 'y': (inc, 'x')}
+
+    result = yield c._get(dsk, 'y', resources={'y': {'A': 1}})
+    assert result == 3
