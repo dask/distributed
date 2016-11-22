@@ -488,6 +488,7 @@ def test_missing_data_heals(c, s, a, b):
     assert result == 3 + 4
 
 
+@pytest.mark.xfail(reason="Test creates inconsistent scheduler state")
 @slow
 @gen_cluster()
 def test_missing_worker(s, a, b):
