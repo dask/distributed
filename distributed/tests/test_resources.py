@@ -131,3 +131,18 @@ def test__get(c, s, a, b):
 
     result = yield c._get(dsk, 'y', resources={'y': {'A': 1}})
     assert result == 3
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 1}}),
+                                  ('127.0.0.1', 1, {'resources': {'B': 1}})])
+def test_persist_tuple(c, s, a, b):
+    x = delayed(inc)(1)
+    y = delayed(inc)(x)
+
+    xx, yy = c.persist([x, y], resources={(x, y): {'A': 1}})
+
+    yield _wait([xx, yy])
+
+    assert x.key in a.data
+    assert y.key in a.data
+    assert not b.data

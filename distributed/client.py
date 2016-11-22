@@ -2344,11 +2344,14 @@ def expand_resources(resources):
     assert isinstance(resources, dict)
     out = {}
     for k, v in resources.items():
-        if hasattr(k, '_keys'):
-            for kk in k._keys():
+        if not isinstance(k, tuple):
+            k = (k,)
+        for kk in k:
+            if hasattr(kk, '_keys'):
+                for kkk in kk._keys():
+                    out[tokey(kkk)] = v
+            else:
                 out[tokey(kk)] = v
-        else:
-            out[tokey(k)] = v
     return out
 
 
