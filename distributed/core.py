@@ -199,6 +199,9 @@ def set_tcp_timeout(stream, timeout=20, nprobes=5):
     """
     Set kernel-level TCP transmission timeout on the stream.
     """
+    timeout = int(timeout)
+    assert timeout >= nprobes + 1, "Timeout too low"
+
     sock = stream.socket
 
     if sys.platform.startswith("win"):
@@ -206,6 +209,8 @@ def set_tcp_timeout(stream, timeout=20, nprobes=5):
         nprobes = 10
     idle = max(2, timeout // 4)
     interval = max(1, (timeout - idle) // nprobes)
+    idle = timeout - interval * nprobes
+    assert idle > 0
 
     try:
         if sys.platform.startswith("win"):
