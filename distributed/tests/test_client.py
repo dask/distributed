@@ -5,12 +5,13 @@ from operator import add
 from collections import Iterator
 from concurrent.futures import CancelledError
 from datetime import timedelta
+import gc
 import itertools
 import os
 import pickle
 from random import random, choice
 import sys
-from threading import Thread
+from threading import Thread, Semaphore
 from time import sleep, time
 import traceback
 
@@ -3177,16 +3178,20 @@ def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip('psutil')
     proc = psutil.Process()
 
-    with cluster(nworkers=0) as (s, []):
+    with cluster(nworkers=0, active_rpc_timeout=20) as (s, []):
+        gc.collect()
         before = proc.num_fds()
+        done = Semaphore(0)
+
         @gen.coroutine
         def start_worker(sleep, duration, repeat=1):
             for i in range(repeat):
                 yield gen.sleep(sleep)
-                w = worker('127.0.0.1', s['port'], loop=loop)
+                w = worker('127.0.0.1', s['port'], ip='127.0.0.1', loop=loop)
                 yield w._start()
                 yield gen.sleep(duration)
                 yield w._close()
+            done.release()
 
         for i in range(count):
             loop.add_callback(start_worker, random() / 5, random() / 5,
@@ -3194,13 +3199,19 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
         with Client(('127.0.0.1', s['port']), loop=loop) as c:
             sleep(1)
+
+            for i in range(count):
+                done.acquire()
+
             start = time()
             while c.ncores():
                 sleep(0.2)
                 assert time() < start + 10
 
-    after = proc.num_fds()
-    assert before >= after
+    start = time()
+    while proc.num_fds() > before:
+        sleep(0.1)
+        assert time() < start + 10
 
 
 @gen_cluster(client=False, timeout=None)

@@ -267,15 +267,18 @@ def check_active_rpc(loop, active_rpc_timeout=0):
         def wait_a_bit():
             yield gen.sleep(0.01)
 
+        logger.info("Waiting for active RPC count to drop down")
         while rpc.active > rpc_active and loop.time() < deadline:
             loop.run_sync(wait_a_bit)
+        logger.info("... Finished waiting for active RPC count to drop down")
+
     assert rpc.active == rpc_active
 
 
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0):
     with pristine_loop() as loop:
-        with check_active_rpc(loop):
+        with check_active_rpc(loop, active_rpc_timeout):
             if nanny:
                 _run_worker = run_nanny
             else:
