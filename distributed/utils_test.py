@@ -539,7 +539,7 @@ def wait_for_ports(addresses, timeout=5):
     deadline = time() + timeout
 
     allowed_errnos = (errno.EAGAIN, errno.EINPROGRESS, errno.EWOULDBLOCK,
-                      errno.ECONNREFUSED,)
+                      errno.ECONNREFUSED, errno.EALREADY, errno.EINVAL)
 
     while True:
         timeout = deadline - time()

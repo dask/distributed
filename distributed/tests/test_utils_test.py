@@ -8,7 +8,7 @@ from time import sleep, time
 import pytest
 
 from distributed.utils_test import (cluster, loop, gen_cluster,
-        gen_test, wait_for_ports)
+        gen_test, wait_for_ports, slow)
 from distributed.core import rpc
 from distributed import Scheduler, Worker, Client
 from tornado import gen
@@ -71,9 +71,9 @@ def _listen(delay=0):
 def test_wait_for_ports():
     t1 = time()
     with pytest.raises(RuntimeError):
-        wait_for_ports(["127.0.0.1:9999"], 2.0)
+        wait_for_ports(["127.0.0.1:9999"], 0.5)
     t2 = time()
-    assert t2 - t1 >= 2.0
+    assert t2 - t1 >= 0.5
 
     with _listen(0) as s1:
         with _listen(0.5) as s2:
@@ -85,4 +85,4 @@ def test_wait_for_ports():
     with _listen(0) as s1:
         host, port = s1.getsockname()
         with pytest.raises(RuntimeError):
-            wait_for_ports([(host, port), (host, port+1)], 2.0)
+            wait_for_ports([(host, port), (host, port+1)], 1.0)
