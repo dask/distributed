@@ -3152,7 +3152,6 @@ def test_reconnect(loop):
 
         x = c.submit(inc, 1)
         assert x.result() == 2
-        print(c.status, c.ncores())
 
     start = time()
     while True:
