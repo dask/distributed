@@ -138,6 +138,7 @@ class Server(TCPServer):
         """
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
+
         ip, port = address
         logger.debug("Connection from %s:%d to %s", ip, port,
                      type(self).__name__)
@@ -214,6 +215,8 @@ def set_tcp_timeout(stream, timeout=20, nprobes=5):
 
     try:
         if sys.platform.startswith("win"):
+            logger.debug("Setting TCP keepalive: idle=%d, interval=%d",
+                         idle, interval)
             sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, idle * 1000, interval * 1000))
         else:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
@@ -230,11 +233,15 @@ def set_tcp_timeout(stream, timeout=20, nprobes=5):
                     TCP_KEEPIDLE = None
 
             if TCP_KEEPIDLE is not None:
+                logger.debug("Setting TCP keepalive: nprobes=%d, idle=%d, interval=%d",
+                             nprobes, idle, interval)
                 sock.setsockopt(socket.SOL_TCP, TCP_KEEPCNT, nprobes)
                 sock.setsockopt(socket.SOL_TCP, TCP_KEEPIDLE, idle)
                 sock.setsockopt(socket.SOL_TCP, TCP_KEEPINTVL, interval)
 
         if sys.platform.startswith("linux"):
+            logger.debug("Setting TCP user timeout: %d ms",
+                         timeout * 1000)
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
             sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
     except EnvironmentError as e:
