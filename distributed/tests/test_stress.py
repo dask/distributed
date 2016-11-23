@@ -171,12 +171,11 @@ def test_stress_communication(c, s, *workers):
     assert isinstance(result, float)
 
 
-@slow
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 8, timeout=10000)
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 8, timeout=None)
 def test_communication_heavy_graph(c, s, *workers):
     da = pytest.importorskip('dask.array')
     import numpy as np
-    n = 1000
+    n = 10000
     xs = [da.random.random((n, n), chunks=(n // 100, n)) for i in
             range(5)]
     y = np.random.random((n // 100, n))

@@ -664,7 +664,7 @@ class Worker(Server):
             for key in keys:
                 if key in self.data:
                     del self.data[key]
-            logger.info("Deleted %d keys", len(keys))
+            logger.debug("Deleted %d keys", len(keys))
             if report:
                 logger.debug("Reporting loss of keys to scheduler")
                 yield self.scheduler.remove_keys(address=self.address,
