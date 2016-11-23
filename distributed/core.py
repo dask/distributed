@@ -26,6 +26,7 @@ from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream, StreamClosedError
 
 from .compatibility import PY3, unicode, WINDOWS
+from .config import config
 from .utils import get_traceback, truncate_exception, ignoring
 from . import protocol
 
@@ -196,18 +197,19 @@ class Server(TCPServer):
                      type(self).__name__)
 
 
-def set_tcp_timeout(stream, timeout=20, nprobes=5):
+def set_tcp_timeout(stream):
     """
-    Set kernel-level TCP transmission timeout on the stream.
+    Set kernel-level TCP timeout on the stream.
     """
-    timeout = int(timeout)
-    assert timeout >= nprobes + 1, "Timeout too low"
+    timeout = int(config.get('tcp-timeout', 30))
 
     sock = stream.socket
 
-    if sys.platform.startswith("win"):
-        # https://msdn.microsoft.com/en-us/library/windows/desktop/dd877220(v=vs.85).aspx
-        nprobes = 10
+    # Default (unsettable) value on Windows
+    # https://msdn.microsoft.com/en-us/library/windows/desktop/dd877220(v=vs.85).aspx
+    nprobes = 10
+    assert timeout >= nprobes + 1, "Timeout too low"
+
     idle = max(2, timeout // 4)
     interval = max(1, (timeout - idle) // nprobes)
     idle = timeout - interval * nprobes
