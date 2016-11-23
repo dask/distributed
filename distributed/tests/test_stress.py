@@ -169,3 +169,25 @@ def test_stress_communication(c, s, *workers):
 
     result = yield future._result()
     assert isinstance(result, float)
+
+
+@slow
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 8, timeout=10000)
+def test_communication_heavy_graph(c, s, *workers):
+    da = pytest.importorskip('dask.array')
+    import numpy as np
+    n = 1000
+    xs = [da.random.random((n, n), chunks=(n // 100, n)) for i in
+            range(5)]
+    y = np.random.random((n // 100, n))
+
+    x2s = [x.map_blocks(add, y, dtype=x.dtype) for x in xs]
+    x3s = [x2.rechunk((n, n // 100)) for x2 in x2s]
+
+    for x3 in x3s:
+        future = c.compute(x3.sum())
+        yield gen.sleep(0.001)
+
+    f = future._result()
+
+    yield f
