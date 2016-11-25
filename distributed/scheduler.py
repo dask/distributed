@@ -1072,12 +1072,15 @@ class Scheduler(Server):
     def send_task_to_worker(self, worker, key):
         """ Send a single computational task to a worker """
         msg = {'op': 'compute-task',
-               'key': key}
+               'key': key,
+               'priority': self.priority[key],
+               'duration': self.task_duration.get(key_split(key), 0.5)}
 
         deps = self.dependencies[key]
         if deps:
             msg['who_has'] = {dep: tuple(self.who_has.get(dep, ()))
                               for dep in deps}
+            msg['nbytes'] = {dep: self.nbytes.get(dep) for dep in deps}
 
         task = self.tasks[key]
         if type(task) is dict:
