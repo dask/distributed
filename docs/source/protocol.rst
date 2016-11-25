@@ -222,3 +222,69 @@ In the following sections we describe how we create these frames.
 
 
 .. _MsgPack: http://msgpack.org/index.html
+
+
+Technical Version
+-----------------
+
+A message consists of the following components:
+
+1.  8 bytes encoding how many frames there are in the message (N)
+2.  8 * N frames encoding the length of each frame
+3.  Header for the administrative message
+4.  Administrative message, msgpack encoded, possibly compressed
+5.  Header for all payload messages
+6.  Payload message
+7.  Payload message
+8.  Payload message
+9.  ...
+
+3-4 Header for Administrative Message
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The administrative message is arbitrary msgpack-encoded data.  Usually a
+dictionary.  It may optionally be compressed.  If so the compression type will
+be in the header.
+
+5-end Payload frames and Header
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+These frames are optional.
+
+The payload frames generally contain data may be large and may be language
+specific.  The header is msgpack encoded and contains encoding and compression
+information for the other frames.
+
+Each payload frame corresponds to one piece of data what will be inserted into
+the administrative message at a particular location (location is provided in
+the header.)
+
+
+Simple Example
+~~~~~~~~~~~~~~
+
+Message: ``{'status': 'OK'}``
+
+Frames:
+
+*  Header: ``{}``
+*  Administrative Message: ``{'status': 'OK'}``
+
+
+Example with Custom Data
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Message: ``{'op': 'get-data', 'data': np.ones(5)}``
+
+Frames:
+
+*  Header: ``{}``
+*  Administrative Message: ``{'op': 'get-data'}``
+*  Payload header: ``{'headers': [{'type': 'numpy.ndarray',
+                                   'compression': 'lz4',
+                                   'count': 1,
+                                   'lengths': [40]}],
+                      'keys': [('data',)]}``
+*  Payload Frame: ``b'\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\xf0?``
+
+
