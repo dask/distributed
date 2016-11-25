@@ -16,7 +16,6 @@ from ..client import Client
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..worker import Worker, _ncores
-from ..worker2 import Worker2 as Worker
 
 logger = logging.getLogger(__file__)
 

@@ -2,20 +2,20 @@
 from operator import add
 
 from distributed.utils_test import gen_cluster, inc, slowinc
-from distributed.worker2 import Worker2
+from distributed.worker import WorkerNew
 
 from distributed.client import _wait
 
 
-@gen_cluster(client=True, Worker=Worker2, ncores=[('127.0.0.1', 1)])
+@gen_cluster(client=True, Worker=WorkerNew, ncores=[('127.0.0.1', 1)])
 def test_submit(c, s, a):
-    assert isinstance(a, Worker2)
+    assert isinstance(a, WorkerNew)
     future = c.submit(inc, 1)
     result = yield future._result()
     assert result == 2
 
 
-@gen_cluster(client=True, Worker=Worker2)
+@gen_cluster(client=True, Worker=WorkerNew)
 def test_inter_worker_communication(c, s, a, b):
     [x, y] = yield c._scatter([1, 2], workers=a.address)
 
@@ -24,14 +24,14 @@ def test_inter_worker_communication(c, s, a, b):
     assert result == 3
 
 
-@gen_cluster(client=True, Worker=Worker2)
+@gen_cluster(client=True, Worker=WorkerNew)
 def test_map(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.01)
     result = yield c._gather(futures)
     assert result == list(range(1, 21))
 
 
-@gen_cluster(client=True, Worker=Worker2, ncores=[('127.0.0.1', 1)] * 8,
+@gen_cluster(client=True, Worker=WorkerNew, ncores=[('127.0.0.1', 1)] * 8,
         timeout=None)
 def test_dataframes(c, s, *workers):
     import dask.dataframe as dd

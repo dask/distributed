@@ -219,7 +219,7 @@ def run_worker(q, scheduler_port, **kwargs):
         IOLoop.clear_instance()
         loop = IOLoop(); loop.make_current()
         PeriodicCallback(lambda: None, 500).start()
-        worker = Worker2('127.0.0.1', scheduler_port, ip='127.0.0.1',
+        worker = Worker('127.0.0.1', scheduler_port, ip='127.0.0.1',
                         loop=loop, **kwargs)
         loop.run_sync(lambda: worker._start(0))
         q.put(worker.port)
@@ -381,7 +381,6 @@ def gen_test(timeout=10):
 
 from .scheduler import Scheduler
 from .worker import Worker
-from .worker2 import Worker2
 from .client import Client
 
 @gen.coroutine
@@ -389,7 +388,7 @@ def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
                   worker_kwargs={}):
     s = Scheduler(ip='127.0.0.1', loop=loop, validate=True, **scheduler_kwargs)
     done = s.start(0)
-    workers = [Worker2(s.ip, s.port, ncores=v, ip=k, name=i, loop=loop,
+    workers = [Worker(s.ip, s.port, ncores=v, ip=k, name=i, loop=loop,
                       **worker_kwargs)
                 for i, (k, v) in enumerate(ncores)]
     for w in workers:
@@ -419,7 +418,7 @@ def end_cluster(s, workers):
 
 
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
-        Worker=Worker2, client=False, scheduler_kwargs={}, worker_kwargs={},
+        Worker=Worker, client=False, scheduler_kwargs={}, worker_kwargs={},
         active_rpc_timeout=0):
     from distributed import Client
     """ Coroutine test with small cluster

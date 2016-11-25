@@ -6,15 +6,10 @@ from tornado import gen
 from tornado.iostream import StreamClosedError
 
 from .batched import BatchedSend
-from .core import read, write, connect, close, send_recv, error_message
 from .utils import log_errors, validate_key
 
 from .worker import (Worker, funcname, convert_args_to_str,
         convert_kwargs_to_str, logger, pack_data, apply_function)
-
-
-import psutil
-process = psutil.Process()
 
 
 class Worker2(Worker):
