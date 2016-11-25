@@ -1131,7 +1131,10 @@ class Scheduler(Server):
 
                         self.correct_time_delay(worker, msg)
 
-                        key = msg['key']
+                        try:
+                            key = msg['key']
+                        except Exception as e:
+                            import pdb; pdb.set_trace()
                         validate_key(key)
                         if msg['status'] == 'OK':
                             r = self.stimulus_task_finished(worker=worker, **msg)

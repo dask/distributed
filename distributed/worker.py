@@ -15,9 +15,9 @@ import sys
 from dask.core import istask
 from dask.compatibility import apply
 try:
-    from cytoolz import valmap, merge
+    from cytoolz import valmap, merge, pluck
 except ImportError:
-    from toolz import valmap, merge
+    from toolz import valmap, merge, pluck
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -357,6 +357,7 @@ class WorkerBase(Server):
     @gen.coroutine
     def update_data(self, stream=None, data=None, report=True):
         self.data.update(data)
+        self.nbytes.update(valmap(sizeof, data))
         if report:
             response = yield self.scheduler.add_keys(
                                 address=(self.ip, self.port),
@@ -372,6 +373,8 @@ class WorkerBase(Server):
             for key in keys:
                 if key in self.data:
                     del self.data[key]
+                    self.log.append(('delete', key))
+                    self.forget_key(key)
             logger.debug("Deleted %d keys", len(keys))
             if report:
                 logger.debug("Reporting loss of keys to scheduler")
@@ -482,6 +485,7 @@ class WorkerBase(Server):
                           'keys': e.args})
         else:
             self.data.update(result)
+            self.nbytes.update(valmap(sizeof, result))
             raise Return({'status': 'OK'})
 
 
@@ -985,10 +989,11 @@ class WorkerNew(WorkerBase):
             self.dependents = dict()
             self.waiting_for_data = dict()
             self.who_has = dict()
+            self.has_what = defaultdict(set)
+            self.pending_data_per_worker = defaultdict(deque)
 
             self.data_needed = deque()
 
-            self.has_what = defaultdict(deque)
             self.in_flight = dict()
             self.total_connections = 10
             self.connections = {}
@@ -1052,6 +1057,19 @@ class WorkerNew(WorkerBase):
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
             who_has=None, nbytes=None, priority=None, duration=None):
         with log_errors():
+            if key in self.data:
+                # TODO: scheduler should be getting message that we already
+                # have this
+                self.batched_stream.send({
+                    'status': 'OK', 'key': key, 'nbytes': self.nbytes[key],
+                    'type': dumps_function(type(self.data[key]))
+                })
+                return
+
+            if (key in self.executing or
+                key in self.waiting_for_data):
+                return
+
             self.log.append(('add-task', key))
             try:
                 self.tasks[key] = self._deserialize(function, args, kwargs, task)
@@ -1078,18 +1096,18 @@ class WorkerNew(WorkerBase):
                 who_has = {dep: v for dep, v in who_has.items() if dep not in self.data}
                 self.waiting_for_data[key] = set(who_has)
             else:
-                self.dependencies[key] = set()
                 self.waiting_for_data[key] = set()
+                self.dependencies[key] = set()
 
             if who_has:
                 for dep, workers in who_has.items():
-                    if dep in self.who_has:
-                        self.who_has[dep].update(workers)
-                    else:
+                    if dep not in self.who_has:
                         self.who_has[dep] = set(workers)
+                    self.who_has[dep].update(workers)
 
                     for worker in workers:
-                        self.has_what[worker].append(dep)
+                        self.has_what[worker].add(dep)
+                        self.pending_data_per_worker[worker].append(dep)
 
                 self.data_needed.append(key)
             else:
@@ -1120,7 +1138,9 @@ class WorkerNew(WorkerBase):
 
     @gen.coroutine
     def gather_dep(self, dep):
-        with log_errors():
+        try:
+            if self.validate:
+                self.validate_state()
             if not self.who_has[dep]:
                 # TODO: ask scheduler nicely for new who_has before canceling
                 for key in list(self.dependents[dep]):
@@ -1129,23 +1149,33 @@ class WorkerNew(WorkerBase):
                 return
 
             worker = random.choice(list(self.who_has[dep]))
+
+            ip, port = worker.split(':')
+            future = connect(ip, int(port))
+            self.connections[future] = True
+            stream = yield future
+
+            if dep in self.data or dep in self.in_flight:  # someone beat us
+                yield close(stream)  # close newly opened stream
+                return
+
             deps = {dep}
+
             total_bytes = self.nbytes[dep]
-            L = self.has_what[worker]
+            L = self.pending_data_per_worker[worker]
 
             while L:
                 d = L.popleft()
-                if d in self.data or d in self.in_flight:
+                if (d in self.data or
+                    d in self.in_flight or
+                    d in self.executing or
+                    d not in self.nbytes):  # no longer tracking
                     continue
                 if total_bytes + self.nbytes[d] > self.target_message_size:
                     break
                 deps.add(d)
                 total_bytes += self.nbytes[d]
 
-            ip, port = worker.split(':')
-            future = connect(ip, int(port))
-            self.connections[future] = True
-            stream = yield future
             self.connections[stream] = deps
             del self.connections[future]
             for d in deps:
@@ -1175,15 +1205,16 @@ class WorkerNew(WorkerBase):
             for d, v in response.items():
                 if d not in self.data:
                     self.data[d] = v
+                    self.nbytes[d] = sizeof(v)
                 for key in self.dependents[d]:
                     if key in self.waiting_for_data:
                         if d in self.waiting_for_data[key]:
                             self.waiting_for_data[key].remove(d)
                         if not self.waiting_for_data[key]:
-                            del self.waiting_for_data[key]
+                            self.waiting_for_data[key]
                             self.task_ready(key)
 
-            self.scheduler.add_keys(address=self.address, keys=list(response))
+            self.loop.add_callback(self.scheduler.add_keys, address=self.address, keys=list(response))
 
             for d in deps:
                 if d not in response and d in self.dependents:
@@ -1191,7 +1222,14 @@ class WorkerNew(WorkerBase):
                     for key in self.dependents[d]:
                         self.data_needed.appendleft(key)
 
+            if self.validate:
+                self.validate_state()
+
             self.ensure_communicating()
+        except Exception as e:
+            logger.exception(e)
+            import pdb; pdb.set_trace()
+            raise
 
     @gen.coroutine
     def query_who_has(self, *deps):
@@ -1209,7 +1247,7 @@ class WorkerNew(WorkerBase):
                     self.who_has[dep] = set(workers)
 
                 for worker in workers:
-                    self.has_what[worker].append(dep)
+                    self.has_what[worker].add(dep)
 
     def cancel_key(self, key):
         with log_errors():
@@ -1221,26 +1259,53 @@ class WorkerNew(WorkerBase):
                 self.batched_stream.send({'status': 'missing-data',
                                           'key': key,
                                           'keys': missing})
-            del self.tasks[key]
-            del self.waiting_for_data[key]
-            for dep in self.dependencies.pop(key):
+            self.forget_key(key)
+
+    def forget_key(self, key):
+        with log_errors():
+            if key in self.tasks:
+                del self.tasks[key]
+            if key in self.waiting_for_data:
+                del self.waiting_for_data[key]
+
+            for dep in self.dependencies.pop(key, ()):
                 self.dependents[dep].remove(key)
                 if not self.dependents[dep]:
                     del self.dependents[dep]
+
+            if key in self.who_has:
+                for worker in self.who_has.pop(key):
+                    self.has_what[worker].remove(key)
+                    if not self.has_what[worker]:
+                        del self.has_what[worker]
+
+            if key in self.nbytes:
+                del self.nbytes[key]
+            if key in self.priorities:
+                del self.priorities[key]
+            if key in self.durations:
+                del self.durations[key]
 
     ################
     # Execute Task #
     ################
 
     def task_ready(self, key):
-        with log_errors():
-            assert not self.waiting_for_data.pop(key, None)
-            if not all(dep in self.data for dep in self.dependencies[key]):
-                import pdb; pdb.set_trace()
+        try:
+            if self.validate:
+                assert key in self.waiting_for_data
+                assert not self.waiting_for_data.pop(key)
+                assert all(dep in self.data for dep in self.dependencies[key])
+                assert key not in self.executing
+                assert key not in self.heap
 
             heapq.heappush(self.heap, (self.priorities[key], key))
 
             self.ensure_computing()
+        except Exception as e:
+            logger.exception(e)
+            import pdb; pdb.set_trace()
+            raise
 
     def ensure_computing(self):
         with log_errors():
@@ -1251,7 +1316,11 @@ class WorkerNew(WorkerBase):
 
     @gen.coroutine
     def execute(self, key, report=False):
-        with log_errors():
+        try:
+            if self.validate:
+                assert key not in self.waiting_for_data
+                assert key not in self.data
+
             self.executing.add(key)
             function, args, kwargs = self.tasks[key]
 
@@ -1266,9 +1335,11 @@ class WorkerNew(WorkerBase):
 
             result['key'] = key
             result.update(diagnostics)
+            self.log.append(('start-execute', key))
 
             if result['status'] == 'OK':
                 self.data[key] = result.pop('result')
+                self.nbytes[key] = result['nbytes']
                 if report:  # TODO: remove?
                     response = yield self.scheduler.add_keys(keys=[key],
                                             address=(self.ip, self.port))
@@ -1287,10 +1358,68 @@ class WorkerNew(WorkerBase):
             logger.debug("Send compute response to scheduler: %s, %s", key,
                          result)
 
-            self.batched_stream.send(result)
+            self.log.append(('finish-execute', key, result['status']))
 
+            self.batched_stream.send(result)
             self.executing.remove(key)
+
+            if self.validate:
+                assert key not in self.executing
+                assert key not in self.waiting_for_data
+
             self.ensure_computing()
+        except RuntimeError:
+            logger.error("Thread Pool Executor is shut down")
+        except Exception as e:
+            logger.exception(e)
+            raise
+
+    def validate_state(self):
+        try:
+            for key, workers in self.who_has.items():
+                for w in workers:
+                    assert key in self.has_what[w]
+
+            for worker, keys in self.has_what.items():
+                for k in keys:
+                    assert worker in self.who_has[k]
+
+            for key in self.tasks:
+                state = self.stateof(key)
+                if sum(state.values()) != 1:
+                    if state['data'] and state['executing']:
+                        continue
+                    else:
+                        pass # import pdb; pdb.set_trace()
+
+            for key in self.data.fast:
+                # assert key not in self.tasks
+                assert isinstance(self.nbytes[key], int)
+                assert key not in self.waiting_for_data
+
+            for key in self.waiting_for_data:
+                assert key not in self.data.fast
+
+            for dep in self.in_flight:
+                for key in self.dependents[dep]:
+                    assert key in self.waiting_for_data
+                    assert key not in self.executing
+
+        except Exception as e:
+            logger.exception(e)
+            import pdb; pdb.set_trace()
+
+    def stateof(self, key):
+        return {'executing': key in self.executing,
+                'waiting_for_data': key in self.waiting_for_data,
+                'heap': key in pluck(1, self.heap),
+                'data': key in self.data}
+
+    def story(self, key):
+        return [msg for msg in self.log
+                    if key in msg
+                    or any(key in c for c in msg
+                           if isinstance(c, (tuple, list, set)))]
 
 
 Worker = WorkerNew
