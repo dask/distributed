@@ -345,12 +345,12 @@ def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
 def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
         worker_port, local_dir, services, name, memory_limit, reconnect):
     """ Function run by the Nanny when creating the worker """
-    from distributed import Worker  # pragma: no cover
+    from distributed import Worker2  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
     loop.make_current()  # pragma: no cover
-    worker = Worker(scheduler_ip, scheduler_port, ncores=ncores, ip=ip,
+    worker = Worker2(scheduler_ip, scheduler_port, ncores=ncores, ip=ip,
                     service_ports={'nanny': nanny_port}, local_dir=local_dir,
                     services=services, name=name, memory_limit=memory_limit,
                     reconnect=reconnect, loop=loop)  # pragma: no cover

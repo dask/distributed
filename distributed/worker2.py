@@ -6,11 +6,15 @@ from tornado import gen
 from tornado.iostream import StreamClosedError
 
 from .batched import BatchedSend
-from .core import read, write, connect, close, send_recv
+from .core import read, write, connect, close, send_recv, error_message
 from .utils import log_errors, validate_key
 
 from .worker import (Worker, funcname, convert_args_to_str,
         convert_kwargs_to_str, logger, pack_data, apply_function)
+
+
+import psutil
+process = psutil.Process()
 
 
 class Worker2(Worker):
@@ -38,6 +42,9 @@ class Worker2(Worker):
 
             self.batched_stream = None
             self.target_message_size = 10e6  # 10 MB
+
+            self.log = deque(maxlen=100000)
+            self.validate = True
 
             Worker.__init__(self, *args, **kwargs)
 
@@ -85,7 +92,16 @@ class Worker2(Worker):
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
             who_has=None, nbytes=None, priority=None, duration=None):
         with log_errors():
-            self.tasks[key] = self._deserialize(function, args, kwargs, task)
+            self.log.append(('add-task', key))
+            try:
+                self.tasks[key] = self._deserialize(function, args, kwargs, task)
+            except Exception as e:
+                logger.warn("Could not deserialize task", exc_info=True)
+                emsg = error_message(e)
+                emsg['key'] = key
+                self.batched_stream.send(emsg)
+                return
+
             self.priorities[key] = priority
             self.durations[key] = duration
 
@@ -134,20 +150,23 @@ class Worker2(Worker):
 
                 n = self.total_connections - len(self.connections)
 
+                self.log.append(('gather-key', key, deps))
+
                 for dep in list(deps)[:n]:
                     self.gather_dep(dep)
 
-                self.data_needed.popleft()
+                if n >= len(deps):
+                    self.data_needed.popleft()
 
     @gen.coroutine
     def gather_dep(self, dep):
         with log_errors():
             if not self.who_has[dep]:
-                response = yield self.query_who_has(dep)
-                if not response[dep]:
-                    for key in self.dependents[dep]:
+                # TODO: ask scheduler nicely for new who_has before canceling
+                for key in list(self.dependents[dep]):
+                    if dep in self.waiting_for_data.get(key, ()):
                         self.cancel_key(key)
-                    return
+                return
 
             worker = random.choice(list(self.who_has[dep]))
             deps = {dep}
@@ -164,26 +183,29 @@ class Worker2(Worker):
                 total_bytes += self.nbytes[d]
 
             ip, port = worker.split(':')
-            stream = yield connect(ip, int(port))
+            future = connect(ip, int(port))
+            self.connections[future] = True
+            stream = yield future
             self.connections[stream] = deps
+            del self.connections[future]
             for d in deps:
                 if d in self.in_flight:
                     self.in_flight[d].add(stream)
                 else:
                     self.in_flight[d] = {stream}
-            response = yield send_recv(stream, op='get_data', keys=list(deps))
-            yield close(stream)
+            self.log.append(('request-dep', dep, worker, deps))
+            response = yield send_recv(stream, op='get_data', keys=list(deps),
+                                       close=True)
+            self.log.append(('receive-dep', dep, worker, list(response)))
+            stream.close()
             del self.connections[stream]
+
+            assert len(self.connections) < self.total_connections
 
             for d in deps:
                 self.in_flight[d].remove(stream)
                 if not self.in_flight[d]:
                     del self.in_flight[d]
-
-            for d in deps:
-                if d not in response:
-                    # TODO: handle missing data
-                    import pdb; pdb.set_trace()
 
             for d, v in response.items():
                 if d not in self.data:
@@ -196,9 +218,20 @@ class Worker2(Worker):
                             del self.waiting_for_data[key]
                             self.task_ready(key)
 
-            if dep not in self.data:
-                self.who_has[dep].remove(worker)
-                self.gather_dep(dep)
+            self.scheduler.add_keys(address=self.address, keys=list(response))
+
+            for d in deps:
+                if d not in response and d in self.dependents:
+                    self.log.append(('missing-dep', d))
+                    if dep == d:  # high priority dependence, go immediately
+                        try:
+                            self.who_has[dep].remove(worker)
+                        except KeyError:  # TODO: why does this sometimes fail
+                            pass
+                        self.gather_dep(dep)
+                    else:
+                        for key in self.dependents[d]:
+                            self.data_needed.append(key)
 
             self.ensure_communicating()
 
@@ -222,16 +255,20 @@ class Worker2(Worker):
 
     def cancel_key(self, key):
         with log_errors():
-            if key in self.pending:
+            if key in self.waiting_for_data:
                 missing = [dep for dep in self.dependencies[key]
                            if dep not in self.data
                            and not self.who_has.get(dep)]
-                self.batched_stream.send({'op': 'missing-data',
+                self.log.append(('report-missing-data', key, missing))
+                self.batched_stream.send({'status': 'missing-data',
                                           'key': key,
-                                          'keys': missing,
-                                          'worker': self.address})
+                                          'keys': missing})
             del self.tasks[key]
-            del self.pending[key]
+            del self.waiting_for_data[key]
+            for dep in self.dependencies.pop(key):
+                self.dependents[dep].remove(key)
+                if not self.dependents[dep]:
+                    del self.dependents[dep]
 
     ################
     # Execute Task #

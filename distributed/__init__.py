@@ -10,6 +10,7 @@ from .nanny import Nanny
 from .scheduler import Scheduler
 from .utils import sync
 from .worker import Worker
+from .worker2 import Worker2
 from .worker_client import local_client
 
 try:

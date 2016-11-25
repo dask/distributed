@@ -26,7 +26,7 @@ from tornado.iostream import StreamClosedError
 import dask
 from dask import delayed
 from dask.context import _globals
-from distributed import Worker, Nanny
+from distributed import Nanny, Worker2 as Worker
 from distributed.utils_comm import WrappedKey
 from distributed.client import (Client, Future, CompatibleExecutor, _wait,
         wait, _as_completed, as_completed, tokenize, _global_client,
@@ -515,11 +515,10 @@ def test_gather_robust_to_missing_data(c, s, a, b):
     x, y, z = c.map(inc, range(3))
     yield _wait([x, y, z])  # everything computed
 
-    for q in [x, y]:
-        if q.key in a.data:
-            del a.data[q.key]
-        if q.key in b.data:
-            del b.data[q.key]
+    for f in [x, y]:
+        for w in [a, b]:
+            if f.key in w.data:
+                del w.data[f.key]
 
     xx, yy, zz = yield c._gather([x, y, z])
     assert (xx, yy, zz) == (1, 2, 3)

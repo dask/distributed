@@ -16,6 +16,7 @@ from ..client import Client
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..worker import Worker, _ncores
+from ..worker2 import Worker2 as Worker
 
 logger = logging.getLogger(__file__)
 
@@ -37,6 +38,9 @@ class LocalCluster(object):
         If False keep the workers in the main calling process
     scheduler_port: int
         Port of the scheduler.  8786 by default, use 0 to choose a random port
+    silence_logs: logging level
+        Level of logs to print out to stdout.  ``logging.CRITICAL`` by default.
+        Use a falsey value like False or None for no change.
     kwargs: dict
         Extra worker arguments, will be passed to the Worker constructor.
 
@@ -83,7 +87,7 @@ class LocalCluster(object):
             threads_per_worker = max(1, int(math.ceil(_ncores / n_workers)))
 
         self.loop = loop or IOLoop()
-        if not self.loop._running:
+        if start and not self.loop._running:
             self._thread = Thread(target=self.loop.start)
             self._thread.daemon = True
             self._thread.start()

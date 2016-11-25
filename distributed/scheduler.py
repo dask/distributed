@@ -673,28 +673,29 @@ class Scheduler(Server):
     def stimulus_missing_data(self, keys=None, key=None, worker=None,
             ensure=True, **kwargs):
         """ Mark that certain keys have gone missing.  Recover. """
-        logger.debug("Stimulus missing data %s, %s", key, worker)
-        if worker:
-            self.maybe_idle.add(worker)
+        with log_errors():
+            logger.debug("Stimulus missing data %s, %s", key, worker)
+            if worker:
+                self.maybe_idle.add(worker)
 
-        recommendations = OrderedDict()
-        for k in set(keys):
-            if self.task_state.get(k) == 'memory':
-                for w in set(self.who_has[k]):
-                    self.has_what[w].remove(k)
-                    self.who_has[k].remove(w)
-                    self.worker_bytes[w] -= self.nbytes.get(k, 1000)
-                recommendations[k] = 'released'
+            recommendations = OrderedDict()
+            for k in set(keys):
+                if self.task_state.get(k) == 'memory':
+                    for w in set(self.who_has[k]):
+                        self.has_what[w].remove(k)
+                        self.who_has[k].remove(w)
+                        self.worker_bytes[w] -= self.nbytes.get(k, 1000)
+                    recommendations[k] = 'released'
 
-        if key:
-            recommendations[key] = 'released'
+            if key:
+                recommendations[key] = 'released'
 
-        self.transitions(recommendations)
+            self.transitions(recommendations)
 
-        if ensure:
-            self.ensure_occupied()
+            if ensure:
+                self.ensure_occupied()
 
-        return {}
+            return {}
 
     def remove_worker(self, stream=None, address=None, safe=False):
         """
