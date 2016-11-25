@@ -1154,8 +1154,13 @@ class WorkerNew(WorkerBase):
                 else:
                     self.in_flight[d] = {stream}
             self.log.append(('request-dep', dep, worker, deps))
-            response = yield send_recv(stream, op='get_data', keys=list(deps),
-                                       close=True)
+            try:
+                response = yield send_recv(stream, op='get_data', keys=list(deps),
+                                           close=True)
+            except StreamClosedError as e:
+                logger.exception(e)
+                response = {}
+
             self.log.append(('receive-dep', dep, worker, list(response)))
             stream.close()
             del self.connections[stream]
@@ -1183,15 +1188,8 @@ class WorkerNew(WorkerBase):
             for d in deps:
                 if d not in response and d in self.dependents:
                     self.log.append(('missing-dep', d))
-                    if dep == d:  # high priority dependence, go immediately
-                        try:
-                            self.who_has[dep].remove(worker)
-                        except KeyError:  # TODO: why does this sometimes fail
-                            pass
-                        self.gather_dep(dep)
-                    else:
-                        for key in self.dependents[d]:
-                            self.data_needed.append(key)
+                    for key in self.dependents[d]:
+                        self.data_needed.appendleft(key)
 
             self.ensure_communicating()
 
