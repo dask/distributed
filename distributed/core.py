@@ -149,7 +149,7 @@ class Server(TCPServer):
                     msg = yield read(stream, deserialize=self.deserialize)
                     logger.debug("Message from %s:%d: %s", ip, port, msg)
                 except StreamClosedError:
-                    logger.info("Lost connection: %s", str(address))
+                    logger.debug("Lost connection: %s", str(address))
                     break
                 except Exception as e:
                     logger.exception(e)

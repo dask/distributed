@@ -1061,6 +1061,7 @@ class WorkerNew(WorkerBase):
             if key in self.data:
                 # TODO: scheduler should be getting message that we already
                 # have this
+                logger.info("Asked to compute prexisting result: %s" , key)
                 self.batched_stream.send({
                     'status': 'OK', 'key': key, 'nbytes': self.nbytes[key],
                     'type': dumps_function(type(self.data[key]))
@@ -1121,11 +1122,28 @@ class WorkerNew(WorkerBase):
     def ensure_communicating(self):
         with log_errors():
             while self.data_needed and len(self.connections) < self.total_connections:
+                logger.debug("Ensure communicating.  Pending: %d.  Connections: %d/%d",
+                        len(self.data_needed), len(self.connections),
+                        self.total_connections)
                 key = self.data_needed[0]
+                if key not in self.tasks:
+                    self.data_needed.popleft()
+                    continue
                 deps = self.dependencies[key]
                 deps = {d for d in deps
                           if d not in self.data
+                          and d not in self.executing
                           and d not in self.in_flight}
+
+                for dep in deps:
+                    if not self.who_has.get(dep):
+                        logger.info("Can't find dependencies for key %s", key)
+                        self.cancel_key(key)
+                        continue
+
+                if key not in self.tasks:
+                    self.data_needed.popleft()
+                    continue
 
                 n = self.total_connections - len(self.connections)
 
@@ -1198,7 +1216,7 @@ class WorkerNew(WorkerBase):
                 logger.exception(e)
                 response = {}
 
-            self.log.append(('receive-dep', dep, worker, list(response)))
+            self.log.append(('receive-dep', worker, list(response)))
             stream.close()
             del self.connections[stream]
 
@@ -1226,8 +1244,11 @@ class WorkerNew(WorkerBase):
             for d in deps:
                 if d not in response and d in self.dependents:
                     self.log.append(('missing-dep', d))
+                    self.who_has[d].remove(worker)
+                    self.has_what[worker].remove(d)
                     for key in self.dependents[d]:
-                        self.data_needed.appendleft(key)
+                        if key in self.waiting_for_data:
+                            self.data_needed.appendleft(key)
 
             if self.validate:
                 self.validate_state()
@@ -1258,6 +1279,7 @@ class WorkerNew(WorkerBase):
 
     def cancel_key(self, key):
         with log_errors():
+            self.log.append(('cancel', key))
             if key in self.waiting_for_data:
                 missing = [dep for dep in self.dependencies[key]
                            if dep not in self.data
@@ -1270,6 +1292,7 @@ class WorkerNew(WorkerBase):
 
     def forget_key(self, key):
         with log_errors():
+            self.log.append(('forget', key))
             if key in self.tasks:
                 del self.tasks[key]
             if key in self.waiting_for_data:
