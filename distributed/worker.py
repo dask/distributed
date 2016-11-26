@@ -1142,7 +1142,7 @@ class WorkerNew(WorkerBase):
         try:
             if self.validate:
                 self.validate_state()
-            if not self.who_has[dep]:
+            if not self.who_has.get(dep):
                 # TODO: ask scheduler nicely for new who_has before canceling
                 for key in list(self.dependents[dep]):
                     if dep in self.waiting_for_data.get(key, ()):
@@ -1157,7 +1157,7 @@ class WorkerNew(WorkerBase):
             stream = yield future
 
             if dep in self.data or dep in self.in_flight:  # someone beat us
-                yield close(stream)  # close newly opened stream
+                stream.close() # close newly opened stream
                 return
 
             deps = {dep}
