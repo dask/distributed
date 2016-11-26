@@ -227,13 +227,20 @@ def pack_data(o, d):
     {'a': [1], 'b': 'y'}
     """
     typ = type(o)
-    if typ is str:
+    try:
         if o in d:
             return d[o]
+    except TypeError:
+        pass
 
     if typ in collection_types:
         return typ([pack_data(x, d) for x in o])
     elif typ is dict:
         return {k: pack_data(v, d) for k, v in o.items()}
     else:
+        try:
+            if o in d:
+                return d[o]
+        except TypeError:
+            pass
         return o
