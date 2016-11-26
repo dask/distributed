@@ -1001,6 +1001,7 @@ class WorkerNew(WorkerBase):
             self.nbytes = dict()
             self.priorities = dict()
             self.durations = dict()
+            self.diagnostics = dict()
 
             self.heap = list()
             self.executing = set()
@@ -1185,8 +1186,14 @@ class WorkerNew(WorkerBase):
                     self.in_flight[d] = {stream}
             self.log.append(('request-dep', dep, worker, deps))
             try:
+                start_time = time()
                 response = yield send_recv(stream, op='get_data', keys=list(deps),
                                            close=True)
+                end_time = time()
+                if dep not in self.diagnostics:
+                    self.diagnostics[dep] = {}
+                self.diagnostics[dep].update({'transfer_start': start_time,
+                                              'transfer_stop': end_time})
             except StreamClosedError as e:
                 logger.exception(e)
                 response = {}
@@ -1324,7 +1331,14 @@ class WorkerNew(WorkerBase):
             self.executing.add(key)
             function, args, kwargs = self.tasks[key]
 
-            diagnostics = {}  # TODO
+            try:
+                start = min(self.diagnostics[dep]['transfer_start'] for dep in
+                        self.dependencies[key] if dep in self.diagnostics)
+                stop = max(self.diagnostics[dep]['transfer_stop'] for dep in
+                        self.dependencies[key] if dep in self.diagnostics)
+                diagnostics = {'transfer_start': start, 'transfer_stop': stop}
+            except ValueError:
+                diagnostics = {}
 
             args2 = pack_data(args, self.data)
             kwargs2 = pack_data(kwargs, self.data)
