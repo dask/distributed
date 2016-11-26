@@ -1001,7 +1001,7 @@ class WorkerNew(WorkerBase):
             self.nbytes = dict()
             self.priorities = dict()
             self.durations = dict()
-            self.diagnostics = dict()
+            self.diagnostics = defaultdict(dict)
 
             self.heap = list()
             self.executing = set()
@@ -1053,6 +1053,7 @@ class WorkerNew(WorkerBase):
                 self.ensure_computing()
 
             yield self.batched_stream.close()
+            self.batched_stream = None
             logger.info('Close compute stream')
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
@@ -1208,8 +1209,6 @@ class WorkerNew(WorkerBase):
                 response = yield send_recv(stream, op='get_data', keys=list(deps),
                                            close=True)
                 end_time = time()
-                if dep not in self.diagnostics:
-                    self.diagnostics[dep] = {}
                 self.diagnostics[dep].update({'transfer_start': start_time,
                                               'transfer_stop': end_time})
             except StreamClosedError as e:
@@ -1315,6 +1314,8 @@ class WorkerNew(WorkerBase):
                 del self.priorities[key]
             if key in self.durations:
                 del self.durations[key]
+            if key in self.diagnostics:
+                del self.diagnostics[key]
 
     ################
     # Execute Task #
@@ -1363,8 +1364,13 @@ class WorkerNew(WorkerBase):
             except ValueError:
                 diagnostics = {}
 
+            start = time()
             args2 = pack_data(args, self.data)
             kwargs2 = pack_data(kwargs, self.data)
+            stop = time()
+            if stop - start > 0.005:
+                self.diagnostics[key]['disk_load_start'] = start
+                self.diagnostics[key]['disk_load_stop'] = stop
 
             result = yield self.executor_submit(key, apply_function, function,
                                                 args2, kwargs2,
