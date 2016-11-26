@@ -1126,10 +1126,14 @@ class WorkerNew(WorkerBase):
                 logger.debug("Ensure communicating.  Pending: %d.  Connections: %d/%d",
                         len(self.data_needed), len(self.connections),
                         self.total_connections)
+
                 key = self.data_needed[0]
-                if key not in self.tasks:
+                if (key in self.executing or
+                    key not in self.tasks or
+                    key in self.data):
                     self.data_needed.popleft()
                     continue
+
                 deps = self.dependencies[key]
                 deps = {d for d in deps
                           if d not in self.data
@@ -1164,6 +1168,8 @@ class WorkerNew(WorkerBase):
             if not self.who_has.get(dep):
                 # TODO: ask scheduler nicely for new who_has before canceling
                 for key in list(self.dependents[dep]):
+                    if dep in self.executing:
+                        continue
                     if dep in self.waiting_for_data.get(key, ()):
                         self.cancel_key(key)
                 return
