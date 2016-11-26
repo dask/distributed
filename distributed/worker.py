@@ -1014,6 +1014,13 @@ class WorkerNew(WorkerBase):
 
             WorkerBase.__init__(self, *args, **kwargs)
 
+    def __str__(self):
+        return "<%s, threads: %d, running: %d, ready: %d, in-flight: %d, waiting: %d>" % (
+                self.__class__.__name__, self.ncores, len(self.executing),
+                len(self.heap), len(self.in_flight), len(self.waiting_for_data))
+
+    __repr__ = __str__
+
     ################
     # Update Graph #
     ################
@@ -1362,10 +1369,14 @@ class WorkerNew(WorkerBase):
             function, args, kwargs = self.tasks[key]
 
             try:
-                start = min(self.diagnostics[dep]['transfer_start'] for dep in
-                        self.dependencies[key] if dep in self.diagnostics)
-                stop = max(self.diagnostics[dep]['transfer_stop'] for dep in
-                        self.dependencies[key] if dep in self.diagnostics)
+                start = min(self.diagnostics[dep]['transfer_start']
+                            for dep in self.dependencies[key]
+                            if dep in self.diagnostics
+                            and 'transfer_start' in self.diagnostics[dep])
+                stop = max(self.diagnostics[dep]['transfer_stop']
+                            for dep in self.dependencies[key]
+                            if dep in self.diagnostics
+                            and 'transfer_stop' in self.diagnostics[dep])
                 diagnostics = {'transfer_start': start, 'transfer_stop': stop}
             except ValueError:
                 diagnostics = {}
