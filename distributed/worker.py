@@ -24,6 +24,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.iostream import StreamClosedError
 
 from .batched import BatchedSend
+from .config import config
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
 from .core import (rpc, Server, pingpong, coerce_to_address,
@@ -39,6 +40,8 @@ _ncores = mp_context.cpu_count()
 thread_state = local()
 
 logger = logging.getLogger(__name__)
+
+LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
 
 try:
     import psutil
@@ -375,6 +378,7 @@ class WorkerBase(Server):
                     del self.data[key]
                     self.log.append((key, 'delete'))
                 if key in self.tasks and self.task_state[key] in ('memory', 'error'):
+                    # TODO: cleanly cancel in-flight tasks
                     self.forget_key(key)
             logger.debug("Deleted %d keys", len(keys))
             if report:
@@ -1157,7 +1161,8 @@ class WorkerNew(WorkerBase):
             heapq.heappush(self.heap, (self.priorities[key], key))
         except Exception as e:
             logger.exception(e)
-            import pdb; pdb.set_trace()
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
             raise
 
     def transition_ready_executing(self, key):
@@ -1173,7 +1178,8 @@ class WorkerNew(WorkerBase):
             self.loop.add_callback(self.execute, key)
         except Exception as e:
             logger.exception(e)
-            import pdb; pdb.set_trace()
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
             raise
 
     def transition_executing_done(self, key):
@@ -1192,7 +1198,8 @@ class WorkerNew(WorkerBase):
             self._close(report=False)
         except Exception as e:
             logger.exception(e)
-            import pdb; pdb.set_trace()
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
             raise
 
     ##########################
@@ -1351,7 +1358,8 @@ class WorkerNew(WorkerBase):
             self.ensure_communicating()
         except Exception as e:
             logger.exception(e)
-            import pdb; pdb.set_trace()
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
             raise
 
     @gen.coroutine
@@ -1497,7 +1505,8 @@ class WorkerNew(WorkerBase):
             logger.error("Thread Pool Executor is shut down")
         except Exception as e:
             logger.exception(e)
-            import pdb; pdb.set_trace()
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
             raise
 
     def validate_state(self):
@@ -1537,7 +1546,9 @@ class WorkerNew(WorkerBase):
 
         except Exception as e:
             logger.exception(e)
-            import pdb; pdb.set_trace()
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def stateof(self, key):
         return {'executing': key in self.executing,
