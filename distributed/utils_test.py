@@ -220,7 +220,7 @@ def run_worker(q, scheduler_port, **kwargs):
         loop = IOLoop(); loop.make_current()
         PeriodicCallback(lambda: None, 500).start()
         worker = Worker('127.0.0.1', scheduler_port, ip='127.0.0.1',
-                        loop=loop, **kwargs)
+                        loop=loop, validate=True, **kwargs)
         loop.run_sync(lambda: worker._start(0))
         q.put(worker.port)
         try:
@@ -237,7 +237,7 @@ def run_nanny(q, scheduler_port, **kwargs):
         loop = IOLoop(); loop.make_current()
         PeriodicCallback(lambda: None, 500).start()
         worker = Nanny('127.0.0.1', scheduler_port, ip='127.0.0.1',
-                       loop=loop, **kwargs)
+                       loop=loop, validate=True, **kwargs)
         loop.run_sync(lambda: worker._start(0))
         q.put(worker.port)
         try:
@@ -389,7 +389,7 @@ def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
     s = Scheduler(ip='127.0.0.1', loop=loop, validate=True, **scheduler_kwargs)
     done = s.start(0)
     workers = [Worker(s.ip, s.port, ncores=v, ip=k, name=i, loop=loop,
-                      **worker_kwargs)
+                      validate=True, **worker_kwargs)
                 for i, (k, v) in enumerate(ncores)]
     for w in workers:
         w.rpc = workers[0].rpc

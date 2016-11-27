@@ -1,10 +1,11 @@
 
 from operator import add
 
-from distributed.utils_test import gen_cluster, inc, slowinc
-from distributed.worker import WorkerNew
+from tornado import gen
 
 from distributed.client import _wait
+from distributed.utils_test import gen_cluster, inc, slowinc
+from distributed.worker import WorkerNew
 
 
 @gen_cluster(client=True, Worker=WorkerNew, ncores=[('127.0.0.1', 1)])
@@ -44,3 +45,25 @@ def test_dataframes(c, s, *workers):
 
     future = c.compute(df.index.quantile(np.linspace(0, 1, 100)))
     result = yield future._result()
+
+
+@gen_cluster(client=True, Worker=WorkerNew)
+def test_clean(c, s, a, b):
+    x = c.submit(inc, 1, workers=a.address)
+    y = c.submit(inc, x, workers=b.address)
+
+    yield y._result()
+
+    collections = [a.tasks, a.task_state, a.response, a.data, a.nbytes,
+                   a.durations, a.priorities]
+    for c in collections:
+        assert c
+
+    x.release()
+    y.release()
+
+    while x.key in a.task_state:
+        yield gen.sleep(0.01)
+
+    for c in collections:
+        assert not c

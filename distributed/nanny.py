@@ -36,12 +36,14 @@ class Nanny(Server):
     def __init__(self, scheduler_ip, scheduler_port, ip=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit=TOTAL_MEMORY, reconnect=True,
-                 environment=nanny_environment, quiet=False, **kwargs):
+                 validate=False, environment=nanny_environment, quiet=False,
+                 **kwargs):
         self.ip = ip or get_ip()
         self.worker_port = None
         self._given_worker_port = worker_port
         self.ncores = ncores or _ncores
         self.reconnect = reconnect
+        self.validate = validate
         if not local_dir:
             local_dir = tempfile.mkdtemp(prefix='nanny-')
             self._should_cleanup_local_dir = True
@@ -199,7 +201,7 @@ class Nanny(Server):
                           self.scheduler.port, self.ncores,
                           self.port, self._given_worker_port,
                           self.local_dir, self.services, self.name,
-                          self.memory_limit, self.reconnect))
+                          self.memory_limit, self.reconnect, self.validate))
                 self.process.daemon = True
                 self.process.start()
                 while True:
@@ -343,7 +345,8 @@ def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
 
 
 def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
-        worker_port, local_dir, services, name, memory_limit, reconnect):
+        worker_port, local_dir, services, name, memory_limit, reconnect,
+        validate):
     """ Function run by the Nanny when creating the worker """
     from distributed import Worker  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
@@ -353,7 +356,7 @@ def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
     worker = Worker(scheduler_ip, scheduler_port, ncores=ncores, ip=ip,
                     service_ports={'nanny': nanny_port}, local_dir=local_dir,
                     services=services, name=name, memory_limit=memory_limit,
-                    reconnect=reconnect, loop=loop)  # pragma: no cover
+                    reconnect=reconnect, validate=validate, loop=loop)  # pragma: no cover
 
     @gen.coroutine  # pragma: no cover
     def run():
