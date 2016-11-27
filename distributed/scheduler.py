@@ -30,7 +30,7 @@ from dask.order import order
 from .batched import BatchedSend
 from .config import config
 from .core import (rpc, connect, read, write, close, MAX_BUFFER_SIZE,
-        Server, send_recv, coerce_to_address, error_message)
+        Server, send_recv, coerce_to_address, error_message, clean_exception)
 from .utils import (All, ignoring, clear_queue, get_ip, ignore_exceptions,
         ensure_ip, get_fileno_limit, log_errors, key_split, mean,
         divide_n_among_bins, validate_key)
@@ -1130,6 +1130,10 @@ class Scheduler(Server):
                             break
 
                         self.correct_time_delay(worker, msg)
+
+                        if msg['status'] == 'uncaught-error':
+                            logger.exception(clean_exception(**msg)[1])
+                            continue
 
                         try:
                             key = msg['key']

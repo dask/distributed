@@ -374,6 +374,7 @@ class WorkerBase(Server):
                 if key in self.data:
                     del self.data[key]
                     self.log.append(('delete', key))
+                if key in self.tasks:
                     self.forget_key(key)
             logger.debug("Deleted %d keys", len(keys))
             if report:
@@ -985,6 +986,7 @@ class WorkerNew(WorkerBase):
     def __init__(self, *args, **kwargs):
         with log_errors():
             self.tasks = dict()
+            self.task_state = dict()
             self.dependencies = dict()
             self.dependents = dict()
             self.waiting_for_data = dict()
@@ -1066,19 +1068,20 @@ class WorkerNew(WorkerBase):
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
             who_has=None, nbytes=None, priority=None, duration=None):
         with log_errors():
-            if key in self.data:
-                # TODO: scheduler should be getting message that we already
-                # have this
-                logger.info("Asked to compute prexisting result: %s" , key)
-                self.batched_stream.send({
-                    'status': 'OK', 'key': key, 'nbytes': self.nbytes[key],
-                    'type': dumps_function(type(self.data[key]))
-                })
-                return
-
-            if (key in self.executing or
-                key in self.waiting_for_data):
-                return
+            if key in self.task_state:
+                state = self.task_state[key]
+                if state == 'memory':
+                    assert key in self.data
+                    # TODO: scheduler should be getting message that we already
+                    # have this
+                    logger.info("Asked to compute prexisting result: %s" , key)
+                    self.batched_stream.send({
+                        'status': 'OK', 'key': key, 'nbytes': self.nbytes[key],
+                        'type': dumps_function(type(self.data[key]))
+                    })
+                    return
+                if state in ('waiting', 'executing', 'ready'):
+                    return
 
             self.log.append(('add-task', key))
             try:
@@ -1092,6 +1095,7 @@ class WorkerNew(WorkerBase):
 
             self.priorities[key] = priority
             self.durations[key] = duration
+            self.task_state[key] = 'waiting'
 
             if nbytes:
                 self.nbytes.update(nbytes)
@@ -1266,6 +1270,9 @@ class WorkerNew(WorkerBase):
                 self.validate_state()
 
             self.ensure_communicating()
+        except StreamClosedError as e:
+            logger.info("Stream closed during inter-worker communication")
+            raise
         except Exception as e:
             logger.exception(e)
             import pdb; pdb.set_trace()
@@ -1307,6 +1314,7 @@ class WorkerNew(WorkerBase):
             self.log.append(('forget', key))
             if key in self.tasks:
                 del self.tasks[key]
+                del self.task_state[key]
             if key in self.waiting_for_data:
                 del self.waiting_for_data[key]
 
@@ -1337,12 +1345,15 @@ class WorkerNew(WorkerBase):
     def task_ready(self, key):
         try:
             if self.validate:
+                assert self.task_state[key] == 'waiting'
                 assert key in self.waiting_for_data
                 assert not self.waiting_for_data.pop(key)
                 assert all(dep in self.data for dep in self.dependencies[key])
                 assert key not in self.executing
                 assert key not in self.heap
 
+            self.log.append(('ready', key))
+            self.task_state[key] = 'ready'
             heapq.heappush(self.heap, (self.priorities[key], key))
 
             self.ensure_computing()
@@ -1355,6 +1366,8 @@ class WorkerNew(WorkerBase):
         with log_errors():
             while self.heap and len(self.executing) < self.ncores:
                 _, key = heapq.heappop(self.heap)
+                if self.task_state[key] in ('memory', 'error', 'executing'):
+                    continue
                 self.executing.add(key)
                 self.loop.add_callback(self.execute, key)
 
@@ -1364,9 +1377,12 @@ class WorkerNew(WorkerBase):
             if self.validate:
                 assert key not in self.waiting_for_data
                 assert key not in self.data
+                assert self.task_state[key] == 'ready'
 
             self.executing.add(key)
             function, args, kwargs = self.tasks[key]
+            self.task_state[key] = 'executing'
+            self.log.append(('execute', key))
 
             try:
                 start = min(self.diagnostics[dep]['transfer_start']
@@ -1395,11 +1411,11 @@ class WorkerNew(WorkerBase):
 
             result['key'] = key
             result.update(diagnostics)
-            self.log.append(('start-execute', key))
 
             if result['status'] == 'OK':
                 self.data[key] = result.pop('result')
                 self.nbytes[key] = result['nbytes']
+                self.task_state[key] = 'memory'
                 if report:  # TODO: remove?
                     response = yield self.scheduler.add_keys(keys=[key],
                                             address=(self.ip, self.port))
@@ -1407,6 +1423,7 @@ class WorkerNew(WorkerBase):
                         logger.warn('Could not report results to scheduler: %s',
                                     str(response))
             else:
+                self.task_state[key] = 'error'
                 logger.warn(" Compute Failed\n"
                     "Function: %s\n"
                     "args:     %s\n"
@@ -1452,13 +1469,15 @@ class WorkerNew(WorkerBase):
                     else:
                         pass # import pdb; pdb.set_trace()
 
-            for key in self.data.fast:
-                # assert key not in self.tasks
-                assert isinstance(self.nbytes[key], int)
-                assert key not in self.waiting_for_data
+            for key in self.tasks:
+                if self.task_state[key] == 'memory':
+                    assert isinstance(self.nbytes[key], int)
+                    assert key not in self.waiting_for_data
+                    assert key in self.data
 
             for key in self.waiting_for_data:
                 assert key not in self.data.fast
+                assert self.task_state[key] == 'waiting'
 
             for dep in self.in_flight:
                 for key in self.dependents[dep]:
