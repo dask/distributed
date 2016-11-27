@@ -383,14 +383,18 @@ from .scheduler import Scheduler
 from .worker import Worker
 from .client import Client
 
+
 @gen.coroutine
 def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
                   worker_kwargs={}):
     s = Scheduler(ip='127.0.0.1', loop=loop, validate=True, **scheduler_kwargs)
     done = s.start(0)
-    workers = [Worker(s.ip, s.port, ncores=v, ip=k, name=i, loop=loop,
-                      validate=True, **worker_kwargs)
-                for i, (k, v) in enumerate(ncores)]
+    workers = [Worker(s.ip, s.port, ncores=ncore[1], ip=ncore[0], name=i,
+                      loop=loop, validate=True,
+                      **(merge(worker_kwargs, ncore[2])
+                         if len(ncore) > 2
+                         else worker_kwargs))
+                for i, ncore in enumerate(ncores)]
     for w in workers:
         w.rpc = workers[0].rpc
 

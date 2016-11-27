@@ -133,18 +133,7 @@ def test_worker_bad_args(c, s, a, b):
         assert any('1 / 0' in line
                   for line in pluck(3, traceback.extract_tb(tb))
                   if line)
-    assert hdlr.messages['warning'][0] == " Compute Failed\n" \
-        "Function: bad_func\n" \
-        "args:     (< could not convert arg to str >)\n" \
-        "kwargs:   {'k': < could not convert arg to str >}\n"
-    assert re.match(r"^Send compute response to scheduler: y, " \
-        "\{.*'args': \(< could not convert arg to str >\), .*" \
-        "'kwargs': \{'k': < could not convert arg to str >\}.*\}",
-        hdlr.messages['debug'][0]) or \
-        re.match("^Send compute response to scheduler: y, " \
-        "\{.*'kwargs': \{'k': < could not convert arg to str >\}, .*" \
-        "'args': \(< could not convert arg to str >\).*\}",
-        hdlr.messages['debug'][0])
+    assert "Compute Failed" in hdlr.messages['warning'][0]
     logger.setLevel(old_level)
 
     # Now we check that both workers are still alive.
@@ -154,7 +143,7 @@ def test_worker_bad_args(c, s, a, b):
 
     results = yield c._gather([xx, yy])
 
-    assert results == (3, 7)
+    assert tuple(results) == (3, 7)
 
 
 @gen_cluster()

@@ -124,11 +124,13 @@ class WorkerBase(Server):
     def __init__(self, scheduler_ip, scheduler_port, ip=None, ncores=None,
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
-                 memory_limit='auto', executor=None, **kwargs):
+                 memory_limit='auto', executor=None, resources=None, **kwargs):
         self.ip = ip or get_ip()
         self._port = 0
         self.ncores = ncores or _ncores
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
+        self.total_resources = resources or {}
+        self.available_resources = (resources or {}).copy()
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
 
@@ -258,6 +260,7 @@ class WorkerBase(Server):
                         host_info=self.host_health(),
                         services=self.service_ports,
                         memory_limit=self.memory_limit,
+                        resources=self.total_resources,
                         **self.process_health())
                 break
             except (OSError, StreamClosedError):
@@ -1552,7 +1555,7 @@ class WorkerNew(WorkerBase):
                 if state == 'ready':
                     assert key in pluck(1, self.heap)
                 if state == 'executing':
-                    assert key in self.execting
+                    assert key in self.executing
                 if state == 'long-running':
                     assert key not in self.execting
                     assert key in self.long_running

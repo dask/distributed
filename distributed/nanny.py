@@ -37,13 +37,14 @@ class Nanny(Server):
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit=TOTAL_MEMORY, reconnect=True,
                  validate=False, environment=nanny_environment, quiet=False,
-                 **kwargs):
+                 resources=None, **kwargs):
         self.ip = ip or get_ip()
         self.worker_port = None
         self._given_worker_port = worker_port
         self.ncores = ncores or _ncores
         self.reconnect = reconnect
         self.validate = validate
+        self.resources = resources
         if not local_dir:
             local_dir = tempfile.mkdtemp(prefix='nanny-')
             self._should_cleanup_local_dir = True
@@ -179,7 +180,8 @@ class Nanny(Server):
                     self.process = run_worker_subprocess(self.environment, self.ip,
                             self.scheduler.ip, self.scheduler.port, self.ncores,
                             self.port, self._given_worker_port, self.name,
-                            self.memory_limit, self.loop, fn, self.quiet)
+                            self.memory_limit, self.loop, fn, self.quiet,
+                            self.resources)
 
                     while not os.path.exists(fn):
                         yield gen.sleep(0.01)
@@ -201,7 +203,8 @@ class Nanny(Server):
                           self.scheduler.port, self.ncores,
                           self.port, self._given_worker_port,
                           self.local_dir, self.services, self.name,
-                          self.memory_limit, self.reconnect, self.validate))
+                          self.memory_limit, self.reconnect, self.resources,
+                          self.validate))
                 self.process.daemon = True
                 self.process.start()
                 while True:
@@ -311,7 +314,8 @@ class Nanny(Server):
 
 
 def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
-        nanny_port, worker_port, name, memory_limit, io_loop, fn, quiet):
+        nanny_port, worker_port, name, memory_limit, io_loop, fn, quiet,
+        resources):
 
     if environment.endswith('python'):
         environment = os.path.dirname(environment)
@@ -328,6 +332,8 @@ def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
                  '--nanny-port', nanny_port,
                  '--nthreads', ncores,
                  '--nprocs', 1,
+                 '--resources', '"%s"' % ' '.join('='.join(map(str, item))
+                                                  for item in resources),
                  '--temp-filename', fn])
 
     if name:
@@ -346,7 +352,7 @@ def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
 
 def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
         worker_port, local_dir, services, name, memory_limit, reconnect,
-        validate):
+        resources, validate):
     """ Function run by the Nanny when creating the worker """
     from distributed import Worker  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
@@ -356,7 +362,8 @@ def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
     worker = Worker(scheduler_ip, scheduler_port, ncores=ncores, ip=ip,
                     service_ports={'nanny': nanny_port}, local_dir=local_dir,
                     services=services, name=name, memory_limit=memory_limit,
-                    reconnect=reconnect, validate=validate, loop=loop)  # pragma: no cover
+                    reconnect=reconnect, validate=validate,
+                    resources=resources, loop=loop)  # pragma: no cover
 
     @gen.coroutine  # pragma: no cover
     def run():
