@@ -1011,6 +1011,7 @@ class WorkerNew(WorkerBase):
 
             self.heap = list()
             self.executing = set()
+            self.long_running = set()
 
             self.batched_stream = None
             self.target_message_size = 10e6  # 10 MB
@@ -1023,6 +1024,9 @@ class WorkerNew(WorkerBase):
                     ('ready', 'executing'): self.transition_ready_executing,
                     ('executing', 'memory'): self.transition_executing_done,
                     ('executing', 'error'): self.transition_executing_done,
+                    ('executing', 'long-running'): self.transition_executing_long_running,
+                    ('long-running', 'error'): self.transition_executing_done,
+                    ('long-running', 'memory'): self.transition_executing_done,
                     }
 
             WorkerBase.__init__(self, *args, **kwargs)
@@ -1185,17 +1189,35 @@ class WorkerNew(WorkerBase):
     def transition_executing_done(self, key):
         try:
             if self.validate:
-                assert key in self.executing
+                assert key in self.executing or key in self.long_running
                 assert key not in self.waiting_for_data
                 assert key not in self.heap
 
-            self.executing.remove(key)
+            try:
+                self.executing.remove(key)
+            except KeyError:
+                self.long_running.remove(key)
             if self.batched_stream:
                 self.batched_stream.send(self.response[key])
 
         except StreamClosedError:
             logger.info("Stream closed")
             self._close(report=False)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
+
+    def transition_executing_long_running(self, key):
+        try:
+            if self.validate:
+                assert key in self.executing
+
+            self.executing.remove(key)
+            self.long_running.add(key)
+
+            self.ensure_computing()
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1529,6 +1551,11 @@ class WorkerNew(WorkerBase):
                     assert key in self.waiting_for_data
                 if state == 'ready':
                     assert key in pluck(1, self.heap)
+                if state == 'executing':
+                    assert key in self.execting
+                if state == 'long-running':
+                    assert key not in self.execting
+                    assert key in self.long_running
 
             for key in self.tasks:
                 state = self.stateof(key)
