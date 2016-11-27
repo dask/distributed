@@ -1028,8 +1028,8 @@ class WorkerNew(WorkerBase):
             WorkerBase.__init__(self, *args, **kwargs)
 
     def __str__(self):
-        return "<%s, threads: %d, running: %d, ready: %d, in-flight: %d, waiting: %d>" % (
-                self.__class__.__name__, self.ncores, len(self.executing),
+        return "<%s: %s, threads: %d, running: %d, ready: %d, in-flight: %d, waiting: %d>" % (
+                self.__class__.__name__, self.address, self.ncores, len(self.executing),
                 len(self.heap), len(self.in_flight), len(self.waiting_for_data))
 
     __repr__ = __str__
