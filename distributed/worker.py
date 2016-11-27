@@ -1202,8 +1202,8 @@ class Worker(WorkerBase):
                 diagnostics = {}
 
             start = time()
-            args2 = pack_data(args, self.data)
-            kwargs2 = pack_data(kwargs, self.data)
+            args2 = pack_data(args, self.data, key_types=str)
+            kwargs2 = pack_data(kwargs, self.data, key_types=str)
             stop = time()
             if stop - start > 0.005:
                 self.response[key]['disk_load_start'] = start
