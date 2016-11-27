@@ -1119,10 +1119,9 @@ class WorkerNew(WorkerBase):
             if who_has:
                 self.dependencies[key] = set(who_has)
                 for dep in who_has:
-                    if dep in self.dependents:
-                        self.dependents[dep].add(key)
-                    else:
-                        self.dependents[dep] = {key}
+                    if dep not in self.dependents:
+                        self.dependents[dep] = set()
+                    self.dependents[dep].add(key)
                 who_has = {dep: v for dep, v in who_has.items() if dep not in self.data}
                 self.waiting_for_data[key] = set(who_has)
             else:
@@ -1271,6 +1270,24 @@ class WorkerNew(WorkerBase):
                 if n >= len(deps):
                     self.data_needed.popleft()
 
+    def put_key_in_memory(self, key, value):
+        if key in self.data:
+            return
+
+        self.data[key] = value
+        self.nbytes[key] = sizeof(value)
+        if key in self.tasks:
+            # TODO: clean up in-flight tasks
+            pass
+
+        for dep in self.dependents.get(key, ()):
+            if dep in self.waiting_for_data:
+                if key in self.waiting_for_data[dep]:
+                    self.waiting_for_data[dep].remove(key)
+                if not self.waiting_for_data[dep]:
+                    self.waiting_for_data[dep]
+                    self.transition(dep, 'ready')
+
     @gen.coroutine
     def gather_dep(self, dep):
         try:
@@ -1351,19 +1368,7 @@ class WorkerNew(WorkerBase):
                     del self.in_flight[d]
 
             for d, v in response.items():
-                if d not in self.data:
-                    self.data[d] = v
-                    self.nbytes[d] = sizeof(v)
-                    if d in self.tasks:
-                        # TODO: clean up in-flight tasks
-                        pass
-                for key in self.dependents[d]:
-                    if key in self.waiting_for_data:
-                        if d in self.waiting_for_data[key]:
-                            self.waiting_for_data[key].remove(d)
-                        if not self.waiting_for_data[key]:
-                            self.waiting_for_data[key]
-                            self.transition(key, 'ready')
+                self.put_key_in_memory(d, v)
 
             self.loop.add_callback(self.scheduler.add_keys, address=self.address, keys=list(response))
 
@@ -1499,14 +1504,7 @@ class WorkerNew(WorkerBase):
             self.response[key].update(result)
 
             if result['status'] == 'OK':
-                self.data[key] = value
-                self.nbytes[key] = result['nbytes']
-                if report:  # TODO: remove?
-                    response = yield self.scheduler.add_keys(keys=[key],
-                                            address=(self.ip, self.port))
-                    if not response == 'OK':
-                        logger.warn('Could not report results to scheduler: %s',
-                                    str(response))
+                self.put_key_in_memory(key, value)
                 self.transition(key, 'memory')
             else:
                 logger.warn(" Compute Failed\n"
@@ -1552,6 +1550,10 @@ class WorkerNew(WorkerBase):
                     assert key not in self.data
                 if state == 'waiting':
                     assert key in self.waiting_for_data
+                    assert key in self.data_needed or all(dep in self.in_flight
+                            or dep in self.data for dep in self.dependencies)
+                    for dep in self.waiting_for_data[key]:
+                        assert dep not in self.data
                 if state == 'ready':
                     assert key in pluck(1, self.heap)
                 if state == 'executing':
