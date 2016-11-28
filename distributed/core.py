@@ -180,7 +180,7 @@ class Server(TCPServer):
                     except Exception as e:
                         logger.exception(e)
                         result = error_message(e, status='uncaught-error')
-                if reply:
+                if reply and result != 'dont-reply':
                     try:
                         yield write(stream, result)
                     except StreamClosedError:
@@ -292,6 +292,7 @@ def write(stream, msg):
         stream.write(frame)
 
     yield gen.moment
+    raise gen.Return(sum(map(len, frames)))
 
 
 @gen.coroutine
