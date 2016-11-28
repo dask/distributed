@@ -2007,7 +2007,6 @@ class Client(object):
         result = {'scheduler': scheduler, 'workers': workers, 'client': client}
 
         if check:
-
             # we care about the required & optional packages matching
             extract = lambda x: merge(result[x]['packages'].values())
             client_versions = extract('client')
@@ -2022,17 +2021,17 @@ class Client(object):
                                          client=cv,
                                          scheduler=sv))
 
-            for wkr, worker in workers.items():
-                worker_versions = merge(worker['packages'].values())
+            for w, d in workers.items():
+                worker_versions = merge(d['packages'].values())
                 for pkg, cv in client_versions.items():
                     wv = worker_versions[pkg]
                     if wv != cv:
                         raise ValueError("package [{package}] is version [{client}] "
-                                         "on client and [{worker}] on worker [{wkr}]!".format(
+                                         "on client and [{worker}] on worker [{w}]!".format(
                                              package=pkg,
                                              client=cv,
                                              worker=wv,
-                                             wkr=wkr))
+                                             w=w))
 
         return result
 
