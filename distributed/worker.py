@@ -1029,7 +1029,6 @@ class Worker(WorkerBase):
                 if key in self.waiting_for_data[dep]:
                     self.waiting_for_data[dep].remove(key)
                 if not self.waiting_for_data[dep]:
-                    self.waiting_for_data[dep]
                     self.transition(dep, 'ready')
 
     @gen.coroutine
@@ -1056,9 +1055,8 @@ class Worker(WorkerBase):
                     self.connections[future] = True
                     stream = yield gen.with_timeout(timedelta(seconds=3),
                                                     future)
-                except AttributeError:  # set_sock_opt sometimes fails
-                    pass
                 except (gen.TimeoutError, StreamClosedError):
+                    logger.info("Failed to connect to %s", worker)
                     with ignoring(KeyError):  # other coroutine may have removed
                         for d in self.has_what.pop(worker):
                             self.who_has[d].remove(worker)
