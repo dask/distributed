@@ -1,5 +1,5 @@
 
-from operator import add
+from operator import add, mul
 
 from tornado import gen
 
@@ -65,3 +65,13 @@ def test_clean(c, s, a, b):
 
     for c in collections:
         assert not c
+
+
+@gen_cluster(client=True)
+def test_message_breakup(c, s, a, b):
+    xs = [c.submit(mul, b'%d' % i, 1000000, workers=a.address) for i in range(30)]
+    y = c.submit(lambda *args: None, xs, workers=b.address)
+    yield y._result()
+
+    assert 2 <= len(b.incoming_transfer_log) <= 20
+    assert 2 <= len(a.outgoing_transfer_log) <= 20

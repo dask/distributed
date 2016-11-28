@@ -394,8 +394,23 @@ class WorkerBase(Server):
                                               keys=list(keys))
         raise Return('OK')
 
-    def get_data(self, stream, keys=None):
-        return {k: to_serialize(self.data[k]) for k in keys if k in self.data}
+    @gen.coroutine
+    def get_data(self, stream, keys=None, who=None):
+        start = time()
+        msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
+        nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
+        compressed = yield write(stream, msg)
+        stop = time()
+
+        self.outgoing_transfer_log.append({
+            'start': start,
+            'stop': stop,
+            'destination': who,
+            'keys': nbytes,
+            'compressed-total': compressed
+        })
+
+        raise gen.Return('dont-reply')
 
     def start_ipython(self, stream):
         """Start an IPython kernel
@@ -749,6 +764,9 @@ class Worker(WorkerBase):
                 ('long-running', 'memory'): self.transition_executing_done,
         }
 
+        self.incoming_transfer_log = deque(maxlen=(100000))
+        self.outgoing_transfer_log = deque(maxlen=(100000))
+
         WorkerBase.__init__(self, *args, **kwargs)
 
     def __str__(self):
@@ -984,7 +1002,7 @@ class Worker(WorkerBase):
 
                 self.log.append(('gather-dependencies', key, deps))
 
-                while deps and len(self.connections) <= self.total_connections:
+                while deps and len(self.connections) < self.total_connections:
                     self.gather_dep(deps.pop())
 
                 if not deps:
@@ -1083,6 +1101,12 @@ class Worker(WorkerBase):
                 end_time = time()
                 self.response[dep].update({'transfer_start': start_time,
                                            'transfer_stop': end_time})
+                self.incoming_transfer_log.append({
+                    'start': start_time,
+                    'stop': end_time,
+                    'keys': {dep: self.nbytes.get(dep, None) for dep in deps},
+                    'source': worker
+                })
             except StreamClosedError as e:
                 logger.exception(e)
                 response = {}
