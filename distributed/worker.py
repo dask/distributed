@@ -376,13 +376,19 @@ class WorkerBase(Server):
     @gen.coroutine
     def delete_data(self, stream, keys=None, report=True):
         if keys:
-            for key in keys:
-                if key in self.data:
-                    del self.data[key]
+            for key in list(keys):
+                if not (key in self.dependents and any(self.task_state[dep] in
+                        ('waiting', 'executing', 'long-running', 'ready')
+                        for dep in self.dependents.get(key, ()))):
+                    if key in self.data:
+                        del self.data[key]
                     self.log.append((key, 'delete'))
-                if key in self.tasks and self.task_state[key] in ('memory', 'error'):
-                    # TODO: cleanly cancel in-flight tasks
-                    self.forget_key(key)
+                    if key in self.tasks and self.task_state[key] in ('memory', 'error'):
+                        # TODO: cleanly cancel in-flight tasks
+                        self.forget_key(key)
+                else:
+                    logger.info("Tried to delete necessary key: %s", key)
+                    keys.remove(key)
             logger.debug("Deleted %d keys", len(keys))
             if report:
                 logger.debug("Reporting loss of keys to scheduler")
@@ -1011,6 +1017,8 @@ class Worker(WorkerBase):
             while True:
                 if not self.who_has.get(dep):
                     # TODO: ask scheduler nicely for new who_has before canceling
+                    if dep not in self.dependents:
+                        return
                     for key in list(self.dependents[dep]):
                         if dep in self.executing:
                             continue
@@ -1022,12 +1030,18 @@ class Worker(WorkerBase):
                 try:
                     future = connect(ip, int(port))
                     self.connections[future] = True
-                    stream = yield future
-                except StreamClosedError:
-                    for d in self.has_what.pop(worker):
-                        self.who_has[d].remove(worker)
+                    stream = yield gen.with_timeout(timedelta(seconds=3),
+                                                    future)
+                except AttributeError:  # set_sock_opt sometimes fails
+                    pass
+                except (gen.TimeoutError, StreamClosedError):
+                    with ignoring(KeyError):  # other coroutine may have removed
+                        for d in self.has_what.pop(worker):
+                            self.who_has[d].remove(worker)
                 else:
                     break
+                finally:
+                    del self.connections[future]
 
 
             if dep in self.data or dep in self.in_flight:  # someone beat us
@@ -1052,7 +1066,6 @@ class Worker(WorkerBase):
                 total_bytes += self.nbytes[d]
 
             self.connections[stream] = deps
-            del self.connections[future]
             for d in deps:
                 if d in self.in_flight:
                     self.in_flight[d].add(stream)
@@ -1238,6 +1251,7 @@ class Worker(WorkerBase):
                 assert key not in self.waiting_for_data
 
             self.ensure_computing()
+            self.ensure_communicating()
         except RuntimeError:
             logger.error("Thread Pool Executor is shut down")
         except Exception as e:
