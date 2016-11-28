@@ -1146,7 +1146,7 @@ class Worker(WorkerBase):
             self.ensure_communicating()
         except Exception as e:
             logger.exception(e)
-            if LOG_PDB:
+            if self.batched_stream and LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
 
@@ -1192,8 +1192,6 @@ class Worker(WorkerBase):
             self.forget_key(key)
         except Exception as e:
             logger.exception(e)
-            if LOG_PDB:
-                import pdb; pdb.set_trace()
             raise
 
     def forget_key(self, key):
