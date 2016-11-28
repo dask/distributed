@@ -405,8 +405,10 @@ class WorkerBase(Server):
         self.outgoing_transfer_log.append({
             'start': start,
             'stop': stop,
-            'destination': who,
+            'duration': stop - start,
+            'who': who,
             'keys': nbytes,
+            'total': sum(filter(None, nbytes.values())),
             'compressed-total': compressed
         })
 
@@ -1095,17 +1097,19 @@ class Worker(WorkerBase):
                     self.in_flight[d] = {stream}
             self.log.append(('request-dep', dep, worker, deps))
             try:
-                start_time = time()
+                start = time()
                 response = yield send_recv(stream, op='get_data', keys=list(deps),
-                                           close=True)
-                end_time = time()
-                self.response[dep].update({'transfer_start': start_time,
-                                           'transfer_stop': end_time})
+                                           close=True, who=self.address)
+                stop = time()
+                self.response[dep].update({'transfer_start': start,
+                                           'transfer_stop': stop})
                 self.incoming_transfer_log.append({
-                    'start': start_time,
-                    'stop': end_time,
+                    'start': start,
+                    'stop': stop,
+                    'duration': stop - start,
                     'keys': {dep: self.nbytes.get(dep, None) for dep in deps},
-                    'source': worker
+                    'total': sum(self.nbytes.get(dep, 0) for dep in deps),
+                    'who': worker
                 })
             except StreamClosedError as e:
                 logger.exception(e)

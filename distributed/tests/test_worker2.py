@@ -75,3 +75,6 @@ def test_message_breakup(c, s, a, b):
 
     assert 2 <= len(b.incoming_transfer_log) <= 20
     assert 2 <= len(a.outgoing_transfer_log) <= 20
+
+    assert all(msg['who'] == b.address for msg in a.outgoing_transfer_log)
+    assert all(msg['who'] == a.address for msg in a.incoming_transfer_log)
