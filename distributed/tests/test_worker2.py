@@ -1,6 +1,8 @@
 
 from operator import add, mul
+import sys
 
+import pytest
 from tornado import gen
 
 from distributed.client import _wait
@@ -35,7 +37,7 @@ def test_map(c, s, a, b):
 def test_dataframes(c, s, *workers):
     import dask.dataframe as dd
     import numpy as np
-    df = dd.demo.make_timeseries('2000', '2001',
+    df = dd.demo.make_timeseries('2000-01-01', '2000-02-01',
                                  {'value': float, 'name': str, 'id': int},
                                  freq='60s', partition_freq='1D', seed=1)
     df = c.persist(df)
@@ -67,6 +69,7 @@ def test_clean(c, s, a, b):
         assert not c
 
 
+@pytest.mark.skipif(sys.version_info[:2] == (3, 4), reason="mul bytes fails")
 @gen_cluster(client=True)
 def test_message_breakup(c, s, a, b):
     xs = [c.submit(mul, b'%d' % i, 1000000, workers=a.address) for i in range(30)]
