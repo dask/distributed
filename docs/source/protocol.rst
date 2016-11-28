@@ -227,41 +227,42 @@ In the following sections we describe how we create these frames.
 Technical Version
 -----------------
 
-A message consists of the following components:
+A message is broken up into the following components:
 
-1.  8 bytes encoding how many frames there are in the message (N)
-2.  8 * N frames encoding the length of each frame
+1.  8 bytes encoding how many frames there are in the message (N) as a
+    ``uint64``
+2.  8 * N frames encoding the length of each frame as ``uint64`` s
 3.  Header for the administrative message
-4.  Administrative message, msgpack encoded, possibly compressed
+4.  The administrative message, msgpack encoded, possibly compressed
 5.  Header for all payload messages
-6.  Payload message
-7.  Payload message
-8.  Payload message
-9.  ...
+6.  Payload messages
 
-3-4 Header for Administrative Message
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Header for Administrative Message
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The administrative message is arbitrary msgpack-encoded data.  Usually a
 dictionary.  It may optionally be compressed.  If so the compression type will
 be in the header.
 
-5-end Payload frames and Header
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Payload frames and Header
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 These frames are optional.
 
-The payload frames generally contain data may be large and may be language
-specific.  The header is msgpack encoded and contains encoding and compression
-information for the other frames.
+Payload frames are used to send large or language-specific data.  These values
+will be inserted into the administrative message after they are decoded.  The
+header is msgpack encoded and contains encoding and compression information for
+the all subsequent payload messages.
 
-Each payload frame corresponds to one piece of data what will be inserted into
-the administrative message at a particular location (location is provided in
-the header.)
+A Payload may be spread across many frames.  Each frame may be separately
+compressed.
 
 
 Simple Example
 ~~~~~~~~~~~~~~
+
+This simple example shows a minimal message.  There is only an empty header and
+a small msgpack message.  There are no additional payload frames
 
 Message: ``{'status': 'OK'}``
 
@@ -274,6 +275,9 @@ Frames:
 Example with Custom Data
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
+This example contains a single payload message composed of a single frame.  It
+uses a special serialization for NumPy arrays.
+
 Message: ``{'op': 'get-data', 'data': np.ones(5)}``
 
 Frames:
@@ -283,8 +287,9 @@ Frames:
 *  Payload header: ``{'headers': [{'type': 'numpy.ndarray',
                                    'compression': 'lz4',
                                    'count': 1,
-                                   'lengths': [40]}],
+                                   'lengths': [40],
+                                   'dtype': '<f8',
+                                   'strides': (8,),
+                                   'shape': (5,)}],
                       'keys': [('data',)]}``
-*  Payload Frame: ``b'\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\xf0?\x00\x00\x00\x00\x00\x00\xf0?``
-
-
+*  Payload Frame: ``b'(\x00\x00\x00\x11\x00\x01\x00!\xf0?\x07\x00\x0f\x08\x00\x03P\x00\x00\x00\xf0?'``
