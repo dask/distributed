@@ -1089,10 +1089,8 @@ class Worker(WorkerBase):
 
             self.connections[stream] = deps
             for d in deps:
-                if d in self.in_flight:
-                    self.in_flight[d].add(stream)
-                else:
-                    self.in_flight[d] = {stream}
+                assert d not in self.in_flight
+                self.in_flight[d] = stream
             self.log.append(('request-dep', dep, worker, deps))
             try:
                 start = time()
@@ -1120,9 +1118,7 @@ class Worker(WorkerBase):
             assert len(self.connections) < self.total_connections
 
             for d in deps:
-                self.in_flight[d].remove(stream)
-                if not self.in_flight[d]:
-                    del self.in_flight[d]
+                del self.in_flight[d]
 
             for d, v in response.items():
                 self.put_key_in_memory(d, v)
