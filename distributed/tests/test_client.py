@@ -26,7 +26,7 @@ from tornado.iostream import StreamClosedError
 import dask
 from dask import delayed
 from dask.context import _globals
-from distributed import Nanny, Worker
+from distributed import Worker, Nanny
 from distributed.utils_comm import WrappedKey
 from distributed.client import (Client, Future, CompatibleExecutor, _wait,
         wait, _as_completed, as_completed, tokenize, _global_client,

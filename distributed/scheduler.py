@@ -1165,10 +1165,7 @@ class Scheduler(Server):
                             logger.exception(clean_exception(**msg)[1])
                             continue
 
-                        try:
-                            key = msg['key']
-                        except Exception as e:
-                            import pdb; pdb.set_trace()
+                        key = msg['key']
                         validate_key(key)
                         if msg['status'] == 'OK':
                             r = self.stimulus_task_finished(worker=worker, **msg)

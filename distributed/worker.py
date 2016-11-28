@@ -51,6 +51,9 @@ except ImportError:
     TOTAL_MEMORY = 8e9
 
 
+IN_PLAY = ('waiting', 'ready', 'executing', 'long-running')
+
+
 class WorkerBase(Server):
     """ Worker Node
 
@@ -182,19 +185,19 @@ class WorkerBase(Server):
             self.service_ports[k] = self.services[k].port
 
         handlers = {
-                    'gather': self.gather,
-                    'compute-stream': self.compute_stream,
-                    'run': self.run,
-                    'get_data': self.get_data,
-                    'update_data': self.update_data,
-                    'delete_data': self.delete_data,
-                    'terminate': self.terminate,
-                    'ping': pingpong,
-                    'health': self.host_health,
-                    'upload_file': self.upload_file,
-                    'start_ipython': self.start_ipython,
-                    'keys': self.keys,
-                }
+          'gather': self.gather,
+          'compute-stream': self.compute_stream,
+          'run': self.run,
+          'get_data': self.get_data,
+          'update_data': self.update_data,
+          'delete_data': self.delete_data,
+          'terminate': self.terminate,
+          'ping': pingpong,
+          'health': self.host_health,
+          'upload_file': self.upload_file,
+          'start_ipython': self.start_ipython,
+          'keys': self.keys,
+        }
 
         super(WorkerBase, self).__init__(handlers, io_loop=self.loop, **kwargs)
 
@@ -202,11 +205,6 @@ class WorkerBase(Server):
                                                    self.heartbeat_interval,
                                                    io_loop=self.loop)
         self.loop.add_callback(self.heartbeat_callback.start)
-
-    def __str__(self):
-        return "<%s: %s, threads: %d/%d>" % (self.__class__.__name__, self.address, len(self.active), self.ncores)
-
-    __repr__ = __str__
 
     @property
     def worker_address(self):
@@ -377,9 +375,9 @@ class WorkerBase(Server):
     def delete_data(self, stream, keys=None, report=True):
         if keys:
             for key in list(keys):
-                if not (key in self.dependents and any(self.task_state[dep] in
-                        ('waiting', 'executing', 'long-running', 'ready')
-                        for dep in self.dependents.get(key, ()))):
+                if not (key in self.dependents and
+                        any(self.task_state[dep] in IN_PLAY
+                            for dep in self.dependents.get(key, ()))):
                     if key in self.data:
                         del self.data[key]
                     self.log.append((key, 'delete'))
@@ -711,48 +709,47 @@ from .core import read, write, connect, close, send_recv, error_message
 
 class Worker(WorkerBase):
     def __init__(self, *args, **kwargs):
-        with log_errors():
-            self.tasks = dict()
-            self.task_state = dict()
-            self.dependencies = dict()
-            self.dependents = dict()
-            self.waiting_for_data = dict()
-            self.who_has = dict()
-            self.has_what = defaultdict(set)
-            self.pending_data_per_worker = defaultdict(deque)
+        self.tasks = dict()
+        self.task_state = dict()
+        self.dependencies = dict()
+        self.dependents = dict()
+        self.waiting_for_data = dict()
+        self.who_has = dict()
+        self.has_what = defaultdict(set)
+        self.pending_data_per_worker = defaultdict(deque)
 
-            self.data_needed = deque()
+        self.data_needed = deque()  # TODO: replace with heap?
 
-            self.in_flight = dict()
-            self.total_connections = 10
-            self.connections = {}
+        self.in_flight = dict()
+        self.total_connections = 10
+        self.connections = {}
 
-            self.nbytes = dict()
-            self.priorities = dict()
-            self.durations = dict()
-            self.response = defaultdict(dict)
+        self.nbytes = dict()
+        self.priorities = dict()
+        self.durations = dict()
+        self.response = defaultdict(dict)
 
-            self.heap = list()
-            self.executing = set()
-            self.long_running = set()
+        self.heap = list()
+        self.executing = set()
+        self.long_running = set()
 
-            self.batched_stream = None
-            self.target_message_size = 10e6  # 10 MB
+        self.batched_stream = None
+        self.target_message_size = 10e6  # 10 MB
 
-            self.log = deque(maxlen=100000)
-            self.validate = kwargs.pop('validate', False)
+        self.log = deque(maxlen=100000)
+        self.validate = kwargs.pop('validate', False)
 
-            self._transitions = {
-                    ('waiting', 'ready'): self.transition_waiting_ready,
-                    ('ready', 'executing'): self.transition_ready_executing,
-                    ('executing', 'memory'): self.transition_executing_done,
-                    ('executing', 'error'): self.transition_executing_done,
-                    ('executing', 'long-running'): self.transition_executing_long_running,
-                    ('long-running', 'error'): self.transition_executing_done,
-                    ('long-running', 'memory'): self.transition_executing_done,
-                    }
+        self._transitions = {
+                ('waiting', 'ready'): self.transition_waiting_ready,
+                ('ready', 'executing'): self.transition_ready_executing,
+                ('executing', 'memory'): self.transition_executing_done,
+                ('executing', 'error'): self.transition_executing_done,
+                ('executing', 'long-running'): self.transition_executing_long_running,
+                ('long-running', 'error'): self.transition_executing_done,
+                ('long-running', 'memory'): self.transition_executing_done,
+        }
 
-            WorkerBase.__init__(self, *args, **kwargs)
+        WorkerBase.__init__(self, *args, **kwargs)
 
     def __str__(self):
         return "<%s: %s, threads: %d, running: %d, ready: %d, in-flight: %d, waiting: %d>" % (
@@ -805,18 +802,16 @@ class Worker(WorkerBase):
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
             who_has=None, nbytes=None, priority=None, duration=None):
-        with log_errors():
+        try:
             if key in self.task_state:
                 state = self.task_state[key]
                 if state in ('memory', 'error'):
                     if state == 'memory':
                         assert key in self.data
-                    # TODO: scheduler should be getting message that we already
-                    # have this
                     logger.info("Asked to compute prexisting result: %s" , key)
                     self.batched_stream.send(self.response[key])
                     return
-                if state in ('waiting', 'executing', 'ready'):
+                if state in IN_PLAY:
                     return
 
             self.log.append((key, 'new'))
@@ -862,6 +857,11 @@ class Worker(WorkerBase):
                 self.data_needed.append(key)
             else:
                 self.transition(key, 'ready')
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     ###############
     # Transitions #
@@ -916,9 +916,9 @@ class Worker(WorkerBase):
                 assert key not in self.waiting_for_data
                 assert key not in self.heap
 
-            try:
+            if self.task_state[key] == 'executing':
                 self.executing.remove(key)
-            except KeyError:
+            elif self.task_state[key] == 'long-running':
                 self.long_running.remove(key)
             if self.batched_stream:
                 self.batched_stream.send(self.response[key])
@@ -952,23 +952,29 @@ class Worker(WorkerBase):
     ##########################
 
     def ensure_communicating(self):
-        with log_errors():
+        try:
             while self.data_needed and len(self.connections) < self.total_connections:
                 logger.debug("Ensure communicating.  Pending: %d.  Connections: %d/%d",
-                        len(self.data_needed), len(self.connections),
-                        self.total_connections)
+                             len(self.data_needed),
+                             len(self.connections),
+                             self.total_connections)
 
                 key = self.data_needed[0]
+
+                if key not in self.tasks:
+                    self.data_needed.popleft()
+                    continue
+
                 if self.task_state.get(key) != 'waiting':
-                    self.log.append((key, 'pass-communicate'))
+                    self.log.append((key, 'communication pass'))
                     self.data_needed.popleft()
                     continue
 
                 deps = self.dependencies[key]
-                deps = {d for d in deps
+                deps = [d for d in deps
                           if d not in self.data
                           and d not in self.executing
-                          and d not in self.in_flight}
+                          and d not in self.in_flight]
 
                 for dep in deps:
                     if not self.who_has.get(dep):
@@ -976,29 +982,27 @@ class Worker(WorkerBase):
                         self.cancel_key(key)
                         continue
 
-                if key not in self.tasks:
-                    self.data_needed.popleft()
-                    continue
-
-                n = self.total_connections - len(self.connections)
-
                 self.log.append(('gather-dependencies', key, deps))
 
-                for dep in list(deps)[:n]:
-                    self.gather_dep(dep)
+                while deps and len(self.connections) <= self.total_connections:
+                    self.gather_dep(deps.pop())
 
-                if n >= len(deps):
+                if not deps:
                     self.data_needed.popleft()
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def put_key_in_memory(self, key, value):
         if key in self.data:
             return
 
         self.data[key] = value
-        self.nbytes[key] = sizeof(value)
-        if key in self.tasks:
-            # TODO: clean up in-flight tasks
-            pass
+
+        if key not in self.nbytes:
+            self.nbytes[key] = sizeof(value)
 
         for dep in self.dependents.get(key, ()):
             if dep in self.waiting_for_data:
@@ -1121,13 +1125,18 @@ class Worker(WorkerBase):
 
     @gen.coroutine
     def query_who_has(self, *deps):
-        with log_errors():
+        try:
             response = yield self.scheduler.who_has(keys=deps)
             self.update_who_has(response)
             raise gen.Return(response)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def update_who_has(self, who_has):
-        with log_errors():
+        try:
             for dep, workers in who_has.items():
                 if dep in self.who_has:
                     self.who_has[dep].update(workers)
@@ -1136,9 +1145,14 @@ class Worker(WorkerBase):
 
                 for worker in workers:
                     self.has_what[worker].add(dep)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def cancel_key(self, key):
-        with log_errors():
+        try:
             self.log.append(('cancel', key))
             if key in self.waiting_for_data:
                 missing = [dep for dep in self.dependencies[key]
@@ -1149,9 +1163,14 @@ class Worker(WorkerBase):
                                           'key': key,
                                           'keys': missing})
             self.forget_key(key)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def forget_key(self, key):
-        with log_errors():
+        try:
             self.log.append(('forget', key))
             if key in self.tasks:
                 del self.tasks[key]
@@ -1178,18 +1197,28 @@ class Worker(WorkerBase):
                 del self.durations[key]
             if key in self.response:
                 del self.response[key]
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     ################
     # Execute Task #
     ################
 
     def ensure_computing(self):
-        with log_errors():
+        try:
             while self.heap and len(self.executing) < self.ncores:
                 _, key = heapq.heappop(self.heap)
                 if self.task_state[key] in ('memory', 'error', 'executing'):
                     continue
                 self.transition(key, 'executing')
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     @gen.coroutine
     def execute(self, key, report=False):
