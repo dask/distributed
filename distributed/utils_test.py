@@ -457,6 +457,9 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
                             loop.run_sync(e._shutdown)
                         loop.run_sync(lambda: end_cluster(s, workers))
 
+                    for w in workers:
+                        assert not w._listen_streams
+
         return test_func
     return _
 

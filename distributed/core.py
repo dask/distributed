@@ -94,6 +94,7 @@ class Server(TCPServer):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._port = None
+        self._listen_streams = set()
         self.rpc = ConnectionPool(limit=connection_limit,
                                   deserialize=deserialize)
         self.deserialize = deserialize
@@ -143,6 +144,7 @@ class Server(TCPServer):
         ip, port = address
         logger.debug("Connection from %s:%d to %s", ip, port,
                      type(self).__name__)
+        self._listen_streams.add(stream)
         try:
             while True:
                 try:
@@ -193,6 +195,9 @@ class Server(TCPServer):
                 yield close(stream)
             except Exception as e:
                 logger.warn("Failed while closing writer", exc_info=True)
+            finally:
+                stream.close()
+            self._listen_streams.remove(stream)
         logger.debug("Close connection from %s:%d to %s", address[0], address[1],
                      type(self).__name__)
 
