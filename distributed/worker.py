@@ -28,7 +28,7 @@ from .config import config
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
 from .core import (rpc, Server, pingpong, coerce_to_address,
-        error_message, read, RPCClosed)
+        error_message, read, RPCClosed, close)
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
@@ -282,6 +282,7 @@ class WorkerBase(Server):
 
     @gen.coroutine
     def _close(self, report=True, timeout=10):
+        self.stop()
         self.heartbeat_callback.stop()
         with ignoring(RPCClosed, StreamClosedError):
             if report:
@@ -289,7 +290,6 @@ class WorkerBase(Server):
                         self.scheduler.unregister(address=(self.ip, self.port)),
                         io_loop=self.loop)
         self.scheduler.close_rpc()
-        self.stop()
         self.executor.shutdown()
         if os.path.exists(self.local_dir):
             shutil.rmtree(self.local_dir)
@@ -298,7 +298,11 @@ class WorkerBase(Server):
             v.stop()
         self.rpc.close()
         self.status = 'closed'
-        self.stop()
+        with ignoring(gen.TimeoutError):
+            yield gen.with_timeout(timedelta(seconds=1),
+                    [close(stream) for stream in self._listen_streams])
+        for stream in self._listen_streams:
+            stream.close()
 
     @gen.coroutine
     def terminate(self, stream, report=True):
@@ -1108,7 +1112,8 @@ class Worker(WorkerBase):
                     'who': worker
                 })
             except StreamClosedError as e:
-                logger.exception(e)
+                logger.info("Worker stream died during communication: %s",
+                            worker)
                 response = {}
 
             self.log.append(('receive-dep', worker, list(response)))
