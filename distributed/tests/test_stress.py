@@ -144,6 +144,7 @@ def vsum(*args):
     return sum(args)
 
 
+@pytest.mark.avoid_travis
 @slow
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 80, timeout=1000)
 def test_stress_communication(c, s, *workers):
