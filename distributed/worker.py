@@ -785,7 +785,6 @@ class Worker(WorkerBase):
     @gen.coroutine
     def compute_stream(self, stream):
         try:
-            assert not self.batched_stream
             self.batched_stream = BatchedSend(interval=2, loop=self.loop)
             self.batched_stream.start(stream)
 
@@ -817,7 +816,6 @@ class Worker(WorkerBase):
                 self.ensure_computing()
 
             yield self.batched_stream.close()
-            self.batched_stream = None
             logger.info('Close compute stream')
         except Exception as e:
             logger.exception(e)
@@ -1069,7 +1067,6 @@ class Worker(WorkerBase):
                     break
                 finally:
                     del self.connections[future]
-
 
             if dep in self.data or dep in self.in_flight:  # someone beat us
                 stream.close() # close newly opened stream
