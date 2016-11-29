@@ -49,6 +49,9 @@ def get_total_physical_memory():
 MAX_BUFFER_SIZE = get_total_physical_memory()
 
 
+CommunicationErrors = (StreamClosedError, socket.error, IOError, RPCClosed)
+
+
 def handle_signal(sig, frame):
     IOLoop.instance().add_callback(IOLoop.instance().stop)
 
@@ -194,7 +197,7 @@ class Server(TCPServer):
             try:
                 yield close(stream)
             except Exception as e:
-                logger.warn("Failed while closing writer", exc_info=True)
+                logger.warn("Failed while closing writer")
             finally:
                 stream.close()
             self._listen_streams.remove(stream)

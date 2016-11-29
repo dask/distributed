@@ -28,7 +28,7 @@ from .config import config
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
 from .core import (rpc, Server, pingpong, coerce_to_address,
-        error_message, read, RPCClosed, close)
+        error_message, read, RPCClosed, close, CommunicationErrors)
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
@@ -261,7 +261,7 @@ class WorkerBase(Server):
                         resources=self.total_resources,
                         **self.process_health())
                 break
-            except (OSError, StreamClosedError):
+            except CommunicationErrors:
                 logger.debug("Unable to register with scheduler.  Waiting")
                 yield gen.sleep(0.5)
         if resp != 'OK':
@@ -284,7 +284,7 @@ class WorkerBase(Server):
     def _close(self, report=True, timeout=10):
         self.stop()
         self.heartbeat_callback.stop()
-        with ignoring(RPCClosed, StreamClosedError):
+        with ignoring(CommunicationErrors):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
                         self.scheduler.unregister(address=(self.ip, self.port)),
@@ -794,7 +794,7 @@ class Worker(WorkerBase):
             while not closed:
                 try:
                     msgs = yield read(stream)
-                except StreamClosedError:
+                except CommunicationErrors:
                     if self.reconnect:
                         break
                     else:
@@ -945,8 +945,10 @@ class Worker(WorkerBase):
                 self.long_running.remove(key)
             if self.batched_stream:
                 self.batched_stream.send(self.response[key])
+            else:
+                raise StreamClosedError()
 
-        except StreamClosedError:
+        except CommunicationErrors:
             logger.info("Stream closed")
             self._close(report=False)
         except Exception as e:
@@ -1058,7 +1060,7 @@ class Worker(WorkerBase):
                     self.connections[future] = True
                     stream = yield gen.with_timeout(timedelta(seconds=3),
                                                     future)
-                except (gen.TimeoutError, StreamClosedError):
+                except (gen.TimeoutError,) + CommunicationErrors:
                     logger.info("Failed to connect to %s", worker)
                     with ignoring(KeyError):  # other coroutine may have removed
                         for d in self.has_what.pop(worker):
@@ -1110,7 +1112,7 @@ class Worker(WorkerBase):
                     'total': sum(self.nbytes.get(dep, 0) for dep in deps),
                     'who': worker
                 })
-            except StreamClosedError as e:
+            except CommunicationErrors as e:
                 logger.info("Worker stream died during communication: %s",
                             worker)
                 response = {}

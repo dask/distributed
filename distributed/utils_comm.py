@@ -14,7 +14,7 @@ from tornado.iostream import StreamClosedError
 from dask.base import tokenize
 from toolz import merge, concat, groupby, drop, valmap
 
-from .core import rpc, coerce_to_rpc, coerce_to_address
+from .core import rpc, coerce_to_rpc, coerce_to_address, CommunicationErrors
 from .utils import ignore_exceptions, All, log_errors, tokey, sync
 from .protocol.pickle import dumps, loads
 
@@ -66,8 +66,7 @@ def gather_from_workers(who_has, rpc=rpc, close=True, permissive=False):
         try:
             coroutines = [rpcs[address].get_data(keys=keys, close=close)
                           for address, keys in d.items()]
-            response = yield ignore_exceptions(coroutines, socket.error,
-                                               StreamClosedError)
+            response = yield ignore_exceptions(coroutines, *CommunicationErrors)
         finally:
             for r in rpcs.values():
                 r.close_rpc()
