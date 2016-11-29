@@ -111,7 +111,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     except ImportError:
         pass
     else:
-        from distributed.bokeh.worker_server import BokehWorkerServer
+        from distributed.bokeh.worker import BokehWorkerServer
         services[('bokeh', 8789)] = BokehWorkerServer
 
     if resources:

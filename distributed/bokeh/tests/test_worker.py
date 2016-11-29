@@ -7,7 +7,7 @@ from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
 from distributed.utils_test import gen_cluster, inc, dec
-from distributed.bokeh.worker_server import BokehWorkerServer, ExecutingTable
+from distributed.bokeh.worker import BokehWorkerServer, ExecutingTable
 
 
 @gen_cluster(client=True,
