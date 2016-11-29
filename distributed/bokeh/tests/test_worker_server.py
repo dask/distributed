@@ -20,7 +20,7 @@ def test_simple(c, s, a, b):
     yield gen.sleep(0.1)
 
     http_client = AsyncHTTPClient()
-    response = yield http_client.fetch('http://localhost:%d/worker' %
+    response = yield http_client.fetch('http://localhost:%d/' %
                                        a.services['bokeh'].port)
     assert 'bokeh' in response.body.decode().lower()
 

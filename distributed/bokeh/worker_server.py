@@ -1,5 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
+from functools import partial
+
 from bokeh.layouts import row, column
 from bokeh.models import (
     ColumnDataSource, Plot, Datetime, DataRange1d, Rect, LinearAxis,
@@ -46,16 +48,21 @@ class ExecutingTable(DashboardComponent):
 
 
 from bokeh.server.server import Server
-from bokeh.command.util import build_single_handler_applications
+from bokeh.application.handlers.function import FunctionHandler
+from bokeh.application import Application
+
+
+def modify_doc(worker, doc):
+    table = ExecutingTable(worker)
+    doc.add_periodic_callback(table.update, 100)
+    doc.add_root(table.root)
 
 
 class BokehWorkerServer(object):
-    scripts = ['distributed/bokeh/worker']
     def __init__(self, worker, io_loop=None):
         self.worker = worker
-        self.apps = build_single_handler_applications(self.scripts, {})
-        for app in self.apps.values():
-            app.worker = worker
+        app = Application(FunctionHandler(partial(modify_doc, worker)))
+        self.apps = {'/': app}
 
         self.loop = io_loop or worker.loop
         self.server = None
