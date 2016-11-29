@@ -177,8 +177,8 @@ class Server(TCPServer):
                     try:
                         result = yield gen.maybe_future(handler(stream, **msg))
                     except StreamClosedError as e:
-                        logger.info("%s", e)
-                        result = error_message(e, status='uncaught-error')
+                        logger.info("Lost connection: %s" % str(address))
+                        break
                     except Exception as e:
                         logger.exception(e)
                         result = error_message(e, status='uncaught-error')

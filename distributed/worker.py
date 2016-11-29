@@ -298,11 +298,6 @@ class WorkerBase(Server):
             v.stop()
         self.rpc.close()
         self.status = 'closed'
-        with ignoring(gen.TimeoutError):
-            yield gen.with_timeout(timedelta(seconds=1),
-                    [close(stream) for stream in self._listen_streams])
-        for stream in self._listen_streams:
-            stream.close()
 
     @gen.coroutine
     def terminate(self, stream, report=True):
@@ -401,6 +396,7 @@ class WorkerBase(Server):
     @gen.coroutine
     def get_data(self, stream, keys=None, who=None):
         start = time()
+
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
         nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
         compressed = yield write(stream, msg)
