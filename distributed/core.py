@@ -49,9 +49,6 @@ def get_total_physical_memory():
 MAX_BUFFER_SIZE = get_total_physical_memory()
 
 
-CommunicationErrors = (StreamClosedError, socket.error, IOError, RPCClosed)
-
-
 def handle_signal(sig, frame):
     IOLoop.instance().add_callback(IOLoop.instance().stop)
 
@@ -153,7 +150,7 @@ class Server(TCPServer):
                 try:
                     msg = yield read(stream, deserialize=self.deserialize)
                     logger.debug("Message from %s:%d: %s", ip, port, msg)
-                except StreamClosedError:
+                except EnvironmentError:
                     logger.debug("Lost connection: %s", str(address))
                     break
                 except Exception as e:
@@ -188,7 +185,7 @@ class Server(TCPServer):
                 if reply and result != 'dont-reply':
                     try:
                         yield write(stream, result)
-                    except StreamClosedError:
+                    except EnvironmentError:
                         logger.info("Lost connection: %s" % str(address))
                         break
                 if close_desired:
@@ -317,7 +314,7 @@ def close(stream):
             # Flush the stream's write buffer by waiting for a last write.
             if stream.writing():
                 yield stream.write(b'')
-        except StreamClosedError:
+        except EnvironmentError:
             pass
         finally:
             stream.close()
@@ -338,7 +335,7 @@ def connect(ip, port, timeout=3):
             stream.set_nodelay(True)
             set_tcp_timeout(stream)
             raise gen.Return(stream)
-        except StreamClosedError:
+        except EnvironmentError:
             if time() - start < timeout:
                 yield gen.sleep(0.01)
                 logger.debug("sleeping on connect")
@@ -489,7 +486,7 @@ class rpc(object):
             if stream and not stream.closed():
                 try:
                     close(stream)
-                except (OSError, IOError, StreamClosedError):
+                except EnvironmentError:
                     pass
         self.streams.clear()
 

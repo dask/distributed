@@ -28,7 +28,7 @@ from .config import config
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
 from .core import (rpc, Server, pingpong, coerce_to_address,
-        error_message, read, RPCClosed, close, CommunicationErrors)
+        error_message, read, RPCClosed, close)
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
@@ -261,7 +261,7 @@ class WorkerBase(Server):
                         resources=self.total_resources,
                         **self.process_health())
                 break
-            except CommunicationErrors:
+            except EnvironmentError:
                 logger.debug("Unable to register with scheduler.  Waiting")
                 yield gen.sleep(0.5)
         if resp != 'OK':
@@ -284,7 +284,7 @@ class WorkerBase(Server):
     def _close(self, report=True, timeout=10):
         self.stop()
         self.heartbeat_callback.stop()
-        with ignoring(CommunicationErrors):
+        with ignoring(EnvironmentError):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
                         self.scheduler.unregister(address=(self.ip, self.port)),
@@ -399,7 +399,12 @@ class WorkerBase(Server):
 
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
         nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
-        compressed = yield write(stream, msg)
+        try:
+            compressed = yield write(stream, msg)
+        except EnvironmentError:
+            logger.exception('failed during get data', exc_info=True)
+            stream.close()
+            raise
         stop = time()
 
         self.outgoing_transfer_log.append({
@@ -793,7 +798,7 @@ class Worker(WorkerBase):
             while not closed:
                 try:
                     msgs = yield read(stream)
-                except CommunicationErrors:
+                except EnvironmentError:
                     if self.reconnect:
                         break
                     else:
@@ -946,7 +951,7 @@ class Worker(WorkerBase):
             else:
                 raise StreamClosedError()
 
-        except CommunicationErrors:
+        except EnvironmentError:
             logger.info("Stream closed")
             self._close(report=False)
         except Exception as e:
@@ -1058,7 +1063,7 @@ class Worker(WorkerBase):
                     self.connections[future] = True
                     stream = yield gen.with_timeout(timedelta(seconds=3),
                                                     future)
-                except (gen.TimeoutError,) + CommunicationErrors:
+                except (gen.TimeoutError, EnvironmentError):
                     logger.info("Failed to connect to %s", worker)
                     with ignoring(KeyError):  # other coroutine may have removed
                         for d in self.has_what.pop(worker):
@@ -1109,7 +1114,7 @@ class Worker(WorkerBase):
                     'total': sum(self.nbytes.get(dep, 0) for dep in deps),
                     'who': worker
                 })
-            except CommunicationErrors as e:
+            except EnvironmentError as e:
                 logger.info("Worker stream died during communication: %s",
                             worker)
                 response = {}
