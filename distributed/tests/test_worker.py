@@ -413,3 +413,48 @@ def test_memory_limit_auto():
     assert a.memory_limit < b.memory_limit
 
     assert c.memory_limit == d.memory_limit
+
+
+@gen_cluster(client=True)
+def test_inter_worker_communication(c, s, a, b):
+    [x, y] = yield c._scatter([1, 2], workers=a.address)
+
+    future = c.submit(add, x, y, workers=b.address)
+    result = yield future._result()
+    assert result == 3
+
+
+@gen_cluster(client=True)
+def test_clean(c, s, a, b):
+    x = c.submit(inc, 1, workers=a.address)
+    y = c.submit(inc, x, workers=b.address)
+
+    yield y._result()
+
+    collections = [a.tasks, a.task_state, a.response, a.data, a.nbytes,
+                   a.durations, a.priorities]
+    for c in collections:
+        assert c
+
+    x.release()
+    y.release()
+
+    while x.key in a.task_state:
+        yield gen.sleep(0.01)
+
+    for c in collections:
+        assert not c
+
+
+@pytest.mark.skipif(sys.version_info[:2] == (3, 4), reason="mul bytes fails")
+@gen_cluster(client=True)
+def test_message_breakup(c, s, a, b):
+    xs = [c.submit(mul, b'%d' % i, 1000000, workers=a.address) for i in range(30)]
+    y = c.submit(lambda *args: None, xs, workers=b.address)
+    yield y._result()
+
+    assert 2 <= len(b.incoming_transfer_log) <= 20
+    assert 2 <= len(a.outgoing_transfer_log) <= 20
+
+    assert all(msg['who'] == b.address for msg in a.outgoing_transfer_log)
+    assert all(msg['who'] == a.address for msg in a.incoming_transfer_log)

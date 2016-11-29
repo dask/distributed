@@ -784,7 +784,7 @@ class Worker(WorkerBase):
 
     @gen.coroutine
     def compute_stream(self, stream):
-        with log_errors():
+        try:
             assert not self.batched_stream
             self.batched_stream = BatchedSend(interval=2, loop=self.loop)
             self.batched_stream.start(stream)
@@ -819,6 +819,9 @@ class Worker(WorkerBase):
             yield self.batched_stream.close()
             self.batched_stream = None
             logger.info('Close compute stream')
+        except Exception as e:
+            logger.exception(e)
+            raise
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
             who_has=None, nbytes=None, priority=None, duration=None):
