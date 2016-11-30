@@ -433,6 +433,8 @@ class Scheduler(Server):
         --------
         Scheduler.cleanup
         """
+        if self.status == 'closed':
+            return
         self._delete_periodic_callback.stop()
         self._synchronize_data_periodic_callback.stop()
         for service in self.services.values():

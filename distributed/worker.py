@@ -282,6 +282,10 @@ class WorkerBase(Server):
 
     @gen.coroutine
     def _close(self, report=True, timeout=10):
+        if self.status in ('closed', 'closing'):
+            return
+        logger.info("Stopping worker at %s:%d", self.ip, self.port)
+        self.status = 'closing'
         self.stop()
         self.heartbeat_callback.stop()
         with ignoring(EnvironmentError):
@@ -1094,11 +1098,11 @@ class Worker(WorkerBase):
                 deps.add(d)
                 total_bytes += self.nbytes[d]
 
-            self.connections[stream] = deps
             for d in deps:
                 assert d not in self.in_flight
                 self.in_flight[d] = stream
             self.log.append(('request-dep', dep, worker, deps))
+            self.connections[stream] = deps
             try:
                 start = time()
                 response = yield send_recv(stream, op='get_data', keys=list(deps),
@@ -1115,13 +1119,14 @@ class Worker(WorkerBase):
                     'who': worker
                 })
             except EnvironmentError as e:
-                logger.info("Worker stream died during communication: %s",
-                            worker)
+                logger.error("Worker stream died during communication: %s",
+                             worker)
                 response = {}
+            finally:
+                del self.connections[stream]
+                stream.close()
 
             self.log.append(('receive-dep', worker, list(response)))
-            stream.close()
-            del self.connections[stream]
 
             assert len(self.connections) < self.total_connections
 
@@ -1309,8 +1314,8 @@ class Worker(WorkerBase):
 
             self.ensure_computing()
             self.ensure_communicating()
-        except RuntimeError:
-            logger.error("Thread Pool Executor is shut down")
+        except RuntimeError as e:
+            logger.error("Thread Pool Executor error: %s", e)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:

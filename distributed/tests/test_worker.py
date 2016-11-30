@@ -25,7 +25,7 @@ from distributed.protocol.pickle import dumps, loads
 from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
 from distributed.utils import ignoring
-from distributed.utils_test import (loop, inc, gen_cluster,
+from distributed.utils_test import (loop, inc, mul, gen_cluster,
         slow, slowinc, throws, current_loop, gen_test, readone)
 
 
