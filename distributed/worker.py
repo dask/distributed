@@ -1,16 +1,22 @@
 from __future__ import print_function, division, absolute_import
 
+from collections import defaultdict, deque
 from datetime import timedelta
 from importlib import import_module
+import heapq
 import logging
 import os
 import pkg_resources
+import random
 import tempfile
 from threading import current_thread, Lock, local
 from time import time
 from timeit import default_timer
 import shutil
 import sys
+
+from .core import read, write, connect, close, send_recv, error_message
+
 
 from dask.core import istask
 from dask.compatibility import apply
@@ -27,8 +33,8 @@ from .batched import BatchedSend
 from .config import config
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
-from .core import (rpc, Server, pingpong, coerce_to_address,
-        error_message, read, RPCClosed, close)
+from .core import (read, write, connect, close, send_recv, error_message,
+                   rpc, Server, pingpong, coerce_to_address, RPCClosed)
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
@@ -727,11 +733,6 @@ def run(worker, stream, function=None, args=(), kwargs={}):
         }
     raise Return(response)
 
-
-from collections import defaultdict, deque
-import heapq
-import random
-from .core import read, write, connect, close, send_recv, error_message
 
 class Worker(WorkerBase):
     def __init__(self, *args, **kwargs):
