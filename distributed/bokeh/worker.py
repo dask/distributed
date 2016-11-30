@@ -142,10 +142,12 @@ class CommunicatingTimeSeries(DashboardComponent):
         self.worker = worker
         self.source = ColumnDataSource({'x': [], 'in': [], 'out': []})
 
+        x_range = DataRange1d(follow='end', follow_interval=30000)
+
         fig = figure(title="Communication History",
                      x_axis_type='datetime',
                      y_range=[-0.1, worker.total_connections + 0.1],
-                     height=150, tools='', **kwargs)
+                     height=150, tools='', x_range=x_range, **kwargs)
         fig.line(source=self.source, x='x', y='in', color='red')
         fig.line(source=self.source, x='x', y='out', color='blue')
 
@@ -170,9 +172,11 @@ class ExecutingTimeSeries(DashboardComponent):
         self.worker = worker
         self.source = ColumnDataSource({'x': [], 'y': []})
 
+        x_range = DataRange1d(follow='end', follow_interval=30000)
+
         fig = figure(title="Executing History",
                      x_axis_type='datetime', y_range=[-0.1, worker.ncores + 0.1],
-                     height=150, tools='', **kwargs)
+                     height=150, tools='', x_range=x_range, **kwargs)
         fig.line(source=self.source, x='x', y='y')
 
         fig.add_tools(
