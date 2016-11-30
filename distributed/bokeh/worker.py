@@ -29,7 +29,7 @@ class StateTable(DashboardComponent):
     def __init__(self, worker):
         self.worker = worker
 
-        names = ['Executing', 'Ready', 'Waiting', 'Connections', 'Serving']
+        names = ['Stored', 'Executing', 'Ready', 'Waiting', 'Connections', 'Serving']
         self.source = ColumnDataSource({name: [] for name in names})
 
         columns = {name: TableColumn(field=name, title=name)
@@ -44,7 +44,8 @@ class StateTable(DashboardComponent):
     def update(self):
         with log_errors():
             w = self.worker
-            d = {'Executing': ['%d / %d' % (len(w.executing), w.ncores)],
+            d = {'Stored': [len(w.data)],
+                 'Executing': ['%d / %d' % (len(w.executing), w.ncores)],
                  'Ready': [len(w.heap)],
                  'Waiting': [len(w.waiting_for_data)],
                  'Connections': [len(w.connections)],
