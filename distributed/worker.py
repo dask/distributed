@@ -749,6 +749,7 @@ class Worker(WorkerBase):
         self.connections = {}
 
         self.nbytes = dict()
+        self.types = dict()
         self.priorities = dict()
         self.durations = dict()
         self.response = defaultdict(dict)
@@ -1038,6 +1039,8 @@ class Worker(WorkerBase):
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
 
+        self.types[key] = type(value)
+
         for dep in self.dependents.get(key, ()):
             if dep in self.waiting_for_data:
                 if key in self.waiting_for_data[dep]:
@@ -1231,6 +1234,8 @@ class Worker(WorkerBase):
 
             if key in self.nbytes:
                 del self.nbytes[key]
+            if key in self.types:
+                del self.types[key]
             if key in self.priorities:
                 del self.priorities[key]
             if key in self.durations:
