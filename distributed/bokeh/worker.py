@@ -52,71 +52,6 @@ class StateTable(DashboardComponent):
             self.source.data.update(d)
 
 
-class ExecutingTable(DashboardComponent):
-    """ Currently running tasks """
-    def __init__(self, worker):
-        self.worker = worker
-
-        names = ['Task', 'Dependencies']
-        self.source = ColumnDataSource({name: [] for name in names})
-
-        columns = {name: TableColumn(field=name, title=name)
-                   for name in names}
-
-        table = DataTable(
-            source=self.source, columns=[columns[n] for n in names],
-        )
-        self.root = table
-
-    def update(self):
-        with log_errors():
-            keys = sorted(self.worker.executing)
-            deps = [frequencies(map(key_split, self.worker.dependencies[key]))
-                    for key in keys]
-            deps = [', '.join(key if v == 1 else '%d x %s' % (v, key)
-                              for key, v in dep.items())
-                    for dep in deps]
-            self.source.data.update({'Task': keys, 'Dependencies': deps})
-
-
-class Pending(DashboardComponent):
-    def __init__(self, worker, **kwargs):
-        with log_errors():
-            self.worker = worker
-
-            self.source = ColumnDataSource({'x': [], 'y': [], 'color': [],
-                                                    'name': []})
-            fig= figure(title='Waiting for Data', tools='', **kwargs)
-            fig.rect(source=self.source, x='x', y='y', width=1, height='y',
-                     color='color', alpha=0.5)
-            fig.rect(source=self.source, x='x', y=0.5, width=1, height=1,
-                     color='color')
-
-            hover = HoverTool(point_policy="follow_mouse", tooltips="@name")
-            fig.add_tools(
-                hover,
-                ResetTool(reset_size=False),
-                PanTool(dimensions="width"),
-                WheelZoomTool(dimensions="width")
-            )
-
-            self.root = fig
-
-    def update(self):
-        with log_errors():
-            keys = list(self.worker.data_needed)
-            names = [key_split(key) for key in keys]
-
-            d = {
-                  'x': list(range(len(keys))),
-                  'y': [len(self.worker.waiting_for_data[key]) / 2 for key in keys],
-                  'name': names,
-                  'color': [color_of(name) for name in names]
-                }
-
-            self.source.data.update(d)
-
-
 class CommunicatingStream(DashboardComponent):
     def __init__(self, worker, height=300, **kwargs):
         with log_errors():
@@ -254,44 +189,6 @@ class ExecutingTimeSeries(DashboardComponent):
                                 'y': [len(self.worker.executing)]}, 1000)
 
 
-class Executing(DashboardComponent):
-    def __init__(self, worker, **kwargs):
-        self.worker = worker
-
-        self.source = ColumnDataSource({'y': [], 'color': [], 'name': [], 'duration': []})
-
-        fig = figure(title="Executing",
-                     y_range=Range1d(start=-0.1, end=self.worker.ncores + 0.1),
-                     width=100, tools='', **kwargs)
-        fig.rect(source=self.source, x=0, y='y', color='color',
-        width='duration', height=1)
-
-        hover = HoverTool(point_policy="follow_mouse", tooltips="@name")
-        fig.add_tools(
-            hover,
-            ResetTool(reset_size=False),
-            PanTool(dimensions="width"),
-            WheelZoomTool(dimensions="width")
-        )
-
-        self.root = fig
-
-    def update(self):
-        with log_errors():
-            keys = sorted(self.worker.executing)
-
-            names = [key_split(key) for key in keys]
-
-            d = {
-                  'y': list(range(len(keys))),
-                  'duration': [self.worker.durations.get(key, 0.1) for key in keys],
-                  'color': [color_of(name) for name in names],
-                  'name': names
-                }
-
-            self.source.data.update(d)
-
-
 from bokeh.server.server import Server
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.application import Application
@@ -299,8 +196,6 @@ from bokeh.application import Application
 
 def modify_doc(worker, doc):
     with log_errors():
-        pending = Pending(worker, sizing_mode='scale_width')
-        executing = Executing(worker, sizing_mode='scale_width')
         statetable = StateTable(worker)
         executing_ts = ExecutingTimeSeries(worker, sizing_mode='scale_width')
         communicating_ts = CommunicatingTimeSeries(worker,
@@ -313,8 +208,6 @@ def modify_doc(worker, doc):
         communicating_stream.root.x_range = xr
 
         doc.add_periodic_callback(statetable.update, 100)
-        doc.add_periodic_callback(pending.update, 100)
-        doc.add_periodic_callback(executing.update, 100)
         doc.add_periodic_callback(executing_ts.update, 100)
         doc.add_periodic_callback(communicating_ts.update, 100)
         doc.add_periodic_callback(communicating_stream.update, 100)
@@ -322,11 +215,10 @@ def modify_doc(worker, doc):
                             executing_ts.root,
                             communicating_ts.root,
                             communicating_stream.root,
-                            row(executing.root, pending.root),
                             sizing_mode='scale_width'))
 
 
-class BokehWorkerServer(object):
+class BokehWorker(object):
     def __init__(self, worker, io_loop=None):
         self.worker = worker
         app = Application(FunctionHandler(partial(modify_doc, worker)))

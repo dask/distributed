@@ -9,13 +9,12 @@ from tornado.httpclient import AsyncHTTPClient
 
 from distributed.client import _wait
 from distributed.utils_test import gen_cluster, inc, dec
-from distributed.bokeh.worker import (BokehWorkerServer, ExecutingTable,
-        StateTable, Executing, CommunicatingStream, ExecutingTimeSeries,
-        CommunicatingTimeSeries)
+from distributed.bokeh.worker import (BokehWorker, StateTable,
+        CommunicatingStream, ExecutingTimeSeries, CommunicatingTimeSeries)
 
 
 @gen_cluster(client=True,
-             worker_kwargs={'services': {('bokeh', 0):  BokehWorkerServer}})
+             worker_kwargs={'services': {('bokeh', 0):  BokehWorker}})
 def test_simple(c, s, a, b):
     assert s.worker_info[a.address]['services'] == {'bokeh': a.services['bokeh'].port}
     assert s.worker_info[b.address]['services'] == {'bokeh': b.services['bokeh'].port}
@@ -30,34 +29,10 @@ def test_simple(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_ExecutingTable(c, s, a, b):
-    aa = ExecutingTable(a)
-    bb = ExecutingTable(b)
-
-    xs = c.map(inc, range(10))
-    ys = c.map(dec, range(10))
-    z = c.submit(add, 1, 2)
-
-    def slowall(*args):
-        sleep(1)
-        pass
-
-    future = c.submit(slowall, xs, ys, z)
-    yield gen.sleep(0.2)
-
-    aa.update()
-    bb.update()
-    assert aa.source.data['Task'] or bb.source.data['Task']
-    for t in [aa, bb]:
-        if t.source.data['Task']:
-            assert t.source.data['Task'] == [future.key]
-            assert '10 x ' in t.source.data['Dependencies'][0]
-
-
-@gen_cluster(client=True)
 def test_basic(c, s, a, b):
-    for component in [Executing, ExecutingTable, StateTable,
-                      ExecutingTimeSeries, CommunicatingTimeSeries]:
+    for component in [StateTable, ExecutingTimeSeries,
+            CommunicatingTimeSeries]:
+
         aa = component(a)
         bb = component(b)
 
@@ -103,9 +78,9 @@ def test_CommunicatingStream(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_port_overlap(c, s, a, b):
-    sa = BokehWorkerServer(a)
+    sa = BokehWorker(a)
     sa.listen(57384)
-    sb = BokehWorkerServer(b)
+    sb = BokehWorker(b)
     sb.listen(57384)
     assert sa.port
     assert sb.port
