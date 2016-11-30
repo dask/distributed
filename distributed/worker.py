@@ -406,22 +406,22 @@ class WorkerBase(Server):
 
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
         nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
-        try:
-            compressed = yield write(stream, msg)
-        except EnvironmentError:
-            logger.exception('failed during get data', exc_info=True)
-            stream.close()
-            raise
+        compressed = yield write(stream, msg)
         stop = time()
 
+        total_bytes = sum(filter(None, nbytes.values()))
+
+        self.outgoing_count += 1
         self.outgoing_transfer_log.append({
             'start': start,
             'stop': stop,
+            'middle': (start + stop) / 2,
             'duration': stop - start,
             'who': who,
             'keys': nbytes,
-            'total': sum(filter(None, nbytes.values())),
-            'compressed-total': compressed
+            'total': total_bytes,
+            'compressed': compressed,
+            'bandwidth': total_bytes / (stop - start)
         })
 
         raise gen.Return('dont-reply')
@@ -755,6 +755,7 @@ class Worker(WorkerBase):
 
         self.heap = list()
         self.executing = set()
+        self.executed_count = 0
         self.long_running = set()
 
         self.batched_stream = None
@@ -774,7 +775,9 @@ class Worker(WorkerBase):
         }
 
         self.incoming_transfer_log = deque(maxlen=(100000))
+        self.incoming_count = 0
         self.outgoing_transfer_log = deque(maxlen=(100000))
+        self.outgoing_count = 0
 
         WorkerBase.__init__(self, *args, **kwargs)
 
@@ -946,6 +949,7 @@ class Worker(WorkerBase):
 
             if self.task_state[key] == 'executing':
                 self.executing.remove(key)
+                self.executed_count += 1
             elif self.task_state[key] == 'long-running':
                 self.long_running.remove(key)
             if self.batched_stream:
@@ -1108,14 +1112,19 @@ class Worker(WorkerBase):
                 stop = time()
                 self.response[dep].update({'transfer_start': start,
                                            'transfer_stop': stop})
+
+                total_bytes = sum(self.nbytes.get(dep, 0) for dep in deps)
                 self.incoming_transfer_log.append({
                     'start': start,
                     'stop': stop,
+                    'middle': (start + stop) / 2.0,
                     'duration': stop - start,
                     'keys': {dep: self.nbytes.get(dep, None) for dep in deps},
-                    'total': sum(self.nbytes.get(dep, 0) for dep in deps),
+                    'total': total_bytes,
+                    'bandwidth': total_bytes / (stop - start),
                     'who': worker
                 })
+                self.incoming_count += 1
             except EnvironmentError as e:
                 logger.error("Worker stream died during communication: %s",
                              worker)

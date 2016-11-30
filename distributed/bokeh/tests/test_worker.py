@@ -1,13 +1,17 @@
 from __future__ import print_function, division, absolute_import
 
-from operator import add
+from operator import add, sub
 from time import sleep
 
+from toolz import first
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
+from distributed.client import _wait
 from distributed.utils_test import gen_cluster, inc, dec
-from distributed.bokeh.worker import BokehWorkerServer, ExecutingTable
+from distributed.bokeh.worker import (BokehWorkerServer, ExecutingTable,
+        StateTable, Executing, CommunicatingStream, ExecutingTimeSeries,
+        CommunicatingTimeSeries)
 
 
 @gen_cluster(client=True,
@@ -27,8 +31,8 @@ def test_simple(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_ExecutingTable(c, s, a, b):
-    ta = ExecutingTable(a)
-    tb = ExecutingTable(b)
+    aa = ExecutingTable(a)
+    bb = ExecutingTable(b)
 
     xs = c.map(inc, range(10))
     ys = c.map(dec, range(10))
@@ -41,13 +45,60 @@ def test_ExecutingTable(c, s, a, b):
     future = c.submit(slowall, xs, ys, z)
     yield gen.sleep(0.2)
 
-    ta.update()
-    tb.update()
-    assert ta.source.data['Task'] or tb.source.data['Task']
-    for t in [ta, tb]:
+    aa.update()
+    bb.update()
+    assert aa.source.data['Task'] or bb.source.data['Task']
+    for t in [aa, bb]:
         if t.source.data['Task']:
             assert t.source.data['Task'] == [future.key]
             assert '10 x ' in t.source.data['Dependencies'][0]
+
+
+@gen_cluster(client=True)
+def test_basic(c, s, a, b):
+    for component in [Executing, ExecutingTable, StateTable,
+                      ExecutingTimeSeries, CommunicatingTimeSeries]:
+        aa = component(a)
+        bb = component(b)
+
+        xs = c.map(inc, range(10), workers=a.address)
+        ys = c.map(dec, range(10), workers=b.address)
+
+        def slowall(*args):
+            sleep(1)
+            pass
+
+        x = c.submit(slowall, xs, ys, 1, workers=a.address)
+        y = c.submit(slowall, xs, ys, 2, workers=b.address)
+        yield gen.sleep(0.1)
+
+        aa.update()
+        bb.update()
+
+        assert (len(first(aa.source.data.values())) and
+                len(first(bb.source.data.values())))
+
+
+
+@gen_cluster(client=True)
+def test_CommunicatingStream(c, s, a, b):
+    aa = CommunicatingStream(a)
+    bb = CommunicatingStream(b)
+
+    xs = c.map(inc, range(10), workers=a.address)
+    ys = c.map(dec, range(10), workers=b.address)
+    adds = c.map(add, xs, ys, workers=a.address)
+    subs = c.map(sub, xs, ys, workers=b.address)
+
+    yield _wait([adds, subs])
+
+    aa.update()
+    bb.update()
+
+    assert (len(first(aa.outgoing.data.values())) and
+            len(first(bb.outgoing.data.values())))
+    assert (len(first(aa.incoming.data.values())) and
+            len(first(bb.incoming.data.values())))
 
 
 @gen_cluster(client=True)
