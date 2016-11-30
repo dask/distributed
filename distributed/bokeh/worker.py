@@ -2,14 +2,15 @@ from __future__ import print_function, division, absolute_import
 
 from functools import partial
 from time import time
+import logging
 
-from bokeh.layouts import row, column
+from bokeh.layouts import row, column, widgetbox
 from bokeh.models import (
     ColumnDataSource, Plot, Datetime, DataRange1d, Rect, LinearAxis,
     DatetimeAxis, Grid, BasicTicker, HoverTool, BoxZoomTool, ResetTool,
     PanTool, WheelZoomTool, Title, Range1d, Quad, Text, value, Line,
     NumeralTickFormatter, ToolbarBox, Legend, LegendItem, BoxSelectTool,
-    Circle, CategoricalAxis,
+    Circle, CategoricalAxis, Select
 )
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
 from bokeh.palettes import Spectral9, RdBu11
@@ -22,6 +23,9 @@ from ..utils import log_errors, key_split
 
 
 red_blue = sorted(RdBu11)[::-1]
+
+
+logger = logging.getLogger(__name__)
 
 
 class StateTable(DashboardComponent):
@@ -96,12 +100,12 @@ class CommunicatingStream(DashboardComponent):
         with log_errors():
             outgoing = self.worker.outgoing_transfer_log
             n = self.worker.outgoing_count - self.last_outgoing
-            outgoing = [outgoing[-i].copy() for i in range(0, n)]
+            outgoing = [outgoing[-i].copy() for i in range(1, n)]
             self.last_outgoing = self.worker.outgoing_count
 
             incoming = self.worker.incoming_transfer_log
             n = self.worker.incoming_count - self.last_incoming
-            incoming = [incoming[-i].copy() for i in range(0, n)]
+            incoming = [incoming[-i].copy() for i in range(1, n)]
             self.last_incoming = self.worker.incoming_count
 
             for [msgs, source] in [[incoming, self.incoming],
@@ -198,8 +202,9 @@ from bokeh.server.server import Server
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.application import Application
 
+cf = []
 
-def modify_doc(worker, doc):
+def main_doc(worker, doc):
     with log_errors():
         statetable = StateTable(worker)
         executing_ts = ExecutingTimeSeries(worker, sizing_mode='scale_width')
@@ -223,11 +228,24 @@ def modify_doc(worker, doc):
                             sizing_mode='scale_width'))
 
 
+def crossfilter_doc(worker, doc):
+    with log_errors():
+        statetable = StateTable(worker)
+        crossfilter = CrossFilter(worker)
+
+        doc.add_periodic_callback(statetable.update, 100)
+        doc.add_periodic_callback(crossfilter.update, 200)
+
+        doc.add_root(column(statetable.root, crossfilter.root))
+
+
 class BokehWorker(object):
     def __init__(self, worker, io_loop=None):
         self.worker = worker
-        app = Application(FunctionHandler(partial(modify_doc, worker)))
-        self.apps = {'/': app}
+        main = Application(FunctionHandler(partial(main_doc, worker)))
+        crossfilter = Application(FunctionHandler(partial(crossfilter_doc, worker)))
+        self.apps = {'/main': main,
+                     '/crossfilter': crossfilter}
 
         self.loop = io_loop or worker.loop
         self.server = None
@@ -305,3 +323,148 @@ def format_time(n):
     if n >= 1e-3:
         return '%.2f ms' % (n * 1e3)
     return '%.2f us' % (n * 1e6)
+
+
+class CrossFilter(DashboardComponent):
+    def __init__(self, worker, **kwargs):
+        with log_errors():
+            self.worker = worker
+
+            names = ['nbytes', 'duration', 'bandwidth', 'count', 'type',
+                     'inout-color', 'type-color', 'key', 'key-color', 'start',
+                     'stop']
+            quantities = ['nbytes', 'duration', 'bandwidth', 'count',
+                          'start', 'stop']
+            colors = ['inout-color', 'type-color', 'key-color']
+
+            # self.source = ColumnDataSource({name: [] for name in names})
+            self.source = ColumnDataSource({
+                'nbytes': [1, 2],
+                'duration': [0.01, 0.02],
+                'bandwidth': [0.01, 0.02],
+                'count': [1, 2],
+                'type': ['int', 'str'],
+                'inout-color': ['blue', 'red'],
+                'type-color': ['blue', 'red'],
+                'key': ['add', 'inc'],
+                'start': [1, 2],
+                'stop': [1, 2]
+                })
+
+
+
+            self.x = Select(title='X-Axis', value='nbytes', options=quantities)
+            self.x.on_change('value', self.update_figure)
+
+            self.y = Select(title='Y-Axis', value='bandwidth', options=quantities)
+            self.y.on_change('value', self.update_figure)
+
+            self.size = Select(title='Size', value='None',
+                               options=['None'] + quantities)
+            self.size.on_change('value', self.update_figure)
+
+            self.color = Select(title='Color', value='type-color',
+                                options=['black'] + colors)
+            self.color.on_change('value', self.update_figure)
+
+            if 'sizing_mode' in kwargs:
+                kw = {'sizing_mode': kwargs['sizing_mode']}
+            else:
+                kw = {}
+
+            self.control = widgetbox([self.x, self.y, self.size, self.color],
+                                     width=200, **kw)
+
+            self.last_outgoing = 0
+            self.last_incoming = 0
+            self.kwargs = kwargs
+
+            self.layout = row(self.control, self.create_figure(**self.kwargs),
+                              **kw)
+
+            self.root = self.layout
+
+    def update(self):
+        with log_errors():
+            outgoing = self.worker.outgoing_transfer_log
+            n = self.worker.outgoing_count - self.last_outgoing
+            n = min(n, 1000)
+            outgoing = [outgoing[-i].copy() for i in range(1, n)]
+            self.last_outgoing = self.worker.outgoing_count
+
+            incoming = self.worker.incoming_transfer_log
+            n = self.worker.incoming_count - self.last_incoming
+            n = min(n, 1000)
+            incoming = [incoming[-i].copy() for i in range(1, n)]
+            self.last_incoming = self.worker.incoming_count
+
+            out = []
+
+            for msg in incoming:
+                d = self.process_msg(msg)
+                d['inout-color'] = 'red'
+                out.append(d)
+
+            for msg in outgoing:
+                d = self.process_msg(msg)
+                d['inout-color'] = 'blue'
+                out.append(d)
+
+            if out:
+                out = transpose(out)
+                if (len(self.source.data['stop']) and
+                    min(out['start']) > self.source.data['stop'][-1] + 10):
+                    self.source.data.update(out)
+                else:
+                    self.source.stream(out, rollover=1000)
+
+    def create_figure(self, **kwargs):
+        with log_errors():
+            fig = figure(title='', tools='', **kwargs)
+
+            size = self.size.value
+            if size == 'None':
+                size = 1
+
+            fig.circle(source=self.source, x=self.x.value, y=self.y.value,
+                       color=self.color.value, size=10, alpha=0.5,
+                       hover_alpha=1)
+            fig.xaxis.axis_label = self.x.value
+            fig.yaxis.axis_label = self.y.value
+
+            fig.add_tools(
+                # self.hover,
+                ResetTool(reset_size=False),
+                PanTool(),
+                WheelZoomTool(),
+                BoxZoomTool(),
+            )
+            return fig
+
+    def update_figure(self, attr, old, new):
+        with log_errors():
+            fig = self.create_figure(**self.kwargs)
+            self.layout.children[1] = fig
+
+    def process_msg(self, msg):
+        try:
+            func = lambda k: msg['keys'].get(k, 0)
+            main_key = max(msg['keys'], key=func)
+            typ = self.worker.types.get(main_key, object).__name__
+            keyname = key_split(main_key)
+            d = {
+                  'nbytes': msg['total'],
+                  'duration': msg['duration'],
+                  'bandwidth': msg['bandwidth'],
+                  'count': len(msg['keys']),
+                  'type': typ,
+                  'type-color': color_of(typ),
+                  'key': keyname,
+                  'key-color': color_of(keyname),
+                  'start': msg['start'],
+                  'stop': msg['stop']
+                 }
+            return d
+        except Exception as e:
+            logger.exception(e)
+            raise

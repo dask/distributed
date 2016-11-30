@@ -9,7 +9,7 @@ from tornado.httpclient import AsyncHTTPClient
 
 from distributed.client import _wait
 from distributed.utils_test import gen_cluster, inc, dec
-from distributed.bokeh.worker import (BokehWorker, StateTable,
+from distributed.bokeh.worker import (BokehWorker, StateTable, CrossFilter,
         CommunicatingStream, ExecutingTimeSeries, CommunicatingTimeSeries)
 
 
@@ -23,15 +23,16 @@ def test_simple(c, s, a, b):
     yield gen.sleep(0.1)
 
     http_client = AsyncHTTPClient()
-    response = yield http_client.fetch('http://localhost:%d/' %
-                                       a.services['bokeh'].port)
-    assert 'bokeh' in response.body.decode().lower()
+    for suffix in ['main', 'crossfilter']:
+        response = yield http_client.fetch('http://localhost:%d/%s'
+                                           % (a.services['bokeh'].port, suffix))
+        assert 'bokeh' in response.body.decode().lower()
 
 
 @gen_cluster(client=True)
 def test_basic(c, s, a, b):
     for component in [StateTable, ExecutingTimeSeries,
-            CommunicatingTimeSeries]:
+            CommunicatingTimeSeries, CrossFilter]:
 
         aa = component(a)
         bb = component(b)
