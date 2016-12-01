@@ -116,7 +116,7 @@ class CommunicatingStream(DashboardComponent):
                         del msg['compressed']
                     del msg['keys']
 
-                    bandwidth = msg['total'] / msg['duration']
+                    bandwidth = msg['total'] / (msg['duration'] or 0.5)
                     bw = max(min(bandwidth / 500e6, 1), 0.3)
                     msg['alpha'] = bw
                     try:

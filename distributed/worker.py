@@ -420,16 +420,17 @@ class WorkerBase(Server):
         total_bytes = sum(filter(None, nbytes.values()))
 
         self.outgoing_count += 1
+        duration = (stop - start) or 0.5  # windows
         self.outgoing_transfer_log.append({
             'start': start,
             'stop': stop,
             'middle': (start + stop) / 2,
-            'duration': stop - start,
+            'duration': duration,
             'who': who,
             'keys': nbytes,
             'total': total_bytes,
             'compressed': compressed,
-            'bandwidth': total_bytes / (stop - start)
+            'bandwidth': total_bytes / duration
         })
 
         raise gen.Return('dont-reply')
@@ -1125,14 +1126,15 @@ class Worker(WorkerBase):
                                            'transfer_stop': stop})
 
                 total_bytes = sum(self.nbytes.get(dep, 0) for dep in deps)
+                duration = (stop - start) or 0.5
                 self.incoming_transfer_log.append({
                     'start': start,
                     'stop': stop,
                     'middle': (start + stop) / 2.0,
-                    'duration': stop - start,
+                    'duration': duration,
                     'keys': {dep: self.nbytes.get(dep, None) for dep in deps},
                     'total': total_bytes,
-                    'bandwidth': total_bytes / (stop - start),
+                    'bandwidth': total_bytes / duration,
                     'who': worker
                 })
                 self.incoming_count += 1
