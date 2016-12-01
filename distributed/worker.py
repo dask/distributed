@@ -239,6 +239,9 @@ class WorkerBase(Server):
     def _start(self, port=0):
         self.listen(port)
         self.name = self.name or self.address
+        for k, v in self.services.items():
+            v.listen(0)
+            self.service_ports[k] = v.port
 
         logger.info('      Start worker at: %20s:%d', self.ip, self.port)
         for k, v in self.service_ports.items():
@@ -406,7 +409,12 @@ class WorkerBase(Server):
 
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
         nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
-        compressed = yield write(stream, msg)
+        try:
+            compressed = yield write(stream, msg)
+        except EnvironmentError:
+            logger.exception('failed during get data', exc_info=True)
+            stream.close()
+            raise
         stop = time()
 
         total_bytes = sum(filter(None, nbytes.values()))
