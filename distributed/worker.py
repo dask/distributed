@@ -35,6 +35,7 @@ from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
 from .core import (read, write, connect, close, send_recv, error_message,
                    rpc, Server, pingpong, coerce_to_address, RPCClosed)
+from .metrics import wall_clock
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
@@ -227,7 +228,7 @@ class WorkerBase(Server):
             try:
                 yield self.scheduler.register(address=self.address, name=self.name,
                                         ncores=self.ncores,
-                                        now=time(),
+                                        now=wall_clock(),
                                         host_info=self.host_health(),
                                         services=self.service_ports,
                                         memory_limit=self.memory_limit,
@@ -262,7 +263,7 @@ class WorkerBase(Server):
                         ncores=self.ncores, address=(self.ip, self.port),
                         keys=list(self.data),
                         name=self.name, nbytes=valmap(sizeof, self.data),
-                        now=time(),
+                        now=wall_clock(),
                         host_info=self.host_health(),
                         services=self.service_ports,
                         memory_limit=self.memory_limit,
@@ -407,7 +408,7 @@ class WorkerBase(Server):
 
     @gen.coroutine
     def get_data(self, stream, keys=None, who=None):
-        start = time()
+        start = wall_clock()
 
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
         nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
@@ -417,7 +418,7 @@ class WorkerBase(Server):
             logger.exception('failed during get data', exc_info=True)
             stream.close()
             raise
-        stop = time()
+        stop = wall_clock()
 
         self.outgoing_transfer_log.append({
             'start': start,
@@ -480,7 +481,7 @@ class WorkerBase(Server):
 
     def host_health(self, stream=None):
         """ Information about worker """
-        d = {'time': time()}
+        d = {'time': wall_clock()}
         try:
             import psutil
             mem = psutil.virtual_memory()
@@ -609,7 +610,7 @@ def apply_function(function, args, kwargs, execution_state, key):
     """
     thread_state.execution_state = execution_state
     thread_state.key = key
-    start = time()
+    start = wall_clock()
     try:
         result = function(*args, **kwargs)
     except Exception as e:
@@ -620,7 +621,7 @@ def apply_function(function, args, kwargs, execution_state, key):
                'nbytes': sizeof(result),
                'type': dumps_function(type(result)) if result is not None else None}
     finally:
-        end = time()
+        end = wall_clock()
     msg['compute_start'] = start
     msg['compute_stop'] = end
     msg['thread'] = current_thread().ident
@@ -1107,10 +1108,10 @@ class Worker(WorkerBase):
             self.log.append(('request-dep', dep, worker, deps))
             self.connections[stream] = deps
             try:
-                start = time()
+                start = wall_clock()
                 response = yield send_recv(stream, op='get_data', keys=list(deps),
                                            close=True, who=self.address)
-                stop = time()
+                stop = wall_clock()
                 self.response[dep].update({'transfer_start': start,
                                            'transfer_stop': stop})
                 self.incoming_transfer_log.append({
@@ -1279,10 +1280,10 @@ class Worker(WorkerBase):
             except ValueError:
                 diagnostics = {}
 
-            start = time()
+            start = wall_clock()
             args2 = pack_data(args, self.data, key_types=str)
             kwargs2 = pack_data(kwargs, self.data, key_types=str)
-            stop = time()
+            stop = wall_clock()
             if stop - start > 0.005:
                 self.response[key]['disk_load_start'] = start
                 self.response[key]['disk_load_stop'] = stop
