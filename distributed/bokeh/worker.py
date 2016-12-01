@@ -257,7 +257,7 @@ class BokehWorker(object):
             self.server = Server(self.apps, io_loop=self.loop, port=port,
                                  host=['*'])
             self.server.start(start_loop=False)
-        except SystemExit:
+        except (SystemExit, EnvironmentError):
             self.server = Server(self.apps, io_loop=self.loop, port=0,
                                  host=['*'])
             self.server.start(start_loop=False)
