@@ -4,6 +4,8 @@ from collections import deque
 import psutil
 from time import time
 
+from .compatibility import WINDOWS
+
 
 class SystemMonitor(object):
     def __init__(self, n=1000):
@@ -12,7 +14,6 @@ class SystemMonitor(object):
         self.time = deque(maxlen=n)
         self.cpu = deque(maxlen=n)
         self.memory = deque(maxlen=n)
-        self.num_fds = deque(maxlen=n)
         self.read_bytes = deque(maxlen=n)
         self.write_bytes = deque(maxlen=n)
 
@@ -23,14 +24,15 @@ class SystemMonitor(object):
         self.quantities = {'cpu': self.cpu,
                            'memory': self.memory,
                            'time': self.time,
-                           'num_fds': self.num_fds,
                            'read_bytes': self.read_bytes,
                            'write_bytes': self.write_bytes}
+        if not WINDOWS:
+            self.num_fds = deque(maxlen=n)
+            self.quantities['num_fds'] = self.num_fds
 
     def update(self):
         cpu = self.proc.cpu_percent()
         memory = self.proc.memory_info().rss
-        num_fds = self.proc.num_fds()
 
         now = time()
         ioc = self.proc.io_counters()
@@ -42,7 +44,6 @@ class SystemMonitor(object):
 
         self.cpu.append(cpu)
         self.memory.append(memory)
-        self.num_fds.append(num_fds)
         self.time.append(now)
 
         self.read_bytes.append(read_bytes)
@@ -50,6 +51,13 @@ class SystemMonitor(object):
 
         self.count += 1
 
-        return {'cpu': cpu, 'memory': memory, 'num_fds': num_fds, 'time': now,
-                'count': self.count, 'read_bytes': read_bytes, 'write_bytes':
-                write_bytes}
+        result = {'cpu': cpu, 'memory': memory, 'time': now,
+                  'count': self.count, 'read_bytes': read_bytes,
+                  'write_bytes': write_bytes}
+
+        if not WINDOWS:
+            num_fds = self.proc.num_fds()
+            self.num_fds.append(num_fds)
+            result['num_fds'] = num_fds
+
+        return result

@@ -18,6 +18,7 @@ from bokeh.plotting import figure
 from toolz import frequencies
 
 from .components import DashboardComponent
+from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..utils import log_errors, key_split
 
@@ -346,36 +347,42 @@ class CrossFilter(DashboardComponent):
 class SystemMonitor(DashboardComponent):
     def __init__(self, worker, height=150, **kwargs):
         self.worker = worker
-        names = ['cpu', 'memory', 'num_fds', 'read_bytes', 'write_bytes',
-                 'time']
-        self.source = ColumnDataSource({name: [] for name in names})
+
+        self.names = ['cpu', 'memory', 'read_bytes', 'write_bytes', 'time']
+        if not WINDOWS:
+            self.names.append('num_fds')
+        self.source = ColumnDataSource({name: [] for name in self.names})
 
         x_range = DataRange1d(follow='end', follow_interval=30000,
                               range_padding=0)
 
         tools = 'reset,pan,wheel_zoom'
 
-        cpu = figure(title="CPU", x_axis_type='datetime',
-                     y_range=[-0.1, 100 * self.worker.ncores],
-                     height=height, tools=tools, x_range=x_range, **kwargs)
-        cpu.line(source=self.source, x='time', y='cpu')
-        cpu.yaxis.axis_label = 'Percentage'
+        self.cpu = figure(title="CPU", x_axis_type='datetime',
+                          y_range=[-0.1, 100 * self.worker.ncores],
+                          height=height, tools=tools, x_range=x_range, **kwargs)
+        self.cpu.line(source=self.source, x='time', y='cpu')
+        self.cpu.yaxis.axis_label = 'Percentage'
         self.mem = figure(title="Memory", x_axis_type='datetime',
-                     height=height, tools=tools, x_range=x_range, **kwargs)
+                          height=height, tools=tools, x_range=x_range, **kwargs)
         self.mem.line(source=self.source, x='time', y='memory')
         self.mem.yaxis.axis_label = 'Bytes'
-        bandwidth = figure(title='Bandwidth', x_axis_type='datetime',
-                           y_range=[-1, 500e6], height=height, x_range=x_range,
-                           tools=tools, **kwargs)
-        bandwidth.line(source=self.source, x='time', y='read_bytes',
-                       color='red')
-        bandwidth.line(source=self.source, x='time', y='write_bytes',
-                       color='blue')
-        self.num_fds = figure(title='Number of File Descriptors',
-                              x_axis_type='datetime', height=height,
-                              x_range=x_range, tools=tools, **kwargs)
+        self.bandwidth = figure(title='Bandwidth', x_axis_type='datetime',
+                                y_range=[-1, 500e6], height=height,
+                                x_range=x_range, tools=tools, **kwargs)
+        self.bandwidth.line(source=self.source, x='time', y='read_bytes',
+                            color='red')
+        self.bandwidth.line(source=self.source, x='time', y='write_bytes',
+                            color='blue')
+        plots = [self.cpu, self.mem, self.bandwidth]
 
-        self.num_fds.line(source=self.source, x='time', y='num_fds')
+        if not WINDOWS:
+            self.num_fds = figure(title='Number of File Descriptors',
+                                  x_axis_type='datetime', height=height,
+                                  x_range=x_range, tools=tools, **kwargs)
+
+            self.num_fds.line(source=self.source, x='time', y='num_fds')
+            plots.append(self.num_fds)
 
         if 'sizing_mode' in kwargs:
             kw = {'sizing_mode': kwargs['sizing_mode']}
@@ -383,7 +390,7 @@ class SystemMonitor(DashboardComponent):
             kw = {}
 
         self.last = 0
-        self.root = column(cpu, self.mem, bandwidth, self.num_fds, **kw)
+        self.root = column(*plots, **kw)
         self.worker.monitor.update()
 
     def update(self):
@@ -397,13 +404,13 @@ class SystemMonitor(DashboardComponent):
             seq = [-i for i in range(1, n + 1)][::-1]
 
             d = {attr: [getattr(monitor, attr)[i] for i in seq]
-                 for attr in ['cpu', 'memory', 'read_bytes', 'write_bytes',
-                     'num_fds']}
+                 for attr in self.names}
 
             d['time'] = [monitor.time[i] * 1000 for i in seq]
 
             self.source.stream(d, 1000)
-            self.num_fds.y_range.start = 0
+            if not WINDOWS:
+                self.num_fds.y_range.start = 0
             self.mem.y_range.start = 0
             self.last = monitor.count
 
