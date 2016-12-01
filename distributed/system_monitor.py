@@ -20,7 +20,7 @@ class SystemMonitor(object):
         self.last_time = time()
         self.count = 0
 
-        self._last_io_counters = self.proc.io_counters()
+        self._last_io_counters = psutil.net_io_counters()
         self.quantities = {'cpu': self.cpu,
                            'memory': self.memory,
                            'time': self.time,
@@ -35,11 +35,11 @@ class SystemMonitor(object):
         memory = self.proc.memory_info().rss
 
         now = time()
-        ioc = self.proc.io_counters()
+        ioc = psutil.net_io_counters()
         last = self._last_io_counters
         duration = now - self.last_time
-        read_bytes = (ioc.read_bytes - last.read_bytes) / (duration or 0.5)
-        write_bytes = (ioc.write_bytes - last.write_bytes) / (duration or 0.5)
+        read_bytes = (ioc.bytes_recv - last.bytes_recv) / (duration or 0.5)
+        write_bytes = (ioc.bytes_sent - last.bytes_sent) / (duration or 0.5)
         self._last_io_counters = ioc
         self.last_time = now
 
@@ -66,6 +66,6 @@ class SystemMonitor(object):
     def __str__(self):
         return '<SystemMonitor: cpu: %d memory: %d MB fds: %d>' % (
                 self.cpu[-1], self.memory[-1] / 1e6,
-                '-1' if WINDOWS else self.num_fds[-1])
+                -1 if WINDOWS else self.num_fds[-1])
 
     __repr__ = __str__

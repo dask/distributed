@@ -368,7 +368,7 @@ class SystemMonitor(DashboardComponent):
         self.mem.line(source=self.source, x='time', y='memory')
         self.mem.yaxis.axis_label = 'Bytes'
         self.bandwidth = figure(title='Bandwidth', x_axis_type='datetime',
-                                y_range=[-1, 500e6], height=height,
+                                height=height,
                                 x_range=x_range, tools=tools, **kwargs)
         self.bandwidth.line(source=self.source, x='time', y='read_bytes',
                             color='red')
