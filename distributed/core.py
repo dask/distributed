@@ -102,7 +102,7 @@ class Server(TCPServer):
         self.monitor = SystemMonitor()
         if hasattr(self, 'loop'):
             pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.loop)
-            pc.start()
+            self.loop.add_callback(pc.start)
         self.__stopped = False
         super(Server, self).__init__(max_buffer_size=max_buffer_size, **kwargs)
 
