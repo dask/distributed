@@ -86,3 +86,6 @@ def test_port_overlap(c, s, a, b):
     assert sa.port
     assert sb.port
     assert sa.port != sb.port
+
+    sa.stop()
+    sb.stop()
