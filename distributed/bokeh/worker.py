@@ -239,92 +239,6 @@ def crossfilter_doc(worker, doc):
         doc.add_root(column(statetable.root, crossfilter.root))
 
 
-class BokehWorker(object):
-    def __init__(self, worker, io_loop=None):
-        self.worker = worker
-        main = Application(FunctionHandler(partial(main_doc, worker)))
-        crossfilter = Application(FunctionHandler(partial(crossfilter_doc, worker)))
-        self.apps = {'/main': main,
-                     '/crossfilter': crossfilter}
-
-        self.loop = io_loop or worker.loop
-        self.server = None
-
-    def listen(self, port):
-        if self.server:
-            return
-        try:
-            self.server = Server(self.apps, io_loop=self.loop, port=port,
-                                 host=['*'])
-            self.server.start(start_loop=False)
-        except (SystemExit, EnvironmentError):
-            self.server = Server(self.apps, io_loop=self.loop, port=0,
-                                 host=['*'])
-            self.server.start(start_loop=False)
-
-    @property
-    def port(self):
-        return (self.server.port or
-                list(self.server._http._sockets.values())[0].getsockname()[1])
-
-    def stop(self):
-        for context in self.server._tornado._applications.values():
-            context.run_unload_hook()
-
-        self.server._tornado._stats_job.stop()
-        self.server._tornado._cleanup_job.stop()
-        if self.server._tornado._ping_job is not None:
-            self.server._tornado._ping_job.stop()
-
-        # self.server.stop()
-        # https://github.com/bokeh/bokeh/issues/5494
-
-
-def transpose(lod):
-    keys = list(lod[0].keys())
-    return {k: [d[k] for d in lod] for k in keys}
-
-
-def format_bytes(n):
-    """ Format bytes as text
-
-    >>> format_bytes(1)
-    '1 B'
-    >>> format_bytes(1234)
-    '1.23 kB'
-    >>> format_bytes(12345678)
-    '12.35 MB'
-    >>> format_bytes(1234567890)
-    '1.23 GB'
-    """
-    if n > 1e9:
-        return '%0.2f GB' % (n / 1e9)
-    if n > 1e6:
-        return '%0.2f MB' % (n / 1e6)
-    if n > 1e3:
-        return '%0.2f kB' % (n / 1000)
-    return '%d B' % n
-
-
-def format_time(n):
-    """ format integers as time
-
-    >>> format_time(1)
-    '1.00 s'
-    >>> format_time(0.001234)
-    '1.23 ms'
-    >>> format_time(0.00012345)
-    '123.45 us'
-    >>> format_time(123.456)
-    '123.46 s'
-    """
-    if n >= 1:
-        return '%.2f s' % n
-    if n >= 1e-3:
-        return '%.2f ms' % (n * 1e3)
-    return '%.2f us' % (n * 1e6)
-
-
 class CrossFilter(DashboardComponent):
     def __init__(self, worker, **kwargs):
         with log_errors():
@@ -468,3 +382,89 @@ class CrossFilter(DashboardComponent):
         except Exception as e:
             logger.exception(e)
             raise
+
+
+class BokehWorker(object):
+    def __init__(self, worker, io_loop=None):
+        self.worker = worker
+        main = Application(FunctionHandler(partial(main_doc, worker)))
+        crossfilter = Application(FunctionHandler(partial(crossfilter_doc, worker)))
+        self.apps = {'/main': main,
+                     '/crossfilter': crossfilter}
+
+        self.loop = io_loop or worker.loop
+        self.server = None
+
+    def listen(self, port):
+        if self.server:
+            return
+        try:
+            self.server = Server(self.apps, io_loop=self.loop, port=port,
+                                 host=['*'])
+            self.server.start(start_loop=False)
+        except (SystemExit, EnvironmentError):
+            self.server = Server(self.apps, io_loop=self.loop, port=0,
+                                 host=['*'])
+            self.server.start(start_loop=False)
+
+    @property
+    def port(self):
+        return (self.server.port or
+                list(self.server._http._sockets.values())[0].getsockname()[1])
+
+    def stop(self):
+        for context in self.server._tornado._applications.values():
+            context.run_unload_hook()
+
+        self.server._tornado._stats_job.stop()
+        self.server._tornado._cleanup_job.stop()
+        if self.server._tornado._ping_job is not None:
+            self.server._tornado._ping_job.stop()
+
+        # self.server.stop()
+        # https://github.com/bokeh/bokeh/issues/5494
+
+
+def transpose(lod):
+    keys = list(lod[0].keys())
+    return {k: [d[k] for d in lod] for k in keys}
+
+
+def format_bytes(n):
+    """ Format bytes as text
+
+    >>> format_bytes(1)
+    '1 B'
+    >>> format_bytes(1234)
+    '1.23 kB'
+    >>> format_bytes(12345678)
+    '12.35 MB'
+    >>> format_bytes(1234567890)
+    '1.23 GB'
+    """
+    if n > 1e9:
+        return '%0.2f GB' % (n / 1e9)
+    if n > 1e6:
+        return '%0.2f MB' % (n / 1e6)
+    if n > 1e3:
+        return '%0.2f kB' % (n / 1000)
+    return '%d B' % n
+
+
+def format_time(n):
+    """ format integers as time
+
+    >>> format_time(1)
+    '1.00 s'
+    >>> format_time(0.001234)
+    '1.23 ms'
+    >>> format_time(0.00012345)
+    '123.45 us'
+    >>> format_time(123.456)
+    '123.46 s'
+    """
+    if n >= 1:
+        return '%.2f s' % n
+    if n >= 1e-3:
+        return '%.2f ms' % (n * 1e3)
+    return '%.2f us' % (n * 1e6)
