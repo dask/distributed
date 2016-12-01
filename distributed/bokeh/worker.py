@@ -100,12 +100,12 @@ class CommunicatingStream(DashboardComponent):
         with log_errors():
             outgoing = self.worker.outgoing_transfer_log
             n = self.worker.outgoing_count - self.last_outgoing
-            outgoing = [outgoing[-i].copy() for i in range(1, n)]
+            outgoing = [outgoing[-i].copy() for i in range(1, n + 1)]
             self.last_outgoing = self.worker.outgoing_count
 
             incoming = self.worker.incoming_transfer_log
             n = self.worker.incoming_count - self.last_incoming
-            incoming = [incoming[-i].copy() for i in range(1, n)]
+            incoming = [incoming[-i].copy() for i in range(1, n + 1)]
             self.last_incoming = self.worker.incoming_count
 
             for [msgs, source] in [[incoming, self.incoming],
@@ -147,7 +147,7 @@ class CommunicatingTimeSeries(DashboardComponent):
         self.worker = worker
         self.source = ColumnDataSource({'x': [], 'in': [], 'out': []})
 
-        x_range = DataRange1d(follow='end', follow_interval=30000)
+        x_range = DataRange1d(follow='end', follow_interval=30000, range_padding=0)
 
         fig = figure(title="Communication History",
                      x_axis_type='datetime',
@@ -177,7 +177,7 @@ class ExecutingTimeSeries(DashboardComponent):
         self.worker = worker
         self.source = ColumnDataSource({'x': [], 'y': []})
 
-        x_range = DataRange1d(follow='end', follow_interval=30000)
+        x_range = DataRange1d(follow='end', follow_interval=30000, range_padding=0)
 
         fig = figure(title="Executing History",
                      x_axis_type='datetime', y_range=[-0.1, worker.ncores + 0.1],
@@ -196,47 +196,6 @@ class ExecutingTimeSeries(DashboardComponent):
         with log_errors():
             self.source.stream({'x': [time() * 1000],
                                 'y': [len(self.worker.executing)]}, 1000)
-
-
-from bokeh.server.server import Server
-from bokeh.application.handlers.function import FunctionHandler
-from bokeh.application import Application
-
-cf = []
-
-def main_doc(worker, doc):
-    with log_errors():
-        statetable = StateTable(worker)
-        executing_ts = ExecutingTimeSeries(worker, sizing_mode='scale_width')
-        communicating_ts = CommunicatingTimeSeries(worker,
-                sizing_mode='scale_width')
-        communicating_stream = CommunicatingStream(worker,
-                sizing_mode='scale_width')
-
-        xr = executing_ts.root.x_range
-        communicating_ts.root.x_range = xr
-        communicating_stream.root.x_range = xr
-
-        doc.add_periodic_callback(statetable.update, 100)
-        doc.add_periodic_callback(executing_ts.update, 100)
-        doc.add_periodic_callback(communicating_ts.update, 100)
-        doc.add_periodic_callback(communicating_stream.update, 100)
-        doc.add_root(column(statetable.root,
-                            executing_ts.root,
-                            communicating_ts.root,
-                            communicating_stream.root,
-                            sizing_mode='scale_width'))
-
-
-def crossfilter_doc(worker, doc):
-    with log_errors():
-        statetable = StateTable(worker)
-        crossfilter = CrossFilter(worker)
-
-        doc.add_periodic_callback(statetable.update, 100)
-        doc.add_periodic_callback(crossfilter.update, 200)
-
-        doc.add_root(column(statetable.root, crossfilter.root))
 
 
 class CrossFilter(DashboardComponent):
@@ -384,13 +343,128 @@ class CrossFilter(DashboardComponent):
             raise
 
 
+class SystemMonitor(DashboardComponent):
+    def __init__(self, worker, height=150, **kwargs):
+        self.worker = worker
+        names = ['cpu', 'memory', 'num_fds', 'read_bytes', 'write_bytes',
+                 'time']
+        self.source = ColumnDataSource({name: [] for name in names})
+
+        x_range = DataRange1d(follow='end', follow_interval=30000,
+                              range_padding=0)
+
+        tools = 'reset,pan,wheel_zoom'
+
+        cpu = figure(title="CPU", x_axis_type='datetime',
+                     y_range=[-0.1, 100 * self.worker.ncores],
+                     height=height, tools=tools, x_range=x_range, **kwargs)
+        cpu.line(source=self.source, x='time', y='cpu')
+        cpu.yaxis.axis_label = 'Percentage'
+        self.mem = figure(title="Memory", x_axis_type='datetime',
+                     height=height, tools=tools, x_range=x_range, **kwargs)
+        self.mem.line(source=self.source, x='time', y='memory')
+        self.mem.yaxis.axis_label = 'Bytes'
+        bandwidth = figure(title='Bandwidth', x_axis_type='datetime',
+                           y_range=[-1, 500e6], height=height, x_range=x_range,
+                           tools=tools, **kwargs)
+        bandwidth.line(source=self.source, x='time', y='read_bytes',
+                       color='red')
+        bandwidth.line(source=self.source, x='time', y='write_bytes',
+                       color='blue')
+        self.num_fds = figure(title='Number of File Descriptors',
+                              x_axis_type='datetime', height=height,
+                              x_range=x_range, tools=tools, **kwargs)
+
+        self.num_fds.line(source=self.source, x='time', y='num_fds')
+
+        if 'sizing_mode' in kwargs:
+            kw = {'sizing_mode': kwargs['sizing_mode']}
+        else:
+            kw = {}
+
+        self.last = 0
+        self.root = column(cpu, self.mem, bandwidth, self.num_fds, **kw)
+        self.worker.monitor.update()
+
+    def update(self):
+        with log_errors():
+            monitor = self.worker.monitor
+
+            n = monitor.count - self.last
+            if not n:
+                return
+
+            seq = [-i for i in range(1, n + 1)][::-1]
+
+            d = {attr: [getattr(monitor, attr)[i] for i in seq]
+                 for attr in ['cpu', 'memory', 'read_bytes', 'write_bytes',
+                     'num_fds']}
+
+            d['time'] = [monitor.time[i] * 1000 for i in seq]
+
+            self.source.stream(d, 1000)
+            self.num_fds.y_range.start = 0
+            self.mem.y_range.start = 0
+            self.last = monitor.count
+
+
+from bokeh.server.server import Server
+from bokeh.application.handlers.function import FunctionHandler
+from bokeh.application import Application
+
+
+def main_doc(worker, doc):
+    with log_errors():
+        statetable = StateTable(worker)
+        executing_ts = ExecutingTimeSeries(worker, sizing_mode='scale_width')
+        communicating_ts = CommunicatingTimeSeries(worker,
+                sizing_mode='scale_width')
+        communicating_stream = CommunicatingStream(worker,
+                sizing_mode='scale_width')
+
+        xr = executing_ts.root.x_range
+        communicating_ts.root.x_range = xr
+        communicating_stream.root.x_range = xr
+
+        doc.add_periodic_callback(statetable.update, 100)
+        doc.add_periodic_callback(executing_ts.update, 100)
+        doc.add_periodic_callback(communicating_ts.update, 100)
+        doc.add_periodic_callback(communicating_stream.update, 100)
+        doc.add_root(column(statetable.root,
+                            executing_ts.root,
+                            communicating_ts.root,
+                            communicating_stream.root,
+                            sizing_mode='scale_width'))
+
+
+def crossfilter_doc(worker, doc):
+    with log_errors():
+        statetable = StateTable(worker)
+        crossfilter = CrossFilter(worker)
+
+        doc.add_periodic_callback(statetable.update, 100)
+        doc.add_periodic_callback(crossfilter.update, 200)
+
+        doc.add_root(column(statetable.root, crossfilter.root))
+
+
+def systemmonitor_doc(worker, doc):
+    with log_errors():
+        sysmon = SystemMonitor(worker, sizing_mode='scale_width')
+        doc.add_periodic_callback(sysmon.update, 100)
+
+        doc.add_root(sysmon.root)
+
+
 class BokehWorker(object):
     def __init__(self, worker, io_loop=None):
         self.worker = worker
         main = Application(FunctionHandler(partial(main_doc, worker)))
         crossfilter = Application(FunctionHandler(partial(crossfilter_doc, worker)))
+        systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc, worker)))
         self.apps = {'/main': main,
-                     '/crossfilter': crossfilter}
+                     '/crossfilter': crossfilter,
+                     '/system': systemmonitor}
 
         self.loop = io_loop or worker.loop
         self.server = None
