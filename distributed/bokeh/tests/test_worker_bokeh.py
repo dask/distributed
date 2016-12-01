@@ -3,6 +3,8 @@ from __future__ import print_function, division, absolute_import
 from operator import add, sub
 from time import sleep
 
+import pytest
+import sys
 from toolz import first
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
@@ -13,6 +15,8 @@ from distributed.bokeh.worker import (BokehWorker, StateTable, CrossFilter,
         CommunicatingStream, ExecutingTimeSeries, CommunicatingTimeSeries)
 
 
+@pytest.mark.skipif(sys.version_info[0] == 2,
+                    reason='https://github.com/bokeh/bokeh/issues/5494')
 @gen_cluster(client=True,
              worker_kwargs={'services': {('bokeh', 0):  BokehWorker}})
 def test_simple(c, s, a, b):
@@ -77,6 +81,8 @@ def test_CommunicatingStream(c, s, a, b):
             len(first(bb.incoming.data.values())))
 
 
+@pytest.mark.skipif(sys.version_info[0] == 2,
+                    reason='https://github.com/bokeh/bokeh/issues/5494')
 @gen_cluster(client=True)
 def test_port_overlap(c, s, a, b):
     sa = BokehWorker(a)
