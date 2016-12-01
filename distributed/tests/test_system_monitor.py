@@ -16,3 +16,5 @@ def test_SystemMonitor():
     assert all(rb >= 0 for rb in sm.read_bytes)
     assert all(wb >= 0 for wb in sm.write_bytes)
     assert all(len(q) == 2 for q in sm.quantities.values())
+
+    assert 'cpu' in repr(sm)

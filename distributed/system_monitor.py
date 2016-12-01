@@ -8,7 +8,7 @@ from .compatibility import WINDOWS
 
 
 class SystemMonitor(object):
-    def __init__(self, n=1000):
+    def __init__(self, n=10000):
         self.proc = psutil.Process()
 
         self.time = deque(maxlen=n)
@@ -37,8 +37,9 @@ class SystemMonitor(object):
         now = time()
         ioc = self.proc.io_counters()
         last = self._last_io_counters
-        read_bytes = (ioc.read_bytes - last.read_bytes) / (now - self.last_time)
-        write_bytes = (ioc.write_bytes - last.write_bytes) / (now - self.last_time)
+        duration = now - self.last_time
+        read_bytes = (ioc.read_bytes - last.read_bytes) / (duration or 0.5)
+        write_bytes = (ioc.write_bytes - last.write_bytes) / (duration or 0.5)
         self._last_io_counters = ioc
         self.last_time = now
 
@@ -61,3 +62,10 @@ class SystemMonitor(object):
             result['num_fds'] = num_fds
 
         return result
+
+    def __str__(self):
+        return '<SystemMonitor: cpu: %d memory: %d MB fds: %d>' % (
+                self.cpu[-1], self.memory[-1] / 1e6,
+                '-1' if WINDOWS else self.num_fds[-1])
+
+    __repr__ = __str__
