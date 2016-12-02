@@ -765,6 +765,7 @@ class Worker(WorkerBase):
         self.nbytes = dict()
         self.types = dict()
         self.priorities = dict()
+        self.priority_counter = 0
         self.durations = dict()
         self.response = defaultdict(dict)
 
@@ -816,6 +817,7 @@ class Worker(WorkerBase):
             closed = False
 
             while not closed:
+                self.priority_counter += 1
                 try:
                     msgs = yield read(stream)
                 except EnvironmentError:
@@ -833,7 +835,10 @@ class Worker(WorkerBase):
                         closed = True
                         break
                     elif op == 'compute-task':
-                        self.add_task(**msg)
+                        priority = msg.pop('priority')
+                        priority = [self.priority_counter] + priority
+                        priority = tuple(-x for x in priority)
+                        self.add_task(priority=priority, **msg)
                     else:
                         logger.warning("Unknown operation %s, %s", op, msg)
 
@@ -1339,6 +1344,7 @@ class Worker(WorkerBase):
                 self.response[key]['disk_load_start'] = start
                 self.response[key]['disk_load_stop'] = stop
 
+            logger.info("Execute key: %s", key)
             result = yield self.executor_submit(key, apply_function, function,
                                                 args2, kwargs2,
                                                 self.execution_state, key)

@@ -152,6 +152,12 @@ def slowinc(x, delay=0.02):
     return x + 1
 
 
+def slowdec(x, delay=0.02):
+    from time import sleep
+    sleep(delay)
+    return x - 1
+
+
 def randominc(x, scale=1):
     from time import sleep
     from random import random

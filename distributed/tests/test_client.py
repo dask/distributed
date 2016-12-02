@@ -35,9 +35,9 @@ from distributed.client import (Client, Future, CompatibleExecutor, _wait,
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All, mp_context
-from distributed.utils_test import (cluster, slow, slowinc, slowadd, randominc,
-        loop, inc, dec, div, throws, gen_cluster, gen_test, double, deep,
-        popen)
+from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
+        randominc, loop, inc, dec, div, throws, gen_cluster, gen_test, double,
+        deep, popen)
 
 
 @gen_cluster(client=True, timeout=None)
@@ -3790,3 +3790,48 @@ def test_auto_normalize_collection_sync(loop):
                 y.sum().compute()
                 end = time()
                 assert end - start < 1
+
+
+@gen_cluster(client=True, timeout=None)
+def test_interleave_computations(c, s, a, b):
+    xs = [delayed(slowinc)(i, delay=0.02) for i in range(30)]
+    ys = [delayed(slowdec)(x, delay=0.02) for x in xs]
+    zs = [delayed(slowadd)(x, y, delay=0.02) for x, y in zip(xs, ys)]
+
+    total = delayed(sum)(zs)
+
+    future = c.compute(total)
+
+    done = ('memory', 'released')
+
+    yield gen.sleep(0.1)
+
+    while not s.tasks or any(s.processing.values()):
+        yield gen.sleep(0.05)
+        x_done = len([k for k in xs if s.task_state[k.key] in done])
+        y_done = len([k for k in ys if s.task_state[k.key] in done])
+        z_done = len([k for k in zs if s.task_state[k.key] in done])
+
+        assert x_done >= y_done >= z_done
+        assert x_done < y_done + 10
+        assert y_done < z_done + 10
+
+
+@gen_cluster(client=True, timeout=None)
+def test_interleave_computations_map(c, s, a, b):
+    xs = c.map(slowinc, range(30), delay=0.02)
+    ys = c.map(slowdec, xs, delay=0.02)
+    zs = c.map(slowadd, xs, ys, delay=0.02)
+
+    done = ('memory', 'released')
+
+    while not s.tasks or any(s.processing.values()):
+        yield gen.sleep(0.05)
+        x_done = len([k for k in xs if s.task_state[k.key] in done])
+        y_done = len([k for k in ys if s.task_state[k.key] in done])
+        z_done = len([k for k in zs if s.task_state[k.key] in done])
+
+        assert x_done >= y_done >= z_done
+        assert x_done < y_done + 10
+        assert y_done < z_done + 10
+
