@@ -1304,6 +1304,8 @@ class Worker(WorkerBase):
         try:
             while self.heap and len(self.executing) < self.ncores:
                 _, key = heapq.heappop(self.heap)
+                if key not in self.task_state:
+                    continue
                 if self.task_state[key] in ('memory', 'error', 'executing'):
                     continue
                 self.transition(key, 'executing')
@@ -1344,7 +1346,7 @@ class Worker(WorkerBase):
                 self.response[key]['disk_load_start'] = start
                 self.response[key]['disk_load_stop'] = stop
 
-            logger.info("Execute key: %s", key)
+            logger.debug("Execute key: %s", key)  # TODO: comment out?
             result = yield self.executor_submit(key, apply_function, function,
                                                 args2, kwargs2,
                                                 self.execution_state, key)
@@ -1397,31 +1399,32 @@ class Worker(WorkerBase):
         worker: string, address of peer
         budget: number, time in seconds to steal
         """
-        ip, port = worker.split(':')
-        target = yield connect(ip, int(port))
-        response = yield send_recv(target, op='request_work',
-                                   worker=self.address,
-                                   budget=budget,
-                                   ncores=self.ncores,
-                                   memory=self.memory_limit,
-                                   total_resources=self.total_resources,
-                                   available_resources=self.available_resources)
+        with log_errors():
+            ip, port = worker.split(':')
+            target = yield connect(ip, int(port))
+            response = yield send_recv(target, op='request_work',
+                                       worker=self.address,
+                                       budget=budget,
+                                       ncores=self.ncores,
+                                       memory=self.memory_limit,
+                                       total_resources=self.total_resources,
+                                       available_resources=self.available_resources)
 
-        for key, msg in response['msgs'].items():
-            self.add_task(key, **msg)
+            for key, msg in response['msgs'].items():
+                self.add_task(key, **msg)
 
-        self.ensure_communicating()
-        self.ensure_computing()
+            self.ensure_communicating()
+            self.ensure_computing()
 
-        yield write(stream, {'keys': response['keys']})
-        response = yield read(stream)
+            yield write(stream, {'keys': response['keys']})
+            response = yield read(stream)
 
-        assert response == 'OK'  # Ack from scheduler, tell victim all's well
+            assert response == 'OK'  # Ack from scheduler, tell victim all's well
 
-        yield write(target, 'OK')
-        yield close(target)
+            yield write(target, 'OK')
+            yield close(target)
 
-        raise gen.Return('dont-reply')
+            raise gen.Return('dont-reply')
 
     @gen.coroutine
     def request_work(self, stream, worker=None, budget=None, ncores=None,
@@ -1437,39 +1440,40 @@ class Worker(WorkerBase):
         bandwidth: number
             Expected bandwidth between machines in bytes per second
         """
-        heap = []
-        for k in concat([self.waiting_for_data, pluck(1, self.heap)]):
-            if self.task_state[k] in PENDING:
-                compute = self.durations.get(k, 0.5) / ncores
-                communicate = 0.010 + sum(self.nbytes[dep] for dep in self.dependencies[k]) / bandwidth
-                score = compute / communicate
-                if score > 0.05:
-                    heapq.heappush(heap, (score, k, compute, communicate))
+        with log_errors():
+            heap = []
+            for k in concat([self.waiting_for_data, pluck(1, self.heap)]):
+                if self.task_state.get(k) in PENDING:
+                    compute = self.durations.get(k, 0.5) / ncores
+                    communicate = 0.010 + sum(self.nbytes[dep] for dep in self.dependencies[k]) / bandwidth
+                    score = compute / communicate
+                    if score > 0.05:
+                        heapq.heappush(heap, (score, k, compute, communicate))
 
-        good = set()
-        cost = 0
-        while heap:
-            score, k, compute, communicate = heapq.heappop(heap)
-            cost += compute + communicate
-            if cost < budget:
-                good.add(k)
+            good = set()
+            cost = 0
+            while heap:
+                score, k, compute, communicate = heapq.heappop(heap)
+                cost += compute + communicate
+                if cost < budget:
+                    good.add(k)
 
-        msgs = {k: {'task': dumps_task(self.tasks[k]),
-                    'who_has': list(self.who_has.get(k, [])),
-                    'priority': self.priorities[k],
-                    'duration': self.durations[k]}
-                    for k in good}
+            msgs = {k: {'task': dumps_task(self.tasks[k]),
+                        'who_has': list(self.who_has.get(k, [])),
+                        'priority': self.priorities[k],
+                        'duration': self.durations[k]}
+                        for k in good}
 
-        yield write(stream, {'msgs': msgs, 'keys': list(good)})  # wait on ack
-        response = yield read(stream)
-        assert response == "OK"
+            yield write(stream, {'msgs': msgs, 'keys': list(good)})  # wait on ack
+            response = yield read(stream)
+            assert response == "OK"
 
-        # We're clear to remove these keys.  Scheduler is aware
-        for key in good:
-            self.rescind_key(key)
+            # We're clear to remove these keys.  Scheduler is aware
+            for key in good:
+                self.rescind_key(key)
 
-        yield close(stream)
-        raise gen.Return('dont-reply')
+            yield close(stream)
+            raise gen.Return('dont-reply')
 
     ##################
     # Administrative #

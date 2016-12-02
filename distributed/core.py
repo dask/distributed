@@ -201,7 +201,7 @@ class Server(TCPServer):
                         logger.warn("Lost connection to %s while sending result: %s",
                                     str(address), e)
                         break
-                if close_desired:
+                if close_desired or stream.closed():
                     break
         finally:
             logger.info("Closing connection from %s:%d to %s", ip, port,

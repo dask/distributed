@@ -22,6 +22,7 @@ import pytest
 def test_work_stealing(c, s, a, b):
     [x] = yield c._scatter([1])
     futures = c.map(slowadd, range(50), [x] * 50)
+    yield gen.sleep(0.1)
     yield _wait(futures)
     assert len(a.data) > 10
     assert len(b.data) > 10
@@ -47,7 +48,7 @@ def test_steal_cheap_data_slow_computation(c, s, a, b):
     x = c.submit(slowinc, 100, delay=0.1)  # learn that slowinc is slow
     yield _wait([x])
 
-    futures = c.map(slowinc, range(10), delay=0.01, workers=a.address,
+    futures = c.map(slowinc, range(10), delay=0.1, workers=a.address,
                     allow_other_workers=True)
     yield _wait(futures)
     assert abs(len(a.data) - len(b.data)) <= 3
@@ -66,6 +67,7 @@ def test_steal_expensive_data_slow_computation(c, s, a, b):
     slow = [c.submit(slowinc, x, delay=0.1, pure=False) for i in range(4)]
     yield _wait([slow])
 
+    import pdb; pdb.set_trace()
     assert b.data  # not empty
 
 
@@ -122,6 +124,8 @@ def test_dont_steal_fast_tasks(c, s, *workers):
 
     def do_nothing(x, y=None):
         pass
+
+    yield _wait(c.submit(do_nothing, 1))
 
     futures = c.map(do_nothing, range(1000), y=x)
 
