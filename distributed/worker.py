@@ -748,6 +748,7 @@ def run(worker, stream, function=None, args=(), kwargs={}):
 class Worker(WorkerBase):
     def __init__(self, *args, **kwargs):
         self.tasks = dict()
+        self.raw_tasks = dict()
         self.task_state = dict()
         self.dependencies = dict()
         self.dependents = dict()
@@ -868,6 +869,9 @@ class Worker(WorkerBase):
             self.log.append((key, 'new'))
             try:
                 self.tasks[key] = self._deserialize(function, args, kwargs, task)
+                raw = {'function': function, 'args': args, 'kwargs': kwargs,
+                        'task': task}
+                self.raw_tasks[key] = {k: v for k, v in raw.items() if v is not None}
             except Exception as e:
                 logger.warn("Could not deserialize task", exc_info=True)
                 emsg = error_message(e)
@@ -1237,6 +1241,7 @@ class Worker(WorkerBase):
             self.log.append(('forget', key))
             if key in self.tasks:
                 del self.tasks[key]
+                del self.raw_tasks[key]
                 del self.task_state[key]
             if key in self.waiting_for_data:
                 del self.waiting_for_data[key]
@@ -1275,6 +1280,7 @@ class Worker(WorkerBase):
                 return
             del self.task_state[key]
             del self.tasks[key]
+            del self.raw_tasks[key]
             if key in self.waiting_for_data:
                 del self.waiting_for_data[key]
 
@@ -1364,8 +1370,8 @@ class Worker(WorkerBase):
                     "args:     %s\n"
                     "kwargs:   %s\n",
                     str(funcname(function))[:1000],
-                    convert_args_to_str(args, max_len=1000),
-                    convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
+                    convert_args_to_str(args2, max_len=1000),
+                    convert_kwargs_to_str(kwargs2, max_len=1000), exc_info=True)
                 self.transition(key, 'error')
 
             logger.debug("Send compute response to scheduler: %s, %s", key,
@@ -1410,8 +1416,13 @@ class Worker(WorkerBase):
                                        total_resources=self.total_resources,
                                        available_resources=self.available_resources)
 
+            self.priority_counter += 1
             for key, msg in response['msgs'].items():
-                self.add_task(key, **msg)
+                msg.update(msg.pop('task'))
+                priority = msg.pop('priority')
+                priority = [self.priority_counter] + priority
+                priority = tuple(-x for x in priority)
+                self.add_task(key, priority=priority, **msg)
 
             self.ensure_communicating()
             self.ensure_computing()
@@ -1458,12 +1469,24 @@ class Worker(WorkerBase):
                 if cost < budget:
                     good.add(k)
 
-            msgs = {k: {'task': dumps_task(self.tasks[k]),
-                        'who_has': list(self.who_has.get(k, [])),
-                        'priority': self.priorities[k],
-                        'duration': self.durations[k]}
-                        for k in good}
+            msgs = {}
+            for k in good:
+                d = {}
+                d['task'] = to_serialize(self.raw_tasks[k])
+                who_has = {dep: list(self.who_has.get(dep, []))
+                           for dep in self.dependencies[k]}
+                for dep, deps in who_has.items():
+                    if dep in self.data:
+                        deps.append(self.address)
+                d['who_has'] = who_has
+                d['priority'] = self.priorities[k][1:]
+                d['duration'] = self.durations[k]
+                d['nbytes'] = {dep: self.nbytes.get(dep) for dep in
+                               self.dependencies[k]}
+                msgs[k] = d
 
+            logger.info("Sending %d tasks: %s -> %s", len(good), self.address,
+                        worker)
             yield write(stream, {'msgs': msgs, 'keys': list(good)})  # wait on ack
             response = yield read(stream)
             assert response == "OK"
