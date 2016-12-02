@@ -93,7 +93,7 @@ class Scheduler(Server):
         Dictionary showing which keys are dependent on which others
     * **task_state:** ``{key: string}``:
         Dictionary listing the current state of every task among the following:
-        released, waiting, stacks, queue, no-worker, processing, memory, erred
+        released, waiting, queue, no-worker, processing, memory, erred
     * **priority:** ``{key: tuple}``:
         A score per key that determines its priority
     * **waiting:** ``{key: {key}}``:
@@ -102,15 +102,9 @@ class Scheduler(Server):
         Dictionary like dependents but excludes keys already computed
     * **ready:** ``deque(key)``
         Keys that are ready to run, but not yet assigned to a worker
-    * **stacks:** ``{worker: [keys]}``:
-        List of keys waiting to be sent to each worker
     * **processing:** ``{worker: {key: cost}}``:
         Set of keys currently in execution on each worker and their expected
         duration
-    * **stack_durations:** ``{worker: [ints]}``:
-        Expected durations of stacked tasks
-    * **stacks_duration:** ``{worker: int}``:
-        Total duration of all tasks in each workers stack
     * **rprocessing:** ``{key: {worker}}``:
         Set of workers currently executing a particular task
     * **who_has:** ``{key: {worker}}``:
@@ -227,15 +221,12 @@ class Scheduler(Server):
         self.resource_restrictions = dict()
         self.loose_restrictions = set()
         self.suspicious_tasks = defaultdict(lambda: 0)
-        self.stacks = dict()
-        self.stack_durations = dict()
-        self.stack_duration = dict()
         self.waiting = dict()
         self.waiting_data = dict()
         self.ready = deque()
         self.unrunnable = set()
         self.idle = set()
-        self.maybe_idle = set()
+        self.idle_list = set()
         self.who_has = dict()
         self.has_what = dict()
         self.who_wants = defaultdict(set)
@@ -251,6 +242,7 @@ class Scheduler(Server):
 
         # Worker state
         self.ncores = dict()
+        self.total_ncores = 0
         self.worker_info = dict()
         self.host_info = defaultdict(dict)
         self.worker_resources = dict()
@@ -259,6 +251,8 @@ class Scheduler(Server):
         self.aliases = dict()
         self.saturated = set()
         self.occupancy = dict()
+        self.total_occupancy = 0
+        self.stealing = dict()
 
         self.plugins = []
         self.transition_log = deque(maxlen=config.get('transition-log-length',
@@ -282,7 +276,6 @@ class Scheduler(Server):
                          'ncores': self.get_ncores,
                          'has_what': self.get_has_what,
                          'who_has': self.get_who_has,
-                         'stacks': self.get_stacks,
                          'processing': self.get_processing,
                          'nbytes': self.get_nbytes,
                          'versions': self.get_versions,
@@ -314,16 +307,13 @@ class Scheduler(Server):
 
         self._transitions = {
                  ('released', 'waiting'): self.transition_released_waiting,
-                 ('waiting', 'ready'): self.transition_waiting_ready,
+                 ('waiting', 'processing'): self.transition_waiting_processing,
                  ('waiting', 'released'): self.transition_waiting_released,
-                 ('queue', 'processing'): self.transition_ready_processing,
-                 ('stacks', 'processing'): self.transition_ready_processing,
                  ('processing', 'released'): self.transition_processing_released,
-                 ('queue', 'released'): self.transition_ready_released,
-                 ('stacks', 'released'): self.transition_ready_released,
-                 ('no-worker', 'released'): self.transition_ready_released,
                  ('processing', 'memory'): self.transition_processing_memory,
                  ('processing', 'erred'): self.transition_processing_erred,
+                 ('no-worker', 'released'): self.transition_no_worker_released,
+                 ('no-worker', 'waiting'): self.transition_no_worker_waiting,
                  ('released', 'forgotten'): self.transition_released_forgotten,
                  ('memory', 'forgotten'): self.transition_memory_forgotten,
                  ('erred', 'forgotten'): self.transition_released_forgotten,
@@ -514,6 +504,7 @@ class Scheduler(Server):
                 self.host_info[host]['cores'] += ncores
 
             self.ncores[address] = ncores
+            self.total_ncores += ncores
             self.aliases[name] = address
             self.worker_info[address]['name'] = name
 
@@ -522,9 +513,6 @@ class Scheduler(Server):
                 self.worker_bytes[address] = 0
                 self.processing[address] = dict()
                 self.occupancy[address] = 0
-                self.stacks[address] = deque()
-                self.stack_durations[address] = deque()
-                self.stack_duration[address] = 0
 
             if nbytes:
                 self.nbytes.update(nbytes)
@@ -538,19 +526,15 @@ class Scheduler(Server):
             if self.ncores[address] > len(self.processing[address]):
                 self.idle.add(address)
 
+            recommendations = {}
             for key in list(self.unrunnable):
-                if address in self.worker_restrictions.get(key, []):
-                    self.transitions({key: 'released'})
-                elif (key in self.resource_restrictions and  # TODO: slow
-                      address in self.valid_workers(key)):
-                    self.transitions({key: 'released'})
-                else:
-                    r = self.host_restrictions.get(key, [])
-                    if name in r or host in r:
-                        self.transitions({key: 'released'})
+                valid = self.valid_workers(key)
+                if valid is True or address in valid:
+                    recommendations[key] = 'waiting'
+            if recommendations:
+                self.transitions(recommendations)
 
-            self.maybe_idle.add(address)
-            self.ensure_occupied()
+            self.loop.add_callback(self.work_steal, address)
 
             logger.info("Register %s", str(address))
             return 'OK'
@@ -660,13 +644,11 @@ class Scheduler(Server):
             if self.task_state[key] in ('memory', 'erred'):
                 self.report_on_key(key)
 
-        self.ensure_occupied()
+        # TODO: balance workers
 
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
         """ Mark that a task has finished execution on a particular worker """
         # logger.debug("Stimulus task finished %s, %s", key, worker)
-        self.maybe_idle.add(worker)
-
         if key not in self.task_state:
             return {}
 
@@ -688,7 +670,6 @@ class Scheduler(Server):
                         exception=None, traceback=None, **kwargs):
         """ Mark that a task has erred on a particular worker """
         logger.debug("Stimulus task erred %s, %s", key, worker)
-        self.maybe_idle.add(worker)
 
         if key not in self.task_state:
             return {}
@@ -706,8 +687,6 @@ class Scheduler(Server):
         """ Mark that certain keys have gone missing.  Recover. """
         with log_errors():
             logger.debug("Stimulus missing data %s, %s", key, worker)
-            if worker:
-                self.maybe_idle.add(worker)
 
             recommendations = OrderedDict()
             for k in set(keys):
@@ -722,9 +701,6 @@ class Scheduler(Server):
                 recommendations[key] = 'released'
 
             self.transitions(recommendations)
-
-            if ensure:
-                self.ensure_occupied()
 
             return {}
 
@@ -749,6 +725,7 @@ class Scheduler(Server):
 
             self.host_info[host]['cores'] -= self.ncores[address]
             self.host_info[host]['ports'].remove(port)
+            self.total_ncores -= self.ncores[address]
 
             if not self.host_info[host]['ports']:
                 del self.host_info[host]
@@ -757,8 +734,6 @@ class Scheduler(Server):
             del self.ncores[address]
             del self.aliases[self.worker_info[address]['name']]
             del self.worker_info[address]
-            if address in self.maybe_idle:
-                self.maybe_idle.remove(address)
             if address in self.idle:
                 self.idle.remove(address)
             if address in self.saturated:
@@ -779,12 +754,6 @@ class Scheduler(Server):
                 elif not self.rprocessing[k]:
                     recommendations[k] = 'released'
 
-            for k in self.stacks.pop(address):
-                if k in self.tasks:
-                    recommendations[k] = 'waiting'
-            del self.stack_durations[address]
-            del self.stack_duration[address]
-
             del self.occupancy[address]
             del self.worker_bytes[address]
             self.remove_resources(address)
@@ -799,10 +768,8 @@ class Scheduler(Server):
 
             self.transitions(recommendations)
 
-            if not self.stacks:
+            if not self.processing:
                 logger.info("Lost all workers")
-
-            self.ensure_occupied()
 
         return 'OK'
 
@@ -904,15 +871,6 @@ class Scheduler(Server):
         for dep in self.dependencies[key]:
             assert dep in self.who_has
 
-    def validate_stacks(self, key):
-        # assert any(key in stack for stack in self.stacks.values())
-        assert key not in self.released
-        assert key not in self.rprocessing
-        assert key not in self.who_has
-        assert key not in self.waiting
-        for dep in self.dependencies[key]:
-            assert dep in self.who_has
-
     def validate_key(self, key):
         try:
             try:
@@ -929,25 +887,21 @@ class Scheduler(Server):
                 import pdb; pdb.set_trace()
             raise
 
-    def validate_state(self, allow_overlap=False, allow_bad_stacks=True):
+    def validate_state(self, allow_overlap=False):
         validate_state(self.dependencies, self.dependents, self.waiting,
-                self.waiting_data, self.ready, self.who_has, self.stacks,
+                self.waiting_data, self.ready, self.who_has,
                 self.processing, None, self.released, self.who_wants,
                 self.wants_what, tasks=self.tasks, erred=self.exceptions_blame,
-                allow_overlap=allow_overlap, allow_bad_stacks=allow_bad_stacks)
-        if not (set(self.ncores) == \
-                set(self.has_what) == \
-                set(self.stacks) == \
-                set(self.processing) == \
-                set(self.worker_info) == \
+                allow_overlap=allow_overlap)
+        if not (set(self.ncores) ==
+                set(self.has_what) ==
+                set(self.processing) ==
+                set(self.worker_info) ==
                 set(self.worker_streams)):
             raise ValueError("Workers not the same in all collections")
 
         assert self.worker_bytes == {w: sum(self.nbytes[k] for k in keys)
                                      for w, keys in self.has_what.items()}
-        for w in self.stacks:
-            assert abs(sum(self.stack_durations[w]) - self.stack_duration[w]) < 1e-8
-            assert len(self.stack_durations[w]) == len(self.stacks[w])
 
         for key, workers in self.who_has.items():
             for worker in workers:
@@ -1195,7 +1149,12 @@ class Scheduler(Server):
                     if self.validate:
                         logger.debug("Messages: %s\nRecommendations: %s",
                                      msgs, recommendations)
-                self.ensure_occupied()
+
+                self.check_idle_saturated(worker)
+
+                if worker in self.idle and worker not in self.stealing:
+                    self.stealing[worker] = None
+                    self.loop.add_callback(self.work_steal, worker)
 
         except (StreamClosedError, IOError, OSError):
             logger.info("Worker failed from closed stream: %s", worker)
@@ -1743,13 +1702,6 @@ class Scheduler(Server):
                 if teardown:
                     teardown(self, state)
 
-    def get_stacks(self, stream=None, workers=None):
-        if workers is not None:
-            workers = set(map(self.coerce_address, workers))
-            return {w: list(self.stacks[w]) for w in workers}
-        else:
-            return valmap(list, self.stacks)
-
     def get_processing(self, stream=None, workers=None):
         if workers is not None:
             workers = set(map(self.coerce_address, workers))
@@ -1819,8 +1771,7 @@ class Scheduler(Server):
         This is used when a worker wants to spin off a long-running task
         """
         self.ncores[worker] += diff
-        self.maybe_idle.add(worker)
-        self.ensure_occupied()
+        # self.ensure_occupied()
 
     #####################
     # State Transitions #
@@ -1833,8 +1784,6 @@ class Scheduler(Server):
                 assert key in self.dependencies
                 assert key in self.dependents
                 assert key not in self.waiting
-                # assert key not in self.readyset
-                # assert key not in self.rstacks
                 assert key not in self.who_has
                 assert key not in self.rprocessing
                 # assert all(dep in self.task_state
@@ -1862,15 +1811,20 @@ class Scheduler(Server):
                 else:
                     self.waiting_data[dep].add(key)
 
-            if not self.waiting[key]:
-                recommendations[key] = 'ready'
+            if not self.waiting[key] and self.ncores:
+                recommendations[key] = 'processing'
 
             self.waiting_data[key] = {dep for dep in self.dependents[key]
                                           if dep not in self.who_has
                                           and dep not in self.released
                                           and dep not in self.exceptions_blame}
 
-            self.task_state[key] = 'waiting'
+            if not self.ncores:
+                self.unrunnable.add(key)
+                self.task_state[key] = 'no-worker'
+            else:
+                self.task_state[key] = 'waiting'
+
             self.released.remove(key)
 
             if self.validate:
@@ -1884,7 +1838,31 @@ class Scheduler(Server):
                 import pdb; pdb.set_trace()
             raise
 
-    def transition_waiting_ready(self, key):
+    def transition_no_worker_waiting(self, key):
+        try:
+            if self.validate:
+                assert key in self.unrunnable
+                assert key in self.waiting
+                assert key not in self.who_has
+                assert key not in self.rprocessing
+                assert not self.waiting[key]
+
+            self.unrunnable.remove(key)
+
+            if not all(dep in self.task_state for dep in
+                    self.dependencies[key]):
+                return {key: 'forgotten'}
+
+            self.task_state[key] = 'waiting'
+
+            return {key: 'processing'}
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
+
+    def transition_waiting_processing(self, key):
         try:
             if self.validate:
                 assert key in self.waiting
@@ -1897,54 +1875,35 @@ class Scheduler(Server):
                 assert all(dep in self.who_has
                            for dep in self.dependencies[key])
 
+            valid_workers = self.valid_workers(key)
+
+            if not valid_workers:
+                self.unrunnable.add(key)
+                self.task_state[key] = 'no-worker'
+                return {}
+
             del self.waiting[key]
 
-            valid_workers = self.valid_workers(key)
             if self.dependencies.get(key, None) or valid_workers is not True:
-                new_worker = decide_worker(self.dependencies, self.stacks,
-                        self.stack_duration, self.processing, self.who_has,
+                worker = decide_worker(self.dependencies,
+                        self.occupancy, self.who_has,
                         self.has_what, valid_workers, self.loose_restrictions,
                         self.nbytes, self.ncores, key)
-                if not new_worker:
-                    self.unrunnable.add(key)
-                    self.task_state[key] = 'no-worker'
-                else:
-                    self.stacks[new_worker].append(key)
-                    duration = self.task_duration.get(key_split(key), 0.5)
-                    self.stack_durations[new_worker].append(duration)
-                    self.stack_duration[new_worker] += duration
-                    self.maybe_idle.add(new_worker)
-                    self.put_key_in_stealable(key)
-                    self.task_state[key] = 'stacks'
+            elif self.idle:
+                worker = random.choice(tuple(self.idle))  # TODO: linear time
+            elif self.ncores:
+                worker = random.choice(tuple(self.ncores))  # TODO: linear time
             else:
-                self.ready.appendleft(key)
-                self.task_state[key] = 'queue'
-
-            return {}
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb; pdb.set_trace()
-            raise
-
-    def transition_ready_processing(self, key, worker=None, latency=5e-3):
-        try:
-            if self.validate:
-                assert key not in self.waiting
-                assert key not in self.who_has
-                assert key not in self.exceptions_blame
-                assert self.task_state[key] in ('queue', 'stacks')
-                if self.task_state[key] == 'no-worker':
-                    raise ValueError()
+                raise NotImplementedError()
 
             assert worker
 
-            duration = self.task_duration.get(key_split(key), latency*100)
+            duration = self.task_duration.get(key_split(key), 0.5)
             self.processing[worker][key] = duration
             self.rprocessing[key].add(worker)
             self.occupancy[worker] += duration
+            self.total_occupancy += duration
             self.task_state[key] = 'processing'
-            self.remove_key_from_stealable(key)
             self.consume_resources(key, worker)
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
@@ -1953,6 +1912,11 @@ class Scheduler(Server):
                 self.send_task_to_worker(worker, key)
             except StreamClosedError:
                 self.remove_worker(worker)
+
+            self.check_idle_saturated(worker)
+
+            if self.validate:
+                assert key not in self.waiting
 
             return {}
         except Exception as e:
@@ -1999,10 +1963,6 @@ class Scheduler(Server):
                                   + 0.5 * new_duration)
 
                 self.task_duration[ks] = avg_duration
-                if ks in self.stealable_unknown_durations:
-                    for k in self.stealable_unknown_durations.pop(ks, ()):
-                        if self.task_state.get(k) == 'stacks':
-                            self.put_key_in_stealable(k)
 
                 info['last-task'] = compute_stop
 
@@ -2025,7 +1985,9 @@ class Scheduler(Server):
 
             workers = self.rprocessing.pop(key)
             for worker in workers:
-                self.occupancy[worker] -= self.processing[worker].pop(key)
+                duration = self.processing[worker].pop(key)
+                self.occupancy[worker] -= duration
+                self.total_occupancy -= duration
 
             recommendations = OrderedDict()
 
@@ -2038,7 +2000,7 @@ class Scheduler(Server):
                     s = self.waiting[dep]
                     s.remove(key)
                     if not s:  # new task ready to run
-                        recommendations[dep] = 'ready'
+                        recommendations[dep] = 'processing'
 
             for dep in self.dependencies.get(key, []):
                 if dep in self.waiting_data:
@@ -2063,6 +2025,7 @@ class Scheduler(Server):
 
             if self.validate:
                 assert key not in self.rprocessing
+                assert key not in self.waiting
 
             return recommendations
         except Exception as e:
@@ -2113,6 +2076,9 @@ class Scheduler(Server):
 
             if key in self.waiting_data:
                 del self.waiting_data[key]
+
+            if self.validate:
+                assert key not in self.waiting
 
             return recommendations
         except Exception as e:
@@ -2207,7 +2173,9 @@ class Scheduler(Server):
                 assert self.task_state[key] == 'processing'
 
             for w in self.rprocessing.pop(key):
-                self.occupancy[w] -= self.processing[w].pop(key)
+                duration = self.processing[w].pop(key)
+                self.occupancy[w] -= duration
+                self.total_occupancy -= duration
                 self.release_resources(key, w)
 
             self.released.add(key)
@@ -2239,49 +2207,6 @@ class Scheduler(Server):
                 import pdb; pdb.set_trace()
             raise
 
-    def transition_ready_released(self, key):
-        try:
-            if self.validate:
-                assert key not in self.who_has
-                assert self.task_state[key] in ('stacks', 'queue', 'no-worker')
-
-            if self.task_state[key] == 'no-worker':
-                self.unrunnable.remove(key)
-            if self.task_state[key] == 'stacks':  # TODO: non-linear
-                for w in self.stacks:
-                    if key in self.stacks[w]:
-                        for i, k in enumerate(self.stacks[w]):
-                            if k == key:
-                                del self.stacks[w][i]
-                                duration = self.stack_durations[w][i]
-                                del self.stack_durations[w][i]
-                                self.stack_duration[w] -= duration
-                            break
-
-            self.released.add(key)
-            self.task_state[key] = 'released'
-
-            for dep in self.dependencies[key]:
-                try:
-                    self.waiting_data[dep].remove(key)
-                except KeyError:  # dep may also be released
-                    pass
-                # TODO: maybe release dep if not about to wait?
-
-            if self.waiting_data[key] or key in self.who_wants:
-                recommendations = {key: 'waiting'}
-            else:
-                recommendations = {}
-
-            del self.waiting_data[key]
-
-            return recommendations
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb; pdb.set_trace()
-            raise
-
     def transition_processing_erred(self, key, cause=None, exception=None,
             traceback=None):
         try:
@@ -2290,8 +2215,6 @@ class Scheduler(Server):
                 assert key in self.rprocessing
                 assert key not in self.who_has
                 assert key not in self.waiting
-                # assert key not in self.rstacks
-                # assert key not in self.readyset
 
             if exception:
                 self.exceptions[key] = exception
@@ -2319,7 +2242,9 @@ class Scheduler(Server):
                         recommendations[dep] = 'released'
 
             for w in self.rprocessing.pop(key):
-                self.occupancy[w] -= self.processing[w].pop(key)
+                duration = self.processing[w].pop(key)
+                self.occupancy[w] -= duration
+                self.total_occupancy -= duration
                 self.release_resources(key, w)
 
             del self.waiting_data[key]  # do anything with this?
@@ -2427,6 +2352,32 @@ class Scheduler(Server):
                 import pdb; pdb.set_trace()
             raise
 
+    def transition_no_worker_released(self, key):
+        try:
+            if self.validate:
+                assert self.task_state[key] == 'no-worker'
+                assert key not in self.who_has
+
+            self.unrunnable.remove(key)
+            self.released.add(key)
+            self.task_state[key] = 'released'
+
+            for dep in self.dependencies[key]:
+                try:
+                    self.waiting_data[dep].remove(key)
+                except KeyError:  # dep may also be released
+                    pass
+
+            del self.waiting[key]
+            del self.waiting_data[key]
+
+            return {}
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
+
     def transition_released_forgotten(self, key):
         try:
             if self.validate:
@@ -2493,7 +2444,7 @@ class Scheduler(Server):
         Examples
         --------
         >>> self.transition('x', 'waiting')
-        {'x': 'ready'}
+        {'x': 'processing'}
 
         Returns
         -------
@@ -2571,227 +2522,13 @@ class Scheduler(Server):
     # Assigning Tasks to Workers #
     ##############################
 
-    def ensure_occupied(self):
-        """ Run ready tasks on idle workers
-
-        **Work stealing policy**
-
-        If some workers are idle but not others, if there are no globally ready
-        tasks, and if there are tasks in worker stacks, then we start to pull
-        preferred tasks from overburdened workers and deploy them back into the
-        global pool in the following manner.
-
-        We determine the number of tasks to reclaim as the number of all tasks
-        in all stacks times the fraction of idle workers to all workers.
-        We sort the stacks by size and walk through them, reclaiming half of
-        each stack until we have enough task to fill the global pool.
-        We are careful not to reclaim tasks that are restricted to run on
-        certain workers.
-
-        See also
-        --------
-        Scheduler.ensure_occupied_queue
-        Scheduler.ensure_occupied_stacks
-        Scheduler.work_steal
-        """
-        with log_errors(pdb=LOG_PDB):
-            for worker in self.maybe_idle:
-                self.ensure_occupied_stacks(worker)
-            self.maybe_idle.clear()
-
-            if self.idle and self.ready:
-                if len(self.ready) < len(self.idle):
-                    def keyfunc(w):
-                        return (-len(self.stacks[w]) - len(self.processing[w]),
-                                -len(self.has_what.get(w, ())))
-                    for worker in topk(len(self.ready), self.idle, key=keyfunc):
-                        self.ensure_occupied_queue(worker, count=1)
-                else:
-                    # Fill up empty cores
-                    workers = list(self.idle)
-                    free_cores = [self.ncores[w] - len(self.processing[w])
-                                  for w in workers]
-
-                    workers2 = []  # Clean out workers that *are* actually full
-                    free_cores2 = []
-                    for w, fs in zip(workers, free_cores):
-                        if fs > 0:
-                            workers2.append(w)
-                            free_cores2.append(fs)
-
-                    if workers2:
-                        n = min(sum(free_cores2), len(self.ready))
-                        counts = divide_n_among_bins(n, free_cores2)
-                        for worker, count in zip(workers2, counts):
-                            self.ensure_occupied_queue(worker, count=count)
-
-                    # Fill up unsaturated cores by time
-                    workers = list(self.idle)
-                    latency = 5e-3
-                    free_time = [latency * self.ncores[w] - self.occupancy[w]
-                                  for w in workers]
-                    workers2 = []  # Clean out workers that *are* actually full
-                    free_time2 = []
-                    for w, fs in zip(workers, free_time):
-                        if fs > 0:
-                            workers2.append(w)
-                            free_time2.append(fs)
-                    total_free_time = sum(free_time2)
-                    if workers2 and total_free_time > 0:
-                        tasks = []
-                        while self.ready and total_free_time > 0:
-                            task = self.ready.pop()
-                            if self.task_state.get(task) != 'queue':
-                                continue
-                            total_free_time -= self.task_duration.get(key_split(task), 1)
-                            tasks.append(task)
-
-                        self.ready.extend(tasks[::-1])
-
-                        counts = divide_n_among_bins(len(tasks), free_time2)
-                        for worker, count in zip(workers2, counts):
-                            self.ensure_occupied_queue(worker, count=count)
-
-            """
-            if self.idle and any(self.stealable):
-                thieves = self.work_steal()
-                for worker in thieves:
-                    self.ensure_occupied_stacks(worker)
-            """
-
-    def ensure_occupied_stacks(self, worker):
-        """ Send tasks to worker while it has tasks and free cores
-
-        These tasks may come from the worker's own stacks or from the global
-        ready deque.
-
-        We update the idle workers set appropriately.
-
-        See Also
-        --------
-        Scheduler.ensure_occupied
-        Scheduler.ensure_occupied_queue
-        """
-        stack = self.stacks[worker]
-        latency = 500
-
-        while (stack and
-               (self.ncores[worker] > len(self.processing[worker]) or
-                self.occupancy[worker] < latency * self.ncores[worker])):
-            key = stack.pop()
-
-            # TODO: Move this logic to the worker.
-            # This blocks all activity on the worker until resources clear
-            if (key in self.resource_restrictions and not
-                self.check_resources(key, worker)):
-                stack.append(key)
-                break
-
-            duration = self.stack_durations[worker].pop()
-            self.stack_duration[worker] -= duration
-
-            if self.task_state.get(key) == 'stacks':
-                r = self.transition(key, 'processing',
-                                    worker=worker, latency=latency)
-
-        if stack:
-            self.saturated.add(worker)
-            if worker in self.idle:
-                self.idle.remove(worker)
-        else:
-            if worker in self.saturated:
-                self.saturated.remove(worker)
-            self._check_idle(worker)
-
-    def put_key_in_stealable(self, key):
-        ratio, loc = self.steal_time_ratio(key)
-        if ratio is not None:
-            self.stealable[loc].add(key)
-            self.key_stealable[key] = loc
-
-    def remove_key_from_stealable(self, key):
-        loc = self.key_stealable.pop(key, None)
-        if loc is not None:
-            try:
-                self.stealable[loc].remove(key)
-            except:
-                pass
-
-    def ensure_occupied_queue(self, worker, count):
-        """
-        Send at most count tasks from the ready queue to the specified worker
-
-        See also
-        --------
-        Scheduler.ensure_occupied
-        Scheduler.ensure_occupied_stacks
-        """
-        for i in range(count):
-            try:
-                key = self.ready.pop()
-                while self.task_state.get(key) != 'queue':
-                    key = self.ready.pop()
-            except (IndexError, KeyError):
-                break
-
-            if self.task_state[key] == 'queue':
-                r = self.transition(key, 'processing', worker=worker)
-
-        self._check_idle(worker)
-
-
-    def work_steal(self):
-        """ Steal tasks from saturated workers to idle workers
-
-        This moves tasks from the bottom of the stacks of over-occupied workers
-        to the stacks of idling workers.
-
-        See also
-        --------
-        Scheduler.ensure_occupied
-        """
-        if not self.steal:
-            return []
-        with log_errors():
-            thieves = set()
-            for level, stealable in enumerate(self.stealable[:-1]):
-                if not stealable:
-                    continue
-                if len(self.idle) == len(self.ncores):  # no stacks
-                    stealable.clear()
-                    continue
-                # Enough idleness to continue?
-                ratio = 2 ** (level - 3)
-                n_saturated = len(self.ncores) - len(self.idle)
-                duration_if_hold = len(stealable) / n_saturated
-                duration_if_steal = ratio
-                if level > 1 and duration_if_hold < duration_if_steal:
-                    break
-                while stealable and self.idle:
-                    for w in list(self.idle):
-                        try:
-                            key = stealable.pop()
-                        except:
-                            break
-                        else:
-                            if self.task_state.get(key, 'stacks'):
-                                self.stacks[w].append(key)
-                                duration = self.task_duration.get(key_split(key), 0.5)
-                                self.stack_durations[w].append(duration)
-                                self.stack_duration[w] += duration
-
-                                thieves.add(w)
-                                if (self.ncores[w] <=
-                                    len(self.processing[w]) + len(self.stacks[w])):
-                                    self.idle.remove(w)
-
-                if stealable:
-                    break
-            logger.debug('Stolen tasks for %d workers', len(thieves))
-            return thieves
-
     @gen.coroutine
-    def work_steal(self, idle, saturated, budget=None):
+    def work_steal(self, idle, saturated=None, budget=None):
+        if saturated is None:                          # TODO: linear time
+            saturated = random.choice(self.saturated)  # TODO: find biggest
+        if random.random() < 0.2 and saturated in self.saturated:
+            self.saturated.remove(saturated) # remove for now to stop clobbering
+        self.stealing[idle] = saturated
         with log_errors():
             budget = budget or self.occupancy[saturated] / 10 # TODO scale by ratio of idle/saturated
             ip, port = idle.split(':')
@@ -2815,9 +2552,11 @@ class Scheduler(Server):
                         self.release_resources(key, saturated)
             finally:
                 close(stream)
+                del self.stealing[idle]
 
+            self.check_idle_satuarated(idle)
+            self.check_idle_satuarated(saturated)
             raise gen.Return(response['keys'])
-
 
     def steal_time_ratio(self, key, bandwidth=BANDWIDTH):
         """ The compute to communication time ratio of a key
@@ -2857,26 +2596,19 @@ class Scheduler(Server):
                 loc = int(-round(log(ratio) / log(2), 0) + 3)
             return ratio, loc
 
-    def issaturated(self, worker, latency=5e-3):
-        """
-        Determine if a worker has enough work to avoid being idle
+    def check_idle_saturated(self, worker):
+        avg = self.total_occupancy / self.total_ncores
+        score = self.occupancy[worker] / self.ncores[worker]
 
-        A worker is saturated if the following criteria are met
-
-        1.  It is working on at least as many tasks as it has cores
-        2.  The expected time it will take to complete all of its currently
-            assigned  tasks is at least a full round-trip time.  This is
-            relevant when it has many small tasks
-        """
-        return (len(self.stacks[worker]) + len(self.processing[worker])
-                > self.ncores[worker] and
-                self.occupancy[worker] > latency * self.ncores[worker])
-
-    def _check_idle(self, worker, latency=5e-3):
-        if not self.issaturated(worker, latency=latency):
+        if score <= avg / 3:
             self.idle.add(worker)
         elif worker in self.idle:
             self.idle.remove(worker)
+
+        if score > avg * 3:
+            self.saturated.add(worker)
+        elif worker in self.saturated:
+            self.saturated.remove(worker)
 
     def valid_workers(self, key):
         """ Return set of currently valid worker addresses for key
@@ -3018,14 +2750,13 @@ class Scheduler(Server):
         return self._ipython_kernel.get_connection_info()
 
 
-def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
+def decide_worker(dependencies, occupancy, who_has,
         has_what, valid_workers, loose_restrictions, nbytes, ncores, key):
     """
     Decide which worker should take task
 
     >>> dependencies = {'c': {'b'}, 'b': {'a'}}
-    >>> stacks = {'alice:8000': ['z'], 'bob:8000': []}
-    >>> processing = {'alice:8000': set(), 'bob:8000': set()}
+    >>> occupancy = {'alice:8000': 0, 'bob:8000': 0}
     >>> who_has = {'a': {'alice:8000'}}
     >>> has_what = {'alice:8000': {'a'}}
     >>> nbytes = {'a': 100}
@@ -3035,7 +2766,7 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
 
     We choose the worker that has the data on which 'b' depends (alice has 'a')
 
-    >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
+    >>> decide_worker(dependencies, occupancy, who_has, has_what,
     ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
     'alice:8000'
 
@@ -3043,14 +2774,14 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
 
     >>> who_has = {'a': {'alice:8000', 'bob:8000'}}
     >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'a'}}
-    >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
+    >>> decide_worker(dependencies, who_has, has_what,
     ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
     'bob:8000'
 
     Optionally provide valid workers of where jobs are allowed to occur
 
     >>> valid_workers = {'alice:8000', 'charlie:8000'}
-    >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
+    >>> decide_worker(dependencies, who_has, has_what,
     ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
     'alice:8000'
 
@@ -3062,9 +2793,8 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     >>> who_has = {'a': {'alice:8000'}, 'b': {'bob:8000'}}
     >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'b'}}
     >>> nbytes = {'a': 1, 'b': 1000}
-    >>> stacks = {'alice:8000': [], 'bob:8000': []}
 
-    >>> decide_worker(dependencies, stacks, processing, who_has, has_what,
+    >>> decide_worker(dependencies, who_has, has_what,
     ...               {}, set(), nbytes, ncores, 'c')
     'bob:8000'
     """
@@ -3073,19 +2803,19 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     workers = frequencies([w for dep in deps
                              for w in who_has[dep]])
     if not workers:
-        workers = stacks
+        workers = occupancy
     if valid_workers is not True:
         workers = valid_workers & set(workers)
         if not workers:
             workers = valid_workers
             if not workers:
                 if key in loose_restrictions:
-                    return decide_worker(dependencies, stacks, stack_duration,
-                            processing, who_has, has_what, True, set(), nbytes,
+                    return decide_worker(dependencies, occupancy,
+                            who_has, has_what, True, set(), nbytes,
                             ncores, key)
                 else:
                     return None
-    if not workers or not stacks:
+    if not workers or not occupancy:
         return None
 
     if len(workers) == 1:
@@ -3095,16 +2825,16 @@ def decide_worker(dependencies, stacks, stack_duration, processing, who_has,
     def objective(w):
         comm_bytes = sum([nbytes.get(k, 1000) for k in dependencies[key]
                           if w not in who_has[k]])
-        stack_time = stack_duration[w] / ncores[w]
+        stack_time = occupancy[w] / ncores[w]
         start_time = comm_bytes / BANDWIDTH + stack_time
-        return start_time
+        return (start_time, len(has_what[w]))
 
     return min(workers, key=objective)
 
 
 def validate_state(dependencies, dependents, waiting, waiting_data, ready,
-        who_has, stacks, processing, finished_results, released,
-        who_wants, wants_what, tasks=None, allow_overlap=False, allow_bad_stacks=False,
+        who_has, processing, finished_results, released,
+        who_wants, wants_what, tasks=None, allow_overlap=False,
         erred=None, **kwargs):
     """
     Validate a current runtime state
@@ -3112,7 +2842,6 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
     This performs a sequence of checks on the entire graph, running in about
     linear time.  This raises assert errors if anything doesn't check out.
     """
-    in_stacks = {k for v in stacks.values() for k in v}
     in_processing = {k for v in processing.values() for k in v}
     keys = {key for key in dependents if not dependents[key]}
     ready_set = set(ready)
@@ -3137,9 +2866,7 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
         for vv in v:
             if vv in released:
                 raise ValueError('dependent not in play', k, vv)
-            if not (vv in ready_set or
-                    vv in waiting or
-                    vv in in_stacks or
+            if not (vv in waiting or
                     vv in in_processing):
                 raise ValueError('dependent not in play2', k, vv)
 
@@ -3154,15 +2881,13 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
         """ Validate a single key, recurse downwards """
         vals = ([key in waiting,
                  key in ready,
-                 key in in_stacks,
                  key in in_processing,
                  not not who_has.get(key),
                  key in released,
                  key in erred])
         if ((allow_overlap and sum(vals) < 1) or
             (not allow_overlap and sum(vals) != 1)):
-            if not (in_stacks and waiting):  # known ok state
-                raise ValueError("Key exists in wrong number of places", key, vals)
+            raise ValueError("Key exists in wrong number of places", key, vals)
 
         for dep in dependencies[key]:
             if dep in dependents:
@@ -3173,9 +2898,9 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
                            for dep in dependents.get(key, ()))
             assert not waiting.get(key)
 
-        if not allow_bad_stacks and (key in in_stacks or key in in_processing):
+        if key in in_processing:
             if not all(who_has.get(dep) for dep in dependencies[key]):
-                raise ValueError("Key in stacks/processing without all deps",
+                raise ValueError("Key in processing without all deps",
                                  key)
             assert not waiting.get(key)
             assert key not in ready

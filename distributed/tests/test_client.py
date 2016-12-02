@@ -2678,6 +2678,7 @@ def test_even_load_on_startup(c, s, a, b):
     assert len(a.data) == len(b.data) == 1
 
 
+@pytest.mark.xfail
 @gen_cluster(client=True, ncores=[('127.0.0.1', 2)] * 2)
 def test_contiguous_load(c, s, a, b):
     w, x, y, z = c.map(inc, [1, 2, 3, 4])
@@ -2703,21 +2704,6 @@ def test_balanced_with_submit_and_resident_data(c, s, *workers):
     yield _wait(L)
     for w in workers:
         assert len(w.data) == 2
-
-
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
-def test_balanced_with_submit_and_resident_data(c, s, a, b):
-    slow1 = c.submit(slowinc, 1, delay=0.2, workers=a.address)  # learn slow
-    slow2 = c.submit(slowinc, 2, delay=0.2, workers=b.address)
-    yield _wait([slow1, slow2])
-    aa = c.map(inc, range(100), pure=False, workers=a.address)  # learn fast
-    bb = c.map(inc, range(100), pure=False, workers=b.address)
-    yield _wait(aa + bb)
-
-    cc = c.map(slowinc, range(10), delay=0.1)
-    while not all(c.done() for c in cc):
-        assert all(len(p) < 3 for p in s.processing.values())
-        yield gen.sleep(0.01)
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 20)] * 2)
@@ -2806,10 +2792,7 @@ def test_default_get(loop):
 
 
 @gen_cluster(client=True)
-def test_get_stacks_processing(c, s, a, b):
-    stacks = yield c.scheduler.stacks()
-    assert stacks == valmap(list, s.stacks)
-
+def test_get_processing(c, s, a, b):
     processing = yield c.scheduler.processing()
     assert processing == valmap(list, s.processing)
 
@@ -2817,13 +2800,6 @@ def test_get_stacks_processing(c, s, a, b):
                     allow_other_workers=True)
 
     yield gen.sleep(0.2)
-
-    x = yield c.scheduler.stacks()
-    assert set(x) == {a.address, b.address}
-
-    x = yield c.scheduler.stacks(workers=[a.address])
-    assert set(x) == {a.address}
-    assert isinstance(x[a.address], list)
 
     x = yield c.scheduler.processing()
     assert set(x) == {a.address, b.address}
@@ -2869,13 +2845,10 @@ def test_bad_tasks_fail(c, s, a, b):
         yield f._result()
 
 
-def test_get_stacks_processing_sync(loop):
+def test_get_processing_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(('127.0.0.1', s['port']), loop=loop) as c:
-            stacks = c.stacks()
             processing = c.processing()
-            assert len(stacks) == len(processing) == 2
-            assert not any(v for v in stacks.values())
             assert not any(v for v in processing.values())
 
             futures = c.map(slowinc, range(10), delay=0.1,
@@ -2886,14 +2859,7 @@ def test_get_stacks_processing_sync(loop):
 
             aa = '127.0.0.1:%d' % a['port']
             bb = '127.0.0.1:%d' % b['port']
-            stacks = c.stacks()
             processing = c.processing()
-
-            assert all(k.startswith('slowinc') for k in stacks[aa])
-            assert stacks[bb] == []
-
-            assert set(c.stacks(aa)) == {aa}
-            assert set(c.stacks([aa])) == {aa}
 
             assert set(c.processing(aa)) == {aa}
             assert set(c.processing([aa])) == {aa}
