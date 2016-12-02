@@ -204,8 +204,8 @@ class Server(TCPServer):
                 if close_desired or stream.closed():
                     break
         finally:
-            logger.info("Closing connection from %s:%d to %s", ip, port,
-                        type(self).__name__)
+            logger.debug("Closing connection from %s:%d to %s", ip, port,
+                         type(self).__name__)
             self._listen_streams.remove(stream)
             try:
                 yield close(stream)
