@@ -8,6 +8,7 @@ from tornado import gen
 
 import dask
 from dask import delayed
+from distributed import Worker
 from distributed.client import Client, _wait, wait
 from distributed.utils_test import (cluster, slowinc, slowadd, randominc,
         loop, inc, dec, div, throws, gen_cluster, gen_test, double, deep)
@@ -67,7 +68,6 @@ def test_steal_expensive_data_slow_computation(c, s, a, b):
     slow = [c.submit(slowinc, x, delay=0.1, pure=False) for i in range(4)]
     yield _wait([slow])
 
-    import pdb; pdb.set_trace()
     assert b.data  # not empty
 
 
@@ -148,3 +148,42 @@ def test_steal_simple(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) < 100
     assert 10 < len(b.task_state) < 20
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)], timeout=20)
+def test_new_worker_steals(c, s, a):
+    yield _wait(c.submit(slowinc, 1, delay=0.01)._result())
+
+    futures = c.map(slowinc, range(100), delay=0.05)
+    total = c.submit(sum, futures)
+    while len(a.task_state) < 10:
+        yield gen.sleep(0.01)
+
+    b = Worker(s.ip, s.port, loop=s.loop, ncores=1)
+    yield b._start()
+
+    yield gen.sleep(1)
+
+    result = yield total._result()
+    assert result == sum(map(inc, range(100)))
+
+    for w in [a, b]:
+        assert all(isinstance(v, int) for v in w.data.values())
+
+    assert b.data
+
+    yield b._close()
+
+
+@gen_cluster(client=True, timeout=20)
+def test_work_steal_no_kwargs(c, s, a, b):
+    futures = c.map(slowinc, range(100), workers=a.address,
+                    allow_other_workers=True)
+
+    total = c.submit(sum, futures)
+    result = yield total._result()
+
+    assert result == sum(map(inc, range(100)))
+
+    assert len(a.data) > 20
+    assert len(b.data) > 20
