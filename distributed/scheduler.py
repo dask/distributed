@@ -1108,6 +1108,13 @@ class Scheduler(Server):
                'key': key,
                'priority': self.priority[key],
                'duration': self.task_duration.get(key_split(key), 0.5)}
+        if key not in self.loose_restrictions:
+            if key in self.host_restrictions:
+                msg['host-restrictions'] = list(self.host_restrictions[key])
+            if key in self.worker_restrictions:
+                msg['worker-restrictions'] = list(self.host_restrictions[key])
+        if key in self.resource_restrictions:
+            msg['resource-restrictions'] = self.resource_restrictions[key]
 
         deps = self.dependencies[key]
         if deps:
@@ -2645,10 +2652,12 @@ class Scheduler(Server):
                         for worker, count in zip(workers2, counts):
                             self.ensure_occupied_queue(worker, count=count)
 
+            """
             if self.idle and any(self.stealable):
                 thieves = self.work_steal()
                 for worker in thieves:
                     self.ensure_occupied_stacks(worker)
+            """
 
     def ensure_occupied_stacks(self, worker):
         """ Send tasks to worker while it has tasks and free cores
@@ -2664,7 +2673,7 @@ class Scheduler(Server):
         Scheduler.ensure_occupied_queue
         """
         stack = self.stacks[worker]
-        latency = 5e-3
+        latency = 500
 
         while (stack and
                (self.ncores[worker] > len(self.processing[worker]) or
@@ -2730,6 +2739,7 @@ class Scheduler(Server):
 
         self._check_idle(worker)
 
+
     def work_steal(self):
         """ Steal tasks from saturated workers to idle workers
 
@@ -2779,6 +2789,35 @@ class Scheduler(Server):
                     break
             logger.debug('Stolen tasks for %d workers', len(thieves))
             return thieves
+
+    @gen.coroutine
+    def work_steal(self, idle, saturated, budget=None):
+        with log_errors():
+            budget = budget or self.occupancy[saturated] / 10 # TODO scale by ratio of idle/saturated
+            ip, port = idle.split(':')
+            stream = yield connect(ip, int(port))
+
+            try:
+                response = yield send_recv(stream, op='steal', worker=saturated, budget=budget)
+                assert response
+                yield write(stream, 'OK')
+
+                for key in response['keys']:
+                    if self.task_state[key] == 'processing':
+                        duration = self.task_duration.get(key, 0.5)
+                        self.processing[idle][key] = duration
+                        del self.processing[saturated][key]
+                        self.rprocessing[key].add(idle)
+                        self.rprocessing[key].remove(saturated)
+                        self.occupancy[idle] += duration
+                        self.occupancy[saturated] -= duration
+                        self.consume_resources(key, idle)
+                        self.release_resources(key, saturated)
+            finally:
+                close(stream)
+
+            raise gen.Return(response['keys'])
+
 
     def steal_time_ratio(self, key, bandwidth=BANDWIDTH):
         """ The compute to communication time ratio of a key

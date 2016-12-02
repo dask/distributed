@@ -128,3 +128,19 @@ def test_dont_steal_fast_tasks(c, s, *workers):
     yield _wait(futures)
 
     assert len(s.has_what[workers[0].address]) == 1001
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)])
+def test_steal_simple(c, s, a, b):
+    future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
+    yield future._result()
+
+    futures = c.map(slowinc, range(100), delay=0.1, workers=a.address)
+    yield gen.sleep(0.1)
+    assert len(a.task_state) == 100
+    assert len(b.task_state) == 0
+
+    result = yield s.work_steal(b.address, a.address, budget=1)
+    yield gen.sleep(0.1)
+    assert len(a.task_state) < 100
+    assert 10 < len(b.task_state) < 20

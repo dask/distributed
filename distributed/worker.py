@@ -21,9 +21,9 @@ from .core import read, write, connect, close, send_recv, error_message
 from dask.core import istask
 from dask.compatibility import apply
 try:
-    from cytoolz import valmap, merge, pluck
+    from cytoolz import valmap, merge, pluck, concat
 except ImportError:
-    from toolz import valmap, merge, pluck
+    from toolz import valmap, merge, pluck, concat
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -58,6 +58,7 @@ except ImportError:
 
 
 IN_PLAY = ('waiting', 'ready', 'executing', 'long-running')
+PENDING = ('waiting', 'ready')
 
 
 class WorkerBase(Server):
@@ -205,6 +206,8 @@ class WorkerBase(Server):
           'upload_file': self.upload_file,
           'start_ipython': self.start_ipython,
           'keys': self.keys,
+          'steal': self.steal,
+          'request_work': self.request_work,
         }
 
         super(WorkerBase, self).__init__(handlers, io_loop=self.loop, **kwargs)
@@ -844,7 +847,7 @@ class Worker(WorkerBase):
             raise
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
-            who_has=None, nbytes=None, priority=None, duration=None):
+            who_has=None, nbytes=None, priority=None, duration=None, **kwargs2):
         try:
             if key in self.task_state:
                 state = self.task_state[key]
@@ -1244,16 +1247,44 @@ class Worker(WorkerBase):
                     if not self.has_what[worker]:
                         del self.has_what[worker]
 
-            if key in self.nbytes:
-                del self.nbytes[key]
-            if key in self.types:
-                del self.types[key]
-            if key in self.priorities:
-                del self.priorities[key]
-            if key in self.durations:
-                del self.durations[key]
-            if key in self.response:
-                del self.response[key]
+            if key not in self.dependents:
+                if key in self.nbytes:
+                    del self.nbytes[key]
+                if key in self.types:
+                    del self.types[key]
+                if key in self.priorities:
+                    del self.priorities[key]
+                if key in self.durations:
+                    del self.durations[key]
+                if key in self.response:
+                    del self.response[key]
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
+
+    def rescind_key(self, key):
+        try:
+            if self.task_state.get(key) not in PENDING:
+                return
+            del self.task_state[key]
+            del self.tasks[key]
+            if key in self.waiting_for_data:
+                del self.waiting_for_data[key]
+
+            for dep in self.dependencies.pop(key, ()):
+                self.dependents[dep].remove(key)
+                if not self.dependents[dep]:
+                    del self.dependents[dep]
+
+            if key not in self.dependents:
+                if key in self.nbytes:
+                    del self.nbytes[key]
+                if key in self.priorities:
+                    del self.priorities[key]
+                if key in self.durations:
+                    del self.durations[key]
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1345,6 +1376,98 @@ class Worker(WorkerBase):
             if LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
+
+    #################
+    # Work Stealing #
+    #################
+
+    @gen.coroutine
+    def steal(self, stream, worker=None, budget=None):
+        """
+        Steal work from a peer worker
+
+        Parameters
+        ----------
+        worker: string, address of peer
+        budget: number, time in seconds to steal
+        """
+        ip, port = worker.split(':')
+        target = yield connect(ip, int(port))
+        response = yield send_recv(target, op='request_work',
+                                   worker=self.address,
+                                   budget=budget,
+                                   ncores=self.ncores,
+                                   memory=self.memory_limit,
+                                   total_resources=self.total_resources,
+                                   available_resources=self.available_resources)
+
+        for key, msg in response['msgs'].items():
+            self.add_task(key, **msg)
+
+        self.ensure_communicating()
+        self.ensure_computing()
+
+        yield write(stream, {'keys': response['keys']})
+        response = yield read(stream)
+
+        assert response == 'OK'  # Ack from scheduler, tell victim all's well
+
+        yield write(target, 'OK')
+        yield close(target)
+
+        raise gen.Return('dont-reply')
+
+    @gen.coroutine
+    def request_work(self, stream, worker=None, budget=None, ncores=None,
+                     bandwidth=100e6, **kwargs):
+        """ Determine tasks to send to peer worker
+
+        Parameters
+        ----------
+        budget: number
+            Duration in seconds of work to send
+        ncores: int
+            Number of cores on remove machine
+        bandwidth: number
+            Expected bandwidth between machines in bytes per second
+        """
+        heap = []
+        for k in concat([self.waiting_for_data, pluck(1, self.heap)]):
+            if self.task_state[k] in PENDING:
+                compute = self.durations.get(k, 0.5) / ncores
+                communicate = 0.010 + sum(self.nbytes[dep] for dep in self.dependencies[k]) / bandwidth
+                score = compute / communicate
+                if score > 0.05:
+                    heapq.heappush(heap, (score, k, compute, communicate))
+
+        good = set()
+        cost = 0
+        while heap:
+            score, k, compute, communicate = heapq.heappop(heap)
+            cost += compute + communicate
+            if cost < budget:
+                good.add(k)
+
+        msgs = {k: {'task': dumps_task(self.tasks[k]),
+                    'who_has': list(self.who_has.get(k, [])),
+                    'priority': self.priorities[k],
+                    'duration': self.durations[k]}
+                    for k in good}
+
+        yield write(stream, {'msgs': msgs, 'keys': list(good)})  # wait on ack
+        response = yield read(stream)
+        assert response == "OK"
+
+        # We're clear to remove these keys.  Scheduler is aware
+        for key in good:
+            self.rescind_key(key)
+
+        yield close(stream)
+        raise gen.Return('dont-reply')
+
+    ##################
+    # Administrative #
+    ##################
 
     def validate_state(self):
         try:
