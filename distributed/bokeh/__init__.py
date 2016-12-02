@@ -21,8 +21,7 @@ messages = {
 
     'progress': {},
 
-    'processing': {'stacks': {}, 'processing': {},
-                   'memory': 0, 'waiting': 0, 'ready': 0},
+    'processing': {'processing': {}, 'memory': 0, 'waiting': 0},
 
     'task-events': {'interval': 200,
                     'deque': deque(maxlen=m),

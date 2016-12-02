@@ -24,15 +24,14 @@ def test_dependent_keys():
     a, b, c, d, e, f, g = 'abcdefg'
     who_has = {a: [1], b: [1]}
     processing = {'alice': {c}}
-    stacks = {'bob': [d]}
     exceptions = {}
     dsk = {a: 1, b: 2, c: (add, a, b), d: (inc, a), e: (add, c, d), f: (inc, e)}
     dependencies, dependents = get_deps(dsk)
 
-    assert dependent_keys(f, who_has, processing, stacks, dependencies,
+    assert dependent_keys(f, who_has, processing, dependencies,
             exceptions, complete=False)[0] == {f, e, c, d}
 
-    assert dependent_keys(f, who_has, processing, stacks, dependencies,
+    assert dependent_keys(f, who_has, processing, dependencies,
             exceptions, complete=True)[0] == {a, b, c, d, e, f}
 
 
