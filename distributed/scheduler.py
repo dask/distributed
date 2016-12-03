@@ -251,7 +251,6 @@ class Scheduler(Server):
         self.aliases = dict()
         self.saturated = set()
         self.occupancy = dict()
-        self.total_occupancy = 0
 
         self.plugins = []
         self.transition_log = deque(maxlen=config.get('transition-log-length',
@@ -383,6 +382,13 @@ class Scheduler(Server):
                                  io_loop=self.loop)
         self._synchronize_data_periodic_callback.start()
 
+        self._steal_periodic_callback = \
+                PeriodicCallback(callback=self.balance_by_stealing,
+                                 callback_time=100,
+                                 io_loop=self.loop)
+        self._steal_periodic_callback.start()
+
+
         if start_queues:
             self.loop.add_callback(self.handle_queues, self.scheduler_queues[0], None)
 
@@ -426,6 +432,7 @@ class Scheduler(Server):
             return
         self._delete_periodic_callback.stop()
         self._synchronize_data_periodic_callback.stop()
+        self._steal_periodic_callback.stop()
         for service in self.services.values():
             service.stop()
         yield self.cleanup()
@@ -533,7 +540,7 @@ class Scheduler(Server):
             if recommendations:
                 self.transitions(recommendations)
 
-            self.check_idle_saturated(address)
+            # self.(address)
 
             logger.info("Register %s", str(address))
             return 'OK'
@@ -1149,7 +1156,7 @@ class Scheduler(Server):
                         logger.debug("Messages: %s\nRecommendations: %s",
                                      msgs, recommendations)
 
-                    self.check_idle_saturated(worker)
+                    # self.check_idle_saturated(worker)
 
         except (StreamClosedError, IOError, OSError):
             logger.info("Worker failed from closed stream: %s", worker)
@@ -1897,7 +1904,6 @@ class Scheduler(Server):
             self.processing[worker][key] = duration
             self.rprocessing[key].add(worker)
             self.occupancy[worker] += duration
-            self.total_occupancy += duration
             self.task_state[key] = 'processing'
             self.consume_resources(key, worker)
 
@@ -1908,7 +1914,7 @@ class Scheduler(Server):
             except StreamClosedError:
                 self.remove_worker(worker)
 
-            self.check_idle_saturated(worker)
+            # self.check_idle_saturated(worker)
 
             if self.validate:
                 assert key not in self.waiting
@@ -1982,7 +1988,6 @@ class Scheduler(Server):
             for worker in workers:
                 duration = self.processing[worker].pop(key)
                 self.occupancy[worker] -= duration
-                self.total_occupancy -= duration
 
             recommendations = OrderedDict()
 
@@ -2170,7 +2175,6 @@ class Scheduler(Server):
             for w in self.rprocessing.pop(key):
                 duration = self.processing[w].pop(key)
                 self.occupancy[w] -= duration
-                self.total_occupancy -= duration
                 self.release_resources(key, w)
 
             self.released.add(key)
@@ -2239,7 +2243,6 @@ class Scheduler(Server):
             for w in self.rprocessing.pop(key):
                 duration = self.processing[w].pop(key)
                 self.occupancy[w] -= duration
-                self.total_occupancy -= duration
                 self.release_resources(key, w)
 
             del self.waiting_data[key]  # do anything with this?
@@ -2551,14 +2554,14 @@ class Scheduler(Server):
 
                     for key in response['keys']:
                         if self.task_state.get(key) == 'processing':
-                            duration = self.task_duration.get(key, 0.5)
                             if key in self.processing[saturated]:
-                                del self.processing[saturated][key]
+                                duration = self.processing[saturated].pop(key)
                                 self.rprocessing[key].remove(saturated)
                                 self.occupancy[saturated] -= duration
                                 self.release_resources(key, saturated)
 
                             if key not in self.processing[idle]:
+                                duration = self.task_duration.get(key, 0.5)
                                 self.processing[idle][key] = duration
                                 self.rprocessing[key].add(idle)
                                 self.occupancy[idle] += duration
@@ -2568,8 +2571,8 @@ class Scheduler(Server):
                                  len(response['keys']), idle, saturated)
                 finally:
                     close(stream)
-                    self.check_idle_saturated(idle)
-                    self.check_idle_saturated(saturated)
+                    # self.check_idle_saturated(idle)
+                    # self.check_idle_saturated(saturated)
 
                 raise gen.Return(response['keys'])
         except gen.Return:
@@ -2581,41 +2584,61 @@ class Scheduler(Server):
             raise
 
     def balance_by_stealing(self):
-        import pdb; pdb.set_trace()
-        if not self.idle or not self.saturated:
-            return
+        with log_errors():
+            total_occupancy = sum(self.occupancy.values())
 
-        idle = self.idle
-        saturated = topk(len(idle), self.saturated, key=self.occupancy.get)
-        if len(saturated) < len(idle):
-            idle = topk(len(saturated), idle, key=self.occupancy.get)
-        else:
-            idle = sorted(idle, key=self.occupancy.get)
+            if not self.total_ncores or not total_occupancy:
+                return
+            avg = total_occupancy / self.total_ncores
 
-        for i, s in zip(idle, saturated):
-            self.loop.add_callback(self.work_steal, i, s)
+            idle = list()
+            saturated = list()
 
-    def check_idle_saturated(self, worker):
-        avg = self.total_occupancy / self.total_ncores
-        score = self.occupancy[worker] / self.ncores[worker]
+            for worker, duration in self.occupancy.items():
+                time_until_completion = duration / self.ncores[worker]
+                if time_until_completion < 0.3:
+                    idle.append(worker)
+                    continue
 
-        if score <= avg / 3:
-            self.idle.add(worker)
-            if self.saturated:
-                self.loop.add_callback(self.work_steal, idle=worker)
-            else:
-                self.idle.add(worker)
+                ratio = time_until_completion / avg
+                if ratio < 0.25:
+                    idle.append(worker)
+                elif ratio > 1.9:
+                    saturated.append(worker)
 
-        elif worker in self.idle:
-            self.idle.remove(worker)
+            if not saturated or not idle:
+                return
 
-        factor = 1 + 5 * len(self.saturated) / len(self.ncores)
-        if score and score >= avg * factor and self.occupancy[worker] > 0.3:
-            self.saturated.add(worker)
-            if self.idle:
-                self.loop.add_callback(self.work_steal, saturated=worker)
-        elif worker in self.saturated:
-            self.saturated.remove(worker)
+            saturated.sort(reverse=True, key=lambda w: self.occupancy[w]
+                                                     / self.ncores[w])
+
+            # near 1/10 for many more idle than saturated
+            # near 1/3 for roughly the same number
+            fraction = 1/10 + min(1, len(saturated) / len(idle)) / 4
+
+            flag = False
+
+            for s in saturated:
+                occ = self.occupancy[s]
+                sc = self.ncores[s]
+                while idle and occ / sc >= avg * 1.9:
+                    i = idle.pop()
+                    ic = self.ncores[i]
+                    budget = fraction * occ
+                    if sc > ic:
+                        budget *= ic / sc
+                    if budget < 0.1:
+                        idle.append(i)
+                        break
+                    else:
+                        occ -= budget
+                        self.loop.add_callback(self.work_steal, i, s,
+                                               budget=budget)
+                        flag = True
+
+            if flag:
+                logger.info("Stealing %d saturated %d idle", len(saturated),
+                             len(idle))
 
     def valid_workers(self, key):
         """ Return set of currently valid worker addresses for key

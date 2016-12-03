@@ -59,13 +59,13 @@ def test_steal_cheap_data_slow_computation(c, s, a, b):
 def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip('numpy')
 
-    x = c.submit(slowinc, 100, delay=0.1, workers=a.address)
+    x = c.submit(slowinc, 100, delay=0.2, workers=a.address)
     yield _wait([x])  # learn that slowinc is slow
 
     x = c.submit(np.arange, 1000000, workers=a.address)  # put expensive data
     yield _wait([x])
 
-    slow = [c.submit(slowinc, x, delay=0.1, pure=False) for i in range(4)]
+    slow = [c.submit(slowinc, x, delay=0.1, pure=False) for i in range(20)]
     yield _wait([slow])
 
     assert b.data  # not empty
@@ -76,7 +76,7 @@ def test_worksteal_many_thieves(c, s, *workers):
     x = c.submit(slowinc, -1, delay=0.1)
     yield x._result()
 
-    xs = c.map(slowinc, [x] * 100, pure=False, delay=0.01)
+    xs = c.map(slowinc, [x] * 100, pure=False, delay=0.1)
 
     yield _wait(xs)
 
