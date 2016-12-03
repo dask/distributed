@@ -1989,7 +1989,10 @@ class Scheduler(Server):
             workers = self.rprocessing.pop(key)
             for worker in workers:
                 duration = self.processing[worker].pop(key)
-                self.occupancy[worker] -= duration
+                if not self.processing[worker]:
+                    self.occupancy[worker] = 0
+                else:
+                    self.occupancy[worker] -= duration
 
             recommendations = OrderedDict()
 
@@ -2611,6 +2614,8 @@ class Scheduler(Server):
             if not saturated or not idle:
                 return
 
+            original_idle = list(idle)
+
             saturated.sort(reverse=True, key=lambda w: self.occupancy[w]
                                                      / self.ncores[w])
 
@@ -2639,8 +2644,8 @@ class Scheduler(Server):
                         flag = True
 
             if flag:
-                logger.info("Stealing %d saturated %d idle", len(saturated),
-                             len(idle))
+                logger.info("Stealing %d saturated %d idle",
+                            len(saturated), len(original_idle))
 
     def valid_workers(self, key):
         """ Return set of currently valid worker addresses for key
