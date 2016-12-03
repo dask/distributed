@@ -148,11 +148,11 @@ class CommunicatingTimeSeries(DashboardComponent):
         self.worker = worker
         self.source = ColumnDataSource({'x': [], 'in': [], 'out': []})
 
-        x_range = DataRange1d(follow='end', follow_interval=30000, range_padding=0)
+        x_range = DataRange1d(follow='end', follow_interval=10000, range_padding=0)
 
         fig = figure(title="Communication History",
                      x_axis_type='datetime',
-                     y_range=[-0.1, worker.total_connections + 0.1],
+                     y_range=[-0.1, worker.total_connections + 0.5],
                      height=150, tools='', x_range=x_range, **kwargs)
         fig.line(source=self.source, x='x', y='in', color='red')
         fig.line(source=self.source, x='x', y='out', color='blue')
@@ -178,7 +178,7 @@ class ExecutingTimeSeries(DashboardComponent):
         self.worker = worker
         self.source = ColumnDataSource({'x': [], 'y': []})
 
-        x_range = DataRange1d(follow='end', follow_interval=30000, range_padding=0)
+        x_range = DataRange1d(follow='end', follow_interval=10000, range_padding=0)
 
         fig = figure(title="Executing History",
                      x_axis_type='datetime', y_range=[-0.1, worker.ncores + 0.1],
@@ -355,7 +355,7 @@ class SystemMonitor(DashboardComponent):
             self.names.append('num_fds')
         self.source = ColumnDataSource({name: [] for name in self.names})
 
-        x_range = DataRange1d(follow='end', follow_interval=30000,
+        x_range = DataRange1d(follow='end', follow_interval=10000,
                               range_padding=0)
 
         tools = 'reset,pan,wheel_zoom'
@@ -435,10 +435,10 @@ def main_doc(worker, doc):
         communicating_ts.root.x_range = xr
         communicating_stream.root.x_range = xr
 
-        doc.add_periodic_callback(statetable.update, 100)
-        doc.add_periodic_callback(executing_ts.update, 100)
-        doc.add_periodic_callback(communicating_ts.update, 100)
-        doc.add_periodic_callback(communicating_stream.update, 100)
+        doc.add_periodic_callback(statetable.update, 200)
+        doc.add_periodic_callback(executing_ts.update, 200)
+        doc.add_periodic_callback(communicating_ts.update, 200)
+        doc.add_periodic_callback(communicating_stream.update, 200)
         doc.add_root(column(statetable.root,
                             executing_ts.root,
                             communicating_ts.root,
@@ -451,8 +451,8 @@ def crossfilter_doc(worker, doc):
         statetable = StateTable(worker)
         crossfilter = CrossFilter(worker)
 
-        doc.add_periodic_callback(statetable.update, 100)
-        doc.add_periodic_callback(crossfilter.update, 200)
+        doc.add_periodic_callback(statetable.update, 200)
+        doc.add_periodic_callback(crossfilter.update, 500)
 
         doc.add_root(column(statetable.root, crossfilter.root))
 
@@ -460,7 +460,7 @@ def crossfilter_doc(worker, doc):
 def systemmonitor_doc(worker, doc):
     with log_errors():
         sysmon = SystemMonitor(worker, sizing_mode='scale_width')
-        doc.add_periodic_callback(sysmon.update, 100)
+        doc.add_periodic_callback(sysmon.update, 500)
 
         doc.add_root(sysmon.root)
 
