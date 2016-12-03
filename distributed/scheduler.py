@@ -1584,7 +1584,7 @@ class Scheduler(Server):
                             for w in self.worker_info}
             result = {k: v for k, v in result.items() if any(v.values())}
             if result:
-                logger.info("Excess keys found on workers: %s", result)
+                logger.info("Excess keys found on workers: %d", len(result))
             raise Return(result or None)
         else:
             keys = yield self.rpc(addr=worker).keys()
@@ -1592,8 +1592,8 @@ class Scheduler(Server):
 
             missing = self.has_what[worker] - keys
             if missing:
-                logger.info("Expected data missing from worker: %s, %s",
-                            worker, missing)
+                logger.info("Expected data missing from worker: %s, %d",
+                            worker, len(missing))
 
             extra = keys - self.has_what[worker] - self.deleted_keys[worker]
             if extra:
