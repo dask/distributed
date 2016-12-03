@@ -226,7 +226,6 @@ class Scheduler(Server):
         self.ready = deque()
         self.unrunnable = set()
         self.idle = set()
-        self.idle_list = set()
         self.who_has = dict()
         self.has_what = dict()
         self.who_wants = defaultdict(set)
@@ -249,7 +248,6 @@ class Scheduler(Server):
         self.available_resources = dict()
         self.resources = defaultdict(dict)
         self.aliases = dict()
-        self.saturated = set()
         self.occupancy = dict()
 
         self.plugins = []
@@ -742,8 +740,6 @@ class Scheduler(Server):
             del self.worker_info[address]
             if address in self.idle:
                 self.idle.remove(address)
-            if address in self.saturated:
-                self.saturated.remove(address)
 
             recommendations = OrderedDict()
 
@@ -1157,8 +1153,6 @@ class Scheduler(Server):
                     if self.validate:
                         logger.debug("Messages: %s\nRecommendations: %s",
                                      msgs, recommendations)
-
-                    # self.check_idle_saturated(worker)
 
         except (StreamClosedError, IOError, OSError):
             logger.info("Worker failed from closed stream: %s", worker)
@@ -1916,8 +1910,6 @@ class Scheduler(Server):
             except StreamClosedError:
                 self.remove_worker(worker)
 
-            # self.check_idle_saturated(worker)
-
             if self.validate:
                 assert key not in self.waiting
 
@@ -2528,58 +2520,37 @@ class Scheduler(Server):
     @gen.coroutine
     def work_steal(self, idle=None, saturated=None, budget=None):
         try:
-            if idle is None:
-                if self.idle:
-                    idle = random.choice(tuple(self.idle))
-                else:
-                    return
+            budget = budget or self.occupancy[saturated] / 10 # TODO scale by ratio of idle/saturated
+            ip, port = idle.split(':')
+            stream = yield connect(ip, int(port))
 
-            if saturated is None:                          # TODO: linear time
-                if self.saturated:
-                    saturated = random.choice(tuple(self.saturated))  # TODO: find biggest
-                else:
-                    return
+            try:
+                logger.info("Steal %.2fs of work: %s <- %s", budget, idle, saturated)
+                response = yield send_recv(stream, op='steal', worker=saturated, budget=budget)
+                assert response
+                yield write(stream, 'OK')
 
-            if random.random() < 0.2 and saturated in self.saturated:
-                self.saturated.remove(saturated) # remove for now to stop clobbering
+                for key in response['keys']:
+                    if self.task_state.get(key) == 'processing':
+                        if key in self.processing[saturated]:
+                            duration = self.processing[saturated].pop(key)
+                            self.rprocessing[key].remove(saturated)
+                            self.occupancy[saturated] -= duration
+                            self.release_resources(key, saturated)
 
-            if idle in self.idle:
-                self.idle.remove(idle)
+                        if key not in self.processing[idle]:
+                            duration = self.task_duration.get(key, 0.5)
+                            self.processing[idle][key] = duration
+                            self.rprocessing[key].add(idle)
+                            self.occupancy[idle] += duration
+                            self.consume_resources(key, idle)
 
-            with log_errors():
-                budget = budget or self.occupancy[saturated] / 10 # TODO scale by ratio of idle/saturated
-                ip, port = idle.split(':')
-                stream = yield connect(ip, int(port))
+                logger.info("Stolen %d keys:  %s <- %s",
+                             len(response['keys']), idle, saturated)
+            finally:
+                close(stream)
 
-                try:
-                    logger.info("Steal %.2fs of work: %s <- %s", budget, idle, saturated)
-                    response = yield send_recv(stream, op='steal', worker=saturated, budget=budget)
-                    assert response
-                    yield write(stream, 'OK')
-
-                    for key in response['keys']:
-                        if self.task_state.get(key) == 'processing':
-                            if key in self.processing[saturated]:
-                                duration = self.processing[saturated].pop(key)
-                                self.rprocessing[key].remove(saturated)
-                                self.occupancy[saturated] -= duration
-                                self.release_resources(key, saturated)
-
-                            if key not in self.processing[idle]:
-                                duration = self.task_duration.get(key, 0.5)
-                                self.processing[idle][key] = duration
-                                self.rprocessing[key].add(idle)
-                                self.occupancy[idle] += duration
-                                self.consume_resources(key, idle)
-
-                    logger.info("Stolen %d keys:  %s <- %s",
-                                 len(response['keys']), idle, saturated)
-                finally:
-                    close(stream)
-                    # self.check_idle_saturated(idle)
-                    # self.check_idle_saturated(saturated)
-
-                raise gen.Return(response['keys'])
+            raise gen.Return(response['keys'])
         except gen.Return:
             raise
         except Exception as e:
