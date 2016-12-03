@@ -2557,7 +2557,10 @@ class Scheduler(Server):
             else:
                 close(stream)
 
-            raise gen.Return(response['keys'])
+            if response['keys']:
+                raise gen.Return(response['keys'])
+            else:
+                return
         except gen.Return:
             raise
         except Exception as e:
