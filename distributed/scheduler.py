@@ -652,7 +652,7 @@ class Scheduler(Server):
 
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
         """ Mark that a task has finished execution on a particular worker """
-        # logger.debug("Stimulus task finished %s, %s", key, worker)
+        logger.debug("Stimulus task finished %s, %s", key, worker)
         if key not in self.task_state:
             return {}
 
@@ -1809,17 +1809,19 @@ class Scheduler(Server):
                 else:
                     self.waiting_data[dep].add(key)
 
-            if not self.waiting[key] and self.ncores:
-                recommendations[key] = 'processing'
 
             self.waiting_data[key] = {dep for dep in self.dependents[key]
                                           if dep not in self.who_has
                                           and dep not in self.released
                                           and dep not in self.exceptions_blame}
 
-            if not self.ncores:
-                self.unrunnable.add(key)
-                self.task_state[key] = 'no-worker'
+            if not self.waiting[key]:
+                if self.ncores:
+                    self.task_state[key] = 'waiting'
+                    recommendations[key] = 'processing'
+                else:
+                    self.unrunnable.add(key)
+                    self.task_state[key] = 'no-worker'
             else:
                 self.task_state[key] = 'waiting'
 
@@ -2046,9 +2048,10 @@ class Scheduler(Server):
             recommendations = OrderedDict()
 
             for dep in self.waiting_data.get(key, ()):  # lost dependency
-                if self.task_state[dep] == 'waiting':
+                dep_state = self.task_state[dep]
+                if dep_state == 'waiting':
                     self.waiting[dep].add(key)
-                else:
+                elif dep_state != 'no-worker':
                     recommendations[dep] = 'waiting'
 
             workers = self.who_has.pop(key)
@@ -2522,32 +2525,36 @@ class Scheduler(Server):
         try:
             budget = budget or self.occupancy[saturated] / 10 # TODO scale by ratio of idle/saturated
             ip, port = idle.split(':')
-            stream = yield connect(ip, int(port))
 
             try:
+                stream = yield connect(ip, int(port))
                 logger.info("Steal %.2fs of work: %s <- %s", budget, idle, saturated)
                 response = yield send_recv(stream, op='steal', worker=saturated, budget=budget)
                 assert response
                 yield write(stream, 'OK')
 
-                for key in response['keys']:
-                    if self.task_state.get(key) == 'processing':
-                        if key in self.processing[saturated]:
-                            duration = self.processing[saturated].pop(key)
-                            self.rprocessing[key].remove(saturated)
-                            self.occupancy[saturated] -= duration
-                            self.release_resources(key, saturated)
+                if saturated in self.worker_info and idle in self.worker_info:
+                    for key in response['keys']:
+                        if self.task_state.get(key) == 'processing':
+                            if key in self.processing[saturated]:
+                                duration = self.processing[saturated].pop(key)
+                                self.rprocessing[key].remove(saturated)
+                                self.occupancy[saturated] -= duration
+                                self.release_resources(key, saturated)
 
-                        if key not in self.processing[idle]:
-                            duration = self.task_duration.get(key, 0.5)
-                            self.processing[idle][key] = duration
-                            self.rprocessing[key].add(idle)
-                            self.occupancy[idle] += duration
-                            self.consume_resources(key, idle)
+                            if key not in self.processing[idle]:
+                                duration = self.task_duration.get(key, 0.5)
+                                self.processing[idle][key] = duration
+                                self.rprocessing[key].add(idle)
+                                self.occupancy[idle] += duration
+                                self.consume_resources(key, idle)
 
-                logger.info("Stolen %d keys:  %s <- %s",
-                             len(response['keys']), idle, saturated)
-            finally:
+                    logger.info("Stolen %d keys:  %s <- %s",
+                                 len(response['keys']), idle, saturated)
+            except EnvironmentError:
+                logger.info("Stream closed while monitoring stealing")
+                return
+            else:
                 close(stream)
 
             raise gen.Return(response['keys'])
@@ -2574,13 +2581,12 @@ class Scheduler(Server):
                 time_until_completion = duration / self.ncores[worker]
                 if time_until_completion < 0.3:
                     idle.append(worker)
-                    continue
-
-                ratio = time_until_completion / avg
-                if ratio < 0.25:
-                    idle.append(worker)
-                elif ratio > 1.9:
-                    saturated.append(worker)
+                else:
+                    ratio = time_until_completion / avg
+                    if ratio < 0.25:
+                        idle.append(worker)
+                    elif ratio > 1.9:
+                        saturated.append(worker)
 
             if not saturated or not idle:
                 return
@@ -2613,6 +2619,7 @@ class Scheduler(Server):
                         self.loop.add_callback(self.work_steal, i, s,
                                                budget=budget)
                         flag = True
+                    logger.debug("cycle balance work steal")
 
             if flag:
                 logger.info("Stealing %d saturated %d idle",

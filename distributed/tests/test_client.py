@@ -2718,21 +2718,6 @@ def test_scheduler_saturates_cores(c, s, a, b):
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 20)] * 2)
-def test_scheduler_saturates_cores_stacks(c, s, a, b):
-    for delay in [0, 0.01, 0.1]:
-        x = c.map(slowinc, range(100), delay=delay, pure=False,
-                  workers=a.address)
-        y = c.map(slowinc, range(100), delay=delay, pure=False,
-                  workers=b.address)
-        while not s.tasks or any(s.stacks.values()):
-            if s.tasks:
-                for w, stack in s.stacks.items():
-                    if stack:
-                        assert len(s.processing[w]) >= s.ncores[w]
-            yield gen.sleep(0.01)
-
-
-@gen_cluster(client=True, ncores=[('127.0.0.1', 20)] * 2)
 def test_scheduler_saturates_cores_random(c, s, a, b):
     for delay in [0, 0.01, 0.1]:
         futures = c.map(randominc, range(100), scale=0.1)
