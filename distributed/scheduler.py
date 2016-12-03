@@ -931,6 +931,8 @@ class Scheduler(Server):
         for q in self.report_queues:
             q.put_nowait(msg)
         if 'key' in msg:
+            if msg['key'] not in self.who_wants:
+                return
             streams = [self.streams[c]
                        for c in self.who_wants.get(msg['key'], ())
                        if c in self.streams]
