@@ -71,14 +71,14 @@ class CommunicatingStream(DashboardComponent):
             x_range = DataRange1d(range_padding=0)
             y_range = DataRange1d(range_padding=0)
 
-            fig= figure(title='Outgoing Communications',
+            fig= figure(title='Peer Communications',
                     x_axis_type='datetime', x_range=x_range, y_range=y_range,
                     height=height, tools='', **kwargs)
 
             fig.rect(source=self.incoming, x='middle', y='y', width='duration',
-                     height=0.9, color='blue', alpha='alpha')
-            fig.rect(source=self.outgoing, x='middle', y='y', width='duration',
                      height=0.9, color='red', alpha='alpha')
+            fig.rect(source=self.outgoing, x='middle', y='y', width='duration',
+                     height=0.9, color='blue', alpha='alpha')
 
             hover = HoverTool(
                 point_policy="follow_mouse",
@@ -163,14 +163,13 @@ class CommunicatingTimeSeries(DashboardComponent):
             WheelZoomTool(dimensions="width")
         )
 
-
         self.root = fig
 
     def update(self):
         with log_errors():
             self.source.stream({'x': [time() * 1000],
-                                'in': [len(self.worker._listen_streams)],
-                                'out': [len(self.worker.connections)]}, 1000)
+                                'out': [len(self.worker._listen_streams)],
+                                'in': [len(self.worker.connections)]}, 1000)
 
 
 class ExecutingTimeSeries(DashboardComponent):

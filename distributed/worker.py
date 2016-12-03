@@ -416,6 +416,7 @@ class WorkerBase(Server):
         nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
         try:
             compressed = yield write(stream, msg)
+            yield close(stream)
         except EnvironmentError:
             logger.exception('failed during get data', exc_info=True)
             stream.close()
