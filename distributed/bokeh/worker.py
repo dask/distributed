@@ -275,14 +275,16 @@ class CrossFilter(DashboardComponent):
             out = []
 
             for msg in incoming:
-                d = self.process_msg(msg)
-                d['inout-color'] = 'red'
-                out.append(d)
+                if msg['keys']:
+                    d = self.process_msg(msg)
+                    d['inout-color'] = 'red'
+                    out.append(d)
 
             for msg in outgoing:
-                d = self.process_msg(msg)
-                d['inout-color'] = 'blue'
-                out.append(d)
+                if msg['keys']:
+                    d = self.process_msg(msg)
+                    d['inout-color'] = 'blue'
+                    out.append(d)
 
             if out:
                 out = transpose(out)
