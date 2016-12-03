@@ -1043,7 +1043,7 @@ class Worker(WorkerBase):
                 self.log.append(('gather-dependencies', key, deps))
 
                 while deps and len(self.connections) < self.total_connections:
-                    self.gather_dep(deps.pop())
+                    self.gather_dep(deps.pop(), cause=key)
 
                 if not deps:
                     self.data_needed.popleft()
@@ -1072,7 +1072,7 @@ class Worker(WorkerBase):
                     self.transition(dep, 'ready')
 
     @gen.coroutine
-    def gather_dep(self, dep):
+    def gather_dep(self, dep, cause=None):
         try:
             if self.validate:
                 self.validate_state()
@@ -1133,20 +1133,25 @@ class Worker(WorkerBase):
             self.connections[stream] = deps
             try:
                 start = time()
+                logger.debug("Request %d keys and %d bytes", len(deps),
+                             total_bytes)
                 response = yield send_recv(stream, op='get_data', keys=list(deps),
                                            close=True, who=self.address)
                 stop = time()
-                self.response[dep].update({'transfer_start': start,
-                                           'transfer_stop': stop})
+                deps2 = list(response)
 
-                total_bytes = sum(self.nbytes.get(dep, 0) for dep in deps)
+                if cause:
+                    self.response[cause].update({'transfer_start': start,
+                                                 'transfer_stop': stop})
+
+                total_bytes = sum(self.nbytes.get(dep, 0) for dep in deps2)
                 duration = (stop - start) or 0.5
                 self.incoming_transfer_log.append({
                     'start': start,
                     'stop': stop,
                     'middle': (start + stop) / 2.0,
                     'duration': duration,
-                    'keys': {dep: self.nbytes.get(dep, None) for dep in deps},
+                    'keys': {dep: self.nbytes.get(dep, None) for dep in deps2},
                     'total': total_bytes,
                     'bandwidth': total_bytes / duration,
                     'who': worker
@@ -1330,19 +1335,6 @@ class Worker(WorkerBase):
                 assert self.task_state[key] == 'executing'
 
             function, args, kwargs = self.tasks[key]
-
-            try:
-                start = min(self.response[dep]['transfer_start']
-                            for dep in self.dependencies[key]
-                            if dep in self.response
-                            and 'transfer_start' in self.response[dep])
-                stop = max(self.response[dep]['transfer_stop']
-                            for dep in self.dependencies[key]
-                            if dep in self.response
-                            and 'transfer_stop' in self.response[dep])
-                diagnostics = {'transfer_start': start, 'transfer_stop': stop}
-            except ValueError:
-                diagnostics = {}
 
             start = time()
             args2 = pack_data(args, self.data, key_types=str)
