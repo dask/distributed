@@ -253,6 +253,7 @@ class Scheduler(Server):
         self.plugins = []
         self.transition_log = deque(maxlen=config.get('transition-log-length',
                                                       100000))
+        self._transition_counter = 0
 
         self.compute_handlers = {'update-graph': self.update_graph,
                                  'update-data': self.update_data,
@@ -873,14 +874,24 @@ class Scheduler(Server):
         for dep in self.dependencies[key]:
             assert dep in self.who_has
 
+    def validate_no_worker(self, key):
+        assert key in self.unrunnable
+        assert key not in self.waiting
+        assert key not in self.released
+        assert key not in self.rprocessing
+        assert key not in self.who_has
+        for dep in self.dependencies[key]:
+            assert dep in self.who_has
+
     def validate_key(self, key):
         try:
             try:
-                func = getattr(self, 'validate_' + self.task_state[key])
+                func = getattr(self, 'validate_' + self.task_state[key].replace('-', '_'))
             except KeyError:
                 logger.debug("Key lost: %s", key)
             except AttributeError:
-                logger.info("self.validate_%s not found", self.task_state[key])
+                logger.info("self.validate_%s not found",
+                            self.task_state[key].replace('-', '_'))
             else:
                 func(key)
         except Exception as e:
@@ -1809,7 +1820,6 @@ class Scheduler(Server):
                 else:
                     self.waiting_data[dep].add(key)
 
-
             self.waiting_data[key] = {dep for dep in self.dependents[key]
                                           if dep not in self.who_has
                                           and dep not in self.released
@@ -1821,15 +1831,12 @@ class Scheduler(Server):
                     recommendations[key] = 'processing'
                 else:
                     self.unrunnable.add(key)
+                    del self.waiting[key]
                     self.task_state[key] = 'no-worker'
             else:
                 self.task_state[key] = 'waiting'
 
             self.released.remove(key)
-
-            if self.validate:
-                assert key in self.waiting
-                assert key in self.waiting_data
 
             return recommendations
         except Exception as e:
@@ -1842,10 +1849,9 @@ class Scheduler(Server):
         try:
             if self.validate:
                 assert key in self.unrunnable
-                assert key in self.waiting
+                assert key not in self.waiting
                 assert key not in self.who_has
                 assert key not in self.rprocessing
-                assert not self.waiting[key]
 
             self.unrunnable.remove(key)
 
@@ -1853,9 +1859,27 @@ class Scheduler(Server):
                     self.dependencies[key]):
                 return {key: 'forgotten'}
 
+            recommendations = OrderedDict()
+
+            self.waiting[key] = set()
+
+            for dep in self.dependencies[key]:
+                if dep not in self.who_has:
+                    self.waiting[key].add(dep)
+                if dep in self.released:
+                    recommendations[dep] = 'waiting'
+                else:
+                    self.waiting_data[dep].add(key)
+
             self.task_state[key] = 'waiting'
 
-            return {key: 'processing'}
+            if not self.waiting[key]:
+                if self.ncores:
+                    recommendations[key] = 'processing'
+                else:
+                    self.task_state[key] = 'no-worker'
+
+            return recommendations
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1890,9 +1914,9 @@ class Scheduler(Server):
                         self.has_what, valid_workers, self.loose_restrictions,
                         self.nbytes, self.ncores, key)
             elif self.idle:
-                worker = random.choice(tuple(self.idle))  # TODO: linear time
+                worker = min(self.idle, key=self.occupancy.get)  # TODO: linear time
             elif self.ncores:
-                worker = random.choice(tuple(self.ncores))  # TODO: linear time
+                worker = min(self.idle, key=self.occupancy.get)  # TODO: linear time
             else:
                 raise NotImplementedError()
 
@@ -2049,10 +2073,10 @@ class Scheduler(Server):
 
             for dep in self.waiting_data.get(key, ()):  # lost dependency
                 dep_state = self.task_state[dep]
+                if dep_state in ('no-worker', 'processing'):
+                    recommendations[dep] = 'waiting'
                 if dep_state == 'waiting':
                     self.waiting[dep].add(key)
-                elif dep_state != 'no-worker':
-                    recommendations[dep] = 'waiting'
 
             workers = self.who_has.pop(key)
             for w in workers:
@@ -2366,7 +2390,6 @@ class Scheduler(Server):
                 except KeyError:  # dep may also be released
                     pass
 
-            del self.waiting[key]
             del self.waiting_data[key]
 
             return {}
@@ -2475,7 +2498,9 @@ class Scheduler(Server):
                 recommendations = a
                 start = 'released'
             finish2 = self.task_state.get(key, 'forgotten')
-            self.transition_log.append((key, start, finish2, recommendations))
+            self.transition_log.append((key, start, finish2, recommendations,
+                                        self._transition_counter))
+            self._transition_counter += 1
             if self.validate:
                 logger.debug("Transition %s->%s: %s New: %s",
                              start, finish2, key, recommendations)
@@ -2499,6 +2524,7 @@ class Scheduler(Server):
         reach a steady state
         """
         keys = set()
+        original = recommendations
         recommendations = recommendations.copy()
         while recommendations:
             key, finish = recommendations.popitem()

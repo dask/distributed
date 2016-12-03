@@ -1161,6 +1161,7 @@ class Worker(WorkerBase):
                 logger.error("Worker stream died during communication: %s",
                              worker)
                 response = {}
+                self.log.append(('receive-dep-failed', worker))
             finally:
                 del self.connections[stream]
                 stream.close()
@@ -1175,14 +1176,21 @@ class Worker(WorkerBase):
             for d, v in response.items():
                 self.put_key_in_memory(d, v)
 
-            self.loop.add_callback(self.scheduler.add_keys, address=self.address, keys=list(response))
+            if response:
+                self.loop.add_callback(self.scheduler.add_keys, address=self.address, keys=list(response))
 
             for d in deps:
                 if d not in response and d in self.dependents:
                     self.log.append(('missing-dep', d))
-                    self.who_has[d].remove(worker)
-                    self.has_what[worker].remove(d)
-                    for key in self.dependents[d]:
+                    try:
+                        self.who_has[d].remove(worker)
+                    except KeyError:
+                        pass
+                    try:
+                        self.has_what[worker].remove(d)
+                    except KeyError:
+                        pass
+                    for key in self.dependents.get(d, ()):
                         if key in self.waiting_for_data:
                             self.data_needed.appendleft(key)
 
