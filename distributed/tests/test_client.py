@@ -1313,6 +1313,7 @@ def test_allow_restrictions(c, s, a, b):
     """
 
     x = c.submit(inc, 15, workers='127.0.0.3', allow_other_workers=True)
+
     yield x._result()
     assert s.who_has[x.key]
     assert x.key in s.loose_restrictions

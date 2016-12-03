@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timedelta
+from functools import partial
 import logging
 import math
 from math import log
@@ -1903,20 +1904,20 @@ class Scheduler(Server):
 
             del self.waiting[key]
 
-            if not valid_workers:
+            if not valid_workers and key not in self.loose_restrictions and self.ncores:
                 self.unrunnable.add(key)
                 self.task_state[key] = 'no-worker'
                 return {}
 
             if self.dependencies.get(key, None) or valid_workers is not True:
-                worker = decide_worker(self.dependencies,
-                        self.occupancy, self.who_has,
-                        self.has_what, valid_workers, self.loose_restrictions,
-                        self.nbytes, self.ncores, key)
+                worker = decide_worker(self.dependencies, self.occupancy,
+                        self.who_has, valid_workers, self.loose_restrictions,
+                        key, objective=partial(self.worker_objective, key))
             elif self.idle:
-                worker = min(self.idle, key=self.occupancy.get)  # TODO: linear time
+                # TODO: these lines are linear time (in workers) and don't scale
+                worker = min(self.idle, key=partial(self.worker_objective,  key))
             elif self.ncores:
-                worker = min(self.idle, key=self.occupancy.get)  # TODO: linear time
+                worker = min(self.ncores, key=partial(self.worker_objective,  key))
             else:
                 raise NotImplementedError()
 
@@ -2793,16 +2794,29 @@ class Scheduler(Server):
             )
         return self._ipython_kernel.get_connection_info()
 
+    def worker_objective(self, key, worker):
+        """
+        Objective function to determine which worker should get the key
 
-def decide_worker(dependencies, occupancy, who_has,
-        has_what, valid_workers, loose_restrictions, nbytes, ncores, key):
+        Minimize expected start time.  If a tie then break with data storate.
+        """
+        comm_bytes = sum([self.nbytes.get(k, 1000) for k in self.dependencies[key]
+                          if worker not in self.who_has[k]])
+        stack_time = self.occupancy[worker] / self.ncores[worker]
+        start_time = comm_bytes / BANDWIDTH + stack_time
+        return (start_time, self.worker_bytes[worker])
+
+
+def decide_worker(dependencies, occupancy, who_has, valid_workers,
+        loose_restrictions, key, objective=None, has_what=None, nbytes=None,
+        ncores=None):
+
     """
     Decide which worker should take task
 
     >>> dependencies = {'c': {'b'}, 'b': {'a'}}
     >>> occupancy = {'alice:8000': 0, 'bob:8000': 0}
     >>> who_has = {'a': {'alice:8000'}}
-    >>> has_what = {'alice:8000': {'a'}}
     >>> nbytes = {'a': 100}
     >>> ncores = {'alice:8000': 1, 'bob:8000': 1}
     >>> valid_workers = True
@@ -2854,9 +2868,10 @@ def decide_worker(dependencies, occupancy, who_has,
             workers = valid_workers
             if not workers:
                 if key in loose_restrictions:
-                    return decide_worker(dependencies, occupancy,
-                            who_has, has_what, True, set(), nbytes,
-                            ncores, key)
+                    return decide_worker(dependencies, occupancy, who_has,
+                            True, set(), key, objective=objective,
+                            nbytes=nbytes, has_what=has_what, ncores=ncores)
+
                 else:
                     return None
     if not workers or not occupancy:
@@ -2865,13 +2880,13 @@ def decide_worker(dependencies, occupancy, who_has,
     if len(workers) == 1:
         return first(workers)
 
-    # Select worker that will finish task first
-    def objective(w):
-        comm_bytes = sum([nbytes.get(k, 1000) for k in dependencies[key]
-                          if w not in who_has[k]])
-        stack_time = occupancy[w] / ncores[w]
-        start_time = comm_bytes / BANDWIDTH + stack_time
-        return (start_time, len(has_what[w]))
+    if objective is None:
+        def objective(w):
+            comm_bytes = sum([nbytes.get(k, 1000) for k in dependencies[key]
+                              if w not in who_has[k]])
+            stack_time = occupancy[w] / ncores[w]
+            start_time = comm_bytes / BANDWIDTH + stack_time
+            return (start_time, len(has_what[w]))
 
     return min(workers, key=objective)
 
