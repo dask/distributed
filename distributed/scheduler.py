@@ -1901,12 +1901,12 @@ class Scheduler(Server):
 
             valid_workers = self.valid_workers(key)
 
+            del self.waiting[key]
+
             if not valid_workers:
                 self.unrunnable.add(key)
                 self.task_state[key] = 'no-worker'
                 return {}
-
-            del self.waiting[key]
 
             if self.dependencies.get(key, None) or valid_workers is not True:
                 worker = decide_worker(self.dependencies,
