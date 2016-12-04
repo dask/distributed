@@ -11,6 +11,8 @@ from . import pickle
 serializers = {}
 deserializers = {None: lambda header, frames: pickle.loads(b''.join(frames))}
 
+lazy_registrations = {}
+
 
 def register_serialization(cls, serialize, deserialize):
     """ Register a new class for custom serialization
@@ -50,6 +52,13 @@ def register_serialization(cls, serialize, deserialize):
         name = cls
     serializers[name] = serialize
     deserializers[name] = deserialize
+
+
+def register_serialization_lazy(toplevel, func):
+    """Register a registration function to be called if *toplevel*
+    module is ever loaded.
+    """
+    lazy_registrations[toplevel] = func
 
 
 def typename(typ):
@@ -98,11 +107,16 @@ def serialize(x):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
-    name = typename(type(x))
+    typ = type(x)
+    name = typename(typ)
     if name in serializers:
         header, frames = serializers[name](x)
         header['type'] = name
     else:
+        toplevel, _, _ = typ.__module__.partition('.')
+        if toplevel in lazy_registrations:
+            lazy_registrations.pop(toplevel)()
+            return serialize(x)  # recurse
         header, frames = {}, [pickle.dumps(x)]
 
     return header, frames
