@@ -45,7 +45,6 @@ def test_processing_update():
     data = Processing.processing_update(msg)
     expected = {'name': ['alice', 'bob'],
                 'processing': [2, 1],
-                'left': [-3, -2],
                 'right': [2, 1],
                 'top': [2, 1],
                 'bottom': [1, 0],
