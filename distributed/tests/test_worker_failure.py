@@ -113,8 +113,9 @@ def test_restart(c, s, a, b):
     f = yield c._restart()
     assert f is c
 
-    assert len(s.stacks) == 2
     assert len(s.processing) == 2
+    assert len(s.occupancy) == 2
+    assert not any(s.occupancy.values())
 
     assert not s.who_has
 
