@@ -104,6 +104,7 @@ def test_stress_creation_and_deletion(c, s):
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 10, client=True, timeout=60)
 def test_stress_scatter_death(c, s, *workers):
     import random
+    s.allowed_failures = 1000
     np = pytest.importorskip('numpy')
     L = yield c._scatter([np.random.random(10000) for i in range(len(workers))])
     yield c._replicate(L, n=2)
