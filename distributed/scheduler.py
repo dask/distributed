@@ -2557,7 +2557,7 @@ class Scheduler(Server):
 
             try:
                 stream = yield connect(ip, int(port))
-                logger.info("Steal %.2fs of work: %s <- %s", budget, idle, saturated)
+                logger.info("Steal %s percent of work: %s <- %s", int(100 * budget), idle, saturated)
                 response = yield send_recv(stream, op='steal', worker=saturated, budget=budget)
                 assert response
                 yield write(stream, 'OK')
@@ -2640,16 +2640,17 @@ class Scheduler(Server):
                 while idle and occ / sc >= avg * 1.9:
                     i = idle.pop()
                     ic = self.ncores[i]
-                    budget = fraction * occ
+                    frac = fraction
                     if sc > ic:
-                        budget *= ic / sc
+                        frac *= ic / sc
+                    budget = frac * occ
                     if budget < 0.1:
                         idle.append(i)
                         break
                     else:
                         occ -= budget
                         self.loop.add_callback(self.work_steal, i, s,
-                                               budget=budget)
+                                               budget=frac)
                         flag = True
                     logger.debug("cycle balance work steal")
 

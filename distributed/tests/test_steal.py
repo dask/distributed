@@ -82,7 +82,9 @@ def test_worksteal_many_thieves(c, s, *workers):
     yield _wait(xs)
 
     for w, keys in s.has_what.items():
-        assert 2 < len(keys) < 50
+        assert 2 < len(keys) < 30
+
+    assert sum(map(len, s.has_what.values())) < 150
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
@@ -162,17 +164,20 @@ def test_new_worker_steals(c, s, a):
 
 @gen_cluster(client=True, timeout=20)
 def test_work_steal_no_kwargs(c, s, a, b):
+    yield _wait(c.submit(slowinc, 1, delay=0.05))
+
     futures = c.map(slowinc, range(100), workers=a.address,
-                    allow_other_workers=True)
+                    allow_other_workers=True, delay=0.05)
+
+    yield _wait(futures)
+
+    assert 20 < len(a.data) < 80
+    assert 20 < len(b.data) < 80
 
     total = c.submit(sum, futures)
     result = yield total._result()
 
     assert result == sum(map(inc, range(100)))
-
-    assert len(a.data) > 20
-    assert len(b.data) > 20
-
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)])
 def test_dont_steal_worker_restrictions(c, s, a, b):
@@ -183,7 +188,7 @@ def test_dont_steal_worker_restrictions(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
-    result = yield s.work_steal(b.address, a.address, budget=1)
+    result = yield s.work_steal(b.address, a.address, budget=0.5)
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
@@ -198,7 +203,7 @@ def test_dont_steal_host_restrictions(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
-    result = yield s.work_steal(b.address, a.address, budget=1)
+    result = yield s.work_steal(b.address, a.address, budget=0.5)
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
@@ -214,7 +219,7 @@ def test_dont_steal_resource_restrictions(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
-    result = yield s.work_steal(b.address, a.address, budget=1)
+    result = yield s.work_steal(b.address, a.address, budget=0.5)
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0

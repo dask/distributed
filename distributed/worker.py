@@ -778,6 +778,7 @@ class Worker(WorkerBase):
         self.executing = set()
         self.executed_count = 0
         self.long_running = set()
+        self.steal_offered = set()
 
         self.batched_stream = None
         self.target_message_size = 200e6  # 10 MB
@@ -1421,8 +1422,10 @@ class Worker(WorkerBase):
 
         Parameters
         ----------
-        worker: string, address of peer
-        budget: number, time in seconds to steal
+        worker: string
+            Address of peer
+        budget: float
+            Fraction of total time to steal
         """
         with log_errors():
             ip, port = worker.split(':')
@@ -1437,11 +1440,12 @@ class Worker(WorkerBase):
 
             self.priority_counter += 1
             for key, msg in response['msgs'].items():
-                msg.update(msg.pop('task'))
-                priority = msg.pop('priority')
-                priority = [self.priority_counter] + priority
-                priority = tuple(-x for x in priority)
-                self.add_task(key, priority=priority, **msg)
+                if key not in self.task_state:
+                    msg.update(msg.pop('task'))
+                    priority = msg.pop('priority')
+                    priority = [self.priority_counter] + priority
+                    priority = tuple(-x for x in priority)
+                    self.add_task(key, priority=priority, **msg)
 
             self.ensure_communicating()
             self.ensure_computing()
@@ -1464,7 +1468,7 @@ class Worker(WorkerBase):
         Parameters
         ----------
         budget: number
-            Duration in seconds of work to send
+            Fraction of total time to steal
         ncores: int
             Number of cores on remove machine
         bandwidth: number
@@ -1472,7 +1476,10 @@ class Worker(WorkerBase):
         """
         with log_errors():
             heap = []
+            total_duration = 0
             for k in concat([self.waiting_for_data, pluck(1, self.heap)]):
+                if k in self.steal_offered:
+                    continue
                 if self.task_state.get(k) in PENDING:
                     if not is_valid_worker(
                             worker_restrictions=self.worker_restrictions.get(k),
@@ -1482,11 +1489,14 @@ class Worker(WorkerBase):
                         continue
 
                     compute = self.durations.get(k, 0.5) / ncores
+                    total_duration += compute
                     communicate = 0.010 + sum(self.nbytes[dep] for dep in self.dependencies[k]) / bandwidth
                     score = compute / communicate
                     if score > 0.05:
                         heapq.heappush(heap, (score, k, compute, communicate))
 
+            assert budget < 1.0  # fraction
+            budget = budget * total_duration
             good = set()
             cost = 0
             while heap:
@@ -1511,6 +1521,7 @@ class Worker(WorkerBase):
                                self.dependencies[k]}
                 msgs[k] = d
 
+            self.steal_offered.update(good)
             logger.info("Sending %d tasks: %s -> %s", len(good), self.address,
                         worker)
             yield write(stream, {'msgs': msgs, 'keys': list(good)})  # wait on ack
@@ -1519,6 +1530,7 @@ class Worker(WorkerBase):
 
             # We're clear to remove these keys.  Scheduler is aware
             for key in good:
+                self.steal_offered.remove(key)
                 self.rescind_key(key)
 
             yield close(stream)
