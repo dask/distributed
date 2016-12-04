@@ -225,11 +225,10 @@ def test_steal_resource_restrictions(c, s, a):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     yield future._result()
 
-    futures = c.map(slowinc, range(100), delay=0.1, resources={'A': 1})
-    while not a.task_state:
+    futures = c.map(slowinc, range(100), delay=0.2, resources={'A': 1})
+    while len(a.task_state) < 101:
         yield gen.sleep(0.01)
-    yield gen.sleep(0.1)
-    assert len(a.task_state) == 100
+    assert len(a.task_state) == 101
 
     b = Worker(s.ip, s.port, loop=s.loop, ncores=1, resources={'A': 4})
     yield b._start()
@@ -237,7 +236,7 @@ def test_steal_resource_restrictions(c, s, a):
     s.balance_by_stealing()
 
     start = time()
-    while not b.task_state:
+    while not b.task_state and len(a.task_state) == 101:
         yield gen.sleep(0.01)
         assert time() < start + 3
 
