@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 from functools import partial
-from time import time
 import logging
 
 from bokeh.layouts import row, column, widgetbox
@@ -20,6 +19,7 @@ from toolz import frequencies
 from .components import DashboardComponent
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
+from ..metrics import time
 from ..utils import log_errors, key_split
 
 

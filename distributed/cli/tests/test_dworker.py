@@ -6,12 +6,13 @@ pytest.importorskip('requests')
 import os
 import requests
 import signal
-from time import time, sleep
+from time import sleep
 from toolz import first
 
 from distributed import Scheduler, Client
 from distributed.core import rpc
 from distributed.nanny import isalive
+from distributed.metrics import time
 from distributed.utils import sync, ignoring
 from distributed.utils_test import (loop, popen, slow, terminate_process,
                                     wait_for_port)

@@ -3,18 +3,19 @@ from __future__ import print_function, division, absolute_import
 from operator import add
 import pytest
 import sys
-from time import time
+
 from toolz import valmap
 from tornado import gen
 from tornado.queues import Queue
 
 from dask.core import get_deps
-from distributed.client import _wait
-from distributed.worker import dumps_task
 from distributed import Nanny
+from distributed.client import _wait
+from distributed.metrics import time
 from distributed.utils_test import (gen_cluster, cluster, inc, dec, gen_test,
         div)
 from distributed.utils import All, key_split
+from distributed.worker import dumps_task
 from distributed.diagnostics.progress import (Progress, SchedulerPlugin,
         AllProgress, MultiProgress, dependent_keys)
 from distributed.protocol.pickle import dumps

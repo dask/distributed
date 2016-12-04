@@ -8,7 +8,6 @@ import os
 import re
 import shutil
 import sys
-from time import time
 import traceback
 
 from dask import delayed
@@ -20,6 +19,7 @@ from tornado.ioloop import TimeoutError
 from distributed.core import rpc, connect, read, write
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
+from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.protocol.pickle import dumps, loads
 from distributed.sizeof import sizeof

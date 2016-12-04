@@ -8,7 +8,7 @@ import shutil
 import socket
 from sys import argv, exit
 import sys
-from time import time, sleep
+from time import sleep
 
 import click
 from distributed import Nanny, Worker, sync, rpc
@@ -16,6 +16,7 @@ from distributed.nanny import isalive
 from distributed.utils import get_ip, All, ignoring
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
+from distributed.metrics import time
 from distributed.cli.utils import check_python_3
 from toolz import valmap
 from tornado.ioloop import IOLoop, TimeoutError

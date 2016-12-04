@@ -9,12 +9,13 @@ import requests
 import signal
 import socket
 import sys
-from time import sleep, time
+from time import sleep
 
 
 from distributed import Scheduler, Client
 from distributed.utils import get_ip, ignoring, tmpfile
 from distributed.utils_test import loop, popen
+from distributed.metrics import time
 
 
 def test_defaults(loop):

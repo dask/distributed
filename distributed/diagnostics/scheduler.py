@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 import os
-from time import time
 
 try:
     from cytoolz import valmap
@@ -10,6 +9,7 @@ except ImportError:
 
 from toolz import countby, concat, dissoc
 
+from ..metrics import time
 from ..utils import key_split, log_errors
 
 

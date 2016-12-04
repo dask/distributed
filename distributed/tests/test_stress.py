@@ -4,13 +4,14 @@ from concurrent.futures import CancelledError
 from datetime import timedelta
 from operator import add
 import sys
-from time import sleep, time
+from time import sleep
 
 from dask import delayed
 import pytest
 from toolz import concat, sliding_window, first
 
 from distributed import Client, wait, Nanny
+from distributed.metrics import time
 from distributed.utils import All
 from distributed.utils_test import (gen_cluster, cluster, inc, slowinc, loop,
         slowadd, slow)

@@ -7,7 +7,6 @@ import six
 import socket
 import struct
 import sys
-from time import time
 import traceback
 import uuid
 
@@ -27,6 +26,7 @@ from tornado.iostream import IOStream, StreamClosedError
 
 from .compatibility import PY3, unicode, WINDOWS
 from .config import config
+from .metrics import time
 from .system_monitor import SystemMonitor
 from .utils import get_traceback, truncate_exception, ignoring
 from . import protocol

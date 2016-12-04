@@ -1,5 +1,6 @@
 from collections import deque
-from time import time
+
+from ..metrics import time
 
 n = 60
 m = 100000

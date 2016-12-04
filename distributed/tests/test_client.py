@@ -12,7 +12,7 @@ import pickle
 from random import random, choice
 import sys
 from threading import Thread, Semaphore
-from time import sleep, time
+from time import sleep
 import traceback
 
 import mock
@@ -32,6 +32,7 @@ from distributed.client import (Client, Future, CompatibleExecutor, _wait,
         wait, _as_completed, as_completed, tokenize, _global_client,
         default_client, _first_completed, ensure_default_get, futures_of,
         temp_default_client, get_restrictions)
+from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All, mp_context

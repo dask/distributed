@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from time import time, sleep
+from time import sleep
 import weakref
 
 from tornado.ioloop import IOLoop
@@ -18,7 +18,7 @@ from tornado import gen
 
 from .compatibility import JSONDecodeError
 from .core import Server, rpc, write, RPCClosed
-from .metrics import disk_io_counters, net_io_counters
+from .metrics import disk_io_counters, net_io_counters, time
 from .protocol import to_serialize
 from .utils import get_ip, ignoring, log_errors, mp_context, tmpfile
 from .worker import _ncores, Worker, run, TOTAL_MEMORY

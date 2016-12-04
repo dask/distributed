@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 import sys
-from time import time
 
 import pytest
 from toolz import sliding_window
@@ -11,6 +10,7 @@ import dask
 from dask import delayed
 from distributed import Worker
 from distributed.client import Client, _wait, wait
+from distributed.metrics import time
 from distributed.utils_test import (cluster, slowinc, slowadd, randominc,
         loop, inc, dec, div, throws, gen_cluster, gen_test, double, deep)
 

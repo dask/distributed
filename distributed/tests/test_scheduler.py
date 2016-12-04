@@ -6,7 +6,7 @@ from copy import deepcopy
 from datetime import timedelta
 from operator import add
 import sys
-from time import time, sleep
+from time import sleep
 
 import dask
 from dask import delayed
@@ -23,6 +23,7 @@ from distributed import Nanny, Worker
 from distributed.core import connect, read, write, close, rpc
 from distributed.scheduler import validate_state, Scheduler
 from distributed.client import _wait
+from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
