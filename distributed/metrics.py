@@ -78,7 +78,7 @@ class _WindowsTime(object):
 
 # A high-resolution wall clock timer measuring the seconds since Unix epoch
 if sys.platform.startswith('win'):
-    wall_clock = _WindowsTime().time
+    time = _WindowsTime().time
 else:
     # Under modern Unices, time.time() should be good enough
-    wall_clock = time.time
+    time = time.time
