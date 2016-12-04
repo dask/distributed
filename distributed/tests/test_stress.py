@@ -11,6 +11,7 @@ import pytest
 from toolz import concat, sliding_window, first
 
 from distributed import Client, wait, Nanny
+from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import All
 from distributed.utils_test import (gen_cluster, cluster, inc, slowinc, loop,
@@ -129,7 +130,10 @@ def test_stress_scatter_death(c, s, *workers):
             s.validate_state()
         except Exception as c:
             logger.exception(c)
-            import pdb; pdb.set_trace()
+            if config.get('log-on-err'):
+                import pdb; pdb.set_trace()
+            else:
+                raise
         w = random.choice(alive)
         yield w._close()
         alive.remove(w)
@@ -138,7 +142,10 @@ def test_stress_scatter_death(c, s, *workers):
         yield gen.with_timeout(timedelta(seconds=10), c._gather(futures))
     except gen.TimeoutError:
         ws = {w.address: w for w in workers if w.status != 'closed'}
-        import pdb; pdb.set_trace()
+        if config.get('log-on-err'):
+            import pdb; pdb.set_trace()
+        else:
+            raise
     except CancelledError:
         pass
 
