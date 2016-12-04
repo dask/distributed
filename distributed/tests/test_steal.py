@@ -236,11 +236,11 @@ def test_steal_resource_restrictions(c, s, a):
     s.balance_by_stealing()
 
     start = time()
-    while not b.task_state and len(a.task_state) == 101:
+    while not b.task_state or len(a.task_state) == 101:
         yield gen.sleep(0.01)
         assert time() < start + 3
 
-    assert len(a.task_state) < 100
     assert len(b.task_state) > 0
+    assert len(a.task_state) < 101
 
     yield b._close()
