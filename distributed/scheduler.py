@@ -1080,11 +1080,11 @@ class Scheduler(Server):
                'duration': self.task_duration.get(key_split(key), 0.5)}
         if key not in self.loose_restrictions:
             if key in self.host_restrictions:
-                msg['host-restrictions'] = list(self.host_restrictions[key])
+                msg['host_restrictions'] = list(self.host_restrictions[key])
             if key in self.worker_restrictions:
-                msg['worker-restrictions'] = list(self.host_restrictions[key])
+                msg['worker_restrictions'] = list(self.worker_restrictions[key])
         if key in self.resource_restrictions:
-            msg['resource-restrictions'] = self.resource_restrictions[key]
+            msg['resource_restrictions'] = self.resource_restrictions[key]
 
         deps = self.dependencies[key]
         if deps:

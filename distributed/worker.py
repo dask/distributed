@@ -770,6 +770,9 @@ class Worker(WorkerBase):
         self.priority_counter = 0
         self.durations = dict()
         self.response = defaultdict(dict)
+        self.host_restrictions = dict()
+        self.worker_restrictions = dict()
+        self.resource_restrictions = dict()
 
         self.heap = list()
         self.executing = set()
@@ -854,7 +857,9 @@ class Worker(WorkerBase):
             raise
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
-            who_has=None, nbytes=None, priority=None, duration=None, **kwargs2):
+            who_has=None, nbytes=None, priority=None, duration=None,
+            host_restrictions=None, worker_restrictions=None,
+            resource_restrictions=None, **kwargs2):
         try:
             if key in self.task_state:
                 state = self.task_state[key]
@@ -883,6 +888,12 @@ class Worker(WorkerBase):
 
             self.priorities[key] = priority
             self.durations[key] = duration
+            if host_restrictions:
+                self.host_restrictions[key] = set(host_restrictions)
+            if worker_restrictions:
+                self.worker_restrictions[key] = set(worker_restrictions)
+            if resource_restrictions:
+                self.resource_restrictions[key] = resource_restrictions
             self.task_state[key] = 'waiting'
 
             if nbytes:
@@ -1282,6 +1293,13 @@ class Worker(WorkerBase):
                     del self.durations[key]
                 if key in self.response:
                     del self.response[key]
+
+            if key in self.host_restrictions:
+                del self.host_restrictions[key]
+            if key in self.worker_restrictions:
+                del self.worker_restrictions[key]
+            if key in self.resource_restrictions:
+                del self.resource_restrictions[key]
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
