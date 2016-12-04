@@ -46,7 +46,7 @@ def test_adaptive_local_cluster_multi_workers():
     futures = c.map(slowinc, range(100), delay=0.01)
 
     start = time()
-    while not cluster.workers:
+    while not cluster.scheduler.worker_info:
         yield gen.sleep(0.01)
         assert time() < start + 15
 

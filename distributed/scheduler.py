@@ -1526,57 +1526,59 @@ class Scheduler(Server):
                     self.add_keys(address=w, keys=list(gathers[w]))
 
     def workers_to_close(self, memory_ratio=2):
-        if not self.idle or self.ready:
-            return []
+        with log_errors():
+            if all(self.processing.values()):
+                return []
 
-        limit_bytes = {w: self.worker_info[w]['memory_limit']
-                        for w in self.worker_info}
-        worker_bytes = self.worker_bytes
+            limit_bytes = {w: self.worker_info[w]['memory_limit']
+                            for w in self.worker_info}
+            worker_bytes = self.worker_bytes
 
-        limit = sum(limit_bytes.values())
-        total = sum(worker_bytes.values())
-        idle = sorted(self.idle, key=worker_bytes.get, reverse=True)
+            limit = sum(limit_bytes.values())
+            total = sum(worker_bytes.values())
+            idle = sorted(self.idle, key=worker_bytes.get, reverse=True)
 
-        to_close = []
+            to_close = []
 
-        while idle:
-            w = idle.pop()
-            limit -= limit_bytes[w]
-            if limit >= memory_ratio * total:  # still plenty of space
-                to_close.append(w)
-            else:
-                break
+            while idle:
+                w = idle.pop()
+                limit -= limit_bytes[w]
+                if limit >= memory_ratio * total:  # still plenty of space
+                    to_close.append(w)
+                else:
+                    break
 
-        return to_close
+            return to_close
 
     @gen.coroutine
     def retire_workers(self, stream=None, workers=None, remove=True):
-        if workers is None:
-            while True:
-                try:
-                    workers = self.workers_to_close()
-                    if workers:
-                        yield self.retire_workers(workers=workers, remove=remove)
-                    raise gen.Return(list(workers))
-                except KeyError:  # keys left during replicate
-                    pass
+        with log_errors():
+            if workers is None:
+                while True:
+                    try:
+                        workers = self.workers_to_close()
+                        if workers:
+                            yield self.retire_workers(workers=workers, remove=remove)
+                        raise gen.Return(list(workers))
+                    except KeyError:  # keys left during replicate
+                        pass
 
-        workers = set(workers)
-        keys = set.union(*[self.has_what[w] for w in workers])
-        keys = {k for k in keys if self.who_has[k].issubset(workers)}
+            workers = set(workers)
+            keys = set.union(*[self.has_what[w] for w in workers])
+            keys = {k for k in keys if self.who_has[k].issubset(workers)}
 
-        other_workers = set(self.worker_info) - workers
-        if keys:
-            if other_workers:
-                yield self.replicate(keys=keys, workers=other_workers, n=1,
-                                    delete=False)
-            else:
-                raise gen.Return([])
+            other_workers = set(self.worker_info) - workers
+            if keys:
+                if other_workers:
+                    yield self.replicate(keys=keys, workers=other_workers, n=1,
+                                        delete=False)
+                else:
+                    raise gen.Return([])
 
-        if remove:
-            for w in workers:
-                self.remove_worker(address=w, safe=True)
-        raise gen.Return(list(workers))
+            if remove:
+                for w in workers:
+                    self.remove_worker(address=w, safe=True)
+            raise gen.Return(list(workers))
 
     @gen.coroutine
     def synchronize_worker_data(self, stream=None, worker=None):
