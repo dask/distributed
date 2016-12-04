@@ -1458,7 +1458,7 @@ class Worker(WorkerBase):
 
     @gen.coroutine
     def request_work(self, stream, worker=None, budget=None, ncores=None,
-                     bandwidth=100e6, **kwargs):
+                     bandwidth=100e6, total_resources=None, **kwargs):
         """ Determine tasks to send to peer worker
 
         Parameters
@@ -1474,6 +1474,13 @@ class Worker(WorkerBase):
             heap = []
             for k in concat([self.waiting_for_data, pluck(1, self.heap)]):
                 if self.task_state.get(k) in PENDING:
+                    if not is_valid_worker(
+                            worker_restrictions=self.worker_restrictions.get(k),
+                            host_restrictions=self.host_restrictions.get(k),
+                            resource_restrictions=self.resource_restrictions.get(k),
+                            worker=worker, resources=total_resources):
+                        continue
+
                     compute = self.durations.get(k, 0.5) / ncores
                     communicate = 0.010 + sum(self.nbytes[dep] for dep in self.dependencies[k]) / bandwidth
                     score = compute / communicate
@@ -1584,3 +1591,45 @@ class Worker(WorkerBase):
                     if key in msg
                     or any(key in c for c in msg
                            if isinstance(c, (tuple, list, set)))]
+
+
+def is_valid_worker(worker_restrictions=None, host_restrictions=None,
+        resource_restrictions=None, resources=None, worker=None):
+    """
+    Can this worker run on this machine given known scheduling restrictions?
+
+    Examples
+    --------
+    >>> is_valid_worker(worker_restrictions={'alice:8000', 'bob:8000'},
+    ...                 worker='alice:8000')
+    True
+
+    >>> is_valid_worker(host_restrictions={'alice', 'bob'},
+    ...                 worker='alice:8000')
+    True
+
+    >>> is_valid_worker(resource_restrictions={'GPU': 1, 'MEM': 8e9},
+    ...                 resources={'GPU': 2, 'MEM':4e9})
+    False
+
+    >>> is_valid_worker(host_restrictions={'alice', 'bob'},
+    ...                 resource_restrictions={'GPU': 1, 'MEM': 8e9},
+    ...                 resources={'GPU': 2, 'MEM': 10e9},
+    ...                 worker='charlie:8000')
+    False
+    """
+    if worker_restrictions is not None:
+        if worker not in worker_restrictions:
+            return False
+
+    if host_restrictions is not None:
+        host = worker.split(':')[0]
+        if host not in host_restrictions:
+            return False
+
+    if resource_restrictions is not None:
+        for resource, quantity in resource_restrictions.items():
+            if resources.get(resource, 0) < quantity:
+                return False
+
+    return True

@@ -246,7 +246,7 @@ class Scheduler(Server):
         self.worker_info = dict()
         self.host_info = defaultdict(dict)
         self.worker_resources = dict()
-        self.available_resources = dict()
+        self.used_resources = dict()
         self.resources = defaultdict(dict)
         self.aliases = dict()
         self.occupancy = dict()
@@ -2696,24 +2696,12 @@ class Scheduler(Server):
     def consume_resources(self, key, worker):
         if key in self.resource_restrictions:
             for r, required in self.resource_restrictions[key].items():
-                self.available_resources[worker][r] -= required
-                if self.validate:
-                    assert self.available_resources[worker][r] >= 0
+                self.used_resources[worker][r] += required
 
     def release_resources(self, key, worker):
         if key in self.resource_restrictions:
             for r, required in self.resource_restrictions[key].items():
-                if self.validate:
-                    assert self.available_resources[worker][r] >= 0
-                self.available_resources[worker][r] += required
-
-    def check_resources(self, key, worker):
-        resources = self.available_resources[worker]
-        if key in self.resource_restrictions:
-            for r, required in self.resource_restrictions[key].items():
-                if required > resources.get(r, 0):
-                    return False
-        return True
+                self.used_resources[worker][r] -= required
 
     #####################
     # Utility functions #
@@ -2722,7 +2710,7 @@ class Scheduler(Server):
     def add_resources(self, worker, resources):
         if worker not in self.worker_resources:
             self.worker_resources[worker] = resources
-            self.available_resources[worker] = resources
+            self.used_resources[worker] = resources
             for resource, quantity in resources.items():
                 self.resources[resource][worker] = quantity
 
@@ -2730,7 +2718,7 @@ class Scheduler(Server):
 
     def remove_resources(self, worker):
         if worker in self.worker_resources:
-            del self.available_resources[worker]
+            del self.used_resources[worker]
             for resource, quantity in self.worker_resources.pop(worker).items():
                 del self.resources[resource][worker]
 
