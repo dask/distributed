@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 import collections
 from functools import wraps
 import sys
-import time
+import time as timemod
 
 
 _empty_namedtuple = collections.namedtuple("_empty_namedtuple", ())
@@ -46,9 +46,9 @@ class _WindowsTime(object):
         self.last_resync = float("-inf")
 
     if sys.version_info >= (3,):
-        perf_counter = time.perf_counter
+        perf_counter = timemod.perf_counter
     else:
-        perf_counter = time.clock
+        perf_counter = timemod.clock
 
     def time(self):
         delta = self.delta
@@ -59,7 +59,7 @@ class _WindowsTime(object):
         return delta + cur
 
     def resync(self):
-        _time = time.time
+        _time = timemod.time
         _perf_counter = self.perf_counter
         min_samples = 5
         while True:
@@ -81,4 +81,4 @@ if sys.platform.startswith('win'):
     time = _WindowsTime().time
 else:
     # Under modern Unices, time.time() should be good enough
-    time = time.time
+    time = timemod.time
