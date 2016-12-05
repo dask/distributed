@@ -123,13 +123,20 @@ class Scheduler(Server):
     * **worker_restrictions:** ``{key: {workers}}``:
         Like host_restrictions except that these include specific host:port
         worker names
+    * **loose_restrictions:** ``{key}``:
+        Set of keys for which we are allow to violate restrictions (see above)
+        if not valid workers are present.
     * **resource_restrictions:** ``{key: {str: Number}}``:
         Resources required by a task, such as ``{'GPU': 1}`` or
         ``{'memory': 1e9}``.  These names must match resources specified when
         creating workers.
-    * **loose_restrictions:** ``{key}``:
-        Set of keys for which we are allow to violate restrictions (see above)
-        if not valid workers are present.
+    * **worker_resources:** ``{worker: {str: Number}}``:
+        The available resources on each worker like ``{'gpu': 2, 'mem': 1e9}``.
+        These are abstract quantities that constrain certain tasks from running
+        at the same time.
+    * **used_resources:** ``{worker: {str: Number}}``:
+        The sum of each resource used by all tasks allocated to a particular
+        worker.
     *  **exceptions:** ``{key: Exception}``:
         A dict mapping keys to remote exceptions
     *  **tracebacks:** ``{key: list}``:
