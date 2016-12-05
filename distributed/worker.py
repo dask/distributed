@@ -761,7 +761,7 @@ class Worker(WorkerBase):
         self.data_needed = deque()  # TODO: replace with heap?
 
         self.in_flight = dict()
-        self.total_connections = 10
+        self.total_connections = 50
         self.connections = {}
 
         self.nbytes = dict()
@@ -781,7 +781,7 @@ class Worker(WorkerBase):
         self.steal_offered = set()
 
         self.batched_stream = None
-        self.target_message_size = 200e6  # 10 MB
+        self.target_message_size = 200e6  # 200 MB
 
         self.log = deque(maxlen=100000)
         self.validate = kwargs.pop('validate', False)

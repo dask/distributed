@@ -139,7 +139,7 @@ def test_stress_scatter_death(c, s, *workers):
         alive.remove(w)
 
     try:
-        yield gen.with_timeout(timedelta(seconds=10), c._gather(futures))
+        yield gen.with_timeout(timedelta(seconds=20), c._gather(futures))
     except gen.TimeoutError:
         ws = {w.address: w for w in workers if w.status != 'closed'}
         print(s.processing)
