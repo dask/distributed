@@ -1316,17 +1316,8 @@ class Scheduler(Server):
             nannies = [rpc(ip=worker_address.split(':')[0], port=n_port)
                        for worker_address, n_port in nannies.items()]
             try:
-                yield All([nanny.kill() for nanny in nannies])
-                logger.debug("Received done signal from nannies")
-
-                while self.ncores:
-                    yield gen.sleep(0.01)
-
-                logger.debug("Workers all removed.  Sending startup signal")
-
-                # All quiet
-                resps = yield All([nanny.instantiate(close=True,
-                    environment=environment) for nanny in nannies])
+                resps = yield All([nanny.restart(environment=environment, close=True)
+                           for nanny in nannies])
                 assert all(resp == 'OK' for resp in resps)
             finally:
                 for nanny in nannies:
