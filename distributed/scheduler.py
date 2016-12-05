@@ -2584,6 +2584,7 @@ class Scheduler(Server):
                 logger.info("Stream closed while monitoring stealing")
                 return
             else:
+                write(stream, {'op': 'close'})
                 close(stream)
 
             if response['keys']:

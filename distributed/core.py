@@ -151,6 +151,7 @@ class Server(TCPServer):
         """
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
+        op = None
 
         ip, port = address
         logger.info("Connection from %s:%d to %s", ip, port,
@@ -162,8 +163,9 @@ class Server(TCPServer):
                     msg = yield read(stream, deserialize=self.deserialize)
                     logger.debug("Message from %s:%d: %s", ip, port, msg)
                 except EnvironmentError as e:
-                    logger.warn("Lost connection to %s while reading message: %s",
-                                str(address), e)
+                    logger.warn("Lost connection to %s while reading message: %s."
+                                " Last operation: %s",
+                                str(address), e, op)
                     break
                 except Exception as e:
                     logger.exception(e)
