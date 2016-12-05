@@ -142,6 +142,9 @@ def test_stress_scatter_death(c, s, *workers):
         yield gen.with_timeout(timedelta(seconds=10), c._gather(futures))
     except gen.TimeoutError:
         ws = {w.address: w for w in workers if w.status != 'closed'}
+        print(s.processing)
+        print(ws)
+        print(futures)
         if config.get('log-on-err'):
             import pdb; pdb.set_trace()
         else:
