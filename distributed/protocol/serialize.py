@@ -73,6 +73,15 @@ def typename(typ):
     return typ.__module__ + '.' + typ.__name__
 
 
+def _find_lazy_registration(typename):
+    toplevel, _, _ = typename.partition('.')
+    if toplevel in lazy_registrations:
+        lazy_registrations.pop(toplevel)()
+        return True
+    else:
+        return False
+
+
 def serialize(x):
     r"""
     Convert object to a header and list of bytestrings
@@ -113,9 +122,7 @@ def serialize(x):
         header, frames = serializers[name](x)
         header['type'] = name
     else:
-        toplevel, _, _ = typ.__module__.partition('.')
-        if toplevel in lazy_registrations:
-            lazy_registrations.pop(toplevel)()
+        if _find_lazy_registration(name):
             return serialize(x)  # recurse
         header, frames = {}, [pickle.dumps(x)]
 
@@ -135,6 +142,10 @@ def deserialize(header, frames):
     --------
     serialize
     """
+    name = header.get('type')
+    if name not in deserializers:
+        if _find_lazy_registration(name):
+            return deserialize(header, frames)  # recurse
     f = deserializers[header.get('type')]
     return f(header, frames)
 

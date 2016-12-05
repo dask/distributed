@@ -191,6 +191,7 @@ class LocalCluster(object):
         except ImportError:
             logger.info("To start diagnostics web server please install Bokeh")
             return
+        from ..http.scheduler import HTTPScheduler
 
         assert self.diagnostics is None
         if 'http' not in self.scheduler.services:
