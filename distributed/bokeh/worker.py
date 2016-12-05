@@ -12,18 +12,15 @@ from bokeh.models import (
     Circle, CategoricalAxis, Select
 )
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
-from bokeh.palettes import Spectral9, RdBu11
 from bokeh.plotting import figure
 from toolz import frequencies
 
 from .components import DashboardComponent
+from .core import BokehServer, format_bytes, format_time
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..metrics import time
 from ..utils import log_errors, key_split
-
-
-red_blue = sorted(RdBu11)[::-1]
 
 
 logger = logging.getLogger(__name__)
@@ -148,7 +145,7 @@ class CommunicatingTimeSeries(DashboardComponent):
         self.worker = worker
         self.source = ColumnDataSource({'x': [], 'in': [], 'out': []})
 
-        x_range = DataRange1d(follow='end', follow_interval=10000, range_padding=0)
+        x_range = DataRange1d(follow='end', follow_interval=20000, range_padding=0)
 
         fig = figure(title="Communication History",
                      x_axis_type='datetime',
@@ -177,7 +174,7 @@ class ExecutingTimeSeries(DashboardComponent):
         self.worker = worker
         self.source = ColumnDataSource({'x': [], 'y': []})
 
-        x_range = DataRange1d(follow='end', follow_interval=10000, range_padding=0)
+        x_range = DataRange1d(follow='end', follow_interval=20000, range_padding=0)
 
         fig = figure(title="Executing History",
                      x_axis_type='datetime', y_range=[-0.1, worker.ncores + 0.1],
@@ -354,13 +351,12 @@ class SystemMonitor(DashboardComponent):
             self.names.append('num_fds')
         self.source = ColumnDataSource({name: [] for name in self.names})
 
-        x_range = DataRange1d(follow='end', follow_interval=10000,
+        x_range = DataRange1d(follow='end', follow_interval=20000,
                               range_padding=0)
 
         tools = 'reset,pan,wheel_zoom'
 
         self.cpu = figure(title="CPU", x_axis_type='datetime',
-                          y_range=[-0.1, 100 * self.worker.ncores],
                           height=height, tools=tools, x_range=x_range, **kwargs)
         self.cpu.line(source=self.source, x='time', y='cpu')
         self.cpu.yaxis.axis_label = 'Percentage'
@@ -413,6 +409,7 @@ class SystemMonitor(DashboardComponent):
             if not WINDOWS:
                 self.num_fds.y_range.start = 0
             self.mem.y_range.start = 0
+            self.cpu.y_range.start = 0
             self.last = monitor.count
 
 
@@ -464,7 +461,7 @@ def systemmonitor_doc(worker, doc):
         doc.add_root(sysmon.root)
 
 
-class BokehWorker(object):
+class BokehWorker(BokehServer):
     def __init__(self, worker, io_loop=None):
         self.worker = worker
         main = Application(FunctionHandler(partial(main_doc, worker)))
@@ -476,37 +473,6 @@ class BokehWorker(object):
 
         self.loop = io_loop or worker.loop
         self.server = None
-
-    def listen(self, port):
-        if self.server:
-            return
-        for i in range(5):
-            try:
-                self.server = Server(self.apps, io_loop=self.loop, port=port,
-                                     host=['*'])
-                self.server.start(start_loop=False)
-                break
-            except (SystemExit, EnvironmentError):
-                port = 0
-                if i == 4:
-                    raise
-
-    @property
-    def port(self):
-        return (self.server.port or
-                list(self.server._http._sockets.values())[0].getsockname()[1])
-
-    def stop(self):
-        for context in self.server._tornado._applications.values():
-            context.run_unload_hook()
-
-        self.server._tornado._stats_job.stop()
-        self.server._tornado._cleanup_job.stop()
-        if self.server._tornado._ping_job is not None:
-            self.server._tornado._ping_job.stop()
-
-        # self.server.stop()
-        # https://github.com/bokeh/bokeh/issues/5494
 
 
 def transpose(lod):
