@@ -480,14 +480,16 @@ class BokehWorker(object):
     def listen(self, port):
         if self.server:
             return
-        try:
-            self.server = Server(self.apps, io_loop=self.loop, port=port,
-                                 host=['*'])
-            self.server.start(start_loop=False)
-        except (SystemExit, EnvironmentError):
-            self.server = Server(self.apps, io_loop=self.loop, port=0,
-                                 host=['*'])
-            self.server.start(start_loop=False)
+        for i in range(5):
+            try:
+                self.server = Server(self.apps, io_loop=self.loop, port=port,
+                                     host=['*'])
+                self.server.start(start_loop=False)
+                break
+            except (SystemExit, EnvironmentError):
+                port = 0
+                if i == 4:
+                    raise
 
     @property
     def port(self):
