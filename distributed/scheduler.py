@@ -40,6 +40,7 @@ from .versions import get_versions
 
 logger = logging.getLogger(__name__)
 
+LATENCY = config.get('latency', 0.010)
 BANDWIDTH = config.get('bandwidth', 100e6)
 ALLOWED_FAILURES = config.get('allowed-failures', 3)
 
@@ -1920,7 +1921,7 @@ class Scheduler(Server):
                 import pdb; pdb.set_trace()
             raise
 
-    def transition_ready_processing(self, key, worker=None, latency=5e-3):
+    def transition_ready_processing(self, key, worker=None):
         try:
             if self.validate:
                 assert key not in self.waiting
@@ -1932,7 +1933,7 @@ class Scheduler(Server):
 
             assert worker
 
-            duration = self.task_duration.get(key_split(key), latency*100)
+            duration = self.task_duration.get(key_split(key), 0.500)
             self.processing[worker][key] = duration
             self.rprocessing[key].add(worker)
             self.occupancy[worker] += duration
@@ -2620,8 +2621,7 @@ class Scheduler(Server):
 
                     # Fill up unsaturated cores by time
                     workers = list(self.idle)
-                    latency = 5e-3
-                    free_time = [latency * self.ncores[w] - self.occupancy[w]
+                    free_time = [LATENCY * self.ncores[w] - self.occupancy[w]
                                   for w in workers]
                     workers2 = []  # Clean out workers that *are* actually full
                     free_time2 = []
@@ -2664,11 +2664,10 @@ class Scheduler(Server):
         Scheduler.ensure_occupied_queue
         """
         stack = self.stacks[worker]
-        latency = 5e-3
 
         while (stack and
                (self.ncores[worker] > len(self.processing[worker]) or
-                self.occupancy[worker] < latency * self.ncores[worker])):
+                self.occupancy[worker] < LATENCY * self.ncores[worker])):
             key = stack.pop()
 
             # TODO: Move this logic to the worker.
@@ -2682,8 +2681,7 @@ class Scheduler(Server):
             self.stack_duration[worker] -= duration
 
             if self.task_state.get(key) == 'stacks':
-                r = self.transition(key, 'processing',
-                                    worker=worker, latency=latency)
+                r = self.transition(key, 'processing', worker=worker)
 
         if stack:
             self.saturated.add(worker)
@@ -2818,7 +2816,7 @@ class Scheduler(Server):
                 loc = int(-round(log(ratio) / log(2), 0) + 3)
             return ratio, loc
 
-    def issaturated(self, worker, latency=5e-3):
+    def issaturated(self, worker):
         """
         Determine if a worker has enough work to avoid being idle
 
@@ -2831,10 +2829,10 @@ class Scheduler(Server):
         """
         return (len(self.stacks[worker]) + len(self.processing[worker])
                 > self.ncores[worker] and
-                self.occupancy[worker] > latency * self.ncores[worker])
+                self.occupancy[worker] > LATENCY * self.ncores[worker])
 
-    def _check_idle(self, worker, latency=5e-3):
-        if not self.issaturated(worker, latency=latency):
+    def _check_idle(self, worker):
+        if not self.issaturated(worker):
             self.idle.add(worker)
         elif worker in self.idle:
             self.idle.remove(worker)
