@@ -1,5 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
+from zlib import crc32
+
 import numpy as np
 import pytest
 
@@ -28,8 +30,19 @@ def test_serialize():
 
 @pytest.mark.parametrize('x',
         [np.ones(5),
+         np.array(5),
          np.asfortranarray(np.random.random((5, 5))),
          np.random.random(5).astype('f4'),
+         np.random.random(5).astype('>i8'),
+         np.random.random(5).astype('<i8'),
+         np.arange(5).astype('M8[us]'),
+         np.arange(5).astype('M8[ms]'),
+         np.arange(5).astype('m8'),
+         np.arange(5).astype('m8[s]'),
+         np.arange(5).astype('c16'),
+         np.arange(5).astype('c8'),
+         np.array([True, False, True]),
+         np.ones(shape=5, dtype=[('a', 'i4'), ('b', 'M8[us]')]),
          np.array(['abc'], dtype='S3'),
          np.array(['abc'], dtype='U3'),
          np.array(['abc'], dtype=object),
@@ -64,25 +77,33 @@ def test_memmap():
 @slow
 def test_dumps_serialize_numpy_large():
     psutil = pytest.importorskip('psutil')
-    if psutil.virtual_memory().total < 4e9:
+    if psutil.virtual_memory().total < 2e9:
         return
-    x = np.random.randint(0, 255, size=int(BIG_BYTES_SHARD_SIZE * 2)).astype('u1')
+    x = np.random.random(size=int(BIG_BYTES_SHARD_SIZE * 2 // 8)).view('u1')
+    assert x.nbytes == BIG_BYTES_SHARD_SIZE * 2
     frames = dumps([to_serialize(x)])
+    dtype, shape = x.dtype, x.shape
+    checksum = crc32(x)
+    del x
     [y] = loads(frames)
 
-    np.testing.assert_equal(x, y)
+    assert (y.dtype, y.shape) == (dtype, shape)
+    assert crc32(y) == checksum, "Arrays are unequal"
 
 
 @pytest.mark.parametrize('dt,size', [('f8', 8),
                                      ('i4', 4),
+                                     ('c16', 16),
+                                     ('b', 1),
                                      ('S3', 3),
+                                     ('M8[us]', 8),
+                                     ('M8[s]', 8),
                                      ('U3', 12),
                                      ([('a', 'i4'), ('b', 'f8')], 12),
                                      (('i4', 100), 4),
                                      ([('a', 'i4', 100)], 8),
                                      ([('a', 'i4', 20), ('b', 'f8')], 20*4 + 8),
                                      ([('a', 'i4', 200), ('b', 'f8')], 8)])
-
 def test_itemsize(dt, size):
     assert itemsize(np.dtype(dt)) == size
 

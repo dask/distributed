@@ -3,13 +3,14 @@ from __future__ import print_function, division, absolute_import
 from datetime import datetime, timedelta
 import json
 import logging
-from multiprocessing import Process, Queue, queues
+from multiprocessing.queues import Empty
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 from time import time, sleep
+import weakref
 
 from tornado.ioloop import IOLoop
 from tornado.iostream import StreamClosedError
@@ -17,8 +18,9 @@ from tornado import gen
 
 from .compatibility import JSONDecodeError
 from .core import Server, rpc, write, RPCClosed
+from .metrics import disk_io_counters, net_io_counters
 from .protocol import to_serialize
-from .utils import get_ip, ignoring, log_errors, tmpfile
+from .utils import get_ip, ignoring, log_errors, mp_context, tmpfile
 from .worker import _ncores, Worker, run, TOTAL_MEMORY
 
 nanny_environment = os.path.dirname(sys.executable)
@@ -33,12 +35,16 @@ class Nanny(Server):
     """
     def __init__(self, scheduler_ip, scheduler_port, ip=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
-                 name=None, memory_limit=TOTAL_MEMORY,
-                 environment=nanny_environment, quiet=False, **kwargs):
+                 name=None, memory_limit=TOTAL_MEMORY, reconnect=True,
+                 validate=False, environment=nanny_environment, quiet=False,
+                 resources=None, **kwargs):
         self.ip = ip or get_ip()
         self.worker_port = None
         self._given_worker_port = worker_port
         self.ncores = ncores or _ncores
+        self.reconnect = reconnect
+        self.validate = validate
+        self.resources = resources
         if not local_dir:
             local_dir = tempfile.mkdtemp(prefix='nanny-')
             self._should_cleanup_local_dir = True
@@ -87,7 +93,7 @@ class Nanny(Server):
         self.loop.add_callback(self._start, port)
 
     @gen.coroutine
-    def _kill(self, stream=None, timeout=5):
+    def _kill(self, stream=None, timeout=10):
         """ Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -96,8 +102,11 @@ class Nanny(Server):
         while not self.worker_port:
             yield gen.sleep(0.1)
 
-        if self.process is not None:
-            process, self.process = self.process, None  # avoid race with _watch
+        if self.process is None:
+            raise gen.Return('OK')
+
+        process, self.process = self.process, None  # avoid race with _watch
+        if isalive(process):
             try:
                 # Ask worker to close
                 with rpc(ip='127.0.0.1', port=self.worker_port) as worker:
@@ -110,7 +119,7 @@ class Nanny(Server):
                 logger.info("Worker non-responsive.  Terminating.")
             except StreamClosedError:
                 pass
-            except Exception as e:
+            except BaseException as e:
                 logger.exception(e)
 
             try:
@@ -126,7 +135,7 @@ class Nanny(Server):
                     logger.info("Unregister worker %s:%d from scheduler",
                                 self.ip, self.worker_port)
             except gen.TimeoutError:
-                logger.info("Nanny %s:%d failed to unregister worker %s:%d",
+                logger.warn("Nanny %s:%d failed to unregister worker %s:%d",
                         self.ip, self.port, self.ip, self.worker_port,
                         exc_info=True)
             except (StreamClosedError, RPCClosed):
@@ -134,21 +143,21 @@ class Nanny(Server):
             except Exception as e:
                 logger.exception(e)
 
-            self.process = process  # re-instantiate self.process
-            if self.process:
-                with ignoring(OSError):
-                    self.process.terminate()
-                if self.process in processes_to_close:
-                    processes_to_close.remove(self.process)
+        self.process = process  # re-instantiate self.process
+        if self.process:
+            with ignoring(OSError):
+                self.process.terminate()
+            join(process, timeout)
+            processes_to_close.discard(self.process)
 
-                start = time()
-                while isalive(self.process) and time() < start + timeout:
-                    sleep(0.01)
+            start = time()
+            while isalive(self.process) and time() < start + timeout:
+                sleep(0.01)
 
-                self.process = None
-                self.cleanup()
-                logger.info("Nanny %s:%d kills worker process %s:%d",
-                            self.ip, self.port, self.ip, self.worker_port)
+            self.process = None
+            self.cleanup()
+            logger.info("Nanny %s:%d kills worker process %s:%d",
+                        self.ip, self.port, self.ip, self.worker_port)
         raise gen.Return('OK')
 
     @gen.coroutine
@@ -163,7 +172,7 @@ class Nanny(Server):
             self.environment = environment
 
         with log_errors():
-            if self.process and isalive(self.process):
+            if isalive(self.process):
                 raise ValueError("Existing process still alive. Please kill first")
 
             if self.environment != nanny_environment:
@@ -171,7 +180,8 @@ class Nanny(Server):
                     self.process = run_worker_subprocess(self.environment, self.ip,
                             self.scheduler.ip, self.scheduler.port, self.ncores,
                             self.port, self._given_worker_port, self.name,
-                            self.memory_limit, self.loop, fn, self.quiet)
+                            self.memory_limit, self.loop, fn, self.quiet,
+                            self.resources)
 
                     while not os.path.exists(fn):
                         yield gen.sleep(0.01)
@@ -186,13 +196,15 @@ class Nanny(Server):
                         except JSONDecodeError:
                             yield gen.sleep(0.01)
             else:
-                q = Queue()
-                self.process = Process(target=run_worker_fork,
-                                       args=(q, self.ip, self.scheduler.ip,
-                                             self.scheduler.port, self.ncores,
-                                             self.port, self._given_worker_port,
-                                             self.local_dir, self.services, self.name,
-                                             self.memory_limit))
+                q = mp_context.Queue()
+                self.process = mp_context.Process(
+                    target=run_worker_fork,
+                    args=(q, self.ip, self.scheduler.ip,
+                          self.scheduler.port, self.ncores,
+                          self.port, self._given_worker_port,
+                          self.local_dir, self.services, self.name,
+                          self.memory_limit, self.reconnect, self.resources,
+                          self.validate))
                 self.process.daemon = True
                 self.process.start()
                 while True:
@@ -204,7 +216,7 @@ class Nanny(Server):
                         self.worker_dir = msg['dir']
                         assert self.worker_port
                         break
-                    except queues.Empty:
+                    except Empty:
                         yield gen.sleep(0.1)
 
             logger.info("Nanny %s:%d starts worker process %s:%d",
@@ -235,10 +247,17 @@ class Nanny(Server):
                 yield self._close()
                 break
             elif self.process and not isalive(self.process):
-                logger.warn("Discovered failed worker.  Restarting. Status: %s",
-                            self.status)
+                logger.warn("Discovered failed worker")
                 self.cleanup()
-                yield self.scheduler.unregister(address=self.worker_address)
+                try:
+                    yield self.scheduler.unregister(address=self.worker_address)
+                except StreamClosedError:
+                    if self.reconnect:
+                        yield gen.sleep(wait_seconds)
+                    else:
+                        yield self._close()
+                        break
+                logger.warn('Restarting worker...')
                 yield self.instantiate()
             else:
                 yield gen.sleep(wait_seconds)
@@ -283,8 +302,8 @@ class Nanny(Server):
                 'status': p.status(),
                 'memory_percent': p.memory_percent(),
                 'memory_info_ex': p.memory_info_ex()._asdict(),
-                'disk_io_counters': psutil.disk_io_counters()._asdict(),
-                'net_io_counters': psutil.net_io_counters()._asdict()}
+                'disk_io_counters': disk_io_counters()._asdict(),
+                'net_io_counters': net_io_counters()._asdict()}
 
     @gen.coroutine
     def monitor_resources(self, stream, interval=1):
@@ -295,7 +314,8 @@ class Nanny(Server):
 
 
 def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
-        nanny_port, worker_port, name, memory_limit, io_loop, fn, quiet):
+        nanny_port, worker_port, name, memory_limit, io_loop, fn, quiet,
+        resources):
 
     if environment.endswith('python'):
         environment = os.path.dirname(environment)
@@ -312,6 +332,8 @@ def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
                  '--nanny-port', nanny_port,
                  '--nthreads', ncores,
                  '--nprocs', 1,
+                 '--resources', '"%s"' % ' '.join('='.join(map(str, item))
+                                                  for item in resources),
                  '--temp-filename', fn])
 
     if name:
@@ -323,13 +345,14 @@ def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
     proc = subprocess.Popen([executable] + list(map(str, args)),
             stderr=subprocess.PIPE if quiet else None)
 
-    processes_to_close.append(proc)
+    processes_to_close.add(proc)
 
     return proc
 
 
 def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
-        worker_port, local_dir, services, name, memory_limit):
+        worker_port, local_dir, services, name, memory_limit, reconnect,
+        resources, validate):
     """ Function run by the Nanny when creating the worker """
     from distributed import Worker  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
@@ -339,10 +362,11 @@ def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
     worker = Worker(scheduler_ip, scheduler_port, ncores=ncores, ip=ip,
                     service_ports={'nanny': nanny_port}, local_dir=local_dir,
                     services=services, name=name, memory_limit=memory_limit,
-                    loop=loop)  # pragma: no cover
+                    reconnect=reconnect, validate=validate,
+                    resources=resources, loop=loop)  # pragma: no cover
 
     @gen.coroutine  # pragma: no cover
-    def start():
+    def run():
         try:  # pragma: no cover
             yield worker._start(worker_port)  # pragma: no cover
         except Exception as e:  # pragma: no cover
@@ -352,26 +376,38 @@ def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
             assert worker.port  # pragma: no cover
             q.put({'port': worker.port, 'dir': worker.local_dir})  # pragma: no cover
 
-    loop.add_callback(start)  # pragma: no cover
+        while worker.status != 'closed':
+            yield gen.sleep(0.1)
+
+        logger.info("Worker closed")
+
     try:
-        loop.start()  # pragma: no cover
+        loop.run_sync(run)
     finally:
         loop.stop()
         loop.close(all_fds=True)
 
 
 def isalive(proc):
-    if isinstance(proc, subprocess.Popen):
+    if proc is None:
+        return False
+    elif isinstance(proc, subprocess.Popen):
         return proc.poll() is None
     else:
         return proc.is_alive()
+
+
+def join(proc, timeout):
+    if proc is None or isinstance(proc, subprocess.Popen):
+        return
+    proc.join(timeout)
 
 
 import atexit
 
 closing = [False]
 
-processes_to_close = []
+processes_to_close = weakref.WeakSet()
 
 def _closing():
     for proc in processes_to_close:

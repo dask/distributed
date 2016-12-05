@@ -3,8 +3,10 @@ from __future__ import print_function, division, absolute_import
 from collections import Iterable
 from contextlib import contextmanager
 import logging
+import multiprocessing
 import os
 import re
+import shutil
 import socket
 import six
 import sys
@@ -26,6 +28,14 @@ from .compatibility import Queue, PY3, PY2
 from .config import config
 
 logger = logging.getLogger(__name__)
+
+
+if PY3 and not sys.platform.startswith('win'):
+    mp_context = multiprocessing.get_context('forkserver')
+    # Makes the test suite much faster
+    mp_context.set_forkserver_preload(['distributed'])
+else:
+    mp_context = multiprocessing
 
 
 def funcname(func):
@@ -62,7 +72,7 @@ def get_ip(host='8.8.8.8', port=80):
 def ignoring(*exceptions):
     try:
         yield
-    except exceptions:
+    except exceptions as e:
         pass
 
 
@@ -313,23 +323,33 @@ def iterator_to_queue(seq, maxsize=0):
 
 
 def tokey(o):
-    """ Convert an object to a bytestring, using str
+    """ Convert an object to a string.
 
     Examples
     --------
 
     >>> tokey(b'x')
-    b'x'
+    'x'
     >>> tokey('x')
     'x'
     >>> tokey(1)
     '1'
     """
     t = type(o)
-    if t is str or t is bytes:
+    if t is str:
         return o
+    elif t is bytes:
+        return o.decode('latin1')
     else:
         return str(o)
+
+
+def validate_key(k):
+    """Validate a key as received on a stream.
+    """
+    if type(k) is not str:
+        raise TypeError("Unexpected key type %s (value: %r)"
+                        % (type(k), k))
 
 
 def _maybe_complex(task):
@@ -355,26 +375,6 @@ def str_graph(dsk, extra_values=()):
         return task
 
     return {tokey(k): convert(v) for k, v in dsk.items()}
-
-
-import logging
-from .compatibility import logging_names
-logging.basicConfig(format='%(name)s - %(levelname)s - %(message)s',
-                    level=logging.INFO)
-
-for name, level in config.get('logging', {}).items():
-    LEVEL = logging_names[level.upper()]
-    logging.getLogger(name).setLevel(LEVEL)
-
-# http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
-stream = logging.StreamHandler(sys.stderr)
-stream.setLevel(logging.CRITICAL)
-logging.getLogger('tornado').addHandler(stream)
-logging.getLogger('tornado').propagate = False
-
-
-from contextlib import contextmanager
-import shutil
 
 
 def seek_delimiter(file, delimiter, blocksize):

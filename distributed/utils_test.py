@@ -1,9 +1,9 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
+import gc
 from glob import glob
 import logging
-from multiprocessing import Process, Queue
 import os
 import shutil
 import signal
@@ -13,13 +13,15 @@ import sys
 from time import time, sleep
 import uuid
 
+import six
+
 from toolz import merge
-from tornado import gen
+from tornado import gen, queues
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado.iostream import StreamClosedError
 
-from .core import connect, read, write, rpc
-from .utils import ignoring, log_errors, sync
+from .core import connect, read, write, close, rpc, coerce_to_address
+from .utils import ignoring, log_errors, sync, mp_context
 import pytest
 
 
@@ -57,10 +59,11 @@ def current_loop():
     for i in range(5):
         try:
             loop.close(all_fds=True)
-            return
+            break
         except Exception as e:
             f = e
-            print(f)
+    else:
+        print(f)
     IOLoop.clear_instance()
 
 
@@ -73,10 +76,11 @@ def loop():
     for i in range(5):
         try:
             loop.close(all_fds=True)
-            return
+            break
         except Exception as e:
             f = e
-            print(f)
+    else:
+        print(f)
 
 
 @pytest.yield_fixture
@@ -85,6 +89,18 @@ def zmq_ctx():
     ctx = zmq.Context.instance()
     yield ctx
     ctx.destroy(linger=0)
+
+
+@contextmanager
+def pristine_loop():
+    IOLoop.clear_instance()
+    loop = IOLoop()
+    loop.make_current()
+    try:
+        yield loop
+    finally:
+        loop.close(all_fds=True)
+        IOLoop.clear_instance()
 
 
 @contextmanager
@@ -107,6 +123,10 @@ def dec(x):
     return x - 1
 
 
+def mul(x, y):
+    return x * y
+
+
 def div(x, y):
     return x / y
 
@@ -119,7 +139,7 @@ def deep(n):
 
 
 def throws(x):
-    raise Exception('hello!')
+    raise RuntimeError('hello!')
 
 
 def double(x):
@@ -145,14 +165,46 @@ def slowadd(x, y, delay=0.02):
     return x + y
 
 
+_readone_queues = {}
+
+@gen.coroutine
+def readone(stream):
+    """
+    Read one message at a time from a stream that reads lists of
+    messages.
+    """
+    try:
+        q = _readone_queues[stream]
+    except KeyError:
+        q = _readone_queues[stream] = queues.Queue()
+
+        @gen.coroutine
+        def background_read():
+            while True:
+                try:
+                    messages = yield read(stream)
+                except StreamClosedError:
+                    break
+                for msg in messages:
+                    q.put_nowait(msg)
+            q.put_nowait(None)
+            del _readone_queues[stream]
+
+        background_read()
+
+    msg = yield q.get()
+    if msg is None:
+        raise StreamClosedError
+    else:
+        raise gen.Return(msg)
+
+
 def run_scheduler(q, scheduler_port=0, **kwargs):
     from distributed import Scheduler
     from tornado.ioloop import IOLoop, PeriodicCallback
-    import logging
     IOLoop.clear_instance()
     loop = IOLoop(); loop.make_current()
     PeriodicCallback(lambda: None, 500).start()
-    logging.getLogger("tornado").setLevel(logging.CRITICAL)
 
     scheduler = Scheduler(loop=loop, validate=True, **kwargs)
     done = scheduler.start(scheduler_port)
@@ -167,14 +219,12 @@ def run_scheduler(q, scheduler_port=0, **kwargs):
 def run_worker(q, scheduler_port, **kwargs):
     from distributed import Worker
     from tornado.ioloop import IOLoop, PeriodicCallback
-    import logging
     with log_errors():
         IOLoop.clear_instance()
         loop = IOLoop(); loop.make_current()
         PeriodicCallback(lambda: None, 500).start()
-        logging.getLogger("tornado").setLevel(logging.CRITICAL)
         worker = Worker('127.0.0.1', scheduler_port, ip='127.0.0.1',
-                        loop=loop, **kwargs)
+                        loop=loop, validate=True, **kwargs)
         loop.run_sync(lambda: worker._start(0))
         q.put(worker.port)
         try:
@@ -186,14 +236,12 @@ def run_worker(q, scheduler_port, **kwargs):
 def run_nanny(q, scheduler_port, **kwargs):
     from distributed import Nanny
     from tornado.ioloop import IOLoop, PeriodicCallback
-    import logging
     with log_errors():
         IOLoop.clear_instance()
         loop = IOLoop(); loop.make_current()
         PeriodicCallback(lambda: None, 500).start()
-        logging.getLogger("tornado").setLevel(logging.CRITICAL)
         worker = Nanny('127.0.0.1', scheduler_port, ip='127.0.0.1',
-                       loop=loop, **kwargs)
+                       loop=loop, validate=True, **kwargs)
         loop.run_sync(lambda: worker._start(0))
         q.put(worker.port)
         try:
@@ -204,66 +252,92 @@ def run_nanny(q, scheduler_port, **kwargs):
 
 
 @contextmanager
-def cluster(nworkers=2, nanny=False, worker_kwargs={}):
+def check_active_rpc(loop, active_rpc_timeout=0):
+    if rpc.active > 0:
+        # Streams from a previous test dangling around?
+        gc.collect()
     rpc_active = rpc.active
-    if nanny:
-        _run_worker = run_nanny
-    else:
-        _run_worker = run_worker
-    scheduler_q = Queue()
-    scheduler = Process(target=run_scheduler, args=(scheduler_q,))
-    scheduler.daemon = True
-    scheduler.start()
-    sport = scheduler_q.get()
+    yield
+    if rpc.active > rpc_active and active_rpc_timeout:
+        # Some streams can take a bit of time to notice their peer
+        # has closed, and keep a coroutine (*) waiting for a StreamClosedError
+        # before calling close_rpc() after a StreamClosedError.
+        # This would happen especially if a non-localhost address is used,
+        # as Nanny does.
+        # (*) (example: gather_from_workers())
+        deadline = loop.time() + active_rpc_timeout
+        @gen.coroutine
+        def wait_a_bit():
+            yield gen.sleep(0.01)
 
-    workers = []
-    for i in range(nworkers):
-        q = Queue()
-        fn = '_test_worker-%s' % uuid.uuid1()
-        proc = Process(target=_run_worker, args=(q, sport),
-                        kwargs=merge({'ncores': 1, 'local_dir': fn},
-                                     worker_kwargs))
-        workers.append({'proc': proc, 'queue': q, 'dir': fn})
+        logger.info("Waiting for active RPC count to drop down")
+        while rpc.active > rpc_active and loop.time() < deadline:
+            loop.run_sync(wait_a_bit)
+        logger.info("... Finished waiting for active RPC count to drop down")
 
-    for worker in workers:
-        worker['proc'].start()
+    assert rpc.active == rpc_active
 
-    for worker in workers:
-        worker['port'] = worker['queue'].get()
 
-    loop = IOLoop()
-    start = time()
-    try:
-        with rpc(ip='127.0.0.1', port=sport) as s:
-            while True:
-                ncores = loop.run_sync(s.ncores)
-                if len(ncores) == nworkers:
-                    break
-                if time() - start > 5:
-                    raise Exception("Timeout on cluster creation")
+@contextmanager
+def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0):
+    with pristine_loop() as loop:
+        with check_active_rpc(loop, active_rpc_timeout):
+            if nanny:
+                _run_worker = run_nanny
+            else:
+                _run_worker = run_worker
+            scheduler_q = mp_context.Queue()
+            scheduler = mp_context.Process(
+                target=run_scheduler, args=(scheduler_q,))
+            scheduler.daemon = True
+            scheduler.start()
+            sport = scheduler_q.get()
 
-        yield {'proc': scheduler, 'port': sport}, workers
-    finally:
-        logger.debug("Closing out test cluster")
-        with ignoring(socket.error, TimeoutError, StreamClosedError):
-            loop.run_sync(lambda: disconnect('127.0.0.1', sport), timeout=0.5)
-        scheduler.terminate()
-        scheduler.join(timeout=2)
+            workers = []
+            for i in range(nworkers):
+                q = mp_context.Queue()
+                fn = '_test_worker-%s' % uuid.uuid1()
+                proc = mp_context.Process(target=_run_worker, args=(q, sport),
+                                kwargs=merge({'ncores': 1, 'local_dir': fn},
+                                             worker_kwargs))
+                workers.append({'proc': proc, 'queue': q, 'dir': fn})
 
-        for port in [w['port'] for w in workers]:
-            with ignoring(socket.error, TimeoutError, StreamClosedError):
-                loop.run_sync(lambda: disconnect('127.0.0.1', port),
-                              timeout=0.5)
-        for proc in [w['proc'] for w in workers]:
-            with ignoring(Exception):
-                proc.terminate()
-                proc.join(timeout=2)
-        for q in [w['queue'] for w in workers]:
-            q.close()
-        for fn in glob('_test_worker-*'):
-            shutil.rmtree(fn)
-        loop.close(all_fds=True)
-        assert rpc.active == rpc_active  # no new rpcs made
+            for worker in workers:
+                worker['proc'].start()
+
+            for worker in workers:
+                worker['port'] = worker['queue'].get()
+
+            start = time()
+            try:
+                with rpc(ip='127.0.0.1', port=sport) as s:
+                    while True:
+                        ncores = loop.run_sync(s.ncores)
+                        if len(ncores) == nworkers:
+                            break
+                        if time() - start > 5:
+                            raise Exception("Timeout on cluster creation")
+
+                yield {'proc': scheduler, 'port': sport}, workers
+            finally:
+                logger.debug("Closing out test cluster")
+                with ignoring(socket.error, TimeoutError, StreamClosedError):
+                    loop.run_sync(lambda: disconnect('127.0.0.1', sport), timeout=0.5)
+                scheduler.terminate()
+                scheduler.join(timeout=2)
+
+                for port in [w['port'] for w in workers]:
+                    with ignoring(socket.error, TimeoutError, StreamClosedError):
+                        loop.run_sync(lambda: disconnect('127.0.0.1', port),
+                                      timeout=0.5)
+                for proc in [w['proc'] for w in workers]:
+                    with ignoring(EnvironmentError):
+                        proc.terminate()
+                        proc.join(timeout=2)
+                for q in [w['queue'] for w in workers]:
+                    q.close()
+                for fn in glob('_test_worker-*'):
+                    shutil.rmtree(fn)
 
 
 @gen.coroutine
@@ -273,7 +347,7 @@ def disconnect(ip, port):
         yield write(stream, {'op': 'terminate', 'close': True})
         response = yield read(stream)
     finally:
-        stream.close()
+        yield close(stream)
 
 
 import pytest
@@ -299,16 +373,12 @@ def gen_test(timeout=10):
     """
     def _(func):
         def test_func():
-            IOLoop.clear_instance()
-            loop = IOLoop()
-            loop.make_current()
-
-            cor = gen.coroutine(func)
-            try:
-                loop.run_sync(cor, timeout=timeout)
-            finally:
-                loop.stop()
-                loop.close(all_fds=True)
+            with pristine_loop() as loop:
+                cor = gen.coroutine(func)
+                try:
+                    loop.run_sync(cor, timeout=timeout)
+                finally:
+                    loop.stop()
         return test_func
     return _
 
@@ -317,12 +387,18 @@ from .scheduler import Scheduler
 from .worker import Worker
 from .client import Client
 
+
 @gen.coroutine
-def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={}):
+def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
+                  worker_kwargs={}):
     s = Scheduler(ip='127.0.0.1', loop=loop, validate=True, **scheduler_kwargs)
     done = s.start(0)
-    workers = [Worker(s.ip, s.port, ncores=v, ip=k, name=i, loop=loop)
-                for i, (k, v) in enumerate(ncores)]
+    workers = [Worker(s.ip, s.port, ncores=ncore[1], ip=ncore[0], name=i,
+                      loop=loop, validate=True,
+                      **(merge(worker_kwargs, ncore[2])
+                         if len(ncore) > 2
+                         else worker_kwargs))
+                for i, ncore in enumerate(ncores)]
     for w in workers:
         w.rpc = workers[0].rpc
 
@@ -339,17 +415,19 @@ def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={}):
 @gen.coroutine
 def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
+    scheduler_close = s.close()  # shut down periodic callbacks immediately
     for w in workers:
         with ignoring(TimeoutError, StreamClosedError, OSError):
             yield w._close(report=False)
         if w.local_dir and os.path.exists(w.local_dir):
             shutil.rmtree(w.local_dir)
-    yield s.close()
+    yield scheduler_close  # wait until scheduler stops completely
     s.stop()
 
 
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
-        Worker=Worker, client=False, scheduler_kwargs={}):
+        Worker=Worker, client=False, scheduler_kwargs={}, worker_kwargs={},
+        active_rpc_timeout=0):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -365,28 +443,26 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
         cor = gen.coroutine(func)
 
         def test_func():
-            rpc_active = rpc.active
-            IOLoop.clear_instance()
-            loop = IOLoop()
-            loop.make_current()
+            with pristine_loop() as loop:
+                with check_active_rpc(loop, active_rpc_timeout):
+                    s, workers = loop.run_sync(lambda: start_cluster(ncores, loop,
+                                    Worker=Worker, scheduler_kwargs=scheduler_kwargs,
+                                    worker_kwargs=worker_kwargs))
+                    args = [s] + workers
 
-            s, workers = loop.run_sync(lambda: start_cluster(ncores, loop,
-                            Worker=Worker, scheduler_kwargs=scheduler_kwargs))
-            args = [s] + workers
+                    if client:
+                        e = Client((s.ip, s.port), loop=loop, start=False)
+                        loop.run_sync(e._start)
+                        args = [e] + args
+                    try:
+                        return loop.run_sync(lambda: cor(*args), timeout=timeout)
+                    finally:
+                        if client:
+                            loop.run_sync(e._shutdown)
+                        loop.run_sync(lambda: end_cluster(s, workers))
 
-            if client:
-                e = Client((s.ip, s.port), loop=loop, start=False)
-                loop.run_sync(e._start)
-                args = [e] + args
-            try:
-                loop.run_sync(lambda: cor(*args), timeout=timeout)
-            finally:
-                if client:
-                    loop.run_sync(e._shutdown)
-                loop.run_sync(lambda: end_cluster(s, workers))
-                loop.stop()
-                loop.close(all_fds=True)
-            assert rpc.active == rpc_active
+                    for w in workers:
+                        assert not w._listen_streams
 
         return test_func
     return _
@@ -395,16 +471,18 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
 @contextmanager
 def make_hdfs():
     from hdfs3 import HDFileSystem
+    # from .hdfs import DaskHDFileSystem
+    basedir = '/tmp/test-distributed'
     hdfs = HDFileSystem(host='localhost', port=8020)
-    if hdfs.exists('/tmp/test'):
-        hdfs.rm('/tmp/test')
-    hdfs.mkdir('/tmp/test')
+    if hdfs.exists(basedir):
+        hdfs.rm(basedir)
+    hdfs.mkdir(basedir)
 
     try:
-        yield hdfs
+        yield hdfs, basedir
     finally:
-        if hdfs.exists('/tmp/test'):
-            hdfs.rm('/tmp/test')
+        if hdfs.exists(basedir):
+            hdfs.rm(basedir)
 
 
 def raises(func, exc=Exception):
@@ -413,6 +491,23 @@ def raises(func, exc=Exception):
         return False
     except exc:
         return True
+
+
+def terminate_process(proc):
+    if proc.poll() is None:
+        if sys.platform.startswith('win'):
+            proc.send_signal(signal.CTRL_BREAK_EVENT)
+        else:
+            proc.send_signal(signal.SIGINT)
+        try:
+            if sys.version_info[0] == 3:
+                proc.wait(10)
+            else:
+                proc.wait()
+        finally:
+            # Make sure we don't leave the process lingering around
+            with ignoring(OSError):
+                proc.kill()
 
 
 @contextmanager
@@ -431,20 +526,9 @@ def popen(*args, **kwargs):
         raise
 
     finally:
-        if sys.platform.startswith('win'):
-            proc.send_signal(signal.CTRL_BREAK_EVENT)
-        else:
-            proc.send_signal(signal.SIGINT)
         try:
-            if sys.version_info[0] == 3:
-                proc.wait(10)
-            else:
-                proc.wait()
+            terminate_process(proc)
         finally:
-            # Make sure we don't leave the process lingering around
-            with ignoring(OSError):
-                proc.kill()
-
             # XXX Also dump stdout if return code != 0 ?
             if dump_stdout:
                 line = '\n\nPrint from stderr\n=================\n'
@@ -456,3 +540,46 @@ def popen(*args, **kwargs):
                 while line:
                     print(line)
                     line = proc.stdout.readline()
+
+
+def wait_for_port(address, timeout=5):
+    address = coerce_to_address(address, out=tuple)
+    deadline = time() + timeout
+
+    while True:
+        timeout = deadline - time()
+        if timeout < 0:
+            raise RuntimeError("Failed to connect to %s" % (address,))
+        try:
+            sock = socket.create_connection(address, timeout=timeout)
+        except EnvironmentError:
+            pass
+        else:
+            sock.close()
+            break
+
+
+@contextmanager
+def captured_logger(logger):
+    """Capture output from the given Logger.
+    """
+    orig_handlers = logger.handlers[:]
+    sio = six.StringIO()
+    logger.handlers[:] = [logging.StreamHandler(sio)]
+    try:
+        yield sio
+    finally:
+        logger.handlers[:] = orig_handlers
+
+
+@contextmanager
+def captured_handler(handler):
+    """Capture output from the given logging.StreamHandler.
+    """
+    assert isinstance(handler, logging.StreamHandler)
+    orig_stream = handler.stream
+    handler.stream = six.StringIO()
+    try:
+        yield handler.stream
+    finally:
+        handler.stream = orig_stream

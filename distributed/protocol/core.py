@@ -29,7 +29,7 @@ def dumps(msg):
         data = {}
         # Only lists and dicts can contain serialized values
         if isinstance(msg, (list, dict)):
-            msg, data = extract_serialize(msg)
+            msg, data, bytestrings = extract_serialize(msg)
         small_header, small_payload = dumps_msgpack(msg)
 
         if not data:  # fast path without serialized data
@@ -40,11 +40,13 @@ def dumps(msg):
                if type(value) is Serialized}
 
         data = {key: serialize(value.data)
-                     for key, value in data.items()
-                     if type(value) is Serialize}
+                for key, value in data.items()
+                if type(value) is Serialize}
 
         header = {'headers': {},
-                  'keys': []}
+                  'keys': [],
+                  'bytestrings': list(bytestrings)}
+
         out_frames = []
 
         for key, (head, frames) in data.items():
@@ -81,24 +83,30 @@ def dumps(msg):
 
 def loads(frames, deserialize=True):
     """ Transform bytestream back into Python value """
+    frames = frames[::-1]  # reverse order to improve pop efficiency
+    if not isinstance(frames, list):
+        frames = list(frames)
     try:
-        small_header, small_payload, frames = frames[0], frames[1], frames[2:]
+        small_header = frames.pop()
+        small_payload = frames.pop()
         msg = loads_msgpack(small_header, small_payload)
         if not frames:
             return msg
 
-        header, frames = frames[0], frames[1:]
+        header = frames.pop()
         header = msgpack.loads(header, encoding='utf8', use_list=False)
         keys = header['keys']
         headers = header['headers']
+        bytestrings = set(header['bytestrings'])
 
         for key in keys:
             head = headers[key]
             lengths = head['lengths']
             count = head['count']
-            fs, frames = frames[:count], frames[count:]
+            fs = frames[-count::][::-1]
+            del frames[-count:]
 
-            if deserialize:
+            if deserialize or key in bytestrings:
                 fs = decompress(head, fs)
                 fs = merge_frames(head, fs)
                 value = _deserialize(head, fs)
@@ -109,7 +117,7 @@ def loads(frames, deserialize=True):
 
         return msg
     except Exception as e:
-        logger.critical("Failed to deerialize", exc_info=True)
+        logger.critical("Failed to deserialize", exc_info=True)
         raise
 
 

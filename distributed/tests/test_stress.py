@@ -3,11 +3,12 @@ from __future__ import print_function, division, absolute_import
 from concurrent.futures import CancelledError
 from datetime import timedelta
 from operator import add
+import sys
 from time import sleep, time
 
 from dask import delayed
 import pytest
-from toolz import concat, sliding_window
+from toolz import concat, sliding_window, first
 
 from distributed import Client, wait, Nanny
 from distributed.utils import All
@@ -41,6 +42,8 @@ def test_stress_gc(loop, func, n):
             assert x.result() == n + 2
 
 
+@pytest.mark.skipif(sys.platform.startswith('win'),
+                    reason="test can leave dangling RPC objects")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4, timeout=None)
 def test_cancel_stress(c, s, *workers):
     da = pytest.importorskip('dask.array')
@@ -132,6 +135,7 @@ def test_stress_scatter_death(c, s, *workers):
     try:
         yield gen.with_timeout(timedelta(seconds=10), c._gather(futures))
     except gen.TimeoutError:
+        ws = {w.address: w for w in workers if w.status != 'closed'}
         import pdb; pdb.set_trace()
     except CancelledError:
         pass
@@ -141,16 +145,27 @@ def vsum(*args):
     return sum(args)
 
 
+@pytest.mark.avoid_travis
 @slow
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 80, timeout=1000)
 def test_stress_communication(c, s, *workers):
     s.validate = False # very slow otherwise
     da = pytest.importorskip('dask.array')
+    # Test consumes many file descriptors and can hang if the limit is too low
+    resource = pytest.importorskip('resource')
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        lim = 8192
+        if soft < lim:
+            resource.setrlimit(resource.RLIMIT_NOFILE, (lim, max(hard, lim)))
+    except Exception as e:
+        pytest.skip("file descriptor limit too low and couldn't be increased :"
+                    + str(e))
 
     n = 40
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
     ys = [x + x.T for x in xs]
-    z = da.atop(vsum, 'ij', *concat(zip(ys, ['ij'] * n)))
+    z = da.atop(vsum, 'ij', *concat(zip(ys, ['ij'] * n)), dtype='float64')
 
     future = c.compute(z.sum())
 

@@ -6,6 +6,7 @@ import logging
 import six
 import socket
 import struct
+import sys
 from time import time
 import traceback
 import uuid
@@ -21,10 +22,12 @@ from tornado import gen
 from tornado.locks import Event
 from tornado.tcpserver import TCPServer
 from tornado.tcpclient import TCPClient
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.iostream import IOStream, StreamClosedError
 
 from .compatibility import PY3, unicode, WINDOWS
+from .config import config
+from .system_monitor import SystemMonitor
 from .utils import get_traceback, truncate_exception, ignoring
 from . import protocol
 
@@ -92,10 +95,21 @@ class Server(TCPServer):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._port = None
+        self._listen_streams = set()
         self.rpc = ConnectionPool(limit=connection_limit,
                                   deserialize=deserialize)
         self.deserialize = deserialize
+        self.monitor = SystemMonitor()
+        if hasattr(self, 'loop'):
+            pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.loop)
+            self.loop.add_callback(pc.start)
+        self.__stopped = False
         super(Server, self).__init__(max_buffer_size=max_buffer_size, **kwargs)
+
+    def stop(self):
+        if not self.__stopped:
+            self.__stopped = True
+            super(Server, self).stop()
 
     @property
     def port(self):
@@ -136,16 +150,20 @@ class Server(TCPServer):
         Coroutines should expect a single IOStream object.
         """
         stream.set_nodelay(True)
+        set_tcp_timeout(stream)
+
         ip, port = address
         logger.info("Connection from %s:%d to %s", ip, port,
                     type(self).__name__)
+        self._listen_streams.add(stream)
         try:
             while True:
                 try:
                     msg = yield read(stream, deserialize=self.deserialize)
                     logger.debug("Message from %s:%d: %s", ip, port, msg)
-                except StreamClosedError:
-                    logger.info("Lost connection: %s", str(address))
+                except EnvironmentError as e:
+                    logger.warn("Lost connection to %s while reading message: %s",
+                                str(address), e)
                     break
                 except Exception as e:
                     logger.exception(e)
@@ -155,7 +173,7 @@ class Server(TCPServer):
                     raise TypeError("Bad message type.  Expected dict, got\n  "
                                     + str(msg))
                 op = msg.pop('op')
-                close = msg.pop('close', False)
+                close_desired = msg.pop('close', False)
                 reply = msg.pop('reply', True)
                 if op == 'close':
                     if reply:
@@ -171,81 +189,149 @@ class Server(TCPServer):
                     try:
                         result = yield gen.maybe_future(handler(stream, **msg))
                     except StreamClosedError as e:
-                        logger.info("%s", e)
-                        result = error_message(e, status='uncaught-error')
+                        logger.warn("Lost connection to %s: %s", str(address), e)
+                        break
                     except Exception as e:
                         logger.exception(e)
                         result = error_message(e, status='uncaught-error')
-                if reply:
+                if reply and result != 'dont-reply':
                     try:
                         yield write(stream, result)
-                    except StreamClosedError:
-                        logger.info("Lost connection: %s" % str(address))
+                    except EnvironmentError as e:
+                        logger.warn("Lost connection to %s while sending result: %s",
+                                    str(address), e)
                         break
-                if close:
+                if close_desired:
                     break
         finally:
+            logger.info("Closing connection from %s:%d to %s", ip, port,
+                        type(self).__name__)
+            self._listen_streams.remove(stream)
             try:
-                stream.close()
+                yield close(stream)
             except Exception as e:
-                logger.warn("Failed while closing writer",  exc_info=True)
-        logger.info("Close connection from %s:%d to %s", address[0], address[1],
-                    type(self).__name__)
+                logger.error("Failed while closing connection to %s: %s",
+                             address, e)
+            finally:
+                stream.close()
+
+
+def set_tcp_timeout(stream):
+    """
+    Set kernel-level TCP timeout on the stream.
+    """
+    if stream.closed():
+        return
+
+    timeout = int(config.get('tcp-timeout', 30))
+
+    sock = stream.socket
+
+    # Default (unsettable) value on Windows
+    # https://msdn.microsoft.com/en-us/library/windows/desktop/dd877220(v=vs.85).aspx
+    nprobes = 10
+    assert timeout >= nprobes + 1, "Timeout too low"
+
+    idle = max(2, timeout // 4)
+    interval = max(1, (timeout - idle) // nprobes)
+    idle = timeout - interval * nprobes
+    assert idle > 0
+
+    try:
+        if sys.platform.startswith("win"):
+            logger.debug("Setting TCP keepalive: idle=%d, interval=%d",
+                         idle, interval)
+            sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, idle * 1000, interval * 1000))
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            try:
+                TCP_KEEPIDLE = socket.TCP_KEEPIDLE
+                TCP_KEEPINTVL = socket.TCP_KEEPINTVL
+                TCP_KEEPCNT = socket.TCP_KEEPCNT
+            except AttributeError:
+                if sys.platform == "darwin":
+                    TCP_KEEPIDLE = 0x10  # (named "TCP_KEEPALIVE" in C)
+                    TCP_KEEPINTVL = 0x101
+                    TCP_KEEPCNT = 0x102
+                else:
+                    TCP_KEEPIDLE = None
+
+            if TCP_KEEPIDLE is not None:
+                logger.debug("Setting TCP keepalive: nprobes=%d, idle=%d, interval=%d",
+                             nprobes, idle, interval)
+                sock.setsockopt(socket.SOL_TCP, TCP_KEEPCNT, nprobes)
+                sock.setsockopt(socket.SOL_TCP, TCP_KEEPIDLE, idle)
+                sock.setsockopt(socket.SOL_TCP, TCP_KEEPINTVL, interval)
+
+        if sys.platform.startswith("linux"):
+            logger.debug("Setting TCP user timeout: %d ms",
+                         timeout * 1000)
+            TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
+            sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
+    except EnvironmentError as e:
+        logger.warn("Could not set timeout on TCP stream: %s", e)
 
 
 @gen.coroutine
 def read(stream, deserialize=True):
     """ Read a message from a stream """
-    if isinstance(stream, BatchedStream):
-        msg = yield stream.recv()
-        raise gen.Return(msg)
-    else:
-        n_frames = yield stream.read_bytes(8)
-        n_frames = struct.unpack('Q', n_frames)[0]
+    n_frames = yield stream.read_bytes(8)
+    n_frames = struct.unpack('Q', n_frames)[0]
 
-        lengths = yield stream.read_bytes(8 * n_frames)
-        lengths = struct.unpack('Q' * n_frames, lengths)
+    lengths = yield stream.read_bytes(8 * n_frames)
+    lengths = struct.unpack('Q' * n_frames, lengths)
 
-        frames = []
-        for length in lengths:
-            if length:
-                frame = yield stream.read_bytes(length)
-            else:
-                frame = b''
-            frames.append(frame)
+    frames = []
+    for length in lengths:
+        if length:
+            frame = yield stream.read_bytes(length)
+        else:
+            frame = b''
+        frames.append(frame)
 
-        msg = protocol.loads(frames, deserialize=deserialize)
-        raise gen.Return(msg)
+    msg = protocol.loads(frames, deserialize=deserialize)
+    raise gen.Return(msg)
 
 
 @gen.coroutine
 def write(stream, msg):
     """ Write a message to a stream """
-    if isinstance(stream, BatchedStream):
-        stream.send(msg)
-    else:
+    try:
+        frames = protocol.dumps(msg)
+    except Exception as e:
+        logger.info("Unserializable Message: %s", msg)
+        logger.exception(e)
+        raise
+
+    lengths = ([struct.pack('Q', len(frames))] +
+               [struct.pack('Q', len(frame)) for frame in frames])
+    stream.write(b''.join(lengths))
+
+    for frame in frames:
+        # Can't wait for the write() Future as it may be lost
+        # ("If write is called again before that Future has resolved,
+        #   the previous future will be orphaned and will never resolve")
+        stream.write(frame)
+
+    yield gen.moment
+    raise gen.Return(sum(map(len, frames)))
+
+
+@gen.coroutine
+def close(stream):
+    """Close a stream after flushing it.
+    No concurrent write() should be issued during execution of this
+    coroutine.
+    """
+    if not stream.closed():
         try:
-            frames = protocol.dumps(msg)
-        except Exception as e:
-            logger.info("Unserializable Message: %s", msg)
-            logger.exception(e)
-            raise
-
-        futures = []
-
-        lengths = ([struct.pack('Q', len(frames))] +
-                   [struct.pack('Q', len(frame)) for frame in frames])
-        futures.append(stream.write(b''.join(lengths)))
-
-        for frame in frames[:-1]:
-            futures.append(stream.write(frame))
-
-        futures.append(stream.write(frames[-1]))
-
-        if WINDOWS:
-            yield futures[-1]
-        else:
-            yield futures
+            # Flush the stream's write buffer by waiting for a last write.
+            if stream.writing():
+                yield stream.write(b'')
+        except EnvironmentError:
+            pass
+        finally:
+            stream.close()
 
 
 def pingpong(stream):
@@ -261,8 +347,9 @@ def connect(ip, port, timeout=3):
         try:
             stream = yield gen.with_timeout(timedelta(seconds=timeout), future)
             stream.set_nodelay(True)
+            set_tcp_timeout(stream)
             raise gen.Return(stream)
-        except StreamClosedError:
+        except EnvironmentError:
             if time() - start < timeout:
                 yield gen.sleep(0.01)
                 logger.debug("sleeping on connect")
@@ -309,7 +396,7 @@ def send_recv(stream=None, arg=None, ip=None, port=None, addr=None, reply=True,
     else:
         response = None
     if kwargs.get('close'):
-        stream.close()
+        close(stream)
     raise gen.Return(response)
 
 
@@ -412,17 +499,22 @@ class rpc(object):
         for stream in self.streams:
             if stream and not stream.closed():
                 try:
-                    stream.close()
-                except (OSError, IOError, StreamClosedError):
+                    close(stream)
+                except EnvironmentError:
                     pass
         self.streams.clear()
 
     def __getattr__(self, key):
         @gen.coroutine
         def send_recv_from_rpc(**kwargs):
-            stream = yield self.live_stream()
-            result = yield send_recv(stream=stream, op=key,
-                    deserialize=self.deserialize, **kwargs)
+            try:
+                stream = yield self.live_stream()
+                result = yield send_recv(stream=stream, op=key,
+                        deserialize=self.deserialize, **kwargs)
+            except (RPCClosed, StreamClosedError) as e:
+                raise e.__class__("%s: while trying to call remote method %r"
+                                  % (e, key,))
+
             self.streams[stream] = True  # mark as open
             raise gen.Return(result)
         return send_recv_from_rpc
@@ -438,6 +530,14 @@ class rpc(object):
 
     def __exit__(self, *args):
         self.close_rpc()
+
+    def __del__(self):
+        if self.status != 'closed':
+            rpc.active -= 1
+            n_open = sum(not stream.closed() for stream in self.streams)
+            if n_open:
+                logger.warn("rpc object %s deleted with %d open streams",
+                            self, n_open)
 
 
 class RPCCall(object):
@@ -565,15 +665,15 @@ class ConnectionPool(object):
                     self.open, self.active)
         for streams in list(self.available.values()):
             for stream in streams:
-                stream.close()
+                close(stream)
 
     def close(self):
         for streams in list(self.available.values()):
             for stream in streams:
-                stream.close()
+                close(stream)
         for streams in list(self.occupied.values()):
             for stream in streams:
-                stream.close()
+                close(stream)
 
 
 def coerce_to_address(o, out=str):
@@ -656,6 +756,3 @@ def clean_exception(exception, traceback, **kwargs):
     if isinstance(traceback, str):
         traceback = None
     return type(exception), exception, traceback
-
-
-from .batched import BatchedStream

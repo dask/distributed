@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 from functools import partial
-from multiprocessing import Process
 import socket
 from time import time
 
@@ -12,6 +11,7 @@ import pytest
 from distributed.core import (read, write, pingpong, Server, rpc, connect,
         coerce_to_rpc, send_recv, coerce_to_address, ConnectionPool)
 from distributed.utils_test import slow, loop, gen_test
+
 
 def test_server(loop):
     @gen.coroutine
@@ -24,7 +24,10 @@ def test_server(loop):
 
         stream = yield connect('127.0.0.1', 8887)
 
-        yield write(stream, {'op': 'ping'})
+        n = yield write(stream, {'op': 'ping'})
+        assert isinstance(n, int)
+        assert 4 <= n <= 1000
+
         response = yield read(stream)
         assert response == b'pong'
 

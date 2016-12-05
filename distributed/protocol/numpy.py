@@ -41,21 +41,23 @@ def serialize_numpy_ndarray(x):
     else:
         dt = x.dtype.str
 
-    x = np.ascontiguousarray(x)  # np.frombuffer requires this
+    x = np.ascontiguousarray(x)  # cannot get .data attribute from discontiguous
 
     header = {'dtype': dt,
               'strides': x.strides,
               'shape': x.shape}
 
+    data = x.view('u1').data
+
     if blosc:
-        frames = frame_split_size([x.data])
+        frames = frame_split_size([data])
         if sys.version_info.major == 2:
             frames = [ensure_bytes(frame) for frame in frames]
         frames = [blosc.compress(frame, typesize=size,
                                  cname='lz4', clevel=5) for frame in frames]
         header['compression'] = ['blosc'] * len(frames)
     else:
-        frames = [x.data]
+        frames = [data]
 
     header['lengths'] = [x.nbytes]
 
@@ -72,12 +74,9 @@ def deserialize_numpy_ndarray(header, frames):
         dt = header['dtype']
         if isinstance(dt, tuple):
             dt = list(dt)
-        dt = np.dtype(dt)
 
-        buffer = frames[0]
-
-        x = np.frombuffer(buffer, dt)
-        x = np.lib.stride_tricks.as_strided(x, header['shape'], header['strides'])
+        x = np.ndarray(header['shape'], dtype=dt, buffer=frames[0],
+                       strides=header['strides'])
 
         return x
 

@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from concurrent.futures import CancelledError
+from datetime import timedelta
 from operator import add
 import os
 from time import time, sleep
@@ -12,6 +13,7 @@ from tornado import gen
 
 from distributed.compatibility import PY3
 from distributed.client import _wait
+from distributed.core import coerce_to_address
 from distributed.nanny import isalive
 from distributed.utils import sync, ignoring
 from distributed.utils_test import (gen_cluster, cluster, inc, loop, slow, div,
@@ -49,10 +51,14 @@ def test_gather_then_submit_after_failed_workers(loop):
             total = c.submit(sum, L)
             wait([total])
 
-            (_, port) = first(c.scheduler.who_has[total.key])
+            addr = c.who_has()[total.key][0]
+            _, port = coerce_to_address(addr, out=tuple)
             for d in [x, y, z]:
                 if d['port'] == port:
                     d['proc'].terminate()
+                    break
+            else:
+                assert 0, "Could not find worker"
 
             result = c.gather([total])
             assert result == [sum(map(inc, range(20)))]
@@ -131,7 +137,8 @@ def test_restart_cleared(c, s, a, b):
     yield c._restart()
 
     for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
-            s.waiting_data, s.who_has, s.restrictions, s.loose_restrictions,
+            s.waiting_data, s.who_has, s.host_restrictions,
+            s.worker_restrictions, s.loose_restrictions,
             s.released, s.priority, s.exceptions, s.who_wants,
             s.exceptions_blame]:
         assert not coll
@@ -255,7 +262,7 @@ def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     yield y._result()
 
 
-@gen_cluster(client=True, timeout=60)
+@gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 def test_broken_worker_during_computation(c, s, a, b):
     n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
     n.start(0)

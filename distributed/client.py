@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from collections import defaultdict, Iterator, Iterable
+from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
 from contextlib import contextmanager
 import copy
@@ -72,17 +73,21 @@ class Future(WrappedKey):
     --------
     Client:  Creates futures
     """
+    _cb_executor = None
+    _cb_executor_pid = None
+
     def __init__(self, key, client):
         self.key = key
+        tkey = tokey(key)
         self.client = client
-        self.client._inc_ref(tokey(key))
+        self.client._inc_ref(tkey)
         self._generation = self.client.generation
         self._cleared = False
 
-        tkey = tokey(key)
-
-        if tkey not in client.futures:
-            client.futures[tkey] = {'event': Event(), 'status': 'pending'}
+        if tkey in client.futures:
+            self._state = client.futures[tkey]
+        else:
+            self._state = client.futures[tkey] = FutureState(Event())
 
     @property
     def executor(self):
@@ -90,14 +95,11 @@ class Future(WrappedKey):
 
     @property
     def status(self):
-        try:
-            return self.client.futures[tokey(self.key)]['status']
-        except KeyError:
-            return 'cancelled'
+        return self._state.status
 
     @property
     def event(self):
-        return self.client.futures[tokey(self.key)]['event']
+        return self._state.event
 
     def done(self):
         """ Is the computation complete? """
@@ -108,28 +110,27 @@ class Future(WrappedKey):
         result = sync(self.client.loop, self._result, raiseit=False)
         if self.status == 'error':
             six.reraise(*result)
-        if self.status == 'cancelled':
+        elif self.status == 'cancelled':
             raise result
         else:
             return result
 
     @gen.coroutine
     def _result(self, raiseit=True):
-        try:
-            d = self.client.futures[tokey(self.key)]
-        except KeyError:
+        yield self._state.event.wait()
+        if self.status == 'error':
+            exc = clean_exception(self._state.exception,
+                                  self._state.traceback)
+            if raiseit:
+                six.reraise(*exc)
+            else:
+                raise Return(exc)
+        elif self.status == 'cancelled':
             exception = CancelledError(self.key)
             if raiseit:
                 raise exception
             else:
                 raise gen.Return(exception)
-
-        yield d['event'].wait()
-        if self.status == 'error':
-            if raiseit:
-                six.reraise(*clean_exception(**d))
-            else:
-                raise Return(clean_exception(**d))
         else:
             result = yield self.client._gather([self])
             raise gen.Return(result[0])
@@ -138,8 +139,7 @@ class Future(WrappedKey):
     def _exception(self):
         yield self.event.wait()
         if self.status == 'error':
-            exception = self.client.futures[self.key]['exception']
-            raise Return(exception)
+            raise Return(self._state.exception)
         else:
             raise Return(None)
 
@@ -158,8 +158,22 @@ class Future(WrappedKey):
         The callback ``fn`` should take the future as its only argument.  This
         will be called regardless of if the future completes successfully,
         errs, or is cancelled
+
+        The callback is executed in a separate thread.
         """
-        self.client.loop.add_callback(done_callback, self, fn)
+        cls = Future
+        if cls._cb_executor is None or cls._cb_executor_pid != os.getpid():
+            cls._cb_executor = ThreadPoolExecutor(1)
+            cls._cb_executor_pid = os.getpid()
+
+        def execute_callback(fut):
+            try:
+                fn(fut)
+            except BaseException:
+                logger.exception("Error in callback %s of %s:", fn, fut)
+
+        self.client.loop.add_callback(done_callback, self,
+                                      partial(cls._cb_executor.submit, execute_callback))
 
     def cancel(self):
         """ Returns True if the future has been cancelled """
@@ -167,13 +181,13 @@ class Future(WrappedKey):
 
     def cancelled(self):
         """ Returns True if the future has been cancelled """
-        return tokey(self.key) not in self.client.futures
+        return self._state.status == 'cancelled'
 
     @gen.coroutine
     def _traceback(self):
         yield self.event.wait()
         if self.status == 'error':
-            raise Return(self.client.futures[tokey(self.key)]['traceback'])
+            raise Return(self._state.traceback)
         else:
             raise Return(None)
 
@@ -199,10 +213,7 @@ class Future(WrappedKey):
 
     @property
     def type(self):
-        try:
-            return self.client.futures[tokey(self.key)]['type']
-        except KeyError:
-            return None
+        return self._state.type
 
     def release(self):
         if not self._cleared and self.client.generation == self._generation:
@@ -235,9 +246,47 @@ class Future(WrappedKey):
     __repr__ = __str__
 
 
+class FutureState(object):
+    """A Future's internal state.
+
+    This is shared between all Futures with the same key and client.
+    """
+    __slots__ = ('event', 'status', 'type', 'exception', 'traceback')
+
+    def __init__(self, event):
+        self.event = event
+        self.status = 'pending'
+        self.type = None
+
+    def cancel(self):
+        self.status = 'cancelled'
+        self.event.set()
+
+    def finish(self, type=None):
+        self.status = 'finished'
+        self.event.set()
+        if type is not None:
+            self.type = type
+
+    def lose(self):
+        self.status = 'lost'
+        self.event.clear()
+
+    def set_error(self, exception, traceback):
+        self.status = 'error'
+        self.exception = exception
+        self.traceback = traceback
+        self.event.set()
+
+    def __str__(self):
+        return '<%s: %s>' % (self.__class__.__name__, self.status)
+
+    __repr__ = __str__
+
+
 @gen.coroutine
 def done_callback(future, callback):
-    """ Wait on future, then call callback """
+    """ Coroutine that waits on future, then calls callback """
     while future.status == 'pending':
         yield future.event.wait()
     callback(future)
@@ -246,6 +295,11 @@ def done_callback(future, callback):
 @partial(normalize_token.register, Future)
 def normalize_future(f):
     return [f.key, type(f)]
+
+
+class AllExit(Exception):
+    """Custom exception class to exit All(...) early.
+    """
 
 
 class Client(object):
@@ -314,11 +368,13 @@ class Client(object):
     def __str__(self):
         if hasattr(self, '_loop_thread'):
             n = sync(self.loop, self.scheduler.ncores)
-            return '<Client: scheduler="%s:%d" processes=%d cores=%d>' % (
+            return '<%s: scheduler="%s:%d" processes=%d cores=%d>' % (
+                    self.__class__.__name__,
                     self.scheduler.ip, self.scheduler.port, len(n),
                     sum(n.values()))
         else:
-            return '<Client: scheduler="%s:%d">' % (
+            return '<%s: scheduler="%s:%d">' % (
+                    self.__class__.__name__,
                     self.scheduler.ip, self.scheduler.port)
 
     __repr__ = __str__
@@ -376,10 +432,9 @@ class Client(object):
             self.status = 'connecting'
             self.scheduler_stream = None
 
-            events = [d['event'] for d in self.futures.values()]
+            for st in self.futures.values():
+                st.cancel()
             self.futures.clear()
-            for e in events:
-                e.set()
 
             while self.status == 'connecting':
                 try:
@@ -443,9 +498,9 @@ class Client(object):
     def _release_key(self, key):
         """ Release key from distributed memory """
         logger.debug("Release key %s", key)
-        if key in self.futures:
-            self.futures[key]['event'].clear()
-            del self.futures[key]
+        st = self.futures.pop(key, None)
+        if st is not None:
+            st.cancel()
         if self.status != 'closed':
             self._send_to_scheduler({'op': 'client-releases-keys',
                                      'keys': [key],
@@ -459,7 +514,7 @@ class Client(object):
                 try:
                     msgs = yield read(self.scheduler_stream.stream)
                 except StreamClosedError:
-                    logger.debug("Stream closed to scheduler", exc_info=True)
+                    logger.warn("Client report stream closed to scheduler")
                     if self.status == 'running':
                         logger.info("Reconnecting...")
                         self.status = 'connecting'
@@ -480,37 +535,38 @@ class Client(object):
                         breakout = True
                         break
                     elif msg['op'] == 'key-in-memory':
-                        if msg['key'] in self.futures:
-                            self.futures[msg['key']]['status'] = 'finished'
-                            self.futures[msg['key']]['event'].set()
-                            if (msg.get('type') and
-                                not self.futures[msg['key']].get('type')):
-                                self.futures[msg['key']]['type'] = loads(msg['type'])
+                        st = self.futures.get(msg['key'])
+                        if st is not None:
+                            typ = (loads(msg['type'])
+                                   if (msg.get('type') and not st.type)
+                                   else None)
+                            st.finish(typ)
                     elif msg['op'] == 'lost-data':
-                        if msg['key'] in self.futures:
-                            self.futures[msg['key']]['status'] = 'lost'
-                            self.futures[msg['key']]['event'].clear()
+                        st = self.futures.get(msg['key'])
+                        if st is not None:
+                            st.lose()
                     elif msg['op'] == 'cancelled-key':
-                        if msg['key'] in self.futures:
-                            self.futures[msg['key']]['event'].set()
-                            del self.futures[msg['key']]
+                        st = self.futures.pop(msg['key'], None)
+                        if st is not None:
+                            st.cancel()
                     elif msg['op'] == 'task-erred':
-                        if msg['key'] in self.futures:
-                            self.futures[msg['key']]['status'] = 'error'
+                        st = self.futures.get(msg['key'])
+                        if st is not None:
                             try:
-                                self.futures[msg['key']]['exception'] = loads(msg['exception'])
+                                exception = loads(msg['exception'])
                             except TypeError:
-                                self.futures[msg['key']]['exception'] = \
-                                    Exception('Undeserializable exception', msg['exception'])
-                            self.futures[msg['key']]['traceback'] = (loads(msg['traceback'])
-                                                                     if msg['traceback'] else None)
-                            self.futures[msg['key']]['event'].set()
+                                exception = Exception(
+                                    'Undeserializable exception',
+                                    msg['exception'])
+                            st.set_error(exception,
+                                         loads(msg['traceback'])
+                                         if msg['traceback']
+                                         else None)
                     elif msg['op'] == 'restart':
                         logger.info("Receive restart signal from scheduler")
-                        events = [d['event'] for d in self.futures.values()]
+                        for st in self.futures.values():
+                            st.cancel()
                         self.futures.clear()
-                        for e in events:
-                            e.set()
                         with ignoring(AttributeError):
                             self._restart_event.set()
                     elif 'error' in msg['op']:
@@ -606,6 +662,7 @@ class Client(object):
         key = kwargs.pop('key', None)
         pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
+        resources = kwargs.pop('resources', None)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers not in (True, False, None):
@@ -640,7 +697,8 @@ class Client(object):
             dsk = {skey: (func,) + tuple(args)}
 
         futures = self._graph_to_futures(dsk, [skey], restrictions,
-                loose_restrictions, priority={skey: 0})
+                loose_restrictions, priority={skey: 0},
+                resources={skey: resources} if resources else None)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -716,6 +774,7 @@ class Client(object):
         key = key or funcname(func)
         pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
+        resources = kwargs.pop('resources', None)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers and workers is None:
@@ -763,8 +822,13 @@ class Client(object):
 
         priority = dict(zip(keys, range(len(keys))))
 
+        if resources:
+            resources = {key: resources for key in keys}
+        else:
+            resources = None
+
         futures = self._graph_to_futures(dsk, keys, restrictions,
-                loose_restrictions, priority=priority)
+                loose_restrictions, priority=priority, resources=resources)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(key)] for key in keys]
@@ -778,28 +842,29 @@ class Client(object):
         @gen.coroutine
         def wait(k):
             """ Want to stop the All(...) early if we find an error """
-            yield self.futures[k]['event'].wait()
-            if self.futures[k]['status'] != 'finished':
-                raise Exception()
+            st = self.futures[k]
+            yield st.event.wait()
+            if st.status != 'finished':
+                raise AllExit()
 
         while True:
             logger.debug("Waiting on futures to clear before gather")
 
-            with ignoring(Exception):
+            with ignoring(AllExit):
                 yield All([wait(key) for key in keys if key in self.futures])
 
             exceptions = set()
             bad_keys = set()
             for key in keys:
                 if (key not in self.futures or
-                    self.futures[key]['status'] == 'error'):
+                    self.futures[key].status == 'error'):
                     exceptions.add(key)
                     if errors == 'raise':
                         try:
-                            d = self.futures[key]
-                            six.reraise(type(d['exception']),
-                                        d['exception'],
-                                        d['traceback'])
+                            st = self.futures[key]
+                            six.reraise(type(st.exception),
+                                        st.exception,
+                                        st.traceback)
                         except KeyError:
                             six.reraise(CancelledError,
                                         CancelledError(key),
@@ -814,11 +879,11 @@ class Client(object):
             response = yield self.scheduler.gather(keys=keys)
 
             if response['status'] == 'error':
-                logger.debug("Couldn't gather keys %s", response['keys'])
+                logger.warn("Couldn't gather keys %s", response['keys'])
                 self._send_to_scheduler({'op': 'missing-data',
                                          'keys': response['keys']})
                 for key in response['keys']:
-                    self.futures[key]['event'].clear()
+                    self.futures[key].event.clear()
             else:
                 break
 
@@ -916,15 +981,14 @@ class Client(object):
                     "Input to scatter must be a list, iterator, or queue")
 
         for key in keys:
-            self.futures[key]['status'] = 'finished'
-            self.futures[key]['event'].set()
+            self.futures[key].finish(type=None)
 
         if isinstance(types, list):
             for key, typ in zip(keys, types):
-                self.futures[key]['type'] = typ
+                self.futures[key].type = typ
         elif isinstance(types, dict):
             for key in keys:
-                self.futures[key]['type'] = types[key]
+                self.futures[key].type = types[key]
 
         raise gen.Return(out)
 
@@ -1027,8 +1091,9 @@ class Client(object):
         keys = {tokey(f.key) for f in futures_of(futures)}
         yield self.scheduler.cancel(keys=list(keys), client=self.id)
         for k in keys:
-            with ignoring(KeyError):
-                del self.futures[k]
+            st = self.futures.pop(k, None)
+            if st is not None:
+                st.cancel()
 
     def cancel(self, futures):
         """
@@ -1198,7 +1263,8 @@ class Client(object):
         return sync(self.loop, self._run, function, *args, **kwargs)
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
-            loose_restrictions=None, allow_other_workers=True, priority=None):
+            loose_restrictions=None, allow_other_workers=True, priority=None,
+            resources=None):
 
         keyset = set(keys)
         flatkeys = list(map(tokey, keys))
@@ -1238,13 +1304,16 @@ class Client(object):
                                  'restrictions': restrictions or {},
                                  'loose_restrictions': loose_restrictions,
                                  'client': self.id,
-                                 'priority': priority})
+                                 'priority': priority,
+                                 'resources': resources})
 
         return futures
 
     @gen.coroutine
-    def _get(self, dsk, keys, restrictions=None, raise_on_error=True):
-        futures = self._graph_to_futures(dsk, set(flatten([keys])), restrictions)
+    def _get(self, dsk, keys, restrictions=None, raise_on_error=True,
+            resources=None):
+        futures = self._graph_to_futures(dsk, set(flatten([keys])),
+                restrictions, resources=resources)
 
         packed = pack_data(keys, futures)
         try:
@@ -1263,7 +1332,7 @@ class Client(object):
         raise gen.Return(result)
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-            **kwargs):
+            resources=None, **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -1286,7 +1355,7 @@ class Client(object):
         Client.compute: Compute asynchronous collections
         """
         futures = self._graph_to_futures(dsk, set(flatten([keys])),
-                restrictions, loose_restrictions)
+                restrictions, loose_restrictions, resources=resources)
 
         try:
             results = self.gather(futures)
@@ -1352,7 +1421,7 @@ class Client(object):
             return redict_collection(collection, dsk)
 
     def compute(self, collections, sync=False, optimize_graph=True,
-            workers=None, allow_other_workers=False, **kwargs):
+            workers=None, allow_other_workers=False, resources=None, **kwargs):
         """ Compute dask collections on cluster
 
         Parameters
@@ -1417,8 +1486,12 @@ class Client(object):
         restrictions, loose_restrictions = get_restrictions(collections,
                 workers, allow_other_workers)
 
+        if resources:
+            resources = expand_resources(resources)
+
         futures_dict = self._graph_to_futures(merge(dsk2, dsk), names,
-                                              restrictions, loose_restrictions)
+                                              restrictions, loose_restrictions,
+                                              resources=resources)
 
         i = 0
         futures = []
@@ -1440,7 +1513,7 @@ class Client(object):
             return result
 
     def persist(self, collections, optimize_graph=True, workers=None,
-                allow_other_workers=None, **kwargs):
+                allow_other_workers=None, resources=None, **kwargs):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -1494,8 +1567,11 @@ class Client(object):
         restrictions, loose_restrictions = get_restrictions(collections,
                 workers, allow_other_workers)
 
+        if resources:
+            resources = expand_resources(resources)
+
         futures = self._graph_to_futures(dsk, names, restrictions,
-                loose_restrictions)
+                loose_restrictions, resources=resources)
 
         result = [redict_collection(c, {k: futures[k]
                                         for k in flatten(c._keys())})
@@ -1899,8 +1975,14 @@ class Client(object):
         """
         return sync(self.loop, self.scheduler.identity)
 
-    def get_versions(self):
+    def get_versions(self, check=False):
         """ Return version info for the scheduler, all workers and myself
+
+        Parameters
+        ----------
+        check : boolean, default False
+            raise ValueError if all required & optional packages
+            do not match
 
         Examples
         --------
@@ -1922,7 +2004,36 @@ class Client(object):
                 return None
 
         workers = sync(self.loop, self._run, f)
-        return {'scheduler': scheduler, 'workers': workers, 'client': client}
+        result = {'scheduler': scheduler, 'workers': workers, 'client': client}
+
+        if check:
+            # we care about the required & optional packages matching
+            extract = lambda x: merge(result[x]['packages'].values())
+            client_versions = extract('client')
+            scheduler_versions = extract('scheduler')
+
+            for pkg, cv in client_versions.items():
+                sv = scheduler_versions[pkg]
+                if sv != cv:
+                    raise ValueError("package [{package}] is version [{client}] "
+                                     "on client and [{scheduler}] on scheduler!".format(
+                                         package=pkg,
+                                         client=cv,
+                                         scheduler=sv))
+
+            for w, d in workers.items():
+                worker_versions = merge(d['packages'].values())
+                for pkg, cv in client_versions.items():
+                    wv = worker_versions[pkg]
+                    if wv != cv:
+                        raise ValueError("package [{package}] is version [{client}] "
+                                         "on client and [{worker}] on worker [{w}]!".format(
+                                             package=pkg,
+                                             client=cv,
+                                             worker=wv,
+                                             w=w))
+
+        return result
 
     def futures_of(self, futures):
         return futures_of(futures, client=self)
@@ -2110,12 +2221,12 @@ def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
     if timeout is not None:
         raise NotImplementedError("Timeouts not yet supported")
     if return_when == 'ALL_COMPLETED':
-        try:
-            yield All({f.event.wait() for f in fs})
-        except KeyError:
-            raise CancelledError([f.key for f in fs
-                                        if f.key not in f.client.futures])
+        yield All({f.event.wait() for f in fs})
         done, not_done = set(fs), set()
+        cancelled = [f.key for f in done
+                     if f.status == 'cancelled']
+        if cancelled:
+            raise CancelledError(cancelled)
     else:
         raise NotImplementedError("Only return_when='ALL_COMPLETED' supported")
 
@@ -2262,6 +2373,22 @@ def temp_default_client(c):
         yield
     finally:
         _global_client[0] = old_exec
+
+
+def expand_resources(resources):
+    assert isinstance(resources, dict)
+    out = {}
+    for k, v in resources.items():
+        if not isinstance(k, tuple):
+            k = (k,)
+        for kk in k:
+            if hasattr(kk, '_keys'):
+                for kkk in kk._keys():
+                    out[tokey(kkk)] = v
+            else:
+                out[tokey(kk)] = v
+    return out
+
 
 def get_restrictions(collections, workers, allow_other_workers):
     """ Get restrictions from inputs to compute/persist """

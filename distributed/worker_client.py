@@ -9,10 +9,10 @@ import uuid
 from dask.base import tokenize
 from tornado import gen
 
-from .client import Client, Future, pack_data, unpack_remotedata
+from .client import AllExit, Client, Future, pack_data, unpack_remotedata
 from .sizeof import sizeof
 from .threadpoolexecutor import secede
-from .utils import log_errors, sync, tokey, ignoring
+from .utils import All, log_errors, sync, tokey, ignoring
 from .worker import thread_state
 
 
@@ -40,16 +40,18 @@ def local_client():
     >>> future = e.submit(func, 1)  # submit func(1) on cluster
     """
     address = thread_state.execution_state['scheduler']
+    worker = thread_state.execution_state['worker']
     secede()  # have this thread secede from the thread pool
               # so that it doesn't take up a fixed resource while waiting
+    worker.loop.add_callback(worker.transition, thread_state.key, 'long-running')
     with WorkerClient(address) as e:
-        e.worker.loop.add_callback(e.worker.scheduler.change_worker_cores,
-                                   worker=e.worker.address, diff=+1)
+        worker.loop.add_callback(worker.scheduler.change_worker_cores,
+                                 worker=worker.address, diff=+1)
         try:
             yield e
         finally:
-            e.worker.loop.add_callback(e.worker.scheduler.change_worker_cores,
-                                       worker=e.worker.address, diff=-1)
+            worker.loop.add_callback(worker.scheduler.change_worker_cores,
+                                     worker=worker.address, diff=-1)
 
 
 def get_worker():
@@ -122,8 +124,7 @@ class WorkerClient(Client):
                         "Input to scatter must be a list or dict")
 
             for key in keys:
-                self.futures[key]['status'] = 'finished'
-                self.futures[key]['event'].set()
+                self.futures[key].finish(type=None)
 
             raise gen.Return(out)
 
@@ -143,11 +144,11 @@ class WorkerClient(Client):
         @gen.coroutine
         def wait(k):
             """ Want to stop the All(...) early if we find an error """
-            yield self.futures[k]['event'].wait()
-            if self.futures[k]['status'] != 'finished':
-                raise Exception()
+            yield self.futures[k].event.wait()
+            if self.futures[k].status != 'finished':
+                raise AllExit()
 
-        with ignoring(Exception):
+        with ignoring(AllExit):
             yield All([wait(key) for key in keys if key in self.futures])
 
         while True:  # not threadsafe, so try until success

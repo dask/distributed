@@ -20,15 +20,14 @@ from tornado import gen
 import pytest
 
 from distributed import Nanny, Worker
-from distributed.batched import BatchedStream
-from distributed.core import connect, read, write, rpc
+from distributed.core import connect, read, write, close, rpc
 from distributed.scheduler import (validate_state, decide_worker,
         Scheduler)
 from distributed.client import _wait
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
-        loop)
+        loop, readone)
 from distributed.utils import All
 from dask.compatibility import apply
 
@@ -186,24 +185,19 @@ def test_update_state_supports_recomputing_released_results(s):
     assert set(s.processing[alice]) == {'x'}
 
 
-def test_decide_worker_with_many_independent_leaves():
-    dsk = merge({('y', i): (inc, ('x', i)) for i in range(100)},
-                {('x', i): i for i in range(100)})
-    dependencies, dependents = get_deps(dsk)
-    stacks = {alice: [], bob: []}
-    processing = {alice: dict(), bob: dict()}
-    who_has = merge({('x', i * 2): {alice} for i in range(50)},
-                    {('x', i * 2 + 1): {bob} for i in range(50)})
-    nbytes = {k: 0 for k in who_has}
-    ncores = {alice: 1, bob: 1}
+@gen_cluster(client=True)
+def test_decide_worker_with_many_independent_leaves(c, s, a, b):
+    dinc = delayed(inc)
+    xs = yield [c._scatter(list(range(0, 100, 2)), workers=a.address),
+                c._scatter(list(range(1, 100, 2)), workers=b.address)]
+    xs = list(concat(zip(*xs)))
+    ys = [delayed(inc)(x) for x in xs]
 
-    for key in dsk:
-        worker = decide_worker(dependencies, stacks, stack_duration, processing,
-                               who_has, {}, {}, set(), nbytes, ncores, key)
-        stacks[worker].append(key)
+    y2s = c.persist(ys)
+    yield _wait(y2s)
 
-    nhits = (len([k for k in stacks[alice] if alice in who_has[('x', k[1])]])
-             + len([k for k in stacks[bob] if bob in who_has[('x', k[1])]]))
+    nhits = (sum(y.key in a.data for y in y2s[::2]) +
+             sum(y.key in b.data for y in y2s[1::2]))
 
     assert nhits > 90
 
@@ -214,24 +208,24 @@ def test_decide_worker_with_restrictions():
     stacks = {alice: [], bob: [], charlie: []}
     processing = {alice: dict(), bob: dict(), charlie: dict()}
     who_has = {}
-    restrictions = {'x': {'alice', 'charlie'}}
+    valid_workers = {'alice:8000', 'charlie:8000'}
     nbytes = {}
     ncores = {alice: 1, bob: 1, charlie: 1}
     result = decide_worker(dependencies, stacks, stack_duration, processing,
-                          who_has, {}, restrictions, set(), nbytes, ncores, 'x')
+                          who_has, {}, valid_workers, set(), nbytes, ncores, 'x')
     assert result in {alice, charlie}
 
 
     stacks = {alice: [1, 2, 3], bob: [], charlie: [4, 5, 6]}
     result = decide_worker(dependencies, stacks, stack_duration, processing,
-                          who_has, {}, restrictions, set(), nbytes, ncores, 'x')
+                          who_has, {}, valid_workers, set(), nbytes, ncores, 'x')
     assert result in {alice, charlie}
 
     dependencies = {'x': {'y'}}
     who_has = {'y': {bob}}
     nbytes = {'y': 0}
     result = decide_worker(dependencies, stacks, stack_duration, processing,
-                          who_has, {}, restrictions, set(), nbytes, ncores, 'x')
+                          who_has, {}, valid_workers, set(), nbytes, ncores, 'x')
     assert result in {alice, charlie}
 
 
@@ -244,30 +238,30 @@ def test_decide_worker_with_loose_restrictions():
     who_has = {}
     nbytes = {}
     ncores = {alice: 1, bob: 1, charlie: 1}
-    restrictions = {'x': {'alice', 'charlie'}}
+    valid_workers = {'alice:8000', 'charlie:8000'}
 
     result = decide_worker(dependencies, stacks, stack_duration, processing,
-                          who_has, {}, restrictions, set(), nbytes, ncores, 'x')
+                          who_has, {}, valid_workers, set(), nbytes, ncores, 'x')
     assert result == charlie
 
     result = decide_worker(dependencies, stacks, stack_duration, processing,
-                          who_has, {}, restrictions, {'x'}, nbytes, ncores, 'x')
+                          who_has, {}, valid_workers, {'x'}, nbytes, ncores, 'x')
     assert result == charlie
 
-    restrictions = {'x': {'david', 'ethel'}}
+    valid_workers = set()
     result = decide_worker(dependencies, stacks, stack_duration, processing,
-                          who_has, {}, restrictions, set(), nbytes, ncores, 'x')
+                          who_has, {}, valid_workers, set(), nbytes, ncores, 'x')
     assert result is None
 
-    restrictions = {'x': {'david', 'ethel'}}
+    valid_workers = set()
     result = decide_worker(dependencies, stacks, stack_duration, processing,
-                          who_has, {}, restrictions, {'x'}, nbytes, ncores, 'x')
+                          who_has, {}, valid_workers, {'x'}, nbytes, ncores, 'x')
 
     assert result == bob
 
 
 def test_decide_worker_without_stacks():
-    assert not decide_worker({'x': []}, {}, {}, {}, {}, {}, {}, set(), {}, {},
+    assert not decide_worker({'x': []}, {}, {}, {}, {}, {}, True, set(), {}, {},
                              'x')
 
 
@@ -338,75 +332,6 @@ def test_validate_state():
     validate_state(**locals())
 
 
-def div(x, y):
-    return x / y
-
-@gen_cluster()
-def test_scheduler(s, a, b):
-    stream = yield connect(s.ip, s.port)
-    yield write(stream, {'op': 'register-client', 'client': 'ident'})
-    stream = BatchedStream(stream, 10)
-    msg = yield read(stream)
-    assert msg['op'] == 'stream-start'
-
-    # Test update graph
-    yield write(stream, {'op': 'update-graph',
-                         'tasks': valmap(dumps_task, {'x': (inc, 1),
-                                                      'y': (inc, 'x'),
-                                                      'z': (inc, 'y')}),
-                         'dependencies': {'x': [],
-                                          'y': ['x'],
-                                          'z': ['y']},
-                         'keys': ['x', 'z'],
-                         'client': 'ident'})
-    while True:
-        msg = yield read(stream)
-        if msg['op'] == 'key-in-memory' and msg['key'] == 'z':
-            break
-
-    assert a.data.get('x') == 2 or b.data.get('x') == 2
-
-    # Test erring tasks
-    yield write(stream, {'op': 'update-graph',
-                         'tasks': valmap(dumps_task, {'a': (div, 1, 0),
-                                                       'b': (inc, 'a')}),
-                         'dependencies': {'a': [],
-                                           'b': ['a']},
-                         'keys': ['a', 'b'],
-                         'client': 'ident'})
-
-    while True:
-        msg = yield read(stream)
-        if msg['op'] == 'task-erred' and msg['key'] == 'b':
-            break
-
-    # Test missing data
-    yield write(stream, {'op': 'missing-data', 'keys': ['z']})
-    s.ensure_occupied()
-
-    while True:
-        msg = yield read(stream)
-        if msg['op'] == 'key-in-memory' and msg['key'] == 'z':
-            break
-
-    # Test missing data without being informed
-    for w in [a, b]:
-        if 'z' in w.data:
-            del w.data['z']
-    yield write(stream, {'op': 'update-graph',
-                         'tasks': {'zz': dumps_task((inc, 'z'))},
-                         'dependencies': {'zz': ['z']},
-                         'keys': ['zz'],
-                         'client': 'ident'})
-    while True:
-        msg = yield read(stream)
-        if msg['op'] == 'key-in-memory' and msg['key'] == 'zz':
-            break
-
-    write(stream, {'op': 'close'})
-    stream.close()
-
-
 @gen_cluster()
 def test_multi_queues(s, a, b):
     sched, report = Queue(), Queue()
@@ -452,29 +377,28 @@ def test_multi_queues(s, a, b):
 def test_server(s, a, b):
     stream = yield connect('127.0.0.1', s.port)
     yield write(stream, {'op': 'register-client', 'client': 'ident'})
-    stream = BatchedStream(stream, 0)
-    stream.send({'op': 'update-graph',
-                 'tasks': {'x': dumps_task((inc, 1)),
-                           'y': dumps_task((inc, 'x'))},
-                 'dependencies': {'x': [], 'y': ['x']},
-                 'keys': ['y'],
-                 'client': 'ident'})
+    yield write(stream, {'op': 'update-graph',
+                         'tasks': {'x': dumps_task((inc, 1)),
+                                   'y': dumps_task((inc, 'x'))},
+                         'dependencies': {'x': [], 'y': ['x']},
+                         'keys': ['y'],
+                         'client': 'ident'})
 
     while True:
-        msg = yield read(stream)
+        msg = yield readone(stream)
         if msg['op'] == 'key-in-memory' and msg['key'] == 'y':
             break
 
-    stream.send({'op': 'close-stream'})
-    msg = yield read(stream)
+    yield write(stream, {'op': 'close-stream'})
+    msg = yield readone(stream)
     assert msg == {'op': 'stream-closed'}
-    assert stream.closed()
-    stream.close()
+    with pytest.raises(StreamClosedError):
+        yield readone(stream)
+    close(stream)
 
 
 @gen_cluster()
 def test_remove_client(s, a, b):
-    s.add_client(client='ident')
     s.update_graph(tasks={'x': dumps_task((inc, 1)),
                           'y': dumps_task((inc, 'x'))},
                    dependencies={'x': [], 'y': ['x']},
@@ -499,7 +423,7 @@ def test_server_listens_to_other_ops(s, a, b):
 
 @gen_cluster()
 def test_remove_worker_from_scheduler(s, a, b):
-    dsk = {('x', i): (inc, i) for i in range(20)}
+    dsk = {('x-%d' % i): (inc, i) for i in range(20)}
     s.update_graph(tasks=valmap(dumps_task, dsk), keys=list(dsk),
                    dependencies={k: set() for k in dsk})
     assert s.ready
@@ -520,7 +444,7 @@ def test_add_worker(s, a, b):
     w.data['y'] = 1
     yield w._start(0)
 
-    dsk = {('x-%d' % i).encode(): (inc, i) for i in range(10)}
+    dsk = {('x-%d' % i): (inc, i) for i in range(10)}
     s.update_graph(tasks=valmap(dumps_task, dsk), keys=list(dsk), client='client',
                    dependencies={k: set() for k in dsk})
 
@@ -549,7 +473,7 @@ def test_feed(s, a, b):
         expected = s.processing, s.stacks
         assert cloudpickle.loads(response) == expected
 
-    stream.close()
+    close(stream)
 
 
 @gen_cluster()
@@ -575,11 +499,33 @@ def test_feed_setup_teardown(s, a, b):
         response = yield read(stream)
         assert response == 'OK'
 
-    stream.close()
+    close(stream)
     start = time()
     while not hasattr(s, 'flag'):
         yield gen.sleep(0.01)
         assert time() - start < 5
+
+
+@gen_cluster()
+def test_feed_large_bytestring(s, a, b):
+    np = pytest.importorskip('numpy')
+
+    x = np.ones(10000000)
+
+    def func(scheduler):
+        y = x
+        return True
+
+    stream = yield connect(s.ip, s.port)
+    yield write(stream, {'op': 'feed',
+                         'function': dumps(func),
+                         'interval': 0.01})
+
+    for i in range(5):
+        response = yield read(stream)
+        assert response == True
+
+    close(stream)
 
 
 @gen_test(timeout=None)
@@ -679,8 +625,6 @@ def test_filtered_communication(s, a, b):
     yield write(f, {'op': 'register-client', 'client': 'f'})
     yield read(c)
     yield read(f)
-    c = BatchedStream(c, 0)
-    f = BatchedStream(f, 0)
 
     assert set(s.streams) == {'c', 'f'}
 
@@ -698,10 +642,10 @@ def test_filtered_communication(s, a, b):
                     'client': 'f',
                     'keys': ['z']})
 
-    msg = yield read(c)
+    msg, = yield read(c)
     assert msg['op'] == 'key-in-memory'
     assert msg['key'] == 'y'
-    msg = yield read(f)
+    msg, = yield read(f)
     assert msg['op'] == 'key-in-memory'
     assert msg['key'] == 'z'
 
@@ -735,7 +679,6 @@ def test_dumps_task():
 
 @gen_cluster()
 def test_ready_remove_worker(s, a, b):
-    s.add_client(client='client')
     s.update_graph(tasks={'x-%d' % i: dumps_task((inc, i)) for i in range(20)},
                    keys=['x-%d' % i for i in range(20)],
                    client='client',
@@ -759,7 +702,6 @@ def test_ready_remove_worker(s, a, b):
 
 @gen_cluster(Worker=Nanny)
 def test_restart(s, a, b):
-    s.add_client(client='client')
     s.update_graph(tasks={'x-%d' % i: dumps_task((inc, i)) for i in range(20)},
                    keys=['x-%d' % i for i in range(20)],
                    client='client',
@@ -783,7 +725,6 @@ def test_restart(s, a, b):
 
 @gen_cluster()
 def test_ready_add_worker(s, a, b):
-    s.add_client(client='client')
     s.update_graph(tasks={'x-%d' % i: dumps_task((inc, i)) for i in range(20)},
                    keys=['x-%d' % i for i in range(20)],
                    client='client',
@@ -900,7 +841,6 @@ def test_file_descriptors_dont_leak(s):
 
 @gen_cluster()
 def test_update_graph_culls(s, a, b):
-    s.add_client(client='client')
     s.update_graph(tasks={'x': dumps_task((inc, 1)),
                           'y': dumps_task((inc, 'x')),
                           'z': dumps_task((inc, 2))},
@@ -999,7 +939,7 @@ def test_launch_without_blocked_services():
 def test_scatter_no_workers(c, s):
     with pytest.raises(gen.TimeoutError):
         yield gen.with_timeout(timedelta(seconds=0.1),
-                              s.scatter(data={'x': dumps(1)}, client='alice'))
+                               s.scatter(data={'x': 1}, client='alice'))
 
     w = Worker(s.ip, s.port, ncores=3, ip='127.0.0.1')
     yield [c._scatter(data={'x': 1}),
