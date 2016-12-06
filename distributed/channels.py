@@ -106,6 +106,40 @@ class ChannelClient(object):
 
 
 class Channel(object):
+    """
+    A changing stream of futures shared between clients
+
+    Several clients connected to the same scheduler can communicate a sequence
+    of futures between each other through shared *channels*.  All clients can
+    append to the channel at any time.  All clients will be updated when a
+    channel updates.  The central scheduler maintains consistency and ordering
+    of events.
+
+    Examples
+    --------
+
+    Create channels from your Client:
+
+    >>> client = Client('scheduler-address:8786')
+    >>> chan = client.channel('my-channel')
+
+    Append futures onto a channel
+
+    >>> future = client.submit(add, 1, 2)
+    >>> chan.append(future)
+
+    A channel maintains a collection of current futures added by both your
+    client, and others.
+
+    >>> chan.futures
+    deque([<Future: status: pending, key: add-12345>,
+           <Future: status: pending, key: sub-56789>])
+
+    You can iterate over a channel to get back futures.
+
+    >>> for future in chan:
+    ...     pass
+    """
     def __init__(self, client, name, maxlen=None):
         self.client = client
         self.name = name
@@ -120,6 +154,7 @@ class Channel(object):
                                         'client': self.client.id})
 
     def append(self, future):
+        """ Append a future onto the channel """
         self.client._send_to_scheduler({'op': 'channel-append',
                                         'channel': self.name,
                                         'key': tokey(future.key)})
@@ -138,6 +173,9 @@ class Channel(object):
             self._thread_condition.notify_all()
 
     def flush(self):
+        """
+        Wait for acknowledgement from the scheduler on any pending futures
+        """
         while self._pending:
             sleep(0.01)
 
