@@ -1,5 +1,8 @@
+from __future__ import print_function, division, absolute_import
+
 from collections import deque, defaultdict
 from functools import partial
+import logging
 from time import sleep
 import threading
 
@@ -7,6 +10,8 @@ from tornado.iostream import StreamClosedError
 
 from .client import Future
 from .utils import tokey, log_errors
+
+logger = logging.getLogger(__name__)
 
 
 class ChannelScheduler(object):
@@ -23,7 +28,9 @@ class ChannelScheduler(object):
         self.scheduler.compute_handlers.update(handlers)
 
     def subscribe(self, topic=None, client=None, maxlen=None):
+        logger.info("Add new client to channel, %s, %s", client, topic)
         if topic not in self.deques:
+            logger.info("Add new channel %s", topic)
             self.deques[topic] = deque(maxlen=maxlen)
             self.counts[topic] = 0
             self.clients[topic] = set()
@@ -36,6 +43,7 @@ class ChannelScheduler(object):
                          'topic': topic})
 
     def unsubscribe(self, topic=None, client=None):
+        logger.info("Remove client from channel, %s, %s", client, topic)
         self.clients[topic].remove(client)
         if self.clients[topic]:
             del self.deques[topic]
@@ -50,7 +58,9 @@ class ChannelScheduler(object):
         self.deques[topic].append(key)
         self.counts[topic] += 1
         self.report(topic, key)
-        self.scheduler.update_graph(keys=[key], client='streaming-%s' % topic)
+
+        client='streaming-%s' % topic
+        self.scheduler.client_desires_keys(keys=[key], client=client)
 
     def report(self, topic, key):
         for client in list(self.clients[topic]):
@@ -117,7 +127,7 @@ class Channel(object):
     def _receive_update(self, key=None):
         self.count += 1
         self.futures.append(Future(key, self.client))
-        self.client._send_to_scheduler({'op': 'update-graph',
+        self.client._send_to_scheduler({'op': 'client-desires-keys',
                                         'keys': [key],
                                         'client': self.client.id})
         if key in self._pending:

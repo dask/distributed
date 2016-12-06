@@ -266,6 +266,7 @@ class Scheduler(Server):
         self._transition_counter = 0
 
         self.compute_handlers = {'update-graph': self.update_graph,
+                                 'client-desires-keys': self.client_desires_keys,
                                  'update-data': self.update_data,
                                  'missing-data': self.stimulus_missing_data,
                                  'client-releases-keys': self.client_releases_keys,
@@ -566,12 +567,7 @@ class Scheduler(Server):
         """
         original_keys = keys
         keys = set(keys)
-        for k in keys:
-            self.who_wants[k].add(client)
-            self.wants_what[client].add(k)
-
-        if not tasks:
-            return
+        self.client_desires_keys(keys=keys, client=client)
 
         for k in list(tasks):
             if tasks[k] is k:
@@ -813,6 +809,11 @@ class Scheduler(Server):
         logger.debug("Scheduler cancels key %s", key)
         self.report({'op': 'cancelled-key', 'key': key})
         self.client_releases_keys(keys=[key], client=client)
+
+    def client_desires_keys(self, keys=None, client=None):
+        for k in keys:
+            self.who_wants[k].add(client)
+            self.wants_what[client].add(k)
 
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
