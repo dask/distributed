@@ -564,17 +564,20 @@ class Scheduler(Server):
 
         This happens whenever the Client calls submit, map, get, or compute.
         """
-        for k in list(tasks):
-            if tasks[k] is k:
-                del tasks[k]
-            if k in self.tasks:
-                del tasks[k]
-
         original_keys = keys
         keys = set(keys)
         for k in keys:
             self.who_wants[k].add(client)
             self.wants_what[client].add(k)
+
+        if not tasks:
+            return
+
+        for k in list(tasks):
+            if tasks[k] is k:
+                del tasks[k]
+            if k in self.tasks:
+                del tasks[k]
 
         n = 0
         while len(tasks) != n:  # walk thorough new tasks, cancel any bad deps

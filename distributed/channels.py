@@ -1,8 +1,9 @@
 from collections import deque, defaultdict
 from functools import partial
+import threading
 
 from .client import Future
-from .utils import tokey
+from .utils import tokey, log_errors
 
 
 class ChannelScheduler(object):
@@ -39,7 +40,7 @@ class ChannelScheduler(object):
             del self.clients[topic]
 
     def append(self, topic=None, key=None):
-        self.deques[topic].append(topic)
+        self.deques[topic].append(key)
         self.counts[topic] += 1
         self.report(topic, key)
 
@@ -82,7 +83,10 @@ class Channel(object):
         self.client = client
         self.topic = topic
         self.futures = deque(maxlen=maxlen)
+        self.count = 0
+        self._pending = dict()
         self.client._channel_handler.add_channel(self)  # circular reference
+        self._thread_condition = threading.Condition()
 
         self.client._send_to_scheduler({'op': 'topic-subscribe',
                                         'topic': topic,
@@ -93,11 +97,48 @@ class Channel(object):
         self.client._send_to_scheduler({'op': 'topic-append',
                                         'topic': self.topic,
                                         'key': tokey(future.key)})
+        self._pending[future.key] = future  # hold on to refernce until ack
 
     def _receive_update(self, key=None):
+        self.count += 1
         self.futures.append(Future(key, self.client))
+        self.client._send_to_scheduler({'op': 'update-graph',
+                                        'keys': [key],
+                                        'client': self.client.id})
+        if key in self._pending:
+            del self._pending[key]
+
+        with self._thread_condition:
+            self._thread_condition.notify_all()
+
+    def flush(self):
+        while self._pending:
+            sleep(0.01)
 
     def __del__(self):
         self.client._send_to_scheduler({'op': 'topic-unsubscribe',
                                         'topic': self.topic,
                                         'client': self.client.id})
+
+    def __iter__(self):
+        with log_errors():
+            last = self.count
+            L = list(self.futures)
+            for future in L:
+                yield future
+
+            while True:
+                if self.count == last:
+                    self._thread_condition.acquire()
+                    self._thread_condition.wait()
+                    self._thread_condition.release()
+
+                n = min(self.count - last, len(self.futures))
+                L = [self.futures[i] for i in range(-n, 0)]
+                last = self.count
+                for f in L:
+                    yield f
+
+
+    def __len__(self):
+        return len(self.futures)
