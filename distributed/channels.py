@@ -53,7 +53,7 @@ class ChannelScheduler(object):
     def unsubscribe(self, channel=None, client=None):
         logger.info("Remove client from channel, %s, %s", client, channel)
         self.clients[channel].remove(client)
-        if self.clients[channel]:
+        if not self.clients[channel]:
             del self.deques[channel]
             del self.counts[channel]
             del self.clients[channel]

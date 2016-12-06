@@ -122,3 +122,28 @@ def test_channel_scheduler(c, s, a, b):
 
     results = yield c._gather(list(chan.futures))
     assert results == [6, 7, 8, 9, 10]
+
+
+@gen_cluster(client=True)
+def test_multiple_maxlen(c, s, a, b):
+    c2 = Client((s.ip, s.port), start=False)
+    yield c2._start()
+
+    x = c.channel('x', maxlen=10)
+    assert x.futures.maxlen == 10
+    x2 = c2.channel('x', maxlen=20)
+    assert x2.futures.maxlen == 20
+
+    for i in range(30):
+        x.append(c.submit(inc, i))
+
+    while len(s.task_state) < 20:
+        yield gen.sleep(0.01)
+
+    yield gen.sleep(0.05)
+
+    assert len(x2) == 20
+
+    assert len(s.task_state) == 20
+
+    yield c2._shutdown()
