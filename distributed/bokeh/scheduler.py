@@ -63,7 +63,7 @@ def systemmonitor_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
         sysmon = SystemMonitor(scheduler, sizing_mode='scale_width')
-        doc.add_periodic_callback(table.update, 200)
+        doc.add_periodic_callback(table.update, 500)
         doc.add_periodic_callback(sysmon.update, 500)
 
         doc.add_root(column(table.root, sysmon.root,

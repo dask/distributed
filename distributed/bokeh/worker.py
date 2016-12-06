@@ -392,6 +392,12 @@ class SystemMonitor(DashboardComponent):
         else:
             kw = {}
 
+        if not WINDOWS:
+            self.num_fds.y_range.start = 0
+        self.mem.y_range.start = 0
+        self.cpu.y_range.start = 0
+        self.bandwidth.y_range.start = 0
+
         self.last = 0
         self.root = column(*plots, **kw)
         self.worker.monitor.update()
@@ -413,11 +419,6 @@ class SystemMonitor(DashboardComponent):
 
             self.source.stream(d, 1000)
 
-            if not WINDOWS:
-                self.num_fds.y_range.start = 0
-            self.mem.y_range.start = 0
-            self.cpu.y_range.start = 0
-            self.bandwidth.y_range.start = 0
             self.last = monitor.count
 
 
