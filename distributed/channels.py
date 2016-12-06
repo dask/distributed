@@ -1,10 +1,11 @@
 from collections import deque, defaultdict
+from functools import partial
 
 from .client import Future
 from .utils import tokey
 
 
-class BufferScheduler(object):
+class ChannelScheduler(object):
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.deques = dict()
@@ -53,33 +54,35 @@ class BufferScheduler(object):
                 self.unsubscribe(topic, client)
 
 
-class BufferClient(object):
+class ChannelClient(object):
     def __init__(self, client):
         self.client = client
-        self.buffers = dict()
-        self.client.buffers = self
+        self.channels = dict()
+        self.client._channel_handler = self
 
         handlers = {'topic-append': self.receive_key}
 
         self.client._handlers.update(handlers)
 
+        self.client.channel = partial(Channel, self.client)  # monkey patch
+
     def receive_key(self, topic=None, key=None):
-        for buff in self.buffers[topic]:
+        for buff in self.channels[topic]:
             buff._receive_update(key)
 
-    def add_buffer(self, buffer):
-        if buffer.topic not in self.buffers:
-            self.buffers[buffer.topic] = {buffer}
+    def add_channel(self, channel):
+        if channel.topic not in self.channels:
+            self.channels[channel.topic] = {channel}
         else:
-            self.buffers[buffer.topic].add(buffer)
+            self.channels[channel.topic].add(channel)
 
 
-class Buffer(object):
+class Channel(object):
     def __init__(self, client, topic, maxlen=None):
         self.client = client
         self.topic = topic
         self.futures = deque(maxlen=maxlen)
-        self.client.buffers.add_buffer(self)  # circular reference
+        self.client._channel_handler.add_channel(self)  # circular reference
 
         self.client._send_to_scheduler({'op': 'topic-subscribe',
                                         'topic': topic,

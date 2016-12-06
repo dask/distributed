@@ -374,6 +374,9 @@ class Client(object):
         if start:
             self.start(timeout=timeout)
 
+        from distributed.channels import ChannelClient
+        ChannelClient(self)  # registers itself on construction
+
     def __str__(self):
         if hasattr(self, '_loop_thread'):
             n = sync(self.loop, self.scheduler.ncores)

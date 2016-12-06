@@ -1,25 +1,21 @@
 from tornado import gen
 
 from distributed.utils_test import gen_cluster, inc
-from distributed.streaming_buffer import BufferScheduler, BufferClient, Buffer
 
 
 @gen_cluster(client=True)
 def test_Buffer(c, s, a, b):
-    bs = BufferScheduler(s)
-    bc = BufferClient(c)
+    x = c.channel('x')
+    y = c.channel('y')
 
-    x = Buffer(c, 'x')
-    y = Buffer(c, 'y')
-
-    while set(bs.deques) != {'x', 'y'}:
+    while set(c._channel_handler.channels) != {'x', 'y'}:
         yield gen.sleep(0.01)
 
-    xx = Buffer(c, 'x')
-    yy = Buffer(c, 'y')
+    xx = c.channel('x')
+    yy = c.channel('y')
 
     yield gen.sleep(0.1)
-    assert set(bs.deques) == {'x', 'y'}
+    assert set(c._channel_handler.channels) == {'x', 'y'}
 
     future = c.submit(inc, 1)
 
