@@ -6,6 +6,7 @@ from tornado import gen
 
 from distributed import Client
 from distributed import local_client
+from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, loop, cluster, slowinc
 
 
@@ -21,7 +22,6 @@ def test_channel(c, s, a, b):
 
     xx = c.channel('x')
     yy = c.channel('y')
-
 
     assert len(x) == 0
 
@@ -57,7 +57,7 @@ def test_local_client(loop):
                 future = c.submit(slowinc, i, delay=0.01)
                 x.append(future)
 
-            sleep(5)  # TODO: this avoids a race condition
+            x.flush()
 
     def consume():
         with local_client() as c:
@@ -68,7 +68,7 @@ def test_local_client(loop):
                 last = c.submit(add, future, last)
                 y.append(last)
 
-            sleep(5)  # TODO: this avoids a race condition
+            y.flush()
 
     with cluster() as (s, [a, b]):
         with Client(('127.0.0.1', s['port']), loop=loop) as c:
@@ -86,3 +86,37 @@ def test_local_client(loop):
             assert len(results) == 15
             assert all(0 < r < 100 for r in results)
 
+
+@gen_cluster(client=True)
+def test_channel_scheduler(c, s, a, b):
+    chan = c.channel('chan', maxlen=5)
+
+    x = c.submit(inc, 1)
+    key = x.key
+    chan.append(x)
+    del x
+
+    while not len(chan):
+        yield gen.sleep(0.01)
+
+    assert 'streaming-chan' in s.who_wants[key]
+    assert s.wants_what['streaming-chan'] == {key}
+
+    while len(s.who_wants[key]) < 2:
+        yield gen.sleep(0.01)
+
+    assert s.wants_what[c.id] == {key}
+
+    for i in range(10):
+        chan.append(c.submit(inc, i))
+
+    start = time()
+    while True:
+        if len(chan) == len(s.task_state) == 5:
+            break
+        else:
+            assert time() < start + 2
+            yield gen.sleep(0.01)
+
+    results = yield c._gather(list(chan.futures))
+    assert results == [6, 7, 8, 9, 10]

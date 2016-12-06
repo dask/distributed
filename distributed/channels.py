@@ -1,6 +1,9 @@
 from collections import deque, defaultdict
 from functools import partial
+from time import sleep
 import threading
+
+from tornado.iostream import StreamClosedError
 
 from .client import Future
 from .utils import tokey, log_errors
@@ -40,18 +43,23 @@ class ChannelScheduler(object):
             del self.clients[topic]
 
     def append(self, topic=None, key=None):
+        if len(self.deques[topic]) == self.deques[topic].maxlen:
+            self.scheduler.client_releases_keys(keys=[self.deques[topic][0]],
+                                                client='streaming-%s' % topic)
+
         self.deques[topic].append(key)
         self.counts[topic] += 1
         self.report(topic, key)
+        self.scheduler.update_graph(keys=[key], client='streaming-%s' % topic)
 
     def report(self, topic, key):
-        for c in list(self.clients[topic]):
-            stream = self.scheduler.streams[c]
+        for client in list(self.clients[topic]):
             try:
+                stream = self.scheduler.streams[client]
                 stream.send({'op': 'topic-append',
                              'key': key,
                              'topic': topic})
-            except StreamClosedError:
+            except (KeyError, StreamClosedError):
                 self.unsubscribe(topic, client)
 
 
@@ -67,9 +75,9 @@ class ChannelClient(object):
 
         self.client.channel = self._create_channel  # monkey patch
 
-    def _create_channel(self, topic):
+    def _create_channel(self, topic, maxlen=None):
         if topic not in self.channels:
-            c = Channel(self.client, topic)
+            c = Channel(self.client, topic, maxlen=maxlen)
             self.channels[topic] = c
             return c
         else:
@@ -104,7 +112,7 @@ class Channel(object):
         self.client._send_to_scheduler({'op': 'topic-append',
                                         'topic': self.topic,
                                         'key': tokey(future.key)})
-        self._pending[future.key] = future  # hold on to refernce until ack
+        self._pending[future.key] = future  # hold on to reference until ack
 
     def _receive_update(self, key=None):
         self.count += 1
