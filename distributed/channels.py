@@ -65,11 +65,18 @@ class ChannelClient(object):
 
         self.client._handlers.update(handlers)
 
-        self.client.channel = partial(Channel, self.client)  # monkey patch
+        self.client.channel = self._create_channel  # monkey patch
+
+    def _create_channel(self, topic):
+        if topic not in self.channels:
+            c = Channel(self.client, topic)
+            self.channels[topic] = c
+            return c
+        else:
+            return self.channels[topic]
 
     def receive_key(self, topic=None, key=None):
-        for buff in self.channels[topic]:
-            buff._receive_update(key)
+        self.channels[topic]._receive_update(key)
 
     def add_channel(self, channel):
         if channel.topic not in self.channels:
@@ -116,9 +123,10 @@ class Channel(object):
             sleep(0.01)
 
     def __del__(self):
-        self.client._send_to_scheduler({'op': 'topic-unsubscribe',
-                                        'topic': self.topic,
-                                        'client': self.client.id})
+        if not self.client.scheduler_stream.stream:
+            self.client._send_to_scheduler({'op': 'topic-unsubscribe',
+                                            'topic': self.topic,
+                                            'client': self.client.id})
 
     def __iter__(self):
         with log_errors():
@@ -142,3 +150,8 @@ class Channel(object):
 
     def __len__(self):
         return len(self.futures)
+
+    def __str__(self):
+        return "<Channel: %s - %d elements>" % (self.topic, len(self.futures))
+
+    __repr__ = __str__

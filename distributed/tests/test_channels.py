@@ -14,11 +14,16 @@ def test_channel(c, s, a, b):
     x = c.channel('x')
     y = c.channel('y')
 
+    assert len(x) == 0
+
     while set(c._channel_handler.channels) != {'x', 'y'}:
         yield gen.sleep(0.01)
 
     xx = c.channel('x')
     yy = c.channel('y')
+
+
+    assert len(x) == 0
 
     yield gen.sleep(0.1)
     assert set(c._channel_handler.channels) == {'x', 'y'}
@@ -27,8 +32,10 @@ def test_channel(c, s, a, b):
 
     x.append(future)
 
-    while not xx.futures:
+    while not x.futures:
         yield gen.sleep(0.01)
+
+    assert len(x) == 1
 
     assert xx.futures[0].key == future.key
 
@@ -37,6 +44,9 @@ def test_channel(c, s, a, b):
         yield gen.sleep(0.01)
 
     assert xxx.futures[0].key == future.key
+
+    assert 'x' in repr(x)
+    assert '1' in repr(x)
 
 
 def test_local_client(loop):
