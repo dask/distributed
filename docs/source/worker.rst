@@ -47,6 +47,9 @@ This ``.data`` attribute is a ``MutableMapping`` that is typically a
 combination of in-memory and on-disk storage with an LRU policy to move data
 between them.
 
+
+.. _spill-to-disk:
+
 Spill Excess Data to Disk
 -------------------------
 
@@ -67,9 +70,9 @@ of memory entirely, which can cause the system to halt.
 If the ``dask-worker --memory-limit=NBYTES`` keyword is set during
 initialization then the worker will store at most NBYTES of data (as measured
 with ``sizeof``) in memory.  After that it will start storing least recently
-used (LRU) data in a temporary directory.   Workers serialize data for writing
-to disk with the same system used to write data on the wire, a combination of
-``pickle`` and the default compressor.
+used (LRU) data in a temporary disk-backed store.   Workers serialize data
+for writing to disk with the same system used to write data on the wire, a
+combination of ``pickle`` and the default compressor.
 
 Now whenever new data comes in it will push out old data until at most NBYTES
 of data is in RAM.  If an old value is requested it will be read from disk,

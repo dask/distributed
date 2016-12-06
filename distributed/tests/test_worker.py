@@ -321,7 +321,7 @@ def test_io_loop(loop):
 @gen_cluster(client=True, ncores=[])
 def test_spill_to_disk(e, s):
     np = pytest.importorskip('numpy')
-    w = Worker(s.ip, s.port, loop=s.loop, memory_limit=1000)
+    w = Worker(s.ip, s.port, loop=s.loop, memory_limit=1200)
     yield w._start()
 
     x = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')
@@ -334,6 +334,7 @@ def test_spill_to_disk(e, s):
 
     z = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='z')
     yield _wait(z)
+    # x is oldest and was evicted because of the memory limit
     assert set(w.data) == {x.key, y.key, z.key}
     assert set(w.data.fast) == {y.key, z.key}
     assert set(w.data.slow) == {x.key}
@@ -341,6 +342,35 @@ def test_spill_to_disk(e, s):
     yield x._result()
     assert set(w.data.fast) == {x.key, z.key}
     assert set(w.data.slow) == {y.key}
+    yield w._close()
+
+
+@gen_cluster(client=True, ncores=[])
+def test_spill_to_disk_storage(e, s):
+    np = pytest.importorskip('numpy')
+
+    w = Worker(s.ip, s.port, loop=s.loop, memory_limit=100)
+    yield w._start()
+
+    x = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')
+    y = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='y')
+    z = e.submit(np.random.randint, 0, 255, size=15000000, dtype='u1', key='z')
+    yield _wait([x, y, z])
+
+    assert set(w.data) == {x.key, y.key, z.key}
+    assert set(w.data.fast) == set()
+    assert set(w.data.slow) == {x.key, y.key, z.key}
+    assert set(w.data.slow.mappings['small']) == {x.key, y.key}
+    assert set(w.data.slow.mappings['large']) == {z.key}
+
+    def get_files(path):
+        print(os.listdir(path))
+        return [s for s in os.listdir(path)
+                if os.path.isfile(os.path.join(path, s))]
+
+    files = get_files(os.path.join(w.local_dir, 'storage'))
+    assert files == ['z']
+
     yield w._close()
 
 
