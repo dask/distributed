@@ -371,6 +371,12 @@ class SystemMonitor(DashboardComponent):
                             color='red')
         self.bandwidth.line(source=self.source, x='time', y='write_bytes',
                             color='blue')
+        self.bandwidth.yaxis.axis_label = 'Bytes / second'
+
+        # self.cpu.yaxis[0].formatter = NumeralTickFormatter(format='0%')
+        self.bandwidth.yaxis[0].formatter = NumeralTickFormatter(format='0.0b')
+        self.mem.yaxis[0].formatter = NumeralTickFormatter(format='0.0b')
+
         plots = [self.cpu, self.mem, self.bandwidth]
 
         if not WINDOWS:
@@ -406,10 +412,12 @@ class SystemMonitor(DashboardComponent):
             d['time'] = [monitor.time[i] * 1000 for i in seq]
 
             self.source.stream(d, 1000)
+
             if not WINDOWS:
                 self.num_fds.y_range.start = 0
             self.mem.y_range.start = 0
             self.cpu.y_range.start = 0
+            self.bandwidth.y_range.start = 0
             self.last = monitor.count
 
 
@@ -447,7 +455,7 @@ def crossfilter_doc(worker, doc):
         statetable = StateTable(worker)
         crossfilter = CrossFilter(worker)
 
-        doc.add_periodic_callback(statetable.update, 200)
+        doc.add_periodic_callback(statetable.update, 500)
         doc.add_periodic_callback(crossfilter.update, 500)
 
         doc.add_root(column(statetable.root, crossfilter.root))
