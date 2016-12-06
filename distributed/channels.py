@@ -15,62 +15,70 @@ logger = logging.getLogger(__name__)
 
 
 class ChannelScheduler(object):
+    """ A plugin for the scheduler to manage channels
+
+    This adds the following routes to the scheduler
+
+    *  channel-subscribe
+    *  channel-unsubsribe
+    *  channel-append
+    """
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.deques = dict()
         self.counts = dict()
         self.clients = dict()
 
-        handlers = {'topic-subscribe': self.subscribe,
-                    'topic-unsubscribe': self.unsubscribe,
-                    'topic-append': self.append}
+        handlers = {'channel-subscribe': self.subscribe,
+                    'channel-unsubscribe': self.unsubscribe,
+                    'channel-append': self.append}
 
         self.scheduler.compute_handlers.update(handlers)
 
-    def subscribe(self, topic=None, client=None, maxlen=None):
-        logger.info("Add new client to channel, %s, %s", client, topic)
-        if topic not in self.deques:
-            logger.info("Add new channel %s", topic)
-            self.deques[topic] = deque(maxlen=maxlen)
-            self.counts[topic] = 0
-            self.clients[topic] = set()
-        self.clients[topic].add(client)
+    def subscribe(self, channel=None, client=None, maxlen=None):
+        logger.info("Add new client to channel, %s, %s", client, channel)
+        if channel not in self.deques:
+            logger.info("Add new channel %s", channel)
+            self.deques[channel] = deque(maxlen=maxlen)
+            self.counts[channel] = 0
+            self.clients[channel] = set()
+        self.clients[channel].add(client)
 
         stream = self.scheduler.streams[client]
-        for key in self.deques[topic]:
-            stream.send({'op': 'topic-append',
+        for key in self.deques[channel]:
+            stream.send({'op': 'channel-append',
                          'key': key,
-                         'topic': topic})
+                         'channel': channel})
 
-    def unsubscribe(self, topic=None, client=None):
-        logger.info("Remove client from channel, %s, %s", client, topic)
-        self.clients[topic].remove(client)
-        if self.clients[topic]:
-            del self.deques[topic]
-            del self.counts[topic]
-            del self.clients[topic]
+    def unsubscribe(self, channel=None, client=None):
+        logger.info("Remove client from channel, %s, %s", client, channel)
+        self.clients[channel].remove(client)
+        if self.clients[channel]:
+            del self.deques[channel]
+            del self.counts[channel]
+            del self.clients[channel]
 
-    def append(self, topic=None, key=None):
-        if len(self.deques[topic]) == self.deques[topic].maxlen:
-            self.scheduler.client_releases_keys(keys=[self.deques[topic][0]],
-                                                client='streaming-%s' % topic)
+    def append(self, channel=None, key=None):
+        if len(self.deques[channel]) == self.deques[channel].maxlen:
+            self.scheduler.client_releases_keys(keys=[self.deques[channel][0]],
+                                                client='streaming-%s' % channel)
 
-        self.deques[topic].append(key)
-        self.counts[topic] += 1
-        self.report(topic, key)
+        self.deques[channel].append(key)
+        self.counts[channel] += 1
+        self.report(channel, key)
 
-        client='streaming-%s' % topic
+        client='streaming-%s' % channel
         self.scheduler.client_desires_keys(keys=[key], client=client)
 
-    def report(self, topic, key):
-        for client in list(self.clients[topic]):
+    def report(self, channel, key):
+        for client in list(self.clients[channel]):
             try:
                 stream = self.scheduler.streams[client]
-                stream.send({'op': 'topic-append',
+                stream.send({'op': 'channel-append',
                              'key': key,
-                             'topic': topic})
+                             'channel': channel})
             except (KeyError, StreamClosedError):
-                self.unsubscribe(topic, client)
+                self.unsubscribe(channel, client)
 
 
 class ChannelClient(object):
@@ -79,48 +87,41 @@ class ChannelClient(object):
         self.channels = dict()
         self.client._channel_handler = self
 
-        handlers = {'topic-append': self.receive_key}
+        handlers = {'channel-append': self.receive_key}
 
         self.client._handlers.update(handlers)
 
         self.client.channel = self._create_channel  # monkey patch
 
-    def _create_channel(self, topic, maxlen=None):
-        if topic not in self.channels:
-            c = Channel(self.client, topic, maxlen=maxlen)
-            self.channels[topic] = c
+    def _create_channel(self, channel, maxlen=None):
+        if channel not in self.channels:
+            c = Channel(self.client, channel, maxlen=maxlen)
+            self.channels[channel] = c
             return c
         else:
-            return self.channels[topic]
+            return self.channels[channel]
 
-    def receive_key(self, topic=None, key=None):
-        self.channels[topic]._receive_update(key)
-
-    def add_channel(self, channel):
-        if channel.topic not in self.channels:
-            self.channels[channel.topic] = {channel}
-        else:
-            self.channels[channel.topic].add(channel)
+    def receive_key(self, channel=None, key=None):
+        self.channels[channel]._receive_update(key)
 
 
 class Channel(object):
-    def __init__(self, client, topic, maxlen=None):
+    def __init__(self, client, name, maxlen=None):
         self.client = client
-        self.topic = topic
+        self.name = name
         self.futures = deque(maxlen=maxlen)
         self.count = 0
         self._pending = dict()
-        self.client._channel_handler.add_channel(self)  # circular reference
         self._thread_condition = threading.Condition()
 
-        self.client._send_to_scheduler({'op': 'topic-subscribe',
-                                        'topic': topic,
+        self.client._send_to_scheduler({'op': 'channel-subscribe',
+                                        'channel': name,
                                         'maxlen': maxlen,
                                         'client': self.client.id})
 
     def append(self, future):
-        self.client._send_to_scheduler({'op': 'topic-append',
-                                        'topic': self.topic,
+        self.client._send_to_scheduler({'op': 'channel-append',
+                                        'channel': self.name,
                                         'key': tokey(future.key)})
         self._pending[future.key] = future  # hold on to reference until ack
 
@@ -142,8 +143,8 @@ class Channel(object):
 
     def __del__(self):
         if not self.client.scheduler_stream.stream:
-            self.client._send_to_scheduler({'op': 'topic-unsubscribe',
-                                            'topic': self.topic,
+            self.client._send_to_scheduler({'op': 'channel-unsubscribe',
+                                            'channel': self.name,
                                             'client': self.client.id})
 
     def __iter__(self):
@@ -170,6 +171,6 @@ class Channel(object):
         return len(self.futures)
 
     def __str__(self):
-        return "<Channel: %s - %d elements>" % (self.topic, len(self.futures))
+        return "<Channel: %s - %d elements>" % (self.name, len(self.futures))
 
     __repr__ = __str__
