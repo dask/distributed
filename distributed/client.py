@@ -2308,6 +2308,8 @@ def as_completed(fs):
     This function does not return futures in the order in which they are input.
     """
     fs = list(fs)
+    if not fs:
+        return
     if len(set(f.client for f in fs)) == 1:
         loop = first(fs).client.loop
     else:
