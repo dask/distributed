@@ -140,10 +140,12 @@ def test_multiple_maxlen(c, s, a, b):
     while len(s.task_state) < 20:
         yield gen.sleep(0.01)
 
-    yield gen.sleep(0.05)
+    while len(x2) < 20:
+        yield gen.sleep(0.01)
 
-    assert len(x2) == 20
+    yield gen.sleep(0.1)
 
+    assert len(x2) == 20  # They stay this long after a delay
     assert len(s.task_state) == 20
 
     yield c2._shutdown()
