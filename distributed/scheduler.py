@@ -960,8 +960,10 @@ class Scheduler(Server):
             try:
                 stream = self.streams[client]
                 stream.send(msg)
-            except (KeyError, StreamClosedError):
+            except StreamClosedError:
                 logger.critical("Tried writing to closed stream: %s", msg)
+            except KeyError:
+                pass
 
         for q in self.report_queues:
             q.put_nowait(msg)

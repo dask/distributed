@@ -60,6 +60,7 @@ class ChannelScheduler(object):
 
     def append(self, channel=None, key=None):
         if len(self.deques[channel]) == self.deques[channel].maxlen:
+            # TODO: future might still be in deque
             self.scheduler.client_releases_keys(keys=[self.deques[channel][0]],
                                                 client='streaming-%s' % channel)
 
@@ -146,6 +147,7 @@ class Channel(object):
         self.futures = deque(maxlen=maxlen)
         self.count = 0
         self._pending = dict()
+        self._lock = threading.Lock()
         self._thread_condition = threading.Condition()
 
         self.client._send_to_scheduler({'op': 'channel-subscribe',
@@ -161,8 +163,9 @@ class Channel(object):
         self._pending[future.key] = future  # hold on to reference until ack
 
     def _receive_update(self, key=None):
-        self.count += 1
-        self.futures.append(Future(key, self.client))
+        with self._lock:
+            self.count += 1
+            self.futures.append(Future(key, self.client))
         self.client._send_to_scheduler({'op': 'client-desires-keys',
                                         'keys': [key],
                                         'client': self.client.id})
@@ -187,8 +190,9 @@ class Channel(object):
 
     def __iter__(self):
         with log_errors():
-            last = self.count
-            L = list(self.futures)
+            with self._lock:
+                last = self.count
+                L = list(self.futures)
             for future in L:
                 yield future
 
@@ -198,9 +202,10 @@ class Channel(object):
                     self._thread_condition.wait()
                     self._thread_condition.release()
 
-                n = min(self.count - last, len(self.futures))
-                L = [self.futures[i] for i in range(-n, 0)]
-                last = self.count
+                with self._lock:
+                    n = min(self.count - last, len(self.futures))
+                    L = [self.futures[i] for i in range(-n, 0)]
+                    last = self.count
                 for f in L:
                     yield f
 

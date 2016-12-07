@@ -56,7 +56,7 @@ def test_local_client(loop):
         with local_client() as c:
             x = c.channel('x')
             for i in range(n):
-                future = c.submit(slowinc, i, delay=0.01)
+                future = c.submit(slowinc, i, delay=0.01, key='f-%d' % i)
                 x.append(future)
 
             x.flush()
@@ -67,10 +67,8 @@ def test_local_client(loop):
             y = c.channel('y')
             last = 0
             for i, future in enumerate(x):
-                last = c.submit(add, future, last)
+                last = c.submit(add, future, last, key='add-' + future.key)
                 y.append(last)
-
-            y.flush()
 
     with cluster() as (s, [a, b]):
         with Client(('127.0.0.1', s['port']), loop=loop) as c:
@@ -81,7 +79,7 @@ def test_local_client(loop):
             consumer = c.submit(consume)
 
             results = []
-            for future in take(15, y):
+            for i, future in enumerate(take(15, y)):
                 result = future.result()
                 results.append(result)
 
