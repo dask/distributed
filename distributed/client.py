@@ -352,6 +352,8 @@ class Client(object):
         self.generation = 0
         self.status = None
         self._pending_msg_buffer = []
+        self.extensions = {}
+
         if hasattr(address, 'scheduler_address'):
             self.cluster = address
             address = address.scheduler_address

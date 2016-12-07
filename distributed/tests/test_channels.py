@@ -19,7 +19,7 @@ def test_channel(c, s, a, b):
 
     assert len(x) == 0
 
-    while set(c._channel_handler.channels) != {'x', 'y'}:
+    while set(c.extensions['channels'].channels) != {'x', 'y'}:
         yield gen.sleep(0.01)
 
     xx = c.channel('x')
@@ -28,7 +28,7 @@ def test_channel(c, s, a, b):
     assert len(x) == 0
 
     yield gen.sleep(0.1)
-    assert set(c._channel_handler.channels) == {'x', 'y'}
+    assert set(c.extensions['channels'].channels) == {'x', 'y'}
 
     future = c.submit(inc, 1)
 

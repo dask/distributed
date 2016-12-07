@@ -34,6 +34,7 @@ class ChannelScheduler(object):
                     'channel-append': self.append}
 
         self.scheduler.compute_handlers.update(handlers)
+        self.scheduler.extensions['channels'] = self
 
     def subscribe(self, channel=None, client=None, maxlen=None):
         logger.info("Add new client to channel, %s, %s", client, channel)
@@ -86,7 +87,7 @@ class ChannelClient(object):
     def __init__(self, client):
         self.client = client
         self.channels = dict()
-        self.client._channel_handler = self
+        self.client.extensions['channels'] = self
 
         handlers = {'channel-append': self.receive_key}
 

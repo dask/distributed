@@ -192,7 +192,8 @@ class Scheduler(Server):
             max_buffer_size=MAX_BUFFER_SIZE, delete_interval=500,
             synchronize_worker_interval=60000,
             ip=None, services=None, allowed_failures=ALLOWED_FAILURES,
-            validate=False, steal=True, **kwargs):
+            validate=False, steal=True, extensions=[ChannelScheduler],
+            **kwargs):
 
         # Attributes
         self.ip = ip or get_ip()
@@ -260,6 +261,7 @@ class Scheduler(Server):
         self.aliases = dict()
         self.occupancy = dict()
 
+        self.extensions = {}
         self.plugins = []
         self.transition_log = deque(maxlen=config.get('transition-log-length',
                                                       100000))
@@ -335,7 +337,8 @@ class Scheduler(Server):
                 max_buffer_size=max_buffer_size, io_loop=self.loop,
                 connection_limit=connection_limit, deserialize=False, **kwargs)
 
-        self._channel_handler = ChannelScheduler(self)
+        for ext in extensions:
+            ext(self)
 
     ##################
     # Administration #
