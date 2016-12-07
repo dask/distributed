@@ -132,11 +132,14 @@ def test_multiple_maxlen(c, s, a, b):
     x2 = c2.channel('x', maxlen=20)
     assert x2.futures.maxlen == 20
 
-    for i in range(30):
+    for i in range(10):
         x.append(c.submit(inc, i))
 
-    while len(s.task_state) < 20:
+    while len(x2) < 10:
         yield gen.sleep(0.01)
+
+    for i in range(10, 30):
+        x.append(c.submit(inc, i))
 
     while len(x2) < 20:
         yield gen.sleep(0.01)
