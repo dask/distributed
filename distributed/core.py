@@ -112,8 +112,6 @@ class Server(TCPServer):
             if self.counters is not False:
                 self._last_tick = time()
                 self._tick_pc = PeriodicCallback(self._measure_tick, 20, io_loop=self.loop)
-                self._measure_tick()
-                self._measure_tick()
                 self._tick_pc.start()
 
 

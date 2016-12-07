@@ -64,8 +64,8 @@ def test_basic(c, s, a, b):
 def test_counters(c, s, a, b):
     aa = Counters(a)
 
+    aa.update()
     yield gen.sleep(0.1)
-
     aa.update()
 
     assert len(aa.sources['tick'].data['x'])
