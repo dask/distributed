@@ -1169,6 +1169,7 @@ class Worker(WorkerBase):
                 self.in_flight[d] = stream
             self.log.append(('request-dep', dep, worker, deps))
             self.connections[stream] = deps
+
             try:
                 start = time()
                 logger.debug("Request %d keys and %d bytes", len(deps),
@@ -1194,6 +1195,10 @@ class Worker(WorkerBase):
                     'bandwidth': total_bytes / duration,
                     'who': worker
                 })
+                if self.counters:
+                    self.counters['transfer-bandwidth'].add(total_bytes / duration)
+                    self.counters['transfer-count'].add(len(deps2))
+                    self.counters['transfer-duration'].add(duration)
                 self.incoming_count += 1
             except EnvironmentError as e:
                 logger.error("Worker stream died during communication: %s",
@@ -1416,6 +1421,8 @@ class Worker(WorkerBase):
             if stop - start > 0.005:
                 self.response[key]['disk_load_start'] = start
                 self.response[key]['disk_load_stop'] = stop
+                if self.counters:
+                    self.counters['disk-load-duration'].add(stop - start)
 
             logger.debug("Execute key: %s", key)  # TODO: comment out?
             result = yield self.executor_submit(key, apply_function, function,

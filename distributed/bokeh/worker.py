@@ -421,6 +421,32 @@ class SystemMonitor(DashboardComponent):
 
             self.last = monitor.count
 
+class Counters(DashboardComponent):
+    def __init__(self, server, sizing_mode='scale_width', **kwargs):
+        self.server = server
+        self.figures = {}
+        self.sources = {}
+        self.sizing_mode = sizing_mode
+
+        self.root = column(sizing_mode=sizing_mode)
+
+    def add_figure(self, name):
+        source = ColumnDataSource({'x': [], 'y': []})
+        fig = figure(title=name, tools='', height=150, sizing_mode=self.sizing_mode)
+        fig.line(source=source, x='x', y='y')
+        self.sources[name] = source
+        self.figures[name] = fig
+        self.root.children.append(fig)
+
+    def update(self):
+        for name, counter in self.server.counters.items():
+            if name not in self.figures:
+                self.add_figure(name)
+            else:
+                xs = [counter.quantile(i / 100) for i in range(101)]
+                ys = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+                self.sources[name].data.update({'x': xs, 'y': ys})
+
 
 from bokeh.server.server import Server
 from bokeh.application.handlers.function import FunctionHandler
@@ -470,13 +496,25 @@ def systemmonitor_doc(worker, doc):
         doc.add_root(sysmon.root)
 
 
+def counters_doc(worker, doc):
+    with log_errors():
+        counter = Counters(worker, sizing_mode='scale_width')
+        doc.add_periodic_callback(counter.update, 500)
+
+        doc.add_root(counter.root)
+
+
+
 class BokehWorker(BokehServer):
     def __init__(self, worker, io_loop=None):
         self.worker = worker
         main = Application(FunctionHandler(partial(main_doc, worker)))
         crossfilter = Application(FunctionHandler(partial(crossfilter_doc, worker)))
         systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc, worker)))
+        counters = Application(FunctionHandler(partial(counters_doc, worker)))
+
         self.apps = {'/main': main,
+                     '/counters': counters,
                      '/crossfilter': crossfilter,
                      '/system': systemmonitor}
 

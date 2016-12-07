@@ -1119,6 +1119,8 @@ class Scheduler(Server):
                     msgs = [msgs]
 
                 if worker in self.worker_info and not stream.closed():
+                    if self.counters:
+                        self.counters['worker-message-length'].add(len(msgs))
                     recommendations = OrderedDict()
                     for msg in msgs:
                         if msg == 'OK':  # from close
@@ -2492,7 +2494,11 @@ class Scheduler(Server):
                 write(stream, {'op': 'close'})
                 close(stream)
 
+            if self.counters:
+                self.counters['stolen-keys'].add(len(response['keys']))
+
             raise gen.Return(response['keys'])
+
         except gen.Return:
             raise
         except Exception as e:

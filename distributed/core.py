@@ -100,16 +100,36 @@ class Server(TCPServer):
                                   deserialize=deserialize)
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
+        try:
+            from crick import TDigest
+            self.counters = defaultdict(TDigest)
+        except ImportError:
+            self.counters = False
+
         if hasattr(self, 'loop'):
             pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.loop)
             self.loop.add_callback(pc.start)
+            if self.counters is not False:
+                self._last_tick = time()
+                self._tick_pc = PeriodicCallback(self._measure_tick, 20, io_loop=self.loop)
+                self._measure_tick()
+                self._measure_tick()
+                self._tick_pc.start()
+
+
         self.__stopped = False
+
         super(Server, self).__init__(max_buffer_size=max_buffer_size, **kwargs)
 
     def stop(self):
         if not self.__stopped:
             self.__stopped = True
             super(Server, self).stop()
+
+    def _measure_tick(self):
+        now = time()
+        self.counters['tick'].add(now - self._last_tick)
+        self._last_tick = now
 
     @property
     def port(self):

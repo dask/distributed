@@ -13,7 +13,7 @@ from distributed.client import _wait
 from distributed.utils_test import gen_cluster, inc, dec
 from distributed.bokeh.worker import (BokehWorker, StateTable, CrossFilter,
         CommunicatingStream, ExecutingTimeSeries, CommunicatingTimeSeries,
-        SystemMonitor)
+        SystemMonitor, Counters)
 
 
 @pytest.mark.skipif(sys.version_info[0] == 2,
@@ -59,6 +59,17 @@ def test_basic(c, s, a, b):
         assert (len(first(aa.source.data.values())) and
                 len(first(bb.source.data.values())))
 
+
+@gen_cluster(client=True)
+def test_counters(c, s, a, b):
+    aa = Counters(a)
+
+    yield gen.sleep(0.1)
+
+    aa.update()
+
+    assert len(aa.sources['tick'].data['x'])
+    assert len(aa.sources['tick'].data['y'])
 
 
 @gen_cluster(client=True)
