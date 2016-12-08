@@ -136,10 +136,10 @@ def test_multiple_maxlen(c, s, a, b):
     for i in range(10):
         x.append(c.submit(inc, i))
 
-    while len(x2) < 10:
+    while len(s.wants_what[c2.id]) < 10:
         yield gen.sleep(0.01)
 
-    for i in range(10, 30):
+    for i in range(10, 20):
         x.append(c.submit(inc, i))
 
     while len(x2) < 20:
