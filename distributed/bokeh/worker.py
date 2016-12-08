@@ -428,7 +428,10 @@ class Counters(DashboardComponent):
         self.sources = {}
         self.sizing_mode = sizing_mode
 
-        self.root = column(sizing_mode=sizing_mode)
+        figures = [self.add_figure(name)
+                   for name in sorted(self.server.counters)]
+
+        self.root = column(figures, sizing_mode=sizing_mode)
 
     def add_figure(self, name):
         source = ColumnDataSource({'x': [], 'y': []})
@@ -436,16 +439,21 @@ class Counters(DashboardComponent):
         fig.line(source=source, x='x', y='y')
         self.sources[name] = source
         self.figures[name] = fig
-        self.root.children.append(fig)
+        fig.yaxis.visible = False
+        return fig
 
     def update(self):
-        for name, counter in self.server.counters.items():
-            if name not in self.figures:
-                self.add_figure(name)
-            else:
-                xs = [counter.quantile(i / 100) for i in range(101)]
-                ys = [xs[i + 1] - xs[i] for i in range(len(xs) - 1)]
+        for name, figure in self.figures.items():
+            counter = self.server.counters[name]
+            xs = [counter.quantile(i / 100) for i in range(1, 100)]
+            try:
+                ys = [1 / (xs[i + 1] - xs[i]) for i in range(len(xs) - 1)]
                 self.sources[name].data.update({'x': xs, 'y': ys})
+            except ZeroDivisionError:
+                pass
+            figure.title.text = '%s count: %d mean: %2f' % (name,
+                    counter.count(), counter.quantile(0.5))
+
 
 
 from bokeh.server.server import Server

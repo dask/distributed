@@ -10,6 +10,7 @@ from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
 from distributed.client import _wait
+from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec
 from distributed.bokeh.worker import (BokehWorker, StateTable, CrossFilter,
         CommunicatingStream, ExecutingTimeSeries, CommunicatingTimeSeries,
@@ -68,8 +69,10 @@ def test_counters(c, s, a, b):
     yield gen.sleep(0.1)
     aa.update()
 
-    assert len(aa.sources['tick'].data['x'])
-    assert len(aa.sources['tick'].data['y'])
+    start = time()
+    while not len(aa.sources['tick'].data['x']):
+        yield gen.sleep(0.01)
+        assert time() < start + 5
 
 
 @gen_cluster(client=True)
