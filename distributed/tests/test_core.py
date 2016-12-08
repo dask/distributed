@@ -275,4 +275,4 @@ def test_ticks(s, a, b):
     yield gen.sleep(0.1)
     c = s.counters['tick']
     assert c.count()
-    assert 0.01 < c.quantile(0.5) < 0.5
+    assert 0.01 < c.digests[0].quantile(0.5) < 0.5

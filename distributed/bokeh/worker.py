@@ -434,25 +434,38 @@ class Counters(DashboardComponent):
         self.root = column(figures, sizing_mode=sizing_mode)
 
     def add_figure(self, name):
-        source = ColumnDataSource({'x': [], 'y': []})
-        fig = figure(title=name, tools='', height=150, sizing_mode=self.sizing_mode)
-        fig.line(source=source, x='x', y='y')
-        self.sources[name] = source
-        self.figures[name] = fig
-        fig.yaxis.visible = False
-        return fig
+        with log_errors():
+            n = len(self.server.counters[name].intervals)
+            sources = {i: ColumnDataSource({'x': [], 'y': []})
+                        for i in range(n)}
+
+            fig = figure(title=name, tools='', height=150, sizing_mode=self.sizing_mode)
+            fig.yaxis.visible = False
+            fig.ygrid.visible = False
+
+            for i in range(n):
+                alpha = 0.3 + 0.7 * (n - i) / n
+                fig.line(source=sources[i], x='x', y='y', alpha=alpha)
+
+            self.sources[name] = sources
+            self.figures[name] = fig
+            return fig
 
     def update(self):
-        for name, figure in self.figures.items():
-            counter = self.server.counters[name]
-            xs = [counter.quantile(i / 100) for i in range(1, 100)]
-            try:
-                ys = [1 / (xs[i + 1] - xs[i]) for i in range(len(xs) - 1)]
-                self.sources[name].data.update({'x': xs, 'y': ys})
-            except ZeroDivisionError:
-                pass
-            figure.title.text = '%s count: %d mean: %2f' % (name,
-                    counter.count(), counter.quantile(0.5))
+        with log_errors():
+            for name, figure in self.figures.items():
+                counter = self.server.counters[name]
+                d = {}
+                for i, digest in enumerate(counter.digests):
+                    if digest.count():
+                        try:
+                            xs = [digest.quantile(i / 100) for i in range(5, 95)]
+                            ys = [1 / (xs[i + 1] - xs[i]) for i in range(len(xs) - 1)]
+                        except ZeroDivisionError:
+                            pass
+                        else:
+                            self.sources[name][i].data.update({'x': xs, 'y': ys})
+                figure.title.text = '%s count: %d' % (name, counter.count())
 
 
 

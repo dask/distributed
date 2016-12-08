@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from collections import defaultdict
 from datetime import timedelta
+from functools import partial
 import logging
 import six
 import socket
@@ -101,8 +102,8 @@ class Server(TCPServer):
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
         try:
-            from crick import TDigest
-            self.counters = defaultdict(TDigest)
+            from .counter import Counter
+            self.counters = defaultdict(partial(Counter, loop=self.loop))
         except ImportError:
             self.counters = False
 
