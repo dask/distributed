@@ -1,8 +1,9 @@
 from __future__ import print_function, division, absolute_import
 
 from operator import add
-
 from time import sleep
+
+import pytest
 from toolz import take
 from tornado import gen
 
@@ -150,3 +151,32 @@ def test_multiple_maxlen(c, s, a, b):
     assert len(s.task_state) == 20
 
     yield c2._shutdown()
+
+
+def test_stop(loop):
+    def produce(n):
+        with local_client() as c:
+            x = c.channel('x')
+            for i in range(n):
+                future = c.submit(slowinc, i, delay=0.01, key='f-%d' % i)
+                x.append(future)
+
+            x.stop()
+            x.flush()
+
+    with cluster() as (s, [a, b]):
+        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+            x = c.channel('x')
+
+            producer = c.submit(produce, 5)
+
+            futures = list(x)
+            assert len(futures) == 5
+
+            with pytest.raises(StopIteration):
+                x.append(c.submit(inc, 1))
+
+            with Client(('127.0.0.1', s['port']), loop=loop) as c2:
+                xx = c2.channel('x')
+                futures = list(xx)
+                assert len(futures) == 5

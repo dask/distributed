@@ -28,10 +28,12 @@ class ChannelScheduler(object):
         self.deques = dict()
         self.counts = dict()
         self.clients = dict()
+        self.stopped = dict()
 
         handlers = {'channel-subscribe': self.subscribe,
                     'channel-unsubscribe': self.unsubscribe,
-                    'channel-append': self.append}
+                    'channel-append': self.append,
+                    'channel-stop': self.stop}
 
         self.scheduler.compute_handlers.update(handlers)
         self.scheduler.extensions['channels'] = self
@@ -43,12 +45,17 @@ class ChannelScheduler(object):
             self.deques[channel] = deque(maxlen=maxlen)
             self.counts[channel] = 0
             self.clients[channel] = set()
+            self.stopped[channel] = False
         self.clients[channel].add(client)
 
         stream = self.scheduler.streams[client]
         for key in self.deques[channel]:
             stream.send({'op': 'channel-append',
                          'key': key,
+                         'channel': channel})
+
+        if self.stopped[channel]:
+            stream.send({'op': 'channel-stop',
                          'channel': channel})
 
     def unsubscribe(self, channel=None, client=None):
@@ -58,8 +65,12 @@ class ChannelScheduler(object):
             del self.deques[channel]
             del self.counts[channel]
             del self.clients[channel]
+            del self.stopped[channel]
 
     def append(self, channel=None, key=None):
+        if self.stopped[channel]:
+            return
+
         if len(self.deques[channel]) == self.deques[channel].maxlen:
             # TODO: future might still be in deque
             self.scheduler.client_releases_keys(keys=[self.deques[channel][0]],
@@ -71,6 +82,17 @@ class ChannelScheduler(object):
 
         client='streaming-%s' % channel
         self.scheduler.client_desires_keys(keys=[key], client=client)
+
+    def stop(self, channel=None):
+        self.stopped[channel] = True
+        logger.info("Stop channel %s", channel)
+        for client in list(self.clients[channel]):
+            try:
+                stream = self.scheduler.streams[client]
+                stream.send({'op': 'channel-stop',
+                             'channel': channel})
+            except (KeyError, StreamClosedError):
+                self.unsubscribe(channel, client)
 
     def report(self, channel, key):
         for client in list(self.clients[channel]):
@@ -89,7 +111,8 @@ class ChannelClient(object):
         self.channels = dict()
         self.client.extensions['channels'] = self
 
-        handlers = {'channel-append': self.receive_key}
+        handlers = {'channel-append': self.receive_key,
+                    'channel-stop': self.receive_stop}
 
         self.client._handlers.update(handlers)
 
@@ -105,6 +128,9 @@ class ChannelClient(object):
 
     def receive_key(self, channel=None, key=None):
         self.channels[channel]._receive_update(key)
+
+    def receive_stop(self, channel=None):
+        self.channels[channel]._receive_stop()
 
 
 class Channel(object):
@@ -146,6 +172,7 @@ class Channel(object):
         self.client = client
         self.name = name
         self.futures = deque(maxlen=maxlen)
+        self.stopped = False
         self.count = 0
         self._pending = dict()
         self._lock = threading.Lock()
@@ -158,10 +185,18 @@ class Channel(object):
 
     def append(self, future):
         """ Append a future onto the channel """
+        if self.stopped:
+            raise StopIteration()
         self.client._send_to_scheduler({'op': 'channel-append',
                                         'channel': self.name,
                                         'key': tokey(future.key)})
         self._pending[future.key] = future  # hold on to reference until ack
+
+    def stop(self):
+        if self.stopped:
+            return
+        self.client._send_to_scheduler({'op': 'channel-stop',
+                                        'channel': self.name})
 
     def _receive_update(self, key=None):
         with self._lock:
@@ -173,6 +208,12 @@ class Channel(object):
         if key in self._pending:
             del self._pending[key]
 
+        with self._thread_condition:
+            self._thread_condition.notify_all()
+
+    def _receive_stop(self):
+        logger.info("Channel stopped: %s", self.name)
+        self.stopped = True
         with self._thread_condition:
             self._thread_condition.notify_all()
 
@@ -198,7 +239,9 @@ class Channel(object):
                 yield future
 
             while True:
-                if self.count == last:
+                while self.count == last:
+                    if self.stopped:
+                        return
                     self._thread_condition.acquire()
                     self._thread_condition.wait()
                     self._thread_condition.release()
