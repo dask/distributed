@@ -1159,19 +1159,17 @@ class Scheduler(Server):
                         validate_key(key)
                         if msg['status'] == 'OK':
                             r = self.stimulus_task_finished(worker=worker, **msg)
-                            recommendations.update(r)
+                            self.transitions(r)
                         elif msg['status'] == 'error':
                             r = self.stimulus_task_erred(worker=worker, **msg)
-                            recommendations.update(r)
+                            self.transitions(r)
                         elif msg['status'] == 'missing-data':
                             r = self.stimulus_missing_data(worker=worker,
                                     ensure=False, **msg)
-                            recommendations.update(r)
+                            self.transitions(r)
                         else:
                             logger.warn("Unknown message type, %s, %s",
                                     msg['status'], msg)
-
-                    self.transitions(recommendations)
 
                     if self.validate:
                         logger.debug("Messages: %s\nRecommendations: %s",
@@ -1868,6 +1866,10 @@ class Scheduler(Server):
                     self.task_state[key] = 'no-worker'
             else:
                 self.task_state[key] = 'waiting'
+
+            if self.validate:
+                if self.task_state[key] == 'waiting':
+                    assert key in self.waiting
 
             self.released.remove(key)
 
