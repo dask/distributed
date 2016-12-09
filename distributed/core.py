@@ -638,6 +638,7 @@ class ConnectionPool(object):
             self.event.clear()
             self.collect()
             yield self.event.wait()
+            yield gen.sleep(0.01)
 
         self.open += 1
         stream = yield connect(ip=ip, port=port, timeout=timeout)
