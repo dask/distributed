@@ -525,7 +525,7 @@ class Scheduler(Server):
             # for key in keys:  # TODO
             #     self.mark_key_in_memory(key, [address])
 
-            self.worker_streams[address] = BatchedSend(interval=2, loop=self.loop)
+            self.worker_streams[address] = BatchedSend(interval=5, loop=self.loop)
             self._worker_coroutines.append(self.worker_stream(address))
 
             if self.ncores[address] > len(self.processing[address]):
