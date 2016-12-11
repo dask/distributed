@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from functools import partial
 import logging
+import math
 
 from bokeh.layouts import row, column, widgetbox
 from bokeh.models import (
@@ -14,7 +15,7 @@ from bokeh.models import (
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
 from bokeh.plotting import figure
 from bokeh.palettes import viridis
-from toolz import frequencies, merge
+from toolz import frequencies, merge, partition_all
 
 from .components import DashboardComponent
 from .core import BokehServer, format_bytes, format_time
@@ -424,7 +425,7 @@ class SystemMonitor(DashboardComponent):
 
 
 class Counters(DashboardComponent):
-    def __init__(self, server, sizing_mode='scale_width', **kwargs):
+    def __init__(self, server, sizing_mode='stretch_both', **kwargs):
         self.server = server
         self.counter_figures = {}
         self.counter_sources = {}
@@ -440,7 +441,12 @@ class Counters(DashboardComponent):
         figures = merge(self.digest_figures, self.counter_figures)
         figures = [figures[k] for k in sorted(figures)]
 
-        self.root = column(figures, sizing_mode=sizing_mode)
+        if len(figures) <= 5:
+            self.root = column(figures, sizing_mode=sizing_mode)
+        else:
+            self.root = column(*[row(*pair, sizing_mode=sizing_mode)
+                                 for pair in partition_all(2, figures)],
+                               sizing_mode=sizing_mode)
 
     def add_digest_figure(self, name):
         with log_errors():
@@ -462,6 +468,7 @@ class Counters(DashboardComponent):
                 fig.line(source=sources[i], x='x', y='y',
                          alpha=alpha, color=viridis(n)[i])
 
+            fig.xaxis.major_label_orientation = math.pi / 12
             self.digest_sources[name] = sources
             self.digest_figures[name] = fig
             return fig
@@ -486,6 +493,7 @@ class Counters(DashboardComponent):
                     tooltips="""@x : @counts"""
                 )
                 fig.add_tools(hover)
+                fig.xaxis.major_label_orientation = math.pi / 12
 
             self.counter_sources[name] = sources
             self.counter_figures[name] = fig
@@ -577,7 +585,7 @@ def systemmonitor_doc(worker, doc):
 
 def counters_doc(server, doc):
     with log_errors():
-        counter = Counters(server, sizing_mode='scale_width')
+        counter = Counters(server, sizing_mode='stretch_both')
         doc.add_periodic_callback(counter.update, 500)
 
         doc.add_root(counter.root)
