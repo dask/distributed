@@ -25,4 +25,13 @@ def test_digest(loop, CD, size):
 
     c.add(3)
 
-    assert sum(size(d) for d in c.components) == 3
+    assert sum(size(d) for d in c.components) == c.size()
+
+
+def test_counter(loop):
+    c = Counter(loop=loop)
+    c.add(1)
+
+    for i in range(5):
+        c.shift()
+        assert abs(sum(cc[1] for cc in c.components) - 1) < 1e-13

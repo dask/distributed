@@ -1119,8 +1119,7 @@ class Scheduler(Server):
                     msgs = [msgs]
 
                 if worker in self.worker_info and not stream.closed():
-                    if self.counters:
-                        self.counters['worker-message-length'].add(len(msgs))
+                    self.counters['worker-message-length'].add(len(msgs))
                     recommendations = OrderedDict()
                     for msg in msgs:
                         if msg == 'OK':  # from close

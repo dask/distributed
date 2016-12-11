@@ -101,19 +101,22 @@ class Server(TCPServer):
                                   deserialize=deserialize)
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
-        try:
+        if hasattr(self, 'loop'):
+            try:
+                from .counter import Digest
+                self.digests = defaultdict(partial(Digest, loop=self.loop))
+            except ImportError:
+                self.digests = False
+
             from .counter import Counter
             self.counters = defaultdict(partial(Counter, loop=self.loop))
-        except ImportError:
-            self.counters = False
 
-        if hasattr(self, 'loop'):
             pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.loop)
             self.loop.add_callback(pc.start)
-            if self.counters is not False:
+            if self.digests is not False:
                 self._last_tick = time()
                 self._tick_pc = PeriodicCallback(self._measure_tick, 20, io_loop=self.loop)
-                self._tick_pc.start()
+                self.loop.add_callback(self._tick_pc.start)
 
 
         self.__stopped = False
@@ -127,7 +130,7 @@ class Server(TCPServer):
 
     def _measure_tick(self):
         now = time()
-        self.counters['tick'].add(now - self._last_tick)
+        self.digests['tick'].add(now - self._last_tick)
         self._last_tick = now
 
     @property

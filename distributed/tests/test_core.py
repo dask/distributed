@@ -273,6 +273,6 @@ def test_connection_pool():
 def test_ticks(s, a, b):
     pytest.importorskip('crick')
     yield gen.sleep(0.1)
-    c = s.counters['tick']
-    assert c.count()
-    assert 0.01 < c.digests[0].quantile(0.5) < 0.5
+    c = s.digests['tick']
+    assert c.size()
+    assert 0.01 < c.components[0].quantile(0.5) < 0.5

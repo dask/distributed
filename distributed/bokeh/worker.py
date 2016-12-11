@@ -13,7 +13,8 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
 from bokeh.plotting import figure
-from toolz import frequencies
+from bokeh.palettes import viridis
+from toolz import frequencies, merge
 
 from .components import DashboardComponent
 from .core import BokehServer, format_bytes, format_time
@@ -424,18 +425,25 @@ class SystemMonitor(DashboardComponent):
 class Counters(DashboardComponent):
     def __init__(self, server, sizing_mode='scale_width', **kwargs):
         self.server = server
-        self.figures = {}
-        self.sources = {}
+        self.counter_figures = {}
+        self.counter_sources = {}
+        self.digest_figures = {}
+        self.digest_sources = {}
         self.sizing_mode = sizing_mode
 
-        figures = [self.add_figure(name)
-                   for name in sorted(self.server.counters)]
+        for name in self.server.digests:
+            self.add_digest_figure(name)
+        for name in self.server.counters:
+            self.add_counter_figure(name)
+
+        figures = merge(self.digest_figures, self.counter_figures)
+        figures = [figures[k] for k in sorted(figures)]
 
         self.root = column(figures, sizing_mode=sizing_mode)
 
-    def add_figure(self, name):
+    def add_digest_figure(self, name):
         with log_errors():
-            n = len(self.server.counters[name].intervals)
+            n = len(self.server.digests[name].intervals)
             sources = {i: ColumnDataSource({'x': [], 'y': []})
                         for i in range(n)}
 
@@ -447,25 +455,63 @@ class Counters(DashboardComponent):
                 alpha = 0.3 + 0.7 * (n - i) / n
                 fig.line(source=sources[i], x='x', y='y', alpha=alpha)
 
-            self.sources[name] = sources
-            self.figures[name] = fig
+            self.digest_sources[name] = sources
+            self.digest_figures[name] = fig
+            return fig
+
+    def add_counter_figure(self, name):
+        with log_errors():
+            n = len(self.server.counters[name].intervals)
+            sources = {i: ColumnDataSource({'x': [], 'y': [], 'y-center': []})
+                        for i in range(n)}
+
+            fig = figure(title=name, tools='', height=150,
+                    sizing_mode=self.sizing_mode,
+                    x_range=sorted(map(str, self.server.counters[name].components[0])))
+            fig.yaxis.visible = False
+            fig.ygrid.visible = False
+
+            for i in range(n):
+                width = 0.3 + 0.6 * i / n
+                fig.rect(source=sources[i], x='x', y='y-center', width=width,
+                        height='y', alpha=0.3, color=viridis(n)[i])
+
+            self.counter_sources[name] = sources
+            self.counter_figures[name] = fig
             return fig
 
     def update(self):
         with log_errors():
-            for name, figure in self.figures.items():
-                counter = self.server.counters[name]
+            for name, figure in self.digest_figures.items():
+                digest = self.server.digests[name]
                 d = {}
-                for i, digest in enumerate(counter.digests):
-                    if digest.size():
+                for i, d in enumerate(digest.components):
+                    if d.size():
                         try:
-                            xs = [digest.quantile(i / 100) for i in range(5, 95)]
+                            xs = [d.quantile(i / 100) for i in range(5, 95)]
                             ys = [1 / (xs[i + 1] - xs[i]) for i in range(len(xs) - 1)]
                         except ZeroDivisionError:
                             pass
                         else:
-                            self.sources[name][i].data.update({'x': xs, 'y': ys})
-                figure.title.text = '%s count: %d' % (name, counter.size())
+                            self.digest_sources[name][i].data.update({'x': xs, 'y': ys})
+                figure.title.text = '%s: %d' % (name, digest.size())
+
+            for name, figure in self.counter_figures.items():
+                counter = self.server.counters[name]
+                d = {}
+                for i, d in enumerate(counter.components):
+                    if d:
+                        xs = sorted(d)
+                        factor = counter.intervals[0] / counter.intervals[i]
+                        counts = [d[x] for x in xs]
+                        ys = [factor * c for c in counts]
+                        y_centers = [y / 2 for y in ys]
+                        xs = list(map(str, xs))
+                        self.counter_sources[name][i].data.update(
+                                {'x': xs, 'y': ys, 'y-center': y_centers,
+                                 'counts': counts})
+                    figure.title.text = '%s: %d' % (name, counter.size())
+                    figure.x_range.factors = list(map(str, xs))
 
 
 
