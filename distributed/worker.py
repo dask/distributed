@@ -835,6 +835,8 @@ class Worker(WorkerBase):
                         yield self._close(report=False)
                     break
 
+                start = time()
+
                 for msg in msgs:
                     op = msg.pop('op', None)
                     if 'key' in msg:
@@ -854,6 +856,10 @@ class Worker(WorkerBase):
 
                 self.ensure_communicating()
                 self.ensure_computing()
+
+                end = time()
+                if self.digests is not None:
+                    self.digests['handle-messages-duration'].add(end - start)
 
             yield self.batched_stream.close()
             logger.info('Close compute stream')
@@ -1129,10 +1135,14 @@ class Worker(WorkerBase):
                 worker = random.choice(list(self.who_has[dep]))
                 ip, port = worker.split(':')
                 try:
+                    start = time()
                     future = connect(ip, int(port))
                     self.connections[future] = True
                     stream = yield gen.with_timeout(timedelta(seconds=3),
                                                     future)
+                    end = time()
+                    if self.digests is not None:
+                        self.digests['gather-connect-duration'].add(end - start)
                 except (gen.TimeoutError, EnvironmentError):
                     logger.info("Failed to connect to %s", worker)
                     with ignoring(KeyError):  # other coroutine may have removed

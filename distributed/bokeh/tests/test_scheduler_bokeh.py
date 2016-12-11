@@ -45,7 +45,7 @@ def test_basic(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_counters(c, s, a, b):
-    while 'tick' not in s.digests:
+    while 'tick-duration' not in s.digests:
         yield gen.sleep(0.01)
     ss = Counters(s)
 
@@ -54,6 +54,6 @@ def test_counters(c, s, a, b):
     ss.update()
 
     start = time()
-    while not len(ss.digest_sources['tick'][0].data['x']):
+    while not len(ss.digest_sources['tick-duration'][0].data['x']):
         yield gen.sleep(1)
         assert time() < start + 5

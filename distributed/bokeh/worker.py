@@ -448,13 +448,19 @@ class Counters(DashboardComponent):
             sources = {i: ColumnDataSource({'x': [], 'y': []})
                         for i in range(n)}
 
-            fig = figure(title=name, tools='', height=150, sizing_mode=self.sizing_mode)
+            kwargs = {}
+            if name.endswith('duration'):
+                kwargs['x_axis_type'] = 'datetime'
+
+            fig = figure(title=name, tools='', height=150,
+                    sizing_mode=self.sizing_mode, **kwargs)
             fig.yaxis.visible = False
             fig.ygrid.visible = False
 
             for i in range(n):
-                alpha = 0.3 + 0.7 * (n - i) / n
-                fig.line(source=sources[i], x='x', y='y', alpha=alpha)
+                alpha = 0.3 + 0.3 * (n - i) / n
+                fig.line(source=sources[i], x='x', y='y',
+                         alpha=alpha, color=viridis(n)[i])
 
             self.digest_sources[name] = sources
             self.digest_figures[name] = fig
@@ -469,13 +475,17 @@ class Counters(DashboardComponent):
             fig = figure(title=name, tools='', height=150,
                     sizing_mode=self.sizing_mode,
                     x_range=sorted(map(str, self.server.counters[name].components[0])))
-            fig.yaxis.visible = False
             fig.ygrid.visible = False
 
             for i in range(n):
-                width = 0.3 + 0.6 * i / n
+                width = 0.5 + 0.4 * i / n
                 fig.rect(source=sources[i], x='x', y='y-center', width=width,
                         height='y', alpha=0.3, color=viridis(n)[i])
+                hover = HoverTool(
+                    point_policy="follow_mouse",
+                    tooltips="""@x : @counts"""
+                )
+                fig.add_tools(hover)
 
             self.counter_sources[name] = sources
             self.counter_figures[name] = fig
@@ -489,8 +499,10 @@ class Counters(DashboardComponent):
                 for i, d in enumerate(digest.components):
                     if d.size():
                         try:
-                            xs = [d.quantile(i / 100) for i in range(5, 95)]
+                            xs = [d.quantile(i / 100) for i in range(1, 99)]
                             ys = [1 / (xs[i + 1] - xs[i]) for i in range(len(xs) - 1)]
+                            if name.endswith('duration'):
+                                xs = [x * 1000 for x in xs]
                         except ZeroDivisionError:
                             pass
                         else:
@@ -513,7 +525,6 @@ class Counters(DashboardComponent):
                                  'counts': counts})
                     figure.title.text = '%s: %d' % (name, counter.size())
                     figure.x_range.factors = list(map(str, xs))
-
 
 
 from bokeh.server.server import Server

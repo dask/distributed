@@ -539,6 +539,7 @@ class Scheduler(Server):
 
         This happens whenever the Client calls submit, map, get, or compute.
         """
+        start = time()
         original_keys = keys
         keys = set(keys)
         self.client_desires_keys(keys=keys, client=client)
@@ -633,6 +634,10 @@ class Scheduler(Server):
         for key in keys:
             if self.task_state[key] in ('memory', 'erred'):
                 self.report_on_key(key, client=client)
+
+        end = time()
+        if self.digests:
+            self.digests['update-graph-duration'].add(end - start)
 
         # TODO: balance workers
 
@@ -1115,6 +1120,8 @@ class Scheduler(Server):
         try:
             while True:
                 msgs = yield read(stream)
+                start = time()
+
                 if not isinstance(msgs, list):
                     msgs = [msgs]
 
@@ -1129,6 +1136,10 @@ class Scheduler(Server):
                         op = msg.pop('op')
                         handler = self.worker_handlers[op]
                         handler(worker=worker, **msg)
+
+                end = time()
+                if self.digests:
+                    self.digests['handle-worker-duration'].add(end - start)
 
         except (StreamClosedError, IOError, OSError):
             logger.info("Worker failed from closed stream: %s", worker)

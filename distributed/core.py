@@ -130,7 +130,7 @@ class Server(TCPServer):
 
     def _measure_tick(self):
         now = time()
-        self.digests['tick'].add(now - self._last_tick)
+        self.digests['tick-duration'].add(now - self._last_tick)
         self._last_tick = now
 
     @property
@@ -197,6 +197,7 @@ class Server(TCPServer):
                     raise TypeError("Bad message type.  Expected dict, got\n  "
                                     + str(msg))
                 op = msg.pop('op')
+                self.counters['op'].add(op)
                 self._listen_streams[stream] = op
                 close_desired = msg.pop('close', False)
                 reply = msg.pop('reply', True)
