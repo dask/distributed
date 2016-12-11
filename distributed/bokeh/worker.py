@@ -457,7 +457,7 @@ class Counters(DashboardComponent):
                 counter = self.server.counters[name]
                 d = {}
                 for i, digest in enumerate(counter.digests):
-                    if digest.count():
+                    if digest.size():
                         try:
                             xs = [digest.quantile(i / 100) for i in range(5, 95)]
                             ys = [1 / (xs[i + 1] - xs[i]) for i in range(len(xs) - 1)]
@@ -465,7 +465,7 @@ class Counters(DashboardComponent):
                             pass
                         else:
                             self.sources[name][i].data.update({'x': xs, 'y': ys})
-                figure.title.text = '%s count: %d' % (name, counter.count())
+                figure.title.text = '%s count: %d' % (name, counter.size())
 
 
 
