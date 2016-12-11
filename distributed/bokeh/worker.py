@@ -422,6 +422,7 @@ class SystemMonitor(DashboardComponent):
 
             self.last = monitor.count
 
+
 class Counters(DashboardComponent):
     def __init__(self, server, sizing_mode='scale_width', **kwargs):
         self.server = server
@@ -563,9 +564,9 @@ def systemmonitor_doc(worker, doc):
         doc.add_root(sysmon.root)
 
 
-def counters_doc(worker, doc):
+def counters_doc(server, doc):
     with log_errors():
-        counter = Counters(worker, sizing_mode='scale_width')
+        counter = Counters(server, sizing_mode='scale_width')
         doc.add_periodic_callback(counter.update, 500)
 
         doc.add_root(counter.root)
