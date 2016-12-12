@@ -1132,6 +1132,9 @@ class Scheduler(Server):
                         if msg == 'OK':  # from close
                             break
 
+                        if 'status' in msg and 'error' in msg['status']:
+                            logger.exception(clean_exception(**msg)[1])
+
                         self.correct_time_delay(worker, msg)
                         op = msg.pop('op')
                         handler = self.worker_handlers[op]

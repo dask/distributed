@@ -106,7 +106,7 @@ class Server(TCPServer):
                 from .counter import Digest
                 self.digests = defaultdict(partial(Digest, loop=self.loop))
             except ImportError:
-                self.digests = False
+                self.digests = None
 
             from .counter import Counter
             self.counters = defaultdict(partial(Counter, loop=self.loop))
