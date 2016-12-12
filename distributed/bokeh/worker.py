@@ -14,7 +14,7 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
 from bokeh.plotting import figure
-from bokeh.palettes import viridis
+from bokeh.palettes import viridis, RdBu
 from toolz import frequencies, merge, partition_all
 
 from .components import DashboardComponent
@@ -463,11 +463,13 @@ class Counters(DashboardComponent):
                     sizing_mode=self.sizing_mode, **kwargs)
             fig.yaxis.visible = False
             fig.ygrid.visible = False
+            if name.endswith('bandwidth') or name.endswith('bytes'):
+                fig.xaxis[0].formatter = NumeralTickFormatter(format='0.0b')
 
             for i in range(n):
                 alpha = 0.3 + 0.3 * (n - i) / n
                 fig.line(source=sources[i], x='x', y='y',
-                         alpha=alpha, color=viridis(n)[i])
+                         alpha=alpha, color=RdBu[max(n, 3)][-i])
 
             fig.xaxis.major_label_orientation = math.pi / 12
             self.digest_sources[name] = sources
@@ -488,7 +490,7 @@ class Counters(DashboardComponent):
             for i in range(n):
                 width = 0.5 + 0.4 * i / n
                 fig.rect(source=sources[i], x='x', y='y-center', width=width,
-                        height='y', alpha=0.3, color=viridis(n)[i])
+                        height='y', alpha=0.3, color=RdBu[max(n, 3)][-i])
                 hover = HoverTool(
                     point_policy="follow_mouse",
                     tooltips="""@x : @counts"""
