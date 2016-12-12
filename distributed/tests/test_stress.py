@@ -186,9 +186,13 @@ def test_stress_communication(c, s, *workers):
     assert isinstance(result, float)
 
 
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10, timeout=1000)
+@slow
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10, timeout=60)
 def test_stress_steal(c, s, *workers):
-    s._steal_periodic_callback.callback_time = 100000
+    s.validate = False
+    for w in workers:
+        w.validate = False
+    s._steal_periodic_callback.callback_time = 100
     dinc = delayed(slowinc)
     L = [delayed(slowinc)(i, delay=0.005) for i in range(1000)]
     for i in range(10):
@@ -199,13 +203,12 @@ def test_stress_steal(c, s, *workers):
     future = c.compute(total)
 
     while future.status != 'finished':
-        yield gen.sleep(0.5)
+        yield gen.sleep(0.2)
         coroutines = dict()
         for i in range(3):
             a = random.choice(workers)
             b = random.choice(workers)
-            coroutines[a, b] = s.work_steal(a.address, b.address, 0.5)
-        print(len(s.waiting) + len(s.processing))
-        result = yield coroutines
-        if all(len(r) == 0 for r in result.values()):
-            import pdb; pdb.set_trace()
+            if a is not b:
+                coroutines[a, b] = s.work_steal(a.address, b.address, 0.5)
+        if not s.processing:
+            break

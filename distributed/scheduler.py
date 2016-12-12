@@ -2486,8 +2486,6 @@ class Scheduler(Server):
                 write(stream, {'op': 'close'})
                 close(stream)
 
-            self.counters['stolen-keys'].add(len(response['keys']))
-
             raise gen.Return(response['keys'])
         except gen.Return:
             raise
