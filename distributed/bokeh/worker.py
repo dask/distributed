@@ -472,6 +472,7 @@ class Counters(DashboardComponent):
                          alpha=alpha, color=RdBu[max(n, 3)][-i])
 
             fig.xaxis.major_label_orientation = math.pi / 12
+            fig.toolbar.logo = None
             self.digest_sources[name] = sources
             self.digest_figures[name] = fig
             return fig
@@ -497,6 +498,8 @@ class Counters(DashboardComponent):
                 )
                 fig.add_tools(hover)
                 fig.xaxis.major_label_orientation = math.pi / 12
+
+            fig.toolbar.logo = None
 
             self.counter_sources[name] = sources
             self.counter_figures[name] = fig
