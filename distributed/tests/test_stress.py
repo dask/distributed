@@ -192,10 +192,10 @@ def test_stress_steal(c, s, *workers):
     s.validate = False
     for w in workers:
         w.validate = False
-    s._steal_periodic_callback.callback_time = 100
+
     dinc = delayed(slowinc)
-    L = [delayed(slowinc)(i, delay=0.005) for i in range(1000)]
-    for i in range(10):
+    L = [delayed(slowinc)(i, delay=0.005) for i in range(100)]
+    for i in range(5):
         L = [delayed(slowsum)(part, delay=0.005)
              for part in sliding_window(5, L)]
 
@@ -203,12 +203,11 @@ def test_stress_steal(c, s, *workers):
     future = c.compute(total)
 
     while future.status != 'finished':
-        yield gen.sleep(0.2)
-        coroutines = dict()
+        yield gen.sleep(0.1)
         for i in range(3):
             a = random.choice(workers)
             b = random.choice(workers)
             if a is not b:
-                coroutines[a, b] = s.work_steal(a.address, b.address, 0.5)
+                s.work_steal(a.address, b.address, 0.5)
         if not s.processing:
             break
