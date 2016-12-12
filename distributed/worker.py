@@ -1205,7 +1205,7 @@ class Worker(WorkerBase):
                     'bandwidth': total_bytes / duration,
                     'who': worker
                 })
-                if self.digests:
+                if self.digests is not None:
                     self.digests['transfer-bandwidth'].add(total_bytes / duration)
                     self.digests['transfer-duration'].add(duration)
                 self.counters['transfer-count'].add(len(deps2))
@@ -1431,7 +1431,7 @@ class Worker(WorkerBase):
             if stop - start > 0.005:
                 self.response[key]['disk_load_start'] = start
                 self.response[key]['disk_load_stop'] = stop
-                if self.digests:
+                if self.digests is not None:
                     self.digests['disk-load-duration'].add(stop - start)
 
             logger.debug("Execute key: %s", key)  # TODO: comment out?

@@ -63,6 +63,7 @@ def test_basic(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_counters(c, s, a, b):
+    pytest.importorskip('crick')
     while 'tick-duration' not in a.digests:
         yield gen.sleep(0.01)
     aa = Counters(a)
@@ -81,9 +82,9 @@ def test_counters(c, s, a, b):
     a.digests['foo'].add(2)
     aa.add_digest_figure('foo')
 
-    a.digests['bar'].add(1)
-    a.digests['bar'].add(2)
-    a.digests['bar'].add(2)
+    a.counters['bar'].add(1)
+    a.counters['bar'].add(2)
+    a.counters['bar'].add(2)
     aa.add_counter_figure('bar')
 
 

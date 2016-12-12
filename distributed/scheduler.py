@@ -636,7 +636,7 @@ class Scheduler(Server):
                 self.report_on_key(key, client=client)
 
         end = time()
-        if self.digests:
+        if self.digests is not None:
             self.digests['update-graph-duration'].add(end - start)
 
         # TODO: balance workers
@@ -1141,7 +1141,7 @@ class Scheduler(Server):
                         handler(worker=worker, **msg)
 
                 end = time()
-                if self.digests:
+                if self.digests is not None:
                     self.digests['handle-worker-duration'].add(end - start)
 
         except (StreamClosedError, IOError, OSError):

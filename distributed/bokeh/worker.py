@@ -433,8 +433,9 @@ class Counters(DashboardComponent):
         self.digest_sources = {}
         self.sizing_mode = sizing_mode
 
-        for name in self.server.digests:
-            self.add_digest_figure(name)
+        if self.server.digests:
+            for name in self.server.digests:
+                self.add_digest_figure(name)
         for name in self.server.counters:
             self.add_counter_figure(name)
 
