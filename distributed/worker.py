@@ -410,6 +410,10 @@ class WorkerBase(Server):
 
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
         nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
+        stop = time()
+        if self.digests is not None:
+            self.digests['get-data-load-duration'].add(stop - start)
+        start = time()
         try:
             compressed = yield write(stream, msg)
             yield close(stream)
@@ -418,6 +422,8 @@ class WorkerBase(Server):
             stream.close()
             raise
         stop = time()
+        if self.digests is not None:
+            self.digests['get-data-send-duration'].add(stop - start)
 
         total_bytes = sum(filter(None, nbytes.values()))
 
@@ -1446,6 +1452,9 @@ class Worker(WorkerBase):
             if result['op'] == 'task-finished':
                 self.put_key_in_memory(key, value)
                 self.transition(key, 'memory')
+                if self.digests is not None:
+                    self.digests['task-duration'].add(result['compute_stop'] -
+                                                      result['compute_start'])
             else:
                 logger.warn(" Compute Failed\n"
                     "Function: %s\n"
