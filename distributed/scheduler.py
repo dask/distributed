@@ -249,6 +249,7 @@ class Scheduler(Server):
 
         # Worker state
         self.ncores = dict()
+        self.workers = SortedSet()
         self.total_ncores = 0
         self.total_occupancy = 0
         self.worker_info = dict()
@@ -257,7 +258,7 @@ class Scheduler(Server):
         self.used_resources = dict()
         self.resources = defaultdict(dict)
         self.aliases = dict()
-        self.occupancy = ValueSortedDict()
+        self.occupancy = dict()
 
         self.extensions = {}
         self.plugins = []
@@ -499,6 +500,7 @@ class Scheduler(Server):
                 self.host_info[host]['cores'] += ncores
 
             self.ncores[address] = ncores
+            self.workers.add(address)
             self.total_ncores += ncores
             self.aliases[name] = address
             self.worker_info[address]['name'] = name
@@ -735,6 +737,7 @@ class Scheduler(Server):
 
             del self.worker_streams[address]
             del self.ncores[address]
+            self.workers.remove(address)
             del self.aliases[self.worker_info[address]['name']]
             del self.worker_info[address]
             if address in self.idle:
@@ -1837,8 +1840,10 @@ class Scheduler(Server):
                 worker = decide_worker(self.dependencies, self.occupancy,
                         self.who_has, valid_workers, self.loose_restrictions,
                         partial(self.worker_objective, key), key)
+            elif self.idle:
+                worker = random.choice(self.idle)
             else:
-                worker = first(self.occupancy)
+                worker = random.choice(self.workers)
 
             assert worker
 
@@ -1847,9 +1852,9 @@ class Scheduler(Server):
             self.rprocessing[key].add(worker)
             self.occupancy[worker] += duration
             self.total_occupancy += duration
-            self.check_idle_saturated(worker)
             self.task_state[key] = 'processing'
             self.consume_resources(key, worker)
+            self.check_idle_saturated(worker)
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
@@ -2493,10 +2498,11 @@ class Scheduler(Server):
             self.idle.add(worker)
             if worker in self.saturated:
                 self.saturated.remove(worker)
-        elif score > 0.3 and (score / avg) > 1.9:
-            self.saturated.add(worker)
+        else:
             if worker in self.idle:
                 self.idle.remove(worker)
+            if score > 0.3 and (score / avg) > 1.9:
+                self.saturated.add(worker)
 
     @gen.coroutine
     def work_steal(self, idle=None, saturated=None, budget=None):
