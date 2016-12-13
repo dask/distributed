@@ -188,6 +188,8 @@ def test_dont_steal_worker_restrictions(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
+    s.stealing.add(b.address)
+    s.steal_serving[a.address].add(b.address)
     result = yield s.work_steal(b.address, a.address, budget=0.5)
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
@@ -203,6 +205,8 @@ def test_dont_steal_host_restrictions(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
+    s.stealing.add(b.address)
+    s.steal_serving[a.address].add(b.address)
     result = yield s.work_steal(b.address, a.address, budget=0.5)
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
@@ -219,6 +223,8 @@ def test_dont_steal_resource_restrictions(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
+    s.stealing.add(b.address)
+    s.steal_serving[a.address].add(b.address)
     result = yield s.work_steal(b.address, a.address, budget=0.5)
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100

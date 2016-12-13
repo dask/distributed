@@ -156,8 +156,6 @@ class Scheduler(Server):
         Which clients want each key.  The active targets of computation.
     * **nbytes:** ``{key: int}``:
         Number of bytes for a key as reported by workers holding that key.
-    * **stealable:** ``[[key]]``
-        A list of stacks of stealable keys, ordered by stealability
     * **ncores:** ``{worker: int}``:
         Number of cores owned by each worker
     * **idle:** ``{worker}``:
@@ -201,7 +199,6 @@ class Scheduler(Server):
         self.delete_interval = delete_interval
         self.synchronize_worker_interval = synchronize_worker_interval
         self.steal = steal
-        self.stealing = set()
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -242,9 +239,10 @@ class Scheduler(Server):
         self.tracebacks = dict()
         self.exceptions_blame = dict()
         self.datasets = dict()
-        self.stealable = [set() for i in range(12)]
-        self.key_stealable = dict()
-        self.stealable_unknown_durations = defaultdict(set)
+
+        self.stealing = set()
+        self.steal_serving = defaultdict(set)
+        self.steal_holdoff = dict()
 
         # Worker state
         self.ncores = dict()
@@ -2474,6 +2472,7 @@ class Scheduler(Server):
 
     @gen.coroutine
     def work_steal(self, idle=None, saturated=None, budget=None):
+        failed = False
         try:
             budget = budget or self.occupancy[saturated] / 10 # TODO scale by ratio of idle/saturated
             ip, port = idle.split(':')
@@ -2522,12 +2521,16 @@ class Scheduler(Server):
         except gen.Return:
             raise
         except Exception as e:
+            failed = True
             logger.exception(e)
             if LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
         finally:
             self.stealing.remove(idle)
+            self.steal_serving[saturated].remove(idle)
+            if failed or not response['keys']:
+                self.steal_holdoff[saturated] = time() + 2
 
     def balance_by_stealing(self):
         with log_errors():
@@ -2551,6 +2554,14 @@ class Scheduler(Server):
                     break
 
             for worker in self.occupancy.irange(reverse=True):
+                if len(self.steal_serving[worker]) > 10:
+                    continue
+                if worker in self.steal_holdoff:
+                    if self.steal_holdoff[worker] > time():
+                        continue
+                    else:
+                        del self.steal_holdoff[worker]
+
                 duration = self.occupancy[worker]
                 time_until_completion = duration / self.ncores[worker]
 
@@ -2589,6 +2600,7 @@ class Scheduler(Server):
                     else:
                         occ -= budget
                         self.stealing.add(i)
+                        self.steal_serving[s].add(i)
                         self.loop.add_callback(self.work_steal, i, s,
                                                budget=frac)
                         flag = True
