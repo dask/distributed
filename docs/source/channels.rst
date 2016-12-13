@@ -5,7 +5,7 @@ Often it is desirable to respond to events from outside the distributed cluster
 or to instantiate a new client in order to check on the progress of a set of tasks. 
 The channels feature makes these and many other workflows possible. 
 It also allows the Dask Scheduler to be extended in a clean way using the normal
-Distributed task submission,
+Distributed task submission.
 
 Channel:
 --------
@@ -18,6 +18,7 @@ channel updates. The central scheduler maintains consistency and ordering
 of events.
 
 Examples
+--------
 
 Create channels from your Client:
 
@@ -42,10 +43,25 @@ deque([<Future: status: pending, key: add-12345>,
 You can iterate over a channel to get back futures.
 
 .. code-block:: python
+>>> anotherclient = Client('scheduler-address:8786')
+>>> chan = anotherclient.channel('my-channel')
 >>> for future in chan:
 ...     pass
 
+You can ensure that a channel is fully processed using the flush method
+
+.. code-block:: python
+>>> client = Client('scheduler-address:8786')
+>>> chan = client.channel('my-channel')
+>>> future2 = client.submit(time.sleep,2)
+>>> chan.append(future2)
+>>> chan.flush()
+
+
 Example with local_client
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Using channels with local client allows for a more decoupled version of what is possible with :doc:`Data Streams with Queues<queues>` in that independent worker clients can build up a set of results which can be read later by a different client. This opens up Dask/Distributed to being integrated in a wider application environment similar to other python task queues such as celery,
 
 .. code-block:: python
 import random, time, operator
