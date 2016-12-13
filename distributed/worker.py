@@ -3,7 +3,6 @@ from __future__ import print_function, division, absolute_import
 from collections import defaultdict, deque
 from datetime import timedelta
 from importlib import import_module
-from itertools import count
 import heapq
 import logging
 import os
@@ -42,8 +41,6 @@ from .utils import (funcname, get_ip, _maybe_complex, log_errors, All,
                     ignoring, validate_key, mp_context)
 
 _ncores = mp_context.cpu_count()
-
-tokens = count()
 
 thread_state = local()
 
@@ -1081,7 +1078,7 @@ class Worker(WorkerBase):
                 self.log.append(('gather-dependencies', key, deps))
 
                 while deps and len(self.connections) < self.total_connections:
-                    token = next(tokens)
+                    token = object()
                     self.connections[token] = None
                     self.loop.add_callback(self.gather_dep, deps.pop(), token, cause=key)
 
