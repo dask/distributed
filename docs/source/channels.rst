@@ -44,3 +44,40 @@ You can iterate over a channel to get back futures.
 .. code-block:: python
 >>> for future in chan:
 ...     pass
+
+Example with local_client
+
+.. code-block:: python
+import random, time, operator
+from distributed import Client, local_client
+from tornado import gen
+
+def emit(name):
+    with local_client() as c:
+       chan = c.channel(name)
+       while True:
+           future = c.submit(random.random, pure=False)
+            chan.append(future)
+            gen.sleep(1)
+
+def combine():
+    with local_client() as c:
+        a_chan = c.channel('a')
+        b_chan = c.channel('b')
+        out_chan = c.channel('adds')
+        for a, b in zip(a_chan, b_chan):
+            future = c.submit(operator.add, a, b)
+            out_chan.append(future)
+
+client = Client()
+
+emitters = (client.submit(emit, 'a'), client.submit(emit, 'b'))
+combiner = client.submit(combine)
+chan = client.channel('adds')
+
+
+for future in chan:
+    print(future.result())
+   ...:     
+1.782009416831722
+...
