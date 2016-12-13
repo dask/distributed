@@ -1500,7 +1500,7 @@ class Worker(WorkerBase):
             self.ensure_communicating()
             self.ensure_computing()
 
-            yield write(stream, {'keys': response['keys']})
+            yield write(stream, {'keys': stolen})
             response = yield read(stream)
 
             assert response == 'OK'  # Ack from scheduler, tell victim all's well
