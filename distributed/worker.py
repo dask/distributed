@@ -1578,10 +1578,14 @@ class Worker(WorkerBase):
             budget = budget * total_duration
             good = set()
             cost = 0
-            while heap:
+            while heap and cost < budget:
                 score, k, compute, communicate = heapq.heappop(heap)
                 cost += compute + communicate
                 if cost < budget:
+                    good.add(k)
+
+            if not good:
+                if cost < total_duration / 2:  # try to send something
                     good.add(k)
 
             msgs = {}

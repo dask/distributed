@@ -223,8 +223,6 @@ class CrossFilter(DashboardComponent):
                 'stop': [1, 2]
                 })
 
-
-
             self.x = Select(title='X-Axis', value='nbytes', options=quantities)
             self.x.on_change('value', self.update_figure)
 
