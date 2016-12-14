@@ -81,15 +81,15 @@ environment similar to other python task queues such as Celery_.
 
     import random, time, operator
     from distributed import Client, local_client
-    from tornado import gen
+    from time import sleep
 
     def emit(name):
         with local_client() as c:
            chan = c.channel(name)
            while True:
                future = c.submit(random.random, pure=False)
-                chan.append(future)
-                gen.sleep(1)
+               chan.append(future)
+               sleep(1)
 
     def combine():
         with local_client() as c:
