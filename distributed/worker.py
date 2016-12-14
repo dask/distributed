@@ -1591,7 +1591,10 @@ class Worker(WorkerBase):
             msgs = {}
             for k in good:
                 d = {}
-                d['task'] = to_serialize(self.raw_tasks[k])
+                try:
+                    d['task'] = to_serialize(self.raw_tasks[k])
+                except KeyError:
+                    continue
                 who_has = {dep: list(self.who_has.get(dep, []))
                            for dep in self.dependencies[k]}
                 for dep, deps in who_has.items():
@@ -1621,7 +1624,10 @@ class Worker(WorkerBase):
 
             # We're clear to remove these keys.  Scheduler is aware
             for key in good:
-                self.steal_offered.remove(key)
+                try:
+                    self.steal_offered.remove(key)
+                except KeyError:
+                    pass
                 if key in stolen:
                     self.log.append((key, 'steal-donate', worker))
                     self.rescind_key(key)
