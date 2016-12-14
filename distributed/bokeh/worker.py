@@ -233,7 +233,7 @@ class CrossFilter(DashboardComponent):
                                options=['None'] + quantities)
             self.size.on_change('value', self.update_figure)
 
-            self.color = Select(title='Color', value='type-color',
+            self.color = Select(title='Color', value='inout-color',
                                 options=['black'] + colors)
             self.color.on_change('value', self.update_figure)
 
