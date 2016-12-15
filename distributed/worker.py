@@ -856,6 +856,8 @@ class Worker(WorkerBase):
                         priority = [self.priority_counter] + priority
                         priority = tuple(-x for x in priority)
                         self.add_task(priority=priority, **msg)
+                    elif op == 'release-task':
+                        self.release_task(**msg)
                     elif op == 'delete-data':
                         self.delete_data(**msg)
                     else:
@@ -949,6 +951,10 @@ class Worker(WorkerBase):
             if LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
+
+    def release_task(self, key=None):
+        if self.task_state.get(key) in PENDING:
+            self.rescind_key(key)
 
     ###############
     # Transitions #

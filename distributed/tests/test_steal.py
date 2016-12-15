@@ -22,13 +22,13 @@ import pytest
 @gen_cluster(client=True, ncores=[('127.0.0.1', 2), ('127.0.0.2', 2)],
         timeout=20)
 def test_work_stealing(c, s, a, b):
-    [x] = yield c._scatter([1])
+    [x] = yield c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50)
     yield gen.sleep(0.1)
     yield _wait(futures)
-    import pdb; pdb.set_trace()
     assert len(a.data) > 10
     assert len(b.data) > 10
+    assert len(a.data) > len(b.data)
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
@@ -150,8 +150,6 @@ def test_new_worker_steals(c, s, a):
     b = Worker(s.ip, s.port, loop=s.loop, ncores=1)
     yield b._start()
 
-    yield gen.sleep(1)
-
     result = yield total._result()
     assert result == sum(map(inc, range(100)))
 
@@ -224,6 +222,7 @@ def test_dont_steal_resource_restrictions(c, s, a, b):
     yield gen.sleep(0.1)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
+
     s.stealing.add(b.address)
     s.steal_serving[a.address].add(b.address)
     result = yield s.work_steal(b.address, a.address, budget=0.5)
@@ -232,7 +231,9 @@ def test_dont_steal_resource_restrictions(c, s, a, b):
     assert len(b.task_state) == 0
 
 
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 2}})])
+@pytest.mark.xfail(reason='no stealing of resources')
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 2}})],
+             timeout=3)
 def test_steal_resource_restrictions(c, s, a):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     yield future._result()
@@ -244,8 +245,6 @@ def test_steal_resource_restrictions(c, s, a):
 
     b = Worker(s.ip, s.port, loop=s.loop, ncores=1, resources={'A': 4})
     yield b._start()
-
-    s.balance_by_stealing()
 
     start = time()
     while not b.task_state or len(a.task_state) == 101:
