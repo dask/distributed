@@ -2148,6 +2148,7 @@ def test_fatally_serialized_input(c, s):
         yield gen.sleep(0.01)
 
 
+@pytest.mark.xfail(reason='Use fast random selection now')
 @gen_cluster(client=True)
 def test_balance_tasks_by_stacks(c, s, a, b):
     x = c.submit(inc, 1)
