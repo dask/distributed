@@ -26,6 +26,7 @@ def test_work_stealing(c, s, a, b):
     futures = c.map(slowadd, range(50), [x] * 50)
     yield gen.sleep(0.1)
     yield _wait(futures)
+    import pdb; pdb.set_trace()
     assert len(a.data) > 10
     assert len(b.data) > 10
 

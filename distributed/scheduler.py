@@ -34,6 +34,7 @@ from .core import (rpc, connect, read, write, close, MAX_BUFFER_SIZE,
 from .metrics import time
 from .publish import PublishExtension
 from .channels import ChannelScheduler
+from .stealing import WorkStealing
 from .utils import (All, ignoring, get_ip, ignore_exceptions,
         ensure_ip, get_fileno_limit, log_errors, key_split, mean,
         divide_n_among_bins, validate_key)
@@ -187,9 +188,10 @@ class Scheduler(Server):
             max_buffer_size=MAX_BUFFER_SIZE, delete_interval=500,
             synchronize_worker_interval=60000,
             ip=None, services=None, allowed_failures=ALLOWED_FAILURES,
-            validate=False, steal=True, extensions=[ChannelScheduler,
-                PublishExtension],
+            validate=False, steal=True,
+            extensions=[ChannelScheduler, PublishExtension, WorkStealing],
             **kwargs):
+        self.digests = None
 
         # Attributes
         self.ip = ip or get_ip()
@@ -384,11 +386,11 @@ class Scheduler(Server):
             for c in self._worker_coroutines:
                 c.cancel()
 
-        self._steal_periodic_callback = \
-                PeriodicCallback(callback=self.balance_by_stealing,
-                                 callback_time=100,
-                                 io_loop=self.loop)
-        self._steal_periodic_callback.start()
+        # self._steal_periodic_callback = \
+        #         PeriodicCallback(callback=self.balance_by_stealing,
+        #                          callback_time=100,
+        #                          io_loop=self.loop)
+        # self._steal_periodic_callback.start()
 
         for cor in self.coroutines:
             if cor.done():
@@ -428,9 +430,12 @@ class Scheduler(Server):
         """
         if self.status == 'closed':
             return
-        self._steal_periodic_callback.stop()
+        # self._steal_periodic_callback.stop()
         for service in self.services.values():
             service.stop()
+        for ext in self.extensions:
+            with ignoring(AttributeError):
+                ext.teardown()
         yield self.cleanup()
         if not fast:
             yield self.finished()
