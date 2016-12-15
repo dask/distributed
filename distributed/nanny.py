@@ -312,7 +312,7 @@ class Nanny(Server):
         if self.worker_port:
             return '%s:%d' % (self.ip, self.worker_port)
         else:
-            return '%s (No worker port assigned)' % self.ip
+            return '%s:port-unassigned' % self.ip
 
     def resource_collect(self):
         try:
