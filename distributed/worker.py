@@ -1126,6 +1126,7 @@ class Worker(WorkerBase):
 
     @gen.coroutine
     def gather_dep(self, dep, slot, cause=None):
+        failures = 5
         del self.connections[slot]
         try:
             if self.validate:
@@ -1133,15 +1134,19 @@ class Worker(WorkerBase):
 
             while True:
                 if not self.who_has.get(dep):
-                    # TODO: ask scheduler nicely for new who_has before canceling
                     if dep not in self.dependents:
                         return
-                    for key in list(self.dependents[dep]):
-                        if dep in self.executing:
-                            continue
-                        if dep in self.waiting_for_data.get(key, ()):
-                            self.cancel_key(key)
-                    return
+                    failures += 1
+                    result = self.query_who_has(dep)
+                    if not result or failures > 5:
+                        for key in list(self.dependents[dep]):
+                            if dep in self.executing:
+                                continue
+                            if dep in self.waiting_for_data.get(key, ()):
+                                self.cancel_key(key)
+                        return
+                    else:
+                        assert self.who_has.get(dep)
                 worker = random.choice(list(self.who_has[dep]))
                 ip, port = worker.split(':')
                 try:
