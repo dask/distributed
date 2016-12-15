@@ -124,7 +124,7 @@ Very short-lived clients
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you wish to submit work to your cluster from a short lived client such as a
-web application view, a AWS Lambda function or some other fire and forget script,
+web application view, an AWS Lambda function or some other fire and forget script,
 channels give a way to do this.
 
 Motivating Example - A workflow designer
@@ -157,16 +157,16 @@ only exist for the lifetime of the request then the graph is transmitted using s
                     "tracking_key_1" :(func, arg1, arg2),
                     "tracking_key_2" :(func2, "tracking_key_1")
                  }
-    future_list = client.scatter([( "<worflow_run_id>", dask_graph])
+    future_list = client.scatter([("<worflow_run_id>", dask_graph)])
     chan.append(future_list[0])
     chan.flush()
 
 3) A long running client process is listening for new new futures
-on the channel `input`. A long running local client function
-`hold_completed_futures` listens for output tasks to hold them ready
+on the channel ``input``. A long running local client function
+``hold_completed_futures`` listens for output tasks to hold them ready
 for a different client. Dask graphs are submitted and run in the
-`run_on_remote` function. The constituent futures are added to the output
-graph so that the python web services can view status
+``run_on_remote`` function. The constituent futures are added to the output
+graph so that the python web services can view status.
 
 
 .. code-block:: python
@@ -179,11 +179,8 @@ graph so that the python web services can view status
     def run_on_remote(dsk):
         with local_client() as c:
             output_channel = c.channel("output")
-
-            print(dsk)
             keys = list(dsk.keys())
             keys.sort()
-            print(keys)
             #nonblocking get initially so consituent futures can be added to a channel
             future = c._get(dsk, keys)
             for key in keys:
@@ -210,11 +207,8 @@ graph so that the python web services can view status
         main_future = client.submit(hold_completed_futures)
         #output_channel = client.channel("output")
         for future in input_channel:
-            #we know this future is just shared data so we call result
+            #we know this future is just shared data so we call result without blocking
             workflow_run_id, dask_graph = future.result()
-            print(future.key)
-            print("recieved", dask_graph)
-
             fut=client.submit(run_on_remote, dask_graph, pure=True, key=workflow_run_id)
             output_channel.append(fut)
 
