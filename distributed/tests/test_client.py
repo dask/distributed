@@ -2685,7 +2685,7 @@ def test_even_load_after_fast_functions(c, s, a, b):
 
     futures = c.map(inc, range(2, 11))
     yield _wait(futures)
-    assert abs(len(a.data) - len(b.data)) <= 2
+    assert abs(len(a.data) - len(b.data)) <= 5
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
@@ -3458,9 +3458,9 @@ def test_retire_many_workers(c, s, *workers):
 
 
 @gen_cluster(client=True,
-             scheduler_kwargs={'steal': False},
              ncores=[('127.0.0.1', 3)] * 2)
 def test_weight_occupancy_against_data_movement(c, s, a, b):
+    s.extensions['stealing']._pc.callback_time = 1000000
     s.task_duration['f'] = 0.01
     def f(x, y=0, z=0):
         sleep(0.01)
@@ -3478,10 +3478,10 @@ def test_weight_occupancy_against_data_movement(c, s, a, b):
 
 
 @gen_cluster(client=True,
-             scheduler_kwargs={'steal': False},
              ncores=[('127.0.0.1', 1), ('127.0.0.1', 10)])
 def test_distribute_tasks_by_ncores(c, s, a, b):
     s.task_duration['f'] = 0.01
+    s.extensions['stealing']._pc.callback_time = 1000000
     def f(x, y=0):
         sleep(0.01)
         return x
