@@ -188,7 +188,7 @@ class Scheduler(Server):
             max_buffer_size=MAX_BUFFER_SIZE, delete_interval=500,
             synchronize_worker_interval=60000,
             ip=None, services=None, allowed_failures=ALLOWED_FAILURES,
-            validate=False, steal=True,
+            validate=False,
             extensions=[ChannelScheduler, PublishExtension, WorkStealing],
             **kwargs):
         self.digests = None
@@ -200,7 +200,6 @@ class Scheduler(Server):
         self.status = None
         self.delete_interval = delete_interval
         self.synchronize_worker_interval = synchronize_worker_interval
-        self.steal = steal
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -245,10 +244,6 @@ class Scheduler(Server):
 
         self.idle = SortedSet()
         self.saturated = set()
-
-        self.stealing = set()
-        self.steal_serving = defaultdict(set)
-        self.steal_holdoff = dict()
 
         # Worker state
         self.ncores = dict()
@@ -425,7 +420,6 @@ class Scheduler(Server):
         """
         if self.status == 'closed':
             return
-        # self._steal_periodic_callback.stop()
         for service in self.services.values():
             service.stop()
         for ext in self.extensions:

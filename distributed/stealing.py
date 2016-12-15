@@ -27,6 +27,7 @@ class WorkStealing(SchedulerPlugin):
                                     io_loop=self.scheduler.loop)
         self.scheduler.loop.add_callback(self._pc.start)
         self.scheduler.plugins.append(self)
+        self.scheduler.extensions['stealing'] = self
 
     def teardown(self):
         self._pc.stop()
@@ -134,10 +135,12 @@ class WorkStealing(SchedulerPlugin):
             if not self.scheduler.idle or not self.scheduler.saturated:
                 return
 
+            broken = False
+
             with log_errors():
                 start = time()
                 for level, stealable in enumerate(self.stealable[:-1]):
-                    if not stealable:
+                    if broken or not stealable:
                         continue
 
                     original = stealable
@@ -151,8 +154,6 @@ class WorkStealing(SchedulerPlugin):
                         break
 
                     for key in list(stealable):
-                        if not self.scheduler.idle or not self.scheduler.saturated:
-                            break
                         if self.scheduler.task_state.get(key) != 'processing':
                             original.remove(key)
                             continue
@@ -164,6 +165,10 @@ class WorkStealing(SchedulerPlugin):
                             self.scheduler.check_idle_saturated(victim)
                             self.scheduler.check_idle_saturated(thief)
                             original.remove(key)
+
+                        if not self.scheduler.idle or not self.scheduler.saturated:
+                            broken = True
+                            break
 
                 stop = time()
                 if self.scheduler.digests:
