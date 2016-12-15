@@ -2510,7 +2510,10 @@ class Scheduler(Server):
             if self.counters:
                 self.counters['stolen-keys'].add(len(response['keys']))
 
-            raise gen.Return(response['keys'])
+            if response['keys']:
+                raise gen.Return(response['keys'])
+            else:
+                return  # tornado burns cpu when returning empty lists
 
         except gen.Return:
             raise

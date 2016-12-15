@@ -512,15 +512,10 @@ class Counters(DashboardComponent):
                 d = {}
                 for i, d in enumerate(digest.components):
                     if d.size():
-                        try:
-                            xs = [d.quantile(i / 100) for i in range(1, 99)]
-                            ys = [1 / (xs[i + 1] - xs[i]) for i in range(len(xs) - 1)]
-                            if name.endswith('duration'):
-                                xs = [x * 1000 for x in xs]
-                        except ZeroDivisionError:
-                            pass
-                        else:
-                            self.digest_sources[name][i].data.update({'x': xs, 'y': ys})
+                        ys, xs = d.histogram(100)
+                        if name.endswith('duration'):
+                            xs *= 1000
+                        self.digest_sources[name][i].data.update({'x': xs, 'y': ys})
                 figure.title.text = '%s: %d' % (name, digest.size())
 
             for name, figure in self.counter_figures.items():
