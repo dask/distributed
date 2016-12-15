@@ -108,8 +108,9 @@ class WorkStealing(SchedulerPlugin):
                 if victim not in self.scheduler.rprocessing[key]:
                     import pdb; pdb.set_trace()
 
-            logger.info("Moved %s, %2f %2f", key, self.scheduler.occupancy[victim],
-                    self.scheduler.occupancy[thief])
+            logger.info("Moved %s, %s: %2f -> %s: %2f", key,
+                    victim, self.scheduler.occupancy[victim],
+                    thief, self.scheduler.occupancy[thief])
 
             duration = self.scheduler.processing[victim].pop(key)
             self.scheduler.rprocessing[key].remove(victim)

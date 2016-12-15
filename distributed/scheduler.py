@@ -685,6 +685,8 @@ class Scheduler(Server):
         """ Mark that certain keys have gone missing.  Recover. """
         with log_errors():
             logger.debug("Stimulus missing data %s, %s", key, worker)
+            if key and self.task_state.get(key) in (None, 'memory'):
+                return {}
 
             recommendations = OrderedDict()
             for k in set(keys):
@@ -1951,6 +1953,9 @@ class Scheduler(Server):
                     self.total_occupancy -= duration
                     self.occupancy[w] -= duration
                 self.check_idle_saturated(w)
+                if w != worker:
+                    msg = {'op': 'release-task', 'key': key}
+                    # self.worker_streams[w].send(msg)
 
             recommendations = OrderedDict()
 

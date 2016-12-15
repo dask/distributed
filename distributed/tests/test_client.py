@@ -3606,8 +3606,17 @@ def test_auto_normalize_collection_sync(loop):
                 assert end - start < 1
 
 
+def assert_no_data_loss(scheduler):
+    for key, start, finish, recommendations, _ in scheduler.transition_log:
+        if start == 'memory' and finish == 'released':
+            for k, v in recommendations.items():
+                assert not (k == key and v == 'waiting')
+
+
 @gen_cluster(client=True, timeout=None)
 def test_interleave_computations(c, s, a, b):
+    import distributed
+    distributed.g = s
     xs = [delayed(slowinc)(i, delay=0.02) for i in range(30)]
     ys = [delayed(slowdec)(x, delay=0.02) for x in xs]
     zs = [delayed(slowadd)(x, y, delay=0.02) for x, y in zip(xs, ys)]
@@ -3629,6 +3638,8 @@ def test_interleave_computations(c, s, a, b):
         assert x_done >= y_done >= z_done
         assert x_done < y_done + 10
         assert y_done < z_done + 10
+
+    assert_no_data_loss(s)
 
 
 @gen_cluster(client=True, timeout=None)
