@@ -169,6 +169,7 @@ class WorkStealing(SchedulerPlugin):
                         if victim not in self.scheduler.idle:
                             thief = random.choice(self.scheduler.idle)
                             self.move_task(key, victim, thief)
+                            self.log.append((level, victim, thief, key))
                             self.scheduler.check_idle_saturated(victim)
                             self.scheduler.check_idle_saturated(thief)
                             original.remove(key)
