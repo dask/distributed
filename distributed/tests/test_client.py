@@ -890,12 +890,14 @@ def test_if_intermediates_clear_on_error(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_pragmatic_move_small_data_to_large_data(c, s, a, b):
-    lists = c.map(lambda n: list(range(n)), [10] * 10, pure=False)
+    s.extensions['stealing']._pc.callback_time = 1
+    lists = c.map(lambda n: list(range(n)), [100000] * 10, pure=False)
     sums = c.map(sum, lists)
     total = c.submit(sum, sums)
 
     def f(x, y):
         return None
+    s.task_duration['f'] = 0.001
     results = c.map(f, lists, [total] * 10)
 
     yield _wait([total])
