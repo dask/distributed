@@ -264,14 +264,14 @@ def test_steal_resource_restrictions(c, s, a):
 def test_balance_without_dependencies(c, s, *workers):
     s.extensions['stealing']._pc.callback_time = 20
     def slow(x):
-        y = random.random() * 0.05
+        y = random.random() * 0.1
         sleep(y)
         return y
     futures = c.map(slow, range(100))
     yield _wait(futures)
 
     durations = [sum(w.data.values()) for w in workers]
-    assert max(durations) / min(durations) < 1.3
+    assert max(durations) / min(durations) < 1.5
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 4)] * 2)
