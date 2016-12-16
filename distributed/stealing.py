@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import defaultdict, deque
 import logging
 from math import log
 import random
@@ -28,6 +28,7 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.loop.add_callback(self._pc.start)
         self.scheduler.plugins.append(self)
         self.scheduler.extensions['stealing'] = self
+        self.log = deque(maxlen=100000)
 
     def teardown(self):
         self._pc.stop()
@@ -148,7 +149,7 @@ class WorkStealing(SchedulerPlugin):
 
                     original = stealable
 
-                    ratio = 2 ** (level - 5) + 1
+                    ratio = 2 ** (level - 5 + 1)
 
                     duration_if_hold = len(stealable) / len(self.scheduler.saturated)
                     duration_if_steal = ratio

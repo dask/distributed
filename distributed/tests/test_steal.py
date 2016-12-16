@@ -1,6 +1,9 @@
 from __future__ import print_function, division, absolute_import
 
+from operator import mul
+import random
 import sys
+from time import sleep
 
 import pytest
 from toolz import sliding_window
@@ -12,7 +15,8 @@ from distributed import Worker
 from distributed.client import Client, _wait, wait
 from distributed.metrics import time
 from distributed.utils_test import (cluster, slowinc, slowadd, randominc,
-        loop, inc, dec, div, throws, gen_cluster, gen_test, double, deep)
+        loop, inc, dec, div, throws, gen_cluster, gen_test, double, deep,
+        slowidentity)
 
 import pytest
 
@@ -254,3 +258,44 @@ def test_steal_resource_restrictions(c, s, a):
     assert len(a.task_state) < 101
 
     yield b._close()
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 5)
+def test_balance_without_dependencies(c, s, *workers):
+    s.extensions['stealing']._pc.callback_time = 20
+    def slow(x):
+        y = random.random() * 0.05
+        sleep(y)
+        return y
+    futures = c.map(slow, range(100))
+    yield _wait(futures)
+
+    durations = [sum(w.data.values()) for w in workers]
+    assert max(durations) / min(durations) < 1.3
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 4)] * 2)
+def test_dont_steal_executing_tasks(c, s, a, b):
+    futures = c.map(slowinc, range(4), delay=0.1, workers=a.address,
+                    allow_other_workers=True)
+
+    yield _wait(futures)
+    assert len(a.data) == 4
+    assert len(b.data) == 0
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
+def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
+    s.extensions['stealing']._pc.callback_time = 20
+    x = c.submit(mul, b'0', 100000000, workers=a.address)  # 100 MB
+    yield _wait(x)
+    s.task_duration['slowidentity'] = 0.2
+
+    futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for i in range(2)]
+    yield gen.sleep(0.1)
+    import pdb; pdb.set_trace()
+
+    yield _wait(futures)
+
+    assert len(a.data) == 3
+    assert not any(w.data for w in rest)

@@ -2506,16 +2506,23 @@ class Scheduler(Server):
     ##############################
 
     def check_idle_saturated(self, worker):
-        score = self.occupancy[worker] / self.ncores[worker]
+        nc = self.ncores[worker]
+        p = len(self.processing[worker])
+
+        pending = self.occupancy[worker]  * (p - nc) / nc
+        if pending < 0:
+            pending = 0
+
         avg = self.total_occupancy / self.total_ncores
-        if not self.processing[worker] or (score / avg) < 0.5:
+
+        if not pending or avg and (pending / avg) < 0.5:
             self.idle.add(worker)
             if worker in self.saturated:
                 self.saturated.remove(worker)
         else:
             if worker in self.idle:
                 self.idle.remove(worker)
-            if score > 0.3 and (score / avg) > 1.9:
+            if pending > 0.2 and (pending / avg) > 1.9:
                 self.saturated.add(worker)
 
     def valid_workers(self, key):

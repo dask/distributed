@@ -178,6 +178,12 @@ def slowsum(seq, delay=0.02):
     return sum(seq)
 
 
+def slowidentity(*args, delay=0.02):
+    from time import sleep
+    sleep(delay)
+    return args
+
+
 _readone_queues = {}
 
 @gen.coroutine
