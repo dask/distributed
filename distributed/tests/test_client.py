@@ -890,8 +890,9 @@ def test_if_intermediates_clear_on_error(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_pragmatic_move_small_data_to_large_data(c, s, a, b):
-    lists = c.map(lambda n: list(range(n)), [100000] * 10, pure=False)
-    sums = c.map(sum, lists)
+    np = pytest.importorskip('numpy')
+    lists = c.map(np.ones, [10000] * 10, pure=False)
+    sums = c.map(np.sum, lists)
     total = c.submit(sum, sums)
 
     def f(x, y):
@@ -903,8 +904,8 @@ def test_pragmatic_move_small_data_to_large_data(c, s, a, b):
 
     yield _wait(results)
 
-    assert sum(s.who_has[l.key] == s.who_has[r.key]
-               for l, r in zip(lists, results)) >= 8
+    assert sum(s.who_has[r.key].issubset(s.who_has[l.key])
+               for l, r in zip(lists, results)) >= 9
 
 
 @gen_cluster(client=True)
