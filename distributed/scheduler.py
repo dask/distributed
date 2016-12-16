@@ -12,7 +12,7 @@ import random
 import socket
 from timeit import default_timer
 
-from sortedcollections import ValueSortedDict, SortedSet
+from sortedcontainers import SortedSet
 try:
     from cytoolz import frequencies, topk
 except ImportError:
@@ -188,10 +188,9 @@ class Scheduler(Server):
             max_buffer_size=MAX_BUFFER_SIZE, delete_interval=500,
             synchronize_worker_interval=60000,
             ip=None, services=None, allowed_failures=ALLOWED_FAILURES,
-            validate=False,
             extensions=[ChannelScheduler, PublishExtension, WorkStealing],
+            validate=False,
             **kwargs):
-        self.digests = None
 
         # Attributes
         self.ip = ip or get_ip()
@@ -200,6 +199,7 @@ class Scheduler(Server):
         self.status = None
         self.delete_interval = delete_interval
         self.synchronize_worker_interval = synchronize_worker_interval
+        self.digests = None
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -343,7 +343,7 @@ class Scheduler(Server):
 
     def __str__(self):
         return '<Scheduler: "%s:%d" processes: %d cores: %d>' % (
-                self.ip, self.port, len(self.ncores), sum(self.ncores.values()))
+                self.ip, self.port, len(self.workers), self.total_ncores)
 
     __repr__ = __str__
 
@@ -359,7 +359,7 @@ class Scheduler(Server):
         """ Basic information about ourselves and our cluster """
         d = {'type': type(self).__name__,
              'id': str(self.id),
-             'workers': list(self.ncores),
+             'workers': list(self.workers),
              'services': {key: v.port for (key, v) in self.services.items()},
              'workers': dict(self.worker_info)}
         return d
@@ -479,7 +479,7 @@ class Scheduler(Server):
                 self.add_resources(address, resources)
                 self.worker_info[address]['resources'] = resources
 
-            if address in self.ncores:
+            if address in self.workers:
                 return 'OK'
 
             name = name or address
@@ -914,6 +914,7 @@ class Scheduler(Server):
                 self.wants_what, tasks=self.tasks, erred=self.exceptions_blame,
                 allow_overlap=allow_overlap)
         if not (set(self.ncores) ==
+                set(self.workers) ==
                 set(self.has_what) ==
                 set(self.processing) ==
                 set(self.worker_info) ==
@@ -1208,7 +1209,7 @@ class Scheduler(Server):
         Scheduler.broadcast:
         """
         start = time()
-        while not self.ncores:
+        while not self.workers:
             yield gen.sleep(0.2)
             if time() > start + timeout:
                 raise gen.TimeoutError("No workers found")
@@ -1249,7 +1250,7 @@ class Scheduler(Server):
     @gen.coroutine
     def restart(self, environment=None):
         """ Restart all workers.  Reset local state. """
-        n = len(self.ncores)
+        n = len(self.workers)
         with log_errors():
             logger.debug("Send shutdown signal to workers")
 
@@ -1290,7 +1291,7 @@ class Scheduler(Server):
         """ Broadcast message to workers, return all results """
         if workers is None:
             if hosts is None:
-                workers = list(self.ncores)
+                workers = list(self.workers)
             else:
                 workers = []
         if hosts is not None:
@@ -1328,7 +1329,7 @@ class Scheduler(Server):
         """
         with log_errors():
             keys = set(keys or self.who_has)
-            workers = set(workers or self.ncores)
+            workers = set(workers or self.workers)
 
             if not keys.issubset(self.who_has):
                 raise Return({'status': 'missing-data',
@@ -1747,7 +1748,7 @@ class Scheduler(Server):
                                           and dep not in self.exceptions_blame}
 
             if not self.waiting[key]:
-                if self.ncores:
+                if self.workers:
                     self.task_state[key] = 'waiting'
                     recommendations[key] = 'processing'
                 else:
@@ -1799,7 +1800,7 @@ class Scheduler(Server):
             self.task_state[key] = 'waiting'
 
             if not self.waiting[key]:
-                if self.ncores:
+                if self.workers:
                     recommendations[key] = 'processing'
                 else:
                     self.task_state[key] = 'no-worker'
@@ -1838,9 +1839,15 @@ class Scheduler(Server):
                         self.who_has, valid_workers, self.loose_restrictions,
                         partial(self.worker_objective, key), key)
             elif self.idle:
-                worker = random.choice(self.idle)
+                if len(self.idle) < 20:  # smart but linear in small case
+                    worker = min(self.idle, key=self.occupancy.get)
+                else:  # dumb but fast in large case
+                    worker = random.choice(self.idle)
             else:
-                worker = random.choice(self.workers)
+                if len(self.workers) < 20:  # smart but linear in small case
+                    worker = min(self.workers, key=self.occupancy.get)
+                else:  # dumb but fast in large case
+                    worker = random.choice(self.workers)
 
             assert worker
 
@@ -2627,14 +2634,14 @@ class Scheduler(Server):
         Returns a list of all worker addresses that match
         """
         if workers is None:
-            return list(self.ncores)
+            return list(self.workers)
 
         out = set()
         for w in workers:
             if ':' in w:
                 out.add(w)
             else:
-                out.update({ww for ww in self.ncores if w in ww}) # TODO: quadratic
+                out.update({ww for ww in self.workers if w in ww}) # TODO: quadratic
         return list(out)
 
     def start_ipython(self, stream=None):

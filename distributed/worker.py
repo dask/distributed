@@ -1137,7 +1137,7 @@ class Worker(WorkerBase):
                     if dep not in self.dependents:
                         return
                     failures += 1
-                    result = self.query_who_has(dep)
+                    result = yield self.query_who_has(dep)
                     if not result or failures > 5:
                         for key in list(self.dependents[dep]):
                             if dep in self.executing:

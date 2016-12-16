@@ -816,9 +816,9 @@ def test_learn_occupancy(c, s, a, b):
     while not any(s.who_has):
         yield gen.sleep(0.01)
 
-    assert 1 < s.total_occupancy < 20
+    assert 1 < s.total_occupancy < 40
     for w in [a, b]:
-        assert 1 < s.occupancy[w.address] < 10
+        assert 1 < s.occupancy[w.address] < 20
 
 
 @gen_cluster(client=True)
