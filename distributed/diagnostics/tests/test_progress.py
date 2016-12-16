@@ -61,6 +61,7 @@ def test_many_Progress(c, s, a, b):
     while not all(b.status == 'finished' for b in bars):
         yield gen.sleep(0.1)
         assert time() < start + 2
+    print(time() - start)
 
 
 @gen_cluster(client=True)
