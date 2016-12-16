@@ -153,7 +153,8 @@ class WorkStealing(SchedulerPlugin):
 
                     ratio = 2 ** (level - 5 + 1)
 
-                    duration_if_hold = len(stealable) / len(self.scheduler.saturated)
+                    n_stealable = sum(len(s) for s in self.stealable[level:-1])
+                    duration_if_hold = n_stealable / len(self.scheduler.saturated)
                     duration_if_steal = ratio
 
                     if level > 1 and duration_if_hold < duration_if_steal:

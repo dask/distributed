@@ -292,9 +292,44 @@ def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
     s.task_duration['slowidentity'] = 0.2
 
     futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for i in range(2)]
-    yield gen.sleep(0.1)
 
     yield _wait(futures)
 
     assert len(a.data) == 3
-    assert not any(w.data for w in rest)
+    assert not any(w.task_state for w in rest)
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
+def test_steal_when_more_tasks(c, s, a, *rest):
+    s.extensions['stealing']._pc.callback_time = 20
+    x = c.submit(mul, b'0', 100000000, workers=a.address)  # 100 MB
+    yield _wait(x)
+    s.task_duration['slowidentity'] = 0.2
+
+    futures = [c.submit(slowidentity, x, pure=False, delay=0.2)
+                for i in range(20)]
+    yield gen.sleep(0.1)
+
+    assert any(w.task_state for w in rest)
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
+def test_steal_more_attractive_tasks(c, s, a, *rest):
+    def slow2(x):
+        sleep(1)
+        return x
+    s.extensions['stealing']._pc.callback_time = 20
+    x = c.submit(mul, b'0', 100000000, workers=a.address)  # 100 MB
+    yield _wait(x)
+    s.task_duration['slowidentity'] = 0.2
+    s.task_duration['slow2'] = 1
+
+    future = c.submit(slow2, x)
+    futures = [c.submit(slowidentity, x, pure=False, delay=0.2)
+                for i in range(10)]
+
+    while not any(w.task_state for w in rest):
+        yield gen.sleep(0.01)
+
+    # good future moves first
+    assert any(future.key in w.task_state for w in rest)
