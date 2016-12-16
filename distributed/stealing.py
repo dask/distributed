@@ -13,6 +13,7 @@ from .utils import key_split, log_errors
 from .diagnostics.plugin import SchedulerPlugin
 
 BANDWIDTH = 100e6
+LATENCY = 10e-3
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ class WorkStealing(SchedulerPlugin):
             except:
                 pass
 
-    def steal_time_ratio(self, key, bandwidth=BANDWIDTH, split=None):
+    def steal_time_ratio(self, key, split=None):
         """ The compute to communication time ratio of a key
 
         Returns
@@ -83,7 +84,7 @@ class WorkStealing(SchedulerPlugin):
         nbytes = sum(self.scheduler.nbytes.get(k, 1000)
                      for k in self.scheduler.dependencies[key])
 
-        transfer_time = nbytes / bandwidth
+        transfer_time = nbytes / BANDWIDTH + LATENCY
         split = split or key_split(key)
         if split in fast_tasks:
             return None, None
