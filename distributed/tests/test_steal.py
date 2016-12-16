@@ -260,7 +260,7 @@ def test_steal_resource_restrictions(c, s, a):
     yield b._close()
 
 
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 5)
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 5, timeout=20)
 def test_balance_without_dependencies(c, s, *workers):
     s.extensions['stealing']._pc.callback_time = 20
     def slow(x):
