@@ -293,7 +293,6 @@ def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
 
     futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for i in range(2)]
     yield gen.sleep(0.1)
-    import pdb; pdb.set_trace()
 
     yield _wait(futures)
 
