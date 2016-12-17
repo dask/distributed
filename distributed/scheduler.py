@@ -241,6 +241,7 @@ class Scheduler(Server):
         self.tracebacks = dict()
         self.exceptions_blame = dict()
         self.datasets = dict()
+        self.n_tasks = 0
 
         self.idle = SortedSet()
         self.saturated = set()
@@ -1845,12 +1846,12 @@ class Scheduler(Server):
                 if len(self.idle) < 20:  # smart but linear in small case
                     worker = min(self.idle, key=self.occupancy.get)
                 else:  # dumb but fast in large case
-                    worker = random.choice(self.idle)
+                    worker = self.idle[self.n_tasks % len(self.idle)]
             else:
                 if len(self.workers) < 20:  # smart but linear in small case
                     worker = min(self.workers, key=self.occupancy.get)
                 else:  # dumb but fast in large case
-                    worker = random.choice(self.workers)
+                    worker = self.workers[self.n_tasks % len(self.workers)]
 
             assert worker
 
@@ -1868,6 +1869,7 @@ class Scheduler(Server):
             self.task_state[key] = 'processing'
             self.consume_resources(key, worker)
             self.check_idle_saturated(worker)
+            self.n_tasks += 1
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 

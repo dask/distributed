@@ -139,7 +139,9 @@ class WorkStealing(SchedulerPlugin):
 
     def balance(self):
         with log_errors():
-            if not self.scheduler.idle or not self.scheduler.saturated:
+            idle = self.scheduler.idle
+            saturated = self.scheduler.saturated
+            if not idle or not saturated:
                 return
 
             broken = False
@@ -155,7 +157,7 @@ class WorkStealing(SchedulerPlugin):
                     ratio = 2 ** (level - 5 + 1)
 
                     n_stealable = sum(len(s) for s in self.stealable[level:-1])
-                    duration_if_hold = n_stealable / len(self.scheduler.saturated)
+                    duration_if_hold = n_stealable / len(saturated)
                     duration_if_steal = ratio
 
                     if level > 1 and duration_if_hold < duration_if_steal:
@@ -167,15 +169,19 @@ class WorkStealing(SchedulerPlugin):
                             continue
                         victim = max(self.scheduler.rprocessing[key],
                                      key=self.scheduler.occupancy.get)
-                        if victim not in self.scheduler.idle:
-                            thief = random.choice(self.scheduler.idle)
+                        if victim not in idle:
+                            if len(idle) < 20:  # smart but linear in small case
+                                worker = min(idle, key=self.scheduler.occupancy.get)
+                            else:  # dumb but fast in large case
+                                worker = idle[self.scheduler.n_tasks % len(idle)]
+                            thief = random.choice(idle)
                             self.move_task(key, victim, thief)
                             self.log.append((level, victim, thief, key))
                             self.scheduler.check_idle_saturated(victim)
                             self.scheduler.check_idle_saturated(thief)
                             original.remove(key)
 
-                        if not self.scheduler.idle or not self.scheduler.saturated:
+                        if not idle or not saturated:
                             broken = True
                             break
 

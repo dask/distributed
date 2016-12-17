@@ -839,7 +839,7 @@ def test_balance_many_workers(c, s, *workers):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 30)
 def test_balance_many_workers_2(c, s, *workers):
+    s.extensions['stealing']._pc.callback_time = 100000000
     futures = c.map(slowinc, range(90), delay=0.2)
     yield _wait(futures)
-    import pdb; pdb.set_trace()
-    assert set(map(len, s.has_what.values())) == {2}
+    assert set(map(len, s.has_what.values())) == {3}
