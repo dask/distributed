@@ -183,7 +183,7 @@ class WorkStealing(SchedulerPlugin):
                 if self.scheduler.digests:
                     self.scheduler.digests['steal-duration'].add(stop - start)
 
-    def restart(self):
+    def restart(self, scheduler):
         for stealable in self.stealable:
             stealable.clear()
 
