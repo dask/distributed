@@ -156,7 +156,8 @@ class WorkStealing(SchedulerPlugin):
 
                     ratio = 2 ** (level - 5 + 1)
 
-                    n_stealable = sum(len(s) for s in self.stealable[level:-1])
+                    n_stealable = sum(len(s) / 2 ** i for i, s in
+                                      enumerate(self.stealable[level:-1]))
                     duration_if_hold = n_stealable / len(saturated)
                     duration_if_steal = ratio
 
@@ -169,6 +170,10 @@ class WorkStealing(SchedulerPlugin):
                             continue
                         victim = max(self.scheduler.rprocessing[key],
                                      key=self.scheduler.occupancy.get)
+                        if level and (self.scheduler.task_duration[key_split(key)] * (1 + ratio)
+                                    > self.scheduler.occupancy[victim]):
+                            continue
+
                         if victim not in idle:
                             if len(idle) < 20:  # smart but linear in small case
                                 worker = min(idle, key=self.scheduler.occupancy.get)
