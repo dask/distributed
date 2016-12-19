@@ -220,7 +220,7 @@ class Scheduler(Server):
         self.nbytes = dict()
         self.worker_bytes = dict()
         self.processing = dict()
-        self.rprocessing = defaultdict(set)
+        self.rprocessing = dict()
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
         self.unknown_durations = defaultdict(set)
         self.host_restrictions = dict()
@@ -1873,7 +1873,7 @@ class Scheduler(Server):
                 duration = 0.5
 
             self.processing[worker][key] = duration
-            self.rprocessing[key].add(worker)
+            self.rprocessing[key] = {worker}
             self.occupancy[worker] += duration
             self.total_occupancy += duration
             self.task_state[key] = 'processing'
@@ -2543,7 +2543,7 @@ class Scheduler(Server):
                 self.idle.remove(worker)
 
             pending = occ * (p - nc) / nc
-            if p > nc and pending > 0.2 and pending > 1.9 * avg:
+            if p > nc and pending > 0.4 and pending > 1.9 * avg:
                 self.saturated.add(worker)
 
     def valid_workers(self, key):

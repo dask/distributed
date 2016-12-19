@@ -351,16 +351,16 @@ def assert_balanced(inp, out, c, s, *workers):
     tasks = list(concat(inp))
     data = yield c._scatter(range(len(tasks)))
 
-
     for t, f in zip(tasks, data):
         s.nbytes[f.key] = BANDWIDTH * t
-        s.task_duration[str(t)] = 1
+        s.task_duration[str(int(t))] = 1
 
     futures = []
     data_seq = iter(data)
     for w, ts in zip(workers, inp):
         for t in ts:
-            f = c.submit(func, next(data_seq), key='%d-%d' % (t, next(counter)),
+            dat = next(data_seq) if t else 123
+            f = c.submit(func, dat, key='%d-%d' % (int(t), next(counter)),
                          workers=w.address, allow_other_workers=True)
             futures.append(f)
 
@@ -369,47 +369,70 @@ def assert_balanced(inp, out, c, s, *workers):
 
     s.extensions['stealing'].balance()
 
-    result = [sorted([int(key_split(k)) for k in s.processing[w.address]])
+    result = [sorted([int(key_split(k)) for k in s.processing[w.address]],
+                     reverse=True)
               for w in workers]
 
-    if not result == out:
+    result = set(map(tuple, result))
+    out = set(map(tuple, out))
+
+    if result != out:
         import pdb; pdb.set_trace()
 
     assert result == out
 
 
 @pytest.mark.parametrize('inp,out', [
-    ([[1], []],
+    ([[1], []],  # don't move unnecessarily
     [[1], []]),
 
-   ([[0, 0, 0], []],
-    [[0, 0], [0]]),
-
-   ([[0, 0], []],
+   ([[0, 0], []],  # balance
     [[0], [0]]),
 
-   ([[0, 1], []],
-    [[1], [0]]),
+   ([[0.1, 0.1], []],  # balance even if results in even
+    [[0], [0]]),
 
-   ([[0, 0, 0, 0], [], []],
+   ([[0, 0, 0], []],  # don't over balance
+    [[0, 0], [0]]),
+
+   ([[0, 0], [0, 0, 0], []],  # move from larger
+    [[0, 0], [0, 0], [0]]),
+
+   ([[0, 0, 0], [0], []],  # move to smaller
     [[0, 0], [0], [0]]),
 
-   ([[1, 0, 2, 0], [], []],
-    [[1, 2], [0], [0]]),
+   ([[0, 1], []],  # choose easier first
+    [[1], [0]]),
 
-   ([[1, 1, 1], []],
+   ([[0, 0, 0, 0], [], []],  # spread evenly
+    [[0, 0], [0], [0]]),
+
+   ([[1, 0, 2, 0], [], []],  # move easier
+    [[2, 1], [0], [0]]),
+
+   ([[1, 1, 1], []],  # be willing to move costly items
     [[1, 1], [1]]),
 
-   ([[4, 2, 2, 2, 1, 1],
+   ([[1, 1, 1, 1], []],  # but don't move too many
+    [[1, 1, 1], [1]]),
+
+   ([[4, 2, 2, 2, 2, 1, 1],
      [4, 2, 1, 1],
      [],
      [],
      []],
-    [[4, 2, 2],
-     [4, 2],
+    [[4, 2, 2, 2],
+     [4, 2, 1],
      [2, 1],
-     [1, 1],
+     [1],
      [1]]),
+
+   ([[1, 1, 1, 1, 1, 1, 1],
+     [1, 1], [1, 1], [1, 1],
+     []],
+    [[1, 1, 1, 1],
+     [1, 1], [1, 1], [1, 1],
+     [1, 1, 1]])
     ])
 def test_balance(inp, out):
     test = partial(assert_balanced, inp, out)
