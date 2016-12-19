@@ -527,7 +527,11 @@ class Scheduler(Server):
             if recommendations:
                 self.transitions(recommendations)
 
-            # self.(address)
+            for plugin in self.plugins[:]:
+                try:
+                    plugin.add_worker(scheduler=self, worker=address)
+                except Exception as e:
+                    logger.exception(e)
 
             logger.info("Register %s", str(address))
             return 'OK'
@@ -770,6 +774,12 @@ class Scheduler(Server):
                         recommendations[key] = 'forgotten'
 
             self.transitions(recommendations)
+
+            for plugin in self.plugins[:]:
+                try:
+                    plugin.remove_worker(scheduler=self, worker=address)
+                except Exception as e:
+                    logger.exception(e)
 
             if not self.processing:
                 logger.info("Lost all workers")
