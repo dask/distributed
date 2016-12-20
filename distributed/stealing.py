@@ -23,10 +23,10 @@ log_2 = log(2)
 logger = logging.getLogger(__name__)
 
 
-
 class WorkStealing(SchedulerPlugin):
     def __init__(self, scheduler):
         self.scheduler = scheduler
+        self.stealable_all = [set() for i in range(15)]
         self.stealable = dict()
         self.key_stealable = dict()
         self.stealable_unknown_durations = defaultdict(set)
@@ -68,7 +68,6 @@ class WorkStealing(SchedulerPlugin):
                         if self.scheduler.task_state[k] == 'processing':
                             self.put_key_in_stealable(k, split=ks)
 
-
     def put_key_in_stealable(self, key, split=None):
         try:
             worker = first(self.scheduler.rprocessing[key])
@@ -77,6 +76,7 @@ class WorkStealing(SchedulerPlugin):
             import pdb; pdb.set_trace()
         cost_multiplier, level = self.steal_time_ratio(key, split=split)
         if cost_multiplier is not None:
+            self.stealable_all[level].add(key)
             self.stealable[worker][level].add(key)
             self.key_stealable[key] = (worker, level)
 
@@ -86,7 +86,11 @@ class WorkStealing(SchedulerPlugin):
             worker, level = result
             try:
                 self.stealable[worker][level].remove(key)
-            except:
+            except KeyError:
+                pass
+            try:
+                self.stealable_all[level].remove(key)
+            except KeyError:
                 pass
 
     def steal_time_ratio(self, key, split=None):
@@ -166,7 +170,7 @@ class WorkStealing(SchedulerPlugin):
             occupancy = s.occupancy
             idle = s.idle
             saturated = s.saturated
-            if not idle:
+            if not idle or len(idle) == len(self.scheduler.workers):
                 return
 
             start = time()
@@ -175,17 +179,28 @@ class WorkStealing(SchedulerPlugin):
             seen = False
             acted = False
 
-            if not saturated:
-                saturated = topk(len(idle), s.workers, key=occupancy.get)
-                saturated = [w for w in saturated if w not in idle]
-            elif len(s.saturated) < 20:
+            if len(s.saturated) < 20:
                 saturated = sorted(saturated, key=occupancy.get, reverse=True)
 
             if len(idle) < 20:
                 idle = sorted(idle, key=occupancy.get)
 
+            def put(sat, key):
+                idl = idle[i % len(idle)]
+                duration = s.task_duration[key_split(key)]
+
+                if (occupancy[idl] + cost_multiplier * duration
+                  <= occupancy[sat] - duration / 2):
+                    self.move_task(key, sat, idl)
+                    self.log.append((level, sat, idl, key))
+                    self.scheduler.check_idle_saturated(sat)
+                    self.scheduler.check_idle_saturated(idl)
+                    stealable.remove(key)
+                    return True
+
+
             for level, cost_multiplier in enumerate(self.cost_multipliers):
-                if not idle or not saturated:
+                if not idle:
                     break
                 for sat in list(saturated):
                     stealable = self.stealable[sat][level]
@@ -195,18 +210,17 @@ class WorkStealing(SchedulerPlugin):
                         seen = True
 
                     for key in list(stealable):
-                        idl = idle[i % len(idle)]
                         i += 1
-                        duration = s.task_duration[key_split(key)]
+                        seen = put(sat, key) or seen
 
-                        if (occupancy[idl] + cost_multiplier * duration
-                          <= occupancy[sat] - duration / 2):
-                            self.move_task(key, sat, idl)
-                            self.log.append((level, sat, idl, key))
-                            self.scheduler.check_idle_saturated(sat)
-                            self.scheduler.check_idle_saturated(idl)
-                            stealable.remove(key)
-                            acted = True
+                stealable = self.stealable_all[level]
+                if stealable:
+                    seen = True
+                for key in list(stealable):
+                    sat = first(s.rprocessing[key])
+                    i += 1
+                    seen = put(sat, key) or seen
+
                 if seen and not acted:
                     break
 
@@ -219,6 +233,8 @@ class WorkStealing(SchedulerPlugin):
             for s in stealable:
                 s.clear()
 
+        for s in self.stealable_all:
+            s.clear()
         self.key_stealable.clear()
         self.stealable_unknown_durations.clear()
 

@@ -373,13 +373,13 @@ def assert_balanced(inp, out, c, s, *workers):
                      reverse=True)
               for w in workers]
 
-    result = set(map(tuple, result))
-    out = set(map(tuple, out))
+    result2 = sorted(result, reverse=True)
+    out2 = sorted(out, reverse=True)
 
-    if result != out:
+    if result2 != out2:
         import pdb; pdb.set_trace()
 
-    assert result == out
+    assert result2 == out2
 
 
 @pytest.mark.parametrize('inp,out', [
@@ -416,14 +416,17 @@ def assert_balanced(inp, out, c, s, *workers):
    ([[1, 1, 1, 1], []],  # but don't move too many
     [[1, 1, 1], [1]]),
 
+   ([[0, 0], [0, 0], [0, 0], []],  # no one clearly saturated
+    [[0, 0], [0, 0], [0], [0]]),
+
    ([[4, 2, 2, 2, 2, 1, 1],
-     [4, 2, 1, 1],
+     [4, 2, 1, 1, 1],
      [],
      [],
      []],
-    [[4, 2, 2, 2],
+    [[4, 2, 2, 2, 2],
      [4, 2, 1],
-     [2, 1],
+     [1, 1],
      [1],
      [1]]),
 
