@@ -68,12 +68,13 @@ class Occupancy(DashboardComponent):
                                             'worker': ['a', 'b'],
                                             'x': [0.0, 0.1],
                                             'y': [1, 2],
-                                            'ms': [1, 2]})
+                                            'ms': [1, 2],
+                                            'color': ['red', 'blue']})
 
             fig = figure(title='Occupancy', tools='resize', id='bk-occupancy-plot',
                          x_axis_type='datetime', **kwargs)
             fig.rect(source=self.source, x='x', width='ms', y='y', height=1,
-                     color='blue')
+                     color='color')
 
             fig.xaxis.minor_tick_line_alpha = 0
             fig.yaxis.visible = False
@@ -91,12 +92,21 @@ class Occupancy(DashboardComponent):
     def update(self):
         with log_errors():
             o = self.scheduler.occupancy
-            workers = sorted(o)
+            workers = list(self.scheduler.workers)
             y = list(range(len(workers)))
             occupancy = [o[w] for w in workers]
             ms = [occ * 1000 for occ in occupancy]
             x = [occ / 500 for occ in occupancy]
             total = sum(occupancy)
+            color = []
+            for w in workers:
+                if w in self.scheduler.idle:
+                    color.append('red')
+                elif w in self.scheduler.saturated:
+                    color.append('green')
+                else:
+                    color.append('blue')
+
             if total:
                 self.root.title.text = ('Occupancy -- total time: %s  wall time: %s' %
                                   (format_time(total),
@@ -106,6 +116,7 @@ class Occupancy(DashboardComponent):
             self.source.data.update({'occupancy': occupancy,
                                      'worker': workers,
                                      'ms': ms,
+                                     'color': color,
                                      'x': x, 'y': y})
 
 
