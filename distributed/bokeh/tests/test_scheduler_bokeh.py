@@ -14,7 +14,7 @@ from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec
 from distributed.bokeh.worker import Counters
 from distributed.bokeh.scheduler import (BokehScheduler, StateTable,
-        SystemMonitor, Occupancy)
+        SystemMonitor, Occupancy, StealingTimeSeries)
 
 
 @pytest.mark.skipif(sys.version_info[0] == 2,
@@ -36,7 +36,7 @@ def test_simple(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_basic(c, s, a, b):
-    for component in [SystemMonitor, StateTable, Occupancy]:
+    for component in [SystemMonitor, StateTable, Occupancy, StealingTimeSeries]:
         ss = component(s)
 
         ss.update()

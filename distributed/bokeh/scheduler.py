@@ -120,6 +120,36 @@ class Occupancy(DashboardComponent):
                                      'x': x, 'y': y})
 
 
+class StealingTimeSeries(DashboardComponent):
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        self.source = ColumnDataSource({'time': [], 'idle': [], 'saturated': []})
+
+        x_range = DataRange1d(follow='end', follow_interval=20000, range_padding=0)
+
+        fig = figure(title="Idle and Saturated Workers Over Time",
+                     x_axis_type='datetime', y_range=[-0.1, len(scheduler.workers) + 0.1],
+                     height=150, tools='', x_range=x_range, **kwargs)
+        fig.line(source=self.source, x='time', y='idle', color='red')
+        fig.line(source=self.source, x='time', y='saturated', color='green')
+        fig.yaxis.minor_tick_line_color = None
+
+        fig.add_tools(
+            ResetTool(reset_size=False),
+            PanTool(dimensions="width"),
+            WheelZoomTool(dimensions="width")
+        )
+
+        self.root = fig
+
+    def update(self):
+        with log_errors():
+            self.source.stream({'time': [time() * 1000],
+                                'idle': [len(self.scheduler.idle)],
+                                'saturated': [len(self.scheduler.saturated)]},
+                                10000)
+
+
 def systemmonitor_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
@@ -135,10 +165,12 @@ def workers_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
         occupancy = Occupancy(scheduler, height=200, sizing_mode='scale_width')
+        stealing_ts = StealingTimeSeries(scheduler, sizing_mode='scale_width')
         doc.add_periodic_callback(table.update, 500)
         doc.add_periodic_callback(occupancy.update, 500)
+        doc.add_periodic_callback(stealing_ts.update, 500)
 
-        doc.add_root(column(table.root, occupancy.root,
+        doc.add_root(column(table.root, occupancy.root, stealing_ts.root,
                             sizing_mode='scale_width'))
 
 

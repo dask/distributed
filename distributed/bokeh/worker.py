@@ -139,7 +139,7 @@ class CommunicatingStream(DashboardComponent):
                         min(msgs['start']) > source.data['stop'][-1] + 10000):
                         source.data.update(msgs)
                     else:
-                        source.stream(msgs, rollover=1000)
+                        source.stream(msgs, rollover=10000)
 
 
 class CommunicatingTimeSeries(DashboardComponent):
@@ -168,7 +168,8 @@ class CommunicatingTimeSeries(DashboardComponent):
         with log_errors():
             self.source.stream({'x': [time() * 1000],
                                 'out': [len(self.worker._listen_streams)],
-                                'in': [len(self.worker.connections)]}, 1000)
+                                'in': [len(self.worker.connections)]},
+                                10000)
 
 
 class ExecutingTimeSeries(DashboardComponent):
