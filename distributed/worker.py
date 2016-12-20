@@ -730,6 +730,7 @@ def run(worker, stream, function=None, args=(), kwargs={}, is_coro=False):
         kwargs = loads(kwargs)
     if has_arg(function, 'dask_worker'):
         kwargs['dask_worker'] = worker
+    logger.info("Run out-of-band function %r", funcname(function))
     try:
         result = function(*args, **kwargs)
         if is_coro:

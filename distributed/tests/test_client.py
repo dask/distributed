@@ -37,8 +37,8 @@ from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All, mp_context
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
-        randominc, loop, inc, dec, div, throws, geninc, gen_cluster,
-        gen_test, double, deep, popen)
+        randominc, loop, inc, dec, div, throws, geninc, asyncinc,
+        gen_cluster, gen_test, double, deep, popen)
 
 
 @gen_cluster(client=True, timeout=None)
@@ -2202,6 +2202,10 @@ def test_run_coroutine(c, s, a, b):
     with pytest.raises(RuntimeError) as exc_info:
         yield c._run_coroutine(throws, 1)
     exc_info.match("hello")
+
+    if sys.version_info >= (3, 5):
+        results = yield c._run_coroutine(asyncinc, 2, delay=0.01)
+        assert results == {a.address: 3, b.address: 3}
 
 
 def test_run_coroutine_sync(loop):

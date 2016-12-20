@@ -10,6 +10,7 @@ import signal
 import socket
 import subprocess
 import sys
+import textwrap
 from time import sleep
 import uuid
 
@@ -189,6 +190,25 @@ def slowidentity(*args, **kwargs):
 def geninc(x, delay=0.02):
     yield gen.sleep(delay)
     raise gen.Return(x + 1)
+
+
+def compile_snippet(code, dedent=True):
+    if dedent:
+        code = textwrap.dedent(code)
+    code = compile(code, '<dynamic>', 'exec')
+    ns = globals()
+    exec(code, ns, ns)
+
+
+if sys.version_info >= (3, 5):
+    compile_snippet("""
+        async def asyncinc(x, delay=0.02):
+            await gen.sleep(delay)
+            return x + 1
+        """)
+    assert asyncinc
+else:
+    asyncinc = None
 
 
 _readone_queues = {}
