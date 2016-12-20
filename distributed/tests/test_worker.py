@@ -13,6 +13,7 @@ import traceback
 from dask import delayed
 import pytest
 from toolz import pluck, sliding_window
+import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
 
@@ -366,6 +367,9 @@ def test_run_dask_worker(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_run_coroutine_dask_worker(c, s, a, b):
+    if sys.version_info < (3,) and tornado.version_info < (4, 5):
+        pytest.skip("test needs Tornado 4.5+ on Python 2.7")
+
     @gen.coroutine
     def f(dask_worker=None):
         yield gen.sleep(0.001)
