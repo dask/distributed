@@ -1291,18 +1291,23 @@ class Client(object):
     @gen.coroutine
     def _run_coroutine(self, function, *args, **kwargs):
         workers = kwargs.pop('workers', None)
+        wait = kwargs.pop('wait', True)
         responses = yield self.scheduler.broadcast(msg=dict(op='run_coroutine',
                                                 function=dumps(function),
                                                 args=dumps(args),
-                                                kwargs=dumps(kwargs)),
+                                                kwargs=dumps(kwargs),
+                                                wait=wait),
                                                 workers=workers)
-        results = {}
-        for key, resp in responses.items():
-            if resp['status'] == 'OK':
-                results[key] = resp['result']
-            elif resp['status'] == 'error':
-                six.reraise(*clean_exception(**resp))
-        raise Return(results)
+        if not wait:
+            raise Return(None)
+        else:
+            results = {}
+            for key, resp in responses.items():
+                if resp['status'] == 'OK':
+                    results[key] = resp['result']
+                elif resp['status'] == 'error':
+                    six.reraise(*clean_exception(**resp))
+            raise Return(results)
 
     def run_coroutine(self, function, *args, **kwargs):
         """
@@ -1319,6 +1324,8 @@ class Client(object):
              a Python 3.5+ async function)
         *args: arguments for remote function
         **kwargs: keyword arguments for remote function
+        wait: boolean (default True)
+            Whether to wait for coroutines to end.
         workers: list
             Workers on which to run the function. Defaults to all known workers.
 

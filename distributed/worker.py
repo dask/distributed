@@ -367,12 +367,12 @@ class WorkerBase(Server):
         raise gen.Return(result)
 
 
-    def run(self, stream, function=None, args=(), kwargs={}):
+    def run(self, stream, function, args=(), kwargs={}):
         return run(self, stream, function=function, args=args, kwargs=kwargs)
 
-    def run_coroutine(self, stream, function=None, args=(), kwargs={}):
+    def run_coroutine(self, stream, function, args=(), kwargs={}, wait=True):
         return run(self, stream, function=function, args=args, kwargs=kwargs,
-                   is_coro=True)
+                   is_coro=True, wait=wait)
 
     def update_data(self, stream=None, data=None, report=True):
         self.data.update(data)
@@ -722,7 +722,8 @@ def weight(k, v):
 
 
 @gen.coroutine
-def run(worker, stream, function=None, args=(), kwargs={}, is_coro=False):
+def run(worker, stream, function, args=(), kwargs={}, is_coro=False, wait=True):
+    assert wait or is_coro, "Combination not supported"
     function = loads(function)
     if args:
         args = loads(args)
@@ -734,7 +735,7 @@ def run(worker, stream, function=None, args=(), kwargs={}, is_coro=False):
     try:
         result = function(*args, **kwargs)
         if is_coro:
-            result = yield result
+            result = (yield result) if wait else None
     except Exception as e:
         logger.warn(" Run Failed\n"
             "Function: %s\n"

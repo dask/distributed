@@ -2219,6 +2219,12 @@ def test_run_coroutine_sync(loop):
                                      workers=['127.0.0.1:%d' % a['port']])
             assert result == {'127.0.0.1:%d' % a['port']: 3}
 
+            t1 = time()
+            result = c.run_coroutine(geninc, 2, delay=10, wait=False)
+            t2 = time()
+            assert result is None
+            assert t2 - t1 <= 1.0
+
 
 def test_run_exception(loop):
     def raise_exception(exc_type, exc_msg):
