@@ -1250,7 +1250,7 @@ class Client(object):
             if resp['status'] == 'OK':
                 results[key] = resp['result']
             elif resp['status'] == 'error':
-                raise loads(resp['exception'])
+                six.reraise(*clean_exception(**resp))
         raise Return(results)
 
     def run(self, function, *args, **kwargs):
@@ -1301,7 +1301,7 @@ class Client(object):
             if resp['status'] == 'OK':
                 results[key] = resp['result']
             elif resp['status'] == 'error':
-                raise loads(resp['exception'])
+                six.reraise(*clean_exception(**resp))
         raise Return(results)
 
     def run_coroutine(self, function, *args, **kwargs):
