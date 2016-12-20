@@ -435,6 +435,6 @@ def assert_balanced(inp, out, c, s, *workers):
      [1, 1, 1]])
     ])
 def test_balance(inp, out):
-    test = partial(assert_balanced, inp, out)
+    test = lambda *args, **kwargs: assert_balanced(inp, out, *args, **kwargs)
     test = gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * len(inp))(test)
     test()
