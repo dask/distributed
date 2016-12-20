@@ -37,8 +37,8 @@ from .metrics import time
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
-from .utils import (funcname, get_ip, _maybe_complex, log_errors, All,
-                    ignoring, validate_key, mp_context)
+from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
+                    All, ignoring, validate_key, mp_context)
 
 _ncores = mp_context.cpu_count()
 
@@ -196,6 +196,7 @@ class WorkerBase(Server):
           'gather': self.gather,
           'compute-stream': self.compute_stream,
           'run': self.run,
+          'run_coroutine': self.run_coroutine,
           'get_data': self.get_data,
           'update_data': self.update_data,
           'delete_data': self.delete_data,
@@ -368,6 +369,10 @@ class WorkerBase(Server):
 
     def run(self, stream, function=None, args=(), kwargs={}):
         return run(self, stream, function=function, args=args, kwargs=kwargs)
+
+    def run_coroutine(self, stream, function=None, args=(), kwargs={}):
+        return run(self, stream, function=function, args=args, kwargs=kwargs,
+                   is_coro=True)
 
     def update_data(self, stream=None, data=None, report=True):
         self.data.update(data)
@@ -717,20 +722,18 @@ def weight(k, v):
 
 
 @gen.coroutine
-def run(worker, stream, function=None, args=(), kwargs={}):
+def run(worker, stream, function=None, args=(), kwargs={}, is_coro=False):
     function = loads(function)
     if args:
         args = loads(args)
     if kwargs:
         kwargs = loads(kwargs)
-    try:
-        import inspect
-        if 'dask_worker' in inspect.getargspec(function).args:
-            kwargs['dask_worker'] = worker
-    except:
-        pass
+    if has_arg(function, 'dask_worker'):
+        kwargs['dask_worker'] = worker
     try:
         result = function(*args, **kwargs)
+        if is_coro:
+            result = yield result
     except Exception as e:
         logger.warn(" Run Failed\n"
             "Function: %s\n"

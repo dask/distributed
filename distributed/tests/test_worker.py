@@ -364,6 +364,17 @@ def test_run_dask_worker(c, s, a, b):
     assert response == {a.address: a.id, b.address: b.id}
 
 
+@gen_cluster(client=True)
+def test_run_coroutine_dask_worker(c, s, a, b):
+    @gen.coroutine
+    def f(dask_worker=None):
+        yield gen.sleep(0.001)
+        raise gen.Return(dask_worker.id)
+
+    response = yield c._run_coroutine(f)
+    assert response == {a.address: a.id, b.address: b.id}
+
+
 @gen_cluster(client=True, ncores=[])
 def test_Executor(c, s):
     with ThreadPoolExecutor(2) as e:

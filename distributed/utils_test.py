@@ -185,6 +185,12 @@ def slowidentity(*args, **kwargs):
     return args
 
 
+@gen.coroutine
+def geninc(x, delay=0.02):
+    yield gen.sleep(delay)
+    raise gen.Return(x + 1)
+
+
 _readone_queues = {}
 
 @gen.coroutine
