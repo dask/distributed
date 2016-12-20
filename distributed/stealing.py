@@ -6,12 +6,15 @@ from math import log
 import random
 from time import time
 
-from toolz import first
+from toolz import first, topk
 from tornado.iostream import StreamClosedError
 from tornado.ioloop import PeriodicCallback
 
-from .utils import key_split, log_errors
+from .utils import key_split, log_errors, ignoring
 from .diagnostics.plugin import SchedulerPlugin
+
+with ignoring(ImportError):
+    from cytoolz import topk
 
 BANDWIDTH = 100e6
 LATENCY = 10e-3
@@ -163,7 +166,7 @@ class WorkStealing(SchedulerPlugin):
             occupancy = s.occupancy
             idle = s.idle
             saturated = s.saturated
-            if not idle or not saturated:
+            if not idle:
                 return
 
             start = time()
@@ -172,12 +175,14 @@ class WorkStealing(SchedulerPlugin):
             seen = False
             acted = False
 
-            if len(s.saturated) < 20:
+            if not saturated:
+                saturated = topk(len(idle), s.workers, key=occupancy.get)
+                saturated = [w for w in saturated if w not in idle]
+            elif len(s.saturated) < 20:
                 saturated = sorted(saturated, key=occupancy.get, reverse=True)
 
             if len(idle) < 20:
                 idle = sorted(idle, key=occupancy.get)
-
 
             for level, cost_multiplier in enumerate(self.cost_multipliers):
                 if not idle or not saturated:
