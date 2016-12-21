@@ -16,7 +16,7 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
 from bokeh.plotting import figure
-from bokeh.palettes import RdBu11
+from bokeh.palettes import Viridis11
 from toolz import frequencies
 from toolz.curried import map, concat, groupby, pipe
 
@@ -33,9 +33,6 @@ with ignoring(ImportError):
     from cytoolz.curried import map, concat, groupby
 
 logger = logging.getLogger(__name__)
-
-
-RdBuSorted = sorted(RdBu11)
 
 
 class StateTable(DashboardComponent):
@@ -174,6 +171,7 @@ class StealingEvents(DashboardComponent):
 
         fig = figure(title="Stealing Events",
                      x_axis_type='datetime', y_axis_type='log',
+                     y_range=[0.5, 10],
                      height=250, tools='', x_range=x_range, **kwargs)
 
         fig.circle(source=self.source, x='time', y='cost_factor', color='color',
@@ -200,7 +198,7 @@ class StealingEvents(DashboardComponent):
             total_duration += duration
 
         try:
-            color = RdBuSorted[level]
+            color = Viridis11[level]
         except (KeyError, IndexError):
             color = 'black'
 
@@ -209,8 +207,6 @@ class StealingEvents(DashboardComponent):
         d = {'time': time * 1000, 'level': level, 'count': len(msgs),
              'color': color, 'duration': total_duration, 'radius': radius,
              'cost_factor': self.steal.cost_multipliers[level]}
-
-        print(d)
 
         return d
 
