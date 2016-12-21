@@ -13,7 +13,7 @@ from tornado import gen
 
 import dask
 from dask import delayed
-from distributed import Worker
+from distributed import Worker, Nanny
 from distributed.client import Client, _wait, wait
 from distributed.metrics import time
 from distributed.scheduler import BANDWIDTH, key_split
@@ -441,3 +441,20 @@ def test_balance(inp, out):
     test = lambda *args, **kwargs: assert_balanced(inp, out, *args, **kwargs)
     test = gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * len(inp))(test)
     test()
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2, Worker=Nanny)
+def test_restart(c, s, a, b):
+    futures = c.map(slowinc, range(100), delay=0.1, workers=a.address,
+                    allow_other_workers=True)
+    while not s.processing[b.worker_address]:
+        yield gen.sleep(0.01)
+
+    steal = s.extensions['stealing']
+    assert any(st for st in steal.stealable_all)
+    assert any(x for L in steal.stealable.values() for x in L)
+
+    yield c._restart()
+
+    assert not any(x for x in steal.stealable_all)
+    assert not any(x for L in steal.stealable.values() for x in L)
