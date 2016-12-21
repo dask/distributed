@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from collections import defaultdict, deque
 import logging
 from math import log
+import os
 import random
 from time import time
 
@@ -10,8 +11,9 @@ from toolz import first, topk
 from tornado.iostream import StreamClosedError
 from tornado.ioloop import PeriodicCallback
 
-from .utils import key_split, log_errors, ignoring
+from .config import config
 from .diagnostics.plugin import SchedulerPlugin
+from .utils import key_split, log_errors, ignoring
 
 with ignoring(ImportError):
     from cytoolz import topk
@@ -21,6 +23,9 @@ LATENCY = 10e-3
 log_2 = log(2)
 
 logger = logging.getLogger(__name__)
+
+
+LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
 
 
 class WorkStealing(SchedulerPlugin):
@@ -44,6 +49,7 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.plugins.append(self)
         self.scheduler.extensions['stealing'] = self
         self.log = deque(maxlen=100000)
+        self.count = 0
 
     def add_worker(self, scheduler=None, worker=None):
         self.stealable[worker] = [set() for i in range(15)]
@@ -134,17 +140,20 @@ class WorkStealing(SchedulerPlugin):
             return cost_multiplier, level
 
     def move_task(self, key, victim, thief):
-        with log_errors():
+        try:
             if self.scheduler.validate:
                 if victim not in self.scheduler.rprocessing[key]:
                     import pdb; pdb.set_trace()
 
-            # self.remove_key_from_stealable(key)
+            self.remove_key_from_stealable(key)
             logger.info("Moved %s, %s: %2f -> %s: %2f", key,
                     victim, self.scheduler.occupancy[victim],
                     thief, self.scheduler.occupancy[thief])
 
-            duration = self.scheduler.processing[victim].pop(key)
+            try:
+                duration = self.scheduler.processing[victim].pop(key)
+            except:
+                import pdb; pdb.set_trace()
             self.scheduler.rprocessing[key].remove(victim)
             self.scheduler.occupancy[victim] -= duration
             self.scheduler.total_occupancy -= duration
@@ -162,6 +171,11 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.send_task_to_worker(thief, key)
             except StreamClosedError:
                 self.scheduler.remove_worker(thief)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def balance(self):
         with log_errors():
@@ -173,6 +187,7 @@ class WorkStealing(SchedulerPlugin):
             if not idle or len(idle) == len(self.scheduler.workers):
                 return
 
+            log = list()
             start = time()
 
             broken = False
@@ -200,38 +215,47 @@ class WorkStealing(SchedulerPlugin):
                     for key in list(stealable):
                         i += 1
                         idl = idle[i % len(idle)]
-                        duration = s.task_duration[key_split(key)]
+                        duration = s.task_duration.get(key_split(key), 0.5)
+
+                        if cost_multiplier > 10 and  duration < 0.2:
+                            continue
 
                         if (occupancy[idl] + cost_multiplier * duration
                           <= occupancy[sat] - duration / 2):
                             self.move_task(key, sat, idl)
-                            self.log.append((level, sat, idl, key))
+                            log.append((start, level, key, duration,
+                                        sat, occupancy[sat],
+                                        idl, occupancy[idl]))
                             self.scheduler.check_idle_saturated(sat)
                             self.scheduler.check_idle_saturated(idl)
-                            stealable.remove(key)
                             seen = True
 
-                stealable = self.stealable_all[level]
-                if stealable:
-                    seen = True
-                for key in list(stealable):
-                    sat = first(s.rprocessing[key])
-                    i += 1
-                    idl = idle[i % len(idle)]
-                    duration = s.task_duration[key_split(key)]
-
-                    if (occupancy[idl] + cost_multiplier * duration
-                      <= occupancy[sat] - duration / 2):
-                        self.move_task(key, sat, idl)
-                        self.log.append((level, sat, idl, key))
-                        self.scheduler.check_idle_saturated(sat)
-                        self.scheduler.check_idle_saturated(idl)
-                        stealable.remove(key)
+                if self.cost_multipliers[level] < 4:  # don't steal from public at cost
+                    stealable = self.stealable_all[level]
+                    if stealable:
                         seen = True
+                    for key in list(stealable):
+                        sat = first(s.rprocessing[key])
+                        i += 1
+                        idl = idle[i % len(idle)]
+                        duration = s.task_duration.get(key_split(key), 0.5)
+
+                        if (occupancy[idl] + cost_multiplier * duration
+                          <= occupancy[sat] - duration / 2):
+                            self.move_task(key, sat, idl)
+                            log.append((start, level, key, duration,
+                                        sat, occupancy[sat],
+                                        idl, occupancy[idl]))
+                            self.scheduler.check_idle_saturated(sat)
+                            self.scheduler.check_idle_saturated(idl)
+                            seen = True
 
                 if seen and not acted:
                     break
 
+            if log:
+                self.log.append(log)
+                self.count += 1
             stop = time()
             if self.scheduler.digests:
                 self.scheduler.digests['steal-duration'].add(stop - start)

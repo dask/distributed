@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from functools import partial
 import logging
+from math import sqrt
 
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
@@ -15,17 +16,26 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
 from bokeh.plotting import figure
+from bokeh.palettes import RdBu11
 from toolz import frequencies
+from toolz.curried import map, concat, groupby, pipe
 
 from .components import DashboardComponent
 from .core import BokehServer
 from .worker import SystemMonitor, format_time, counters_doc
+from .utils import transpose
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..metrics import time
-from ..utils import log_errors, key_split
+from ..utils import log_errors, key_split, ignoring
+
+with ignoring(ImportError):
+    from cytoolz.curried import map, concat, groupby
 
 logger = logging.getLogger(__name__)
+
+
+RdBuSorted = sorted(RdBu11)
 
 
 class StateTable(DashboardComponent):
@@ -150,6 +160,73 @@ class StealingTimeSeries(DashboardComponent):
                                 10000)
 
 
+class StealingEvents(DashboardComponent):
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        self.steal = scheduler.extensions['stealing']
+        self.last = 0
+        self.source = ColumnDataSource({'time': [],
+                                        'level': [], 'color': [],
+                                        'duration': [], 'radius': [],
+                                        'cost_factor': [], 'count': []})
+
+        x_range = DataRange1d(follow='end', follow_interval=20000, range_padding=0)
+
+        fig = figure(title="Stealing Events",
+                     x_axis_type='datetime',
+                     height=250, tools='', x_range=x_range, **kwargs)
+
+        fig.circle(source=self.source, x='time', y='level', color='color',
+                   radius='radius', radius_dimension='y')
+
+        hover = HoverTool()
+        hover.tooltips = "Level: @level, Duration: @duration, Count: @count, Cost factor: @cost_factor"
+        hover.point_policy = 'follow_mouse'
+
+        fig.add_tools(
+            hover,
+            ResetTool(reset_size=False),
+            PanTool(dimensions="width"),
+            WheelZoomTool(dimensions="width")
+        )
+
+        self.root = fig
+
+    def convert(self, msgs):
+        """ Convert a log message to a glyph """
+        total_duration = 0
+        for msg in msgs:
+            time, level, key, duration, sat, occ_sat, idl, occ_idl = msg
+            total_duration += duration
+
+        try:
+            color = RdBuSorted[level]
+        except (KeyError, IndexError):
+            color = 'black'
+
+        radius = min(0.5, sqrt(total_duration / 10))
+
+        d = {'time': time * 1000, 'level': level, 'count': len(msgs),
+             'color': color, 'duration': total_duration, 'radius': radius,
+             'cost_factor': self.steal.cost_multipliers[level]}
+
+        print(d)
+
+        return d
+
+    def update(self):
+        with log_errors():
+            log = self.steal.log
+            n = self.steal.count - self.last
+            log = [log[-i] for i in range(1, n + 1)]
+            self.last = self.steal.count
+
+            if log:
+                new = pipe(log, map(groupby(1)), map(dict.values), concat,
+                           map(self.convert), list, transpose)
+                self.source.stream(new, 10000)
+
+
 def systemmonitor_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
@@ -166,11 +243,15 @@ def workers_doc(scheduler, doc):
         table = StateTable(scheduler)
         occupancy = Occupancy(scheduler, height=200, sizing_mode='scale_width')
         stealing_ts = StealingTimeSeries(scheduler, sizing_mode='scale_width')
+        stealing_events = StealingEvents(scheduler, sizing_mode='scale_width')
+        stealing_events.root.x_range = stealing_ts.root.x_range
         doc.add_periodic_callback(table.update, 500)
         doc.add_periodic_callback(occupancy.update, 500)
         doc.add_periodic_callback(stealing_ts.update, 500)
+        doc.add_periodic_callback(stealing_events.update, 500)
 
         doc.add_root(column(table.root, occupancy.root, stealing_ts.root,
+                            stealing_events.root,
                             sizing_mode='scale_width'))
 
 

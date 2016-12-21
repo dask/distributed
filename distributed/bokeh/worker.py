@@ -19,6 +19,7 @@ from toolz import frequencies, merge, partition_all
 
 from .components import DashboardComponent
 from .core import BokehServer, format_bytes, format_time
+from .utils import transpose
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..metrics import time
@@ -607,11 +608,6 @@ class BokehWorker(BokehServer):
 
         self.loop = io_loop or worker.loop
         self.server = None
-
-
-def transpose(lod):
-    keys = list(lod[0].keys())
-    return {k: [d[k] for d in lod] for k in keys}
 
 
 def format_bytes(n):
