@@ -173,10 +173,10 @@ class StealingEvents(DashboardComponent):
         x_range = DataRange1d(follow='end', follow_interval=20000, range_padding=0)
 
         fig = figure(title="Stealing Events",
-                     x_axis_type='datetime',
+                     x_axis_type='datetime', y_axis_type='log',
                      height=250, tools='', x_range=x_range, **kwargs)
 
-        fig.circle(source=self.source, x='time', y='level', color='color',
+        fig.circle(source=self.source, x='time', y='cost_factor', color='color',
                    radius='radius', radius_dimension='y')
 
         hover = HoverTool()

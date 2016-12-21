@@ -75,11 +75,7 @@ class WorkStealing(SchedulerPlugin):
                             self.put_key_in_stealable(k, split=ks)
 
     def put_key_in_stealable(self, key, split=None):
-        try:
-            worker = first(self.scheduler.rprocessing[key])
-        except Exception as e:
-            logger.exception(e)
-            import pdb; pdb.set_trace()
+        worker = first(self.scheduler.rprocessing[key])
         cost_multiplier, level = self.steal_time_ratio(key, split=split)
         if cost_multiplier is not None:
             self.stealable_all[level].add(key)
@@ -150,10 +146,7 @@ class WorkStealing(SchedulerPlugin):
                     victim, self.scheduler.occupancy[victim],
                     thief, self.scheduler.occupancy[thief])
 
-            try:
-                duration = self.scheduler.processing[victim].pop(key)
-            except:
-                import pdb; pdb.set_trace()
+            duration = self.scheduler.processing[victim].pop(key)
             self.scheduler.rprocessing[key].remove(victim)
             self.scheduler.occupancy[victim] -= duration
             self.scheduler.total_occupancy -= duration
@@ -217,8 +210,8 @@ class WorkStealing(SchedulerPlugin):
                         idl = idle[i % len(idle)]
                         duration = s.task_duration.get(key_split(key), 0.5)
 
-                        if cost_multiplier > 10 and  duration < 0.2:
-                            continue
+                        # if cost_multiplier > 10 and  duration < 0.2:
+                        #     continue
 
                         if (occupancy[idl] + cost_multiplier * duration
                           <= occupancy[sat] - duration / 2):
@@ -230,7 +223,7 @@ class WorkStealing(SchedulerPlugin):
                             self.scheduler.check_idle_saturated(idl)
                             seen = True
 
-                if self.cost_multipliers[level] < 4:  # don't steal from public at cost
+                if self.cost_multipliers[level] < 20:  # don't steal from public at cost
                     stealable = self.stealable_all[level]
                     if stealable:
                         seen = True
