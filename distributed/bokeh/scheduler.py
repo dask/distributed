@@ -162,20 +162,21 @@ class StealingEvents(DashboardComponent):
         self.scheduler = scheduler
         self.steal = scheduler.extensions['stealing']
         self.last = 0
-        self.source = ColumnDataSource({'time': [],
-                                        'level': [], 'color': [],
-                                        'duration': [], 'radius': [],
-                                        'cost_factor': [], 'count': []})
+        self.source = ColumnDataSource({'time': [time() - 20, time()],
+                                        'level': [0, 15],
+                                        'color': ['white', 'white'],
+                                        'duration': [0, 0], 'radius': [1, 1],
+                                        'cost_factor': [0, 10], 'count': [1, 1]})
 
         x_range = DataRange1d(follow='end', follow_interval=20000, range_padding=0)
 
         fig = figure(title="Stealing Events",
                      x_axis_type='datetime', y_axis_type='log',
-                     y_range=[0.5, 10],
                      height=250, tools='', x_range=x_range, **kwargs)
 
         fig.circle(source=self.source, x='time', y='cost_factor', color='color',
-                   radius='radius', radius_dimension='y', alpha=0.5)
+                   radius='radius', radius_dimension='x', alpha=0.5)
+        fig.yaxis.axis_label = "Cost Multiplier"
 
         hover = HoverTool()
         hover.tooltips = "Level: @level, Duration: @duration, Count: @count, Cost factor: @cost_factor"
@@ -202,11 +203,11 @@ class StealingEvents(DashboardComponent):
         except (KeyError, IndexError):
             color = 'black'
 
-        radius = min(0.5, sqrt(total_duration / 10))
+        radius = min(500, sqrt(total_duration) * 100 + 25)
 
         d = {'time': time * 1000, 'level': level, 'count': len(msgs),
              'color': color, 'duration': total_duration, 'radius': radius,
-             'cost_factor': self.steal.cost_multipliers[level]}
+             'cost_factor': min(10, self.steal.cost_multipliers[level])}
 
         return d
 
