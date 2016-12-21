@@ -210,9 +210,6 @@ class WorkStealing(SchedulerPlugin):
                         idl = idle[i % len(idle)]
                         duration = s.task_duration.get(key_split(key), 0.5)
 
-                        # if cost_multiplier > 10 and  duration < 0.2:
-                        #     continue
-
                         if (occupancy[idl] + cost_multiplier * duration
                           <= occupancy[sat] - duration / 2):
                             self.move_task(key, sat, idl)

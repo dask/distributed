@@ -14,4 +14,3 @@ def parse_args(args):
 def transpose(lod):
     keys = list(lod[0].keys())
     return {k: [d[k] for d in lod] for k in keys}
-
