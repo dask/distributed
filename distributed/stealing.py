@@ -127,6 +127,8 @@ class WorkStealing(SchedulerPlugin):
             self.stealable_unknown_durations[split].add(key)
             return None, None
         else:
+            if compute_time < 0.005:  # 5ms, just give up
+                return None, None
             cost_multiplier = transfer_time / compute_time
             if cost_multiplier > 100:
                 return None, None
@@ -189,6 +191,7 @@ class WorkStealing(SchedulerPlugin):
 
             if not s.saturated:
                 saturated = topk(10, s.workers, key=occupancy.get)
+                saturated = [w for w in saturated if occupancy[w] > 0.2]
             elif len(s.saturated) < 20:
                 saturated = sorted(saturated, key=occupancy.get, reverse=True)
 
@@ -226,12 +229,14 @@ class WorkStealing(SchedulerPlugin):
                         seen = True
                     for key in list(stealable):
                         sat = first(s.rprocessing[key])
+                        if occupancy[sat] < 0.2:
+                            continue
                         i += 1
                         idl = idle[i % len(idle)]
                         duration = s.task_duration.get(key_split(key), 0.5)
 
                         if (occupancy[idl] + cost_multiplier * duration
-                          <= occupancy[sat] - duration / 2):
+                            <= occupancy[sat] - duration / 2):
                             self.move_task(key, sat, idl)
                             log.append((start, level, key, duration,
                                         sat, occupancy[sat],
