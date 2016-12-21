@@ -177,7 +177,7 @@ class StealingEvents(DashboardComponent):
                      height=250, tools='', x_range=x_range, **kwargs)
 
         fig.circle(source=self.source, x='time', y='cost_factor', color='color',
-                   radius='radius', radius_dimension='y')
+                   radius='radius', radius_dimension='y', alpha=0.5)
 
         hover = HoverTool()
         hover.tooltips = "Level: @level, Duration: @duration, Count: @count, Cost factor: @cost_factor"
