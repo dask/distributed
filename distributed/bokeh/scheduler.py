@@ -175,7 +175,7 @@ class StealingEvents(DashboardComponent):
                      height=250, tools='', x_range=x_range, **kwargs)
 
         fig.circle(source=self.source, x='time', y='cost_factor', color='color',
-                   radius='radius', radius_dimension='x', alpha=0.5)
+                   size='radius', alpha=0.5)
         fig.yaxis.axis_label = "Cost Multiplier"
 
         hover = HoverTool()
@@ -203,7 +203,7 @@ class StealingEvents(DashboardComponent):
         except (KeyError, IndexError):
             color = 'black'
 
-        radius = min(500, sqrt(total_duration) * 100 + 25)
+        radius = sqrt(min(total_duration, 10)) * 30 + 2
 
         d = {'time': time * 1000, 'level': level, 'count': len(msgs),
              'color': color, 'duration': total_duration, 'radius': radius,
