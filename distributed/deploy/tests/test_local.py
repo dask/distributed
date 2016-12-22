@@ -5,6 +5,7 @@ import sys
 from time import sleep
 import unittest
 
+from toolz import first
 from tornado.ioloop import IOLoop
 from tornado import gen
 import pytest
@@ -129,10 +130,10 @@ def test_cleanup():
 
 def test_repeated():
     with LocalCluster(scheduler_port=8448, silence_logs=False,
-            diagnostics_port=None) as c:
+                      diagnostics_port=None) as c:
         pass
     with LocalCluster(scheduler_port=8448, silence_logs=False,
-            diagnostics_port=None) as c:
+                      diagnostics_port=None) as c:
         pass
 
 
@@ -148,7 +149,7 @@ def test_http(loop):
 
 def test_bokeh(loop):
     from distributed.http import HTTPScheduler
-    import requests
+    requests = pytest.importorskip('requests')
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
             diagnostics_port=4724, services={('http', 0): HTTPScheduler},
             ) as c:
@@ -168,9 +169,31 @@ def test_bokeh(loop):
         sleep(0.01)
 
 
+def test_bokeh_scheduler(loop):
+    pytest.importorskip('bokeh')
+    requests = pytest.importorskip('requests')
+    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
+                      diagnostics_port=None, n_workers=0) as c:
+        if c.scheduler.services:
+            port = c.scheduler.services['bokeh'].port
+            response = requests.get('http://127.0.0.1:%d' % port)
+            assert response.ok
+
+
+def test_bokeh_worker(loop):
+    pytest.importorskip('bokeh')
+    requests = pytest.importorskip('requests')
+    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
+                      diagnostics_port=None, n_workers=1) as c:
+        info = first(c.scheduler.worker_info.values())
+        port = info['services']['bokeh']
+        response = requests.get('http://127.0.0.1:%d' % port)
+        assert response.ok
+
+
 def test_start_diagnostics(loop):
     from distributed.http import HTTPScheduler
-    import requests
+    requests = pytest.importorskip('requests')
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
             diagnostics_port=None) as c:
         c.start_diagnostics_server(show=False, port=3748)
