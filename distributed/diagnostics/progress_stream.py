@@ -187,6 +187,8 @@ def task_stream_append(lists, msg, workers, palette=task_stream_palette):
         workers[worker_thread] = len(workers)
     lists['y'].append(workers[worker_thread])
 
+    count = 1
+
     if (msg.get('transfer_start') is not None and
         msg['transfer_stop'] > (start - 1)):
         start, stop = msg['transfer_start'], msg['transfer_stop']
@@ -200,6 +202,7 @@ def task_stream_append(lists, msg, workers, palette=task_stream_palette):
         lists['alpha'].append('0.4')
         lists['worker_thread'].append(worker_thread)
         lists['y'].append(workers[worker_thread])
+        count += 1
 
     if msg.get('disk_load_start') is not None:
         start, stop = msg['disk_load_start'], msg['disk_load_stop']
@@ -213,3 +216,6 @@ def task_stream_append(lists, msg, workers, palette=task_stream_palette):
         lists['alpha'].append('0.4')
         lists['worker_thread'].append(worker_thread)
         lists['y'].append(workers[worker_thread])
+        count += 1
+
+    return count
