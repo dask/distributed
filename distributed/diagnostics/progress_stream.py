@@ -187,7 +187,8 @@ def task_stream_append(lists, msg, workers, palette=task_stream_palette):
         workers[worker_thread] = len(workers)
     lists['y'].append(workers[worker_thread])
 
-    if msg.get('transfer_start') is not None:
+    if (msg.get('transfer_start') is not None and
+        msg['transfer_stop'] > (start - 1)):
         start, stop = msg['transfer_start'], msg['transfer_stop']
         lists['start'].append((start + stop) / 2 * 1000)
         lists['duration'].append(1000 * (stop - start))
