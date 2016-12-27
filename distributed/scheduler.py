@@ -1941,7 +1941,7 @@ class Scheduler(Server):
 
                 if ks in self.unknown_durations:
                     for k in self.unknown_durations.pop(ks):
-                        if key in self.rprocessing:
+                        if k in self.rprocessing:
                             w = self.rprocessing[k]
                             old = self.processing[w][k]
                             self.processing[w][k] = avg_duration
