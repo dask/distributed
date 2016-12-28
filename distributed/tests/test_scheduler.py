@@ -855,5 +855,3 @@ def test_learn_occupancy_multiple_workers(c, s, a, b):
 
     assert not any(v == 0.5 for vv in s.processing.values() for v in vv)
     s.validate_state()
-    import pdb; pdb.set_trace()
-    1 + 1
