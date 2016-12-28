@@ -944,6 +944,9 @@ class Scheduler(Server):
             for key in keys:
                 assert worker in self.who_has[key]
 
+        for worker, occ in self.occupancy.items():
+            assert abs(sum(self.processing[worker].values()) - occ) < 1e-8
+
     ###################
     # Manage Messages #
     ###################
