@@ -1310,6 +1310,8 @@ class Worker(WorkerBase):
                             self.has_what[worker].remove(d)
                         except KeyError:
                             pass
+                        if d not in self.who_has:
+                            continue
                         if not self.who_has[d]:
                             self.loop.add_callback(self.handle_missing_dep, dep)
                             continue
