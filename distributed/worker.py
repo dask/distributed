@@ -1158,7 +1158,6 @@ class Worker(WorkerBase):
 
                 while deps and len(self.connections) < self.total_connections:
                     token = object()
-                    self.connections[token] = None
                     dep = deps.pop()
                     if dep in self.in_flight:
                         continue
@@ -1167,6 +1166,7 @@ class Worker(WorkerBase):
                     except KeyError:
                         self.cancel_key(dep)
                     to_gather, total_nbytes = self.gather_select_keys(worker, dep)
+                    self.connections[token] = to_gather
                     for d in to_gather:
                         assert d not in self.in_flight
                         self.in_flight[d] = token
@@ -1227,7 +1227,6 @@ class Worker(WorkerBase):
         with log_errors():
             ip, port = worker.split(':')
             response = {}
-            # del self.connections[slot]
             try:
                 if self.validate:
                     self.validate_state()
@@ -1270,7 +1269,7 @@ class Worker(WorkerBase):
 
                 self.log.append(('receive-dep', worker, list(response)))
 
-                assert len(self.connections) < self.total_connections
+                assert len(self.connections) <= self.total_connections
 
                 for d, v in response.items():
                     self.put_key_in_memory(d, v)
@@ -1288,15 +1287,13 @@ class Worker(WorkerBase):
                     import pdb; pdb.set_trace()
                 raise
             finally:
-                del self.connections[slot]
                 if stream:
                     stream.close()
-                for d in deps:
+                for d in self.connections.pop(slot):
                     if d not in self.in_flight:
                         import pdb; pdb.set_trace()
                     del self.in_flight[d]
 
-                for d in deps:
                     if d not in response and d in self.dependents:
                         self.log.append(('missing-dep', d))
                         try:
