@@ -780,6 +780,8 @@ class Worker(WorkerBase):
 
         self.in_flight = dict()
         self.total_connections = 50
+        self.total_comm_nbytes = 10e6
+        self.comm_nbytes = 0
         self.connections = {}
 
         self.nbytes = dict()
@@ -1156,7 +1158,8 @@ class Worker(WorkerBase):
 
                 self.log.append(('gather-dependencies', key, deps))
 
-                while deps and len(self.connections) < self.total_connections:
+                while deps and (len(self.connections) < self.total_connections
+                                or self.comm_nbytes < self.total_comm_nbytes):
                     token = object()
                     dep = deps.pop()
                     if dep in self.in_flight:
@@ -1168,11 +1171,13 @@ class Worker(WorkerBase):
                         continue
                     worker = random.choice(list(self.who_has[dep]))
                     to_gather, total_nbytes = self.gather_select_keys(worker, dep)
+                    self.comm_nbytes += total_nbytes
                     self.connections[token] = to_gather
                     for d in to_gather:
                         assert d not in self.in_flight
                         self.in_flight[d] = token
-                    self.loop.add_callback(self.gather_dep, worker, dep, to_gather, token, cause=key)
+                    self.loop.add_callback(self.gather_dep, worker, dep,
+                            to_gather, token, total_nbytes, cause=key)
 
                 if not deps:
                     self.data_needed.popleft()
@@ -1224,7 +1229,7 @@ class Worker(WorkerBase):
         return deps, total_bytes
 
     @gen.coroutine
-    def gather_dep(self, worker, dep, deps, slot, cause=None):
+    def gather_dep(self, worker, dep, deps, slot, total_nbytes, cause=None):
         stream = None
         with log_errors():
             ip, port = worker.split(':')
@@ -1271,8 +1276,6 @@ class Worker(WorkerBase):
 
                 self.log.append(('receive-dep', worker, list(response)))
 
-                assert len(self.connections) <= self.total_connections
-
                 for d, v in response.items():
                     self.put_key_in_memory(d, v)
 
@@ -1291,6 +1294,7 @@ class Worker(WorkerBase):
             finally:
                 if stream:
                     stream.close()
+                self.comm_nbytes -= total_nbytes
                 for d in self.connections.pop(slot):
                     del self.in_flight[d]
 

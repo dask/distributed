@@ -586,5 +586,4 @@ def test_gather_many_small(c, s, a, *workers):
     recv = [i for i, t in enumerate(types) if t == 'receive-dep']
     assert min(recv) > max(req)
 
-    import pdb; pdb.set_trace()
     assert a.comm_nbytes == 0
