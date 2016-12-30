@@ -58,6 +58,7 @@ except ImportError:
 
 IN_PLAY = ('waiting', 'ready', 'executing', 'long-running')
 PENDING = ('waiting', 'ready', 'constrained')
+READY = ('ready', 'constrained')
 
 
 class WorkerBase(Server):
@@ -1049,7 +1050,7 @@ class Worker(WorkerBase):
             if self.validate:
                 assert key not in self.waiting_for_data
                 # assert key not in self.data
-                assert self.task_state[key] in ('ready', 'constrained')
+                assert self.task_state[key] in READY
                 assert key not in self.ready
                 assert all(dep in self.data for dep in self.dependencies[key])
 
@@ -1492,11 +1493,8 @@ class Worker(WorkerBase):
                     break
             while self.ready and len(self.executing) < self.ncores:
                 _, key = heapq.heappop(self.ready)
-                if key not in self.task_state:
-                    continue
-                if self.task_state[key] in ('memory', 'error', 'executing'):
-                    continue
-                self.transition(key, 'executing')
+                if self.task_state.get(key) in READY:
+                    self.transition(key, 'executing')
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
