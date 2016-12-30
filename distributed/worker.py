@@ -783,6 +783,7 @@ class Worker(WorkerBase):
         self.total_comm_nbytes = 10e6
         self.comm_nbytes = 0
         self.connections = {}
+        self.suspicious_deps = defaultdict(lambda: 0)
 
         self.nbytes = dict()
         self.types = dict()
@@ -1153,7 +1154,7 @@ class Worker(WorkerBase):
                 for dep in deps:
                     if not self.who_has.get(dep):
                         logger.info("Can't find dependencies for key %s", key)
-                        self.cancel_key(key)
+                        self.loop.add_callback(self.handle_missing_dep, dep)
                         continue
 
                 self.log.append(('gather-dependencies', key, deps))
@@ -1167,7 +1168,7 @@ class Worker(WorkerBase):
                     if dep not in self.who_has:
                         continue
                     if not self.who_has[dep]:
-                        self.cancel_key(dep)
+                        self.loop.add_callback(self.handle_missing_dep, dep)
                         continue
                     worker = random.choice(list(self.who_has[dep]))
                     to_gather, total_nbytes = self.gather_select_keys(worker, dep)
@@ -1304,12 +1305,13 @@ class Worker(WorkerBase):
                             self.who_has[d].remove(worker)
                         except KeyError:
                             pass
-                        if not self.who_has[d]:
-                            self.cancel_key(d)
                         try:
                             self.has_what[worker].remove(d)
                         except KeyError:
                             pass
+                        if not self.who_has[d]:
+                            self.loop.add_callback(self.handle_missing_dep, dep)
+                            continue
                         for key in self.dependents.get(d, ()):
                             if key in self.waiting_for_data:
                                 self.data_needed.appendleft(key)
@@ -1319,6 +1321,35 @@ class Worker(WorkerBase):
 
                 self.ensure_computing()
                 self.ensure_communicating()
+
+    @gen.coroutine
+    def handle_missing_dep(self, dep):
+        with log_errors():
+            if dep not in self.dependents:
+                return
+            suspicious = self.suspicious_deps[dep]
+            if suspicious == 'in-flight':
+                return
+            elif suspicious > 3:
+                for key in list(self.dependents.get(dep, ())):
+                    self.cancel_key(key)
+                return
+            else:
+                logger.info("Suspicious: %s %s", dep, self.suspicious_deps[dep])
+                self.suspicious_deps[dep] = 'in-flight'
+                response = yield self.scheduler.who_has(keys=[dep])
+                self.suspicious_deps[dep] = suspicious + 1
+                if not response:
+                    for key in list(self.dependents.get(dep, ())):
+                        self.cancel_key(key)
+                    return
+                else:
+                    self.update_who_has(response)
+                    self.log.append((dep, 'new workers found'))
+                    for key in self.dependents.get(dep, ()):
+                        if key in self.waiting_for_data:
+                            self.data_needed.append(key)
+            self.ensure_communicating()
 
     @gen.coroutine
     def query_who_has(self, *deps):
