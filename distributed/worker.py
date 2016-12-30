@@ -1161,10 +1161,12 @@ class Worker(WorkerBase):
                     dep = deps.pop()
                     if dep in self.in_flight:
                         continue
-                    try:
-                        worker = random.choice(list(self.who_has[dep]))
-                    except KeyError:
+                    if dep not in self.who_has:
+                        continue
+                    if not self.who_has[dep]:
                         self.cancel_key(dep)
+                        continue
+                    worker = random.choice(list(self.who_has[dep]))
                     to_gather, total_nbytes = self.gather_select_keys(worker, dep)
                     self.connections[token] = to_gather
                     for d in to_gather:
@@ -1290,8 +1292,6 @@ class Worker(WorkerBase):
                 if stream:
                     stream.close()
                 for d in self.connections.pop(slot):
-                    if d not in self.in_flight:
-                        import pdb; pdb.set_trace()
                     del self.in_flight[d]
 
                     if d not in response and d in self.dependents:
