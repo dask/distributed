@@ -1241,7 +1241,7 @@ class Worker(WorkerBase):
                     self.validate_state()
 
                 start = time()
-                stream = yield connect(ip, int(port), timeout=10)
+                stream = yield connect(ip, int(port), timeout=3)
                 stop = time()
                 if self.digests is not None:
                     self.digests['gather-connect-duration'].add(stop - start)
@@ -1333,7 +1333,7 @@ class Worker(WorkerBase):
             suspicious = self.suspicious_deps[dep]
             if suspicious == 'in-flight':
                 return
-            elif suspicious > 3:
+            elif suspicious > 5:
                 for key in list(self.dependents.get(dep, ())):
                     self.cancel_key(key)
                 return
