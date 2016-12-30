@@ -1429,6 +1429,8 @@ class Worker(WorkerBase):
                 del self.worker_restrictions[key]
             if key in self.resource_restrictions:
                 del self.resource_restrictions[key]
+            if key in self.suspicious_deps:
+                del self.suspicious_deps[key]
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
