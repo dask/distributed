@@ -906,18 +906,13 @@ class Worker(WorkerBase):
                         assert key in self.data
                     logger.debug("Asked to compute prexisting result: %s: %s" ,
                                  key, state)
-                    self.batched_stream.send(self.response[key])
+                    self.send_task_state_to_scheduler(key)
                     return
                 if state in IN_PLAY:
                     return
 
             if key in self.data:
-                self.response[key] = {'op': 'task-finished',
-                                      'status': 'OK',
-                                      'key': key,
-                                      'nbytes': self.nbytes[key],
-                                      'type': dumps_function(type(self.data[key]))}
-                self.batched_stream.send(self.response[key])
+                self.send_task_state_to_scheduler(key)
                 self.task_state[key] = 'memory'
                 self.tasks[key] = None
                 self.raw_tasks[key] = None
@@ -1033,12 +1028,7 @@ class Worker(WorkerBase):
                 assert key not in self.ready
 
             del self.waiting_for_data[key]
-            self.response[key] = {'op': 'task-finished',
-                                  'status': 'OK',
-                                  'key': key,
-                                  'nbytes': self.nbytes[key],
-                                  'type': dumps_function(type(self.data[key]))}
-            self.batched_stream.send(self.response[key])
+            self.send_task_state_to_scheduler(key)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1063,12 +1053,7 @@ class Worker(WorkerBase):
             raise
 
     def transition_ready_memory(self, key):
-        self.response[key] = {'op': 'task-finished',
-                              'status': 'OK',
-                              'key': key,
-                              'nbytes': self.nbytes[key],
-                              'type': dumps_function(type(self.data[key]))}
-        self.batched_stream.send(self.response[key])
+        self.send_task_state_to_scheduler(key)
 
     def transition_constrained_executing(self, key):
         self.transition_ready_executing(key)
@@ -1095,7 +1080,7 @@ class Worker(WorkerBase):
             elif self.task_state[key] == 'long-running':
                 self.long_running.remove(key)
             if self.batched_stream:
-                self.batched_stream.send(self.response[key])
+                self.send_task_state_to_scheduler(key)
             else:
                 raise StreamClosedError()
 
@@ -1188,6 +1173,16 @@ class Worker(WorkerBase):
             if LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
+
+    def send_task_state_to_scheduler(self, key):
+        d = self.response[key]
+        if 'op' not in d and key in self.data:
+            d.update({'op': 'task-finished',
+                      'status': 'OK',
+                      'key': key,
+                      'nbytes': self.nbytes[key],
+                      'type': dumps_function(type(self.data[key]))})
+        self.batched_stream.send(d)
 
     def put_key_in_memory(self, key, value):
         if key in self.data:
@@ -1313,7 +1308,7 @@ class Worker(WorkerBase):
                         if d not in self.who_has:
                             continue
                         if not self.who_has[d]:
-                            self.loop.add_callback(self.handle_missing_dep, dep)
+                            self.loop.add_callback(self.handle_missing_dep, d)
                             continue
                         for key in self.dependents.get(d, ()):
                             if key in self.waiting_for_data:
@@ -1506,8 +1501,9 @@ class Worker(WorkerBase):
     @gen.coroutine
     def execute(self, key, report=False):
         try:
+            if key not in self.executing:
+                return
             if self.validate:
-                assert key in self.executing
                 assert key not in self.waiting_for_data
                 assert self.task_state[key] == 'executing'
 
@@ -1640,6 +1636,10 @@ class Worker(WorkerBase):
                 if state == 'long-running':
                     assert key not in self.executing
                     assert key in self.long_running
+
+            # for key, deps in self.waiting_for_data.items():
+            #     if key not in self.data_needed:
+            #         assert all(dep in self.in_flight for dep in deps)
 
             for key in self.tasks:
                 if self.task_state[key] == 'memory':
