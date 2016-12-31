@@ -346,7 +346,8 @@ def func(x):
 
 def assert_balanced(inp, expected, c, s, *workers):
     steal = s.extensions['stealing']
-    steal._pc.callback_time = 1000000000
+    steal._pc.stop()
+
     counter = itertools.count()
     B = BANDWIDTH
     tasks = list(concat(inp))
