@@ -14,6 +14,7 @@ from tornado import gen
 import dask
 from dask import delayed
 from distributed import Worker, Nanny
+from distributed.config import config
 from distributed.client import Client, _wait, wait
 from distributed.metrics import time
 from distributed.scheduler import BANDWIDTH, key_split
@@ -377,8 +378,9 @@ def assert_balanced(inp, expected, c, s, *workers):
     result2 = sorted(result, reverse=True)
     expected2 = sorted(expected, reverse=True)
 
-    if result2 != expected2:
-        import pdb; pdb.set_trace()
+    if config.get('pdb-on-err'):
+        if result2 != expected2:
+            import pdb; pdb.set_trace()
 
     assert result2 == expected2
 
