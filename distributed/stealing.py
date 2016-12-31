@@ -4,7 +4,6 @@ from collections import defaultdict, deque
 import logging
 from math import log
 import os
-import random
 from time import time
 
 from toolz import topk
