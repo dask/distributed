@@ -458,3 +458,21 @@ def test_restart(c, s, a, b):
 
     assert not any(x for x in steal.stealable_all)
     assert not any(x for L in steal.stealable.values() for x in L)
+
+
+@gen_cluster(client=True)
+def test_steal_communication_heavy_tasks(c, s, a, b):
+    s.task_duration['slowadd'] = 0.001
+    x = c.submit(mul, b'0', int(BANDWIDTH), workers=a.address)
+    y = c.submit(mul, b'1', int(BANDWIDTH), workers=b.address)
+
+    futures = [c.submit(slowadd, x, y, delay=1, pure=False, workers=a.address,
+                        allow_other_workers=True)
+                for i in range(10)]
+
+    while not any(f.key in s.rprocessing for f in futures):
+        yield gen.sleep(0.01)
+
+    s.extensions['stealing'].balance()
+
+    assert s.processing[b.address]
