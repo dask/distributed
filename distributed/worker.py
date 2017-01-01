@@ -785,6 +785,7 @@ class Worker(WorkerBase):
         self.comm_nbytes = 0
         self.connections = {}
         self.suspicious_deps = defaultdict(lambda: 0)
+        self._missing_dep_flight = set()
 
         self.nbytes = dict()
         self.types = dict()
@@ -961,6 +962,7 @@ class Worker(WorkerBase):
 
             if who_has:
                 for dep, workers in who_has.items():
+                    assert workers
                     if dep not in self.who_has:
                         self.who_has[dep] = set(workers)
                     self.who_has[dep].update(workers)
@@ -1308,7 +1310,9 @@ class Worker(WorkerBase):
                         if d not in self.who_has:
                             continue
                         if not self.who_has[d]:
-                            self.loop.add_callback(self.handle_missing_dep, d)
+                            if d not in self._missing_dep_flight:
+                                self._missing_dep_flight.add(d)
+                                self.loop.add_callback(self.handle_missing_dep, d)
                             continue
                         for key in self.dependents.get(d, ()):
                             if key in self.waiting_for_data:
@@ -1322,25 +1326,26 @@ class Worker(WorkerBase):
 
     @gen.coroutine
     def handle_missing_dep(self, dep):
-        with log_errors():
+        self.log.append((dep, 'handle-missing'))
+        try:
             if dep not in self.dependents:
                 return
             suspicious = self.suspicious_deps[dep]
-            if suspicious == 'in-flight':
-                return
-            elif suspicious > 5:
+            if suspicious > 5:
                 for key in list(self.dependents.get(dep, ())):
                     self.cancel_key(key)
                 return
             else:
                 logger.info("Suspicious: %s %s", dep, self.suspicious_deps[dep])
-                self.suspicious_deps[dep] = 'in-flight'
                 response = yield self.scheduler.who_has(keys=[dep])
-                self.suspicious_deps[dep] = suspicious + 1
+                self.suspicious_deps[dep] += 1
                 if not response:
+                    self.log.append((dep, 'no workers found',
+                                     self.dependents.get(dep)))
                     for key in list(self.dependents.get(dep, ())):
                         self.cancel_key(key)
                     return
+                    import pdb; pdb.set_trace()
                 else:
                     self.update_who_has(response)
                     self.log.append((dep, 'new workers found'))
@@ -1348,6 +1353,10 @@ class Worker(WorkerBase):
                         if key in self.waiting_for_data:
                             self.data_needed.append(key)
             self.ensure_communicating()
+        except Exception as e:
+            logger.exception(e)
+        finally:
+            self._missing_dep_flight.remove(dep)
 
     @gen.coroutine
     def query_who_has(self, *deps):
@@ -1637,9 +1646,11 @@ class Worker(WorkerBase):
                     assert key not in self.executing
                     assert key in self.long_running
 
-            # for key, deps in self.waiting_for_data.items():
-            #     if key not in self.data_needed:
-            #         assert all(dep in self.in_flight for dep in deps)
+            for key, deps in self.waiting_for_data.items():
+                if key not in self.data_needed:
+                    for dep in deps:
+                        assert (dep in self.in_flight or
+                                dep in self._missing_dep_flight)
 
             for key in self.tasks:
                 if self.task_state[key] == 'memory':
