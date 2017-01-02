@@ -483,7 +483,7 @@ def test_long_tasks_dont_trigger_timeout(c, s, a, b):
     yield x._result()
 
 
-@gen_cluster(client=True, timeout=None)
+@gen_cluster(client=True)
 def test_missing_data_heals(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(inc, x)

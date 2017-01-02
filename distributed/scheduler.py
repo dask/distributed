@@ -709,10 +709,8 @@ class Scheduler(Server):
 
             self.transitions(recommendations)
 
-            assert not any(k in self.who_has for k in keys)
-
             if self.validate:
-                assert all(self.who_has.values())
+                assert not any(k in self.who_has for k in keys)
 
             return {}
 
@@ -771,8 +769,7 @@ class Scheduler(Server):
             del self.worker_bytes[address]
             self.remove_resources(address)
 
-            lost = self.has_what.pop(address)
-            for key in lost:
+            for key in self.has_what.pop(address):
                 self.who_has[key].remove(address)
                 if not self.who_has[key]:
                     if key in self.tasks:
@@ -1135,10 +1132,10 @@ class Scheduler(Server):
         self.transitions(r)
 
     def handle_missing_data(self, key=None, **msg):
-        assert all(self.who_has.values())
         r = self.stimulus_missing_data(key=key, ensure=False, **msg)
         self.transitions(r)
-        assert all(self.who_has.values())
+        if self.validate:
+            assert all(self.who_has.values())
 
     @gen.coroutine
     def handle_worker(self, worker):
@@ -1995,13 +1992,12 @@ class Scheduler(Server):
             self.who_has[key] = set()
             self.release_resources(key, worker)
 
-            if worker:
-                self.who_has[key].add(worker)
-                self.has_what[worker].add(key)
-                self.worker_bytes[worker] += self.nbytes.get(key,
-                                                             DEFAULT_DATA_SIZE)
-            else:
-                import pdb; pdb.set_trace()
+            assert worker
+
+            self.who_has[key].add(worker)
+            self.has_what[worker].add(key)
+            self.worker_bytes[worker] += self.nbytes.get(key,
+                                                         DEFAULT_DATA_SIZE)
 
             w = self.rprocessing.pop(key)
             duration = self.processing[w].pop(key)

@@ -1159,7 +1159,7 @@ class Worker(WorkerBase):
                         self.loop.add_callback(self.handle_missing_dep, dep)
                         continue
                     worker = random.choice(list(self.who_has[dep]))
-                    to_gather, total_nbytes = self.gather_select_keys(worker, dep)
+                    to_gather, total_nbytes = self.select_keys_for_gather(worker, dep)
                     self.comm_nbytes += total_nbytes
                     self.connections[token] = to_gather
                     for d in to_gather:
@@ -1207,7 +1207,7 @@ class Worker(WorkerBase):
         if key in self.task_state:
             self.transition(key, 'memory')
 
-    def gather_select_keys(self, worker, dep):
+    def select_keys_for_gather(self, worker, dep):
         deps = {dep}
 
         total_bytes = self.nbytes[dep]
@@ -1345,7 +1345,6 @@ class Worker(WorkerBase):
                     for key in list(self.dependents.get(dep, ())):
                         self.cancel_key(key)
                     return
-                    import pdb; pdb.set_trace()
                 else:
                     self.update_who_has(response)
                     self.log.append((dep, 'new workers found'))
