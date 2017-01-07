@@ -299,7 +299,6 @@ class WorkerBase(Server):
             yield future
         finally:
             pc.stop()
-            pass
 
         result = future.result()
 
@@ -330,7 +329,8 @@ class WorkerBase(Server):
             for key in list(keys):
                 deps = self.dependents.get(key, ())
                 for dep in deps:
-                    if self.task_state[dep] in PENDING:
+                    state = self.task_state[dep]
+                    if state in PENDING or state == 'executing':
                         self.cancel_key(dep)
 
                 state = self.task_state.get(key)
@@ -933,6 +933,15 @@ class Worker(WorkerBase):
             self.batched_stream = BatchedSend(interval=2, loop=self.loop)
             self.batched_stream.start(stream)
 
+            def on_closed(_):
+                if self.reconnect and self.status not in ('closed', 'closing'):
+                    logger.info("Connection to scheduler broken. Reregistering")
+                    self._register_with_scheduler()
+                else:
+                    self._close(report=False)
+
+            stream.set_close_callback(on_closed)
+
             closed = False
 
             while not closed:
@@ -940,12 +949,6 @@ class Worker(WorkerBase):
                 try:
                     msgs = yield read(stream)
                 except EnvironmentError:
-                    if self.reconnect and self.status not in ('closed', 'closing'):
-                        logger.info("Connection to scheduler broken. Reregistering")
-                        self._register_with_scheduler()
-                        break
-                    else:
-                        yield self._close(report=False)
                     break
 
                 start = time()
@@ -1169,7 +1172,6 @@ class Worker(WorkerBase):
 
         except EnvironmentError:
             logger.info("Stream closed")
-            self._close(report=False)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1687,10 +1689,6 @@ class Worker(WorkerBase):
             logger.debug("Send compute response to scheduler: %s, %s", key,
                          result)
 
-            if self.validate:
-                assert key not in self.executing
-                assert key not in self.waiting_for_data
-
             self.ensure_computing()
             self.ensure_communicating()
         except RuntimeError as e:
@@ -1700,6 +1698,10 @@ class Worker(WorkerBase):
             if LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
+        finally:
+            if self.validate:
+                assert key not in self.executing
+                assert key not in self.waiting_for_data
 
     ##################
     # Administrative #
