@@ -216,14 +216,13 @@ def test_stress_steal(c, s, *workers):
         if not s.processing:
             break
 
-from toolz import frequencies
 
-
-@gen_cluster(ncores=[('127.0.0.1', 1)] * 10, client=True, timeout=60)
+@slow
+@gen_cluster(ncores=[('127.0.0.1', 1)] * 10, client=True, timeout=120)
 def test_close_connections(c, s, *workers):
     da = pytest.importorskip('dask.array')
     x = da.random.random(size=(1000, 1000), chunks=(1000, 1))
-    for i in range(5):
+    for i in range(3):
         x = x.rechunk((1, 1000))
         x = x.rechunk((1000, 1))
 
@@ -233,8 +232,8 @@ def test_close_connections(c, s, *workers):
         worker = random.choice(list(workers))
         for stream in worker._listen_streams:
             stream.close()
-        print(frequencies(s.task_state.values()))
-        for w in workers:
-            print(w)
+        # print(frequencies(s.task_state.values()))
+        # for w in workers:
+        #     print(w)
 
     yield _wait(future)

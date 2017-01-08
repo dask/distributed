@@ -121,3 +121,6 @@ class BatchedSend(object):
             if not ignore_closed:
                 raise
         yield close(self.stream)
+
+    def closed(self):
+        return self.stream is None or self.stream.closed()
