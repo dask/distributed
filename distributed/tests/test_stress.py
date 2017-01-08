@@ -228,7 +228,7 @@ def test_close_connections(c, s, *workers):
 
     future = c.compute(x.sum())
     while any(s.processing.values()):
-        yield gen.sleep(1)
+        yield gen.sleep(0.5)
         worker = random.choice(list(workers))
         for stream in worker._listen_streams:
             stream.close()
