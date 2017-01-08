@@ -1689,6 +1689,10 @@ class Worker(WorkerBase):
             logger.debug("Send compute response to scheduler: %s, %s", key,
                          result)
 
+            if self.validate:
+                assert key not in self.executing
+                assert key not in self.waiting_for_data
+
             self.ensure_computing()
             self.ensure_communicating()
         except RuntimeError as e:
@@ -1699,9 +1703,8 @@ class Worker(WorkerBase):
                 import pdb; pdb.set_trace()
             raise
         finally:
-            if self.validate:
-                assert key not in self.executing
-                assert key not in self.waiting_for_data
+            if key in self.executing:
+                self.executing.remove(key)
 
     ##################
     # Administrative #
