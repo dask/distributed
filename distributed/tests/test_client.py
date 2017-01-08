@@ -3719,7 +3719,10 @@ def test_client_timeout():
 
     s = Scheduler(loop=loop)
     yield gen.sleep(4)
-    s.start(57484)
+    try:
+        s.start(57484)
+    except EnvironmentError:  # port in use
+        return
 
     start = time()
     while not c.scheduler_stream:
