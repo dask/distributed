@@ -230,7 +230,7 @@ class WorkerBase(Server):
                 'memory_limit': self.memory_limit}
 
     @gen.coroutine
-    def _close(self, report=True, timeout=3):
+    def _close(self, report=True, timeout=10):
         if self.status in ('closed', 'closing'):
             return
         logger.info("Stopping worker at %s:%d", self.ip, self.port)
@@ -933,7 +933,7 @@ class Worker(WorkerBase):
             self.batched_stream = BatchedSend(interval=2, loop=self.loop)
             self.batched_stream.start(stream)
 
-            def on_closed(_):
+            def on_closed():
                 if self.reconnect and self.status not in ('closed', 'closing'):
                     logger.info("Connection to scheduler broken. Reregistering")
                     self._register_with_scheduler()
@@ -949,7 +949,6 @@ class Worker(WorkerBase):
                 try:
                     msgs = yield read(stream)
                 except EnvironmentError as e:
-                    on_closed(None)
                     break
 
                 start = time()
