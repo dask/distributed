@@ -1229,8 +1229,8 @@ class Worker(WorkerBase):
                 missing_deps = {dep for dep in deps if not self.who_has.get(dep)}
                 if missing_deps:
                     logger.info("Can't find dependencies for key %s", key)
-                    missing_deps2 = {dep for dep in missing_deps if dep not in
-                                     self._missing_dep_flight}
+                    missing_deps2 = {dep for dep in missing_deps
+                                         if dep not in self._missing_dep_flight}
                     for dep in missing_deps2:
                         self._missing_dep_flight.add(dep)
                     self.loop.add_callback(self.handle_missing_dep,
@@ -1274,13 +1274,14 @@ class Worker(WorkerBase):
             raise
 
     def send_task_state_to_scheduler(self, key):
-        if key in self.nbytes:
+        if key in self.data:
+            value = self.data[key]
             d = {'op': 'task-finished',
                  'status': 'OK',
                  'key': key,
-                 'nbytes': self.nbytes[key],
+                 'nbytes': self.nbytes.get(key) or sizeof(value),
                  'thread': self.threads.get(key),
-                 'type': dumps_function(type(self.data[key]))}
+                 'type': dumps_function(type(value))}
         elif key in self.exceptions:
             d = {'op': 'task-erred',
                  'status': 'error',
@@ -1453,7 +1454,8 @@ class Worker(WorkerBase):
                 if suspicious > 5:
                     deps.remove(dep)
                     for key in list(self.dependents.get(dep, ())):
-                        self.cancel_key(key)
+                        if self.task_state[key] in PENDING:
+                            self.cancel_key(key)
             if not deps:
                 return
 
