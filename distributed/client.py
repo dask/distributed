@@ -553,8 +553,11 @@ class Client(object):
                         breakout = True
                         break
 
-                    handler = self._handlers[op]
-                    handler(**msg)
+                    try:
+                        handler = self._handlers[op]
+                        handler(**msg)
+                    except Exception as e:
+                        logger.exception(e)
                 if breakout:
                     break
 
