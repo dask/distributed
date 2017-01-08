@@ -230,7 +230,7 @@ class WorkerBase(Server):
                 'memory_limit': self.memory_limit}
 
     @gen.coroutine
-    def _close(self, report=True, timeout=10):
+    def _close(self, report=True, timeout=3):
         if self.status in ('closed', 'closing'):
             return
         logger.info("Stopping worker at %s:%d", self.ip, self.port)
@@ -238,7 +238,7 @@ class WorkerBase(Server):
         self.stop()
         self.heartbeat_callback.stop()
         with ignoring(EnvironmentError):
-            if report:
+            if report and self.batched_stream and not self.batched_stream.closed():
                 yield gen.with_timeout(timedelta(seconds=timeout),
                         self.scheduler.unregister(address=(self.ip, self.port)),
                         io_loop=self.loop)
@@ -948,7 +948,8 @@ class Worker(WorkerBase):
                 self.priority_counter += 1
                 try:
                     msgs = yield read(stream)
-                except EnvironmentError:
+                except EnvironmentError as e:
+                    on_closed(None)
                     break
 
                 start = time()
