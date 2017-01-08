@@ -1343,6 +1343,8 @@ class Worker(WorkerBase):
 
     @gen.coroutine
     def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
+        if self.status != 'running':
+            return
         stream = None
         with log_errors():
             ip, port = worker.split(':')
@@ -1751,6 +1753,8 @@ class Worker(WorkerBase):
             raise
 
     def validate_state(self):
+        if self.status != 'running':
+            return
         try:
             for key, workers in self.who_has.items():
                 for w in workers:
