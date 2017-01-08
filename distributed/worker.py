@@ -238,7 +238,7 @@ class WorkerBase(Server):
         self.stop()
         self.heartbeat_callback.stop()
         with ignoring(EnvironmentError):
-            if report and self.batched_stream and not self.batched_stream.closed():
+            if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
                         self.scheduler.unregister(address=(self.ip, self.port)),
                         io_loop=self.loop)
