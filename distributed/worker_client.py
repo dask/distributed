@@ -101,8 +101,7 @@ class WorkerClient(Client):
 
             nbytes = valmap(sizeof, data2)
 
-            # self.worker.data.update(data2)  # thread safety matters
-            self.worker.loop.add_callback(self.worker.data.update, data2)
+            self.worker.data.update(data2)
 
             yield self.scheduler.update_data(
                     who_has={key: [self.worker.address] for key in data2},
@@ -145,13 +144,8 @@ class WorkerClient(Client):
         with ignoring(AllExit):
             yield All([wait(key) for key in keys if key in self.futures])
 
-        while True:  # not threadsafe, so try until success
-            try:
-                local = {k: self.worker.data[k] for k in keys
-                         if k in self.worker.data}
-                break
-            except KeyError as e:
-                pass
+        local = {k: self.worker.data[k] for k in keys
+                 if k in self.worker.data}
 
         futures3 = {k: Future(k, self) for k in keys if k not in local}
 
