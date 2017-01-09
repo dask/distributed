@@ -12,7 +12,16 @@ from distributed.core import pingpong
 from distributed.metrics import time
 from distributed.utils_test import slow, loop, gen_test, gen_cluster
 
-from distributed.comm import tcp
+from distributed.comm import tcp, zmq
+
+
+@gen.coroutine
+def ping():
+    """print dots to indicate idleness"""
+    while True:
+        loop = ioloop.IOLoop.current()
+        print('.', loop, loop._handlers)
+        yield gen.sleep(0.50)
 
 
 @gen_test()
@@ -34,6 +43,47 @@ def test_tcp_client_server():
     assert port > 0
 
     connector = tcp.TCPConnector()
+    l = []
+
+    @gen.coroutine
+    def client_communicate(key, delay=0):
+        comm = yield connector.connect(addr)
+        yield comm.write({'op': 'ping', 'data': key})
+        if delay:
+            yield gen.sleep(delay)
+        msg = yield comm.read()
+        assert msg == {'op': 'pong', 'data': key}
+        l.append(key)
+        yield comm.close()
+
+    yield client_communicate(key=1234)
+
+    # Many clients at once
+    futures = [client_communicate(key=i, delay=0.05) for i in range(20)]
+    yield futures
+    assert set(l) == {1234} | set(range(20))
+
+
+@gen_test()
+def test_zmq_client_server():
+    ping()
+    q = queues.Queue()
+
+    @gen.coroutine
+    def handle_comm(comm):
+        msg = yield comm.read()
+        q.put(msg)
+        msg['op'] = 'pong'
+        yield comm.write(msg)
+        yield comm.close()
+
+    listener = zmq.ZMQListener('127.0.0.1', handle_comm)
+    listener.start()
+    host, port = addr = listener.get_host_port()
+    assert host == '127.0.0.1'
+    assert port > 0
+
+    connector = zmq.ZMQConnector()
     l = []
 
     @gen.coroutine

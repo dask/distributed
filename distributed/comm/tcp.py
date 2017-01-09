@@ -225,7 +225,7 @@ class TCPListener(object):
         """
         The listening address as a string.
         """
-        return 'tcp:%s:%d' % self.get_host_port()
+        return 'tcp://%s:%d' % self.get_host_port()
 
     def handle_stream(self, stream, address):
         comm = TCP(stream, self.deserialize)

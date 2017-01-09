@@ -11,7 +11,7 @@ def to_frames(msg):
     """
     """
     try:
-        return protocol.dumps(msg)
+        return list(protocol.dumps(msg))
     except Exception as e:
         logger.info("Unserializable Message: %s", msg)
         logger.exception(e)
