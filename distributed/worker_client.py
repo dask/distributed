@@ -44,7 +44,7 @@ def local_client():
     secede()  # have this thread secede from the thread pool
               # so that it doesn't take up a fixed resource while waiting
     worker.loop.add_callback(worker.transition, thread_state.key, 'long-running')
-    with WorkerClient(address) as e:
+    with WorkerClient(address, loop=worker.loop) as e:
         yield e
 
 
