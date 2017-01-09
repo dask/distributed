@@ -1549,7 +1549,7 @@ class Worker(WorkerBase):
                     if not self.has_what[worker]:
                         del self.has_what[worker]
 
-            if key in self.nbytes:
+            if key in self.nbytes and key not in self.data:
                 del self.nbytes[key]
             if key in self.types:
                 del self.types[key]
