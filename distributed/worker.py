@@ -1474,7 +1474,8 @@ class Worker(WorkerBase):
                     self.log.append((dep, 'no workers found',
                                      self.dependents.get(dep)))
                     for key in list(self.dependents.get(dep, ())):
-                        self.cancel_key(key)
+                        if self.task_state[key] in PENDING:
+                            self.cancel_key(key)
                 else:
                     self.log.append((dep, 'new workers found'))
                     for key in self.dependents.get(dep, ()):
