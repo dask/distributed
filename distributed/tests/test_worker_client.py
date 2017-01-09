@@ -113,5 +113,4 @@ def test_sync(loop):
 
     with cluster() as (s, [a, b]):
         with Client(('127.0.0.1', s['port']), loop=loop) as c:
-            future = c.submit(mysum)
-            assert future.result() == 9900
+            assert delayed(mysum)().compute(get=c.get) == 9900
