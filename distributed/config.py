@@ -56,7 +56,7 @@ def initialize_logging(config):
 
     # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
     # XXX this silences legitimate error messages
-    logging.getLogger('tornado').setLevel(logging.CRITICAL)
+    logging.getLogger('tornado').setLevel(logging.WARN)
 
 
 initialize_logging(config)

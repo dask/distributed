@@ -725,6 +725,7 @@ def coerce_to_address(o, out=str):
 
 
 def coerce_to_rpc(o, **kwargs):
+    # XXX
     if isinstance(o, (bytes, str, tuple, list)):
         ip, port = coerce_to_address(o, out=tuple)
         return rpc(ip=ip, port=int(port), **kwargs)
