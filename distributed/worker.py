@@ -1463,12 +1463,14 @@ class Worker(WorkerBase):
                 logger.info("Dependent not found: %s %s .  Asking scheduler",
                             dep, self.suspicious_deps[dep])
 
-            response = yield self.scheduler.who_has(keys=list(deps))
-            self.update_who_has(response)
+            who_has, nbytes = yield [self.scheduler.who_has(keys=list(deps)),
+                                     self.scheduler.nbytes(keys=list(deps))]
+            self.update_who_has(who_has)
+            self.nbytes.update(nbytes)
             for dep in deps:
                 self.suspicious_deps[dep] += 1
 
-                if dep not in response:
+                if dep not in who_has:
                     self.log.append((dep, 'no workers found',
                                      self.dependents.get(dep)))
                     for key in list(self.dependents.get(dep, ())):
