@@ -13,14 +13,6 @@ from zmq.eventloop.ioloop import IOLoop
 
 # mixins for tornado/asyncio compatibility
 
-class _AsyncTornado(object):
-    _Future = Future
-    _READ = IOLoop.READ
-    _WRITE = IOLoop.WRITE
-    def _default_loop(self):
-        return IOLoop.current()
-
-
 _FutureRecvEvent = namedtuple('_FutureRecvEvent',
                               ('future', 'flags', 'copy', 'track'))
 
@@ -30,11 +22,9 @@ _FutureSendEvent = namedtuple('_FutureSendEvent',
 
 class _AsyncSocket(object):
 
-    _recv_futures = None
-    _send_futures = None
-    _state = 0
-    _poller_class = Poller
-    io_loop = None
+    _Future = Future
+    _READ = IOLoop.READ
+    _WRITE = IOLoop.WRITE
 
     def __init__(self, context, socket_type, io_loop=None):
         self.io_loop = io_loop or self._default_loop()
@@ -44,9 +34,11 @@ class _AsyncSocket(object):
         self._sock = zmq.Socket(context, socket_type)
         self._init_io_state()
 
+    def _default_loop(self):
+        return IOLoop.current()
+
     def close(self, linger=None):
         if not self.closed:
-            # XXX
             for event in chain(self._recv_futures, self._send_futures):
                 if not event.future.done():
                     event.future.cancel()
@@ -75,8 +67,12 @@ class _AsyncSocket(object):
     def get(self, option):
         return self._sock.get(option)
 
+    getsockopt = get
+
     def set(self, option, value):
         self._sock.set(option, value)
+
+    setsockopt = set
 
     def recv_multipart(self, flags=0, copy=True, track=False):
         """Receive a complete multipart zmq message.
@@ -330,5 +326,8 @@ class _AsyncSocket(object):
         self.io_loop.remove_handler(self._sock)
 
 
-class Socket(_AsyncTornado, _AsyncSocket):
-    pass
+class Context(zmq.Context):
+
+    @property
+    def _socket_class(self):
+        return _AsyncSocket

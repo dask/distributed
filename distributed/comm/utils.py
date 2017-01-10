@@ -32,13 +32,41 @@ def parse_host_port(address, default_port=None):
         return address
     if address.startswith('tcp:'):
         address = address[4:]
-    host, sep, port = address.rpartition(':')
-    # TODO allow square brackets around host, for IPv6 (e.g. '[::1]:8080')
-    if not sep:
+
+    def _fail():
+        raise ValueError("invalid address %r" % (address,))
+
+    def _default():
         if default_port is None:
-            raise ValueError("missing port number in TCP address %r" % (address,))
-        host = port
-        port = default_port
+            raise ValueError("missing port number in address %r" % (address,))
+        return default_port
+
+    if address.startswith('['):
+        host, sep, tail = address[1:].partition(']')
+        if not sep:
+            _fail()
+        if not tail:
+            port = _default()
+        else:
+            if not tail.startswith(':'):
+                _fail()
+            port = tail[1:]
     else:
-        port = int(port)
-    return host, port
+        host, sep, port = address.partition(':')
+        if not sep:
+            port = _default()
+        elif ':' in host:
+            _fail()
+
+    return host, int(port)
+
+
+def unparse_host_port(host, port=None):
+    """
+    """
+    if ':' in host and not host.startswith('['):
+        host = '[%s]' % host
+    if port:
+        return '%s:%s' % (host, port)
+    else:
+        return host

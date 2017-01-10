@@ -23,15 +23,7 @@ listeners = {
     }
 
 
-"""
-
-Addresses:
-    - tcp://192.168.1.5:1234
-    - zmq://192.168.1.6:5678
-    - unix:///run/user/1000/distributed-scheduler.sock
-
-
-"""
+DEFAULT_SCHEME = 'tcp'
 
 
 class Comm(with_metaclass(ABCMeta)):
@@ -64,8 +56,7 @@ def parse_address(addr):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
     scheme, sep, loc = addr.partition('://')
     if not sep:
-        raise ValueError("address must be of the form 'scheme://loc', got %r"
-                         % (addr,))
+        scheme = DEFAULT_SCHEME
     return scheme, loc
 
 
@@ -80,7 +71,7 @@ def connect(addr, deserialize=True):
     if connector is None:
         raise ValueError("unknown scheme %r in address %r" % (scheme, addr))
 
-    comm = yield connector.connect(addr, deserialize=deserialize)
+    comm = yield connector.connect(loc, deserialize=deserialize)
     raise gen.Return(comm)
 
 

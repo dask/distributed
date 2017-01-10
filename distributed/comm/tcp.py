@@ -16,7 +16,7 @@ from tornado.tcpserver import TCPServer
 from .. import config
 from ..metrics import time
 from .transports import connectors, listeners, Comm
-from .utils import to_frames, from_frames, parse_host_port
+from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 
 
 logger = logging.getLogger(__name__)
@@ -170,7 +170,7 @@ class TCPConnector(object):
                 stream = yield gen.with_timeout(timedelta(seconds=self.timeout),
                                                 future)
             except EnvironmentError:
-                if time() - start < timeout:
+                if time() - start < self.timeout:
                     yield gen.sleep(0.01)
                     logger.debug("sleeping on connect")
                 else:
@@ -225,7 +225,7 @@ class TCPListener(object):
         """
         The listening address as a string.
         """
-        return 'tcp://%s:%d' % self.get_host_port()
+        return 'tcp://' + unparse_host_port(*self.get_host_port())
 
     def handle_stream(self, stream, address):
         comm = TCP(stream, self.deserialize)

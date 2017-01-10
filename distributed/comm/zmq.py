@@ -18,7 +18,7 @@ from zmq.eventloop.future import Context
 from .. import config
 from ..metrics import time
 from .transports import connectors, listeners, Comm
-from .utils import to_frames, from_frames, parse_host_port
+from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 from . import zmqimpl
 
 
@@ -41,19 +41,18 @@ install()
 NOCOPY_THRESHOLD = 1000 ** 2   # 1 MB
 
 
-async_ctx = Context()
-# Workaround https://github.com/zeromq/pyzmq/issues/962
-async_ctx.io_loop = None
-
-ctx = zmq.Context()
-
+#async_ctx = Context()
+## Workaround https://github.com/zeromq/pyzmq/issues/962
+#async_ctx.io_loop = None
 
 #def make_socket(sockty):
     #sock = async_ctx.socket(sockty)
     #return sock
 
+ctx = zmqimpl.Context()
+
 def make_socket(sockty):
-    sock = zmqimpl.Socket(ctx, sockty)
+    sock = ctx.socket(sockty)
     return sock
 
 
@@ -61,18 +60,15 @@ def set_socket_options(sock):
     """
     Set common options on a ZeroMQ socket.
     """
-    # XXX use context default options instead?
+    # XXX set context default options instead?
     sock.set(zmq.RECONNECT_IVL, -1)  # disable reconnections
-    #sock.set(zmq.IPV6, True)
+    sock.set(zmq.IPV6, True)
 
 
 def make_zmq_url(ip, port=0):
-    if ':' in ip and not ip.startswith('['):
-        ip = '[%s]' % ip   # IPv6
-    if port:
-        return "tcp://%s:%d" % (ip, port)
-    else:
-        return "tcp://%s:*" % (ip,)
+    if not port:
+        port = '*'
+    return "tcp://" + unparse_host_port(ip, port)
 
 
 def bind_to_random_port(sock, ip):
@@ -181,8 +177,8 @@ class ZMQListener(object):
             assert req['op'] == 'zmq-connect'
 
             cli_sock = make_socket(zmq.DEALER)
-            cli_port = bind_to_random_port(cli_sock, self.ip)
             set_socket_options(cli_sock)
+            cli_port = bind_to_random_port(cli_sock, self.ip)
 
             resp = {'zmq-url': make_zmq_url(self.ip, cli_port)}
             yield self.sock.send_multipart([envelope] + to_frames(resp))
@@ -212,8 +208,8 @@ class ZMQListener(object):
         """
         The listening address as a string.
         """
-        return 'zmq://%s:%d' % self.get_host_port()
+        return 'zmq://'+ unparse_host_port(*self.get_host_port())
 
 
-#connectors['tcp'] = TCPConnector()
-#listeners['tcp'] = TCPListener
+connectors['zmq'] = ZMQConnector()
+listeners['zmq'] = ZMQListener
