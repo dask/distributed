@@ -45,6 +45,8 @@ logger = logging.getLogger(__name__)
 
 LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
 
+no_value = '--no-value-sentinel--'
+
 try:
     import psutil
     TOTAL_MEMORY = psutil.virtual_memory().total
@@ -55,6 +57,7 @@ except ImportError:
 
 IN_PLAY = ('waiting', 'ready', 'executing', 'long-running')
 PENDING = ('waiting', 'ready', 'constrained')
+PROCESSING = ('waiting', 'ready', 'constrained', 'executing', 'long-running')
 READY = ('ready', 'constrained')
 
 
@@ -314,8 +317,15 @@ class WorkerBase(Server):
                    is_coro=True, wait=wait)
 
     def update_data(self, stream=None, data=None, report=True):
-        self.data.update(data)
-        self.nbytes.update(valmap(sizeof, data))
+        for key, value in data.items():
+            if key in self.dep_state:
+                self.transition_dep(key, 'memory', value=value)
+            else:
+                self.put_key_in_memory(key, value)
+                self.dep_state[key] = 'memory'
+                self.dependencies[key] = set()
+            self.log.append((key, 'receive-from-scatter'))
+
         if report:
             self.batched_stream.send({'op': 'add-keys',
                                       'keys': list(data)})
@@ -327,23 +337,13 @@ class WorkerBase(Server):
     def delete_data(self, stream=None, keys=None, report=True):
         if keys:
             for key in list(keys):
-                deps = self.dependents.get(key, ())
-                for dep in deps:
-                    state = self.task_state[dep]
-                    if state in PENDING or state == 'executing':
-                        self.cancel_key(dep)
+                self.log.append((key, 'delete'))
+                if key in self.task_state:
+                    self.release_key(key)
 
-                state = self.task_state.get(key)
-                if state == 'memory':
-                    del self.data[key]
-                    self.forget_key(key)
-                    self.log.append((key, 'delete-memory'))
-                elif state == 'error':
-                    self.forget_key(key)
-                    self.log.append((key, 'delete-error'))
-                elif key in self.data:
-                    del self.data[key]
-                    self.log.append((key, 'delete-data'))
+                if key in self.dep_state:
+                    self.release_dep(key)
+
             logger.debug("Deleted %d keys", len(keys))
             if report:
                 logger.debug("Reporting loss of keys to scheduler")
@@ -485,8 +485,7 @@ class WorkerBase(Server):
             raise Return({'status': 'missing-data',
                           'keys': e.args})
         else:
-            self.data.update(result)
-            self.nbytes.update(valmap(sizeof, result))
+            self.update_data(data=result, report=False)
             raise Return({'status': 'OK'})
 
 
@@ -760,6 +759,8 @@ class Worker(WorkerBase):
         The data needed by this key to run
     * **dependents**: ``{dep: {keys}}``
         The keys that use this dependency
+    * **data_needed**: deque(keys)
+        The keys whose data we still lack, arranged in a deque
     * **waiting_for_data**: ``{kep: {deps}}``
         A dynamic verion of dependencies.  All dependencies that we still don't
         have for a particular key.
@@ -776,14 +777,15 @@ class Worker(WorkerBase):
         A set of keys of tasks that are running and have started their own
         long-running clients.
 
+    * **dep_state**: ``{dep: string}``:
+        The state of all dependencies required by our tasks
+        Valid states include waiting, flight, and memory
     * **who_has**: ``{dep: {worker}}``
         Workers that we believe have this data
     * **has_what**: ``{worker: {deps}}``
         The data that we care about that we think a worker has
     * **pending_data_per_worker**: ``{worker: [dep]}``
         The data on each worker that we still want, prioritized as a deque
-    * **data_needed**: deque(keys)
-        The keys whose data we still lack, arranged in a deque
     * **in_flight_tasks**: ``{task: worker}``
         All dependencies that are coming to us in current peer-to-peer
         connections and the workers from which they are coming.
@@ -853,6 +855,7 @@ class Worker(WorkerBase):
     def __init__(self, *args, **kwargs):
         self.tasks = dict()
         self.task_state = dict()
+        self.dep_state = dict()
         self.dependencies = dict()
         self.dependents = dict()
         self.waiting_for_data = dict()
@@ -906,6 +909,13 @@ class Worker(WorkerBase):
                 ('long-running', 'error'): self.transition_executing_done,
                 ('long-running', 'memory'): self.transition_executing_done,
         }
+
+        self._dep_transitions = {
+                ('waiting', 'flight'): self.transition_dep_waiting_flight,
+                ('waiting', 'memory'): self.transition_dep_waiting_memory,
+                ('flight', 'waiting'): self.transition_dep_flight_waiting,
+                ('flight', 'memory'): self.transition_dep_flight_memory
+                }
 
         self.incoming_transfer_log = deque(maxlen=(100000))
         self.incoming_count = 0
@@ -967,7 +977,8 @@ class Worker(WorkerBase):
                         priority = tuple(-x for x in priority)
                         self.add_task(priority=priority, **msg)
                     elif op == 'release-task':
-                        self.release_task(**msg)
+                        self.log.append((msg['key'], 'release-task'))
+                        self.release_key(**msg)
                     elif op == 'delete-data':
                         self.delete_data(**msg)
                     else:
@@ -1002,11 +1013,13 @@ class Worker(WorkerBase):
                 if state in IN_PLAY:
                     return
 
-            if key in self.data:
+            if self.dep_state.get(key) == 'memory':
                 self.task_state[key] = 'memory'
                 self.send_task_state_to_scheduler(key)
                 self.tasks[key] = None
                 self.log.append((key, 'new-task-already-in-memory'))
+                self.priorities[key] = priority
+                self.durations[key] = duration
                 return
 
             self.log.append((key, 'new'))
@@ -1032,45 +1045,117 @@ class Worker(WorkerBase):
             if nbytes is not None:
                 self.nbytes.update(nbytes)
 
-            if who_has:
-                self.dependencies[key] = set(who_has)
-                for dep in who_has:
-                    if dep not in self.dependents:
-                        self.dependents[dep] = set()
-                    self.dependents[dep].add(key)
-                who_has = {dep: v for dep, v in who_has.items() if dep not in self.data}
-                self.waiting_for_data[key] = set(who_has)
-            else:
-                self.waiting_for_data[key] = set()
-                self.dependencies[key] = set()
+            who_has = who_has or {}
+            self.dependencies[key] = set(who_has)
+            self.waiting_for_data[key] = set()
 
-            if who_has:
-                for dep, workers in who_has.items():
-                    assert workers
-                    if dep not in self.who_has:
-                        self.who_has[dep] = set(workers)
-                    self.who_has[dep].update(workers)
+            for dep in who_has:
+                if dep not in self.dependents:
+                    self.dependents[dep] = set()
+                self.dependents[dep].add(key)
 
-                    for worker in workers:
-                        self.has_what[worker].add(dep)
+                if dep not in self.dep_state:
+                    if self.task_state.get(dep) == 'memory':
+                        self.dep_state[dep] = 'memory'
+                    else:
+                        self.dep_state[dep] = 'waiting'
+
+                if self.dep_state[dep] != 'memory':
+                    self.waiting_for_data[key].add(dep)
+
+            for dep, workers in who_has.items():
+                assert workers
+                if dep not in self.who_has:
+                    self.who_has[dep] = set(workers)
+                self.who_has[dep].update(workers)
+
+                for worker in workers:
+                    self.has_what[worker].add(dep)
+                    if self.dep_state[dep] != 'memory':
                         self.pending_data_per_worker[worker].append(dep)
 
+            if self.waiting_for_data[key]:
                 self.data_needed.append(key)
             else:
                 self.transition(key, 'ready')
+            if self.validate:
+                if who_has:
+                    assert all(dep in self.dep_state for dep in who_has)
+                    assert all(dep in self.nbytes for dep in who_has)
+                    for dep in who_has:
+                        self.validate_dep(dep)
+                    self.validate_key(key)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
 
-    def release_task(self, key=None):
-        if self.task_state.get(key) in PENDING:
-            self.rescind_key(key)
-
     ###############
     # Transitions #
     ###############
+
+    def transition_dep(self, dep, finish, **kwargs):
+        try:
+            start = self.dep_state[dep]
+        except KeyError:
+            return
+        if start == finish:
+            return
+        func = self._dep_transitions[start, finish]
+        state = func(dep, **kwargs)
+        self.log.append(('dep', dep, start, state or finish))
+        self.dep_state[dep] = state or finish
+        if self.validate:
+            self.validate_dep(dep)
+
+    def transition_dep_waiting_flight(self, dep, worker=None):
+        if self.validate:
+            assert dep not in self.in_flight_tasks
+            assert self.dependents[dep]
+
+        self.in_flight_tasks[dep] = worker
+
+    def transition_dep_flight_waiting(self, dep, worker=None):
+        if self.validate:
+            assert dep in self.in_flight_tasks
+
+        del self.in_flight_tasks[dep]
+        try:
+            self.who_has[dep].remove(worker)
+        except KeyError:
+            pass
+        try:
+            self.has_what[worker].remove(dep)
+        except KeyError:
+            pass
+
+        if not self.who_has[dep]:
+            if dep not in self._missing_dep_flight:
+                self._missing_dep_flight.add(dep)
+                self.loop.add_callback(self.handle_missing_dep, dep)
+        for key in self.dependents.get(dep, ()):
+            if self.task_state[key] == 'waiting':
+                self.data_needed.appendleft(key)
+
+    def transition_dep_flight_memory(self, dep, value=None):
+        if self.validate:
+            assert dep in self.in_flight_tasks
+
+        del self.in_flight_tasks[dep]
+        self.dep_state[dep] = 'memory'
+        self.put_key_in_memory(dep, value)
+
+    def transition_dep_waiting_memory(self, dep, value=None):
+        if self.validate:
+            try:
+                assert dep in self.data
+                assert dep in self.nbytes
+                assert dep in self.types
+                assert self.task_state[dep] == 'memory'
+            except Exception as e:
+                logger.exception(e)
+                import pdb; pdb.set_trace()
 
     def transition(self, key, finish, **kwargs):
         start = self.task_state[key]
@@ -1105,7 +1190,7 @@ class Worker(WorkerBase):
                 import pdb; pdb.set_trace()
             raise
 
-    def transition_waiting_memory(self, key):
+    def transition_waiting_memory(self, key, value=None):
         try:
             if self.validate:
                 assert self.task_state[key] == 'waiting'
@@ -1138,7 +1223,7 @@ class Worker(WorkerBase):
                 import pdb; pdb.set_trace()
             raise
 
-    def transition_ready_memory(self, key):
+    def transition_ready_memory(self, key, value=None):
         self.send_task_state_to_scheduler(key)
 
     def transition_constrained_executing(self, key):
@@ -1149,7 +1234,7 @@ class Worker(WorkerBase):
         if self.validate:
             assert all(v >= 0 for v in self.available_resources.values())
 
-    def transition_executing_done(self, key):
+    def transition_executing_done(self, key, value=no_value):
         try:
             if self.validate:
                 assert key in self.executing or key in self.long_running
@@ -1165,6 +1250,13 @@ class Worker(WorkerBase):
                 self.executed_count += 1
             elif self.task_state[key] == 'long-running':
                 self.long_running.remove(key)
+
+            if value is not no_value:
+                self.task_state[key] = 'memory'
+                self.put_key_in_memory(key, value)
+                if key in self.dep_state:
+                    self.transition_dep(key, 'memory')
+
             if self.batched_stream:
                 self.send_task_state_to_scheduler(key)
             else:
@@ -1221,10 +1313,10 @@ class Worker(WorkerBase):
                     continue
 
                 deps = self.dependencies[key]
-                deps = [d for d in deps
-                          if d not in self.data
-                          and d not in self.executing
-                          and d not in self.in_flight_tasks]
+                if self.validate:
+                    assert all(dep in self.dep_state for dep in deps)
+
+                deps = [dep for dep in deps if self.dep_state[dep] == 'waiting']
 
                 missing_deps = {dep for dep in deps if not self.who_has.get(dep)}
                 if missing_deps:
@@ -1245,7 +1337,7 @@ class Worker(WorkerBase):
                 while deps and (len(self.in_flight_workers) < self.total_connections
                                 or self.comm_nbytes < self.total_comm_nbytes):
                     dep = deps.pop()
-                    if dep in self.in_flight_tasks:
+                    if self.dep_state[dep] != 'waiting':
                         continue
                     if dep not in self.who_has:
                         continue
@@ -1259,8 +1351,7 @@ class Worker(WorkerBase):
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
                     for d in to_gather:
-                        assert d not in self.in_flight_tasks
-                        self.in_flight_tasks[d] = worker
+                        self.transition_dep(d, 'flight', worker=worker)
                     self.loop.add_callback(self.gather_dep, worker, dep,
                             to_gather, total_nbytes, cause=key)
                     changed = True
@@ -1290,6 +1381,7 @@ class Worker(WorkerBase):
                  'exception': self.exceptions[key],
                  'traceback': self.tracebacks[key]}
         else:
+            import pdb; pdb.set_trace()
             logger.error("Key not ready to send to worker, %s: %s",
                          key, self.task_state[key])
             return
@@ -1322,6 +1414,8 @@ class Worker(WorkerBase):
         if key in self.task_state:
             self.transition(key, 'memory')
 
+        self.log.append((key, 'put-in-memory'))
+
     def select_keys_for_gather(self, worker, dep):
         deps = {dep}
 
@@ -1330,10 +1424,7 @@ class Worker(WorkerBase):
 
         while L:
             d = L.popleft()
-            if (d in self.data or
-                d in self.in_flight_tasks or
-                d in self.executing or
-                d not in self.nbytes):  # no longer tracking
+            if self.dep_state.get(d) != 'waiting':
                 continue
             if total_bytes + self.nbytes[d] > self.target_message_size:
                 break
@@ -1391,9 +1482,6 @@ class Worker(WorkerBase):
 
                 self.log.append(('receive-dep', worker, list(response)))
 
-                for d, v in response.items():
-                    self.put_key_in_memory(d, v)
-
                 if response:
                     self.batched_stream.send({'op': 'add-keys',
                                               'keys': list(response)})
@@ -1410,29 +1498,15 @@ class Worker(WorkerBase):
                 if stream:
                     stream.close()
                 self.comm_nbytes -= total_nbytes
+
                 for d in self.in_flight_workers.pop(worker):
-                    del self.in_flight_tasks[d]
+                    if d in response:
+                        self.transition_dep(d, 'memory', value=response[d])
+                    elif self.dep_state.get(d) != 'memory':
+                        self.transition_dep(d, 'waiting', worker=worker)
 
                     if d not in response and d in self.dependents:
                         self.log.append(('missing-dep', d))
-                        try:
-                            self.who_has[d].remove(worker)
-                        except KeyError:
-                            pass
-                        try:
-                            self.has_what[worker].remove(d)
-                        except KeyError:
-                            pass
-                        if d not in self.who_has:
-                            continue
-                        if not self.who_has[d]:
-                            if d not in self._missing_dep_flight:
-                                self._missing_dep_flight.add(d)
-                                self.loop.add_callback(self.handle_missing_dep, d)
-                            continue
-                        for key in self.dependents.get(d, ()):
-                            if key in self.waiting_for_data:
-                                self.data_needed.appendleft(key)
 
                 if self.validate:
                     self.validate_state()
@@ -1453,9 +1527,7 @@ class Worker(WorkerBase):
                 suspicious = self.suspicious_deps[dep]
                 if suspicious > 5:
                     deps.remove(dep)
-                    for key in list(self.dependents.get(dep, ())):
-                        if self.task_state[key] in PENDING:
-                            self.cancel_key(key)
+                    self.release_dep(dep)
             if not deps:
                 return
 
@@ -1463,19 +1535,15 @@ class Worker(WorkerBase):
                 logger.info("Dependent not found: %s %s .  Asking scheduler",
                             dep, self.suspicious_deps[dep])
 
-            who_has, nbytes = yield [self.scheduler.who_has(keys=list(deps)),
-                                     self.scheduler.nbytes(keys=list(deps))]
+            who_has = yield self.scheduler.who_has(keys=list(deps))
             self.update_who_has(who_has)
-            self.nbytes.update(nbytes)
             for dep in deps:
                 self.suspicious_deps[dep] += 1
 
                 if dep not in who_has:
                     self.log.append((dep, 'no workers found',
                                      self.dependents.get(dep)))
-                    for key in list(self.dependents.get(dep, ())):
-                        if self.task_state[key] in PENDING:
-                            self.cancel_key(key)
+                    self.release_dep(dep)
                 else:
                     self.log.append((dep, 'new workers found'))
                     for key in self.dependents.get(dep, ()):
@@ -1513,52 +1581,34 @@ class Worker(WorkerBase):
                 import pdb; pdb.set_trace()
             raise
 
-    def cancel_key(self, key):
+    def release_key(self, key, cause=None):
         try:
-            self.log.append(('cancel', key))
-            if key in self.waiting_for_data:
-                missing = [dep for dep in self.dependencies[key]
-                           if dep not in self.data
-                           and not self.who_has.get(dep)]
-                self.log.append(('report-missing-data', key, missing))
-                self.batched_stream.send({'op': 'missing-data',
-                                          'key': key,
-                                          'keys': missing})
-            self.forget_key(key)
-        except Exception as e:
-            logger.exception(e)
-            raise
+            if key not in self.task_state:
+                return
+            state = self.task_state.pop(key)
+            if cause:
+                self.log.append((key, 'release-key', cause))
+            else:
+                self.log.append((key, 'release-key'))
+            del self.tasks[key]
+            if key in self.data and key not in self.dep_state:
+                del self.data[key]
+                del self.nbytes[key]
+                del self.types[key]
 
-    def forget_key(self, key):
-        try:
-            self.log.append((key, 'forget'))
-            if key in self.tasks:
-                del self.tasks[key]
-                del self.task_state[key]
             if key in self.waiting_for_data:
                 del self.waiting_for_data[key]
 
             for dep in self.dependencies.pop(key, ()):
                 self.dependents[dep].remove(key)
                 if not self.dependents[dep]:
-                    del self.dependents[dep]
+                    self.release_dep(dep)
 
-            if key in self.who_has:
-                for worker in self.who_has.pop(key):
-                    self.has_what[worker].remove(key)
-                    if not self.has_what[worker]:
-                        del self.has_what[worker]
-
-            if key in self.nbytes and key not in self.data:
-                del self.nbytes[key]
-            if key in self.types:
-                del self.types[key]
             if key in self.threads:
                 del self.threads[key]
-            if key in self.priorities:
-                del self.priorities[key]
-            if key in self.durations:
-                del self.durations[key]
+            del self.priorities[key]
+            del self.durations[key]
+
             if key in self.exceptions:
                 del self.exceptions[key]
             if key in self.tracebacks:
@@ -1567,10 +1617,47 @@ class Worker(WorkerBase):
             if key in self.startstops:
                 del self.startstops[key]
 
+            if key in self.executing:
+                self.executing.remove(key)
+
             if key in self.resource_restrictions:
                 del self.resource_restrictions[key]
-            if key in self.suspicious_deps:
-                del self.suspicious_deps[key]
+
+            if state in PROCESSING:  # not finished
+                self.batched_stream.send({'op': 'release',
+                                          'key': key,
+                                          'cause': cause})
+        except StreamClosedError:
+            pass
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
+
+    def release_dep(self, dep):
+        try:
+            if dep not in self.dep_state:
+                return
+            self.log.append((dep, 'release-dep'))
+            state = self.dep_state.pop(dep)
+
+            if dep in self.suspicious_deps:
+                del self.suspicious_deps[dep]
+
+            if dep not in self.task_state:
+                if dep in self.data:
+                    del self.data[dep]
+                    del self.types[dep]
+                del self.nbytes[dep]
+
+            if state == 'flight':
+                del self.in_flight_tasks[dep]
+
+            for key in self.dependents.pop(dep, ()):
+                self.dependencies[key].remove(dep)
+                if self.task_state[key] != 'memory':
+                    self.release_key(key, cause=dep)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1664,7 +1751,7 @@ class Worker(WorkerBase):
                                                 args2, kwargs2,
                                                 self.execution_state, key)
 
-            if key not in self.task_state:
+            if self.task_state.get(key) != 'executing':
                 return
 
             result['key'] = key
@@ -1676,8 +1763,7 @@ class Worker(WorkerBase):
             if result['op'] == 'task-finished':
                 self.nbytes[key] = result['nbytes']
                 self.types[key] = result['type']
-                self.put_key_in_memory(key, value)
-                self.transition(key, 'memory')
+                self.transition(key, 'memory', value=value)
                 if self.digests is not None:
                     self.digests['task-duration'].add(result['stop'] -
                                                       result['start'])
@@ -1725,6 +1811,8 @@ class Worker(WorkerBase):
         assert key not in self.waiting_for_data
         assert key not in self.executing
         assert key not in self.ready
+        if key in self.dep_state:
+            assert self.dep_state[key] == 'memory'
 
     def validate_key_executing(self, key):
         assert key in self.executing
@@ -1759,6 +1847,40 @@ class Worker(WorkerBase):
             import pdb; pdb.set_trace()
             raise
 
+    def validate_dep_waiting(self, dep):
+        assert dep not in self.data
+        assert dep in self.nbytes
+        assert self.dependents[dep]
+        assert not any(key in self.ready for key in self.dependents[dep])
+
+    def validate_dep_flight(self, dep):
+        self.validate_dep_waiting(dep)
+        peer = self.in_flight_tasks[dep]
+        assert dep in self.in_flight_workers[peer]
+
+    def validate_dep_memory(self, dep):
+        assert dep in self.data
+        assert dep in self.nbytes
+        assert dep in self.types
+        if dep in self.task_state:
+            assert self.task_state[dep] == 'memory'
+
+    def validate_dep(self, dep):
+        try:
+            state = self.dep_state[dep]
+            if state == 'waiting':
+                self.validate_dep_waiting(dep)
+            elif state == 'flight':
+                self.validate_dep_flight(dep)
+            elif state == 'memory':
+                self.validate_dep_memory(dep)
+            else:
+                raise ValueError("Unknown dependent state", state)
+        except Exception as e:
+            logger.exception(e)
+            import pdb; pdb.set_trace()
+            raise
+
     def validate_state(self):
         if self.status != 'running':
             return
@@ -1771,27 +1893,11 @@ class Worker(WorkerBase):
                 for k in keys:
                     assert worker in self.who_has[k]
 
-            for key, state in self.task_state.items():
-                if state == 'memory':
-                    assert key in self.data
-                    assert isinstance(self.nbytes[key], int)
-                if state == 'error':
-                    assert key not in self.data
-                if state == 'waiting':
-                    assert key in self.waiting_for_data
-                    s = self.waiting_for_data[key]
-                    for dep in self.dependencies[key]:
-                        assert (dep in s or
-                                dep in self.in_flight_tasks or
-                                dep in self.executing or
-                                dep in self.data)
-                if state == 'ready':
-                    assert key in pluck(1, self.ready)
-                if state == 'executing':
-                    assert key in self.executing
-                if state == 'long-running':
-                    assert key not in self.executing
-                    assert key in self.long_running
+            for key in self.task_state:
+                self.validate_key(key)
+
+            for dep in self.dep_state:
+                self.validate_dep(dep)
 
             for key, deps in self.waiting_for_data.items():
                 if key not in self.data_needed:
