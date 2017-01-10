@@ -175,9 +175,9 @@ def test_stress_communication(c, s, *workers):
         lim = 8192
         if soft < lim:
             resource.setrlimit(resource.RLIMIT_NOFILE, (lim, max(hard, lim)))
-    except Exception as e:
-        pytest.skip("file descriptor limit too low and couldn't be increased :"
-                    + str(e))
+        except Exception as e:
+            pytest.skip("file descriptor limit too low and can't be increased :"
+                        + str(e))
 
     n = 40
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
