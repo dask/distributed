@@ -270,12 +270,12 @@ class Scheduler(Server):
                                 'release': self.handle_missing_data,
                                 'add-keys': self.add_keys}
 
-        self.compute_handlers = {'update-graph': self.update_graph,
-                                 'client-desires-keys': self.client_desires_keys,
-                                 'update-data': self.update_data,
-                                 'report-key': self.report_on_key,
-                                 'client-releases-keys': self.client_releases_keys,
-                                 'restart': self.restart}
+        self.client_handlers = {'update-graph': self.update_graph,
+                                'client-desires-keys': self.client_desires_keys,
+                                'update-data': self.update_data,
+                                'report-key': self.report_on_key,
+                                'client-releases-keys': self.client_releases_keys,
+                                'restart': self.restart}
 
         self.handlers = {'register-client': self.add_client,
                          'scatter': self.scatter,
@@ -1073,9 +1073,9 @@ class Scheduler(Server):
                         breakout = True
                         self.close()
                         break
-                    elif op in self.compute_handlers:
+                    elif op in self.client_handlers:
                         try:
-                            handler = self.compute_handlers[op]
+                            handler = self.client_handlers[op]
                             if 'client' not in msg:
                                 msg['client'] = client
                             result = handler(**msg)
@@ -1299,7 +1299,7 @@ class Scheduler(Server):
         raise gen.Return(result)
 
     @gen.coroutine
-    def restart(self, environment=None):
+    def restart(self, environment=None, client=None):
         """ Restart all workers.  Reset local state. """
         n = len(self.workers)
         with log_errors():
