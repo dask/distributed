@@ -273,7 +273,7 @@ class Scheduler(Server):
         self.compute_handlers = {'update-graph': self.update_graph,
                                  'client-desires-keys': self.client_desires_keys,
                                  'update-data': self.update_data,
-                                 'missing-data': self.stimulus_missing_data,
+                                 'report-key': self.report_on_key,
                                  'client-releases-keys': self.client_releases_keys,
                                  'restart': self.restart}
 
@@ -1075,7 +1075,10 @@ class Scheduler(Server):
                         break
                     elif op in self.compute_handlers:
                         try:
-                            result = self.compute_handlers[op](**msg)
+                            handler = self.compute_handlers[op]
+                            if 'client' not in msg:
+                                msg['client'] = client
+                            result = handler(**msg)
                             if isinstance(result, gen.Future):
                                 yield result
                         except Exception as e:
@@ -1138,7 +1141,7 @@ class Scheduler(Server):
         r = self.stimulus_task_erred(key=key, **msg)
         self.transitions(r)
 
-    def handle_missing_data(self, key=None, worker=None, **msg):
+    def handle_missing_data(self, key=None, worker=None, client=None, **msg):
         if self.rprocessing.get(key) != worker:
             return
         r = self.stimulus_missing_data(key=key, ensure=False, **msg)
