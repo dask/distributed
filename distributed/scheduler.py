@@ -2026,6 +2026,8 @@ class Scheduler(Server):
 
             if worker not in self.processing:
                 return {key: 'released'}
+            if worker != self.rprocessing[key]:
+                return {}
 
             if startstops:
                 compute_start, compute_stop = [(b, c) for a, b, c in startstops
