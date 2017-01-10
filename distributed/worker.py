@@ -318,12 +318,19 @@ class WorkerBase(Server):
 
     def update_data(self, stream=None, data=None, report=True):
         for key, value in data.items():
-            if key in self.dep_state:
-                self.transition_dep(key, 'memory', value=value)
+            if key in self.task_state:
+                self.transition(key, 'memory', value=value)
             else:
                 self.put_key_in_memory(key, value)
-                self.dep_state[key] = 'memory'
+                self.task_state[key] = 'memory'
+                self.tasks[key] = None
+                self.priorities[key] = None
+                self.durations[key] = None
                 self.dependencies[key] = set()
+
+            if key in self.dep_state:
+                self.transition_dep(key, 'memory', value=value)
+
             self.log.append((key, 'receive-from-scatter'))
 
         if report:
