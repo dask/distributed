@@ -1751,7 +1751,7 @@ class Worker(WorkerBase):
                                                 args2, kwargs2,
                                                 self.execution_state, key)
 
-            if self.task_state.get(key) != 'executing':
+            if self.task_state.get(key) not in ('executing', 'long-running'):
                 return
 
             result['key'] = key
