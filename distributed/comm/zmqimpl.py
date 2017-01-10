@@ -55,11 +55,18 @@ class _AsyncSocket(object):
 
     close.__doc__ = zmq.Socket.close.__doc__
 
+    def bind(self, addr):
+        return self._sock.bind(addr)
+
     def connect(self, addr):
         return self._sock.connect(addr)
 
-    def bind(self, addr):
-        return self._sock.bind(addr)
+    def disconnect(self, addr):
+        return self._sock.disconnect(addr)
+
+    @property
+    def closed(self):
+        return self._sock.closed
 
     @property
     def _events(self):

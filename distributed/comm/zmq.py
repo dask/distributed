@@ -19,6 +19,7 @@ from .. import config
 from ..metrics import time
 from .transports import connectors, listeners, Comm
 from .utils import to_frames, from_frames, parse_host_port
+from . import zmqimpl
 
 
 logger = logging.getLogger(__name__)
@@ -39,9 +40,21 @@ install()
 
 NOCOPY_THRESHOLD = 1000 ** 2   # 1 MB
 
-ctx = Context()
+
+async_ctx = Context()
 # Workaround https://github.com/zeromq/pyzmq/issues/962
-ctx.io_loop = None
+async_ctx.io_loop = None
+
+ctx = zmq.Context()
+
+
+#def make_socket(sockty):
+    #sock = async_ctx.socket(sockty)
+    #return sock
+
+def make_socket(sockty):
+    sock = zmqimpl.Socket(ctx, sockty)
+    return sock
 
 
 def set_socket_options(sock):
@@ -59,7 +72,15 @@ def make_zmq_url(ip, port=0):
     if port:
         return "tcp://%s:%d" % (ip, port)
     else:
-        return "tcp://%s" % (ip,)
+        return "tcp://%s:*" % (ip,)
+
+
+def bind_to_random_port(sock, ip):
+    sock.bind(make_zmq_url(ip))
+    endpoint = sock.get(zmq.LAST_ENDPOINT).decode()
+    _, sep, port = endpoint.rpartition(':')
+    assert sep
+    return int(port)
 
 
 class ZMQ(Comm):
@@ -119,7 +140,7 @@ class ZMQConnector(object):
     @gen.coroutine
     def connect(self, address, deserialize=True):
         listener_url = make_zmq_url(*parse_host_port(address))
-        sock = ctx.socket(zmq.DEALER)
+        sock = make_socket(zmq.DEALER)
         set_socket_options(sock)
 
         #comm = yield gen.with_timeout(timedelta(seconds=self.timeout),
@@ -142,10 +163,10 @@ class ZMQListener(object):
         self.please_stop = False
 
     def start(self):
-        self.sock = ctx.socket(zmq.ROUTER)
+        self.sock = make_socket(zmq.ROUTER)
         set_socket_options(self.sock)
         if self.port == 0:
-            self.bound_port = self.sock.bind_to_random_port(make_zmq_url(self.ip))
+            self.bound_port = bind_to_random_port(self.sock, self.ip)
         else:
             self.bound_port = port
             self.sock.bind(make_zmq_url(self.ip, self.port))
@@ -159,8 +180,8 @@ class ZMQListener(object):
             req = from_frames(frames[1:])
             assert req['op'] == 'zmq-connect'
 
-            cli_sock = ctx.socket(zmq.DEALER)
-            cli_port = cli_sock.bind_to_random_port(make_zmq_url(self.ip))
+            cli_sock = make_socket(zmq.DEALER)
+            cli_port = bind_to_random_port(cli_sock, self.ip)
             set_socket_options(cli_sock)
 
             resp = {'zmq-url': make_zmq_url(self.ip, cli_port)}
