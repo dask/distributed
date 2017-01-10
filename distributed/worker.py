@@ -101,6 +101,7 @@ class WorkerBase(Server):
         self.status = None
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
+        self.admin_executor = ThreadPoolExecutor(2)
         self.scheduler = rpc(ip=scheduler_ip, port=scheduler_port)
         self.name = name
         self.heartbeat_interval = heartbeat_interval
@@ -247,6 +248,7 @@ class WorkerBase(Server):
                         io_loop=self.loop)
         self.scheduler.close_rpc()
         self.executor.shutdown()
+        self.admin_executor.shutdown()
         if os.path.exists(self.local_dir):
             shutil.rmtree(self.local_dir)
 
@@ -358,12 +360,22 @@ class WorkerBase(Server):
                                               keys=list(keys))
         raise Return('OK')
 
+    def _get_data(self, keys):
+        return {k: to_serialize(self.data[k]) for k in keys}
+
     @gen.coroutine
     def get_data(self, stream, keys=None, who=None):
         start = time()
 
+        nbytes = {k: self.nbytes.get(k) for k in keys
+                    if self.task_state.get(k) == 'memory'
+                    or self.dep_state.get(k) == 'memory'}
+        if all(k in self.data.fast for k in nbytes) or len(nbytes) > 100:
+            msg = self._get_data(nbytes)
+        else:
+            msg = yield self.admin_executor.submit(self._get_data, nbytes)
+
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
-        nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
         stop = time()
         if self.digests is not None:
             self.digests['get-data-load-duration'].add(stop - start)
@@ -1373,13 +1385,14 @@ class Worker(WorkerBase):
 
     def send_task_state_to_scheduler(self, key):
         if key in self.data:
-            value = self.data[key]
+            nbytes = self.nbytes[key] or sizeof(self.data[key])
+            typ = self.types.get(key) or type(self.data[key])
             d = {'op': 'task-finished',
                  'status': 'OK',
                  'key': key,
-                 'nbytes': self.nbytes.get(key) or sizeof(value),
+                 'nbytes': nbytes,
                  'thread': self.threads.get(key),
-                 'type': dumps_function(type(value))}
+                 'type': dumps_function(typ)}
         elif key in self.exceptions:
             d = {'op': 'task-erred',
                  'status': 'error',
