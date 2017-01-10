@@ -299,7 +299,6 @@ class WorkerBase(Server):
             yield future
         finally:
             pc.stop()
-            pass
 
         result = future.result()
 
@@ -330,7 +329,8 @@ class WorkerBase(Server):
             for key in list(keys):
                 deps = self.dependents.get(key, ())
                 for dep in deps:
-                    if self.task_state[dep] in PENDING:
+                    state = self.task_state[dep]
+                    if state in PENDING or state == 'executing':
                         self.cancel_key(dep)
 
                 state = self.task_state.get(key)
@@ -933,19 +933,22 @@ class Worker(WorkerBase):
             self.batched_stream = BatchedSend(interval=2, loop=self.loop)
             self.batched_stream.start(stream)
 
+            def on_closed():
+                if self.reconnect and self.status not in ('closed', 'closing'):
+                    logger.info("Connection to scheduler broken. Reregistering")
+                    self._register_with_scheduler()
+                else:
+                    self._close(report=False)
+
+            stream.set_close_callback(on_closed)
+
             closed = False
 
             while not closed:
                 self.priority_counter += 1
                 try:
                     msgs = yield read(stream)
-                except EnvironmentError:
-                    if self.reconnect and self.status not in ('closed', 'closing'):
-                        logger.info("Connection to scheduler broken. Reregistering")
-                        self._register_with_scheduler()
-                        break
-                    else:
-                        yield self._close(report=False)
+                except EnvironmentError as e:
                     break
 
                 start = time()
@@ -1169,7 +1172,6 @@ class Worker(WorkerBase):
 
         except EnvironmentError:
             logger.info("Stream closed")
-            self._close(report=False)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1227,8 +1229,8 @@ class Worker(WorkerBase):
                 missing_deps = {dep for dep in deps if not self.who_has.get(dep)}
                 if missing_deps:
                     logger.info("Can't find dependencies for key %s", key)
-                    missing_deps2 = {dep for dep in missing_deps if dep not in
-                                     self._missing_dep_flight}
+                    missing_deps2 = {dep for dep in missing_deps
+                                         if dep not in self._missing_dep_flight}
                     for dep in missing_deps2:
                         self._missing_dep_flight.add(dep)
                     self.loop.add_callback(self.handle_missing_dep,
@@ -1272,13 +1274,14 @@ class Worker(WorkerBase):
             raise
 
     def send_task_state_to_scheduler(self, key):
-        if key in self.nbytes:
+        if key in self.data:
+            value = self.data[key]
             d = {'op': 'task-finished',
                  'status': 'OK',
                  'key': key,
-                 'nbytes': self.nbytes[key],
+                 'nbytes': self.nbytes.get(key) or sizeof(value),
                  'thread': self.threads.get(key),
-                 'type': dumps_function(type(self.data[key]))}
+                 'type': dumps_function(type(value))}
         elif key in self.exceptions:
             d = {'op': 'task-erred',
                  'status': 'error',
@@ -1341,6 +1344,8 @@ class Worker(WorkerBase):
 
     @gen.coroutine
     def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
+        if self.status != 'running':
+            return
         stream = None
         with log_errors():
             ip, port = worker.split(':')
@@ -1449,7 +1454,8 @@ class Worker(WorkerBase):
                 if suspicious > 5:
                     deps.remove(dep)
                     for key in list(self.dependents.get(dep, ())):
-                        self.cancel_key(key)
+                        if self.task_state[key] in PENDING:
+                            self.cancel_key(key)
             if not deps:
                 return
 
@@ -1457,16 +1463,19 @@ class Worker(WorkerBase):
                 logger.info("Dependent not found: %s %s .  Asking scheduler",
                             dep, self.suspicious_deps[dep])
 
-            response = yield self.scheduler.who_has(keys=list(deps))
-            self.update_who_has(response)
+            who_has, nbytes = yield [self.scheduler.who_has(keys=list(deps)),
+                                     self.scheduler.nbytes(keys=list(deps))]
+            self.update_who_has(who_has)
+            self.nbytes.update(nbytes)
             for dep in deps:
                 self.suspicious_deps[dep] += 1
 
-                if dep not in response:
+                if dep not in who_has:
                     self.log.append((dep, 'no workers found',
                                      self.dependents.get(dep)))
                     for key in list(self.dependents.get(dep, ())):
-                        self.cancel_key(key)
+                        if self.task_state[key] in PENDING:
+                            self.cancel_key(key)
                 else:
                     self.log.append((dep, 'new workers found'))
                     for key in self.dependents.get(dep, ()):
@@ -1540,7 +1549,7 @@ class Worker(WorkerBase):
                     if not self.has_what[worker]:
                         del self.has_what[worker]
 
-            if key in self.nbytes:
+            if key in self.nbytes and key not in self.data:
                 del self.nbytes[key]
             if key in self.types:
                 del self.types[key]
@@ -1702,6 +1711,9 @@ class Worker(WorkerBase):
             if LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
+        finally:
+            if key in self.executing:
+                self.executing.remove(key)
 
     ##################
     # Administrative #
@@ -1748,6 +1760,8 @@ class Worker(WorkerBase):
             raise
 
     def validate_state(self):
+        if self.status != 'running':
+            return
         try:
             for key, workers in self.who_has.items():
                 for w in workers:
