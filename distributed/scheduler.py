@@ -350,10 +350,6 @@ class Scheduler(Server):
     __repr__ = __str__
 
     @property
-    def address(self):
-        return '%s:%d' % (self.ip, self.port)
-
-    @property
     def address_tuple(self):
         return (self.ip, self.port)
 
@@ -1156,12 +1152,12 @@ class Scheduler(Server):
         Scheduler.handle_client: Equivalent coroutine for clients
         """
         yield gen.sleep(0)
-        ip, port = coerce_to_address(worker, out=tuple)
+        addr = coerce_to_address(worker)
         try:
-            stream = yield connect(ip, port)
+            stream = yield connect(addr)
         except Exception as e:
-            logger.error("Failed to connect to worker '%s:%s': %s",
-                         ip, port, e)
+            logger.error("Failed to connect to worker %r: %s",
+                         addr, e)
             return
         yield write(stream, {'op': 'compute-stream'})
         self.worker_streams[worker].start(stream)

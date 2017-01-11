@@ -1,6 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta, abstractmethod, abstractproperty
 from datetime import timedelta
 import logging
 
@@ -68,9 +68,21 @@ class Comm(with_metaclass(ABCMeta)):
         """
 
     @abstractmethod
+    def abort(self):
+        """
+        Close the communication abruptly.
+        """
+
+    @abstractmethod
     def closed(self):
         """
         Return whether the stream is closed.
+        """
+
+    @abstractproperty
+    def peer_address(self):
+        """
+        Return the peer's address.  For logging and debugging purposes only.
         """
 
 

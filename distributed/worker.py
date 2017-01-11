@@ -98,7 +98,7 @@ class WorkerBase(Server):
         self.status = None
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
-        self.scheduler = rpc(ip=scheduler_ip, port=scheduler_port)
+        self.scheduler = rpc((scheduler_ip, scheduler_port))
         self.name = name
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
@@ -256,10 +256,6 @@ class WorkerBase(Server):
     def terminate(self, stream, report=True):
         yield self._close(report=report)
         raise Return('OK')
-
-    @property
-    def address(self):
-        return '%s:%d' % (self.ip, self.port)
 
     @property
     def address_tuple(self):

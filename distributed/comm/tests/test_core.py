@@ -75,6 +75,7 @@ def test_tcp_specific():
     """
     @gen.coroutine
     def handle_comm(comm):
+        assert comm.peer_address.startswith('tcp://' + host)
         msg = yield comm.read()
         msg['op'] = 'pong'
         yield comm.write(msg)
@@ -82,7 +83,7 @@ def test_tcp_specific():
 
     listener = tcp.TCPListener('localhost', handle_comm)
     listener.start()
-    host, port = addr = listener.get_host_port()
+    host, port = listener.get_host_port()
     assert host in ('localhost', '127.0.0.1', '::1')
     assert port > 0
 
@@ -91,7 +92,9 @@ def test_tcp_specific():
 
     @gen.coroutine
     def client_communicate(key, delay=0):
+        addr = '%s:%d' % (host, port)
         comm = yield connector.connect(addr)
+        assert comm.peer_address == 'tcp://' + addr
         yield comm.write({'op': 'ping', 'data': key})
         if delay:
             yield gen.sleep(delay)
@@ -124,7 +127,7 @@ def test_zmq_specific():
 
     listener = zmq.ZMQListener('127.0.0.1', handle_comm)
     listener.start()
-    host, port = addr = listener.get_host_port()
+    host, port = listener.get_host_port()
     assert host == '127.0.0.1'
     assert port > 0
 
@@ -133,6 +136,7 @@ def test_zmq_specific():
 
     @gen.coroutine
     def client_communicate(key, delay=0):
+        addr = '%s:%d' % (host, port)
         comm = yield connector.connect(addr)
         yield comm.write({'op': 'ping', 'data': key})
         if delay:
@@ -152,8 +156,14 @@ def test_zmq_specific():
 
 @gen.coroutine
 def check_client_server(addr):
+    """
+    Abstract client / server test.
+    """
     @gen.coroutine
     def handle_comm(comm):
+        scheme, loc = parse_address(comm.peer_address)
+        assert scheme == bound_scheme
+
         msg = yield comm.read()
         assert msg['op'] == 'ping'
         msg['op'] = 'pong'
@@ -168,15 +178,17 @@ def check_client_server(addr):
     listener.start()
     bound_addr = listener.get_address()
 
-    scheme, loc = parse_address(bound_addr)
-    assert scheme in ('tcp', 'zmq')
-    assert scheme == parse_address(addr)[0]
+    bound_scheme, bound_loc = parse_address(bound_addr)
+    assert bound_scheme in ('tcp', 'zmq')
+    assert bound_scheme == parse_address(addr)[0]
 
     l = []
 
     @gen.coroutine
     def client_communicate(key, delay=0):
         comm = yield connect(bound_addr)
+        assert comm.peer_address == bound_addr
+
         yield comm.write({'op': 'ping', 'data': key})
         yield comm.write({'op': 'foobar'})
         if delay:
@@ -198,32 +210,36 @@ def check_client_server(addr):
 def test_default_client_server_ipv4():
     # Default scheme is (currently) TCP
     yield check_client_server('127.0.0.1')
-    yield check_client_server('127.0.0.1:3241')
+    yield check_client_server('127.0.0.1:3201')
+    yield check_client_server('')
+    yield check_client_server(':3202')
 
 @gen_test()
 def test_default_client_server_ipv6():
     yield check_client_server('[::1]')
-    yield check_client_server('[::1]:3242')
+    yield check_client_server('[::1]:3211')
 
 @gen_test()
 def test_tcp_client_server_ipv4():
     yield check_client_server('tcp://127.0.0.1')
-    yield check_client_server('tcp://127.0.0.1:3243')
+    yield check_client_server('tcp://127.0.0.1:3221')
+    yield check_client_server('tcp://')
+    yield check_client_server('tcp://:3222')
 
 @gen_test()
 def test_tcp_client_server_ipv6():
     yield check_client_server('tcp://[::1]')
-    yield check_client_server('tcp://[::1]:3244')
+    yield check_client_server('tcp://[::1]:3231')
 
 @gen_test()
 def test_zmq_client_server_ipv4():
     yield check_client_server('zmq://127.0.0.1')
-    yield check_client_server('zmq://127.0.0.1:3245')
+    yield check_client_server('zmq://127.0.0.1:3241')
 
 @gen_test()
 def test_zmq_client_server_ipv6():
     yield check_client_server('zmq://[::1]')
-    yield check_client_server('zmq://[::1]:3246')
+    yield check_client_server('zmq://[::1]:3251')
 
 
 @gen.coroutine
@@ -300,3 +316,27 @@ def check_connect_timeout(addr):
 @gen_test()
 def test_tcp_connect_timeout():
     yield check_connect_timeout('tcp://127.0.0.1:44444')
+
+
+def check_many_listeners(addr):
+    @gen.coroutine
+    def handle_comm(comm):
+        pass
+
+    listeners = []
+    for i in range(100):
+        listener = listen(addr, handle_comm)
+        listener.start()
+        listeners.append(listener)
+
+    for listener in listeners:
+        listener.stop()
+
+
+def test_tcp_many_listeners():
+    check_many_listeners('tcp://127.0.0.1')
+    check_many_listeners('tcp://0.0.0.0')
+    check_many_listeners('tcp://')
+
+
+# TODO tests for Comm.abort()

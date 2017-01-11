@@ -4,11 +4,12 @@ from functools import partial
 import socket
 
 from tornado import gen, ioloop
-from tornado.iostream import StreamClosedError
 import pytest
 
-from distributed.core import (read, write, pingpong, Server, rpc, connect,
-        coerce_to_rpc, send_recv, coerce_to_address, ConnectionPool)
+from distributed.core import (
+    read, write, pingpong, Server, rpc, connect,
+    coerce_to_rpc, send_recv, coerce_to_address, ConnectionPool,
+    CommClosedError)
 from distributed.metrics import time
 from distributed.utils_test import slow, loop, gen_test, gen_cluster
 
@@ -17,22 +18,23 @@ def test_server(loop):
     @gen.coroutine
     def f():
         server = Server({'ping': pingpong})
-        with pytest.raises(OSError):
+        with pytest.raises(ValueError):
             server.port
         server.listen(8887)
         assert server.port == 8887
+        assert server.address in ('tcp://0.0.0.0:8887', 'tcp://[::]:8887')
 
-        stream = yield connect('127.0.0.1', 8887)
+        comm = yield connect('127.0.0.1:8887')
 
-        n = yield write(stream, {'op': 'ping'})
+        n = yield comm.write({'op': 'ping'})
         assert isinstance(n, int)
         assert 4 <= n <= 1000
 
-        response = yield read(stream)
+        response = yield comm.read()
         assert response == b'pong'
 
-        yield write(stream, {'op': 'ping', 'close': True})
-        response = yield read(stream)
+        yield comm.write({'op': 'ping', 'close': True})
+        response = yield comm.read()
         assert response == b'pong'
 
         server.stop()
@@ -46,14 +48,18 @@ def test_rpc(loop):
         server = Server({'ping': pingpong})
         server.listen(8887)
 
-        with rpc(ip='127.0.0.1', port=8887) as remote:
+        with rpc('127.0.0.1:8887') as remote:
             response = yield remote.ping()
             assert response == b'pong'
+
+            assert remote.comms
+            assert remote.port == 8887
+            assert remote.address == '127.0.0.1:8887'
 
             response = yield remote.ping(close=True)
             assert response == b'pong'
 
-        assert not remote.streams
+        assert not remote.comms
         assert remote.status == 'closed'
 
         server.stop()
@@ -66,19 +72,17 @@ def test_rpc_inputs():
          rpc(b'127.0.0.1:8887'),
          rpc(('127.0.0.1', 8887)),
          rpc((b'127.0.0.1', 8887)),
-         rpc(ip='127.0.0.1', port=8887),
-         rpc(ip=b'127.0.0.1', port=8887),
-         rpc(addr='127.0.0.1:8887'),
-         rpc(addr=b'127.0.0.1:8887')]
+         ]
 
-    assert all(r.ip == '127.0.0.1' and r.port == 8887 for r in L)
+    assert all(r.ip == '127.0.0.1' and r.port == 8887
+               and r.address == '127.0.0.1:8887' for r in L)
 
     for r in L:
         r.close_rpc()
 
 
 def test_rpc_with_many_connections(loop):
-    remote = rpc(ip='127.0.0.1', port=8887)
+    remote = rpc(('127.0.0.1', 8887))
 
     @gen.coroutine
     def g():
@@ -95,7 +99,7 @@ def test_rpc_with_many_connections(loop):
         server.stop()
 
         remote.close_streams()
-        assert all(stream.closed() for stream in remote.streams)
+        assert all(comm.closed() for comm in remote.comms)
 
     loop.run_sync(f)
 
@@ -112,7 +116,7 @@ def test_large_packets(loop):
         server.listen(8887)
 
         data = b'0' * int(200e6)  # slightly more than 100MB
-        conn = rpc(ip='127.0.0.1', port=8887)
+        conn = rpc('127.0.0.1:8887')
         result = yield conn.echo(x=data)
         assert result == data
 
@@ -120,6 +124,7 @@ def test_large_packets(loop):
         result = yield conn.echo(x=d)
         assert result == d
 
+        conn.close_streams()
         server.stop()
 
     loop.run_sync(f)
@@ -131,7 +136,7 @@ def test_identity(loop):
         server = Server({})
         server.listen(8887)
 
-        with rpc(ip='127.0.0.1', port=8887) as remote:
+        with rpc(('127.0.0.1', 8887)) as remote:
             a = yield remote.identity()
             b = yield remote.identity()
             assert a['type'] == 'Server'
@@ -164,21 +169,14 @@ def test_ports(loop):
         server3.stop()
 
 
-def test_errors(loop):
-    s = Server({})
-    try:
-        s.port
-    except OSError as e:
-        assert '.listen' in str(e)
-
-
 def test_coerce_to_rpc():
     with coerce_to_rpc(('127.0.0.1', 8000)) as r:
         assert (r.ip, r.port) == ('127.0.0.1', 8000)
+        assert coerce_to_rpc(r) is r
     with coerce_to_rpc('127.0.0.1:8000') as r:
         assert (r.ip, r.port) == ('127.0.0.1', 8000)
-    with coerce_to_rpc('foo:bar:8000') as r:
-        assert (r.ip, r.port) == ('foo:bar', 8000)
+    with coerce_to_rpc('foobar:8000') as r:
+        assert (r.ip, r.port) == ('foobar', 8000)
 
 
 def stream_div(stream=None, x=None, y=None):
@@ -189,15 +187,15 @@ def test_errors():
     server = Server({'div': stream_div})
     server.listen(0)
 
-    with rpc(ip='127.0.0.1', port=server.port) as r:
+    with rpc(('127.0.0.1', server.port)) as r:
         with pytest.raises(ZeroDivisionError):
             yield r.div(x=1, y=0)
 
 
 @gen_test()
 def test_connect_raises():
-    with pytest.raises((gen.TimeoutError, StreamClosedError, IOError)):
-        yield connect('127.0.0.1', 58259, timeout=0.01)
+    with pytest.raises((gen.TimeoutError, IOError)):
+        yield connect('127.0.0.1:58259', timeout=0.01)
 
 
 @gen_test()
@@ -205,17 +203,23 @@ def test_send_recv_args():
     server = Server({'echo': echo})
     server.listen(0)
 
-    result = yield send_recv(arg=('127.0.0.1', server.port), op='echo', x=b'1')
+    addr = '127.0.0.1:%d' % server.port
+    addr2 = server.address
+
+    result = yield send_recv(addr=addr, op='echo', x=b'1')
     assert result == b'1'
-    result = yield send_recv(addr=('127.0.0.1:%d' % server.port).encode(),
-                             op='echo', x=b'1')
-    assert result == b'1'
-    result = yield send_recv(ip=b'127.0.0.1', port=server.port, op='echo',
-                            x=b'1')
-    assert result == b'1'
-    result = yield send_recv(ip=b'127.0.0.1', port=server.port, op='echo',
-                             x=b'1', reply=False)
+    result = yield send_recv(addr=addr, op='echo', x=b'2', reply=False)
     assert result == None
+    result = yield send_recv(addr=addr2, op='echo', x=b'2')
+    assert result == b'2'
+
+    comm = yield connect(addr)
+    result = yield send_recv(comm, op='echo', x=b'3')
+    assert result == b'3'
+    assert not comm.closed()
+    result = yield send_recv(comm, op='echo', x=b'4', close=True)
+    assert result == b'4'
+    assert comm.closed()
 
     server.stop()
 
@@ -232,7 +236,7 @@ def test_coerce_to_address():
 def test_connection_pool():
 
     @gen.coroutine
-    def ping(stream=None, delay=0.1):
+    def ping(comm, delay=0.1):
         yield gen.sleep(delay)
         raise gen.Return('pong')
 
@@ -259,7 +263,7 @@ def test_connection_pool():
 
     s = servers[0]
     yield [rpc(ip='127.0.0.1', port=s.port).ping(delay=0.1) for i in range(3)]
-    assert len(rpc.available['127.0.0.1', s.port]) == 3
+    assert len(rpc.available['127.0.0.1:%d' % s.port]) == 3
 
     # Explicitly clear out connections
     rpc.collect()
@@ -267,6 +271,8 @@ def test_connection_pool():
     while any(rpc.available.values()):
         yield gen.sleep(0.01)
         assert time() < start + 2
+
+    rpc.close()
 
 
 @gen_cluster()

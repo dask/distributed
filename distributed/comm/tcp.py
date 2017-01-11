@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from datetime import timedelta
+import errno
 import logging
 import socket
 import struct
@@ -90,11 +91,16 @@ def set_tcp_timeout(stream):
 
 class TCP(Comm):
 
-    def __init__(self, stream, deserialize=True):
+    def __init__(self, stream, peer_addr, deserialize=True):
+        self._peer_addr = peer_addr
         self.stream = stream
         self.deserialize = deserialize
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
+
+    @property
+    def peer_address(self):
+        return self._peer_addr
 
     @gen.coroutine
     def read(self, deserialize=None):
@@ -160,6 +166,11 @@ class TCP(Comm):
             finally:
                 stream.close()
 
+    def abort(self):
+        stream, self.stream = self.stream, None
+        if stream is not None and not stream.closed():
+            stream.close()
+
     def closed(self):
         return self.stream is None or self.stream.closed()
 
@@ -174,25 +185,7 @@ class TCPConnector(object):
         stream = yield client.connect(ip, port,
                                       max_buffer_size=MAX_BUFFER_SIZE)
 
-        #start = time()
-        #while True:
-            #future = client.connect(ip, port,
-                                    #max_buffer_size=MAX_BUFFER_SIZE)
-            #try:
-                #stream = yield gen.with_timeout(timedelta(seconds=self.timeout),
-                                                #future)
-            #except EnvironmentError:
-                #if time() - start < self.timeout:
-                    #yield gen.sleep(0.01)
-                    #logger.debug("sleeping on connect")
-                #else:
-                    #raise
-            #except gen.TimeoutError:
-                #raise IOError("Timed out while connecting to %s:%d" % (ip, port))
-            #else:
-                #break
-
-        raise gen.Return(TCP(stream, deserialize))
+        raise gen.Return(TCP(stream, 'tcp://' + address, deserialize))
 
 
 class TCPListener(object):
@@ -207,8 +200,19 @@ class TCPListener(object):
     def start(self):
         self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE)
         self.tcp_server.handle_stream = self.handle_stream
-        #print("TCP server listening on:", (self.ip, self.port))
-        self.tcp_server.listen(self.port, self.ip)
+        for i in range(5):
+            try:
+                self.tcp_server.listen(self.port, self.ip)
+            except EnvironmentError as e:
+                # EADDRINUSE can happen sporadically when trying to bind
+                # to an ephemeral port
+                if self.port != 0 or e.errno != errno.EADDRINUSE:
+                    raise
+                exc = e
+            else:
+                break
+        else:
+            raise exc
 
     def stop(self):
         tcp_server, self.tcp_server = self.tcp_server, None
@@ -237,7 +241,8 @@ class TCPListener(object):
         return 'tcp://' + unparse_host_port(*self.get_host_port())
 
     def handle_stream(self, stream, address):
-        comm = TCP(stream, self.deserialize)
+        address = 'tcp://' + unparse_host_port(*address[:2])
+        comm = TCP(stream, address, self.deserialize)
         self.comm_handler(comm)
 
 

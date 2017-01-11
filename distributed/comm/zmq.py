@@ -76,10 +76,15 @@ def bind_to_random_port(sock, ip):
 
 class ZMQ(Comm):
 
-    def __init__(self, sock, deserialize=True):
+    def __init__(self, sock, peer_addr, deserialize=True):
         self.sock = sock
         self.deserialize = deserialize
+        self._peer_addr = peer_addr
         # XXX socket timeouts
+
+    @property
+    def peer_address(self):
+        return self._peer_addr
 
     @gen.coroutine
     def read(self, deserialize=None):
@@ -108,6 +113,11 @@ class ZMQ(Comm):
         if sock is not None and not sock.closed:
             sock.close(linger=5000)   # 5 seconds
 
+    def abort(self):
+        sock, self.sock = self.sock, None
+        if sock is not None and not sock.closed:
+            sock.close(linger=0)      # no wait
+
     def closed(self):
         return self.sock is None
 
@@ -115,7 +125,7 @@ class ZMQ(Comm):
 class ZMQConnector(object):
 
     @gen.coroutine
-    def _do_connect(self, sock, listener_url, deserialize=True):
+    def _do_connect(self, sock, address, listener_url, deserialize=True):
         sock.connect(listener_url)
 
         req = {'op': 'zmq-connect'}
@@ -124,10 +134,9 @@ class ZMQConnector(object):
         sock.disconnect(listener_url)
 
         resp = from_frames(frames)
-        accept_url = resp['zmq-url']
-        sock.connect(accept_url)
+        sock.connect(resp['zmq-url'])
 
-        comm = ZMQ(sock, deserialize)
+        comm = ZMQ(sock, 'zmq://' + address, deserialize)
         raise gen.Return(comm)
 
     @gen.coroutine
@@ -136,7 +145,7 @@ class ZMQConnector(object):
         sock = make_socket(zmq.DEALER)
         set_socket_options(sock)
 
-        comm = yield self._do_connect(sock, listener_url)
+        comm = yield self._do_connect(sock, address, listener_url)
         raise gen.Return(comm)
 
 
@@ -175,7 +184,8 @@ class ZMQListener(object):
             resp = {'zmq-url': make_zmq_url(self.ip, cli_port)}
             yield self.sock.send_multipart([envelope] + to_frames(resp))
 
-            comm = ZMQ(cli_sock, self.deserialize)
+            address = 'zmq://<unknown>'  # XXX
+            comm = ZMQ(cli_sock, address, self.deserialize)
             self.comm_handler(comm)
 
     def stop(self):
