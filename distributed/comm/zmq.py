@@ -2,22 +2,17 @@ from __future__ import print_function, division, absolute_import
 
 from datetime import timedelta
 import logging
-#import socket
 import struct
 import sys
 
-#from toolz import first
-
 from tornado import gen, ioloop
-from tornado.iostream import StreamClosedError
 
 import zmq
 from zmq.eventloop import ioloop as zmqioloop
 from zmq.eventloop.future import Context
 
 from .. import config
-from ..metrics import time
-from .transports import connectors, listeners, Comm, CommClosedError
+from .core import connectors, listeners, Comm, CommClosedError
 from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 from . import zmqimpl
 
@@ -118,7 +113,6 @@ class ZMQ(Comm):
 
 
 class ZMQConnector(object):
-    timeout = 6
 
     @gen.coroutine
     def _do_connect(self, sock, listener_url, deserialize=True):
@@ -142,13 +136,8 @@ class ZMQConnector(object):
         sock = make_socket(zmq.DEALER)
         set_socket_options(sock)
 
-        #comm = yield gen.with_timeout(timedelta(seconds=self.timeout),
-                                      #self._do_connect(sock, listener_url))
         comm = yield self._do_connect(sock, listener_url)
         raise gen.Return(comm)
-
-    def set_timeout(self, timeout):
-        self.timeout = timeout
 
 
 class ZMQListener(object):

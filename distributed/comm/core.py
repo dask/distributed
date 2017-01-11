@@ -1,13 +1,17 @@
-# XXX rename this to distributed.comm.core?
-
 from __future__ import print_function, division, absolute_import
 
 from abc import ABCMeta, abstractmethod
+from datetime import timedelta
+import logging
 
 from six import with_metaclass
 
 from tornado import gen
 
+from ..metrics import time
+
+
+logger = logging.getLogger(__name__)
 
 # Connector instances
 
@@ -80,18 +84,35 @@ def parse_address(addr):
 
 
 @gen.coroutine
-def connect(addr, deserialize=True):
+def connect(addr, timeout=3, deserialize=True):
     """
     Connect to the given address (a URI such as 'tcp://127.0.0.1:1234')
     and yield a Comm object.
     """
-    # XXX should timeout be handled here or in each transport?
     scheme, loc = parse_address(addr)
     connector = connectors.get(scheme)
     if connector is None:
         raise ValueError("unknown scheme %r in address %r" % (scheme, addr))
 
-    comm = yield connector.connect(loc, deserialize=deserialize)
+    start = time()
+    deadline = start + timeout
+    while True:
+        future = connector.connect(loc, deserialize=deserialize)
+        try:
+            comm = yield gen.with_timeout(timedelta(seconds=deadline - time()),
+                                          future,
+                                          quiet_exceptions=EnvironmentError)
+        except EnvironmentError:
+            if time() < deadline:
+                yield gen.sleep(0.01)
+                logger.debug("sleeping on connect")
+            else:
+                raise
+        except gen.TimeoutError:
+            raise IOError("Timed out while connecting to %r" % (addr,))
+        else:
+            break
+
     raise gen.Return(comm)
 
 

@@ -14,8 +14,7 @@ from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 from .. import config
-from ..metrics import time
-from .transports import connectors, listeners, Comm, CommClosedError
+from .core import connectors, listeners, Comm, CommClosedError
 from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 
 
@@ -166,35 +165,34 @@ class TCP(Comm):
 
 
 class TCPConnector(object):
-    timeout = 3
 
     @gen.coroutine
     def connect(self, address, deserialize=True):
         ip, port = parse_host_port(address)
 
         client = TCPClient()
-        start = time()
-        while True:
-            future = client.connect(ip, port,
-                                    max_buffer_size=MAX_BUFFER_SIZE)
-            try:
-                stream = yield gen.with_timeout(timedelta(seconds=self.timeout),
-                                                future)
-            except EnvironmentError:
-                if time() - start < self.timeout:
-                    yield gen.sleep(0.01)
-                    logger.debug("sleeping on connect")
-                else:
-                    raise
-            except gen.TimeoutError:
-                raise IOError("Timed out while connecting to %s:%d" % (ip, port))
-            else:
-                break
+        stream = yield client.connect(ip, port,
+                                      max_buffer_size=MAX_BUFFER_SIZE)
+
+        #start = time()
+        #while True:
+            #future = client.connect(ip, port,
+                                    #max_buffer_size=MAX_BUFFER_SIZE)
+            #try:
+                #stream = yield gen.with_timeout(timedelta(seconds=self.timeout),
+                                                #future)
+            #except EnvironmentError:
+                #if time() - start < self.timeout:
+                    #yield gen.sleep(0.01)
+                    #logger.debug("sleeping on connect")
+                #else:
+                    #raise
+            #except gen.TimeoutError:
+                #raise IOError("Timed out while connecting to %s:%d" % (ip, port))
+            #else:
+                #break
 
         raise gen.Return(TCP(stream, deserialize))
-
-    def set_timeout(self, timeout):
-        self.timeout = timeout
 
 
 class TCPListener(object):

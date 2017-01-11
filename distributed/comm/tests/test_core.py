@@ -12,7 +12,7 @@ from distributed.metrics import time
 from distributed.utils_test import slow, loop, gen_test, gen_cluster
 
 from distributed.comm import tcp, zmq, connect, listen, CommClosedError
-from distributed.comm.transports import parse_address
+from distributed.comm.core import parse_address
 from distributed.comm.utils import parse_host_port, unparse_host_port
 
 
@@ -286,3 +286,17 @@ def test_tcp_comm_closed_explicit():
 @gen_test()
 def test_zmq_comm_closed_explicit():
     yield check_comm_closed_explicit('zmq://127.0.0.1')
+
+
+@gen.coroutine
+def check_connect_timeout(addr):
+    t1 = time()
+    with pytest.raises(IOError):
+        yield connect(addr, timeout=0.15)
+    dt = time() - t1
+    assert 0.3 >= dt >= 0.1
+
+
+@gen_test()
+def test_tcp_connect_timeout():
+    yield check_connect_timeout('tcp://127.0.0.1:44444')
