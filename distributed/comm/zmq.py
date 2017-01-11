@@ -17,7 +17,7 @@ from zmq.eventloop.future import Context
 
 from .. import config
 from ..metrics import time
-from .transports import connectors, listeners, Comm
+from .transports import connectors, listeners, Comm, CommClosedError
 from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 from . import zmqimpl
 
@@ -87,9 +87,11 @@ class ZMQ(Comm):
         # XXX socket timeouts
 
     @gen.coroutine
-    def read(self):
+    def read(self, deserialize=None):
         if self.sock is None:
-            raise ValueError("ZMQ closed")
+            raise CommClosedError
+        if deserialize is None:
+            deserialize = self.deserialize
 
         frames = yield self.sock.recv_multipart(copy=False)
         msg = from_frames([f.buffer for f in frames], deserialize=self.deserialize)
@@ -98,7 +100,7 @@ class ZMQ(Comm):
     @gen.coroutine
     def write(self, msg):
         if self.sock is None:
-            raise ValueError("ZMQ closed")
+            raise CommClosedError
 
         frames = to_frames(msg)
         copy = all(len(f) < NOCOPY_THRESHOLD for f in frames)
@@ -111,7 +113,8 @@ class ZMQ(Comm):
         if sock is not None and not sock.closed:
             sock.close(linger=5000)   # 5 seconds
 
-    #def abort(self):
+    def closed(self):
+        return self.sock is None
 
 
 class ZMQConnector(object):
@@ -164,7 +167,7 @@ class ZMQListener(object):
         if self.port == 0:
             self.bound_port = bind_to_random_port(self.sock, self.ip)
         else:
-            self.bound_port = port
+            self.bound_port = self.port
             self.sock.bind(make_zmq_url(self.ip, self.port))
         self._listen()
 

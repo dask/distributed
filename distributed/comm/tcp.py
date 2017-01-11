@@ -15,7 +15,7 @@ from tornado.tcpserver import TCPServer
 
 from .. import config
 from ..metrics import time
-from .transports import connectors, listeners, Comm
+from .transports import connectors, listeners, Comm, CommClosedError
 from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 
 
@@ -98,44 +98,54 @@ class TCP(Comm):
         set_tcp_timeout(stream)
 
     @gen.coroutine
-    def read(self):
+    def read(self, deserialize=None):
         if self.stream is None:
-            raise StreamClosedError
+            raise CommClosedError
+        if deserialize is None:
+            deserialize = self.deserialize
 
-        n_frames = yield self.stream.read_bytes(8)
-        n_frames = struct.unpack('Q', n_frames)[0]
-        lengths = yield self.stream.read_bytes(8 * n_frames)
-        lengths = struct.unpack('Q' * n_frames, lengths)
+        try:
+            n_frames = yield self.stream.read_bytes(8)
+            n_frames = struct.unpack('Q', n_frames)[0]
+            lengths = yield self.stream.read_bytes(8 * n_frames)
+            lengths = struct.unpack('Q' * n_frames, lengths)
 
-        frames = []
-        for length in lengths:
-            if length:
-                frame = yield self.stream.read_bytes(length)
-            else:
-                frame = b''
-            frames.append(frame)
+            frames = []
+            for length in lengths:
+                if length:
+                    frame = yield self.stream.read_bytes(length)
+                else:
+                    frame = b''
+                frames.append(frame)
+        except StreamClosedError:
+            self.stream = None
+            raise CommClosedError
 
-        msg = from_frames(frames, deserialize=self.deserialize)
+        msg = from_frames(frames, deserialize=deserialize)
         raise gen.Return(msg)
 
     @gen.coroutine
     def write(self, msg):
         if self.stream is None:
-            raise StreamClosedError
+            raise CommClosedError
 
         frames = to_frames(msg)
 
-        lengths = ([struct.pack('Q', len(frames))] +
-                   [struct.pack('Q', len(frame)) for frame in frames])
-        self.stream.write(b''.join(lengths))
+        try:
+            lengths = ([struct.pack('Q', len(frames))] +
+                       [struct.pack('Q', len(frame)) for frame in frames])
+            self.stream.write(b''.join(lengths))
 
-        for frame in frames:
-            # Can't wait for the write() Future as it may be lost
-            # ("If write is called again before that Future has resolved,
-            #   the previous future will be orphaned and will never resolve")
-            self.stream.write(frame)
+            for frame in frames:
+                # Can't wait for the write() Future as it may be lost
+                # ("If write is called again before that Future has resolved,
+                #   the previous future will be orphaned and will never resolve")
+                self.stream.write(frame)
+        except StreamClosedError:
+            self.stream = None
+            raise CommClosedError
 
-        yield gen.moment
+        yield gen.moment  # Make sure the event loop gets a tick
         raise gen.Return(sum(map(len, frames)))
 
     @gen.coroutine
@@ -151,7 +161,8 @@ class TCP(Comm):
             finally:
                 stream.close()
 
-    #def abort(self):
+    def closed(self):
+        return self.stream is None or self.stream.closed()
 
 
 class TCPConnector(object):

@@ -1,3 +1,5 @@
+# XXX rename this to distributed.comm.core?
+
 from __future__ import print_function, division, absolute_import
 
 from abc import ABCMeta, abstractmethod
@@ -26,35 +28,52 @@ listeners = {
 DEFAULT_SCHEME = 'tcp'
 
 
+class CommClosedError(IOError):
+    pass
+
+
 class Comm(with_metaclass(ABCMeta)):
     """
     A communication object, representing an established communication
     channel.
     """
 
-    def __init__(self, stream, deserialize=True):
-        self.stream = stream
-        self.deserialize = deserialize
-        stream.set_nodelay(True)
-        set_tcp_timeout(stream)
-
     @abstractmethod
-    def read(self):
-        raise NotImplementedError
+    def read(self, deserialize=None):
+        """
+        Read and return a message.  If *deserialize* is not None, it
+        overrides this communication's default setting.
+
+        This method is a coroutine.
+        """
 
     @abstractmethod
     def write(self, msg):
-        raise NotImplementedError
+        """
+        Write a message.
+
+        This method is a coroutine.
+        """
 
     @abstractmethod
     def close(self):
-        raise NotImplementedError
+        """
+        Close the communication cleanly.
+
+        This method is a coroutine.
+        """
+
+    @abstractmethod
+    def closed(self):
+        """
+        Return whether the stream is closed.
+        """
 
 
 def parse_address(addr):
     if not isinstance(addr, str):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
-    scheme, sep, loc = addr.partition('://')
+    scheme, sep, loc = addr.rpartition('://')
     if not sep:
         scheme = DEFAULT_SCHEME
     return scheme, loc
@@ -63,9 +82,10 @@ def parse_address(addr):
 @gen.coroutine
 def connect(addr, deserialize=True):
     """
-    Connect to the given address (a URI such as 'tcp://localhost:1234')
-    and yield a comm object.
+    Connect to the given address (a URI such as 'tcp://127.0.0.1:1234')
+    and yield a Comm object.
     """
+    # XXX should timeout be handled here or in each transport?
     scheme, loc = parse_address(addr)
     connector = connectors.get(scheme)
     if connector is None:
@@ -76,6 +96,10 @@ def connect(addr, deserialize=True):
 
 
 def listen(addr, handle_comm, deserialize=True):
+    """
+    Listen on the given address (a URI such as 'tcp://192.168.1.254')
+    and call *handle_comm* with a Comm object on each incoming connection.
+    """
     scheme, loc = parse_address(addr)
     listener_class = listeners.get(scheme)
     if listener_class is None:

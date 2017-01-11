@@ -11,7 +11,8 @@ from distributed.core import pingpong
 from distributed.metrics import time
 from distributed.utils_test import slow, loop, gen_test, gen_cluster
 
-from distributed.comm import tcp, zmq, connect, listen
+from distributed.comm import tcp, zmq, connect, listen, CommClosedError
+from distributed.comm.transports import parse_address
 from distributed.comm.utils import parse_host_port, unparse_host_port
 
 
@@ -72,12 +73,9 @@ def test_tcp_specific():
     """
     Test concrete TCP API.
     """
-    q = queues.Queue()
-
     @gen.coroutine
     def handle_comm(comm):
         msg = yield comm.read()
-        q.put(msg)
         msg['op'] = 'pong'
         yield comm.write(msg)
         yield comm.close()
@@ -116,12 +114,10 @@ def test_zmq_specific():
     Test concrete ZMQ API.
     """
     debug_loop()
-    q = queues.Queue()
 
     @gen.coroutine
     def handle_comm(comm):
         msg = yield comm.read()
-        q.put(msg)
         msg['op'] = 'pong'
         yield comm.write(msg)
         yield comm.close()
@@ -172,6 +168,10 @@ def check_client_server(addr):
     listener.start()
     bound_addr = listener.get_address()
 
+    scheme, loc = parse_address(bound_addr)
+    assert scheme in ('tcp', 'zmq')
+    assert scheme == parse_address(addr)[0]
+
     l = []
 
     @gen.coroutine
@@ -198,23 +198,91 @@ def check_client_server(addr):
 def test_default_client_server_ipv4():
     # Default scheme is (currently) TCP
     yield check_client_server('127.0.0.1')
+    yield check_client_server('127.0.0.1:3241')
 
 @gen_test()
 def test_default_client_server_ipv6():
     yield check_client_server('[::1]')
+    yield check_client_server('[::1]:3242')
 
 @gen_test()
 def test_tcp_client_server_ipv4():
     yield check_client_server('tcp://127.0.0.1')
+    yield check_client_server('tcp://127.0.0.1:3243')
 
 @gen_test()
 def test_tcp_client_server_ipv6():
     yield check_client_server('tcp://[::1]')
+    yield check_client_server('tcp://[::1]:3244')
 
 @gen_test()
 def test_zmq_client_server_ipv4():
     yield check_client_server('zmq://127.0.0.1')
+    yield check_client_server('zmq://127.0.0.1:3245')
 
 @gen_test()
 def test_zmq_client_server_ipv6():
     yield check_client_server('zmq://[::1]')
+    yield check_client_server('zmq://[::1]:3246')
+
+
+@gen.coroutine
+def check_comm_closed_implicit(addr):
+    @gen.coroutine
+    def handle_comm(comm):
+        yield comm.close()
+
+    listener = listen(addr, handle_comm)
+    listener.start()
+    bound_addr = listener.get_address()
+
+    comm = yield connect(bound_addr)
+    with pytest.raises(CommClosedError):
+        yield comm.write({})
+
+    comm = yield connect(bound_addr)
+    with pytest.raises(CommClosedError):
+        yield comm.read()
+
+
+@gen_test()
+def test_tcp_comm_closed_implicit():
+    yield check_comm_closed_implicit('tcp://127.0.0.1')
+
+# XXX zmq transport does not detect a connection is closed by peer
+#@gen_test()
+#def test_zmq_comm_closed():
+    #yield check_comm_closed('zmq://127.0.0.1')
+
+
+@gen.coroutine
+def check_comm_closed_explicit(addr):
+    @gen.coroutine
+    def handle_comm(comm):
+        # Wait
+        try:
+            yield comm.read()
+        except CommClosedError:
+            pass
+
+    listener = listen(addr, handle_comm)
+    listener.start()
+    bound_addr = listener.get_address()
+
+    comm = yield connect(bound_addr)
+    comm.close()
+    with pytest.raises(CommClosedError):
+        yield comm.write({})
+
+    comm = yield connect(bound_addr)
+    comm.close()
+    with pytest.raises(CommClosedError):
+        yield comm.read()
+
+@gen_test()
+def test_tcp_comm_closed_explicit():
+    yield check_comm_closed_explicit('tcp://127.0.0.1')
+
+@gen_test()
+def test_zmq_comm_closed_explicit():
+    yield check_comm_closed_explicit('zmq://127.0.0.1')
