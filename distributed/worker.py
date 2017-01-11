@@ -1145,6 +1145,9 @@ class Worker(WorkerBase):
             if self.task_state[key] == 'waiting':
                 self.data_needed.appendleft(key)
 
+        if not self.dependencies[dep]:
+            self.release_dep(dep)
+
     def transition_dep_flight_memory(self, dep, value=None):
         if self.validate:
             assert dep in self.in_flight_tasks
@@ -1609,6 +1612,8 @@ class Worker(WorkerBase):
 
             for dep in self.dependencies.pop(key, ()):
                 self.dependents[dep].remove(key)
+                if self.dep_state[dep] == 'waiting':
+                    self.release_dep(dep)
 
             if key in self.threads:
                 del self.threads[key]
@@ -1860,7 +1865,9 @@ class Worker(WorkerBase):
         assert not any(key in self.ready for key in self.dependents[dep])
 
     def validate_dep_flight(self, dep):
-        self.validate_dep_waiting(dep)
+        assert dep not in self.data
+        assert dep in self.nbytes
+        assert not any(key in self.ready for key in self.dependents[dep])
         peer = self.in_flight_tasks[dep]
         assert dep in self.in_flight_workers[peer]
 
