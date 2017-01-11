@@ -1112,60 +1112,85 @@ class Worker(WorkerBase):
         func = self._dep_transitions[start, finish]
         state = func(dep, **kwargs)
         self.log.append(('dep', dep, start, state or finish))
-        self.dep_state[dep] = state or finish
-        if self.validate:
-            self.validate_dep(dep)
+        if dep in self.dep_state:
+            self.dep_state[dep] = state or finish
+            if self.validate:
+                self.validate_dep(dep)
 
     def transition_dep_waiting_flight(self, dep, worker=None):
-        if self.validate:
-            assert dep not in self.in_flight_tasks
-            assert self.dependents[dep]
+        try:
+            if self.validate:
+                assert dep not in self.in_flight_tasks
+                assert self.dependents[dep]
 
-        self.in_flight_tasks[dep] = worker
+            self.in_flight_tasks[dep] = worker
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def transition_dep_flight_waiting(self, dep, worker=None):
-        if self.validate:
-            assert dep in self.in_flight_tasks
-
-        del self.in_flight_tasks[dep]
         try:
-            self.who_has[dep].remove(worker)
-        except KeyError:
-            pass
-        try:
-            self.has_what[worker].remove(dep)
-        except KeyError:
-            pass
+            if self.validate:
+                assert dep in self.in_flight_tasks
 
-        if not self.who_has[dep]:
-            if dep not in self._missing_dep_flight:
-                self._missing_dep_flight.add(dep)
-                self.loop.add_callback(self.handle_missing_dep, dep)
-        for key in self.dependents.get(dep, ()):
-            if self.task_state[key] == 'waiting':
-                self.data_needed.appendleft(key)
+            del self.in_flight_tasks[dep]
+            try:
+                self.who_has[dep].remove(worker)
+            except KeyError:
+                pass
+            try:
+                self.has_what[worker].remove(dep)
+            except KeyError:
+                pass
 
-        if not self.dependencies[dep]:
-            self.release_dep(dep)
+            if not self.who_has[dep]:
+                if dep not in self._missing_dep_flight:
+                    self._missing_dep_flight.add(dep)
+                    self.loop.add_callback(self.handle_missing_dep, dep)
+            for key in self.dependents.get(dep, ()):
+                if self.task_state[key] == 'waiting':
+                    self.data_needed.appendleft(key)
+
+            if not self.dependents[dep]:
+                self.release_dep(dep)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def transition_dep_flight_memory(self, dep, value=None):
-        if self.validate:
-            assert dep in self.in_flight_tasks
+        try:
+            if self.validate:
+                assert dep in self.in_flight_tasks
 
-        del self.in_flight_tasks[dep]
-        self.dep_state[dep] = 'memory'
-        self.put_key_in_memory(dep, value)
+            del self.in_flight_tasks[dep]
+            self.dep_state[dep] = 'memory'
+            self.put_key_in_memory(dep, value)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb; pdb.set_trace()
+            raise
 
     def transition_dep_waiting_memory(self, dep, value=None):
-        if self.validate:
-            try:
-                assert dep in self.data
-                assert dep in self.nbytes
-                assert dep in self.types
-                assert self.task_state[dep] == 'memory'
-            except Exception as e:
-                logger.exception(e)
+        try:
+            if self.validate:
+                try:
+                    assert dep in self.data
+                    assert dep in self.nbytes
+                    assert dep in self.types
+                    assert self.task_state[dep] == 'memory'
+                except Exception as e:
+                    logger.exception(e)
+                    import pdb; pdb.set_trace()
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
                 import pdb; pdb.set_trace()
+            raise
 
     def transition(self, key, finish, **kwargs):
         start = self.task_state[key]
@@ -1612,7 +1637,7 @@ class Worker(WorkerBase):
 
             for dep in self.dependencies.pop(key, ()):
                 self.dependents[dep].remove(key)
-                if self.dep_state[dep] == 'waiting':
+                if not self.dependents[dep] and self.dep_state[dep] == 'waiting':
                     self.release_dep(dep)
 
             if key in self.threads:
@@ -1662,7 +1687,7 @@ class Worker(WorkerBase):
                     del self.types[dep]
                 del self.nbytes[dep]
 
-            if state == 'flight':
+            if dep in self.in_flight_tasks:
                 del self.in_flight_tasks[dep]
 
             for key in self.dependents.pop(dep, ()):
