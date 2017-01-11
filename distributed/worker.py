@@ -1609,8 +1609,6 @@ class Worker(WorkerBase):
 
             for dep in self.dependencies.pop(key, ()):
                 self.dependents[dep].remove(key)
-                if not self.dependents[dep]:
-                    self.release_dep(dep)
 
             if key in self.threads:
                 del self.threads[key]
