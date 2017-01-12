@@ -293,9 +293,7 @@ def send_recv(comm=None, addr=None, reply=True, deserialize=True, **kwargs):
     """
     assert (comm is None) != (addr is None)
     if comm is None:
-        if PY3 and isinstance(addr, bytes):
-            addr = addr.decode()
-        comm = yield connect(addr, deserialize=deserialize)
+        comm = yield connect(addr_from_args(addr), deserialize=deserialize)
 
     msg = kwargs
     msg['reply'] = reply

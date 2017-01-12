@@ -1370,9 +1370,8 @@ class Scheduler(Server):
         if nanny:
             addresses = []
             for addr in workers:
-                ip = addr.split(':')[0]
-                port = self.worker_info[addr]['services']['nanny']
-                addresses.append('%s:%d' % (ip, port))
+                info = self.worker_info[addr]
+                addresses.append((info['host'], info['services']['nanny']))
         else:
             addresses = workers
 
