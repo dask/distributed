@@ -27,13 +27,12 @@ from tornado import gen
 from tornado.gen import Return, TimeoutError
 from tornado.locks import Event
 from tornado.ioloop import IOLoop, PeriodicCallback
-from tornado.iostream import StreamClosedError
 from tornado.queues import Queue
 
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
-from .core import (read, write, connect, coerce_to_rpc, clean_exception)
+from .core import connect, coerce_to_rpc, clean_exception, CommClosedError
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .worker import dumps_function, dumps_task
@@ -463,23 +462,23 @@ class Client(object):
             return
 
         try:
-            stream = yield connect(self.scheduler.ip, self.scheduler.port,
-                                   timeout=timeout)
+            comm = yield connect(self.scheduler.address,
+                                 timeout=timeout)
         except:
-            raise IOError("Could not connect to %s:%d" %
-                          (self.scheduler.ip, self.scheduler.port))
+            raise IOError("Could not connect to %r"
+                          % (self.scheduler.address,))
 
         ident = yield self.scheduler.identity()
 
-        yield write(stream, {'op': 'register-client',
-                             'client': self.id})
-        msg = yield read(stream)
+        yield comm.write({'op': 'register-client',
+                          'client': self.id})
+        msg = yield comm.read()
         assert len(msg) == 1
         assert msg[0]['op'] == 'stream-start'
 
-        bstream = BatchedSend(interval=10, loop=self.loop)
-        bstream.start(stream)
-        self.scheduler_stream = bstream
+        bcomm = BatchedSend(interval=10, loop=self.loop)
+        bcomm.start(comm)
+        self.scheduler_stream = bcomm
 
         _global_client[0] = self
         self.status = 'running'
@@ -527,8 +526,8 @@ class Client(object):
         with log_errors():
             while True:
                 try:
-                    msgs = yield read(self.scheduler_stream.stream)
-                except StreamClosedError:
+                    msgs = yield self.scheduler_stream.comm.read()
+                except CommClosedError:
                     if self.status == 'running':
                         logger.warn("Client report stream closed to scheduler")
                         logger.info("Reconnecting...")

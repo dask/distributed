@@ -13,11 +13,12 @@ from time import sleep
 import weakref
 
 from tornado.ioloop import IOLoop
-from tornado.iostream import StreamClosedError
 from tornado import gen
 
+from .comm.core import normalize_address
+from .comm.utils import unparse_host_port
 from .compatibility import JSONDecodeError
-from .core import Server, rpc, write, RPCClosed
+from .core import Server, rpc, RPCClosed, CommClosedError
 from .metrics import disk_io_counters, net_io_counters, time
 from .protocol import to_serialize
 from .utils import get_ip, ignoring, log_errors, mp_context, tmpfile
@@ -33,11 +34,15 @@ class Nanny(Server):
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary.
     """
-    def __init__(self, scheduler_ip, scheduler_port, ip=None, worker_port=0,
+    def __init__(self, scheduler_ip, scheduler_port=None, ip=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit=TOTAL_MEMORY, reconnect=True,
                  validate=False, environment=nanny_environment, quiet=False,
                  resources=None, silence_logs=None, **kwargs):
+        if scheduler_port is None:
+            scheduler_addr = normalize_address(scheduler_ip)
+        else:
+            scheduler_addr = normalize_address(unparse_host_port(scheduler_ip, scheduler_port))
         self.ip = ip or get_ip()
         self.worker_port = None
         self._given_worker_port = worker_port
@@ -59,7 +64,7 @@ class Nanny(Server):
         self.status = None
         self.process = None
         self.loop = loop or IOLoop.current()
-        self.scheduler = rpc(ip=scheduler_ip, port=scheduler_port)
+        self.scheduler = rpc(scheduler_addr)
         self.services = services
         self.name = name
         self.memory_limit = memory_limit
@@ -99,7 +104,7 @@ class Nanny(Server):
         self.loop.add_callback(self._start, port)
 
     @gen.coroutine
-    def _kill(self, stream=None, timeout=10):
+    def _kill(self, comm=None, timeout=10):
         """ Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -124,7 +129,7 @@ class Nanny(Server):
 
             except gen.TimeoutError:
                 logger.info("Worker non-responsive.  Terminating.")
-            except StreamClosedError:
+            except CommClosedError:
                 pass
             except BaseException as e:
                 logger.exception(e)
@@ -145,7 +150,7 @@ class Nanny(Server):
                 logger.warn("Nanny %s:%d failed to unregister worker %s:%d",
                         self.ip, self.port, self.ip, self.worker_port,
                         exc_info=True)
-            except (StreamClosedError, RPCClosed):
+            except (CommClosedError, RPCClosed):
                 pass
             except Exception as e:
                 logger.exception(e)
@@ -169,7 +174,7 @@ class Nanny(Server):
         raise gen.Return('OK')
 
     @gen.coroutine
-    def instantiate(self, stream=None, environment=None):
+    def instantiate(self, comm=None, environment=None):
         """ Start a local worker process
 
         Blocks until the process is up and the scheduler is properly informed
@@ -245,7 +250,7 @@ class Nanny(Server):
         raise gen.Return('OK')
 
     @gen.coroutine
-    def restart(self, stream=None, environment=None):
+    def restart(self, comm=None, environment=None):
         self.should_watch = False
         yield self._kill()
         yield self.instantiate(environment=environment)
@@ -280,7 +285,7 @@ class Nanny(Server):
                 self.cleanup()
                 try:
                     yield self.scheduler.unregister(address=self.worker_address)
-                except StreamClosedError:
+                except CommClosedError:
                     if self.reconnect:
                         yield gen.sleep(wait_seconds)
                     else:
@@ -292,7 +297,7 @@ class Nanny(Server):
                 yield gen.sleep(wait_seconds)
 
     @gen.coroutine
-    def _close(self, stream=None, timeout=5, report=None):
+    def _close(self, comm=None, timeout=5, report=None):
         """ Close the nanny process, stop listening """
         if self.status == 'closed':
             raise gen.Return('OK')
@@ -303,10 +308,6 @@ class Nanny(Server):
         self.scheduler.close_rpc()
         self.stop()
         raise gen.Return('OK')
-
-    @property
-    def address(self):
-        return '%s:%d' % (self.ip, self.port)
 
     @property
     def address_tuple(self):
@@ -338,10 +339,10 @@ class Nanny(Server):
                 'net_io_counters': net_io_counters()._asdict()}
 
     @gen.coroutine
-    def monitor_resources(self, stream, interval=1):
-        while not stream.closed():
+    def monitor_resources(self, comm, interval=1):
+        while not comm.closed():
             if self.process:
-                yield write(stream, self.resource_collect())
+                yield comm.write(self.resource_collect())
             yield gen.sleep(interval)
 
 

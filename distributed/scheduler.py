@@ -488,10 +488,10 @@ class Scheduler(Server):
             if name in self.aliases:
                 return 'name taken, %s' % name
 
-            if 'ports' not in self.host_info[host]:
-                self.host_info[host].update({'ports': set(), 'cores': 0})
+            if 'addresses' not in self.host_info[host]:
+                self.host_info[host].update({'addresses': set(), 'cores': 0})
 
-            self.host_info[host]['ports'].add(address)
+            self.host_info[host]['addresses'].add(address)
             self.host_info[host]['cores'] += ncores
 
             self.ncores[address] = ncores
@@ -499,6 +499,7 @@ class Scheduler(Server):
             self.total_ncores += ncores
             self.aliases[name] = address
             self.worker_info[address]['name'] = name
+            self.worker_info[address]['host'] = host
 
             if address not in self.processing:
                 self.has_what[address] = set()
@@ -605,14 +606,32 @@ class Scheduler(Server):
                 self.priority[key] = (self.generation, new_priority[key]) # prefer old
 
         if restrictions:
-            restrictions = {k: v for k, v in restrictions.items()
-                                 if v is not None}
-            restrictions = {k: set(map(self.coerce_address, v))
-                            for k, v in restrictions.items()}
-            worker_restrictions = {k: {w for w in s if ':' in w}
-                                    for k, s in restrictions.items()}
-            host_restrictions = {k: {w for w in s if ':' not in w}
-                                 for k, s in restrictions.items()}
+            # *restrictions* is a dict keying task ids to lists of
+            # restriction specifications (either worker names or addresses)
+            print("restrictions =", restrictions)
+            worker_restrictions = defaultdict(set)
+            host_restrictions = defaultdict(set)
+            for k, v in restrictions.items():
+                if v is None:
+                    continue
+                for w in v:
+                    try:
+                        w = self.coerce_address(w)
+                    except ValueError:
+                        # Not a valid address, but perhaps it's a hostname
+                        host_restrictions[k].add(self.coerce_hostname(w))
+                    else:
+                        worker_restrictions[k].add(w)
+
+            print("worker_restrictions:", worker_restrictions)
+            print("host_restrictions:", host_restrictions)
+
+            #restrictions = {k: set(map(self.coerce_address, v))
+                            #for k, v in restrictions.items()}
+            #worker_restrictions = {k: {w for w in s if ':' in w}
+                                    #for k, s in restrictions.items()}
+            #host_restrictions = {k: {w for w in s if ':' not in w}
+                                 #for k, s in restrictions.items()}
             self.worker_restrictions.update(worker_restrictions)
             self.host_restrictions.update(host_restrictions)
 
@@ -740,10 +759,10 @@ class Scheduler(Server):
                 self.worker_comms[address].send({'op': 'close'})
 
             self.host_info[host]['cores'] -= self.ncores[address]
-            self.host_info[host]['ports'].remove(address)
+            self.host_info[host]['addresses'].remove(address)
             self.total_ncores -= self.ncores[address]
 
-            if not self.host_info[host]['ports']:
+            if not self.host_info[host]['addresses']:
                 del self.host_info[host]
 
             del self.worker_comms[address]
@@ -1347,7 +1366,7 @@ class Scheduler(Server):
         if hosts is not None:
             for host in hosts:
                 if host in self.host_info:
-                    workers.extend(self.host_info[host]['ports'])
+                    workers.extend(self.host_info[host]['addresses'])
         # TODO replace with worker_list
 
         if nanny:
@@ -2682,7 +2701,9 @@ class Scheduler(Server):
 
         if key in self.host_restrictions:
             hr = self.host_restrictions[key]
-            ss = {w for w in self.worker_info if w.split(':')[0] in hr}
+            ss = [self.host_info[h]['addresses']
+                  for h in hr if h in self.host_info]
+            ss = set.union(*ss) if ss else set()
             if s is True:
                 s = ss
             else:
@@ -2733,9 +2754,10 @@ class Scheduler(Server):
 
     def coerce_address(self, addr, resolve=True):
         """
-        Coerce possible input addresses to canonical form
+        Coerce possible input addresses to canonical form.
+        *resolve* can be disabled for testing with fake hostnames.
 
-        Handles lists, strings, bytes, tuples, or aliases
+        Handles strings, tuples, or aliases.
         """
         # XXX how many address-parsing routines do we have?
         if addr in self.aliases:
@@ -2756,6 +2778,12 @@ class Scheduler(Server):
             addr = normalize_address(addr)
 
         return addr
+
+    def coerce_hostname(self, host):
+        """
+        Coerce the hostname of a worker.
+        """
+        return self.aliases.get(host, host)
 
     def _get_host_port(self, address):
         # XXX this should be scheme-dependent

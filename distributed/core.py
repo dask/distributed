@@ -23,7 +23,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
 from .comm import connect, listen, CommClosedError
-from .comm.core import parse_address, Comm
+from .comm.core import parse_address, normalize_address, Comm
 from .comm.utils import parse_host_port, unparse_host_port
 from .compatibility import PY3, unicode, WINDOWS
 from .config import config
@@ -322,23 +322,14 @@ def send_recv(comm=None, addr=None, reply=True, deserialize=True, **kwargs):
     raise gen.Return(response)
 
 
-def ip_port_from_args(arg=None, addr=None, ip=None, port=None):
-    # XXX simplify this?
-    if arg:
-        if isinstance(arg, (unicode, bytes)):
-            addr = arg
-        if isinstance(arg, tuple):
-            ip, port = arg
-    if addr:
-        if PY3 and isinstance(addr, bytes):
-            addr = addr.decode()
-        assert not ip and not port
-        ip, port = addr.rsplit(':', 1)
-        port = int(port)
-    if PY3 and isinstance(ip, bytes):
-        ip = ip.decode()
-
-    return ip, port
+def addr_from_args(addr=None, ip=None, port=None):
+    if addr is None:
+        addr = (ip, port)
+    else:
+        assert ip is None and port is None
+    if isinstance(addr, tuple):
+        addr = unparse_host_port(*addr)
+    return normalize_address(addr)
 
 
 class rpc(object):
@@ -538,10 +529,9 @@ class ConnectionPool(object):
 
     __repr__ = __str__
 
-    def __call__(self, arg=None, ip=None, port=None, addr=None):
+    def __call__(self, addr=None, ip=None, port=None):
         """ Cached rpc objects """
-        ip, port = ip_port_from_args(arg=arg, addr=addr, ip=ip, port=port)
-        addr = unparse_host_port(ip, port)
+        addr = addr_from_args(addr=addr, ip=ip, port=port)
         return PooledRPCCall(addr, self)
 
     @gen.coroutine

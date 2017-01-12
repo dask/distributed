@@ -284,7 +284,7 @@ def ensure_ip(hostname):
     >>> ensure_ip('123.123.123.123')  # pass through IP addresses
     '123.123.123.123'
     """
-    # Prefer IPv4 over IPv6
+    # Prefer IPv4 over IPv6, for compatibility
     families = [socket.AF_INET, socket.AF_INET6]
     for fam in families:
         try:
@@ -297,17 +297,6 @@ def ensure_ip(hostname):
             return results[0][4][0]
 
     raise exc
-    #if PY3 and isinstance(hostname, bytes):
-        #hostname = hostname.decode()
-    #if re.match('\d+\.\d+\.\d+\.\d+', hostname):  # is IPv4
-        #return hostname
-    #else:
-        #try:
-            #return socket.gethostbyname(hostname)
-        #except Exception as e:
-            #logger.warn("Could not resolve hostname: %s", hostname,
-                        #exc_info=True)
-            #raise
 
 
 tblib.pickling_support.install()

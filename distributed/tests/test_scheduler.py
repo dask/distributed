@@ -301,7 +301,7 @@ def test_add_worker(s, a, b):
     s.validate_state()
 
     assert w.ip in s.host_info
-    assert s.host_info[w.ip]['ports'] == {a.address, b.address, w.address}
+    assert s.host_info[w.ip]['addresses'] == {a.address, b.address, w.address}
     yield w._close()
 
 
@@ -655,23 +655,23 @@ def test_host_health(s, a, b, c):
 
     assert set(s.host_info) == {'127.0.0.1', '127.0.0.2'}
     assert s.host_info['127.0.0.1']['cores'] == 3
-    assert s.host_info['127.0.0.1']['ports'] == {a.address, c.address}
+    assert s.host_info['127.0.0.1']['addresses'] == {a.address, c.address}
     assert s.host_info['127.0.0.2']['cores'] == 2
-    assert s.host_info['127.0.0.2']['ports'] == {b.address}
+    assert s.host_info['127.0.0.2']['addresses'] == {b.address}
 
     s.remove_worker(address=a.address)
 
     assert set(s.host_info) == {'127.0.0.1', '127.0.0.2'}
     assert s.host_info['127.0.0.1']['cores'] == 1
-    assert s.host_info['127.0.0.1']['ports'] == {c.address}
+    assert s.host_info['127.0.0.1']['addresses'] == {c.address}
     assert s.host_info['127.0.0.2']['cores'] == 2
-    assert s.host_info['127.0.0.2']['ports'] == {b.address}
+    assert s.host_info['127.0.0.2']['addresses'] == {b.address}
 
     s.remove_worker(address=b.address)
 
     assert set(s.host_info) == {'127.0.0.1'}
     assert s.host_info['127.0.0.1']['cores'] == 1
-    assert s.host_info['127.0.0.1']['ports'] == {c.address}
+    assert s.host_info['127.0.0.1']['addresses'] == {c.address}
 
     s.remove_worker(address=c.address)
 
@@ -904,7 +904,7 @@ def test_worker_breaks_and_returns(c, s, a):
 
     yield _wait(future)
 
-    a.batched_stream.stream.close()
+    a.batched_stream.comm.close()
 
     yield gen.sleep(0.1)
     start = time()

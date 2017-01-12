@@ -248,8 +248,8 @@ def test_connection_pool():
 
     # Reuse connections
     yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
-    yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
-    yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
+    yield [rpc(s.address).ping() for s in servers[:5]]
+    yield [rpc('127.0.0.1:%d' % s.port).ping() for s in servers[:5]]
     yield [rpc(ip='127.0.0.1', port=s.port).ping() for s in servers[:5]]
     assert sum(map(len, rpc.available.values())) == 5
     assert sum(map(len, rpc.occupied.values())) == 0
@@ -263,7 +263,7 @@ def test_connection_pool():
 
     s = servers[0]
     yield [rpc(ip='127.0.0.1', port=s.port).ping(delay=0.1) for i in range(3)]
-    assert len(rpc.available['127.0.0.1:%d' % s.port]) == 3
+    assert len(rpc.available['tcp://127.0.0.1:%d' % s.port]) == 3
 
     # Explicitly clear out connections
     rpc.collect()
