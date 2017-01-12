@@ -7,11 +7,10 @@ import sys
 import pytest
 from toolz import valmap
 from tornado.tcpclient import TCPClient
-from tornado.iostream import StreamClosedError
 from tornado import gen
 
 from distributed import Nanny, rpc, Scheduler
-from distributed.core import connect, read, write, close
+from distributed.core import connect, CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps, loads
 from distributed.utils import ignoring
@@ -24,7 +23,7 @@ def test_nanny(s):
     n = Nanny(s.ip, s.port, ncores=2, ip='127.0.0.1', loop=s.loop)
 
     yield n._start(0)
-    with rpc(ip=n.ip, port=n.port) as nn:
+    with rpc(n.address) as nn:
         assert isalive(n.process)  # alive
         assert s.ncores[n.worker_address] == 2
 
@@ -68,9 +67,9 @@ def test_nanny_process_failure(c, s):
     assert os.path.exists(first_dir)
 
     original_process = n.process
-    ww = rpc(ip=n.ip, port=n.worker_port)
+    ww = rpc(n.worker_address)
     yield ww.update_data(data=valmap(dumps, {'x': 1, 'y': 2}))
-    with ignoring(StreamClosedError):
+    with ignoring(CommClosedError):
         yield c._run(sys.exit, 0, workers=[n.worker_address])
 
     start = time()
@@ -114,15 +113,15 @@ def test_monitor_resources(s):
 
     assert 'timestamp' in d
 
-    stream = yield connect(ip=n.ip, port=n.port)
-    yield write(stream, {'op': 'monitor_resources', 'interval': 0.01})
+    comm = yield connect(n.address)
+    yield comm.write({'op': 'monitor_resources', 'interval': 0.01})
 
     for i in range(3):
-        msg = yield read(stream)
+        msg = yield comm.read()
         assert isinstance(msg, dict)
         assert {'cpu_percent', 'memory_percent'}.issubset(msg)
 
-    close(stream)
+    yield comm.close()
     yield n._close()
     s.stop()
 

@@ -179,7 +179,7 @@ class WorkerBase(Server):
     @gen.coroutine
     def _register_with_scheduler(self):
         self.heartbeat_callback.stop()
-        while True:
+        while self.status not in ('closed', 'closing'):
             try:
                 resp = yield self.scheduler.register(
                         ncores=self.ncores, address=self.address,
@@ -195,7 +195,7 @@ class WorkerBase(Server):
                 break
             except EnvironmentError:
                 logger.debug("Unable to register with scheduler.  Waiting")
-                yield gen.sleep(0.5)
+                yield gen.sleep(0.1)
         if resp != 'OK':
             raise ValueError(resp)
         self.heartbeat_callback.start()

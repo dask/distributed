@@ -150,7 +150,7 @@ class Nanny(Server):
                 logger.warn("Nanny %r failed to unregister worker %r",
                             self.address, self.worker_address,
                             exc_info=True)
-            except (CommClosedError, RPCClosed):
+            except (CommClosedError, EnvironmentError, RPCClosed):
                 pass
             except Exception as e:
                 logger.exception(e)
@@ -285,14 +285,15 @@ class Nanny(Server):
                 self.cleanup()
                 try:
                     yield self.scheduler.unregister(address=self.worker_address)
-                except CommClosedError:
+                except (EnvironmentError, CommClosedError):
                     if self.reconnect:
                         yield gen.sleep(wait_seconds)
                     else:
                         yield self._close()
                         break
-                logger.warn('Restarting worker...')
-                yield self.instantiate()
+                if self.status != 'closed':
+                    logger.warn('Restarting worker...')
+                    yield self.instantiate()
             else:
                 yield gen.sleep(wait_seconds)
 
@@ -301,7 +302,7 @@ class Nanny(Server):
         """ Close the nanny process, stop listening """
         if self.status == 'closed':
             raise gen.Return('OK')
-        logger.info("Closing Nanny at %s:%d", self.ip, self.port)
+        logger.info("Closing Nanny at %r", self.address)
         self.status = 'closed'
         yield self._kill(timeout=timeout)
         self.rpc.close()
