@@ -7,10 +7,9 @@ from timeit import default_timer
 
 from tornado import gen, locks
 from tornado.queues import Queue
-from tornado.iostream import StreamClosedError
 from tornado.ioloop import PeriodicCallback, IOLoop
 
-from .core import read, write, close
+from .core import CommClosedError
 from .utils import ignoring, log_errors
 
 
@@ -40,6 +39,7 @@ class BatchedSend(object):
         ['Hello,', 'world!']
     """
     def __init__(self, interval, loop=None):
+        # XXX is the loop arg useful?
         self.loop = loop or IOLoop.current()
         self.interval = interval / 1000.
 
@@ -47,14 +47,14 @@ class BatchedSend(object):
         self.stopped = locks.Event()
         self.please_stop = False
         self.buffer = []
-        self.stream = None
+        self.comm = None
         self.message_count = 0
         self.batch_count = 0
         self.byte_count = 0
         self.next_deadline = None
 
-    def start(self, stream):
-        self.stream = stream
+    def start(self, comm):
+        self.comm = comm
         self.loop.add_callback(self._background_send)
 
     def __str__(self):
@@ -80,10 +80,10 @@ class BatchedSend(object):
             self.batch_count += 1
             self.next_deadline = self.loop.time() + self.interval
             try:
-                nbytes = yield write(self.stream, payload)
+                nbytes = yield self.comm.write(payload)
                 self.byte_count += nbytes
-            except StreamClosedError:
-                logger.info("Batched Stream Closed")
+            except CommClosedError:
+                logger.info("Batched Comm Closed")
                 break
             except Exception:
                 logger.exception("Error in batched write")
@@ -96,8 +96,8 @@ class BatchedSend(object):
 
         This completes quickly and synchronously
         """
-        if self.stream is not None and self.stream._closed:
-            raise StreamClosedError()
+        if self.comm is not None and self.comm.closed():
+            raise CommClosedError
 
         self.message_count += 1
         self.buffer.append(msg)
@@ -107,8 +107,8 @@ class BatchedSend(object):
 
     @gen.coroutine
     def close(self, ignore_closed=False):
-        """ Flush existing messages and then close stream """
-        if self.stream is None:
+        """ Flush existing messages and then close comm """
+        if self.comm is None:
             return
         self.please_stop = True
         self.waker.set()
@@ -116,8 +116,8 @@ class BatchedSend(object):
         try:
             if self.buffer:
                 self.buffer, payload = [], self.buffer
-                yield write(self.stream, payload)
-        except StreamClosedError:
+                yield self.comm.write(payload)
+        except CommClosedError:
             if not ignore_closed:
                 raise
-        yield close(self.stream)
+        yield self.comm.close()

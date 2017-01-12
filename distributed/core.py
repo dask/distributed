@@ -148,7 +148,7 @@ class Server(object):
                 raise ValueError("cannot get address of non-running Server")
             # XXX this will often give '0.0.0.0' or '[::]'. Should we
             # use get_ip() in that case?
-            self._address = self.listener.get_address()
+            self._address = self.listener.address
         return self._address
 
     @property

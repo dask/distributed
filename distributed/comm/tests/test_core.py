@@ -176,7 +176,7 @@ def check_client_server(addr):
 
     listener = listen(addr, handle_comm)
     listener.start()
-    bound_addr = listener.get_address()
+    bound_addr = listener.address
 
     bound_scheme, bound_loc = parse_address(bound_addr)
     assert bound_scheme in ('tcp', 'zmq')
@@ -250,7 +250,7 @@ def check_comm_closed_implicit(addr):
 
     listener = listen(addr, handle_comm)
     listener.start()
-    bound_addr = listener.get_address()
+    bound_addr = listener.address
 
     comm = yield connect(bound_addr)
     with pytest.raises(CommClosedError):
@@ -283,7 +283,7 @@ def check_comm_closed_explicit(addr):
 
     listener = listen(addr, handle_comm)
     listener.start()
-    bound_addr = listener.get_address()
+    bound_addr = listener.address
 
     comm = yield connect(bound_addr)
     comm.close()

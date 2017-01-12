@@ -12,7 +12,7 @@ from zmq.eventloop import ioloop as zmqioloop
 from zmq.eventloop.future import Context
 
 from .. import config
-from .core import connectors, listeners, Comm, CommClosedError
+from .core import connectors, listeners, Comm, CommClosedError, Listener
 from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 from . import zmqimpl
 
@@ -149,7 +149,7 @@ class ZMQConnector(object):
         raise gen.Return(comm)
 
 
-class ZMQListener(object):
+class ZMQListener(Listener):
 
     def __init__(self, address, comm_handler, deserialize=True, default_port=0):
         self.ip, self.port = parse_host_port(address, default_port)
@@ -206,7 +206,8 @@ class ZMQListener(object):
         self._check_started()
         return self.ip, self.bound_port
 
-    def get_address(self):
+    @property
+    def address(self):
         """
         The listening address as a string.
         """

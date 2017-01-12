@@ -38,8 +38,8 @@ class CommClosedError(IOError):
 
 class Comm(with_metaclass(ABCMeta)):
     """
-    A communication object, representing an established communication
-    channel.
+    A message-oriented communication object, representing an established
+    communication channel.
     """
 
     @abstractmethod
@@ -54,7 +54,7 @@ class Comm(with_metaclass(ABCMeta)):
     @abstractmethod
     def write(self, msg):
         """
-        Write a message.
+        Write a message (a picklable Python object).
 
         This method is a coroutine.
         """
@@ -84,6 +84,35 @@ class Comm(with_metaclass(ABCMeta)):
         """
         Return the peer's address.  For logging and debugging purposes only.
         """
+
+
+class Listener(with_metaclass(ABCMeta)):
+
+    @abstractmethod
+    def start(self):
+        """
+        Start listening for incoming connections.
+        """
+
+    @abstractmethod
+    def stop(self):
+        """
+        Stop listening.  This does not shutdown already established
+        communications, but prevents accepting new ones.
+        """
+        tcp_server, self.tcp_server = self.tcp_server, None
+        if tcp_server is not None:
+            tcp_server.stop()
+
+    @abstractproperty
+    def address(self):
+        """
+        The listening address as a URL string
+        (e.g. 'tcp://something').
+        """
+        # XXX the returned address is not always contactable, e.g.
+        # 'tcp://0.0.0.0:1234'.  Should we have another property
+        # for that?
 
 
 def parse_address(addr):

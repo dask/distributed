@@ -15,7 +15,7 @@ from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 from .. import config
-from .core import connectors, listeners, Comm, CommClosedError
+from .core import connectors, listeners, Comm, Listener, CommClosedError
 from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 
 
@@ -188,7 +188,7 @@ class TCPConnector(object):
         raise gen.Return(TCP(stream, 'tcp://' + address, deserialize))
 
 
-class TCPListener(object):
+class TCPListener(Listener):
 
     def __init__(self, address, comm_handler, deserialize=True, default_port=0):
         self.ip, self.port = parse_host_port(address, default_port)
@@ -234,7 +234,8 @@ class TCPListener(object):
         # IPv6 getsockname() can return more a 4-len tuple
         return self.bound_address[:2]
 
-    def get_address(self):
+    @property
+    def address(self):
         """
         The listening address as a string.
         """
