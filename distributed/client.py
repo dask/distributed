@@ -411,7 +411,7 @@ class Client(object):
 
     def _send_to_scheduler(self, msg):
         if self.status is 'running':
-            self.loop.add_callback(self.scheduler_stream.send, msg)
+            self.loop.add_callback(self.scheduler_comm.send, msg)
         elif self.status is 'connecting':
             self._pending_msg_buffer.append(msg)
         else:
@@ -432,7 +432,7 @@ class Client(object):
                 yield gen.sleep(0.01)
 
         self.scheduler = coerce_to_rpc(self._start_arg, timeout=timeout)
-        self.scheduler_stream = None
+        self.scheduler_comm = None
 
         yield self.ensure_connected(timeout=timeout)
 
@@ -441,9 +441,9 @@ class Client(object):
     @gen.coroutine
     def reconnect(self, timeout=0.1):
         with log_errors():
-            assert self.scheduler_stream.stream.closed()
+            assert self.scheduler_comm.comm.closed()
             self.status = 'connecting'
-            self.scheduler_stream = None
+            self.scheduler_comm = None
 
             for st in self.futures.values():
                 st.cancel()
@@ -458,7 +458,7 @@ class Client(object):
 
     @gen.coroutine
     def ensure_connected(self, timeout=3):
-        if self.scheduler_stream and not self.scheduler_stream.closed():
+        if self.scheduler_comm and not self.scheduler_comm.closed():
             return
 
         try:
@@ -478,7 +478,7 @@ class Client(object):
 
         bcomm = BatchedSend(interval=10, loop=self.loop)
         bcomm.start(comm)
-        self.scheduler_stream = bcomm
+        self.scheduler_comm = bcomm
 
         _global_client[0] = self
         self.status = 'running'
@@ -526,7 +526,7 @@ class Client(object):
         with log_errors():
             while True:
                 try:
-                    msgs = yield self.scheduler_stream.comm.read()
+                    msgs = yield self.scheduler_comm.comm.read()
                 except CommClosedError:
                     if self.status == 'running':
                         logger.warn("Client report stream closed to scheduler")
@@ -617,7 +617,7 @@ class Client(object):
                     yield [gen.with_timeout(timedelta(seconds=2), f)
                             for f in self.coroutines]
             with ignoring(AttributeError):
-                yield self.scheduler_stream.close()
+                yield self.scheduler_comm.close()
             with ignoring(AttributeError):
                 self.scheduler.close_rpc()
 
@@ -1384,10 +1384,10 @@ class Client(object):
         return futures
 
     @gen.coroutine
-    def _get(self, dsk, keys, restrictions=None, raise_on_error=True,
-            resources=None):
+    def _get(self, dsk, keys, restrictions=None, loose_restrictions=None,
+             resources=None, raise_on_error=True):
         futures = self._graph_to_futures(dsk, set(flatten([keys])),
-                restrictions, resources=resources)
+                restrictions, loose_restrictions, resources=resources)
 
         packed = pack_data(keys, futures)
         try:
@@ -1428,18 +1428,9 @@ class Client(object):
         --------
         Client.compute: Compute asynchronous collections
         """
-        futures = self._graph_to_futures(dsk, set(flatten([keys])),
-                restrictions, loose_restrictions, resources=resources)
-
-        try:
-            results = self.gather(futures)
-        except (KeyboardInterrupt, Exception) as e:
-            for f in futures.values():
-                f.release()
-            raise
-
-        results2 = pack_data(keys, results)
-        return results2
+        return sync(self.loop, self._get, dsk, keys, restrictions=restrictions,
+                    loose_restrictions=loose_restrictions,
+                    resources=resources)
 
     def _optimize_insert_futures(self, dsk, keys):
         """ Replace known keys in dask graph with Futures

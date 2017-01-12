@@ -608,7 +608,6 @@ class Scheduler(Server):
         if restrictions:
             # *restrictions* is a dict keying task ids to lists of
             # restriction specifications (either worker names or addresses)
-            print("restrictions =", restrictions)
             worker_restrictions = defaultdict(set)
             host_restrictions = defaultdict(set)
             for k, v in restrictions.items():
@@ -623,15 +622,6 @@ class Scheduler(Server):
                     else:
                         worker_restrictions[k].add(w)
 
-            print("worker_restrictions:", worker_restrictions)
-            print("host_restrictions:", host_restrictions)
-
-            #restrictions = {k: set(map(self.coerce_address, v))
-                            #for k, v in restrictions.items()}
-            #worker_restrictions = {k: {w for w in s if ':' in w}
-                                    #for k, s in restrictions.items()}
-            #host_restrictions = {k: {w for w in s if ':' not in w}
-                                 #for k, s in restrictions.items()}
             self.worker_restrictions.update(worker_restrictions)
             self.host_restrictions.update(host_restrictions)
 
@@ -1330,7 +1320,7 @@ class Scheduler(Server):
         with log_errors():
             logger.debug("Send shutdown signal to workers")
 
-            nannies = {addr: d['services']['nanny']
+            nannies = {addr: (d['host'], d['services']['nanny'])
                        for addr, d in self.worker_info.items()}
 
             for addr in nannies:
@@ -1340,8 +1330,9 @@ class Scheduler(Server):
                 self.client_releases_keys(keys=keys, client=client)
 
             logger.debug("Send kill signal to nannies: %s", nannies)
-            nannies = [rpc(ip=worker_address.split(':')[0], port=n_port)
-                       for worker_address, n_port in nannies.items()]
+
+            nannies = [rpc(nanny_address)
+                       for nanny_address in nannies.values()]
             try:
                 resps = yield All([nanny.restart(environment=environment, close=True)
                            for nanny in nannies])

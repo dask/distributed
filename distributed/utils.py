@@ -80,6 +80,7 @@ def get_fileno_limit():
         return 512
 
 
+@memoize
 def get_ip(host='8.8.8.8', port=80):
     try:
         return [(s.connect((host, port)), s.getsockname()[0], s.close())

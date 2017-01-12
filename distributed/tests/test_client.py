@@ -358,8 +358,6 @@ def test_submit_errors(loop):
     with pytest.raises(TypeError):
         c.map([1, 2, 3])
 
-    c.shutdown()
-
 
 @gen_cluster(client=True)
 def test_wait(c, s, a, b):
@@ -990,7 +988,7 @@ def test_iterator_scatter(loop):
 
 def test_queue_scatter(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as ee:
+        with Client(s['address'], loop=loop) as ee:
             from distributed.compatibility import Queue
             q = Queue()
             for d in range(10):
@@ -1004,7 +1002,7 @@ def test_queue_scatter(loop):
 
 def test_queue_scatter_gather_maxsize(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             from distributed.compatibility import Queue
             q = Queue(maxsize=3)
             out = c.scatter(q, maxsize=10)
@@ -1025,7 +1023,7 @@ def test_queue_scatter_gather_maxsize(loop):
 
 def test_queue_gather(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as ee:
+        with Client(s['address'], loop=loop) as ee:
             from distributed.compatibility import Queue
             q = Queue()
 
@@ -1048,7 +1046,7 @@ def test_queue_gather(loop):
 @pytest.mark.skip(reason="intermittent blocking failures")
 def test_iterator_gather(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as ee:
+        with Client(s['address'], loop=loop) as ee:
 
             i_in = list(range(10))
 
@@ -1115,7 +1113,7 @@ def test_gather_traceback(c, s, a, b):
 
 def test_traceback_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(div, 1, 0)
             tb = x.traceback()
             if sys.version_info[0] >= 3:
@@ -1173,7 +1171,7 @@ def test_upload_large_file(c, s, a, b):
 
 def test_upload_file_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             def g():
                 import myfile
                 return myfile.x
@@ -1193,7 +1191,7 @@ def test_upload_file_exception(c, s, a, b):
 
 def test_upload_file_exception_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             with tmp_text('myfile.py', 'syntax-error!') as fn:
                 with pytest.raises(SyntaxError):
                     c.upload_file(fn)
@@ -1258,7 +1256,7 @@ def test_async_compute_with_scatter(c, s, a, b):
 
 def test_sync_compute(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = delayed(1)
             y = delayed(inc)(x)
             z = delayed(dec)(x)
@@ -1289,7 +1287,7 @@ def test_remote_submit_on_Future(c, s, a, b):
 
 def test_start_is_idempotent(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             c.start()
             c.start()
             c.start()
@@ -1448,7 +1446,7 @@ def test_badly_serialized_input(c, s, a, b):
 @pytest.mark.skipif('True', reason="")
 def test_badly_serialized_input_stderr(capsys, loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             o = BadlySerializedObject()
             future = c.submit(inc, o)
 
@@ -1589,7 +1587,7 @@ def test_forget_errors(c, s, a, b):
 
 def test_repr_sync(loop):
     with cluster(nworkers=3) as (s, [a, b, c]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             s = str(c)
             r = repr(c)
             assert c.scheduler.ip in s
@@ -1620,7 +1618,7 @@ def test_multi_client(s, a, b):
     f = Client((s.ip, s.port), start=False)
     yield f._start()
 
-    assert set(s.streams) == {c.id, f.id}
+    assert set(s.comms) == {c.id, f.id}
 
     x = c.submit(inc, 1)
     y = f.submit(inc, 2)
@@ -1744,21 +1742,21 @@ def test__broadcast_dict(c, s, a, b):
 
 def test_broadcast(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x, y = c.scatter([1, 2], broadcast=True)
 
             has_what = sync(c.loop, c.scheduler.has_what)
 
             assert {k: set(v) for k, v in has_what.items()} == {
-                                '127.0.0.1:%d' % a['port']: {x.key, y.key},
-                                '127.0.0.1:%d' % b['port']: {x.key, y.key}}
+                                a['address']: {x.key, y.key},
+                                b['address']: {x.key, y.key}}
 
-            [z] = c.scatter([3], broadcast=True, workers=['127.0.0.1:%d' % a['port']])
+            [z] = c.scatter([3], broadcast=True, workers=[a['address']])
 
             has_what = sync(c.loop, c.scheduler.has_what)
             assert {k: set(v) for k, v in has_what.items()} == {
-                                '127.0.0.1:%d' % a['port']: {x.key, y.key, z.key},
-                                '127.0.0.1:%d' % b['port']: {x.key, y.key}}
+                                a['address']: {x.key, y.key, z.key},
+                                b['address']: {x.key, y.key}}
 
 
 @gen_cluster(client=True)
@@ -1843,7 +1841,7 @@ def test__cancel_collection(c, s, a, b):
 
 def test_cancel(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(slowinc, 1, key='x')
             y = c.submit(slowinc, x, key='y')
             z = c.submit(slowinc, y, key='z')
@@ -1977,7 +1975,7 @@ def test_map_infinite_iterators(c, s, a, b):
 
 def test_map_iterator_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             items = enumerate(range(10))
             futures = c.map(lambda x: x, items)
             next(futures).result() == (0, 0)
@@ -1990,7 +1988,7 @@ def test_map_differnet_lengths(c, s, a, b):
 
 def test_Future_exception_sync_2(loop, capsys):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             ensure_default_get(c)
             ensure_default_get(c)
             ensure_default_get(c)
@@ -2060,7 +2058,7 @@ def test_persist(loop):
     pytest.importorskip('dask.array')
     import dask.array as da
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = da.ones((10, 10), chunks=(5, 10))
             y = 2 * (x + 1)
             assert len(y.dask) == 6
@@ -2197,13 +2195,13 @@ def test_run_sync(loop):
         return x + y
 
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             result = c.run(func, 1, y=2)
-            assert result == {'127.0.0.1:%d' % a['port']: 3,
-                              '127.0.0.1:%d' % b['port']: 3}
+            assert result == {a['address']: 3,
+                              b['address']: 3}
 
-            result = c.run(func, 1, y=2, workers=['127.0.0.1:%d' % a['port']])
-            assert result == {'127.0.0.1:%d' % a['port']: 3}
+            result = c.run(func, 1, y=2, workers=[a['address']])
+            assert result == {a['address']: 3}
 
 
 @gen_cluster(client=True)
@@ -2228,14 +2226,14 @@ def test_run_coroutine(c, s, a, b):
 
 def test_run_coroutine_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             result = c.run_coroutine(geninc, 2, delay=0.01)
-            assert result == {'127.0.0.1:%d' % a['port']: 3,
-                              '127.0.0.1:%d' % b['port']: 3}
+            assert result == {a['address']: 3,
+                              b['address']: 3}
 
             result = c.run_coroutine(geninc, 2,
-                                     workers=['127.0.0.1:%d' % a['port']])
-            assert result == {'127.0.0.1:%d' % a['port']: 3}
+                                     workers=[a['address']])
+            assert result == {a['address']: 3}
 
             t1 = time()
             result = c.run_coroutine(geninc, 2, delay=10, wait=False)
@@ -2249,7 +2247,7 @@ def test_run_exception(loop):
         raise exc_type(exc_msg)
 
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             for exc_type in [ValueError, RuntimeError]:
                 with pytest.raises(exc_type) as excinfo:
                     c.run(raise_exception, exc_type, 'informative message')
@@ -2258,9 +2256,9 @@ def test_run_exception(loop):
 
 def test_diagnostic_ui(loop):
     with cluster() as (s, [a, b]):
-        a_addr = '127.0.0.1:%d' % a['port']
-        b_addr = '127.0.0.1:%d' % b['port']
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        a_addr = a['address']
+        b_addr = b['address']
+        with Client(s['address'], loop=loop) as c:
             d = c.ncores()
             assert d == {a_addr: 1, b_addr: 1}
 
@@ -2268,7 +2266,7 @@ def test_diagnostic_ui(loop):
             assert d == {a_addr: 1}
             d = c.ncores(a_addr)
             assert d == {a_addr: 1}
-            d = c.ncores(('127.0.0.1', a['port']))
+            d = c.ncores(a['address'])
             assert d == {a_addr: 1}
 
             x = c.submit(inc, 1)
@@ -2297,13 +2295,10 @@ def test_diagnostic_ui(loop):
             d = c.has_what(a_addr)
             assert set(d) == {a_addr}
 
-            d = c.has_what(('127.0.0.1', a['port']))
-            assert set(d) == {a_addr}
-
 
 def test_diagnostic_nbytes_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             incs = c.map(inc, [1, 2, 3])
             doubles = c.map(double, [1, 2, 3])
             wait(incs + doubles)
@@ -2348,7 +2343,7 @@ def test_worker_aliases():
 
 def test_persist_get_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             dadd = delayed(add)
             x, y = delayed(1), delayed(2)
             xx = delayed(add)(x, x)
@@ -2393,7 +2388,7 @@ def test_client_num_fds(loop):
     with cluster() as (s, [a, b]):
         proc = psutil.Process()
         before = proc.num_fds()
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             during = proc.num_fds()
         after = proc.num_fds()
 
@@ -2413,15 +2408,15 @@ def test_startup_shutdown_startup(s, a, b):
 
 def test_startup_shutdown_startup_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             pass
         sleep(0.1)
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             pass
-        with Client(('127.0.0.1', s['port'])) as c:
+        with Client(s['address']) as c:
             pass
         sleep(0.1)
-        with Client(('127.0.0.1', s['port'])) as c:
+        with Client(s['address']) as c:
             pass
 
 
@@ -2496,8 +2491,8 @@ def test_rebalance_execution(c, s, a, b):
 
 def test_rebalance_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
-            futures = c.map(inc, range(10), workers=[('127.0.0.1', a['port'])])
+        with Client(s['address'], loop=loop) as c:
+            futures = c.map(inc, range(10), workers=[a['address']])
             c.rebalance(futures)
 
             has_what = c.has_what()
@@ -2707,7 +2702,7 @@ def test_client_replicate_host(e, s, a, b, c):
 
 def test_client_replicate_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(inc, 1)
             y = c.submit(inc, 2)
             c.replicate([x, y], n=2)
@@ -2825,29 +2820,29 @@ def test_default_get(loop):
     with cluster() as (s, [a, b]):
         pre_get = _globals.get('get')
         pre_shuffle = _globals.get('shuffle')
-        with Client(('127.0.0.1', s['port']), loop=loop, set_as_default=True) as c:
+        with Client(s['address'], loop=loop, set_as_default=True) as c:
             assert _globals['get'] == c.get
             assert _globals['shuffle'] == 'tasks'
 
         assert _globals['get'] is pre_get
         assert _globals['shuffle'] == pre_shuffle
 
-        c = Client(('127.0.0.1', s['port']), loop=loop, set_as_default=False)
+        c = Client(s['address'], loop=loop, set_as_default=False)
         assert _globals['get'] is pre_get
         assert _globals['shuffle'] == pre_shuffle
         c.shutdown()
 
-        c = Client(('127.0.0.1', s['port']), loop=loop, set_as_default=True)
+        c = Client(s['address'], loop=loop, set_as_default=True)
         assert _globals['shuffle'] == 'tasks'
         assert _globals['get'] == c.get
         c.shutdown()
         assert _globals['get'] is pre_get
         assert _globals['shuffle'] == pre_shuffle
 
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             assert _globals['get'] == c.get
 
-        with Client(('127.0.0.1', s['port']), loop=loop, set_as_default=False) as c:
+        with Client(s['address'], loop=loop, set_as_default=False) as c:
             assert _globals['get'] != c.get
             dask.set_options(get=c.get)
             assert _globals['get'] == c.get
@@ -2910,18 +2905,18 @@ def test_bad_tasks_fail(c, s, a, b):
 
 def test_get_processing_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             processing = c.processing()
             assert not any(v for v in processing.values())
 
             futures = c.map(slowinc, range(10), delay=0.1,
-                            workers=[('127.0.0.1', a['port'])],
+                            workers=[a['address']],
                             allow_other_workers=False)
 
             sleep(0.2)
 
-            aa = '127.0.0.1:%d' % a['port']
-            bb = '127.0.0.1:%d' % b['port']
+            aa = a['address']
+            bb = b['address']
             processing = c.processing()
 
             assert set(c.processing(aa)) == {aa}
@@ -2938,7 +2933,7 @@ def dont_test_scheduler_falldown(loop):
             s2 = Scheduler(loop=loop, validate=True)
             loop.add_callback(s2.start, s['port'])
             sleep(0.1)
-            with Client(('127.0.0.1', s['port']), loop=loop) as ee:
+            with Client(s['address'], loop=loop) as ee:
                 assert len(ee.ncores()) == 2
         finally:
             s2.close()
@@ -2946,7 +2941,7 @@ def dont_test_scheduler_falldown(loop):
 
 def test_shutdown_idempotent(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             c.shutdown()
             c.shutdown()
             c.shutdown()
@@ -2990,40 +2985,20 @@ def test_Client_clears_references_after_restart(c, s, a, b):
     assert key not in c.refcount
 
 
-def test_get_stops_work_after_error(loop):
-    # TODO: this test uses very old testing machinery
-    loop2 = IOLoop()
-    s = Scheduler(loop=loop2, validate=True)
-    s.start(0)
-    w = Worker(s.ip, s.port, loop=loop2)
-    w.start(0)
+@gen_cluster(client=True)
+def test_get_stops_work_after_error(c, s, a, b):
+    with pytest.raises(RuntimeError):
+        yield c._get({'x': (throws, 1), 'y': (sleep, 1.5)}, ['x', 'y'])
 
-    t = Thread(target=loop2.start)
-    t.daemon = True
-    t.start()
-
-    with Client(s.address, loop=loop) as c:
-        with pytest.raises(Exception):
-            c.get({'x': (throws, 1), 'y': (sleep, 1)}, ['x', 'y'])
-
-        start = time()
-        while len(s.tasks):
-            sleep(0.1)
-            assert time() < start + 5
-
-    sync(loop2, w._close)
-    sync(loop2, s.close)
-    loop2.add_callback(loop2.stop)
-    while loop2._running:
-        sleep(0.01)
-    loop2.close(all_fds=True)
-
-    t.join()
+    start = time()
+    while len(s.tasks):
+        yield gen.sleep(0.01)
+        assert time() < start + 0.5
 
 
 def test_as_completed_list(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             seq = c.map(inc, iter(range(5)))
             seq2 = list(as_completed(seq))
             assert set(c.gather(seq2)) == {1, 2, 3, 4, 5}
@@ -3084,8 +3059,11 @@ def test_scatter_raises_if_no_workers(c, s):
 def test_reconnect(loop):
     w = Worker('127.0.0.1', 9393, loop=loop)
     w.start()
-    with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
-        c = Client('localhost:9393', loop=loop)
+
+    scheduler_cli = ['dask-scheduler', '--host', '127.0.0.1',
+                     '--port', '9393', '--no-bokeh']
+    with popen(scheduler_cli) as s:
+        c = Client('127.0.0.1:9393', loop=loop)
         start = time()
         while  len(c.ncores()) != 1:
             sleep(0.1)
@@ -3106,7 +3084,7 @@ def test_reconnect(loop):
     with pytest.raises(CancelledError):
         x.result()
 
-    with popen(['dask-scheduler', '--port', '9393', '--no-bokeh']) as s:
+    with popen(scheduler_cli) as s:
         start = time()
         while c.status != 'running':
             sleep(0.1)
@@ -3153,7 +3131,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         def start_worker(sleep, duration, repeat=1):
             for i in range(repeat):
                 yield gen.sleep(sleep)
-                w = worker('127.0.0.1', s['port'], ip='127.0.0.1', loop=loop)
+                w = worker(s['address'], ip='127.0.0.1', loop=loop)
                 yield w._start()
                 yield gen.sleep(duration)
                 yield w._close()
@@ -3163,7 +3141,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
             loop.add_callback(start_worker, random() / 5, random() / 5,
                               repeat=repeat)
 
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             sleep(1)
 
             for i in range(count):
@@ -3228,7 +3206,7 @@ def test_idempotence(s, a, b):
 
 def test_scheduler_info(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             info = c.scheduler_info()
             assert isinstance(info, dict)
             assert len(info['workers']) == 2
@@ -3236,7 +3214,7 @@ def test_scheduler_info(loop):
 
 def test_get_versions(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             v = c.get_versions()
             assert v['scheduler'] is not None
             assert v['client'] is not None
@@ -3251,7 +3229,7 @@ def test_get_versions(loop):
 
 def test_threaded_get_within_distributed(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             import dask.multiprocessing
             for get in [dask.async.get_sync,
                         dask.multiprocessing.get,
@@ -3652,7 +3630,7 @@ def test_auto_normalize_collection(c, s, a, b):
 def test_auto_normalize_collection_sync(loop):
     da = pytest.importorskip('dask.array')
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = da.ones(10, chunks=5)
 
             y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
@@ -3735,7 +3713,7 @@ def test_client_timeout():
     c = Client('127.0.0.1:57484', loop=loop, start=False)
     loop.add_callback(c._start, timeout=10)
 
-    s = Scheduler(loop=loop)
+    s = Scheduler(ip='127.0.0.1', loop=loop)
     yield gen.sleep(4)
     try:
         s.start(57484)
@@ -3743,7 +3721,7 @@ def test_client_timeout():
         return
 
     start = time()
-    while not c.scheduler_stream:
+    while not c.scheduler_comm:
         yield gen.sleep(0.1)
         assert time() < start + 2
 

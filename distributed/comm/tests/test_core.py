@@ -337,6 +337,3 @@ def test_tcp_many_listeners():
     check_many_listeners('tcp://127.0.0.1')
     check_many_listeners('tcp://0.0.0.0')
     check_many_listeners('tcp://')
-
-
-# TODO tests for Comm.abort()

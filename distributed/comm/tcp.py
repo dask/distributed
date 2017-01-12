@@ -104,21 +104,22 @@ class TCP(Comm):
 
     @gen.coroutine
     def read(self, deserialize=None):
-        if self.stream is None:
+        stream = self.stream
+        if stream is None:
             raise CommClosedError
         if deserialize is None:
             deserialize = self.deserialize
 
         try:
-            n_frames = yield self.stream.read_bytes(8)
+            n_frames = yield stream.read_bytes(8)
             n_frames = struct.unpack('Q', n_frames)[0]
-            lengths = yield self.stream.read_bytes(8 * n_frames)
+            lengths = yield stream.read_bytes(8 * n_frames)
             lengths = struct.unpack('Q' * n_frames, lengths)
 
             frames = []
             for length in lengths:
                 if length:
-                    frame = yield self.stream.read_bytes(length)
+                    frame = yield stream.read_bytes(length)
                 else:
                     frame = b''
                 frames.append(frame)
@@ -131,7 +132,8 @@ class TCP(Comm):
 
     @gen.coroutine
     def write(self, msg):
-        if self.stream is None:
+        stream = self.stream
+        if stream is None:
             raise CommClosedError
 
         frames = to_frames(msg)
@@ -139,15 +141,15 @@ class TCP(Comm):
         try:
             lengths = ([struct.pack('Q', len(frames))] +
                        [struct.pack('Q', len(frame)) for frame in frames])
-            self.stream.write(b''.join(lengths))
+            stream.write(b''.join(lengths))
 
             for frame in frames:
                 # Can't wait for the write() Future as it may be lost
                 # ("If write is called again before that Future has resolved,
                 #   the previous future will be orphaned and will never resolve")
-                self.stream.write(frame)
+                stream.write(frame)
         except StreamClosedError:
-            self.stream = None
+            stream = None
             raise CommClosedError
 
         #yield gen.moment  # Make sure the event loop gets a tick

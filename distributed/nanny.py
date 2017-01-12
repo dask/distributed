@@ -44,7 +44,7 @@ class Nanny(Server):
         else:
             scheduler_addr = normalize_address(unparse_host_port(scheduler_ip, scheduler_port))
         self.ip = ip or get_ip()
-        self.worker_port = None
+        self.worker_address = None
         self._given_worker_port = worker_port
         self.ncores = ncores or _ncores
         self.reconnect = reconnect
@@ -93,11 +93,11 @@ class Nanny(Server):
     @gen.coroutine
     def _start(self, port=0):
         """ Start nanny, start local process, start watching """
-        self.listen(port)
-        logger.info('        Start Nanny at: %20s:%d', self.ip, self.port)
+        self.listen((self.ip, port))
+        logger.info('        Start Nanny at: %r', self.address)
         yield self.instantiate()
         self.loop.add_callback(self._watch)
-        assert self.worker_port
+        assert self.worker_address
         self.status = 'running'
 
     def start(self, port=0):
@@ -110,7 +110,7 @@ class Nanny(Server):
         Blocks until both the process is down and the scheduler is properly
         informed
         """
-        while not self.worker_port:
+        while not self.worker_address:
             yield gen.sleep(0.1)
 
         if self.process is None:
@@ -121,7 +121,7 @@ class Nanny(Server):
         if isalive(self.process):
             try:
                 # Ask worker to close
-                with rpc(ip='127.0.0.1', port=self.worker_port) as worker:
+                with rpc(self.worker_address) as worker:
                     result = yield gen.with_timeout(
                                 timedelta(seconds=min(1, timeout)),
                                 worker.terminate(report=False),
@@ -144,12 +144,12 @@ class Nanny(Server):
                             "Nanny: %s, Worker: %s", result, self.address_tuple,
                             self.worker_address)
                 else:
-                    logger.info("Unregister worker %s:%d from scheduler",
-                                self.ip, self.worker_port)
+                    logger.info("Unregister worker %r from scheduler",
+                                self.worker_address)
             except gen.TimeoutError:
-                logger.warn("Nanny %s:%d failed to unregister worker %s:%d",
-                        self.ip, self.port, self.ip, self.worker_port,
-                        exc_info=True)
+                logger.warn("Nanny %r failed to unregister worker %r",
+                            self.address, self.worker_address,
+                            exc_info=True)
             except (CommClosedError, RPCClosed):
                 pass
             except Exception as e:
@@ -167,8 +167,8 @@ class Nanny(Server):
 
             self.process = None
             self.cleanup()
-            logger.info("Nanny %s:%d kills worker process %s:%d",
-                        self.ip, self.port, self.ip, self.worker_port)
+            logger.info("Nanny %r kills worker process %r",
+                        self.address, self.worker_address)
 
         self.should_watch = should_watch
         raise gen.Return('OK')
@@ -192,11 +192,11 @@ class Nanny(Server):
 
             if self.environment != nanny_environment:
                 with tmpfile() as fn:
-                    self.process = run_worker_subprocess(self.environment, self.ip,
-                            self.scheduler.ip, self.scheduler.port, self.ncores,
-                            self.port, self._given_worker_port, self.name,
-                            self.memory_limit, self.loop, fn, self.quiet,
-                            self.resources)
+                    self.process = run_worker_subprocess(
+                        self.environment, self.ip, self.scheduler.address,
+                        self.ncores, self.port, self._given_worker_port,
+                        self.name, self.memory_limit, fn, self.quiet,
+                        self.resources)
 
                     while not os.path.exists(fn):
                         yield gen.sleep(0.01)
@@ -205,6 +205,7 @@ class Nanny(Server):
                         try:
                             with open(fn) as f:
                                 msg = json.load(f)
+                            # XXX
                             self.worker_port = msg['port']
                             self.worker_dir = msg['local_directory']
                             break
@@ -214,9 +215,8 @@ class Nanny(Server):
                 q = mp_context.Queue()
                 self.process = mp_context.Process(
                     target=run_worker_fork,
-                    args=(q, self.ip, self.scheduler.ip,
-                          self.scheduler.port, self.ncores,
-                          self.port, self._given_worker_port,
+                    args=(q, self.ip, self.scheduler.address,
+                          self.ncores, self.port, self._given_worker_port,
                           self.local_dir),
                     kwargs={'services': self.services,
                             'name': self.name,
@@ -232,15 +232,15 @@ class Nanny(Server):
                         msg = q.get_nowait()
                         if isinstance(msg, Exception):
                             raise msg
-                        self.worker_port = msg['port']
+                        self.worker_address = msg['address']
                         self.worker_dir = msg['dir']
-                        assert self.worker_port
+                        assert self.worker_address
                         break
                     except Empty:
                         yield gen.sleep(0.1)
 
-            logger.info("Nanny %s:%d starts worker process %s:%d",
-                        self.ip, self.port, self.ip, self.worker_port)
+            logger.info("Nanny %r starts worker process %r",
+                        self.address, self.worker_address)
         except Exception as e:
             logger.exception(e)
             raise
@@ -313,17 +313,6 @@ class Nanny(Server):
     def address_tuple(self):
         return (self.ip, self.port)
 
-    @property
-    def worker_address_tuple(self):
-        return (self.ip, self.worker_port)
-
-    @property
-    def worker_address(self):
-        if self.worker_port:
-            return '%s:%d' % (self.ip, self.worker_port)
-        else:
-            return '%s:port-unassigned' % self.ip
-
     def resource_collect(self):
         try:
             import psutil
@@ -346,10 +335,11 @@ class Nanny(Server):
             yield gen.sleep(interval)
 
 
-def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
-        nanny_port, worker_port, name, memory_limit, io_loop, fn, quiet,
-        resources):
-
+def run_worker_subprocess(environment, ip, scheduler_addr, ncores,
+                          nanny_port, worker_port, name, memory_limit,
+                          fn, quiet, resources):
+    # XXX fix this for scheduler_addr
+    1/0
     if environment.endswith('python'):
         environment = os.path.dirname(environment)
     if os.path.exists(os.path.join(environment, 'bin')):
@@ -383,17 +373,19 @@ def run_worker_subprocess(environment, ip, scheduler_ip, scheduler_port, ncores,
     return proc
 
 
-def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
+def run_worker_fork(q, ip, scheduler_addr, ncores, nanny_port,
                     worker_port, local_dir, **kwargs):
-    """ Function run by the Nanny when creating the worker """
+    """
+    Create a worker by forking.  This assumes the environment is the same.
+    """
     from distributed import Worker  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
     loop.make_current()  # pragma: no cover
-    worker = Worker(scheduler_ip, scheduler_port, ncores=ncores, ip=ip,
+    worker = Worker(scheduler_addr, ncores=ncores, ip=ip,
                     service_ports={'nanny': nanny_port}, local_dir=local_dir,
-                    loop=loop, **kwargs)  # pragma: no cover
+                    **kwargs)  # pragma: no cover
 
     @gen.coroutine  # pragma: no cover
     def run():
@@ -404,7 +396,7 @@ def run_worker_fork(q, ip, scheduler_ip, scheduler_port, ncores, nanny_port,
             q.put(e)  # pragma: no cover
         else:
             assert worker.port  # pragma: no cover
-            q.put({'port': worker.port, 'dir': worker.local_dir})  # pragma: no cover
+            q.put({'address': worker.address, 'dir': worker.local_dir})  # pragma: no cover
 
         while worker.status != 'closed':
             yield gen.sleep(0.1)

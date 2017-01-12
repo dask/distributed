@@ -29,7 +29,7 @@ from .compatibility import PY3, unicode, WINDOWS
 from .config import config
 from .metrics import time
 from .system_monitor import SystemMonitor
-from .utils import get_traceback, truncate_exception, ignoring, shutting_down
+from .utils import get_ip, get_traceback, truncate_exception, ignoring, shutting_down
 from . import protocol
 
 
@@ -143,8 +143,6 @@ class Server(object):
         if not self._address:
             if self.listener is None:
                 raise ValueError("cannot get address of non-running Server")
-            # XXX this will often give '0.0.0.0' or '[::]'. Should we
-            # use get_ip() in that case?
             self._address = self.listener.address
         return self._address
 
@@ -347,19 +345,16 @@ class rpc(object):
     >>> remote.close_streams()  # doctest: +SKIP
     """
     active = 0
+    comms = ()
 
     def __init__(self, arg=None, comm=None, deserialize=True, timeout=3):
+        self.comms = {}
         self.address = coerce_to_address(arg)
         self.ip, self.port = parse_host_port(self.address)
-        self.comms = dict()
         self.timeout = timeout
         self.status = 'running'
         self.deserialize = deserialize
         rpc.active += 1
-
-    #@property
-    #def address(self):
-        #return '%s:%d' % (self.ip, self.port)
 
     @gen.coroutine
     def live_comm(self):
