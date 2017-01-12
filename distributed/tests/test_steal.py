@@ -186,19 +186,24 @@ def test_work_steal_no_kwargs(c, s, a, b):
 
     assert result == sum(map(inc, range(100)))
 
+
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)])
 def test_dont_steal_worker_restrictions(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     yield future._result()
 
     futures = c.map(slowinc, range(100), delay=0.1, workers=a.address)
-    yield gen.sleep(0.1)
+
+    while len(a.task_state) + len(b.task_state) < 100:
+        yield gen.sleep(0.01)
+
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
 
     result = s.extensions['stealing'].balance()
 
     yield gen.sleep(0.1)
+
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
 
