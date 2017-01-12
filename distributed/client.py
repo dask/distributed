@@ -471,7 +471,7 @@ class Client(object):
         ident = yield self.scheduler.identity()
 
         yield comm.write({'op': 'register-client',
-                          'client': self.id})
+                          'client': self.id, 'reply': False})
         msg = yield comm.read()
         assert len(msg) == 1
         assert msg[0]['op'] == 'stream-start'
@@ -607,7 +607,8 @@ class Client(object):
         with log_errors():
             if self.status == 'closed':
                 raise Return()
-            self._send_to_scheduler({'op': 'close-stream'})
+            if self.status == 'running':
+                self._send_to_scheduler({'op': 'close-stream'})
             self.status = 'closed'
             if _global_client[0] is self:
                 _global_client[0] = None

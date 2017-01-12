@@ -173,7 +173,7 @@ def test_Future_exception(c, s, a, b):
 
 def test_Future_exception_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(div, 1, 0)
             assert isinstance(x.exception(), ZeroDivisionError)
 
@@ -240,14 +240,14 @@ def test_gc(s, a, b):
 
 def test_thread(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(inc, 1)
             assert x.result() == 2
 
 
 def test_sync_exceptions(loop):
     with cluster() as (s, [a, b]):
-        c = Client(('127.0.0.1', s['port']), loop=loop)
+        c = Client(s['address'], loop=loop)
 
         x = c.submit(div, 10, 2)
         assert x.result() == 5
@@ -291,7 +291,7 @@ def test_gather_lost(c, s, a, b):
 
 def test_gather_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(inc, 1)
             assert c.gather(x) == 2
 
@@ -334,7 +334,7 @@ def test_get(c, s, a, b):
 
 def test_get_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             assert c.get({'x': (inc, 1)}, 'x') == 2
 
 
@@ -343,7 +343,7 @@ def test_get_sync_optimize_graph_passes_through(loop):
     import dask
     bag = db.range(10, npartitions=3).map(inc)
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             dask.compute(bag.sum(), optimize_graph=False, get=c.get)
 
 
@@ -357,6 +357,8 @@ def test_submit_errors(loop):
         c.submit(1, 2, 3)
     with pytest.raises(TypeError):
         c.map([1, 2, 3])
+
+    c.shutdown()
 
 
 @gen_cluster(client=True)
@@ -391,7 +393,7 @@ def test__as_completed(c, s, a, b):
 
 def test_as_completed(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(inc, 1)
             y = c.submit(inc, 2)
             z = c.submit(inc, 1)
@@ -405,14 +407,14 @@ def test_as_completed(loop):
 
 def test_as_completed_with_non_futures(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             with pytest.raises(TypeError):
                 list(as_completed([1, 2, 3]))
 
 
 def test_wait_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(inc, 1)
             y = c.submit(inc, 2)
 
@@ -841,10 +843,10 @@ def test_global_clients(loop):
     with pytest.raises(ValueError):
         default_client()
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             assert _global_client == [c]
             assert default_client() is c
-            with Client(('127.0.0.1', s['port']), loop=loop) as f:
+            with Client(s['address'], loop=loop) as f:
                 assert _global_client == [f]
                 assert default_client() is f
                 assert default_client(c) is c
@@ -943,7 +945,7 @@ def test_get_with_error(c, s, a, b):
 
 def test_get_with_error_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             dsk = {'x': (div, 1, 0), 'y': (inc, 'x')}
             with pytest.raises(ZeroDivisionError):
                 c.get(dsk, 'y')
@@ -961,16 +963,16 @@ def test_directed_scatter(c, s, a, b):
 
 def test_directed_scatter_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
-            futures = c.scatter([1, 2, 3], workers=[('127.0.0.1', b['port'])])
+        with Client(s['address'], loop=loop) as c:
+            futures = c.scatter([1, 2, 3], workers=[b['address']])
             has_what = sync(loop, c.scheduler.has_what)
-            assert len(has_what['127.0.0.1:%d' % b['port']]) == len(futures)
-            assert len(has_what['127.0.0.1:%d' % a['port']]) == 0
+            assert len(has_what[b['address']]) == len(futures)
+            assert len(has_what[a['address']]) == 0
 
 
 def test_iterator_scatter(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             aa = c.scatter([1,2,3])
             assert [1,2,3] == c.gather(aa)
 

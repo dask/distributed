@@ -238,8 +238,8 @@ class Server(object):
                     try:
                         yield comm.write(result)
                     except EnvironmentError as e:
-                        logger.warn("Lost connection to %r while sending result: %s",
-                                    address, e)
+                        logger.warn("Lost connection to %r while sending result for op %r: %s",
+                                    address, op, e)
                         break
                 if close_desired or comm.closed():
                     break
@@ -389,11 +389,11 @@ class rpc(object):
                 to_clear.add(comm)
             if open:
                 break
+        for s in to_clear:
+            del self.comms[s]
         if not open or comm.closed():
             comm = yield connect(self.address, self.timeout,
                                  deserialize=self.deserialize)
-        for s in to_clear:
-            del self.comms[s]
         self.comms[comm] = False     # mark as taken
         raise gen.Return(comm)
 

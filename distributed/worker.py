@@ -74,8 +74,6 @@ class WorkerBase(Server):
             scheduler_addr = normalize_address(scheduler_ip)
         else:
             scheduler_addr = normalize_address(unparse_host_port(scheduler_ip, scheduler_port))
-        print("Scheduler addr = %r (ip = %r, port = %r)"
-              % (scheduler_addr, scheduler_ip, scheduler_port))
         self._port = 0
         self.ncores = ncores or _ncores
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
@@ -373,7 +371,6 @@ class WorkerBase(Server):
         start = time()
         try:
             compressed = yield comm.write(msg)
-            yield comm.close()
         except EnvironmentError:
             logger.exception('failed during get data', exc_info=True)
             comm.abort()

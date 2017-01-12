@@ -1186,10 +1186,11 @@ class Scheduler(Server):
             logger.error("Failed to connect to worker %r: %s",
                          addr, e)
             return
-        yield comm.write({'op': 'compute-stream'})
+        yield comm.write({'op': 'compute-stream', 'reply': False})
         self.worker_comms[worker].start(comm)
         logger.info("Starting worker compute stream, %s", worker)
 
+        io_error = None
         try:
             while True:
                 msgs = yield comm.read()
@@ -1200,7 +1201,6 @@ class Scheduler(Server):
 
                 if worker in self.worker_info and not comm.closed():
                     self.counters['worker-message-length'].add(len(msgs))
-                    recommendations = OrderedDict()
                     for msg in msgs:
                         if msg == 'OK':  # from close
                             break
@@ -1219,15 +1219,22 @@ class Scheduler(Server):
                     self.digests['handle-worker-duration'].add(end - start)
 
         except (CommClosedError, EnvironmentError) as e:
-            logger.info("Worker %r failed from closed comm: %s", worker, e)
+            io_error = e
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
                 import pdb; pdb.set_trace()
             raise
         finally:
-            yield comm.close()
-            self.remove_worker(address=worker)
+            if worker in self.worker_comms:
+                # Worker didn't send us a close message
+                if io_error:
+                    logger.info("Worker %r failed from closed comm: %s",
+                                worker, io_error)
+                yield comm.close()
+                self.remove_worker(address=worker)
+            else:
+                assert comm.closed()
 
     def correct_time_delay(self, worker, msg):
         """
