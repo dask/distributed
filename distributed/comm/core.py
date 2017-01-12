@@ -42,6 +42,8 @@ class Comm(with_metaclass(ABCMeta)):
     communication channel.
     """
 
+    # XXX add set_close_callback()?
+
     @abstractmethod
     def read(self, deserialize=None):
         """
@@ -122,6 +124,16 @@ def parse_address(addr):
     if not sep:
         scheme = DEFAULT_SCHEME
     return scheme, loc
+
+
+def unparse_address(scheme, loc):
+    return '%s://%s' % (scheme, loc)
+
+
+def normalize_address(addr):
+    """
+    """
+    return unparse_address(*parse_address(addr))
 
 
 @gen.coroutine

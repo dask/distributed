@@ -19,9 +19,8 @@ import six
 from toolz import merge
 from tornado import gen, queues
 from tornado.ioloop import IOLoop, TimeoutError
-from tornado.iostream import StreamClosedError
 
-from .core import connect, read, write, close, rpc, coerce_to_address
+from .core import connect, rpc, coerce_to_address, CommClosedError
 from .metrics import time
 from .utils import ignoring, log_errors, sync, mp_context
 import pytest
@@ -216,33 +215,33 @@ else:
 _readone_queues = {}
 
 @gen.coroutine
-def readone(stream):
+def readone(comm):
     """
-    Read one message at a time from a stream that reads lists of
+    Read one message at a time from a comm that reads lists of
     messages.
     """
     try:
-        q = _readone_queues[stream]
+        q = _readone_queues[comm]
     except KeyError:
-        q = _readone_queues[stream] = queues.Queue()
+        q = _readone_queues[comm] = queues.Queue()
 
         @gen.coroutine
         def background_read():
             while True:
                 try:
-                    messages = yield read(stream)
-                except StreamClosedError:
+                    messages = yield comm.read()
+                except CommClosedError:
                     break
                 for msg in messages:
                     q.put_nowait(msg)
             q.put_nowait(None)
-            del _readone_queues[stream]
+            del _readone_queues[comm]
 
         background_read()
 
     msg = yield q.get()
     if msg is None:
-        raise StreamClosedError
+        raise CommClosedError
     else:
         raise gen.Return(msg)
 
@@ -308,8 +307,8 @@ def check_active_rpc(loop, active_rpc_timeout=0):
     yield
     if rpc.active > rpc_active and active_rpc_timeout:
         # Some streams can take a bit of time to notice their peer
-        # has closed, and keep a coroutine (*) waiting for a StreamClosedError
-        # before calling close_rpc() after a StreamClosedError.
+        # has closed, and keep a coroutine (*) waiting for a CommClosedError
+        # before calling close_rpc() after a CommClosedError.
         # This would happen especially if a non-localhost address is used,
         # as Nanny does.
         # (*) (example: gather_from_workers())
@@ -371,13 +370,13 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                 yield {'proc': scheduler, 'port': sport}, workers
             finally:
                 logger.debug("Closing out test cluster")
-                with ignoring(socket.error, TimeoutError, StreamClosedError):
+                with ignoring(socket.error, TimeoutError, CommClosedError):
                     loop.run_sync(lambda: disconnect('127.0.0.1', sport), timeout=0.5)
                 scheduler.terminate()
                 scheduler.join(timeout=2)
 
                 for port in [w['port'] for w in workers]:
-                    with ignoring(socket.error, TimeoutError, StreamClosedError):
+                    with ignoring(socket.error, TimeoutError, CommClosedError):
                         loop.run_sync(lambda: disconnect('127.0.0.1', port),
                                       timeout=0.5)
                 for proc in [w['proc'] for w in workers]:
@@ -467,7 +466,7 @@ def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
     scheduler_close = s.close()  # shut down periodic callbacks immediately
     for w in workers:
-        with ignoring(TimeoutError, StreamClosedError, OSError):
+        with ignoring(TimeoutError, CommClosedError, EnvironmentError):
             yield w._close(report=False)
         if w.local_dir and os.path.exists(w.local_dir):
             shutil.rmtree(w.local_dir)

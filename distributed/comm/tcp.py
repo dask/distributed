@@ -150,7 +150,7 @@ class TCP(Comm):
             self.stream = None
             raise CommClosedError
 
-        yield gen.moment  # Make sure the event loop gets a tick
+        #yield gen.moment  # Make sure the event loop gets a tick
         raise gen.Return(sum(map(len, frames)))
 
     @gen.coroutine
@@ -161,6 +161,7 @@ class TCP(Comm):
                 # Flush the stream's write buffer by waiting for a last write.
                 if stream.writing():
                     yield stream.write(b'')
+                stream.socket.shutdown(socket.SHUT_RDWR)
             except EnvironmentError:
                 pass
             finally:

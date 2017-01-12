@@ -22,13 +22,14 @@ except ImportError:
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
-from tornado.iostream import StreamClosedError
 
 from .batched import BatchedSend
+from .comm.core import normalize_address
+from .comm.utils import unparse_host_port
 from .config import config
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
-from .core import (read, write, connect, close, send_recv, error_message,
+from .core import (connect, send_recv, error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address, RPCClosed)
 from .metrics import time
 from .protocol.pickle import dumps, loads
@@ -63,12 +64,17 @@ READY = ('ready', 'constrained')
 
 class WorkerBase(Server):
 
-    def __init__(self, scheduler_ip, scheduler_port, ip=None, ncores=None,
+    def __init__(self, scheduler_ip, scheduler_port=None, ip=None, ncores=None,
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
                  silence_logs=None, **kwargs):
         self.ip = ip or get_ip()
+        if scheduler_port is None:
+            scheduler_addr = normalize_address(scheduler_ip)
+        else:
+            scheduler_addr = normalize_address(unparse_host_port(scheduler_ip, scheduler_port))
+        print("Scheduler addr = %r" % (scheduler_addr,))
         self._port = 0
         self.ncores = ncores or _ncores
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
@@ -101,7 +107,7 @@ class WorkerBase(Server):
         self.status = None
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
-        self.scheduler = rpc((scheduler_ip, scheduler_port))
+        self.scheduler = rpc(scheduler_addr)
         self.name = name
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
@@ -124,7 +130,7 @@ class WorkerBase(Server):
                 port = 0
 
             self.services[k] = v(self, io_loop=self.loop)
-            self.services[k].listen(port)
+            self.services[k].listen((self.ip, port))
             self.service_ports[k] = self.services[k].port
 
         handlers = {
@@ -177,7 +183,7 @@ class WorkerBase(Server):
         while True:
             try:
                 resp = yield self.scheduler.register(
-                        ncores=self.ncores, address=(self.ip, self.port),
+                        ncores=self.ncores, address=self.address,
                         keys=list(self.data),
                         name=self.name,
                         nbytes=self.nbytes,
@@ -197,17 +203,17 @@ class WorkerBase(Server):
 
     @gen.coroutine
     def _start(self, port=0):
-        self.listen(port)
+        self.listen((self.ip, port))
         self.name = self.name or self.address
         for k, v in self.services.items():
-            v.listen(0)
+            v.listen((self.ip, 0))
             self.service_ports[k] = v.port
 
-        logger.info('      Start worker at: %20s:%d', self.ip, self.port)
+        logger.info('      Start worker at: %26s', self.address)
         for k, v in self.service_ports.items():
             logger.info('  %16s at: %20s:%d' % (k, self.ip, v))
-        logger.info('Waiting to connect to: %20s:%d',
-                    self.scheduler.ip, self.scheduler.port)
+        logger.info('Waiting to connect to: %26s',
+                    self.scheduler.address)
         logger.info('-' * 49)
         logger.info('              Threads: %26d', self.ncores)
         if self.memory_limit:
@@ -217,15 +223,14 @@ class WorkerBase(Server):
 
         yield self._register_with_scheduler()
 
-        logger.info('        Registered to: %20s:%d',
-                    self.scheduler.ip, self.scheduler.port)
+        logger.info('        Registered to: %32s', self.scheduler.address)
         logger.info('-' * 49)
         self.status = 'running'
 
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
 
-    def identity(self, stream):
+    def identity(self, comm):
         return {'type': type(self).__name__,
                 'id': self.id,
                 'scheduler': (self.scheduler.ip, self.scheduler.port),
@@ -236,14 +241,14 @@ class WorkerBase(Server):
     def _close(self, report=True, timeout=10):
         if self.status in ('closed', 'closing'):
             return
-        logger.info("Stopping worker at %s:%d", self.ip, self.port)
+        logger.info("Stopping worker at %s", self.address)
         self.status = 'closing'
         self.stop()
         self.heartbeat_callback.stop()
         with ignoring(EnvironmentError):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
-                        self.scheduler.unregister(address=(self.ip, self.port)),
+                        self.scheduler.unregister(address=self.address),
                         io_loop=self.loop)
         self.scheduler.close_rpc()
         self.executor.shutdown()
@@ -256,12 +261,13 @@ class WorkerBase(Server):
         self.status = 'closed'
 
     @gen.coroutine
-    def terminate(self, stream, report=True):
+    def terminate(self, comm, report=True):
         yield self._close(report=report)
         raise Return('OK')
 
     @property
     def address_tuple(self):
+        # XXX remove?
         return (self.ip, self.port)
 
     def _deserialize(self, function=None, args=None, kwargs=None, task=None):
@@ -305,14 +311,14 @@ class WorkerBase(Server):
         raise gen.Return(result)
 
 
-    def run(self, stream, function, args=(), kwargs={}):
-        return run(self, stream, function=function, args=args, kwargs=kwargs)
+    def run(self, comm, function, args=(), kwargs={}):
+        return run(self, comm, function=function, args=args, kwargs=kwargs)
 
-    def run_coroutine(self, stream, function, args=(), kwargs={}, wait=True):
-        return run(self, stream, function=function, args=args, kwargs=kwargs,
+    def run_coroutine(self, comm, function, args=(), kwargs={}, wait=True):
+        return run(self, comm, function=function, args=args, kwargs=kwargs,
                    is_coro=True, wait=wait)
 
-    def update_data(self, stream=None, data=None, report=True):
+    def update_data(self, comm=None, data=None, report=True):
         for key, value in data.items():
             if key in self.task_state:
                 self.transition(key, 'memory', value=value)
@@ -337,7 +343,7 @@ class WorkerBase(Server):
         return info
 
     @gen.coroutine
-    def delete_data(self, stream=None, keys=None, report=True):
+    def delete_data(self, comm=None, keys=None, report=True):
         if keys:
             for key in list(keys):
                 self.log.append((key, 'delete'))
@@ -355,7 +361,7 @@ class WorkerBase(Server):
         raise Return('OK')
 
     @gen.coroutine
-    def get_data(self, stream, keys=None, who=None):
+    def get_data(self, comm, keys=None, who=None):
         start = time()
 
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
@@ -365,11 +371,11 @@ class WorkerBase(Server):
             self.digests['get-data-load-duration'].add(stop - start)
         start = time()
         try:
-            compressed = yield write(stream, msg)
-            yield close(stream)
+            compressed = yield comm.write(msg)
+            yield comm.close()
         except EnvironmentError:
             logger.exception('failed during get data', exc_info=True)
-            stream.close()
+            comm.abort()
             raise
         stop = time()
         if self.digests is not None:
@@ -393,7 +399,7 @@ class WorkerBase(Server):
 
         raise gen.Return('dont-reply')
 
-    def start_ipython(self, stream):
+    def start_ipython(self, comm):
         """Start an IPython kernel
 
         Returns Jupyter connection info dictionary.
@@ -407,7 +413,7 @@ class WorkerBase(Server):
             )
         return self._ipython_kernel.get_connection_info()
 
-    def upload_file(self, stream, filename=None, data=None, load=True):
+    def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_dir, filename)
         if isinstance(data, unicode):
             data = data.encode()
@@ -436,7 +442,7 @@ class WorkerBase(Server):
                 return {'status': 'error', 'exception': dumps(e)}
         return {'status': 'OK', 'nbytes': len(data)}
 
-    def host_health(self, stream=None):
+    def host_health(self, comm=None):
         """ Information about worker """
         d = {'time': time()}
         try:
@@ -473,11 +479,11 @@ class WorkerBase(Server):
             pass
         return d
 
-    def keys(self, stream=None):
+    def keys(self, comm=None):
         return list(self.data)
 
     @gen.coroutine
-    def gather(self, stream=None, who_has=None):
+    def gather(self, comm=None, who_has=None):
         who_has = {k: [coerce_to_address(addr) for addr in v]
                     for k, v in who_has.items()
                     if k not in self.data}
@@ -663,7 +669,7 @@ def weight(k, v):
 
 
 @gen.coroutine
-def run(worker, stream, function, args=(), kwargs={}, is_coro=False, wait=True):
+def run(worker, comm, function, args=(), kwargs={}, is_coro=False, wait=True):
     assert wait or is_coro, "Combination not supported"
     function = loads(function)
     if args:
@@ -739,7 +745,7 @@ class Worker(WorkerBase):
     * **total_connections**": ``int``
         The maximum number of concurrent connections we want to see
     * **total_comm_nbytes**: ``int``
-    * **batched_stream**: ``BatchedSend(IOstream)``
+    * **batched_stream**: ``BatchedSend``
         A batched stream along which we communicate to the scheduler
     * **log**: ``[(message)]``
         A structured and queryable log.  See ``Worker.story``
@@ -941,10 +947,10 @@ class Worker(WorkerBase):
     ################
 
     @gen.coroutine
-    def compute_stream(self, stream):
+    def compute_stream(self, comm):
         try:
             self.batched_stream = BatchedSend(interval=2, loop=self.loop)
-            self.batched_stream.start(stream)
+            self.batched_stream.start(comm)
 
             def on_closed():
                 if self.reconnect and self.status not in ('closed', 'closing'):
@@ -953,14 +959,17 @@ class Worker(WorkerBase):
                 else:
                     self._close(report=False)
 
-            stream.set_close_callback(on_closed)
+            #stream.set_close_callback(on_closed)
 
             closed = False
 
             while not closed:
                 self.priority_counter += 1
                 try:
-                    msgs = yield read(stream)
+                    msgs = yield comm.read()
+                except CommClosedError:
+                    on_closed()
+                    break
                 except EnvironmentError as e:
                     break
 
@@ -1291,10 +1300,10 @@ class Worker(WorkerBase):
             if self.batched_stream:
                 self.send_task_state_to_scheduler(key)
             else:
-                raise StreamClosedError()
+                raise CommClosedError
 
         except EnvironmentError:
-            logger.info("Stream closed")
+            logger.info("Comm closed")
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1469,16 +1478,15 @@ class Worker(WorkerBase):
     def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
         if self.status != 'running':
             return
-        stream = None
+        comm = None
         with log_errors():
-            ip, port = worker.split(':')
             response = {}
             try:
                 if self.validate:
                     self.validate_state()
 
                 start = time()
-                stream = yield connect(ip, int(port), timeout=3)
+                comm = yield connect(worker, timeout=3)
                 stop = time()
                 if self.digests is not None:
                     self.digests['gather-connect-duration'].add(stop - start)
@@ -1487,7 +1495,7 @@ class Worker(WorkerBase):
                 logger.debug("Request %d keys", len(deps))
 
                 start = time()
-                response = yield send_recv(stream, op='get_data', keys=list(deps),
+                response = yield send_recv(comm, op='get_data', keys=list(deps),
                                            close=True, who=self.address)
                 stop = time()
 
@@ -1527,8 +1535,8 @@ class Worker(WorkerBase):
                     import pdb; pdb.set_trace()
                 raise
             finally:
-                if stream:
-                    stream.close()
+                if comm:
+                    yield comm.close()
                 self.comm_nbytes -= total_nbytes
 
                 for d in self.in_flight_workers.pop(worker):
@@ -1659,7 +1667,7 @@ class Worker(WorkerBase):
                 self.batched_stream.send({'op': 'release',
                                           'key': key,
                                           'cause': cause})
-        except StreamClosedError:
+        except CommClosedError:
             pass
         except Exception as e:
             logger.exception(e)

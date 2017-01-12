@@ -283,23 +283,31 @@ def ensure_ip(hostname):
     '127.0.0.1'
     >>> ensure_ip('123.123.123.123')  # pass through IP addresses
     '123.123.123.123'
-    >>> ensure_ip('localhost:5000')
-    '127.0.0.1:5000'
     """
-    if PY3 and isinstance(hostname, bytes):
-        hostname = hostname.decode()
-    if ':' in hostname:
-        host, port = hostname.rsplit(':', 1)
-        return ':'.join([ensure_ip(host), port])
-    if re.match('\d+\.\d+\.\d+\.\d+', hostname):  # is IP
-        return hostname
-    else:
+    # Prefer IPv4 over IPv6
+    families = [socket.AF_INET, socket.AF_INET6]
+    for fam in families:
         try:
-            return socket.gethostbyname(hostname)
-        except Exception as e:
-            logger.warn("Could not resolve hostname: %s", hostname,
-                        exc_info=True)
-            raise
+            results = socket.getaddrinfo(hostname,
+                                         1234,  # dummy port number
+                                         fam, socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            exc = e
+        else:
+            return results[0][4][0]
+
+    raise exc
+    #if PY3 and isinstance(hostname, bytes):
+        #hostname = hostname.decode()
+    #if re.match('\d+\.\d+\.\d+\.\d+', hostname):  # is IPv4
+        #return hostname
+    #else:
+        #try:
+            #return socket.gethostbyname(hostname)
+        #except Exception as e:
+            #logger.warn("Could not resolve hostname: %s", hostname,
+                        #exc_info=True)
+            #raise
 
 
 tblib.pickling_support.install()

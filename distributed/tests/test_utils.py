@@ -134,11 +134,11 @@ def test_is_kernel():
 
 
 def test_ensure_ip():
-    assert ensure_ip('localhost') == '127.0.0.1'
-    assert ensure_ip('localhost:8787') == '127.0.0.1:8787'
-    assert ensure_ip(b'localhost:8787') == '127.0.0.1:8787'
+    assert ensure_ip('localhost') in ('127.0.0.1', '::1')
     assert ensure_ip('123.123.123.123') == '123.123.123.123'
-    assert ensure_ip('123.123.123.123:8787') == '123.123.123.123:8787'
+    assert ensure_ip('8.8.8.8') == '8.8.8.8'
+    assert ensure_ip('2001:4860:4860::8888') == '2001:4860:4860::8888'
+    assert ensure_ip('::1') == '::1'
 
 
 def test_truncate_exception():

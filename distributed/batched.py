@@ -38,6 +38,8 @@ class BatchedSend(object):
 
         ['Hello,', 'world!']
     """
+    # XXX why doesn't BatchedSend follow either the IOStream or Comm API?
+
     def __init__(self, interval, loop=None):
         # XXX is the loop arg useful?
         self.loop = loop or IOLoop.current()
@@ -106,18 +108,26 @@ class BatchedSend(object):
             self.waker.set()
 
     @gen.coroutine
-    def close(self, ignore_closed=False):
+    def close(self):
         """ Flush existing messages and then close comm """
         if self.comm is None:
             return
         self.please_stop = True
         self.waker.set()
         yield self.stopped.wait()
-        try:
-            if self.buffer:
-                self.buffer, payload = [], self.buffer
-                yield self.comm.write(payload)
-        except CommClosedError:
-            if not ignore_closed:
-                raise
-        yield self.comm.close()
+        if not self.comm.closed():
+            try:
+                if self.buffer:
+                    self.buffer, payload = [], self.buffer
+                    yield self.comm.write(payload)
+            except CommClosedError:
+                pass
+            yield self.comm.close()
+
+    def abort(self):
+        if self.comm is None:
+            return
+        self.waker.set()
+        if not self.comm.closed():
+            self.comm.abort()
+

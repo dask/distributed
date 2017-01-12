@@ -135,7 +135,7 @@ def test_close_closed():
         b.send(123)
         comm.close()  # external closing
 
-        yield b.close(ignore_closed=True)
+        yield b.close()
 
 
 @gen_test()
@@ -219,7 +219,7 @@ def _run_traffic_jam(nsends, nbytes):
         assert results == list(range(nsends))
 
         comm.close()  # external closing
-        yield b.close(ignore_closed=True)
+        yield b.close()
 
 
 @gen_test()

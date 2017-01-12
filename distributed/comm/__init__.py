@@ -8,4 +8,5 @@ try:
 except ImportError:
     pass
 else:
+    # XXX this registers the ZMQ event loop, event if ZMQ is unused...
     from . import zmq

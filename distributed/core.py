@@ -19,12 +19,8 @@ except ImportError:
     import pickle
 import cloudpickle
 from tornado import gen
-from tornado.locks import Event
-from tornado.tcpserver import TCPServer
-#from tornado.tcpclient import TCPClient
 from tornado.ioloop import IOLoop, PeriodicCallback
-#from tornado.iostream import IOStream, StreamClosedError
-#from tornado.iostream import StreamClosedError
+from tornado.locks import Event
 
 from .comm import connect, listen, CommClosedError
 from .comm.core import parse_address, Comm
@@ -96,8 +92,8 @@ class Server(object):
     default_ip = ''
     default_port = 0
 
-    def __init__(self, handlers,
-                 connection_limit=512, deserialize=True, **kwargs):
+    def __init__(self, handlers, connection_limit=512, deserialize=True,
+                 io_loop=None):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._address = None
@@ -111,6 +107,7 @@ class Server(object):
         self.digests = None
 
         self.listener = None
+        self.io_loop = io_loop or IOLoop.current()
 
         if hasattr(self, 'loop'):
             # XXX?
@@ -166,6 +163,8 @@ class Server(object):
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
             addr = unparse_host_port(self.default_ip, port_or_addr)
+        elif isinstance(port_or_addr, tuple):
+            addr = unparse_host_port(*port_or_addr)
         else:
             addr = port_or_addr
             assert isinstance(addr, str)
@@ -565,7 +564,7 @@ class ConnectionPool(object):
             self.event.clear()
             self.collect()
             yield self.event.wait()
-            yield gen.sleep(0.01)  # XXX?
+            #yield gen.sleep(0.01)  # XXX?
 
         self.open += 1
         try:
