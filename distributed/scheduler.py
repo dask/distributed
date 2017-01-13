@@ -420,11 +420,13 @@ class Scheduler(Server):
         """
         if self.status == 'closed':
             return
+        logger.info("Scheduler closing...")
         for service in self.services.values():
             service.stop()
         for ext in self.extensions:
             with ignoring(AttributeError):
                 ext.teardown()
+        logger.info("Scheduler closing all comms")
         yield self.cleanup()
         if not fast:
             yield self.finished()
@@ -792,9 +794,7 @@ class Scheduler(Server):
                     else:
                         recommendations[key] = 'forgotten'
 
-            print("transitions:", len(self.who_has), len(recommendations))
             self.transitions(recommendations)
-            print("=> transitions:", len(self.who_has))
 
             if self.validate:
                 assert all(self.who_has.values()), len(self.who_has)
@@ -1171,7 +1171,6 @@ class Scheduler(Server):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
-        yield gen.sleep(0)
         addr = coerce_to_address(worker)
         try:
             comm = yield connect(addr)

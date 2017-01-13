@@ -484,7 +484,7 @@ def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
 @gen.coroutine
 def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
-    scheduler_close = s.close()  # shut down periodic callbacks immediately
+    #scheduler_close = s.close()  # shut down periodic callbacks immediately
 
     @gen.coroutine
     def end_worker(w):
@@ -494,7 +494,7 @@ def end_cluster(s, workers):
             shutil.rmtree(w.local_dir)
 
     yield [end_worker(w) for w in workers]
-    yield scheduler_close  # wait until scheduler stops completely
+    yield s.close() # wait until scheduler stops completely
     s.stop()
 
 

@@ -22,6 +22,7 @@ except ImportError:
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.locks import Event
 
 from .batched import BatchedSend
 from .comm.core import normalize_address
@@ -104,6 +105,7 @@ class WorkerBase(Server):
             self.data = dict()
         self.loop = loop or IOLoop.current()
         self.status = None
+        self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
         self.scheduler = rpc(scheduler_addr)
@@ -260,11 +262,17 @@ class WorkerBase(Server):
             v.stop()
         self.rpc.close()
         self.status = 'closed'
+        self._closed.set()
 
     @gen.coroutine
     def terminate(self, comm, report=True):
         yield self._close(report=report)
         raise Return('OK')
+
+    @gen.coroutine
+    def wait_until_closed(self):
+        yield self._closed.wait()
+        assert self.status == 'closed'
 
     @property
     def address_tuple(self):

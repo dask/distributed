@@ -147,10 +147,10 @@ class Nanny(Server):
                 else:
                     logger.info("Unregister worker %r from scheduler",
                                 self.worker_address)
-            except allowed_errors:
+            except allowed_errors as e:
                 # Maybe the scheduler is gone, or it is unresponsive
-                logger.warn("Nanny %r failed to unregister worker %r",
-                            self.address, self.worker_address)
+                logger.warn("Nanny %r failed to unregister worker %r: %s",
+                            self.address, self.worker_address, e)
             except Exception as e:
                 logger.exception(e)
 
@@ -399,11 +399,9 @@ def run_worker_fork(q, ip, scheduler_addr, ncores, nanny_port,
             assert worker.port  # pragma: no cover
             q.put({'address': worker.address, 'dir': worker.local_dir})  # pragma: no cover
 
-        while worker.status != 'closed':
-            yield gen.sleep(0.1)
+        yield worker.wait_until_closed()
 
         logger.info("Worker closed")
-
     try:
         loop.run_sync(run)
     finally:
