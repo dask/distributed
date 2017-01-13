@@ -96,7 +96,7 @@ class ChannelScheduler(object):
     def report(self, channel, key):
         for client in list(self.clients[channel]):
             try:
-                comm = self.scheduler.streams[client]
+                comm = self.scheduler.comms[client]
                 comm.send({'op': 'channel-append',
                            'key': key,
                            'channel': channel})
