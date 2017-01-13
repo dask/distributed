@@ -2189,10 +2189,10 @@ class Client(object):
         if qtconsole:
             from ._ipython_utils import connect_qtconsole
             for worker, connection_info in info_dict.items():
-                connect_qtconsole(connection_info,
-                                  name='dask-' + worker.replace(':','-'),
+                name = 'dask-' + worker.replace(':', '-').replace('/', '-')
+                connect_qtconsole(connection_info, name=name,
                                   extra_args=qtconsole_args,
-                )
+                                  )
         return info_dict
 
     def start_ipython_scheduler(self, magic_name='scheduler_if_ipython',
