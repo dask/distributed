@@ -13,7 +13,7 @@ def test_remote_client_uploads_a_file(current_loop, tmpdir, ):
     def test():
         remote_client = RemoteClient(ip='127.0.0.1', local_dir=str(tmpdir))
         yield remote_client._start(0)
-        remote_process = rpc(ip='127.0.0.1', port=remote_client.port)
+        remote_process = rpc(remote_client.address)
         upload = yield remote_process.upload_file(filename='script.py', file_payload='x=1')
 
         assert upload == {'status': 'OK', 'nbytes': 3}
@@ -29,7 +29,7 @@ def test_remote_client_execution_outputs_to_stdout(current_loop, tmpdir):
     def test():
         remote_client = RemoteClient(ip='127.0.0.1', local_dir=str(tmpdir))
         yield remote_client._start(0)
-        rr = rpc(ip='127.0.0.1', port=remote_client.port)
+        rr = rpc(remote_client.address)
         yield rr.upload_file(filename='script.py', file_payload='print("hello world!")')
 
         message = yield rr.execute(filename='script.py')
@@ -46,7 +46,7 @@ def test_remote_client_execution_outputs_stderr(current_loop, tmpdir, invalid_py
     def test():
         remote_client = RemoteClient(ip='127.0.0.1', local_dir=str(tmpdir))
         yield remote_client._start(0)
-        rr = rpc(ip='127.0.0.1', port=remote_client.port)
+        rr = rpc(remote_client.address)
         yield rr.upload_file(filename='script.py', file_payload='a+1')
 
         message = yield rr.execute(filename='script.py')
