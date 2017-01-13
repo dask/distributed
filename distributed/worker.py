@@ -319,7 +319,6 @@ class WorkerBase(Server):
         # logger.info("Finish job %d, %s", i, key)
         raise gen.Return(result)
 
-
     def run(self, comm, function, args=(), kwargs={}):
         return run(self, comm, function=function, args=args, kwargs=kwargs)
 
@@ -677,7 +676,7 @@ def weight(k, v):
 
 
 @gen.coroutine
-def run(worker, comm, function, args=(), kwargs={}, is_coro=False, wait=True):
+def run(server, comm, function, args=(), kwargs={}, is_coro=False, wait=True):
     assert wait or is_coro, "Combination not supported"
     function = loads(function)
     if args:
@@ -685,7 +684,9 @@ def run(worker, comm, function, args=(), kwargs={}, is_coro=False, wait=True):
     if kwargs:
         kwargs = loads(kwargs)
     if has_arg(function, 'dask_worker'):
-        kwargs['dask_worker'] = worker
+        kwargs['dask_worker'] = server
+    if has_arg(function, 'dask_scheduler'):
+        kwargs['dask_scheduler'] = server
     logger.info("Run out-of-band function %r", funcname(function))
     try:
         result = function(*args, **kwargs)
