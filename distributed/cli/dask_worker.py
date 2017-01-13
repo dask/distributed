@@ -11,7 +11,7 @@ import sys
 from time import sleep
 
 import click
-from distributed import Nanny, Worker, sync, rpc
+from distributed import Nanny, Worker, rpc
 from distributed.nanny import isalive
 from distributed.utils import get_ip, All, ignoring
 from distributed.worker import _ncores
