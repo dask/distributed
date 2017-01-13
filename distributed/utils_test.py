@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
+from datetime import timedelta
 import gc
 from glob import glob
 import logging
@@ -18,7 +19,8 @@ import six
 
 from toolz import merge
 from tornado import gen, queues
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.gen import TimeoutError
+from tornado.ioloop import IOLoop
 
 from .core import connect, rpc, coerce_to_address, CommClosedError
 from .metrics import time
@@ -286,7 +288,7 @@ def run_worker(q, scheduler_q, **kwargs):
             loop.close(all_fds=True)
 
 
-def run_nanny(q, scheduler_addr, **kwargs):
+def run_nanny(q, scheduler_q, **kwargs):
     from distributed import Nanny
     from tornado.ioloop import IOLoop, PeriodicCallback
     with log_errors():
@@ -294,6 +296,8 @@ def run_nanny(q, scheduler_addr, **kwargs):
         #IOLoop.clear_instance()
         #loop = IOLoop(); loop.make_current()
         PeriodicCallback(lambda: None, 500).start()
+
+        scheduler_addr = scheduler_q.get()
         worker = Nanny(scheduler_addr, ip='127.0.0.1',
                        validate=True, **kwargs)
         loop.run_sync(lambda: worker._start(0))
@@ -384,9 +388,9 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
             finally:
                 logger.debug("Closing out test cluster")
 
-                loop.run_sync(lambda: disconnect_all([w['address'] for w in workers]),
-                              timeout=0.5)
-                loop.run_sync(lambda: disconnect(saddr), timeout=0.5)
+                loop.run_sync(lambda: disconnect_all([w['address'] for w in workers],
+                                                     timeout=0.5))
+                loop.run_sync(lambda: disconnect(saddr, timeout=0.5))
 
                 scheduler.terminate()
                 for proc in [w['proc'] for w in workers]:
@@ -404,19 +408,24 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
 
 
 @gen.coroutine
-def disconnect(addr):
-    with ignoring(EnvironmentError, TimeoutError, CommClosedError):
-        comm = yield connect(addr)
-        try:
-            yield comm.write({'op': 'terminate', 'close': True})
-            response = yield comm.read()
-        finally:
-            yield comm.close()
+def disconnect(addr, timeout=3):
+    @gen.coroutine
+    def do_disconnect():
+        with ignoring(EnvironmentError, CommClosedError):
+            comm = yield connect(addr)
+            try:
+                yield comm.write({'op': 'terminate', 'close': True})
+                response = yield comm.read()
+            finally:
+                yield comm.close()
+
+    with ignoring(TimeoutError):
+        yield gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
 
 
 @gen.coroutine
-def disconnect_all(addresses):
-    yield [disconnect(addr) for addr in addresses]
+def disconnect_all(addresses, timeout=3):
+    yield [disconnect(addr, timeout) for addr in addresses]
 
 
 import pytest

@@ -24,7 +24,7 @@ from distributed.utils_test import (gen_cluster, cluster, inc, loop, slow, div,
 
 def test_submit_after_failed_worker_sync(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
             a['proc'].terminate()
@@ -45,7 +45,7 @@ def test_submit_after_failed_worker(c, s, a, b):
 
 def test_gather_after_failed_worker(loop):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
             a['proc'].terminate()
@@ -56,7 +56,7 @@ def test_gather_after_failed_worker(loop):
 @slow
 def test_gather_then_submit_after_failed_workers(loop):
     with cluster(nworkers=4) as (s, [w, x, y, z]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(20))
             wait(L)
             w['proc'].terminate()
@@ -64,13 +64,13 @@ def test_gather_then_submit_after_failed_workers(loop):
             wait([total])
 
             addr = c.who_has()[total.key][0]
-            _, port = coerce_to_address(addr, out=tuple)
+            #_, port = coerce_to_address(addr, out=tuple)
             for d in [x, y, z]:
-                if d['port'] == port:
+                if d['address'] == addr:
                     d['proc'].terminate()
                     break
             else:
-                assert 0, "Could not find worker"
+                assert 0, "Could not find worker %r" % (addr,)
 
             result = c.gather([total])
             assert result == [sum(map(inc, range(20)))]
@@ -159,7 +159,7 @@ def test_restart_cleared(c, s, a, b):
 
 def test_restart_sync_no_center(loop):
     with cluster(nanny=True) as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(inc, 1)
             c.restart()
             assert x.cancelled()
@@ -170,7 +170,7 @@ def test_restart_sync_no_center(loop):
 
 def test_restart_sync(loop):
     with cluster(nanny=True) as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(div, 1, 2)
             x.result()
 
@@ -205,7 +205,7 @@ def test_restart_fast(c, s, a, b):
 
 def test_restart_fast_sync(loop):
     with cluster(nanny=True) as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             L = c.map(sleep, range(10))
 
             start = time()
