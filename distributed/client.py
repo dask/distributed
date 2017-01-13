@@ -30,7 +30,6 @@ from tornado.locks import Event
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.queues import Queue
 
-from . import deploy
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
@@ -344,6 +343,8 @@ class Client(object):
     """
     def __init__(self, address=None, start=True, loop=None, timeout=3,
                  set_as_default=True):
+        from .deploy import Cluster
+
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
@@ -355,7 +356,7 @@ class Client(object):
         self._pending_msg_buffer = []
         self.extensions = {}
 
-        if isinstance(address, deploy.Cluster):
+        if isinstance(address, Cluster):
             self.cluster = address
         else:
             self.cluster = None
@@ -430,15 +431,17 @@ class Client(object):
         elif self._start_arg is None:
             # Special case: if Client() was instantiated without a
             # scheduler address or cluster reference, spawn a new cluster
+            from .deploy import LocalCluster
+
             try:
-                self.cluster = deploy.LocalCluster(loop=self.loop, start=False)
+                self.cluster = LocalCluster(loop=self.loop, start=False)
                 yield self.cluster._start()
             except (OSError, socket.error) as e:
                 if e.errno != errno.EADDRINUSE:
                     raise
                 # The default port was taken, use a random one
-                self.cluster = deploy.LocalCluster(scheduler_port=0, loop=self.loop,
-                                                   start=False)
+                self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
+                                            start=False)
                 yield self.cluster._start()
 
             # Wait for all workers to be ready
