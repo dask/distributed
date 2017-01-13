@@ -53,7 +53,7 @@ def test_identity():
     w = Worker('127.0.0.1', 8019)
     ident = w.identity(None)
     assert 'Worker' in ident['type']
-    assert ident['scheduler'] == ('127.0.0.1', 8019)
+    assert ident['scheduler'] == 'tcp://127.0.0.1:8019'
     assert isinstance(ident['ncores'], int)
     assert isinstance(ident['memory_limit'], Number)
 
@@ -194,8 +194,8 @@ def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_dir, 'foobar.py'))
     assert a.local_dir != b.local_dir
 
-    aa = rpc(ip=a.ip, port=a.port)
-    bb = rpc(ip=b.ip, port=b.port)
+    aa = rpc(a.address)
+    bb = rpc(b.address)
     yield [aa.upload_file(filename='foobar.py', data=b'x = 123'),
            bb.upload_file(filename='foobar.py', data='x = 123')]
 
@@ -225,8 +225,8 @@ def test_upload_egg(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_dir, eggname))
     assert a.local_dir != b.local_dir
 
-    aa = rpc(ip=a.ip, port=a.port)
-    bb = rpc(ip=b.ip, port=b.port)
+    aa = rpc(a.address)
+    bb = rpc(b.address)
     with open(local_file, 'rb') as f:
         payload = f.read()
     yield [aa.upload_file(filename=eggname, data=payload),
@@ -252,7 +252,7 @@ def test_upload_egg(c, s, a, b):
 
 @gen_cluster()
 def test_broadcast(s, a, b):
-    with rpc(ip=s.ip, port=s.port) as cc:
+    with rpc(s.address) as cc:
         results = yield cc.broadcast(msg={'op': 'ping'})
         assert results == {a.address: b'pong', b.address: b'pong'}
 
@@ -303,7 +303,7 @@ def test_error_message():
 def test_gather(s, a, b):
     b.data['x'] = 1
     b.data['y'] = 2
-    with rpc(ip=a.ip, port=a.port) as aa:
+    with rpc(a.address) as aa:
         resp = yield aa.gather(who_has={'x': [b.address], 'y': [b.address]})
         assert resp['status'] == 'OK'
 

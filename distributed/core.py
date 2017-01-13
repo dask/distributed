@@ -344,11 +344,12 @@ class rpc(object):
     """
     active = 0
     comms = ()
+    address = None
 
     def __init__(self, arg=None, comm=None, deserialize=True, timeout=3):
         self.comms = {}
-        self.address = coerce_to_address(arg)
-        self.ip, self.port = parse_host_port(self.address)
+        self.address = normalize_address(coerce_to_address(arg))
+        self.ip, self.port = parse_host_port(parse_address(self.address)[1])
         self.timeout = timeout
         self.status = 'running'
         self.deserialize = deserialize
@@ -441,6 +442,9 @@ class rpc(object):
                 logger.warn("rpc object %s deleted with %d open comms",
                             self, n_open)
 
+    def __repr__(self):
+        return "<rpc to %r, %d comms>" % (self.address, len(self.comms))
+
 
 class PooledRPCCall(object):
     """ The result of ConnectionPool()('host:port')
@@ -467,6 +471,9 @@ class PooledRPCCall(object):
 
     def close_rpc(self):
         pass
+
+    def __repr__(self):
+        return "<pooled rpc to %r>" % (self.addr,)
 
 
 class ConnectionPool(object):

@@ -236,7 +236,7 @@ class WorkerBase(Server):
     def identity(self, comm):
         return {'type': type(self).__name__,
                 'id': self.id,
-                'scheduler': (self.scheduler.ip, self.scheduler.port),
+                'scheduler': self.scheduler.address,
                 'ncores': self.ncores,
                 'memory_limit': self.memory_limit}
 
