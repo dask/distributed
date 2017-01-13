@@ -774,10 +774,11 @@ def test_file_descriptors(c, s):
     proc = psutil.Process()
     num_fds_1 = proc.num_fds()
 
-    nannies = [Nanny(s.ip, s.port, loop=s.loop) for i in range(20)]
+    N = 20
+    nannies = [Nanny(s.ip, s.port, loop=s.loop) for i in range(N)]
     yield [n._start() for n in nannies]
 
-    while len(s.ncores) < 20:
+    while len(s.ncores) < N:
         yield gen.sleep(0.1)
 
     num_fds_2 = proc.num_fds()
@@ -792,18 +793,18 @@ def test_file_descriptors(c, s):
     yield _wait(x)
 
     num_fds_4 = proc.num_fds()
-    assert num_fds_4 < num_fds_3 + 20
+    assert num_fds_4 < num_fds_3 + N
 
     y = c.persist(x + x.T)
     yield _wait(y)
 
     num_fds_5 = proc.num_fds()
-    assert num_fds_5 < num_fds_4 + 20
+    assert num_fds_5 < num_fds_4 + N
 
     yield gen.sleep(1)
 
     num_fds_6 = proc.num_fds()
-    assert num_fds_6 < num_fds_5 + 20
+    assert num_fds_6 < num_fds_5 + N
 
     yield [n._close() for n in nannies]
 

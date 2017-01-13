@@ -125,7 +125,7 @@ class Nanny(Server):
                     result = yield gen.with_timeout(
                                 timedelta(seconds=min(1, timeout)),
                                 worker.terminate(report=False),
-                                io_loop=self.loop)
+                                )
 
             except gen.TimeoutError:
                 logger.info("Worker non-responsive.  Terminating.")
@@ -134,11 +134,12 @@ class Nanny(Server):
             except BaseException as e:
                 logger.exception(e)
 
+            allowed_errors = (gen.TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
             try:
                 # Tell scheduler that worker is gone
                 result = yield gen.with_timeout(timedelta(seconds=timeout),
                             self.scheduler.unregister(address=self.worker_address),
-                            io_loop=self.loop)
+                            quiet_exceptions=allowed_errors)
                 if result not in ('OK', 'already-removed'):
                     logger.critical("Unable to unregister with scheduler %s. "
                             "Nanny: %s, Worker: %s", result, self.address_tuple,
@@ -146,12 +147,10 @@ class Nanny(Server):
                 else:
                     logger.info("Unregister worker %r from scheduler",
                                 self.worker_address)
-            except gen.TimeoutError:
+            except allowed_errors:
+                # Maybe the scheduler is gone, or it is unresponsive
                 logger.warn("Nanny %r failed to unregister worker %r",
-                            self.address, self.worker_address,
-                            exc_info=True)
-            except (CommClosedError, EnvironmentError, RPCClosed):
-                pass
+                            self.address, self.worker_address)
             except Exception as e:
                 logger.exception(e)
 
@@ -340,6 +339,7 @@ def run_worker_subprocess(environment, ip, scheduler_addr, ncores,
                           nanny_port, worker_port, name, memory_limit,
                           fn, quiet, resources):
     # XXX fix this for scheduler_addr
+    print("FIXME run_worker_subprocess")
     1/0
     if environment.endswith('python'):
         environment = os.path.dirname(environment)

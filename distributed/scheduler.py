@@ -738,13 +738,13 @@ class Scheduler(Server):
         state.
         """
         with log_errors():
+            if address not in self.processing:
+                return 'already-removed'
+
             address = self.coerce_address(address)
             host, port = self._get_host_port(address)
 
             logger.info("Remove worker %s", address)
-            if address not in self.processing:
-                logger.info("Worker already removed")
-                return 'already-removed'
             with ignoring(AttributeError, CommClosedError):
                 self.worker_comms[address].send({'op': 'close'})
 
@@ -792,10 +792,12 @@ class Scheduler(Server):
                     else:
                         recommendations[key] = 'forgotten'
 
+            print("transitions:", len(self.who_has), len(recommendations))
             self.transitions(recommendations)
+            print("=> transitions:", len(self.who_has))
 
             if self.validate:
-                assert all(self.who_has.values())
+                assert all(self.who_has.values()), len(self.who_has)
 
             for plugin in self.plugins[:]:
                 try:
@@ -1130,7 +1132,8 @@ class Scheduler(Server):
 
             self.worker_comms[worker].send(msg)
         except CommClosedError:
-            logger.info("Tried to send task to removed worker")
+            logger.info("Tried to send task %r to closed worker %r", key, worker)
+            # Worker will be removed by handle_worker()
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1941,10 +1944,7 @@ class Scheduler(Server):
 
             # logger.debug("Send job to worker: %s, %s", worker, key)
 
-            try:
-                self.send_task_to_worker(worker, key)
-            except CommClosedError:
-                self.remove_worker(worker)
+            self.send_task_to_worker(worker, key)
 
             if self.validate:
                 assert key not in self.waiting

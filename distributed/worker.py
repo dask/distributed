@@ -179,7 +179,9 @@ class WorkerBase(Server):
     @gen.coroutine
     def _register_with_scheduler(self):
         self.heartbeat_callback.stop()
-        while self.status not in ('closed', 'closing'):
+        while True:
+            if self.status in ('closed', 'closing'):
+                raise gen.Return
             try:
                 resp = yield self.scheduler.register(
                         ncores=self.ncores, address=self.address,
@@ -1766,6 +1768,7 @@ class Worker(WorkerBase):
 
     @gen.coroutine
     def execute(self, key, report=False):
+        executor_error = None
         try:
             if key not in self.executing or key not in self.task_state:
                 return
@@ -1785,9 +1788,13 @@ class Worker(WorkerBase):
                     self.digests['disk-load-duration'].add(stop - start)
 
             logger.debug("Execute key: %s", key)  # TODO: comment out?
-            result = yield self.executor_submit(key, apply_function, function,
-                                                args2, kwargs2,
-                                                self.execution_state, key)
+            try:
+                result = yield self.executor_submit(key, apply_function, function,
+                                                    args2, kwargs2,
+                                                    self.execution_state, key)
+            except RuntimeError as e:
+                executor_error = e
+                raise
 
             if self.task_state.get(key) not in ('executing', 'long-running'):
                 return
@@ -1828,13 +1835,14 @@ class Worker(WorkerBase):
 
             self.ensure_computing()
             self.ensure_communicating()
-        except RuntimeError as e:
-            logger.error("Thread Pool Executor error: %s", e)
         except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb; pdb.set_trace()
-            raise
+            if executor_error is e:
+                logger.error("Thread Pool Executor error: %s", e)
+            else:
+                logger.exception(e)
+                if LOG_PDB:
+                    import pdb; pdb.set_trace()
+                raise
         finally:
             if key in self.executing:
                 self.executing.remove(key)

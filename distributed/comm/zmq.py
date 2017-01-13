@@ -94,7 +94,7 @@ class ZMQ(Comm):
             deserialize = self.deserialize
 
         frames = yield self.sock.recv_multipart(copy=False)
-        msg = from_frames([f.buffer for f in frames], deserialize=self.deserialize)
+        msg = from_frames([f.buffer for f in frames], deserialize=deserialize)
         raise gen.Return(msg)
 
     @gen.coroutine
