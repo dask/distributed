@@ -14,7 +14,7 @@ import six
 import sys
 import tblib.pickling_support
 import tempfile
-from threading import Thread
+import threading
 
 try:
     import resource
@@ -132,29 +132,30 @@ def All(*args):
 
 
 def sync(loop, func, *args, **kwargs):
-    """ Run coroutine in loop running in separate thread """
+    """
+    Run coroutine in loop running in separate thread.
+    """
     if not loop._running:
         try:
             return loop.run_sync(lambda: func(*args, **kwargs))
         except RuntimeError:  # loop already running
             pass
 
-    from threading import Event
-    e = Event()
+    e = threading.Event()
+    main_tid = threading.get_ident()
     result = [None]
     error = [False]
-    traceback = [False]
 
     @gen.coroutine
     def f():
         try:
+            if main_tid == threading.get_ident():
+                raise RuntimeError("sync() called from thread of running loop")
+            yield gen.moment
             result[0] = yield gen.maybe_future(func(*args, **kwargs))
         except Exception as exc:
             logger.exception(exc)
-            result[0] = exc
-            error[0] = exc
-            exc_type, exc_value, exc_traceback = sys.exc_info()
-            traceback[0] = exc_traceback
+            error[0] = sys.exc_info()
         finally:
             e.set()
 
@@ -162,7 +163,7 @@ def sync(loop, func, *args, **kwargs):
     while not e.is_set():
         e.wait(1000000)
     if error[0]:
-        six.reraise(type(error[0]), error[0], traceback[0])
+        six.reraise(*error[0])
     else:
         return result[0]
 
@@ -342,7 +343,7 @@ def _dump_to_queue(seq, q):
 def iterator_to_queue(seq, maxsize=0):
     q = Queue(maxsize=maxsize)
 
-    t = Thread(target=_dump_to_queue, args=(seq, q))
+    t = threading.Thread(target=_dump_to_queue, args=(seq, q))
     t.daemon = True
     t.start()
 

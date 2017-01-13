@@ -7,6 +7,7 @@ import logging
 from six import with_metaclass
 
 from tornado import gen
+from tornado.ioloop import IOLoop
 
 from ..metrics import time
 

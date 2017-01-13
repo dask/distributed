@@ -629,14 +629,14 @@ def coerce_to_address(o):
 
 def coerce_to_rpc(o, **kwargs):
     # XXX
-    if isinstance(o, (bytes, str, tuple, list)):
+    if isinstance(o, (str, tuple)):
         return rpc(coerce_to_address(o), **kwargs)
     elif isinstance(o, Comm):
         return rpc(comm=o, **kwargs)
     elif isinstance(o, rpc):
         return o
     else:
-        raise TypeError()
+        raise TypeError("Expected rpc-compatible initializer, got %r" % (o,))
 
 
 def error_message(e, status='error'):

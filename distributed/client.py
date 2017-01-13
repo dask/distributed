@@ -6,6 +6,7 @@ from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
 from contextlib import contextmanager
 import copy
 from datetime import timedelta
+import errno
 from functools import partial
 from glob import glob
 import logging
@@ -29,6 +30,7 @@ from tornado.locks import Event
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.queues import Queue
 
+from . import deploy
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
@@ -353,9 +355,10 @@ class Client(object):
         self._pending_msg_buffer = []
         self.extensions = {}
 
-        if hasattr(address, 'scheduler_address'):
+        if isinstance(address, deploy.Cluster):
             self.cluster = address
-            address = address.scheduler_address
+        else:
+            self.cluster = None
         self._start_arg = address
         if set_as_default:
             self._previous_get = _globals.get('get')
@@ -381,14 +384,14 @@ class Client(object):
     def __str__(self):
         if hasattr(self, '_loop_thread'):
             n = sync(self.loop, self.scheduler.ncores)
-            return '<%s: scheduler="%s:%d" processes=%d cores=%d>' % (
+            return '<%s: scheduler=%r processes=%d cores=%d>' % (
                     self.__class__.__name__,
-                    self.scheduler.ip, self.scheduler.port, len(n),
-                    sum(n.values()))
+                    self.scheduler.address, len(n), sum(n.values()))
+        elif hasattr(self, 'scheduler'):
+            return '<%s: scheduler="%r">' % (
+                    self.__class__.__name__, self.scheduler.address)
         else:
-            return '<%s: scheduler="%s:%d">' % (
-                    self.__class__.__name__,
-                    self.scheduler.ip, self.scheduler.port)
+            return '<%s: not connected>' % (self.__class__.__name__,)
 
     __repr__ = __str__
 
@@ -419,17 +422,31 @@ class Client(object):
 
     @gen.coroutine
     def _start(self, timeout=3, **kwargs):
-        if self._start_arg is None:
-            from distributed.deploy import LocalCluster
-            try:
-                self.cluster = LocalCluster(loop=self.loop, start=False)
-            except (OSError, socket.error):
-                self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
-                                            start=False)
+        if self.cluster is not None:
+            # Ensure the cluster is started (no-op if already running)
+            yield self.cluster._start()
             self._start_arg = self.cluster.scheduler_address
+
+        elif self._start_arg is None:
+            # Special case: if Client() was instantiated without a
+            # scheduler address or cluster reference, spawn a new cluster
+            try:
+                self.cluster = deploy.LocalCluster(loop=self.loop, start=False)
+                yield self.cluster._start()
+            except (OSError, socket.error) as e:
+                if e.errno != errno.EADDRINUSE:
+                    raise
+                # The default port was taken, use a random one
+                self.cluster = deploy.LocalCluster(scheduler_port=0, loop=self.loop,
+                                                   start=False)
+                yield self.cluster._start()
+
+            # Wait for all workers to be ready
             while (not self.cluster.workers or
-               len(self.cluster.scheduler.ncores) < len(self.cluster.workers)):
+                   len(self.cluster.scheduler.ncores) < len(self.cluster.workers)):
                 yield gen.sleep(0.01)
+
+            self._start_arg = self.cluster.scheduler_address
 
         self.scheduler = coerce_to_rpc(self._start_arg, timeout=timeout)
         self.scheduler_comm = None
