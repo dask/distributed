@@ -30,7 +30,7 @@ from .batched import BatchedSend
 from .comm.core import parse_address, unparse_address, normalize_address
 from .comm.utils import parse_host_port, unparse_host_port
 from .config import config
-from .core import (rpc, connect, Server, send_recv, coerce_to_address,
+from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
 from .metrics import time
 from .publish import PublishExtension
@@ -298,6 +298,7 @@ class Scheduler(Server):
                          'run_function': self.run_function,
                          'update_data': self.update_data}
 
+        # XXX start_services()?
         self.services = {}
         for k, v in (services or {}).items():
             if isinstance(k, tuple):
@@ -1172,12 +1173,11 @@ class Scheduler(Server):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
-        addr = coerce_to_address(worker)
         try:
-            comm = yield connect(addr)
+            comm = yield connect(worker)
         except Exception as e:
             logger.error("Failed to connect to worker %r: %s",
-                         addr, e)
+                         worker, e)
             return
         yield comm.write({'op': 'compute-stream', 'reply': False})
         self.worker_comms[worker].start(comm)
@@ -1630,7 +1630,6 @@ class Scheduler(Server):
         This should not be used in practice and is mostly here for legacy
         reasons.
         """
-        worker = coerce_to_address(worker)
         if worker not in self.worker_info:
             return 'not found'
         for key in keys:

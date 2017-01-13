@@ -70,3 +70,13 @@ def unparse_host_port(host, port=None):
         return '%s:%s' % (host, port)
     else:
         return host
+
+
+def get_tcp_server_address(tcp_server):
+    """
+    Get the bound address of a started Tornado TCPServer.
+    """
+    sockets = list(tcp_server._sockets.values())
+    if not sockets:
+        raise RuntimeError("TCP Server %r not started yet?" % (tcp_server,))
+    return sockets[0].getsockname()

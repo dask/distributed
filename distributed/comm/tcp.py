@@ -7,8 +7,6 @@ import socket
 import struct
 import sys
 
-from toolz import first
-
 from tornado import gen
 from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpclient import TCPClient
@@ -16,7 +14,8 @@ from tornado.tcpserver import TCPServer
 
 from .. import config
 from .core import connectors, listeners, Comm, Listener, CommClosedError
-from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
+from .utils import (to_frames, from_frames, parse_host_port, unparse_host_port,
+                    get_tcp_server_address)
 
 
 logger = logging.getLogger(__name__)
@@ -233,7 +232,7 @@ class TCPListener(Listener):
         self._check_started()
 
         if self.bound_address is None:
-            self.bound_address = first(self.tcp_server._sockets.values()).getsockname()
+            self.bound_address = get_tcp_server_address(self.tcp_server)
         # IPv6 getsockname() can return more a 4-len tuple
         return self.bound_address[:2]
 

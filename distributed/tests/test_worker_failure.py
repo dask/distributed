@@ -14,7 +14,6 @@ from dask import delayed
 from distributed import Client, Nanny, wait
 from distributed.compatibility import PY3
 from distributed.client import _wait
-from distributed.core import coerce_to_address
 from distributed.metrics import time
 from distributed.nanny import isalive
 from distributed.utils import sync, ignoring
@@ -64,7 +63,6 @@ def test_gather_then_submit_after_failed_workers(loop):
             wait([total])
 
             addr = c.who_has()[total.key][0]
-            #_, port = coerce_to_address(addr, out=tuple)
             for d in [x, y, z]:
                 if d['address'] == addr:
                     d['proc'].terminate()

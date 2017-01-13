@@ -610,8 +610,7 @@ class ConnectionPool(object):
                 comm.abort()
 
 
-def coerce_to_address(o, out=str):
-    # XXX simplify this (always out=str?)
+def coerce_to_address(o):
     if PY3 and isinstance(o, bytes):
         o = o.decode()
 
@@ -619,11 +618,11 @@ def coerce_to_address(o, out=str):
         o = tuple(o)
         if isinstance(o[0], bytes):
             o = (o[0].decode(),) + o[1:]
-        if out == str:
-            o = unparse_host_port(*o)
+        #if out == str:
+        o = unparse_host_port(*o)
 
-    elif out == tuple:
-        o = parse_host_port(parse_address(o)[1])
+    #elif out == tuple:
+        #o = parse_host_port(parse_address(o)[1])
 
     return o
 
