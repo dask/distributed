@@ -104,17 +104,17 @@ Changelog
 *   Rename Executor to Client (:pr:`492`)
 *   Add ``--memory-limit`` option to ``dask-worker``, enabling spill-to-disk
     behavior when running out of memory (:pr:`485`)
-*   Add ``--pid-file`` option to dask-worker and ```--dask-scheduler`` (:pr:`496`)
+*   Add ``--pid-file`` option to dask-worker and ``--dask-scheduler`` (:pr:`496`)
 *   Add ``upload_environment`` function to distribute conda environments.
     This is experimental, undocumented, and may change without notice.  (:pr:`494`)
-*   Add ``workers=``` keyword argument to ``Client.compute`` and ``Client.persist``,
+*   Add ``workers=`` keyword argument to ``Client.compute`` and ``Client.persist``,
     supporting location-restricted workloads with Dask collections (:pr:`484`)
 *   Add ``upload_environment`` function to distribute conda environments.
     This is experimental, undocumented, and may change without notice.  (:pr:`494`)
 
-    *   Add optional ``dask_worker=`` keyword to ```client.run`` functions that gets
+    *   Add optional ``dask_worker=`` keyword to ``client.run`` functions that gets
         provided the worker or nanny object
-    *   Add ```nanny=False`` keyword to ```Client.run``, allowing for the execution
+    *   Add ``nanny=False`` keyword to ``Client.run``, allowing for the execution
         of arbitrary functions on the nannies as well as normal workers
 
 
@@ -141,7 +141,7 @@ refactor.
     *  Stress test losing scattered data permanently
 *  IPython fixes
     *  Add ``start_ipython_scheduler`` method to Executor
-    *  Add ```%remote`` magic for workers
+    *  Add ``%remote`` magic for workers
     *  Clean up code and tests
 *  Pool connects to maintain reuse and reduce number of open file handles
 *  Re-implement work stealing algorithm
