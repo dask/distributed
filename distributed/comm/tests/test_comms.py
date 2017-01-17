@@ -210,8 +210,10 @@ def test_default_client_server_ipv4():
     # Default scheme is (currently) TCP
     yield check_client_server('127.0.0.1')
     yield check_client_server('127.0.0.1:3201')
+    yield check_client_server('0.0.0.0')
+    yield check_client_server('0.0.0.0:3202')
     yield check_client_server('')
-    yield check_client_server(':3202')
+    yield check_client_server(':3203')
 
 @requires_ipv6
 @gen_test()
@@ -223,14 +225,18 @@ def test_default_client_server_ipv6():
 def test_tcp_client_server_ipv4():
     yield check_client_server('tcp://127.0.0.1')
     yield check_client_server('tcp://127.0.0.1:3221')
+    yield check_client_server('tcp://0.0.0.0')
+    yield check_client_server('tcp://0.0.0.0:3222')
     yield check_client_server('tcp://')
-    yield check_client_server('tcp://:3222')
+    yield check_client_server('tcp://:3223')
 
 @requires_ipv6
 @gen_test()
 def test_tcp_client_server_ipv6():
     yield check_client_server('tcp://[::1]')
     yield check_client_server('tcp://[::1]:3231')
+    yield check_client_server('tcp://[::]')
+    yield check_client_server('tcp://[::]:3231')
 
 @gen_test()
 def test_zmq_client_server_ipv4():
