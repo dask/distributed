@@ -179,21 +179,21 @@ class MultiProgressBar(object):
                     'remaining': valmap(len, p.keys),
                     'status': p.status}
 
-        self.stream = yield connect(*self.scheduler)
+        self.comm = yield connect(self.scheduler)
         logger.debug("Progressbar Connected to scheduler")
 
-        yield write(self.stream, {'op': 'feed',
-                                  'setup': dumps(setup),
-                                  'function': dumps(function),
-                                  'interval': self.interval})
+        yield self.comm.write({'op': 'feed',
+                               'setup': dumps(setup),
+                               'function': dumps(function),
+                               'interval': self.interval})
 
         while True:
-            response = yield read(self.stream)
+            response = yield self.comm.read()
             self._last_response = response
             self.status = response['status']
             self._draw_bar(**response)
             if response['status'] in ('error', 'finished'):
-                self.stream.close()
+                yield self.comm.close()
                 self._draw_stop(**response)
                 break
         logger.debug("Progressbar disconnected from scheduler")
@@ -203,7 +203,7 @@ class MultiProgressBar(object):
 
     def __del__(self):
         with ignoring(AttributeError):
-            self.stream.close()
+            self.comm.abort()
 
 
 class MultiProgressWidget(MultiProgressBar):
