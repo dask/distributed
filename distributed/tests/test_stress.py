@@ -230,8 +230,8 @@ def test_close_connections(c, s, *workers):
     while any(s.processing.values()):
         yield gen.sleep(0.5)
         worker = random.choice(list(workers))
-        for stream in worker._listen_streams:
-            stream.close()
+        for comm in worker._comms:
+            comm.abort()
         # print(frequencies(s.task_state.values()))
         # for w in workers:
         #     print(w)
