@@ -1,5 +1,6 @@
 
 import logging
+import socket
 
 from .. import protocol
 
@@ -79,4 +80,19 @@ def get_tcp_server_address(tcp_server):
     sockets = list(tcp_server._sockets.values())
     if not sockets:
         raise RuntimeError("TCP Server %r not started yet?" % (tcp_server,))
-    return sockets[0].getsockname()
+
+    def _look_for_family(fam):
+        for sock in sockets:
+            if sock.family == fam:
+                return sock
+        return None
+
+    # If listening on both IPv4 and IPv6, prefer IPv4 as defective IPv6
+    # is common (e.g. Travis-CI).
+    sock = _look_for_family(socket.AF_INET)
+    if sock is None:
+        sock = _look_for_family(socket.AF_INET6)
+    if sock is None:
+        raise RuntimeError("No Internet socket found on TCPServer??")
+
+    return sock.getsockname()
