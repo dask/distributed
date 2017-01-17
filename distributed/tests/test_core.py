@@ -225,8 +225,7 @@ def test_send_recv_args():
 
 
 def test_coerce_to_address():
-    for arg in [b'127.0.0.1:8786',
-                '127.0.0.1:8786',
+    for arg in ['127.0.0.1:8786',
                 ('127.0.0.1', 8786),
                 ('127.0.0.1', '8786')]:
         assert coerce_to_address(arg) == '127.0.0.1:8786'

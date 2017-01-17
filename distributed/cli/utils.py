@@ -50,7 +50,7 @@ def uri_from_host_port(host_arg, port_arg, default_port):
     # Much of distributed depends on a well-known IP being assigned to
     # each entity (Worker, Scheduler, etc.), so avoid "universal" addresses
     # like '' which would listen on all registered IPs and interfaces.
-    scheme, loc = parse_address(host_arg)
+    scheme, loc = parse_address(host_arg or '')
     host, port = parse_host_port(loc, port_arg or default_port)
     if port and port_arg and port != port_arg:
         raise ValueError("port number given twice in options: "
@@ -67,6 +67,5 @@ def uri_from_host_port(host_arg, port_arg, default_port):
     if host and host not in ('0.0.0.0', '[::]'):
         ip = ensure_ip(host)
     else:
-        print("XXX get_ip")
         ip = get_ip()
     return addr, ip

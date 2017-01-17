@@ -617,9 +617,6 @@ class ConnectionPool(object):
 
 
 def coerce_to_address(o):
-    #if PY3 and isinstance(o, bytes):
-        #o = o.decode()
-
     if isinstance(o, (list, tuple)):
         o = tuple(o)
         if isinstance(o[0], bytes):
