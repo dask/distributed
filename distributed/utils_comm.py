@@ -9,7 +9,6 @@ import uuid
 from tornado import gen
 from tornado.gen import Return
 from tornado.ioloop import IOLoop
-from tornado.iostream import StreamClosedError
 
 from dask.base import tokenize
 from toolz import merge, concat, groupby, drop, valmap

@@ -11,6 +11,8 @@ import sys
 import traceback
 import uuid
 
+from six import string_types
+
 from toolz import assoc, first
 
 try:
@@ -171,7 +173,7 @@ class Server(object):
             addr = unparse_host_port(*port_or_addr)
         else:
             addr = port_or_addr
-            assert isinstance(addr, str)
+            assert isinstance(addr, string_types)
         self.listener = listen(addr, self.handle_comm,
                                deserialize=self.deserialize)
         self.listener.start()
@@ -245,14 +247,16 @@ class Server(object):
                         logger.warn("Lost connection to %r while sending result for op %r: %s",
                                     address, op, e)
                         break
-                if close_desired or comm.closed():
+                if close_desired:
+                    yield comm.close()
+                if comm.closed():
                     break
 
         finally:
             del self._comms[comm]
             if not shutting_down() and not comm.closed():
                 try:
-                    yield comm.close()
+                    comm.abort()
                 except Exception as e:
                     logger.error("Failed while closing connection to %r: %s",
                                  address, e)
@@ -628,14 +632,15 @@ def coerce_to_address(o):
 
 def coerce_to_rpc(o, **kwargs):
     # XXX
-    if isinstance(o, (str, tuple)):
-        return rpc(coerce_to_address(o), **kwargs)
-    elif isinstance(o, Comm):
+    if isinstance(o, Comm):
         return rpc(comm=o, **kwargs)
     elif isinstance(o, rpc):
         return o
     else:
-        raise TypeError("Expected rpc-compatible initializer, got %r" % (o,))
+        try:
+            return rpc(coerce_to_address(o), **kwargs)
+        except (ValueError, TypeError):
+            raise TypeError("Expected rpc-compatible initializer, got %r" % (o,))
 
 
 def error_message(e, status='error'):
@@ -685,6 +690,6 @@ def clean_exception(exception, traceback, **kwargs):
         exception = protocol.pickle.loads(exception)
     if isinstance(traceback, bytes):
         traceback = protocol.pickle.loads(traceback)
-    if isinstance(traceback, str):
-        traceback = None
+    elif isinstance(traceback, string_types):
+        traceback = None  # why?
     return type(exception), exception, traceback

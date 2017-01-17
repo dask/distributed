@@ -25,10 +25,11 @@ except ImportError:
 from dask import istask
 from toolz import memoize, valmap
 from tornado import gen
-from tornado.iostream import StreamClosedError
 
-from .compatibility import Queue, PY3, PY2
+from .compatibility import Queue, PY3, PY2, get_thread_identity
 from .config import config
+from .comm import CommClosedError
+
 
 logger = logging.getLogger(__name__)
 
@@ -158,14 +159,14 @@ def sync(loop, func, *args, **kwargs):
             pass
 
     e = threading.Event()
-    main_tid = threading.get_ident()
+    main_tid = get_thread_identity()
     result = [None]
     error = [False]
 
     @gen.coroutine
     def f():
         try:
-            if main_tid == threading.get_ident():
+            if main_tid == get_thread_identity():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
             result[0] = yield gen.maybe_future(func(*args, **kwargs))
@@ -282,7 +283,7 @@ else:
 def log_errors(pdb=False):
     try:
         yield
-    except (StreamClosedError, gen.Return):
+    except (CommClosedError, gen.Return):
         raise
     except Exception as e:
         logger.exception(e)

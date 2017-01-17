@@ -6,9 +6,6 @@ import random
 import pytest
 from toolz import first, assoc
 from tornado import gen
-#from tornado.tcpserver import TCPServer
-#from tornado.tcpclient import TCPClient
-#from tornado.iostream import StreamClosedError
 
 from distributed.batched import BatchedSend
 from distributed.core import read, write, listen, connect, CommClosedError

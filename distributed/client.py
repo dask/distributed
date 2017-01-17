@@ -21,7 +21,7 @@ import socket
 import dask
 from dask.base import tokenize, normalize_token, Base
 from dask.core import flatten, get_dependencies
-from dask.compatibility import apply
+from dask.compatibility import apply, unicode
 from dask.context import _globals
 from toolz import first, groupby, merge, valmap, keymap
 from tornado import gen
@@ -729,7 +729,7 @@ class Client(object):
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
 
-        if isinstance(workers, str):
+        if isinstance(workers, six.string_types):
             workers = [workers]
         if workers is not None:
             restrictions = {skey: workers}
@@ -846,7 +846,7 @@ class Client(object):
             dsk = {key: (apply, func, (tuple, list(args)), kwargs)
                    for key, args in zip(keys, zip(*iterables))}
 
-        if isinstance(workers, str):
+        if isinstance(workers, six.string_types):
             workers = [workers]
         if isinstance(workers, (list, set)):
             if workers and isinstance(first(workers), (list, set)):
@@ -999,10 +999,10 @@ class Client(object):
 
     @gen.coroutine
     def _scatter(self, data, workers=None, broadcast=False):
-        if isinstance(workers, str):
+        if isinstance(workers, six.string_types):
             workers = [workers]
-        if isinstance(data, dict) and not all(isinstance(k, (bytes, str))
-                                               for k in data):
+        if isinstance(data, dict) and not all(isinstance(k, (bytes, unicode))
+                                              for k in data):
             d = yield self._scatter(keymap(tokey, data), workers, broadcast)
             raise gen.Return({k: d[tokey(k)] for k in data})
 

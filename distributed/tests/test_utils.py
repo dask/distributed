@@ -22,7 +22,7 @@ from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
         iterator_to_queue, _maybe_complex, read_block, seek_delimiter,
         funcname, ensure_bytes)
 from distributed.utils_test import (loop, inc, throws, div, captured_handler,
-                                    captured_logger)
+                                    captured_logger, has_ipv6)
 
 
 def test_All(loop):
@@ -137,8 +137,9 @@ def test_ensure_ip():
     assert ensure_ip('localhost') in ('127.0.0.1', '::1')
     assert ensure_ip('123.123.123.123') == '123.123.123.123'
     assert ensure_ip('8.8.8.8') == '8.8.8.8'
-    assert ensure_ip('2001:4860:4860::8888') == '2001:4860:4860::8888'
-    assert ensure_ip('::1') == '::1'
+    if has_ipv6():
+        assert ensure_ip('2001:4860:4860::8888') == '2001:4860:4860::8888'
+        assert ensure_ip('::1') == '::1'
 
 
 def test_truncate_exception():

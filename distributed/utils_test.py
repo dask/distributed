@@ -641,6 +641,36 @@ def wait_for_port(address, timeout=5):
             break
 
 
+def has_ipv6():
+    """
+    Return whether IPv6 is locally functional.  This doesn't guarantee IPv6
+    is properly configured outside of localhost.
+    """
+    serv = cli = None
+    try:
+        serv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        serv.bind(('::', 0))
+        serv.listen(5)
+        cli = socket.create_connection(serv.getsockname()[:2])
+    except EnvironmentError:
+        return False
+    else:
+        return True
+    finally:
+        if cli is not None:
+            cli.close()
+        if serv is not None:
+            serv.close()
+
+
+if has_ipv6():
+    def requires_ipv6(test_func):
+        pass
+
+else:
+    requires_ipv6 = pytest.mark.skip("ipv6 required")
+
+
 @contextmanager
 def captured_logger(logger):
     """Capture output from the given Logger.

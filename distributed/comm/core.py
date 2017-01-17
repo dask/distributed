@@ -4,7 +4,7 @@ from abc import ABCMeta, abstractmethod, abstractproperty
 from datetime import timedelta
 import logging
 
-from six import with_metaclass
+from six import string_types, with_metaclass
 
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -119,7 +119,7 @@ class Listener(with_metaclass(ABCMeta)):
 
 
 def parse_address(addr):
-    if not isinstance(addr, str):
+    if not isinstance(addr, string_types):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
     scheme, sep, loc = addr.rpartition('://')
     if not sep:

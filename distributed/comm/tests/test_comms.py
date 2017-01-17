@@ -5,11 +5,10 @@ from functools import partial
 import pytest
 
 from tornado import gen, ioloop, queues
-from tornado.iostream import StreamClosedError
 
 from distributed.core import pingpong
 from distributed.metrics import time
-from distributed.utils_test import slow, loop, gen_test, gen_cluster
+from distributed.utils_test import slow, loop, gen_test, gen_cluster, requires_ipv6
 
 from distributed.comm import tcp, zmq, connect, listen, CommClosedError
 from distributed.comm.core import parse_address
@@ -214,6 +213,7 @@ def test_default_client_server_ipv4():
     yield check_client_server('')
     yield check_client_server(':3202')
 
+@requires_ipv6
 @gen_test()
 def test_default_client_server_ipv6():
     yield check_client_server('[::1]')
@@ -226,6 +226,7 @@ def test_tcp_client_server_ipv4():
     yield check_client_server('tcp://')
     yield check_client_server('tcp://:3222')
 
+@requires_ipv6
 @gen_test()
 def test_tcp_client_server_ipv6():
     yield check_client_server('tcp://[::1]')
@@ -236,6 +237,7 @@ def test_zmq_client_server_ipv4():
     yield check_client_server('zmq://127.0.0.1')
     yield check_client_server('zmq://127.0.0.1:3241')
 
+@requires_ipv6
 @gen_test()
 def test_zmq_client_server_ipv6():
     yield check_client_server('zmq://[::1]')

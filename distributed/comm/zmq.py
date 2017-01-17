@@ -12,6 +12,7 @@ from zmq.eventloop import ioloop as zmqioloop
 from zmq.eventloop.future import Context
 
 from .. import config
+from ..utils import PY3
 from .core import connectors, listeners, Comm, CommClosedError, Listener
 from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
 from . import zmqimpl
@@ -94,7 +95,11 @@ class ZMQ(Comm):
             deserialize = self.deserialize
 
         frames = yield self.sock.recv_multipart(copy=False)
-        msg = from_frames([f.buffer for f in frames], deserialize=deserialize)
+        if PY3:
+            msg = from_frames([f.buffer for f in frames], deserialize=deserialize)
+        else:
+            # On Python 2, msgpack-python doesn't accept new-style buffer objects
+            msg = from_frames([f.bytes for f in frames], deserialize=deserialize)
         raise gen.Return(msg)
 
     @gen.coroutine
