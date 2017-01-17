@@ -625,7 +625,7 @@ def popen(*args, **kwargs):
 
 
 def wait_for_port(address, timeout=5):
-    address = coerce_to_address(address, out=tuple)
+    assert isinstance(address, tuple)
     deadline = time() + timeout
 
     while True:

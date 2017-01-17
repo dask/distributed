@@ -52,6 +52,9 @@ LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
 DEFAULT_DATA_SIZE = config.get('default-data-size', 1000)
 
 
+# XXX avoid inheriting from Server? there is some large potential for confusion
+# between base and derived attribute namespaces...
+
 class Scheduler(Server):
     """ Dynamic distributed task scheduler
 
@@ -308,7 +311,16 @@ class Scheduler(Server):
 
             try:
                 service = v(self, io_loop=self.loop)
-                service.listen((self.ip, port))
+                # Listen on all interfaces.  `self.ip` is not suitable
+                # as its default value would prevent connecting to the
+                # services (e.g. a Web UI) via 127.0.0.1.  Unfortunately,
+                # this means that security by restricting the listening
+                # address doesn't work here.
+
+                # XXX we would benefit from moving this to the start()
+                # method, and choose the same listening addr as the
+                # main listener.
+                service.listen(('', port))
                 self.services[k] = service
             except Exception as e:
                 logger.info("Could not launch service: %s-%d", k, port,
@@ -367,7 +379,7 @@ class Scheduler(Server):
         """ Basic information about ourselves and our cluster """
         return get_versions()
 
-    def start(self, port=8786, start_queues=True):
+    def start(self, addr=8786, start_queues=True):
         """ Clear out old state and restart all running coroutines """
         collections = [self.tasks, self.dependencies, self.dependents,
                 self.waiting, self.waiting_data, self.released, self.priority,
@@ -388,7 +400,10 @@ class Scheduler(Server):
                     raise exc
 
         if self.status != 'running':
-            self.listen((self.ip, port))
+            if isinstance(addr, int):
+                self.listen((self.ip, addr))
+            else:
+                self.listen(addr)
 
             self.status = 'running'
             logger.info("  Scheduler at: %20s:%s", self.ip, self.port)

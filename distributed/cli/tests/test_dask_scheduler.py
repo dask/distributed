@@ -4,6 +4,7 @@ import pytest
 pytest.importorskip('requests')
 
 from contextlib import contextmanager
+import itertools
 import os
 import requests
 import signal
@@ -61,14 +62,17 @@ def test_bokeh(loop):
         start = time()
         while True:
             try:
+                # All addresses should respond
                 for name in names:
-                    response = requests.get('http://%s:8787/status/' % name)
+                    uri = 'http://%s:8787/status/' % name
+                    response = requests.get(uri)
                     assert response.ok
                 break
             except Exception as f:
-                print(f)
+                print('got error on %r: %s' % (uri, f))
                 sleep(0.1)
                 assert time() < start + 10
+
     with pytest.raises(Exception):
         requests.get('http://127.0.0.1:8787/status/')
 

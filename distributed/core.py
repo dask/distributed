@@ -140,6 +140,9 @@ class Server(object):
 
     @property
     def address(self):
+        """
+        The address this Server is listening on.
+        """
         if not self._address:
             if self.listener is None:
                 raise ValueError("cannot get address of non-running Server")
@@ -148,6 +151,9 @@ class Server(object):
 
     @property
     def port(self):
+        """
+        The port number this Server is listening on.
+        """
         if not self._port:
             _, loc = parse_address(self.address)
             _, self._port = parse_host_port(loc)
@@ -611,18 +617,14 @@ class ConnectionPool(object):
 
 
 def coerce_to_address(o):
-    if PY3 and isinstance(o, bytes):
-        o = o.decode()
+    #if PY3 and isinstance(o, bytes):
+        #o = o.decode()
 
     if isinstance(o, (list, tuple)):
         o = tuple(o)
         if isinstance(o[0], bytes):
             o = (o[0].decode(),) + o[1:]
-        #if out == str:
         o = unparse_host_port(*o)
-
-    #elif out == tuple:
-        #o = parse_host_port(parse_address(o)[1])
 
     return o
 

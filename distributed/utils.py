@@ -15,6 +15,7 @@ import sys
 import tblib.pickling_support
 import tempfile
 import threading
+import warnings
 
 try:
     import resource
@@ -82,11 +83,26 @@ def get_fileno_limit():
 
 @memoize
 def get_ip(host='8.8.8.8', port=80):
+    """
+    Get the local IP address through which the *host* is reachable.
+
+    *host* defaults to a well-known Internet host (one of Google's public
+    DNS servers).
+    """
+    # By using a UDP socket, we don't actually try to connect but
+    # simply select the local address through which *host* is reachable.
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        return [(s.connect((host, port)), s.getsockname()[0], s.close())
-                for s in [socket.socket(socket.AF_INET, socket.SOCK_DGRAM)]][0][1]
-    except OSError:
-        return '127.0.0.1'
+        sock.connect((host, 0))
+        ip = sock.getsockname()[0]
+        return ip
+    except EnvironmentError as e:
+        ip = '127.0.0.1'
+        warnings.warn("Couldn't detect a suitable IP address, defaulting to %r: %e"
+                      % (ip, e), RuntimeWarning)
+        return ip
+    finally:
+        sock.close()
 
 
 @contextmanager

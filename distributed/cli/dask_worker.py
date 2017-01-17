@@ -17,7 +17,10 @@ from distributed.utils import get_ip, All, ignoring
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
 from distributed.metrics import time
-from distributed.cli.utils import check_python_3
+from distributed.cli.utils import check_python_3, uri_from_host_port
+from distributed.comm.core import parse_address
+from distributed.comm.utils import parse_host_port
+
 from toolz import valmap
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
@@ -83,13 +86,6 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     else:
         port = worker_port
 
-    try:
-        scheduler_host, scheduler_port = scheduler.split(':')
-        scheduler_ip = socket.gethostbyname(scheduler_host)
-        scheduler_port = int(scheduler_port)
-    except IndexError:
-        logger.info("Usage:  dask-worker scheduler_host:scheduler_port")
-
     if nprocs > 1 and worker_port != 0:
         logger.error("Failed to launch worker.  You cannot use the --port argument when nprocs > 1.")
         exit(1)
@@ -143,8 +139,8 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     else:
         # lookup the ip address of a local interface on a network that
         # reach the scheduler
-        ip = get_ip(scheduler_ip, scheduler_port)
-    nannies = [t(scheduler_ip, scheduler_port, ncores=nthreads, ip=ip,
+        ip = get_ip(*parse_host_port(parse_address(scheduler)[1]))
+    nannies = [t(scheduler, ncores=nthreads, ip=ip,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
                  local_dir=local_directory, **kwargs)
