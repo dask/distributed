@@ -72,7 +72,7 @@ that information to the scheduler so that it can make smarter decisions and
 improve load times for users.
 
 
-PermissionError [Errno 13] Permission Denied: `/root/.dask`
+PermissionError [Errno 13] Permission Denied: \`/root/.dask\`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 This error can be seen when starting distributed through the stardard process control tool supervisor and running as a non-root suer. This is caused by supervisor not passing the shell environment variables through to the subprocess, head to `this section`_ of the supervisor documentation to see how to pass the $HOME and $USER variables through.
