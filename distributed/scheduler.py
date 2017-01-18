@@ -1632,11 +1632,11 @@ class Scheduler(Server):
                 else:
                     raise gen.Return([])
 
+            if close and workers:
+                yield [self.close_worker(worker=w) for w in workers]
             if remove:
                 for w in workers:
                     self.remove_worker(address=w, safe=True)
-            if close and workers:
-                yield [self.close_worker(worker=w) for w in workers]
 
             raise gen.Return(list(workers))
 

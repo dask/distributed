@@ -1038,17 +1038,20 @@ def test_retire_workers_close(c, s, a, b):
     assert not s.workers
 
 
-@slow
 @gen_cluster(client=True, timeout=20, Worker=Nanny)
 def test_retire_nannies_close(c, s, a, b):
     processes = [a.process, b.process]
-    yield s.retire_workers(close=True)
+    yield s.retire_workers(close=True, remove=True)
     assert not s.workers
 
     start = time()
     while True:
-        if all(proc.is_alive() for proc in processes):
+        if not any(proc.is_alive() for proc in processes):
             break
         else:
             yield gen.sleep(0.1)
         assert time() < start + 5
+
+    yield gen.sleep(1)
+    assert not any(proc.is_alive() for proc in processes)
+    assert not a.process and not b.process
