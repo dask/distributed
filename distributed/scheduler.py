@@ -461,25 +461,17 @@ class Scheduler(Server):
         not the worker has a nanny process restarting it
         """
         with log_errors():
-            original = worker
             try:
+                # XXX this should have a helper method
                 nanny_port = self.worker_info[worker]['services']['nanny']
-<<<<<<< HEAD
-                worker = (self.ip, nanny_port)
-=======
+                nanny_host, _ = parse_host_port(parse_address(worker)[1])
+                address = (self.ip, nanny_port)
             except KeyError:
-                nanny_port = False
+                address = worker
 
             self.remove_worker(address=worker)
 
-            if nanny_port:
-                ip, port = worker.split(':')
-                address = '%s:%s' % (ip, nanny_port)
-            else:
-                address = worker
->>>>>>> 1c963b3feac24a0a240b99d4b71b549706657661
-
-            with rpc(addr=address) as r:
+            with rpc(address) as r:
                 yield r.terminate(report=False)
 
             self.remove_worker(address=worker)
