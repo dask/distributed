@@ -376,6 +376,18 @@ class Scheduler(Server):
              'workers': dict(self.worker_info)}
         return d
 
+    def get_worker_service_addr(self, worker, service_name):
+        """
+        Get the (host, port) address of the named service on the *worker*.
+        Returns None if the service doesn't exist.
+        """
+        info = self.worker_info[worker]
+        port = info['services'].get(service_name)
+        if port is None:
+            return None
+        else:
+            return info['host'], port
+
     def get_versions(self, comm):
         """ Basic information about ourselves and our cluster """
         return get_versions()
@@ -461,13 +473,8 @@ class Scheduler(Server):
         not the worker has a nanny process restarting it
         """
         with log_errors():
-            try:
-                # XXX this should have a helper method
-                nanny_port = self.worker_info[worker]['services']['nanny']
-                nanny_host, _ = parse_host_port(parse_address(worker)[1])
-                address = (self.ip, nanny_port)
-            except KeyError:
-                address = worker
+            nanny_addr = self.get_worker_service_addr(worker, 'nanny')
+            address = nanny_addr or worker
 
             self.remove_worker(address=worker)
 
@@ -1363,8 +1370,8 @@ class Scheduler(Server):
         with log_errors():
             logger.debug("Send shutdown signal to workers")
 
-            nannies = {addr: (d['host'], d['services']['nanny'])
-                       for addr, d in self.worker_info.items()}
+            nannies = {addr: self.get_worker_service_addr(addr, 'nanny')
+                       for addr in self.worker_info}
 
             for addr in nannies:
                 self.remove_worker(address=addr)
@@ -1375,7 +1382,8 @@ class Scheduler(Server):
             logger.debug("Send kill signal to nannies: %s", nannies)
 
             nannies = [rpc(nanny_address)
-                       for nanny_address in nannies.values()]
+                       for nanny_address in nannies.values()
+                       if nanny_address is not None]
             try:
                 resps = yield All([nanny.restart(environment=environment, close=True)
                            for nanny in nannies])
@@ -1411,15 +1419,14 @@ class Scheduler(Server):
         # TODO replace with worker_list
 
         if nanny:
-            addresses = []
-            for addr in workers:
-                info = self.worker_info[addr]
-                addresses.append((info['host'], info['services']['nanny']))
+            addresses = [self.get_worker_service_addr(w, 'nanny')
+                         for w in workers]
         else:
             addresses = workers
 
         results = yield All([send_recv(addr=address, close=True, **msg)
-                             for address in addresses])
+                             for address in addresses
+                             if address is not None])
 
         raise Return(dict(zip(workers, results)))
 
