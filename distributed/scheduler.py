@@ -462,15 +462,27 @@ class Scheduler(Server):
         """
         with log_errors():
             original = worker
-            self.remove_worker(address=original)
-            with ignoring(KeyError):
+            try:
                 nanny_port = self.worker_info[worker]['services']['nanny']
+<<<<<<< HEAD
                 worker = (self.ip, nanny_port)
+=======
+            except KeyError:
+                nanny_port = False
 
-            with rpc(worker) as r:
+            self.remove_worker(address=worker)
+
+            if nanny_port:
+                ip, port = worker.split(':')
+                address = '%s:%s' % (ip, nanny_port)
+            else:
+                address = worker
+>>>>>>> 1c963b3feac24a0a240b99d4b71b549706657661
+
+            with rpc(addr=address) as r:
                 yield r.terminate(report=False)
 
-            self.remove_worker(address=original)
+            self.remove_worker(address=worker)
 
     @gen.coroutine
     def cleanup(self):
@@ -1637,7 +1649,8 @@ class Scheduler(Server):
                     try:
                         workers = self.workers_to_close()
                         if workers:
-                            yield self.retire_workers(workers=workers, remove=remove)
+                            yield self.retire_workers(workers=workers,
+                                    remove=remove, close=close)
                         raise gen.Return(list(workers))
                     except KeyError:  # keys left during replicate
                         pass
@@ -1654,11 +1667,11 @@ class Scheduler(Server):
                 else:
                     raise gen.Return([])
 
+            if close and workers:
+                yield [self.close_worker(worker=w) for w in workers]
             if remove:
                 for w in workers:
                     self.remove_worker(address=w, safe=True)
-            if close and workers:
-                yield [self.close_worker(w) for w in workers]
 
             raise gen.Return(list(workers))
 
