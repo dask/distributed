@@ -179,23 +179,24 @@ def test_server_listen():
 
     # Only IPv6
 
-    with listen_on(Server, ('::', 2468)) as server:
-        assert server.port == 2468
-        assert server.address == 'tcp://[%s]:%d' % (EXTERNAL_IP6, server.port)
-        yield assert_can_connect(server.address)
-        yield assert_can_connect_from_everywhere_6(server.port)
+    if has_ipv6():
+        with listen_on(Server, ('::', 2468)) as server:
+            assert server.port == 2468
+            assert server.address == 'tcp://[%s]:%d' % (EXTERNAL_IP6, server.port)
+            yield assert_can_connect(server.address)
+            yield assert_can_connect_from_everywhere_6(server.port)
 
-    with listen_on(Server, ('::1', 2468)) as server:
-        assert server.port == 2468
-        assert server.address == 'tcp://[::1]:%d' % server.port
-        yield assert_can_connect(server.address)
-        yield assert_can_connect_locally_6(server.port)
+        with listen_on(Server, ('::1', 2468)) as server:
+            assert server.port == 2468
+            assert server.address == 'tcp://[::1]:%d' % server.port
+            yield assert_can_connect(server.address)
+            yield assert_can_connect_locally_6(server.port)
 
-    with listen_on(Server, 'tcp://[::1]:2468') as server:
-        assert server.port == 2468
-        assert server.address == 'tcp://[::1]:%d' % server.port
-        yield assert_can_connect(server.address)
-        yield assert_can_connect_locally_6(server.port)
+        with listen_on(Server, 'tcp://[::1]:2468') as server:
+            assert server.port == 2468
+            assert server.address == 'tcp://[::1]:%d' % server.port
+            yield assert_can_connect(server.address)
+            yield assert_can_connect_locally_6(server.port)
 
 
 def test_rpc(loop):

@@ -57,9 +57,6 @@ def set_socket_options(sock):
     """
     Set common options on a ZeroMQ socket.
     """
-    # XXX set context default options instead?
-    sock.set(zmq.RECONNECT_IVL, -1)  # disable reconnections
-    sock.set(zmq.IPV6, True)
 
 
 def make_zmq_url(ip, port=0):
@@ -68,12 +65,26 @@ def make_zmq_url(ip, port=0):
     return "tcp://" + unparse_host_port(ip, port)
 
 
+def enable_ipv6(sock, ip):
+    # Ideally, we would enable IPv6 blindly on all ZMQ sockets, but
+    # we can't because of a bug on Windows:
+    # https://github.com/zeromq/libzmq/issues/2124
+    sock.set(zmq.IPV6, ':' in ip)
+
+
 def bind_to_random_port(sock, ip):
+    enable_ipv6(sock, ip)
     sock.bind(make_zmq_url(ip))
     endpoint = sock.get(zmq.LAST_ENDPOINT).decode()
     _, sep, port = endpoint.rpartition(':')
     assert sep
     return int(port)
+
+
+def bind_to_port(sock, ip, port):
+    enable_ipv6(sock, ip)
+    sock.set(zmq.IPV6, ':' in ip)
+    sock.bind(make_zmq_url(ip, port))
 
 
 class ZMQ(Comm):
@@ -147,9 +158,11 @@ class ZMQConnector(object):
 
     @gen.coroutine
     def connect(self, address, deserialize=True):
-        listener_url = make_zmq_url(*parse_host_port(address))
+        host, port = parse_host_port(address)
+        listener_url = make_zmq_url(host, port)
         sock = make_socket(zmq.DEALER)
         set_socket_options(sock)
+        enable_ipv6(sock, host)
 
         comm = yield self._do_connect(sock, address, listener_url)
         raise gen.Return(comm)
@@ -172,7 +185,7 @@ class ZMQListener(Listener):
             self.bound_port = bind_to_random_port(self.sock, self.ip)
         else:
             self.bound_port = self.port
-            self.sock.bind(make_zmq_url(self.ip, self.port))
+            bind_to_port(self.sock, self.ip, self.port)
         self._listen()
 
     @gen.coroutine

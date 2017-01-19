@@ -21,6 +21,11 @@ _FutureSendEvent = namedtuple('_FutureSendEvent',
 
 
 class _AsyncSocket(object):
+    """
+    An alternative to pyzmq's builtin "async" socket for use with Tornado.
+
+    Also fixes https://github.com/zeromq/pyzmq/issues/962
+    """
 
     _Future = Future
     _READ = IOLoop.READ
@@ -119,104 +124,6 @@ class _AsyncSocket(object):
             self._add_io_state(self._WRITE)
         return f
 
-    #def _add_timeout(self, future, timeout):
-        #"""Add a timeout for a send or recv Future"""
-        #def future_timeout():
-            #if future.done():
-                ## future already resolved, do nothing
-                #return
-
-            ## pop the entry from _recv_futures
-            #for f_idx, (f, kind, kwargs, _) in enumerate(self._recv_futures):
-                #if f == future:
-                    #self._recv_futures.pop(f_idx)
-                    #break
-
-            ## pop the entry from _send_futures
-            #for f_idx, (f, kind, kwargs, _) in enumerate(self._send_futures):
-                #if f == future:
-                    #self._send_futures.pop(f_idx)
-                    #break
-
-            ## raise EAGAIN
-            #future.set_exception(zmq.Again())
-        #self._call_later(timeout, future_timeout)
-
-    #def _call_later(self, delay, callback):
-        #"""Schedule a function to be called later
-
-        #Override for different IOLoop implementations
-
-        #Tornado and asyncio happen to both have ioloop.call_later
-        #with the same signature.
-        #"""
-        #self.io_loop.call_later(delay, callback)
-
-    #def _add_recv_event(self, kind, kwargs=None, future=None):
-        #"""Add a recv event, returning the corresponding Future"""
-        #f = future or self._Future()
-        #if kind.startswith('recv') and kwargs.get('flags', 0) & zmq.DONTWAIT:
-            ## short-circuit non-blocking calls
-            #recv = getattr(self._sock, kind)
-            #try:
-                #r = recv(**kwargs)
-            #except Exception as e:
-                #f.set_exception(e)
-            #else:
-                #f.set_result(r)
-            #return f
-
-        ## we add it to the list of futures before we add the timeout as the
-        ## timeout will remove the future from recv_futures to avoid leaks
-        #self._recv_futures.append(
-            #_FutureEvent(f, kind, kwargs, msg=None)
-        #)
-
-        ##if hasattr(zmq, 'RCVTIMEO'):
-            ###timeout_ms = self._shadow_sock.rcvtimeo
-            ##timeout_ms = self._sock.rcvtimeo
-            ##if timeout_ms >= 0:
-                ##self._add_timeout(f, timeout_ms * 1e-3)
-
-        #if self._events & POLLIN:
-            ## recv immediately, if we can
-            #self._handle_recv()
-        #if self._recv_futures:
-            #self._add_io_state(self._READ)
-        #return f
-
-    #def _add_send_event(self, kind, msg=None, kwargs=None, future=None):
-        #"""Add a send event, returning the corresponding Future"""
-        #f = future or self._Future()
-        #if kind.startswith('send') and kwargs.get('flags', 0) & zmq.DONTWAIT:
-            ## short-circuit non-blocking calls
-            #send = getattr(self._sock, kind)
-            #try:
-                #r = send(msg, **kwargs)
-            #except Exception as e:
-                #f.set_exception(e)
-            #else:
-                #f.set_result(r)
-            #return f
-
-        ## we add it to the list of futures before we add the timeout as the
-        ## timeout will remove the future from recv_futures to avoid leaks
-        #self._send_futures.append(
-            #_FutureEvent(f, kind, kwargs=kwargs, msg=msg)
-        #)
-
-        ##if hasattr(zmq, 'SNDTIMEO'):
-            ##timeout_ms = self._sock.sndtimeo
-            ##if timeout_ms >= 0:
-                ##self._add_timeout(f, timeout_ms * 1e-3)
-
-        #if self._events & POLLOUT:
-            ## send immediately if we can
-            #self._handle_send()
-        #if self._send_futures:
-            #self._add_io_state(self._WRITE)
-        #return f
-
     def _handle_recv(self):
         """Handle recv events"""
         if not self._events & POLLIN:
@@ -309,7 +216,6 @@ class _AsyncSocket(object):
     def _update_handler(self, state):
         """Update IOLoop handler with state."""
         self._state = state
-        #print("-- update_handler:", self._state, self._sock)
         self.io_loop.update_handler(self._sock, state)
 
     def _init_io_state(self):
