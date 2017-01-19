@@ -15,7 +15,7 @@ from tornado.tcpserver import TCPServer
 from .. import config
 from .core import connectors, listeners, Comm, Listener, CommClosedError
 from .utils import (to_frames, from_frames, parse_host_port, unparse_host_port,
-                    get_tcp_server_address)
+                    get_tcp_server_address, ensure_concrete_host)
 
 
 logger = logging.getLogger(__name__)
@@ -176,6 +176,8 @@ class TCP(Comm):
     def closed(self):
         return self.stream is None or self.stream.closed()
 
+    # XXX add a __del__?
+
 
 class TCPConnector(object):
 
@@ -237,11 +239,20 @@ class TCPListener(Listener):
         return self.bound_address[:2]
 
     @property
-    def address(self):
+    def listen_address(self):
         """
         The listening address as a string.
         """
         return 'tcp://' + unparse_host_port(*self.get_host_port())
+
+    @property
+    def contact_address(self):
+        """
+        The contact address as a string.
+        """
+        host, port = self.get_host_port()
+        host = ensure_concrete_host(host)
+        return 'tcp://' + unparse_host_port(host, port)
 
     def handle_stream(self, stream, address):
         address = 'tcp://' + unparse_host_port(*address[:2])

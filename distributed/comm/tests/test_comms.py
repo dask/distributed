@@ -8,11 +8,18 @@ from tornado import gen, ioloop, queues
 
 from distributed.core import pingpong
 from distributed.metrics import time
-from distributed.utils_test import slow, loop, gen_test, gen_cluster, requires_ipv6
+from distributed.utils import get_ip, get_ipv6
+from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
+                                    requires_ipv6, has_ipv6)
 
 from distributed.comm import tcp, zmq, connect, listen, CommClosedError
 from distributed.comm.core import parse_address
 from distributed.comm.utils import parse_host_port, unparse_host_port
+
+
+EXTERNAL_IP4 = get_ip()
+if has_ipv6():
+    EXTERNAL_IP6 = get_ipv6()
 
 
 @gen.coroutine
@@ -154,7 +161,7 @@ def test_zmq_specific():
 
 
 @gen.coroutine
-def check_client_server(addr):
+def check_client_server(addr, check_listen_addr=None, check_contact_addr=None):
     """
     Abstract client / server test.
     """
@@ -175,18 +182,32 @@ def check_client_server(addr):
 
     listener = listen(addr, handle_comm)
     listener.start()
-    bound_addr = listener.address
 
+    # Check listener properties
+    bound_addr = listener.listen_address
     bound_scheme, bound_loc = parse_address(bound_addr)
     assert bound_scheme in ('tcp', 'zmq')
     assert bound_scheme == parse_address(addr)[0]
 
+    if check_listen_addr is not None:
+        check_listen_addr(bound_loc)
+
+    contact_addr = listener.contact_address
+    contact_scheme, contact_loc = parse_address(contact_addr)
+    assert contact_scheme == bound_scheme
+
+    if check_contact_addr is not None:
+        check_contact_addr(contact_loc)
+    else:
+        assert contact_addr == bound_addr
+
+    # Check client <-> server comms
     l = []
 
     @gen.coroutine
     def client_communicate(key, delay=0):
-        comm = yield connect(bound_addr)
-        assert comm.peer_address == bound_addr
+        comm = yield connect(listener.contact_address)
+        assert comm.peer_address == listener.contact_address
 
         yield comm.write({'op': 'ping', 'data': key})
         yield comm.write({'op': 'foobar'})
@@ -205,49 +226,76 @@ def check_client_server(addr):
     assert set(l) == {1234} | set(range(20))
 
 
+def tcp_eq(expected_host, expected_port=None):
+    def checker(loc):
+        host, port = parse_host_port(loc)
+        assert host == expected_host
+        if expected_port is not None:
+            assert port == expected_port
+        else:
+            assert 1023 < port < 65536
+
+    return checker
+
+zmq_eq = tcp_eq
+
+
 @gen_test()
 def test_default_client_server_ipv4():
     # Default scheme is (currently) TCP
-    yield check_client_server('127.0.0.1')
-    yield check_client_server('127.0.0.1:3201')
-    yield check_client_server('0.0.0.0')
-    yield check_client_server('0.0.0.0:3202')
-    yield check_client_server('')
-    yield check_client_server(':3203')
+    yield check_client_server('127.0.0.1', tcp_eq('127.0.0.1'))
+    yield check_client_server('127.0.0.1:3201', tcp_eq('127.0.0.1', 3201))
+    yield check_client_server('0.0.0.0',
+                              tcp_eq('0.0.0.0'), tcp_eq(EXTERNAL_IP4))
+    yield check_client_server('0.0.0.0:3202',
+                              tcp_eq('0.0.0.0', 3202), tcp_eq(EXTERNAL_IP4, 3202))
+    # IPv4 is preferred for the bound address
+    yield check_client_server('',
+                              tcp_eq('0.0.0.0'), tcp_eq(EXTERNAL_IP4))
+    yield check_client_server(':3203',
+                              tcp_eq('0.0.0.0', 3203), tcp_eq(EXTERNAL_IP4, 3203))
 
 @requires_ipv6
 @gen_test()
 def test_default_client_server_ipv6():
-    yield check_client_server('[::1]')
-    yield check_client_server('[::1]:3211')
+    yield check_client_server('[::1]', tcp_eq('::1'))
+    yield check_client_server('[::1]:3211', tcp_eq('::1', 3211))
+    yield check_client_server('[::]', tcp_eq('::'), tcp_eq(EXTERNAL_IP6))
+    yield check_client_server('[::]:3212', tcp_eq('::', 3212), tcp_eq(EXTERNAL_IP6, 3212))
 
 @gen_test()
 def test_tcp_client_server_ipv4():
-    yield check_client_server('tcp://127.0.0.1')
-    yield check_client_server('tcp://127.0.0.1:3221')
-    yield check_client_server('tcp://0.0.0.0')
-    yield check_client_server('tcp://0.0.0.0:3222')
-    yield check_client_server('tcp://')
-    yield check_client_server('tcp://:3223')
+    yield check_client_server('tcp://127.0.0.1', tcp_eq('127.0.0.1'))
+    yield check_client_server('tcp://127.0.0.1:3221', tcp_eq('127.0.0.1', 3221))
+    yield check_client_server('tcp://0.0.0.0',
+                              tcp_eq('0.0.0.0'), tcp_eq(EXTERNAL_IP4))
+    yield check_client_server('tcp://0.0.0.0:3222',
+                              tcp_eq('0.0.0.0', 3222), tcp_eq(EXTERNAL_IP4, 3222))
+    yield check_client_server('tcp://',
+                              tcp_eq('0.0.0.0'), tcp_eq(EXTERNAL_IP4))
+    yield check_client_server('tcp://:3223',
+                              tcp_eq('0.0.0.0', 3223), tcp_eq(EXTERNAL_IP4, 3223))
 
 @requires_ipv6
 @gen_test()
 def test_tcp_client_server_ipv6():
-    yield check_client_server('tcp://[::1]')
-    yield check_client_server('tcp://[::1]:3231')
-    yield check_client_server('tcp://[::]')
-    yield check_client_server('tcp://[::]:3231')
+    yield check_client_server('tcp://[::1]', tcp_eq('::1'))
+    yield check_client_server('tcp://[::1]:3231', tcp_eq('::1', 3231))
+    yield check_client_server('tcp://[::]',
+                              tcp_eq('::'), tcp_eq(EXTERNAL_IP6))
+    yield check_client_server('tcp://[::]:3232',
+                              tcp_eq('::', 3232), tcp_eq(EXTERNAL_IP6, 3232))
 
 @gen_test()
 def test_zmq_client_server_ipv4():
-    yield check_client_server('zmq://127.0.0.1')
-    yield check_client_server('zmq://127.0.0.1:3241')
+    yield check_client_server('zmq://127.0.0.1', zmq_eq('127.0.0.1'))
+    yield check_client_server('zmq://127.0.0.1:3241', zmq_eq('127.0.0.1', 3241))
 
 @requires_ipv6
 @gen_test()
 def test_zmq_client_server_ipv6():
-    yield check_client_server('zmq://[::1]')
-    yield check_client_server('zmq://[::1]:3251')
+    yield check_client_server('zmq://[::1]', zmq_eq('::1'))
+    yield check_client_server('zmq://[::1]:3251', zmq_eq('::1', 3251))
 
 
 @gen.coroutine
@@ -258,13 +306,13 @@ def check_comm_closed_implicit(addr):
 
     listener = listen(addr, handle_comm)
     listener.start()
-    bound_addr = listener.address
+    contact_addr = listener.contact_address
 
-    comm = yield connect(bound_addr)
+    comm = yield connect(contact_addr)
     with pytest.raises(CommClosedError):
         yield comm.write({})
 
-    comm = yield connect(bound_addr)
+    comm = yield connect(contact_addr)
     with pytest.raises(CommClosedError):
         yield comm.read()
 
@@ -291,14 +339,14 @@ def check_comm_closed_explicit(addr):
 
     listener = listen(addr, handle_comm)
     listener.start()
-    bound_addr = listener.address
+    contact_addr = listener.contact_address
 
-    comm = yield connect(bound_addr)
+    comm = yield connect(contact_addr)
     comm.close()
     with pytest.raises(CommClosedError):
         yield comm.write({})
 
-    comm = yield connect(bound_addr)
+    comm = yield connect(contact_addr)
     comm.close()
     with pytest.raises(CommClosedError):
         yield comm.read()

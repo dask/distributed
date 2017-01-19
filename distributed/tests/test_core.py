@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+from contextlib import contextmanager
 from functools import partial
 import socket
 
@@ -11,10 +12,31 @@ from distributed.core import (
     coerce_to_rpc, send_recv, coerce_to_address, ConnectionPool,
     CommClosedError)
 from distributed.metrics import time
-from distributed.utils_test import slow, loop, gen_test, gen_cluster
+from distributed.utils import get_ip, get_ipv6
+from distributed.utils_test import slow, loop, gen_test, gen_cluster, has_ipv6
+
+
+EXTERNAL_IP4 = get_ip()
+if has_ipv6():
+    EXTERNAL_IP6 = get_ipv6()
+
+
+@gen.coroutine
+def assert_can_connect(addr, timeout=0.05):
+    comm = yield connect(addr, timeout=timeout)
+    comm.abort()
+
+@gen.coroutine
+def assert_cannot_connect(addr, timeout=0.05):
+    with pytest.raises(EnvironmentError):
+        comm = yield connect(addr, timeout=timeout)
+        comm.abort()
 
 
 def test_server(loop):
+    """
+    Simple Server test.
+    """
     @gen.coroutine
     def f():
         server = Server({'ping': pingpong})
@@ -22,24 +44,158 @@ def test_server(loop):
             server.port
         server.listen(8887)
         assert server.port == 8887
-        assert server.address in ('tcp://0.0.0.0:8887', 'tcp://[::]:8887')
+        assert server.address == ('tcp://%s:8887' % get_ip())
 
-        comm = yield connect('127.0.0.1:8887')
+        for addr in ('127.0.0.1:8887', 'tcp://127.0.0.1:8887', server.address):
+            comm = yield connect('127.0.0.1:8887')
 
-        n = yield comm.write({'op': 'ping'})
-        assert isinstance(n, int)
-        assert 4 <= n <= 1000
+            n = yield comm.write({'op': 'ping'})
+            assert isinstance(n, int)
+            assert 4 <= n <= 1000
 
-        response = yield comm.read()
-        assert response == b'pong'
+            response = yield comm.read()
+            assert response == b'pong'
 
-        yield comm.write({'op': 'ping', 'close': True})
-        response = yield comm.read()
-        assert response == b'pong'
+            yield comm.write({'op': 'ping', 'close': True})
+            response = yield comm.read()
+            assert response == b'pong'
+
+            yield comm.close()
 
         server.stop()
 
     loop.run_sync(f)
+
+
+class MyServer(Server):
+    default_port = 8756
+
+
+@gen_test()
+def test_server_listen():
+    """
+    Test various Server.listen() arguments and their effect.
+    """
+
+    @contextmanager
+    def listen_on(cls, *args):
+        server = cls({})
+        server.listen(*args)
+        try:
+            yield server
+        finally:
+            server.stop()
+
+    @gen.coroutine
+    def assert_can_connect_from_everywhere_4_6(port):
+        yield assert_can_connect('tcp://127.0.0.1:%d' % port)
+        yield assert_can_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
+        if has_ipv6():
+            yield assert_can_connect('tcp://[::1]:%d' % port)
+            yield assert_can_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
+
+    @gen.coroutine
+    def assert_can_connect_from_everywhere_4(port):
+        yield assert_can_connect('tcp://127.0.0.1:%d' % port)
+        yield assert_can_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
+        if has_ipv6():
+            yield assert_cannot_connect('tcp://[::1]:%d' % port)
+            yield assert_cannot_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
+
+    @gen.coroutine
+    def assert_can_connect_locally_4(port):
+        yield assert_can_connect('tcp://127.0.0.1:%d' % port)
+        yield assert_cannot_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
+        if has_ipv6():
+            yield assert_cannot_connect('tcp://[::1]:%d' % port)
+            yield assert_cannot_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
+
+    @gen.coroutine
+    def assert_can_connect_from_everywhere_6(port):
+        yield assert_cannot_connect('tcp://127.0.0.1:%d' % port)
+        yield assert_cannot_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
+        yield assert_can_connect('tcp://[::1]:%d' % port)
+        yield assert_can_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
+
+    @gen.coroutine
+    def assert_can_connect_locally_6(port):
+        yield assert_cannot_connect('tcp://127.0.0.1:%d' % port)
+        yield assert_cannot_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
+        yield assert_can_connect('tcp://[::1]:%d' % port)
+        if EXTERNAL_IP6 != '::1':  # Can happen if no outside IPv6 connectivity
+            yield assert_cannot_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
+
+    # Note server.address is the concrete, contactable address
+
+    with listen_on(Server, 8887) as server:
+        assert server.port == 8887
+        assert server.address == 'tcp://%s:%d' % (EXTERNAL_IP4, server.port)
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_from_everywhere_4_6(server.port)
+
+    with listen_on(Server) as server:
+        assert server.port > 0
+        assert server.address == 'tcp://%s:%d' % (EXTERNAL_IP4, server.port)
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_from_everywhere_4_6(server.port)
+
+    with listen_on(MyServer) as server:
+        assert server.port == MyServer.default_port
+        assert server.address == 'tcp://%s:%d' % (EXTERNAL_IP4, server.port)
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_from_everywhere_4_6(server.port)
+
+    with listen_on(Server, ('', 2468)) as server:
+        assert server.port == 2468
+        assert server.address == 'tcp://%s:%d' % (EXTERNAL_IP4, server.port)
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_from_everywhere_4_6(server.port)
+
+    with listen_on(Server, 'tcp://:2468') as server:
+        assert server.port == 2468
+        assert server.address == 'tcp://%s:%d' % (EXTERNAL_IP4, server.port)
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_from_everywhere_4_6(server.port)
+
+    # Only IPv4
+
+    with listen_on(Server, ('0.0.0.0', 2468)) as server:
+        assert server.port == 2468
+        assert server.address == 'tcp://%s:%d' % (EXTERNAL_IP4, server.port)
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_from_everywhere_4(server.port)
+
+    with listen_on(Server, ('127.0.0.1', 2468)) as server:
+        assert server.port == 2468
+        assert server.address == 'tcp://127.0.0.1:%d' % server.port
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_locally_4(server.port)
+
+    with listen_on(Server, 'tcp://127.0.0.1:2468') as server:
+        assert server.port == 2468
+        assert server.address == 'tcp://127.0.0.1:%d' % server.port
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_locally_4(server.port)
+
+    # Only IPv6
+
+    with listen_on(Server, ('::', 2468)) as server:
+        assert server.port == 2468
+        assert server.address == 'tcp://[%s]:%d' % (EXTERNAL_IP6, server.port)
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_from_everywhere_6(server.port)
+
+    with listen_on(Server, ('::1', 2468)) as server:
+        assert server.port == 2468
+        assert server.address == 'tcp://[::1]:%d' % server.port
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_locally_6(server.port)
+
+    with listen_on(Server, 'tcp://[::1]:2468') as server:
+        assert server.port == 2468
+        assert server.address == 'tcp://[::1]:%d' % server.port
+        yield assert_can_connect(server.address)
+        yield assert_can_connect_locally_6(server.port)
 
 
 def test_rpc(loop):

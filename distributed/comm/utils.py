@@ -3,6 +3,7 @@ import logging
 import socket
 
 from .. import protocol
+from ..utils import get_ip, get_ipv6
 
 
 logger = logging.getLogger(__name__)
@@ -96,3 +97,14 @@ def get_tcp_server_address(tcp_server):
         raise RuntimeError("No Internet socket found on TCPServer??")
 
     return sock.getsockname()
+
+
+def ensure_concrete_host(host):
+    """
+    """
+    if host in ('0.0.0.0', ''):
+        return get_ip()
+    elif host == '::':
+        return get_ipv6()
+    else:
+        return host

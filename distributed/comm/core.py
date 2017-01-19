@@ -85,7 +85,7 @@ class Comm(with_metaclass(ABCMeta)):
     @abstractproperty
     def peer_address(self):
         """
-        Return the peer's address.  For logging and debugging purposes only.
+        The peer's address.  For logging and debugging purposes only.
         """
 
 
@@ -108,14 +108,19 @@ class Listener(with_metaclass(ABCMeta)):
             tcp_server.stop()
 
     @abstractproperty
-    def address(self):
+    def listen_address(self):
         """
         The listening address as a URL string
         (e.g. 'tcp://something').
         """
-        # XXX the returned address is not always contactable, e.g.
-        # 'tcp://0.0.0.0:1234'.  Should we have another property
-        # for that?
+
+    @abstractproperty
+    def contact_address(self):
+        """
+        An address this listener can be contacted on.  This can be
+        different from `listen_address` if the latter is some wildcard
+        address such as 'tcp://0.0.0.0:123'.
+        """
 
 
 def parse_address(addr):

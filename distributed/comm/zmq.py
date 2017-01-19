@@ -14,7 +14,8 @@ from zmq.eventloop.future import Context
 from .. import config
 from ..utils import PY3
 from .core import connectors, listeners, Comm, CommClosedError, Listener
-from .utils import to_frames, from_frames, parse_host_port, unparse_host_port
+from .utils import (to_frames, from_frames, parse_host_port,
+                    unparse_host_port, ensure_concrete_host)
 from . import zmqimpl
 
 
@@ -212,11 +213,20 @@ class ZMQListener(Listener):
         return self.ip, self.bound_port
 
     @property
-    def address(self):
+    def listen_address(self):
         """
         The listening address as a string.
         """
         return 'zmq://'+ unparse_host_port(*self.get_host_port())
+
+    @property
+    def contact_address(self):
+        """
+        The contact address as a string.
+        """
+        host, port = self.get_host_port()
+        host = ensure_concrete_host(host)
+        return 'zmq://' + unparse_host_port(host, port)
 
 
 connectors['zmq'] = ZMQConnector()

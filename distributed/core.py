@@ -148,7 +148,7 @@ class Server(object):
         if not self._address:
             if self.listener is None:
                 raise ValueError("cannot get address of non-running Server")
-            self._address = self.listener.address
+            self._address = self.listener.contact_address
         return self._address
 
     @property

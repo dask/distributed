@@ -83,6 +83,23 @@ def get_fileno_limit():
 
 
 @memoize
+def _get_ip(host, port, family, default):
+    # By using a UDP socket, we don't actually try to connect but
+    # simply select the local address through which *host* is reachable.
+    sock = socket.socket(family, socket.SOCK_DGRAM)
+    try:
+        sock.connect((host, 0))
+        ip = sock.getsockname()[0]
+        return ip
+    except EnvironmentError as e:
+        warnings.warn("Couldn't detect a suitable IP address for "
+                      "reaching %r, defaulting to %r: %s"
+                      % (host, default, e), RuntimeWarning)
+        return default
+    finally:
+        sock.close()
+
+
 def get_ip(host='8.8.8.8', port=80):
     """
     Get the local IP address through which the *host* is reachable.
@@ -90,20 +107,14 @@ def get_ip(host='8.8.8.8', port=80):
     *host* defaults to a well-known Internet host (one of Google's public
     DNS servers).
     """
-    # By using a UDP socket, we don't actually try to connect but
-    # simply select the local address through which *host* is reachable.
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.connect((host, 0))
-        ip = sock.getsockname()[0]
-        return ip
-    except EnvironmentError as e:
-        ip = '127.0.0.1'
-        warnings.warn("Couldn't detect a suitable IP address, defaulting to %r: %e"
-                      % (ip, e), RuntimeWarning)
-        return ip
-    finally:
-        sock.close()
+    return _get_ip(host, port, family=socket.AF_INET, default='127.0.0.1')
+
+
+def get_ipv6(host='2001:4860:4860::8888', port=80):
+    """
+    The same as get_ip(), but for IPv6.
+    """
+    return _get_ip(host, port, family=socket.AF_INET6, default='::1')
 
 
 @contextmanager
