@@ -30,7 +30,7 @@ class EchoServer(object):
     def listen(self):
         listener = listen('', self.handle_comm)
         listener.start()
-        self.address = listener.address
+        self.address = listener.contact_address
         self.stop = listener.stop
 
 @contextmanager
