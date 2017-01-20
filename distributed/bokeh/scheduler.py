@@ -12,9 +12,9 @@ from bokeh.models import (
     DatetimeAxis, Grid, BasicTicker, HoverTool, BoxZoomTool, ResetTool,
     PanTool, WheelZoomTool, Title, Range1d, Quad, Text, value, Line,
     NumeralTickFormatter, ToolbarBox, Legend, LegendItem, BoxSelectTool,
-    Circle, CategoricalAxis, Select, TapTool, OpenURL
+    Circle, CategoricalAxis, Select, TapTool, OpenURL, Button
 )
-from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
+from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter, TextEditor, Paragraph
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from toolz import frequencies
@@ -276,4 +276,77 @@ class BokehScheduler(BokehServer):
                      '/counters': counters}
 
         self.loop = io_loop or scheduler.loop
+        self.server = None
+
+
+class ClusterTable(DashboardComponent):
+    """ Currently running tasks """
+    def __init__(self, cluster, output):
+        self.cluster = cluster
+        self.output = output  # a text box
+
+        self.source = ColumnDataSource({'status': ['OK']})
+        columns = {'status': TableColumn(field='status', title='status')}
+        table = DataTable(
+            source=self.source, columns=[columns['status']]
+        )
+        table.selectable = True
+        self.root = table
+
+    def update(self):
+        with log_errors():
+            sched = [str(self.cluster.scheduler)]
+            works = [str(w) for w in self.cluster.workers]
+            d = {'status': sched + works}
+            self.source.data.update(d)
+            s = self.source.selected
+            self.output.text = str(s)
+            self.selected = s.get('1d', {}).get('indices', [])
+
+    def restart(self):
+        if not self.selected:
+            return
+        s = self.selected[0]
+        if s == 0:
+            # change to self.cluster.restart
+            self.cluster.restart()
+        else:
+            # change to self.cluster.restart_worker
+            self.cluster.restart_worker(s - 1)
+
+def status_doc(cluster, doc):
+    with log_errors():
+        t = Paragraph()
+        table = ClusterTable(cluster, t)
+        doc.add_periodic_callback(table.update, 500)
+        b1 = Button(label='Restart')
+        b2 = Button(label='Stop')
+        b3 = Button(label='Dashboard')
+        b4 = Button(label='Log')
+        b1.on_click(table.restart)
+        r1 = row(b2, b1, b3, b4)
+
+        s1 = Select(options=cluster.machines, title='Machine',
+                    value=cluster.machines[0])
+        s2 = Select(options=[str(i) for i in range(1, 9)], title='Cores',
+                    value='1')
+        s3 = Select(options=['True', 'False'], title='Nanny',
+                    value='True')
+        b5 = Button(label='New')
+        b5.on_click(lambda: cluster.new(s1.value, int(s2.value),
+                                        s3.value == 'True'))
+        r2 = row(s1, s2, s3, b5)
+
+        doc.add_root(column(t, table.root, r1, r2))
+
+
+class BokehCluster(BokehServer):
+    def __init__(self, cluster, io_loop=None):
+        self.cluster = cluster
+        status = Application(FunctionHandler(partial(status_doc, cluster)))
+
+        self.apps = {'/status': status}
+
+        # unlike BokehScheduler, always require specific loop to run in
+        self.loop = io_loop
         self.server = None

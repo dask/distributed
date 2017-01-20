@@ -95,6 +95,7 @@ class LocalCluster(object):
 
         self.scheduler = Scheduler(loop=self.loop, ip='127.0.0.1',
                                    services=services)
+        self.machines = ['127.0.0.1']
         self.scheduler.start(scheduler_port)
         self.workers = []
 
@@ -207,6 +208,11 @@ class LocalCluster(object):
                 bokeh_port=port, show=show,
                 log_level=logging.getLevelName(silence).lower())
 
+    def start_cluster_monitor(self, port=8900):
+        from distributed.bokeh.scheduler import BokehCluster
+        self.cluster_monitor = BokehCluster(self, io_loop=self.scheduler.loop)
+        self.cluster_monitor.listen(port)
+
     @gen.coroutine
     def _close(self):
         with ignoring(gen.TimeoutError, StreamClosedError, OSError):
@@ -270,3 +276,13 @@ class LocalCluster(object):
     @property
     def scheduler_address(self):
         return self.scheduler.address
+
+    def restart(self):
+        self.scheduler.restart()
+
+    def restart_worker(self, i):
+        self.workers[i].restart()
+
+    def new(self, machine, ncores, nanny):
+        print('New: ', machine, ncores, nanny)
+        self._start_worker(ncores=ncores, nanny=nanny)
