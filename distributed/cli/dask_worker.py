@@ -76,9 +76,13 @@ def handle_signal(sig, frame):
               help="Internal use only")
 @click.option('--resources', type=str, default='',
               help='Resources for task constraints like "GPU=2 MEM=10e9"')
+@click.option('--lifetime', type=str, default='',
+              help='Lifetime of worker before it should retire itself, '
+                   'specified e.g. "d=2.5 h=12 m=45 s=59" for days, hours, '
+                   'minutes and seconds respectively.')
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
-         nanny, name, memory_limit, pid_file, temp_filename, reconnect,
-         resources, bokeh, bokeh_port, local_directory):
+        nanny, name, memory_limit, pid_file, temp_filename, reconnect,
+        resources, lifetime, bokeh, bokeh_port, local_directory):
     if nanny:
         port = nanny_port
     else:
@@ -121,6 +125,21 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     else:
         resources = None
 
+    if lifetime:
+        try:
+            lifetime = lifetime.replace(',', ' ').split()
+            lifetime = dict(pair.split('=') for pair in lifetime)
+            lifetime = valmap(float, lifetime)
+            to_secs = {'d': 86400, 'days': 86400,
+                       'h': 3600, 'hours': 3600,
+                       'm': 60, 'mins': 60, 'minutes': 60,
+                       's': 1, 'secs': 1, 'seconds': 1}
+            lifetime = sum(to_secs[key] * val for key, val in lifetime.items())
+        except (KeyError, ValueError):
+            raise ValueError("Lifetime specifier not understood, see "
+                             "--help for the proper format.")
+
+
     loop = IOLoop.current()
 
     if nanny:
@@ -158,9 +177,27 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
                 json.dump(msg, f)
         loop.add_callback(f)
 
+    retired = [False]
+
+    if lifetime:
+        @gen.coroutine
+        def retire():
+            yield gen.sleep(lifetime)
+            logger.info("Retiring worker...")
+            with rpc(ip=nannies[0].scheduler.ip,
+                     port=nannies[0].scheduler.port) as scheduler:
+                workers = ([n.worker_address for n in nannies
+                            if n.process and n.worker_port] if nanny else
+                           [n.address for n in nannies])
+                scheduler.retire_workers(workers=workers, remove=False)
+            retired[0] = True
+            logger.info("Worker retired")
+
+        loop.add_callback(retire)
+
     @gen.coroutine
     def run():
-        while all(n.status != 'closed' for n in nannies):
+        while all(n.status != 'closed' for n in nannies) and not retired[0]:
             yield gen.sleep(0.2)
 
     try:
