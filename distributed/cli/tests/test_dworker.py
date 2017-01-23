@@ -11,7 +11,6 @@ from toolz import first
 
 from distributed import Scheduler, Client
 from distributed.core import rpc
-from distributed.nanny import isalive
 from distributed.metrics import time
 from distributed.utils import sync, ignoring, tmpfile
 from distributed.utils_test import (loop, popen, slow, terminate_process,
@@ -66,7 +65,7 @@ def test_no_reconnect(nanny, loop):
             sleep(2)
             terminate_process(sched)
         start = time()
-        while isalive(worker):
+        while worker.poll() is None:
             sleep(0.1)
             assert time() < start + 10
 
