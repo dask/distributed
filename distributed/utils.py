@@ -34,12 +34,21 @@ from .comm import CommClosedError
 logger = logging.getLogger(__name__)
 
 
-if PY3 and not sys.platform.startswith('win'):
-    mp_context = multiprocessing.get_context('forkserver')
-    # Makes the test suite much faster
-    mp_context.set_forkserver_preload(['distributed'])
-else:
-    mp_context = multiprocessing
+def _initialize_mp_context():
+    if PY3 and not sys.platform.startswith('win'):
+        ctx = multiprocessing.get_context('forkserver')
+        # Makes the test suite much faster
+        preload = ['distributed']
+        if 'pkg_resources' in sys.modules:
+            preload.append('pkg_resources')
+        ctx.set_forkserver_preload(preload)
+    else:
+        ctx = multiprocessing
+
+    return ctx
+
+
+mp_context = _initialize_mp_context()
 
 
 def funcname(func):
