@@ -33,7 +33,7 @@ from tornado.queues import Queue
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .compatibility import Queue as pyQueue, Empty, isqueue
-from .core import connect, coerce_to_rpc, clean_exception, CommClosedError
+from .core import connect, rpc, clean_exception, CommClosedError
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .worker import dumps_function, dumps_task
@@ -312,10 +312,10 @@ class Client(object):
 
     Parameters
     ----------
-    address: string, tuple, or ``Scheduler``
+    address: string, tuple, or ``Cluster``
         This can be the address of a ``Scheduler`` server, either
         as a string ``'127.0.0.1:8787'`` or tuple ``('127.0.0.1', 8787)``
-        or it can be a local ``Scheduler`` object.
+        or it can be a local ``Cluster`` object.
 
     Examples
     --------
@@ -451,7 +451,7 @@ class Client(object):
 
             self._start_arg = self.cluster.scheduler_address
 
-        self.scheduler = coerce_to_rpc(self._start_arg, timeout=timeout)
+        self.scheduler = rpc(self._start_arg, timeout=timeout)
         self.scheduler_comm = None
 
         yield self.ensure_connected(timeout=timeout)

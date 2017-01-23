@@ -420,10 +420,12 @@ class rpc(object):
         if self.status != 'closed':
             rpc.active -= 1
             self.status = 'closed'
-            n_open = sum(not comm.closed() for comm in self.comms)
-            if n_open:
+            still_open = [comm for comm in self.comms if not comm.closed()]
+            if still_open:
                 logger.warn("rpc object %s deleted with %d open comms",
-                            self, n_open)
+                            self, len(still_open))
+                for comm in still_open:
+                    comm.abort()
 
     def __repr__(self):
         return "<rpc to %r, %d comms>" % (self.address, len(self.comms))
@@ -600,19 +602,6 @@ def coerce_to_address(o):
         o = unparse_host_port(*o)
 
     return o
-
-
-def coerce_to_rpc(o, **kwargs):
-    # XXX
-    if isinstance(o, Comm):
-        return rpc(comm=o, **kwargs)
-    elif isinstance(o, rpc):
-        return o
-    else:
-        try:
-            return rpc(coerce_to_address(o), **kwargs)
-        except (ValueError, TypeError):
-            raise TypeError("Expected rpc-compatible initializer, got %r" % (o,))
 
 
 def error_message(e, status='error'):

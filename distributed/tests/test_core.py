@@ -8,7 +8,7 @@ from tornado import gen, ioloop
 import pytest
 
 from distributed.core import (
-    pingpong, Server, rpc, connect, coerce_to_rpc, send_recv,
+    pingpong, Server, rpc, connect, send_recv,
     coerce_to_address, ConnectionPool, CommClosedError)
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
@@ -323,16 +323,6 @@ def test_ports(loop):
         assert server3.port > 1024
     finally:
         server3.stop()
-
-
-def test_coerce_to_rpc():
-    with coerce_to_rpc(('127.0.0.1', 8000)) as r:
-        assert (r.ip, r.port) == ('127.0.0.1', 8000)
-        assert coerce_to_rpc(r) is r
-    with coerce_to_rpc('127.0.0.1:8000') as r:
-        assert (r.ip, r.port) == ('127.0.0.1', 8000)
-    with coerce_to_rpc('foobar:8000') as r:
-        assert (r.ip, r.port) == ('foobar', 8000)
 
 
 def stream_div(stream=None, x=None, y=None):
