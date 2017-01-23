@@ -447,6 +447,7 @@ class rpc(object):
     def __del__(self):
         if self.status != 'closed':
             rpc.active -= 1
+            self.status = 'closed'
             n_open = sum(not comm.closed() for comm in self.comms)
             if n_open:
                 logger.warn("rpc object %s deleted with %d open comms",
