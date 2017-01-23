@@ -203,6 +203,8 @@ class Scheduler(Server):
         self.delete_interval = delete_interval
         self.synchronize_worker_interval = synchronize_worker_interval
         self.digests = None
+        self.services_spec = services or {}
+        self.services = {}
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -302,31 +304,6 @@ class Scheduler(Server):
                          'run_function': self.run_function,
                          'update_data': self.update_data}
 
-        # XXX start_services()?
-        self.services = {}
-        for k, v in (services or {}).items():
-            if isinstance(k, tuple):
-                k, port = k
-            else:
-                port = 0
-
-            try:
-                service = v(self, io_loop=self.loop)
-                # Listen on all interfaces.  `self.ip` is not suitable
-                # as its default value would prevent connecting to the
-                # services (e.g. a Web UI) via 127.0.0.1.  Unfortunately,
-                # this means that security by restricting the listening
-                # address doesn't work here.
-
-                # XXX we would benefit from moving this to the start()
-                # method, and choose the same listening addr as the
-                # main listener.
-                service.listen(('', port))
-                self.services[k] = service
-            except Exception as e:
-                logger.info("Could not launch service: %s-%d", k, port,
-                            exc_info=True)
-
         self._transitions = {
                  ('released', 'waiting'): self.transition_released_waiting,
                  ('waiting', 'released'): self.transition_waiting_released,
@@ -363,10 +340,6 @@ class Scheduler(Server):
 
     __repr__ = __str__
 
-    @property
-    def address_tuple(self):
-        return (self.ip, self.port)
-
     def identity(self, comm):
         """ Basic information about ourselves and our cluster """
         d = {'type': type(self).__name__,
@@ -392,6 +365,33 @@ class Scheduler(Server):
         """ Basic information about ourselves and our cluster """
         return get_versions()
 
+    def start_services(self):
+        for k, v in self.services_spec.items():
+            if isinstance(k, tuple):
+                k, port = k
+            else:
+                port = 0
+
+            try:
+                service = v(self, io_loop=self.loop)
+                # Listen on all interfaces.  `self.ip` is not suitable
+                # as its default value would prevent connecting to the
+                # services (e.g. a Web UI) via 127.0.0.1.  Unfortunately,
+                # this means that security by restricting the listening
+                # address doesn't work here.
+
+                # XXX we should choose the same listening addr as the
+                # main listener.
+                service.listen(('', port))
+                self.services[k] = service
+            except Exception as e:
+                logger.info("Could not launch service: %r", (k, port),
+                            exc_info=True)
+
+    def stop_services(self):
+        for service in self.services.values():
+            service.stop()
+
     def start(self, addr=8786, start_queues=True):
         """ Clear out old state and restart all running coroutines """
         collections = [self.tasks, self.dependencies, self.dependents,
@@ -415,8 +415,10 @@ class Scheduler(Server):
         if self.status != 'running':
             if isinstance(addr, int):
                 self.listen((self.ip, addr))
+                self.start_services()
             else:
                 self.listen(addr)
+                self.start_services()
 
             self.status = 'running'
             logger.info("  Scheduler at: %20s:%s", self.ip, self.port)
@@ -448,8 +450,7 @@ class Scheduler(Server):
         if self.status == 'closed':
             return
         logger.info("Scheduler closing...")
-        for service in self.services.values():
-            service.stop()
+        self.stop_services()
         for ext in self.extensions:
             with ignoring(AttributeError):
                 ext.teardown()

@@ -140,7 +140,7 @@ class Nanny(Server):
                             quiet_exceptions=allowed_errors)
                 if result not in ('OK', 'already-removed'):
                     logger.critical("Unable to unregister with scheduler %s. "
-                            "Nanny: %s, Worker: %s", result, self.address_tuple,
+                            "Nanny: %s, Worker: %s", result, self.address,
                             self.worker_address)
                 else:
                     logger.info("Unregister worker %r from scheduler",
@@ -279,10 +279,6 @@ class Nanny(Server):
         self.scheduler.close_rpc()
         self.stop()
         raise gen.Return('OK')
-
-    @property
-    def address_tuple(self):
-        return (self.ip, self.port)
 
     def resource_collect(self):
         try:

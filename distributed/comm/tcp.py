@@ -151,7 +151,6 @@ class TCP(Comm):
             stream = None
             raise CommClosedError
 
-        #yield gen.moment  # Make sure the event loop gets a tick
         raise gen.Return(sum(map(len, frames)))
 
     @gen.coroutine

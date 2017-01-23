@@ -274,11 +274,6 @@ class WorkerBase(Server):
         yield self._closed.wait()
         assert self.status == 'closed'
 
-    @property
-    def address_tuple(self):
-        # XXX remove?
-        return (self.ip, self.port)
-
     def _deserialize(self, function=None, args=None, kwargs=None, task=None):
         """ Deserialize task inputs and regularize to func, args, kwargs """
         if function is not None:

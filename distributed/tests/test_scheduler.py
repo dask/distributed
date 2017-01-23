@@ -41,7 +41,6 @@ occupancy = defaultdict(lambda: 0)
 @gen_cluster()
 def test_administration(s, a, b):
     assert isinstance(s.address, str)
-    assert s.address_tuple[0] in s.address
     assert s.address in str(s)
     assert str(sum(s.ncores.values())) in repr(s)
     assert str(len(s.ncores)) in repr(s)
