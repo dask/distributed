@@ -8,7 +8,7 @@ from toolz import first, assoc
 from tornado import gen
 
 from distributed.batched import BatchedSend
-from distributed.core import read, write, listen, connect, CommClosedError
+from distributed.core import listen, connect, CommClosedError
 from distributed.metrics import time
 from distributed.utils import sync, All
 from distributed.utils_test import gen_test, slow, gen_cluster

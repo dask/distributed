@@ -24,9 +24,11 @@ from .protocol import to_serialize
 from .utils import get_ip, ignoring, log_errors, mp_context, tmpfile
 from .worker import _ncores, Worker, run, TOTAL_MEMORY
 
+
 nanny_environment = os.path.dirname(sys.executable)
 
 logger = logging.getLogger(__name__)
+
 
 class Nanny(Server):
     """ A process to manage worker processes

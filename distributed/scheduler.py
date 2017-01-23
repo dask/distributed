@@ -437,9 +437,6 @@ class Scheduler(Server):
             comm.abort()
         self.rpc.close()
 
-    # XXX
-    close_streams = close_comms
-
     @gen.coroutine
     def close(self, comm=None, fast=False):
         """ Send cleanup signal to all coroutines then wait until finished

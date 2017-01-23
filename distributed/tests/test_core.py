@@ -8,9 +8,8 @@ from tornado import gen, ioloop
 import pytest
 
 from distributed.core import (
-    read, write, pingpong, Server, rpc, connect,
-    coerce_to_rpc, send_recv, coerce_to_address, ConnectionPool,
-    CommClosedError)
+    pingpong, Server, rpc, connect, coerce_to_rpc, send_recv,
+    coerce_to_address, ConnectionPool, CommClosedError)
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import slow, loop, gen_test, gen_cluster, has_ipv6
@@ -255,7 +254,7 @@ def test_rpc_with_many_connections(loop):
 
         server.stop()
 
-        remote.close_streams()
+        remote.close_comms()
         assert all(comm.closed() for comm in remote.comms)
 
     loop.run_sync(f)
@@ -281,7 +280,7 @@ def test_large_packets(loop):
         result = yield conn.echo(x=d)
         assert result == d
 
-        conn.close_streams()
+        conn.close_comms()
         server.stop()
 
     loop.run_sync(f)

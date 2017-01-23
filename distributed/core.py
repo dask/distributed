@@ -262,33 +262,6 @@ class Server(object):
                                  address, e)
 
 
-@gen.coroutine
-def read(comm, deserialize=None):
-    # XXX TRANSITIONAL
-    if not isinstance(comm, Comm):
-        raise TypeError("Comm expected, got '%s'" % (type(comm),))
-    1/0
-    msg = yield comm.read(deserialize=deserialize)
-    yield msg
-
-
-@gen.coroutine
-def write(comm, msg):
-    # XXX TRANSITIONAL
-    if not isinstance(comm, Comm):
-        raise TypeError("Comm expected, got '%s'" % (type(comm),))
-    1/0
-    yield comm.write(msg)
-
-
-@gen.coroutine
-def close(comm):
-    if not isinstance(comm, Comm):
-        raise TypeError("Comm expected, got '%s'" % (type(comm),))
-    1/0
-    yield comm.close()
-
-
 def pingpong(comm):
     return b'pong'
 
@@ -350,7 +323,7 @@ class rpc(object):
 
     When done, close comms explicitly.
 
-    >>> remote.close_streams()  # doctest: +SKIP
+    >>> remote.close_comms()  # doctest: +SKIP
     """
     active = 0
     comms = ()
@@ -401,8 +374,7 @@ class rpc(object):
         self.comms[comm] = False     # mark as taken
         raise gen.Return(comm)
 
-    def close_streams(self):
-        # XXX close_comms?
+    def close_comms(self):
 
         @gen.coroutine
         def _close_comm(comm):
@@ -436,7 +408,7 @@ class rpc(object):
         if self.status != 'closed':
             rpc.active -= 1
         self.status = 'closed'
-        self.close_streams()
+        self.close_comms()
 
     def __enter__(self):
         return self
@@ -565,7 +537,6 @@ class ConnectionPool(object):
             self.event.clear()
             self.collect()
             yield self.event.wait()
-            #yield gen.sleep(0.01)  # XXX?
 
         self.open += 1
         try:

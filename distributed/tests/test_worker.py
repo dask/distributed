@@ -17,7 +17,7 @@ import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
 
-from distributed.core import rpc, connect, read, write
+from distributed.core import rpc, connect
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
