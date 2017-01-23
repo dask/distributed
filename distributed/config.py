@@ -24,8 +24,13 @@ else:
                     os.mkdir(os.path.dirname(destination))
                 except FileExistsError:
                     pass
-            shutil.copy(default_path, destination)
-
+            # Atomically create destination
+            tmp = '%s.tmp.%d' % (destination, os.getpid())
+            shutil.copy(default_path, tmp)
+            try:
+                os.rename(tmp, destination)
+            except OSError:
+                os.unlink(tmp)
 
     def load_config_file(path=dask_config_path):
         if not os.path.exists(path):
