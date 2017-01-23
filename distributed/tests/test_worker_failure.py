@@ -316,28 +316,3 @@ def test_restart_during_computation(c, s, a, b):
 
     assert len(s.ncores) == 2
     assert not s.task_state
-
-
-@pytest.mark.skipif(not os.path.exists('myenv.zip') or not PY3,
-                    reason='Depends on large local file')
-@gen_cluster(client=True, Worker=Nanny, timeout=120)
-def test_upload_environment(c, s, a, b):
-    responses = yield c._upload_environment('myenv.zip')
-    assert os.path.exists(os.path.join(a.local_dir, 'myenv'))
-    assert os.path.exists(os.path.join(b.local_dir, 'myenv'))
-
-
-@pytest.mark.skipif(not os.path.exists('myenv.zip') or not PY3,
-                    reason='Depends on large local file')
-@gen_cluster(client=True, Worker=Nanny, timeout=120)
-def test_restart_environment(c, s, a, b):
-    yield c._restart(environment='myenv.zip')
-
-    def get_executable():
-        import sys
-        return sys.executable
-
-    results = yield c._run(get_executable)
-    assert results == {n.worker_address:
-                        os.path.join(n.local_dir, 'myenv', 'bin', 'python')
-                        for n in [a, b]}

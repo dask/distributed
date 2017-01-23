@@ -1732,10 +1732,8 @@ class Client(object):
         return sync(self.loop, self._upload_environment, name, zipfile)
 
     @gen.coroutine
-    def _restart(self, environment=None):
-        if environment:
-            environment = yield self._upload_environment(environment)
-        self._send_to_scheduler({'op': 'restart', 'environment': environment})
+    def _restart(self):
+        self._send_to_scheduler({'op': 'restart'})
         self._restart_event = Event()
         yield self._restart_event.wait()
         self.generation += 1
@@ -1743,13 +1741,13 @@ class Client(object):
 
         raise gen.Return(self)
 
-    def restart(self, environment=None):
+    def restart(self):
         """ Restart the distributed network
 
         This kills all active work, deletes all data on the network, and
         restarts the worker processes.
         """
-        return sync(self.loop, self._restart, environment=environment)
+        return sync(self.loop, self._restart)
 
     @gen.coroutine
     def _upload_file(self, filename, raise_on_error=True):

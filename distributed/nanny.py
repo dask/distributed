@@ -6,7 +6,6 @@ import logging
 from multiprocessing.queues import Empty
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 from time import sleep
@@ -25,8 +24,6 @@ from .utils import get_ip, ignoring, log_errors, mp_context, tmpfile
 from .worker import _ncores, Worker, run, TOTAL_MEMORY
 
 
-nanny_environment = os.path.dirname(sys.executable)
-
 logger = logging.getLogger(__name__)
 
 
@@ -39,8 +36,8 @@ class Nanny(Server):
     def __init__(self, scheduler_ip, scheduler_port=None, ip=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit=TOTAL_MEMORY, reconnect=True,
-                 validate=False, environment=nanny_environment, quiet=False,
-                 resources=None, silence_logs=None, **kwargs):
+                 validate=False, quiet=False, resources=None, silence_logs=None,
+                 **kwargs):
         if scheduler_port is None:
             scheduler_addr = normalize_address(scheduler_ip)
         else:
@@ -70,7 +67,6 @@ class Nanny(Server):
         self.services = services
         self.name = name
         self.memory_limit = memory_limit
-        self.environment = environment
         self.quiet = quiet
         self.should_watch = True
 
@@ -175,70 +171,43 @@ class Nanny(Server):
         raise gen.Return('OK')
 
     @gen.coroutine
-    def instantiate(self, comm=None, environment=None):
+    def instantiate(self, comm=None):
         """ Start a local worker process
 
         Blocks until the process is up and the scheduler is properly informed
         """
-        if environment:
-            if not os.path.isabs(environment):
-                environment = os.path.join(self.local_dir, environment)
-            self.environment = environment
-
         should_watch, self.should_watch = self.should_watch, False
 
         try:
             if isalive(self.process):
                 raise ValueError("Existing process still alive. Please kill first")
 
-            if self.environment != nanny_environment:
-                with tmpfile() as fn:
-                    self.process = run_worker_subprocess(
-                        self.environment, self.ip, self.scheduler.address,
-                        self.ncores, self.port, self._given_worker_port,
-                        self.name, self.memory_limit, fn, self.quiet,
-                        self.resources)
-
-                    while not os.path.exists(fn):
-                        yield gen.sleep(0.01)
-
-                    while True:
-                        try:
-                            with open(fn) as f:
-                                msg = json.load(f)
-                            # XXX
-                            self.worker_port = msg['port']
-                            self.worker_dir = msg['local_directory']
-                            break
-                        except JSONDecodeError:
-                            yield gen.sleep(0.01)
-            else:
-                q = mp_context.Queue()
-                self.process = mp_context.Process(
-                    target=run_worker_fork,
-                    args=(q, self.ip, self.scheduler.address,
-                          self.ncores, self.port, self._given_worker_port,
-                          self.local_dir),
-                    kwargs={'services': self.services,
-                            'name': self.name,
-                            'memory_limit': self.memory_limit,
-                            'reconnect': self.reconnect,
-                            'resources': self.resources,
-                            'validate': self.validate,
-                            'silence_logs': self.silence_logs})
-                self.process.daemon = True
-                self.process.start()
-                while True:
-                    try:
-                        msg = q.get_nowait()
-                        if isinstance(msg, Exception):
-                            raise msg
-                        self.worker_address = msg['address']
-                        self.worker_dir = msg['dir']
-                        assert self.worker_address
-                        break
-                    except Empty:
-                        yield gen.sleep(0.1)
+            q = mp_context.Queue()
+            self.process = mp_context.Process(
+                target=run_worker_fork,
+                args=(q, self.ip, self.scheduler.address,
+                      self.ncores, self.port, self._given_worker_port,
+                      self.local_dir),
+                kwargs={'services': self.services,
+                        'name': self.name,
+                        'memory_limit': self.memory_limit,
+                        'reconnect': self.reconnect,
+                        'resources': self.resources,
+                        'validate': self.validate,
+                        'silence_logs': self.silence_logs})
+            self.process.daemon = True
+            self.process.start()
+            while True:
+                try:
+                    msg = q.get_nowait()
+                    if isinstance(msg, Exception):
+                        raise msg
+                    self.worker_address = msg['address']
+                    self.worker_dir = msg['dir']
+                    assert self.worker_address
+                    break
+                except Empty:
+                    yield gen.sleep(0.1)
 
             logger.info("Nanny %r starts worker process %r",
                         self.address, self.worker_address)
@@ -251,10 +220,10 @@ class Nanny(Server):
         raise gen.Return('OK')
 
     @gen.coroutine
-    def restart(self, comm=None, environment=None):
+    def restart(self, comm=None):
         self.should_watch = False
         yield self._kill()
-        yield self.instantiate(environment=environment)
+        yield self.instantiate()
         self.should_watch = True
         raise gen.Return('OK')
 
@@ -337,49 +306,10 @@ class Nanny(Server):
             yield gen.sleep(interval)
 
 
-def run_worker_subprocess(environment, ip, scheduler_addr, ncores,
-                          nanny_port, worker_port, name, memory_limit,
-                          fn, quiet, resources):
-    # XXX fix this for scheduler_addr
-    print("FIXME run_worker_subprocess")
-    1/0
-    if environment.endswith('python'):
-        environment = os.path.dirname(environment)
-    if os.path.exists(os.path.join(environment, 'bin')):
-        environment = os.path.join(environment, 'bin')
-    executable = os.path.join(environment, 'python')
-
-    args = ['-m', 'distributed.cli.dask_worker']
-
-    args.extend(['%s:%d' %(scheduler_ip, scheduler_port),
-                 '--no-nanny',
-                 '--host', ip,
-                 '--worker-port', worker_port,
-                 '--nanny-port', nanny_port,
-                 '--nthreads', ncores,
-                 '--nprocs', 1,
-                 '--resources', '"%s"' % ' '.join('='.join(map(str, item))
-                                                  for item in resources),
-                 '--temp-filename', fn])
-
-    if name:
-        args.extend(['--name', name])
-
-    if memory_limit:
-        args.extend(['--memory-limit', memory_limit])
-
-    proc = subprocess.Popen([executable] + list(map(str, args)),
-            stderr=subprocess.PIPE if quiet else None)
-
-    processes_to_close.add(proc)
-
-    return proc
-
-
 def run_worker_fork(q, ip, scheduler_addr, ncores, nanny_port,
                     worker_port, local_dir, **kwargs):
     """
-    Create a worker by forking.  This assumes the environment is the same.
+    Create a worker by forking.
     """
     from distributed import Worker  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
@@ -412,18 +342,12 @@ def run_worker_fork(q, ip, scheduler_addr, ncores, nanny_port,
 
 
 def isalive(proc):
-    if proc is None:
-        return False
-    elif isinstance(proc, subprocess.Popen):
-        return proc.poll() is None
-    else:
-        return proc.is_alive()
+    return proc is not None and proc.is_alive()
 
 
 def join(proc, timeout):
-    if proc is None or isinstance(proc, subprocess.Popen):
-        return
-    proc.join(timeout)
+    if proc is not None:
+        proc.join(timeout)
 
 
 import atexit
