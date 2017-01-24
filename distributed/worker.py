@@ -70,6 +70,7 @@ class WorkerBase(Server):
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
                  silence_logs=None, **kwargs):
+        # XXX By default, ip should be the required one to reach the scheduler
         self.ip = ip or get_ip()
         if scheduler_port is None:
             scheduler_addr = normalize_address(scheduler_ip)

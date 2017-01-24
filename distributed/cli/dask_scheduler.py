@@ -68,7 +68,7 @@ def main(host, port, http_port, bokeh_port, show, _bokeh,
         with ignoring(ImportError):
             from distributed.bokeh.scheduler import BokehScheduler
             services[('bokeh', 8788)] = BokehScheduler
-    scheduler = Scheduler(ip=ip, loop=loop, services=services)
+    scheduler = Scheduler(loop=loop, services=services)
     scheduler.start(addr)
 
     bokeh_proc = None

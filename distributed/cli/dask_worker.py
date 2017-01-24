@@ -17,7 +17,7 @@ from distributed.utils import get_ip, All, ignoring
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
 from distributed.metrics import time
-from distributed.cli.utils import check_python_3, uri_from_host_port
+from distributed.cli.utils import check_python_3
 from distributed.comm.core import parse_address
 from distributed.comm.utils import parse_host_port
 
@@ -180,8 +180,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
     @gen.coroutine
     def f():
-        scheduler = rpc(ip=nannies[0].scheduler.ip,
-                        port=nannies[0].scheduler.port)
+        scheduler = rpc(nannies[0].scheduler.addresss)
         if nanny:
             yield gen.with_timeout(timedelta(seconds=2),
                     All([scheduler.unregister(address=n.worker_address, close=True)

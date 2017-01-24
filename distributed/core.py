@@ -99,6 +99,7 @@ class Server(object):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._address = None
+        self._listen_address = None
         self._port = None
         self._comms = {}
         self.rpc = ConnectionPool(limit=connection_limit,
@@ -143,13 +144,25 @@ class Server(object):
     @property
     def address(self):
         """
-        The address this Server is listening on.
+        The address this Server can be contacted on.
         """
         if not self._address:
             if self.listener is None:
                 raise ValueError("cannot get address of non-running Server")
             self._address = self.listener.contact_address
         return self._address
+
+    @property
+    def listen_address(self):
+        """
+        The address this Server is listening on.  This may be a wildcard
+        address such as `tcp://0.0.0.0:1234`.
+        """
+        if not self._listen_address:
+            if self.listener is None:
+                raise ValueError("cannot get listen address of non-running Server")
+            self._listen_address = self.listener.listen_address
+        return self._listen_address
 
     @property
     def port(self):

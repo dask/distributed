@@ -93,7 +93,7 @@ class LocalCluster(Cluster):
             while not self.loop._running:
                 sleep(0.001)
 
-        self.scheduler = Scheduler(loop=self.loop, ip='127.0.0.1',
+        self.scheduler = Scheduler(loop=self.loop,
                                    services=services)
         self.scheduler_port = scheduler_port
 
@@ -129,7 +129,7 @@ class LocalCluster(Cluster):
         """
         if self.status == 'running':
             return
-        self.scheduler.start(self.scheduler_port)
+        self.scheduler.start(('127.0.0.1', self.scheduler_port))
 
         yield self._start_all_workers(
             self.n_workers, ncores=self.threads_per_worker,

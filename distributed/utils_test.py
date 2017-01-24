@@ -248,16 +248,15 @@ def readone(comm):
         raise gen.Return(msg)
 
 
-def run_scheduler(q, nputs, scheduler_port=0, **kwargs):
+def run_scheduler(q, nputs, **kwargs):
     from distributed import Scheduler
     from tornado.ioloop import IOLoop, PeriodicCallback
+
     loop = IOLoop.current()
-    #IOLoop.clear_instance()
-    #loop = IOLoop(); loop.make_current()
     PeriodicCallback(lambda: None, 500).start()
 
-    scheduler = Scheduler(ip='127.0.0.1', validate=True, **kwargs)
-    done = scheduler.start(scheduler_port)
+    scheduler = Scheduler(validate=True, **kwargs)
+    done = scheduler.start('127.0.0.1')
 
     for i in range(nputs):
         q.put(scheduler.address)
@@ -270,11 +269,9 @@ def run_scheduler(q, nputs, scheduler_port=0, **kwargs):
 def run_worker(q, scheduler_q, **kwargs):
     from distributed import Worker
     from tornado.ioloop import IOLoop, PeriodicCallback
+
     with log_errors():
         loop = IOLoop.current()
-        #IOLoop.clear_instance()
-        #loop = IOLoop(); loop.make_current()
-        #print("WORKER:", sch
         PeriodicCallback(lambda: None, 500).start()
 
         scheduler_addr = scheduler_q.get()
@@ -293,8 +290,6 @@ def run_nanny(q, scheduler_q, **kwargs):
     from tornado.ioloop import IOLoop, PeriodicCallback
     with log_errors():
         loop = IOLoop.current()
-        #IOLoop.clear_instance()
-        #loop = IOLoop(); loop.make_current()
         PeriodicCallback(lambda: None, 500).start()
 
         scheduler_addr = scheduler_q.get()
@@ -469,9 +464,9 @@ from .client import Client
 @gen.coroutine
 def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
                   worker_kwargs={}):
-    s = Scheduler(ip='127.0.0.1', loop=loop, validate=True, **scheduler_kwargs)
-    done = s.start(0)
-    workers = [Worker(s.ip, s.port, ncores=ncore[1], ip=ncore[0], name=i,
+    s = Scheduler(loop=loop, validate=True, **scheduler_kwargs)
+    done = s.start('127.0.0.1')
+    workers = [Worker(s.address, ncores=ncore[1], ip=ncore[0], name=i,
                       loop=loop, validate=True,
                       **(merge(worker_kwargs, ncore[2])
                          if len(ncore) > 2
@@ -533,7 +528,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
                     args = [s] + workers
 
                     if client:
-                        e = Client((s.ip, s.port), loop=loop, start=False)
+                        e = Client(s.address, loop=loop, start=False)
                         loop.run_sync(e._start)
                         args = [e] + args
                     try:

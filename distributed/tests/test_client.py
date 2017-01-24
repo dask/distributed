@@ -1590,8 +1590,8 @@ def test_repr_sync(loop):
         with Client(s['address'], loop=loop) as c:
             s = str(c)
             r = repr(c)
-            assert c.scheduler.ip in s
-            assert str(c.scheduler.port) in r
+            assert c.scheduler.address in s
+            assert c.scheduler.address in r
             assert str(3) in s  # nworkers
             assert 'cores' in s
 
@@ -3713,10 +3713,10 @@ def test_client_timeout():
     c = Client('127.0.0.1:57484', loop=loop, start=False)
     loop.add_callback(c._start, timeout=10)
 
-    s = Scheduler(ip='127.0.0.1', loop=loop)
+    s = Scheduler(loop=loop)
     yield gen.sleep(4)
     try:
-        s.start(57484)
+        s.start(('127.0.0.1', 57484))
     except EnvironmentError:  # port in use
         return
 

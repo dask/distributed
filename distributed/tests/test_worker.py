@@ -260,7 +260,7 @@ def test_broadcast(s, a, b):
 @gen_test()
 def test_worker_with_port_zero():
     s = Scheduler()
-    s.listen(8007)
+    s.start(8007)
     w = Worker(s.ip, s.port, ip='127.0.0.1')
     yield w._start()
     assert isinstance(w.port, int)
@@ -315,14 +315,14 @@ def test_io_loop(loop):
     s = Scheduler(loop=loop)
     s.listen(0)
     assert s.io_loop is loop
-    w = Worker(s.ip, s.port, loop=loop)
+    w = Worker(s.address, loop=loop)
     assert w.io_loop is loop
 
 
 @gen_cluster(client=True, ncores=[])
 def test_spill_to_disk(e, s):
     np = pytest.importorskip('numpy')
-    w = Worker(s.ip, s.port, loop=s.loop, memory_limit=1000)
+    w = Worker(s.address, loop=s.loop, memory_limit=1000)
     yield w._start()
 
     x = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')

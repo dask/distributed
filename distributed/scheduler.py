@@ -191,12 +191,11 @@ class Scheduler(Server):
 
     def __init__(self, center=None, loop=None,
                  delete_interval=500, synchronize_worker_interval=60000,
-                 ip=None, services=None, allowed_failures=ALLOWED_FAILURES,
+                 services=None, allowed_failures=ALLOWED_FAILURES,
                  extensions=[ChannelScheduler, PublishExtension, WorkStealing],
                  validate=False, **kwargs):
 
         # Attributes
-        self.ip = ip or get_ip()
         self.allowed_failures = allowed_failures
         self.validate = validate
         self.status = None
@@ -365,7 +364,7 @@ class Scheduler(Server):
         """ Basic information about ourselves and our cluster """
         return get_versions()
 
-    def start_services(self):
+    def start_services(self, listen_ip=''):
         for k, v in self.services_spec.items():
             if isinstance(k, tuple):
                 k, port = k
@@ -374,15 +373,7 @@ class Scheduler(Server):
 
             try:
                 service = v(self, io_loop=self.loop)
-                # Listen on all interfaces.  `self.ip` is not suitable
-                # as its default value would prevent connecting to the
-                # services (e.g. a Web UI) via 127.0.0.1.  Unfortunately,
-                # this means that security by restricting the listening
-                # address doesn't work here.
-
-                # XXX we should choose the same listening addr as the
-                # main listener.
-                service.listen(('', port))
+                service.listen((listen_ip, port))
                 self.services[k] = service
             except Exception as e:
                 logger.info("Could not launch service: %r", (k, port),
@@ -414,14 +405,19 @@ class Scheduler(Server):
 
         if self.status != 'running':
             if isinstance(addr, int):
+                self.ip = get_ip()
                 self.listen((self.ip, addr))
+                # Listen on all interfaces.  `self.ip` is not suitable
+                # as its default value would prevent connecting to the
+                # services (e.g. a Web UI) via 127.0.0.1.
                 self.start_services()
             else:
                 self.listen(addr)
-                self.start_services()
+                self.ip = parse_host_port(parse_address(self.listen_address)[1])[0]
+                self.start_services(self.ip)
 
             self.status = 'running'
-            logger.info("  Scheduler at: %20s:%s", self.ip, self.port)
+            logger.info("  Scheduler at: %24s", self.address)
             for k, v in self.services.items():
                 logger.info("%11s at: %20s:%s", k, self.ip, v.port)
 
