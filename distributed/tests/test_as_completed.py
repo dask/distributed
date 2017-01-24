@@ -52,14 +52,17 @@ def test_as_completed_add(loop):
     with cluster() as (s, [a, b]):
         with Client(('127.0.0.1', s['port']), loop=loop) as c:
             total = 0
-            futures = c.map(inc, range(20))
+            expected = sum(map(inc, range(10)))
+            futures = c.map(inc, range(10))
             ac = AsCompleted(futures)
             for future in ac:
-                total += future.result()
+                result = future.result()
+                total += result
                 if random.random() < 0.5:
                     future = c.submit(add, future, 10)
                     ac.add(future)
-            assert total > sum(map(inc, range(10)))
+                    expected += result + 10
+            assert total == expected
 
 
 def test_as_completed_repeats(loop):
