@@ -2465,6 +2465,8 @@ class AsCompleted(object):
                 raise StopIteration()
         return self.queue.get()
 
+    next = __next__
+
 
 as_completed = AsCompleted
 
