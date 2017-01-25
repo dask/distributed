@@ -13,8 +13,8 @@ from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
                                     requires_ipv6, has_ipv6)
 
 from distributed.comm import tcp, zmq, connect, listen, CommClosedError
-from distributed.comm.core import parse_address
-from distributed.comm.utils import parse_host_port, unparse_host_port
+from distributed.comm.core import (parse_address, parse_host_port,
+                                   unparse_host_port, resolve_address)
 
 
 EXTERNAL_IP4 = get_ip()
@@ -72,6 +72,26 @@ def test_unparse_host_port():
     assert f('::1') == '[::1]'
     assert f('[::1]') == '[::1]'
     assert f('::1', '*') == '[::1]:*'
+
+
+def test_resolve_address():
+    f = resolve_address
+
+    assert f('tcp://127.0.0.1:123') == 'tcp://127.0.0.1:123'
+    assert f('zmq://127.0.0.1:456') == 'zmq://127.0.0.1:456'
+    assert f('127.0.0.2:789') == 'tcp://127.0.0.2:789'
+    assert f('tcp://0.0.0.0:456') == 'tcp://0.0.0.0:456'
+    assert f('tcp://0.0.0.0:456') == 'tcp://0.0.0.0:456'
+
+    if has_ipv6():
+        assert f('tcp://[::1]:123') == 'tcp://[::1]:123'
+        assert f('zmq://[::1]:456') == 'zmq://[::1]:456'
+        assert f('[::2]:789') == 'tcp://[::2]:789'
+        assert f('tcp://[::]:123') == 'tcp://[::]:123'
+
+    assert f('localhost:123') == 'tcp://127.0.0.1:123'
+    assert f('tcp://localhost:456') == 'tcp://127.0.0.1:456'
+    assert f('zmq://localhost:789') == 'zmq://127.0.0.1:789'
 
 
 @gen_test()

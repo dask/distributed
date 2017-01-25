@@ -28,8 +28,8 @@ from dask.core import reverse_dict
 from dask.order import order
 
 from .batched import BatchedSend
-from .comm.core import parse_address, unparse_address, normalize_address
-from .comm.utils import parse_host_port, unparse_host_port
+from .comm.core import (normalize_address, resolve_address,
+                        get_address_host_port, unparse_host_port)
 from .config import config
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
@@ -412,7 +412,7 @@ class Scheduler(Server):
                 self.start_services()
             else:
                 self.listen(addr_or_port)
-                self.ip = parse_host_port(parse_address(self.listen_address)[1])[0]
+                self.ip, _ = get_address_host_port(self.listen_address)
                 self.start_services(self.ip)
 
             self.status = 'running'
@@ -504,7 +504,7 @@ class Scheduler(Server):
             host_info = host_info or {}
 
             address = self.coerce_address(address, resolve_address)
-            host, port = self._get_host_port(address)
+            host, port = get_address_host_port(address)
             self.host_info[host]['last-seen'] = local_now
 
             address = normalize_address(address)
@@ -786,7 +786,7 @@ class Scheduler(Server):
                 return 'already-removed'
 
             address = self.coerce_address(address)
-            host, port = self._get_host_port(address)
+            host, port = get_address_host_port(address)
 
             logger.info("Remove worker %s", address)
             with ignoring(AttributeError, CommClosedError):
@@ -2821,11 +2821,7 @@ class Scheduler(Server):
                             % (addr,))
 
         if resolve:
-            scheme, loc = parse_address(addr)
-            ip, port = parse_host_port(loc)
-            ip = ensure_ip(ip)
-            loc = unparse_host_port(ip, port)
-            addr = unparse_address(scheme, loc)
+            addr = resolve_address(addr)
         else:
             addr = normalize_address(addr)
 
@@ -2839,10 +2835,6 @@ class Scheduler(Server):
             return self.worker_info[self.aliases[host]]['host']
         else:
             return host
-
-    def _get_host_port(self, address):
-        # XXX this should be scheme-dependent
-        return parse_host_port(parse_address(address)[1])
 
     def workers_list(self, workers):
         """

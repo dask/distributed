@@ -209,8 +209,6 @@ def test_rpc(loop):
             assert response == b'pong'
 
             assert remote.comms
-            assert remote.ip == '127.0.0.1'
-            assert remote.port == 8887
             assert remote.address == 'tcp://127.0.0.1:8887'
 
             response = yield remote.ping(close=True)
@@ -230,8 +228,7 @@ def test_rpc_inputs():
          rpc('tcp://127.0.0.1:8887'),
          ]
 
-    assert all(r.ip == '127.0.0.1' and r.port == 8887
-               and r.address == 'tcp://127.0.0.1:8887' for r in L), L
+    assert all(r.address == 'tcp://127.0.0.1:8887' for r in L), L
 
     for r in L:
         r.close_rpc()
@@ -374,7 +371,7 @@ def test_coerce_to_address():
     for arg in ['127.0.0.1:8786',
                 ('127.0.0.1', 8786),
                 ('127.0.0.1', '8786')]:
-        assert coerce_to_address(arg) == '127.0.0.1:8786'
+        assert coerce_to_address(arg) == 'tcp://127.0.0.1:8786'
 
 
 @gen_test()

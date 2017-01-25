@@ -17,7 +17,7 @@ import uuid
 
 import six
 
-from toolz import merge
+from toolz import merge, memoize
 from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
@@ -633,6 +633,7 @@ def wait_for_port(address, timeout=5):
             break
 
 
+@memoize
 def has_ipv6():
     """
     Return whether IPv6 is locally functional.  This doesn't guarantee IPv6

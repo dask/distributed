@@ -16,7 +16,7 @@ from distributed import Scheduler
 from distributed.utils import ignoring
 from distributed.http import HTTPScheduler
 from distributed.cli.utils import (check_python_3, install_signal_handlers,
-                                   parse_host_port, uri_from_host_port)
+                                   uri_from_host_port)
 from tornado.ioloop import IOLoop
 
 logger = logging.getLogger('distributed.scheduler')

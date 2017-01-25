@@ -13,9 +13,9 @@ from zmq.eventloop.future import Context
 
 from .. import config
 from ..utils import PY3
-from .core import connectors, listeners, Comm, CommClosedError, Listener
-from .utils import (to_frames, from_frames, parse_host_port,
-                    unparse_host_port, ensure_concrete_host)
+from .core import (connectors, listeners, Comm, CommClosedError, Listener,
+                   parse_host_port, unparse_host_port)
+from .utils import to_frames, from_frames, ensure_concrete_host
 from . import zmqimpl
 
 

@@ -25,10 +25,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
 from .batched import BatchedSend
-from .comm.core import normalize_address, parse_address
-from .comm.utils import parse_host_port, unparse_host_port
+from .comm.core import get_address_host_port
 from .config import config
-from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
 from .core import (connect, send_recv, error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address, RPCClosed)
@@ -38,6 +36,7 @@ from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     All, ignoring, validate_key, mp_context)
+from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
 
@@ -71,9 +70,9 @@ class WorkerBase(Server):
                  memory_limit='auto', executor=None, resources=None,
                  silence_logs=None, **kwargs):
         if scheduler_port is None:
-            scheduler_addr = normalize_address(scheduler_ip)
+            scheduler_addr = coerce_to_address(scheduler_ip)
         else:
-            scheduler_addr = normalize_address(unparse_host_port(scheduler_ip, scheduler_port))
+            scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self._port = 0
         self.ncores = ncores or _ncores
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
@@ -214,12 +213,12 @@ class WorkerBase(Server):
         if isinstance(addr_or_port, int):
             # Default ip is the required one to reach the scheduler
             self.ip = get_ip(
-                parse_host_port(parse_address(self.scheduler.address)[1])[0]
+                get_address_host_port(self.scheduler.address)[0]
                 )
             self.listen((self.ip, addr_or_port))
         else:
             self.listen(addr_or_port)
-            self.ip = parse_host_port(parse_address(self.address)[1])[0]
+            self.ip = get_address_host_port(self.address)[0]
 
         self.name = self.name or self.address
         # XXX Which address should services listen on?

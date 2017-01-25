@@ -25,8 +25,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
 from .comm import connect, listen, CommClosedError
-from .comm.core import parse_address, normalize_address, Comm
-from .comm.utils import parse_host_port, unparse_host_port
+from .comm.core import (parse_address, normalize_address, Comm,
+                        parse_host_port, unparse_host_port)
 from .compatibility import PY3, unicode, WINDOWS
 from .config import config
 from .metrics import time
@@ -344,8 +344,7 @@ class rpc(object):
 
     def __init__(self, arg=None, comm=None, deserialize=True, timeout=3):
         self.comms = {}
-        self.address = normalize_address(coerce_to_address(arg))
-        self.ip, self.port = parse_host_port(parse_address(self.address)[1])
+        self.address = coerce_to_address(arg)
         self.timeout = timeout
         self.status = 'running'
         self.deserialize = deserialize
@@ -609,12 +608,9 @@ class ConnectionPool(object):
 
 def coerce_to_address(o):
     if isinstance(o, (list, tuple)):
-        o = tuple(o)
-        if isinstance(o[0], bytes):
-            o = (o[0].decode(),) + o[1:]
         o = unparse_host_port(*o)
 
-    return o
+    return normalize_address(o)
 
 
 def error_message(e, status='error'):

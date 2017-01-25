@@ -14,10 +14,9 @@ import weakref
 from tornado.ioloop import IOLoop
 from tornado import gen
 
-from .comm.core import parse_address, normalize_address
-from .comm.utils import parse_host_port, unparse_host_port
+from .comm.core import get_address_host_port
 from .compatibility import JSONDecodeError
-from .core import Server, rpc, RPCClosed, CommClosedError
+from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
 from .protocol import to_serialize
 from .utils import get_ip, ignoring, log_errors, mp_context, tmpfile
@@ -39,9 +38,9 @@ class Nanny(Server):
                  validate=False, quiet=False, resources=None, silence_logs=None,
                  **kwargs):
         if scheduler_port is None:
-            scheduler_addr = normalize_address(scheduler_ip)
+            scheduler_addr = coerce_to_address(scheduler_ip)
         else:
-            scheduler_addr = normalize_address(unparse_host_port(scheduler_ip, scheduler_port))
+            scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.worker_address = None
         self._given_worker_port = worker_port
         self.ncores = ncores or _ncores
@@ -94,15 +93,12 @@ class Nanny(Server):
         if isinstance(addr_or_port, int):
             # Default ip is the required one to reach the scheduler
             self.ip = get_ip(
-                parse_host_port(parse_address(self.scheduler.address)[1])[0]
+                get_address_host_port(self.scheduler.address)[0]
                 )
             self.listen((self.ip, addr_or_port))
         else:
             self.listen(addr_or_port)
-            self.ip = parse_host_port(parse_address(self.address)[1])[0]
-
-        print("=> self.ip", self.ip)
-        print("!!! scheduler_addr =", self.scheduler.address)
+            self.ip = get_address_host_port(self.address)[0]
 
         logger.info('        Start Nanny at: %r', self.address)
         yield self.instantiate()
