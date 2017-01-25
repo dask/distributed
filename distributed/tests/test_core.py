@@ -12,24 +12,16 @@ from distributed.core import (
     coerce_to_address, ConnectionPool, CommClosedError)
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
-from distributed.utils_test import slow, loop, gen_test, gen_cluster, has_ipv6
+from distributed.utils_test import (
+    slow, loop, gen_test, gen_cluster, has_ipv6,
+    assert_can_connect, assert_can_connect_from_everywhere_4,
+    assert_can_connect_from_everywhere_4_6, assert_can_connect_from_everywhere_6,
+    assert_can_connect_locally_4, assert_can_connect_locally_6)
 
 
 EXTERNAL_IP4 = get_ip()
 if has_ipv6():
     EXTERNAL_IP6 = get_ipv6()
-
-
-@gen.coroutine
-def assert_can_connect(addr, timeout=0.05):
-    comm = yield connect(addr, timeout=timeout)
-    comm.abort()
-
-@gen.coroutine
-def assert_cannot_connect(addr, timeout=0.05):
-    with pytest.raises(EnvironmentError):
-        comm = yield connect(addr, timeout=timeout)
-        comm.abort()
 
 
 def test_server(loop):
@@ -84,45 +76,6 @@ def test_server_listen():
             yield server
         finally:
             server.stop()
-
-    @gen.coroutine
-    def assert_can_connect_from_everywhere_4_6(port):
-        yield assert_can_connect('tcp://127.0.0.1:%d' % port)
-        yield assert_can_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
-        if has_ipv6():
-            yield assert_can_connect('tcp://[::1]:%d' % port)
-            yield assert_can_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
-
-    @gen.coroutine
-    def assert_can_connect_from_everywhere_4(port):
-        yield assert_can_connect('tcp://127.0.0.1:%d' % port)
-        yield assert_can_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
-        if has_ipv6():
-            yield assert_cannot_connect('tcp://[::1]:%d' % port)
-            yield assert_cannot_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
-
-    @gen.coroutine
-    def assert_can_connect_locally_4(port):
-        yield assert_can_connect('tcp://127.0.0.1:%d' % port)
-        yield assert_cannot_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
-        if has_ipv6():
-            yield assert_cannot_connect('tcp://[::1]:%d' % port)
-            yield assert_cannot_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
-
-    @gen.coroutine
-    def assert_can_connect_from_everywhere_6(port):
-        yield assert_cannot_connect('tcp://127.0.0.1:%d' % port)
-        yield assert_cannot_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
-        yield assert_can_connect('tcp://[::1]:%d' % port)
-        yield assert_can_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
-
-    @gen.coroutine
-    def assert_can_connect_locally_6(port):
-        yield assert_cannot_connect('tcp://127.0.0.1:%d' % port)
-        yield assert_cannot_connect('tcp://%s:%d' % (EXTERNAL_IP4, port))
-        yield assert_can_connect('tcp://[::1]:%d' % port)
-        if EXTERNAL_IP6 != '::1':  # Can happen if no outside IPv6 connectivity
-            yield assert_cannot_connect('tcp://[%s]:%d' % (EXTERNAL_IP6, port))
 
     # Note server.address is the concrete, contactable address
 
