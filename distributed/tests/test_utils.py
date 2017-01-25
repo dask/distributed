@@ -323,42 +323,51 @@ def test_logging():
     assert len(d.handlers) == 1
     assert isinstance(d.handlers[0], logging.StreamHandler)
 
+    # Work around Bokeh messing with the root logger level
+    # https://github.com/bokeh/bokeh/issues/5793
     root = logging.getLogger('')
-    dfb = logging.getLogger('distributed.foo.bar')
-    f = logging.getLogger('foo')
-    fb = logging.getLogger('foo.bar')
+    old_root_level = root.level
+    root.setLevel('WARN')
 
-    with captured_handler(d.handlers[0]) as distributed_log:
-        with captured_logger(root) as foreign_log:
-            h = logging.StreamHandler(foreign_log)
-            fmt = '[%(levelname)s in %(name)s] - %(message)s'
-            h.setFormatter(logging.Formatter(fmt))
-            fb.addHandler(h)
-            fb.propagate = False
+    try:
+        dfb = logging.getLogger('distributed.foo.bar')
+        f = logging.getLogger('foo')
+        fb = logging.getLogger('foo.bar')
 
-            # For debugging
-            dump_logger_list()
+        with captured_handler(d.handlers[0]) as distributed_log:
+            with captured_logger(root) as foreign_log:
+                h = logging.StreamHandler(foreign_log)
+                fmt = '[%(levelname)s in %(name)s] - %(message)s'
+                h.setFormatter(logging.Formatter(fmt))
+                fb.addHandler(h)
+                fb.propagate = False
 
-            d.debug("1: debug")
-            d.info("2: info")
-            dfb.info("3: info")
-            fb.info("4: info")
-            fb.error("5: error")
-            f.info("6: info")
-            f.error("7: error")
+                # For debugging
+                dump_logger_list()
 
-    distributed_log = distributed_log.getvalue().splitlines()
-    foreign_log = foreign_log.getvalue().splitlines()
+                d.debug("1: debug")
+                d.info("2: info")
+                dfb.info("3: info")
+                fb.info("4: info")
+                fb.error("5: error")
+                f.info("6: info")
+                f.error("7: error")
 
-    # distributed log is configured at INFO level by default
-    assert distributed_log == [
-        "distributed - INFO - 2: info",
-        "distributed.foo.bar - INFO - 3: info",
-        ]
+        distributed_log = distributed_log.getvalue().splitlines()
+        foreign_log = foreign_log.getvalue().splitlines()
 
-    # foreign logs should be unaffected by distributed's logging
-    # configuration.  They get the default ERROR level from logging.
-    assert foreign_log == [
-        "[ERROR in foo.bar] - 5: error",
-        "7: error",
-        ]
+        # distributed log is configured at INFO level by default
+        assert distributed_log == [
+            "distributed - INFO - 2: info",
+            "distributed.foo.bar - INFO - 3: info",
+            ]
+
+        # foreign logs should be unaffected by distributed's logging
+        # configuration.  They get the default ERROR level from logging.
+        assert foreign_log == [
+            "[ERROR in foo.bar] - 5: error",
+            "7: error",
+            ]
+
+    finally:
+        root.setLevel(old_root_level)
