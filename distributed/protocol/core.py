@@ -23,7 +23,7 @@ from ..utils import ignoring
 _deserialize = deserialize
 
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 def dumps(msg):

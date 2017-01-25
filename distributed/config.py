@@ -50,8 +50,8 @@ def initialize_logging(config):
     loggers = config.get('logging', {})
     loggers.setdefault('distributed', 'info')
     # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
-    # XXX this silences legitimate error messages
     loggers.setdefault('tornado', 'critical')
+    loggers.setdefault('tornado.application', 'error')
 
     fmt = '%(name)s - %(levelname)s - %(message)s'
 

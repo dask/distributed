@@ -16,7 +16,7 @@ from ..scheduler import Scheduler
 from ..worker import Worker, _ncores
 from .core import Cluster
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class LocalCluster(Cluster):

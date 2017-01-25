@@ -288,6 +288,33 @@ def test_ensure_bytes():
         assert result == b'1'
 
 
+def dump_logger_list():
+    root = logging.getLogger()
+    loggers = root.manager.loggerDict
+    print()
+    print("== Loggers (name, level, effective level, propagate) ==")
+
+    def logger_info(name, logger):
+        return (name, logging.getLevelName(logger.level),
+                logging.getLevelName(logger.getEffectiveLevel()),
+                logger.propagate)
+
+    infos = []
+    infos.append(logger_info('<root>', root))
+
+    for name, logger in sorted(loggers.items()):
+        if not isinstance(logger, logging.Logger):
+            # Skip 'PlaceHolder' objects
+            continue
+        assert logger.name == name
+        infos.append(logger_info(name, logger))
+
+    for info in infos:
+        print("%-40s %-8s %-8s %-5s" % info)
+
+    print()
+
+
 def test_logging():
     """
     Test default logging configuration.
@@ -308,6 +335,9 @@ def test_logging():
             h.setFormatter(logging.Formatter(fmt))
             fb.addHandler(h)
             fb.propagate = False
+
+            # For debugging
+            dump_logger_list()
 
             d.debug("1: debug")
             d.info("2: info")
