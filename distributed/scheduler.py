@@ -202,7 +202,7 @@ class Scheduler(Server):
         self.delete_interval = delete_interval
         self.synchronize_worker_interval = synchronize_worker_interval
         self.digests = None
-        self.services_spec = services or {}
+        self.service_specs = services or {}
         self.services = {}
 
         # Communication state
@@ -365,7 +365,7 @@ class Scheduler(Server):
         return get_versions()
 
     def start_services(self, listen_ip=''):
-        for k, v in self.services_spec.items():
+        for k, v in self.service_specs.items():
             if isinstance(k, tuple):
                 k, port = k
             else:
@@ -383,7 +383,7 @@ class Scheduler(Server):
         for service in self.services.values():
             service.stop()
 
-    def start(self, addr=8786, start_queues=True):
+    def start(self, addr_or_port=8786, start_queues=True):
         """ Clear out old state and restart all running coroutines """
         collections = [self.tasks, self.dependencies, self.dependents,
                 self.waiting, self.waiting_data, self.released, self.priority,
@@ -404,15 +404,14 @@ class Scheduler(Server):
                     raise exc
 
         if self.status != 'running':
-            if isinstance(addr, int):
+            if isinstance(addr_or_port, int):
                 self.ip = get_ip()
-                self.listen((self.ip, addr))
                 # Listen on all interfaces.  `self.ip` is not suitable
-                # as its default value would prevent connecting to the
-                # services (e.g. a Web UI) via 127.0.0.1.
+                # as its default value would prevent connecting via 127.0.0.1.
+                self.listen(('', addr_or_port))
                 self.start_services()
             else:
-                self.listen(addr)
+                self.listen(addr_or_port)
                 self.ip = parse_host_port(parse_address(self.listen_address)[1])[0]
                 self.start_services(self.ip)
 
@@ -579,7 +578,7 @@ class Scheduler(Server):
             recommendations = {}
             for key in list(self.unrunnable):
                 valid = self.valid_workers(key)
-                if valid is True or address in valid:
+                if valid is True or address in valid or name in valid:
                     recommendations[key] = 'waiting'
 
             if recommendations:
@@ -663,7 +662,7 @@ class Scheduler(Server):
                         w = self.coerce_address(w)
                     except ValueError:
                         # Not a valid address, but perhaps it's a hostname
-                        host_restrictions[k].add(self.coerce_hostname(w))
+                        host_restrictions[k].add(w)
                     else:
                         worker_restrictions[k].add(w)
 
@@ -2751,7 +2750,9 @@ class Scheduler(Server):
                     self.worker_info}
 
         if key in self.host_restrictions:
-            hr = self.host_restrictions[key]
+            # Resolve the alias here rather than early, for the worker
+            # may not be connected when host_restrictions is populated
+            hr = [self.coerce_hostname(h) for h in self.host_restrictions[key]]
             ss = [self.host_info[h]['addresses']
                   for h in hr if h in self.host_info]
             ss = set.union(*ss) if ss else set()
@@ -2834,7 +2835,10 @@ class Scheduler(Server):
         """
         Coerce the hostname of a worker.
         """
-        return self.aliases.get(host, host)
+        if host in self.aliases:
+            return self.worker_info[self.aliases[host]]['host']
+        else:
+            return host
 
     def _get_host_port(self, address):
         # XXX this should be scheme-dependent

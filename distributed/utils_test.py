@@ -275,8 +275,7 @@ def run_worker(q, scheduler_q, **kwargs):
         PeriodicCallback(lambda: None, 500).start()
 
         scheduler_addr = scheduler_q.get()
-        worker = Worker(scheduler_addr, ip='127.0.0.1',
-                        validate=True, **kwargs)
+        worker = Worker(scheduler_addr, validate=True, **kwargs)
         loop.run_sync(lambda: worker._start(0))
         q.put(worker.address)
         try:
@@ -293,8 +292,7 @@ def run_nanny(q, scheduler_q, **kwargs):
         PeriodicCallback(lambda: None, 500).start()
 
         scheduler_addr = scheduler_q.get()
-        worker = Nanny(scheduler_addr, ip='127.0.0.1',
-                       validate=True, **kwargs)
+        worker = Nanny(scheduler_addr, validate=True, **kwargs)
         loop.run_sync(lambda: worker._start(0))
         q.put(worker.address)
         try:
@@ -466,7 +464,7 @@ def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
                   worker_kwargs={}):
     s = Scheduler(loop=loop, validate=True, **scheduler_kwargs)
     done = s.start('127.0.0.1')
-    workers = [Worker(s.address, ncores=ncore[1], ip=ncore[0], name=i,
+    workers = [Worker(s.address, ncores=ncore[1], name=i,
                       loop=loop, validate=True,
                       **(merge(worker_kwargs, ncore[2])
                          if len(ncore) > 2
@@ -475,7 +473,7 @@ def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
     for w in workers:
         w.rpc = workers[0].rpc
 
-    yield [w._start() for w in workers]
+    yield [w._start(ncore[0]) for ncore, w in zip(ncores, workers)]
 
     start = time()
     while len(s.ncores) < len(ncores):
@@ -488,7 +486,6 @@ def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
 @gen.coroutine
 def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
-    #scheduler_close = s.close()  # shut down periodic callbacks immediately
 
     @gen.coroutine
     def end_worker(w):

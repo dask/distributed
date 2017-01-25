@@ -261,7 +261,7 @@ def test_broadcast(s, a, b):
 def test_worker_with_port_zero():
     s = Scheduler()
     s.start(8007)
-    w = Worker(s.ip, s.port, ip='127.0.0.1')
+    w = Worker(s.ip, s.port)
     yield w._start()
     assert isinstance(w.port, int)
     assert w.port > 1024
@@ -271,7 +271,7 @@ def test_worker_with_port_zero():
 def test_worker_waits_for_center_to_come_up(current_loop):
     @gen.coroutine
     def f():
-        w = Worker('127.0.0.1', 8007, ip='127.0.0.1')
+        w = Worker('127.0.0.1', 8007)
         yield w._start()
 
     try:

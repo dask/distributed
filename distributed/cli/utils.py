@@ -45,7 +45,7 @@ def install_signal_handlers():
 def uri_from_host_port(host_arg, port_arg, default_port):
     """
     Process the *host* and *port* CLI options.
-    Return an (URI, IP address) tuple.
+    Return a URI.
     """
     # Much of distributed depends on a well-known IP being assigned to
     # each entity (Worker, Scheduler, etc.), so avoid "universal" addresses
@@ -62,10 +62,4 @@ def uri_from_host_port(host_arg, port_arg, default_port):
     loc = unparse_host_port(host, port)
     addr = unparse_address(scheme, loc)
 
-    # Since the IP address serves as a node identifier in distributed, we
-    # return a concrete IP, not a wildcard listening address.
-    if host and host not in ('0.0.0.0', '[::]'):
-        ip = ensure_ip(host)
-    else:
-        ip = get_ip()
-    return addr, ip
+    return addr

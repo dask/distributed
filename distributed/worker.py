@@ -25,8 +25,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
 from .batched import BatchedSend
-from .comm.core import normalize_address
-from .comm.utils import unparse_host_port
+from .comm.core import normalize_address, parse_address
+from .comm.utils import parse_host_port, unparse_host_port
 from .config import config
 from .utils_comm import pack_data, gather_from_workers
 from .compatibility import reload, unicode
@@ -65,13 +65,11 @@ READY = ('ready', 'constrained')
 
 class WorkerBase(Server):
 
-    def __init__(self, scheduler_ip, scheduler_port=None, ip=None, ncores=None,
+    def __init__(self, scheduler_ip, scheduler_port=None, ncores=None,
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
                  silence_logs=None, **kwargs):
-        # XXX By default, ip should be the required one to reach the scheduler
-        self.ip = ip or get_ip()
         if scheduler_port is None:
             scheduler_addr = normalize_address(scheduler_ip)
         else:
@@ -125,15 +123,7 @@ class WorkerBase(Server):
 
         self.services = {}
         self.service_ports = service_ports or {}
-        for k, v in (services or {}).items():
-            if isinstance(k, tuple):
-                k, port = k
-            else:
-                port = 0
-
-            self.services[k] = v(self, io_loop=self.loop)
-            self.services[k].listen((self.ip, port))
-            self.service_ports[k] = self.services[k].port
+        self.service_specs = services or {}
 
         handlers = {
           'gather': self.gather,
@@ -205,13 +195,37 @@ class WorkerBase(Server):
             raise ValueError(resp)
         self.heartbeat_callback.start()
 
+    def start_services(self, listen_ip=''):
+        for k, v in self.service_specs.items():
+            if isinstance(k, tuple):
+                k, port = k
+            else:
+                port = 0
+
+            self.services[k] = v(self, io_loop=self.loop)
+            self.services[k].listen((listen_ip, port))
+            self.service_ports[k] = self.services[k].port
+
     @gen.coroutine
-    def _start(self, port=0):
-        self.listen((self.ip, port))
+    def _start(self, addr_or_port=0):
+        assert self.status is None
+
+        # XXX Factor this out
+        if isinstance(addr_or_port, int):
+            # Default ip is the required one to reach the scheduler
+            self.ip = get_ip(
+                parse_host_port(parse_address(self.scheduler.address)[1])[0]
+                )
+            self.listen((self.ip, addr_or_port))
+        else:
+            self.listen(addr_or_port)
+            self.ip = parse_host_port(parse_address(self.address)[1])[0]
+
         self.name = self.name or self.address
-        for k, v in self.services.items():
-            v.listen((self.ip, 0))
-            self.service_ports[k] = v.port
+        # XXX Which address should services listen on?
+        # Note Nanny is not a "real" service, just some metadata
+        # passed in service_ports...
+        self.start_services()
 
         logger.info('      Start worker at: %26s', self.address)
         for k, v in self.service_ports.items():

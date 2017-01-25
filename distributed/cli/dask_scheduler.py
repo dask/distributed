@@ -58,7 +58,7 @@ def main(host, port, http_port, bokeh_port, show, _bokeh,
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    addr, ip = uri_from_host_port(host, port, 8786)
+    addr = uri_from_host_port(host, port, 8786)
 
     loop = IOLoop.current()
     logger.info('-' * 47)

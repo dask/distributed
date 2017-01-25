@@ -2528,7 +2528,7 @@ def test_unrunnable_task_runs(c, s, a, b):
     assert x.key in s.unrunnable
     assert s.task_state[x.key] == 'no-worker'
 
-    w = Worker(s.ip, s.port, ip=a.ip, loop=s.loop)
+    w = Worker(s.ip, s.port, loop=s.loop)
     yield w._start()
 
     start = time()
@@ -3131,7 +3131,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         def start_worker(sleep, duration, repeat=1):
             for i in range(repeat):
                 yield gen.sleep(sleep)
-                w = worker(s['address'], ip='127.0.0.1', loop=loop)
+                w = worker(s['address'], loop=loop)
                 yield w._start()
                 yield gen.sleep(duration)
                 yield w._close()

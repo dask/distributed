@@ -20,7 +20,7 @@ from distributed.nanny import isalive
 
 @gen_cluster(ncores=[])
 def test_nanny(s):
-    n = Nanny(s.ip, s.port, ncores=2, ip='127.0.0.1', loop=s.loop)
+    n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
 
     yield n._start(0)
     with rpc(n.address) as nn:
@@ -60,7 +60,7 @@ def test_str(s, a, b):
 
 @gen_cluster(ncores=[], timeout=20, client=True)
 def test_nanny_process_failure(c, s):
-    n = Nanny(s.ip, s.port, ncores=2, ip='127.0.0.1', loop=s.loop)
+    n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
     yield n._start()
     first_dir = n.worker_dir
 
@@ -104,7 +104,7 @@ def test_nanny_no_port():
 @gen_cluster(ncores=[])
 def test_monitor_resources(s):
     pytest.importorskip('psutil')
-    n = Nanny(s.ip, s.port, ncores=2, ip='127.0.0.1', loop=s.loop)
+    n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
 
     yield n._start()
     assert isalive(n.process)
@@ -129,7 +129,7 @@ def test_monitor_resources(s):
 @gen_cluster(ncores=[])
 def test_run(s):
     pytest.importorskip('psutil')
-    n = Nanny(s.ip, s.port, ncores=2, ip='127.0.0.1', loop=s.loop)
+    n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
     yield n._start()
 
     with rpc(n.address) as nn:

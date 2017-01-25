@@ -14,8 +14,8 @@ import weakref
 from tornado.ioloop import IOLoop
 from tornado import gen
 
-from .comm.core import normalize_address
-from .comm.utils import unparse_host_port
+from .comm.core import parse_address, normalize_address
+from .comm.utils import parse_host_port, unparse_host_port
 from .compatibility import JSONDecodeError
 from .core import Server, rpc, RPCClosed, CommClosedError
 from .metrics import disk_io_counters, net_io_counters, time
@@ -33,7 +33,7 @@ class Nanny(Server):
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary.
     """
-    def __init__(self, scheduler_ip, scheduler_port=None, ip=None, worker_port=0,
+    def __init__(self, scheduler_ip, scheduler_port=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit=TOTAL_MEMORY, reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
@@ -42,7 +42,6 @@ class Nanny(Server):
             scheduler_addr = normalize_address(scheduler_ip)
         else:
             scheduler_addr = normalize_address(unparse_host_port(scheduler_ip, scheduler_port))
-        self.ip = ip or get_ip()
         self.worker_address = None
         self._given_worker_port = worker_port
         self.ncores = ncores or _ncores
@@ -89,17 +88,30 @@ class Nanny(Server):
     __repr__ = __str__
 
     @gen.coroutine
-    def _start(self, port=0):
+    def _start(self, addr_or_port=0):
         """ Start nanny, start local process, start watching """
-        self.listen((self.ip, port))
+
+        if isinstance(addr_or_port, int):
+            # Default ip is the required one to reach the scheduler
+            self.ip = get_ip(
+                parse_host_port(parse_address(self.scheduler.address)[1])[0]
+                )
+            self.listen((self.ip, addr_or_port))
+        else:
+            self.listen(addr_or_port)
+            self.ip = parse_host_port(parse_address(self.address)[1])[0]
+
+        print("=> self.ip", self.ip)
+        print("!!! scheduler_addr =", self.scheduler.address)
+
         logger.info('        Start Nanny at: %r', self.address)
         yield self.instantiate()
         self.loop.add_callback(self._watch)
         assert self.worker_address
         self.status = 'running'
 
-    def start(self, port=0):
-        self.loop.add_callback(self._start, port)
+    def start(self, addr_or_port=0):
+        self.loop.add_callback(self._start, addr_or_port)
 
     @gen.coroutine
     def _kill(self, comm=None, timeout=10):
@@ -185,8 +197,8 @@ class Nanny(Server):
             q = mp_context.Queue()
             self.process = mp_context.Process(
                 target=run_worker_fork,
-                args=(q, self.ip, self.scheduler.address,
-                      self.ncores, self.port, self._given_worker_port,
+                args=(q, self.scheduler.address, self.ncores,
+                      self.port, self.ip, self._given_worker_port,
                       self.local_dir),
                 kwargs={'services': self.services,
                         'name': self.name,
@@ -302,8 +314,8 @@ class Nanny(Server):
             yield gen.sleep(interval)
 
 
-def run_worker_fork(q, ip, scheduler_addr, ncores, nanny_port,
-                    worker_port, local_dir, **kwargs):
+def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
+                    worker_ip, worker_port, local_dir, **kwargs):
     """
     Create a worker by forking.
     """
@@ -312,14 +324,14 @@ def run_worker_fork(q, ip, scheduler_addr, ncores, nanny_port,
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
     loop.make_current()  # pragma: no cover
-    worker = Worker(scheduler_addr, ncores=ncores, ip=ip,
+    worker = Worker(scheduler_addr, ncores=ncores,
                     service_ports={'nanny': nanny_port}, local_dir=local_dir,
                     **kwargs)  # pragma: no cover
 
     @gen.coroutine  # pragma: no cover
     def run():
         try:  # pragma: no cover
-            yield worker._start(worker_port)  # pragma: no cover
+            yield worker._start((worker_ip, worker_port))  # pragma: no cover
         except Exception as e:  # pragma: no cover
             logger.exception(e)  # pragma: no cover
             q.put(e)  # pragma: no cover

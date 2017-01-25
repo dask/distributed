@@ -285,7 +285,7 @@ def test_remove_worker_from_scheduler(s, a, b):
 
 @gen_cluster()
 def test_add_worker(s, a, b):
-    w = Worker(s.ip, s.port, ncores=3, ip='127.0.0.1')
+    w = Worker(s.ip, s.port, ncores=3)
     w.data['x-5'] = 6
     w.data['y'] = 1
     yield w._start(0)
@@ -378,11 +378,11 @@ def test_feed_large_bytestring(s, a, b):
 def test_scheduler_as_center():
     s = Scheduler(validate=True)
     done = s.start(0)
-    a = Worker(s.address, ip='127.0.0.1', ncores=1)
+    a = Worker(s.address, ncores=1)
     a.data.update({'x': 1, 'y': 2})
-    b = Worker(s.address, ip='127.0.0.1', ncores=2)
+    b = Worker(s.address, ncores=2)
     b.data.update({'y': 2, 'z': 3})
-    c = Worker(s.address, ip='127.0.0.1', ncores=3)
+    c = Worker(s.address, ncores=3)
     yield [w._start(0) for w in [a, b, c]]
 
     assert s.ncores == {w.address: w.ncores for w in [a, b, c]}
@@ -581,9 +581,10 @@ def test_worker_name():
 def test_coerce_address():
     s = Scheduler(validate=True)
     s.start(0)
+    print("scheduler:", s.address, s.listen_address)
     a = Worker(s.ip, s.port, name='alice')
     b = Worker(s.ip, s.port, name=123)
-    c = Worker(s.ip, s.port, name='charlie', ip='127.0.0.2')
+    c = Worker('127.0.0.1', s.port, name='charlie')
     yield [a._start(), b._start(), c._start()]
 
     assert s.coerce_address('127.0.0.1:8000') == 'tcp://127.0.0.1:8000'
@@ -597,6 +598,12 @@ def test_coerce_address():
     assert s.coerce_address('alice') == a.address
     assert s.coerce_address(123) == b.address
     assert s.coerce_address('charlie') == c.address
+
+    assert s.coerce_hostname('127.0.0.1') == '127.0.0.1'
+    assert s.coerce_hostname('alice') == a.ip
+    assert s.coerce_hostname(123) == b.ip
+    assert s.coerce_hostname('charlie') == c.ip
+    assert s.coerce_hostname('jimmy') == 'jimmy'
 
     assert s.coerce_address('zzzt:8000', resolve=False) == 'tcp://zzzt:8000'
 
@@ -727,7 +734,7 @@ def test_scatter_no_workers(c, s):
         yield gen.with_timeout(timedelta(seconds=0.1),
                                s.scatter(data={'x': 1}, client='alice'))
 
-    w = Worker(s.ip, s.port, ncores=3, ip='127.0.0.1')
+    w = Worker(s.ip, s.port, ncores=3)
     yield [c._scatter(data={'x': 1}),
            w._start()]
 
@@ -737,7 +744,7 @@ def test_scatter_no_workers(c, s):
 
 @gen_cluster(ncores=[])
 def test_scheduler_sees_memory_limits(s):
-    w = Worker(s.ip, s.port, ncores=3, ip='127.0.0.1', memory_limit=12345)
+    w = Worker(s.ip, s.port, ncores=3, memory_limit=12345)
     yield w._start(0)
 
     assert s.worker_info[w.address]['memory_limit'] == 12345
@@ -879,7 +886,7 @@ def test_worker_arrives_with_processing_data(c, s, a, b):
     while not s.processing:
         yield gen.sleep(0.01)
 
-    w = Worker(s.ip, s.port, ncores=1, ip='127.0.0.1')
+    w = Worker(s.ip, s.port, ncores=1)
     w.put_key_in_memory(y.key, 3)
 
     yield w._start()
@@ -927,7 +934,7 @@ def test_no_workers_to_memory(c, s):
     while not s.task_state:
         yield gen.sleep(0.01)
 
-    w = Worker(s.ip, s.port, ncores=1, ip='127.0.0.1')
+    w = Worker(s.ip, s.port, ncores=1)
     w.put_key_in_memory(y.key, 3)
 
     yield w._start()
@@ -950,20 +957,19 @@ def test_no_worker_to_memory_restrictions(c, s, a, b):
     y = delayed(slowinc)(x, delay=0.4)
     z = delayed(slowinc)(y, delay=0.4)
 
-    yy, zz = c.persist([y, z], workers={(x, y, z): '127.0.0.2'})
+    yy, zz = c.persist([y, z], workers={(x, y, z): 'alice'})
 
     while not s.task_state:
         yield gen.sleep(0.01)
 
-    w = Worker(s.ip, s.port, ncores=1, ip='127.0.0.2')
+    w = Worker(s.ip, s.port, ncores=1, name='alice')
     w.put_key_in_memory(y.key, 3)
 
     yield w._start()
 
-    start = time()
-
-    while not s.workers:
+    while len(s.workers) < 3:
         yield gen.sleep(0.01)
+    yield gen.sleep(0.3)
 
     assert s.task_state[y.key] == 'memory'
     assert s.task_state[x.key] == 'released'
