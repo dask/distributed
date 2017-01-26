@@ -242,20 +242,25 @@ def connect(addr, timeout=3, deserialize=True):
 
     start = time()
     deadline = start + timeout
+    error = None
     while True:
-        future = connector.connect(loc, deserialize=deserialize)
         try:
+            future = connector.connect(loc, deserialize=deserialize)
             comm = yield gen.with_timeout(timedelta(seconds=deadline - time()),
                                           future,
                                           quiet_exceptions=EnvironmentError)
-        except EnvironmentError:
+        except EnvironmentError as e:
             if time() < deadline:
+                error = str(e)
                 yield gen.sleep(0.01)
                 logger.debug("sleeping on connect")
             else:
                 raise
         except gen.TimeoutError:
-            raise IOError("Timed out while connecting to %r" % (addr,))
+            msg = "Timed out trying to connect to %r" % (addr,)
+            if error is not None:
+                msg = "%s: %s" % (msg, error)
+            raise IOError(msg)
         else:
             break
 

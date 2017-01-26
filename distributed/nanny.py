@@ -344,7 +344,6 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
         loop.stop()
         loop.close(all_fds=True)
 
-
 def isalive(proc):
     return proc is not None and proc.is_alive()
 

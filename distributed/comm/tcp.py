@@ -89,6 +89,18 @@ def set_tcp_timeout(stream):
         logger.warn("Could not set timeout on TCP stream: %s", e)
 
 
+def convert_stream_closed_error(exc):
+    """
+    Re-raise StreamClosedError as CommClosedError.
+    """
+    if exc.real_error is not None:
+        # The stream was closed because of an underlying OS error
+        exc = exc.real_error
+        raise CommClosedError("%s: %s" % (exc.__class__.__name__, exc))
+    else:
+        raise CommClosedError(str(exc))
+
+
 class TCP(Comm):
 
     def __init__(self, stream, peer_addr, deserialize=True):
@@ -123,9 +135,9 @@ class TCP(Comm):
                 else:
                     frame = b''
                 frames.append(frame)
-        except StreamClosedError:
+        except StreamClosedError as e:
             self.stream = None
-            raise CommClosedError
+            convert_stream_closed_error(e)
 
         msg = from_frames(frames, deserialize=deserialize)
         raise gen.Return(msg)
@@ -148,9 +160,9 @@ class TCP(Comm):
                 # ("If write is called again before that Future has resolved,
                 #   the previous future will be orphaned and will never resolve")
                 stream.write(frame)
-        except StreamClosedError:
+        except StreamClosedError as e:
             stream = None
-            raise CommClosedError
+            convert_stream_closed_error(e)
 
         raise gen.Return(sum(map(len, frames)))
 
@@ -186,8 +198,12 @@ class TCPConnector(object):
         ip, port = parse_host_port(address)
 
         client = TCPClient()
-        stream = yield client.connect(ip, port,
-                                      max_buffer_size=MAX_BUFFER_SIZE)
+        try:
+            stream = yield client.connect(ip, port,
+                                          max_buffer_size=MAX_BUFFER_SIZE)
+        except StreamClosedError as e:
+            # The socket connect() call failed
+            convert_stream_closed_error(e)
 
         raise gen.Return(TCP(stream, 'tcp://' + address, deserialize))
 
