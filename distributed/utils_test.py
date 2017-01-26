@@ -665,7 +665,7 @@ else:
 
 
 @gen.coroutine
-def assert_can_connect(addr, timeout=0.05):
+def assert_can_connect(addr, timeout=0.2):
     """
     Check that it is possible to connect to the distributed *addr*
     within the given *timeout*.
@@ -675,7 +675,7 @@ def assert_can_connect(addr, timeout=0.05):
 
 
 @gen.coroutine
-def assert_cannot_connect(addr, timeout=0.05):
+def assert_cannot_connect(addr, timeout=0.2):
     """
     Check that it is impossible to connect to the distributed *addr*
     within the given *timeout*.
