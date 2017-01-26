@@ -33,12 +33,12 @@ def test_server(loop):
         server = Server({'ping': pingpong})
         with pytest.raises(ValueError):
             server.port
-        server.listen(8887)
-        assert server.port == 8887
-        assert server.address == ('tcp://%s:8887' % get_ip())
+        server.listen(8881)
+        assert server.port == 8881
+        assert server.address == ('tcp://%s:8881' % get_ip())
 
-        for addr in ('127.0.0.1:8887', 'tcp://127.0.0.1:8887', server.address):
-            comm = yield connect('127.0.0.1:8887')
+        for addr in ('127.0.0.1:8881', 'tcp://127.0.0.1:8881', server.address):
+            comm = yield connect(addr)
 
             n = yield comm.write({'op': 'ping'})
             assert isinstance(n, int)
@@ -79,8 +79,8 @@ def test_server_listen():
 
     # Note server.address is the concrete, contactable address
 
-    with listen_on(Server, 8887) as server:
-        assert server.port == 8887
+    with listen_on(Server, 8882) as server:
+        assert server.port == 8882
         assert server.address == 'tcp://%s:%d' % (EXTERNAL_IP4, server.port)
         yield assert_can_connect(server.address)
         yield assert_can_connect_from_everywhere_4_6(server.port)
@@ -155,14 +155,14 @@ def test_rpc(loop):
     @gen.coroutine
     def f():
         server = Server({'ping': pingpong})
-        server.listen(8887)
+        server.listen(8883)
 
-        with rpc('127.0.0.1:8887') as remote:
+        with rpc('127.0.0.1:8883') as remote:
             response = yield remote.ping()
             assert response == b'pong'
 
             assert remote.comms
-            assert remote.address == 'tcp://127.0.0.1:8887'
+            assert remote.address == 'tcp://127.0.0.1:8883'
 
             response = yield remote.ping(close=True)
             assert response == b'pong'
@@ -176,19 +176,19 @@ def test_rpc(loop):
 
 
 def test_rpc_inputs():
-    L = [rpc('127.0.0.1:8887'),
-         rpc(('127.0.0.1', 8887)),
-         rpc('tcp://127.0.0.1:8887'),
+    L = [rpc('127.0.0.1:8884'),
+         rpc(('127.0.0.1', 8884)),
+         rpc('tcp://127.0.0.1:8884'),
          ]
 
-    assert all(r.address == 'tcp://127.0.0.1:8887' for r in L), L
+    assert all(r.address == 'tcp://127.0.0.1:8884' for r in L), L
 
     for r in L:
         r.close_rpc()
 
 
 def test_rpc_with_many_connections(loop):
-    remote = rpc(('127.0.0.1', 8887))
+    remote = rpc(('127.0.0.1', 8885))
 
     @gen.coroutine
     def g():
@@ -198,7 +198,7 @@ def test_rpc_with_many_connections(loop):
     @gen.coroutine
     def f():
         server = Server({'ping': pingpong})
-        server.listen(8887)
+        server.listen(8885)
 
         yield [g() for i in range(10)]
 
@@ -219,10 +219,10 @@ def test_large_packets(loop):
     @gen.coroutine
     def f():
         server = Server({'echo': echo})
-        server.listen(8887)
+        server.listen(8886)
 
         data = b'0' * int(200e6)  # slightly more than 100MB
-        conn = rpc('127.0.0.1:8887')
+        conn = rpc('127.0.0.1:8886')
         result = yield conn.echo(x=data)
         assert result == data
 
