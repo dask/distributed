@@ -73,18 +73,31 @@ def enable_ipv6(sock, ip):
 
 
 def bind_to_random_port(sock, ip):
+    # ZMQ doesn't support binding to '' ("No such device").
+    # It also doesn't support binding to both '0.0.0.0' and '::'
+    # on the same port ("Address already in use").
+    # Instead, just use IPv4.
+    ip = ip or '0.0.0.0'
     enable_ipv6(sock, ip)
     sock.bind(make_zmq_url(ip))
-    endpoint = sock.get(zmq.LAST_ENDPOINT).decode()
-    _, sep, port = endpoint.rpartition(':')
-    assert sep
-    return int(port)
 
 
 def bind_to_port(sock, ip, port):
+    ip = ip or '0.0.0.0'
     enable_ipv6(sock, ip)
-    sock.set(zmq.IPV6, ':' in ip)
     sock.bind(make_zmq_url(ip, port))
+
+
+def get_last_endpoint(sock):
+    """
+    Get the last (host, port) the socket was bound to.
+    """
+    endpoint = sock.get(zmq.LAST_ENDPOINT).decode()
+    scheme, sep, loc = endpoint.partition('://')
+    assert scheme == 'tcp'
+    host, sep, port = loc.rpartition(':')
+    assert sep
+    return host.strip('[]'), int(port)
 
 
 class ZMQ(Comm):
@@ -175,6 +188,7 @@ class ZMQListener(Listener):
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.sock = None
+        self.bound_host = None
         self.bound_port = None
         self.please_stop = False
 
@@ -182,10 +196,10 @@ class ZMQListener(Listener):
         self.sock = make_socket(zmq.ROUTER)
         set_socket_options(self.sock)
         if self.port == 0:
-            self.bound_port = bind_to_random_port(self.sock, self.ip)
+            bind_to_random_port(self.sock, self.ip)
         else:
-            self.bound_port = self.port
             bind_to_port(self.sock, self.ip, self.port)
+        self.bound_host, self.bound_port = get_last_endpoint(self.sock)
         self._listen()
 
     @gen.coroutine
@@ -198,9 +212,10 @@ class ZMQListener(Listener):
 
             cli_sock = make_socket(zmq.DEALER)
             set_socket_options(cli_sock)
-            cli_port = bind_to_random_port(cli_sock, self.ip)
+            bind_to_random_port(cli_sock, self.ip)
+            cli_host, cli_port = get_last_endpoint(cli_sock)
 
-            resp = {'zmq-url': make_zmq_url(self.ip, cli_port)}
+            resp = {'zmq-url': make_zmq_url(cli_host, cli_port)}
             yield self.sock.send_multipart([envelope] + to_frames(resp))
 
             address = 'zmq://<unknown>'  # XXX
@@ -215,7 +230,7 @@ class ZMQListener(Listener):
             # XXX cancel listen future?
 
     def _check_started(self):
-        if self.sock is None:
+        if self.bound_port is None:
             raise ValueError("invalid operation on non-started ZMQListener")
 
     def get_host_port(self):
@@ -223,7 +238,7 @@ class ZMQListener(Listener):
         The listening address as a (host, port) tuple.
         """
         self._check_started()
-        return self.ip, self.bound_port
+        return self.bound_host, self.bound_port
 
     @property
     def listen_address(self):

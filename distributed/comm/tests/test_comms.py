@@ -310,12 +310,24 @@ def test_tcp_client_server_ipv6():
 def test_zmq_client_server_ipv4():
     yield check_client_server('zmq://127.0.0.1', zmq_eq('127.0.0.1'))
     yield check_client_server('zmq://127.0.0.1:3241', zmq_eq('127.0.0.1', 3241))
+    yield check_client_server('zmq://0.0.0.0',
+                              zmq_eq('0.0.0.0'), zmq_eq(EXTERNAL_IP4))
+    yield check_client_server('zmq://0.0.0.0:3242',
+                              zmq_eq('0.0.0.0'), zmq_eq(EXTERNAL_IP4, 3242))
+    yield check_client_server('zmq://',
+                              zmq_eq('0.0.0.0'), zmq_eq(EXTERNAL_IP4))
+    yield check_client_server('zmq://:3243',
+                              zmq_eq('0.0.0.0'), zmq_eq(EXTERNAL_IP4, 3243))
 
 @requires_ipv6
 @gen_test()
 def test_zmq_client_server_ipv6():
     yield check_client_server('zmq://[::1]', zmq_eq('::1'))
     yield check_client_server('zmq://[::1]:3251', zmq_eq('::1', 3251))
+    yield check_client_server('zmq://[::]',
+                              zmq_eq('::'), zmq_eq(EXTERNAL_IP6))
+    yield check_client_server('zmq://[::]:3252',
+                              zmq_eq('::', 3252), zmq_eq(EXTERNAL_IP6, 3252))
 
 
 @gen.coroutine
