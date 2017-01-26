@@ -161,9 +161,6 @@ def loads_msgpack(header, payload):
     if header.get('compression'):
         try:
             decompress = compressions[header['compression']]['decompress']
-            if isinstance(payload, memoryview):
-                # Some compression methods (lz4, snappy) don't accept memoryview
-                payload = payload.tobytes()
             payload = decompress(payload)
         except KeyError:
             raise ValueError("Data is compressed as %s but we don't have this"
