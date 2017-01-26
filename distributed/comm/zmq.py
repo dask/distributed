@@ -177,7 +177,7 @@ class ZMQConnector(object):
         set_socket_options(sock)
         enable_ipv6(sock, host)
 
-        comm = yield self._do_connect(sock, address, listener_url)
+        comm = yield self._do_connect(sock, address, listener_url, deserialize)
         raise gen.Return(comm)
 
 

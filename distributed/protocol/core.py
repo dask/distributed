@@ -18,7 +18,7 @@ from .serialize import (serialize, deserialize, Serialize, Serialized,
         to_serialize, extract_serialize)
 from .utils import frame_split_size, merge_frames
 
-from ..utils import ignoring
+from ..utils import ignoring, ensure_bytes
 
 _deserialize = deserialize
 
@@ -75,7 +75,7 @@ def dumps(msg):
             header['keys'].append(key)
             out_frames.extend(frames)
 
-        out_frames = [bytes(f) for f in out_frames]
+        out_frames = [ensure_bytes(f) for f in out_frames]
 
         return [small_header, small_payload,
                 msgpack.dumps(header, use_bin_type=True)] + out_frames
