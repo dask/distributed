@@ -56,6 +56,7 @@ def invalid_python_script(tmpdir_factory):
 @pytest.yield_fixture
 def loop():
     IOLoop.clear_instance()
+    IOLoop.clear_current()
     loop = IOLoop()
     loop.make_current()
     yield loop
@@ -71,6 +72,7 @@ def loop():
     else:
         print(f)
     IOLoop.clear_instance()
+    IOLoop.clear_current()
 
 
 @pytest.yield_fixture
@@ -84,6 +86,7 @@ def zmq_ctx():
 @contextmanager
 def pristine_loop():
     IOLoop.clear_instance()
+    IOLoop.clear_current()
     loop = IOLoop()
     loop.make_current()
     try:
@@ -91,6 +94,7 @@ def pristine_loop():
     finally:
         loop.close(all_fds=True)
         IOLoop.clear_instance()
+        IOLoop.clear_current()
 
 
 @contextmanager
