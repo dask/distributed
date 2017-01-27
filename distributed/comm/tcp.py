@@ -13,6 +13,7 @@ from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 from .. import config
+from ..utils import ensure_bytes
 from .core import (connectors, listeners, Comm, Listener, CommClosedError,
                    parse_host_port, unparse_host_port)
 from .utils import (to_frames, from_frames,
@@ -148,7 +149,8 @@ class TCP(Comm):
         if stream is None:
             raise CommClosedError
 
-        frames = to_frames(msg)
+        # IOStream.write() only takes bytes objects, not memoryviews
+        frames = [ensure_bytes(f) for f in to_frames(msg)]
 
         try:
             lengths = ([struct.pack('Q', len(frames))] +
