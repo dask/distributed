@@ -80,8 +80,8 @@ class Comm(with_metaclass(ABCMeta)):
     @abstractmethod
     def abort(self):
         """
-        Close the communication abruptly.  Useful in destructors or
-        generators' ``finally`` blocks.
+        Close the communication immediately and abruptly.
+        Useful in destructors or generators' ``finally`` blocks.
         """
 
     @abstractmethod
@@ -118,8 +118,7 @@ class Listener(with_metaclass(ABCMeta)):
     @abstractproperty
     def listen_address(self):
         """
-        The listening address as a URL string
-        (e.g. 'tcp://something').
+        The listening address as a URI string.
         """
 
     @abstractproperty
@@ -278,9 +277,10 @@ def connect(addr, timeout=3, deserialize=True):
 
 def listen(addr, handle_comm, deserialize=True):
     """
-    Listen on the given address (a URI such as ``tcp://0.0.0.0``)
-    and call *handle_comm* with a ``Comm`` object for each incoming
-    connection.
+    Create a listener object with the given parameters.  When its ``start()``
+    method is called, the listener will listen on the given address
+    (a URI such as ``tcp://0.0.0.0``) and call *handle_comm* with a
+    ``Comm`` object for each incoming connection.
 
     *handle_comm* can be a regular function or a coroutine.
     """
