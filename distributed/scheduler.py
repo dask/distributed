@@ -409,11 +409,12 @@ class Scheduler(Server):
                 # Listen on all interfaces.  `self.ip` is not suitable
                 # as its default value would prevent connecting via 127.0.0.1.
                 self.listen(('', addr_or_port))
-                self.start_services()
             else:
                 self.listen(addr_or_port)
                 self.ip, _ = get_address_host_port(self.listen_address)
-                self.start_services(self.ip)
+
+            # Services listen on all addresses
+            self.start_services()
 
             self.status = 'running'
             logger.info("  Scheduler at: %25s", self.address)

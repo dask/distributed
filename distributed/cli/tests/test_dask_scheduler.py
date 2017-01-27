@@ -12,6 +12,7 @@ import socket
 import sys
 from time import sleep
 
+from tornado import gen
 
 from distributed import Scheduler, Client
 from distributed.utils import get_ip, ignoring, tmpfile
@@ -25,9 +26,16 @@ from distributed.metrics import time
 
 def test_defaults(loop):
     with popen(['dask-scheduler', '--no-bokeh']) as proc:
-        # Default behaviour is to listen on all addresses
-        assert_can_connect_from_everywhere_4_6(8786)  # main port
-        assert_can_connect_from_everywhere_4_6(9786)  # HTTP port
+
+        @gen.coroutine
+        def f():
+            # Default behaviour is to listen on all addresses
+            yield [
+                assert_can_connect_from_everywhere_4_6(8786, 2.0),  # main port
+                assert_can_connect_from_everywhere_4_6(9786, 2.0),  # HTTP port
+                ]
+
+        loop.run_sync(f)
 
         with Client('127.0.0.1:%d' % Scheduler.default_port, loop=loop) as c:
             response = requests.get('http://127.0.0.1:9786/info.json')
@@ -43,9 +51,16 @@ def test_defaults(loop):
 def test_hostport(loop):
     with popen(['dask-scheduler', '--no-bokeh', '--host', '127.0.0.1:8978',
                 '--http-port', '8979']):
-        # Scheduler can't be contacted from the outside
-        assert_can_connect_locally_4(8978)  # main port
-        assert_can_connect_locally_4(8979)  # HTTP port
+        @gen.coroutine
+        def f():
+            yield [
+                # The scheduler's main port can't be contacted from the outside
+                assert_can_connect_locally_4(8978, 2.0),
+                # ... but its HTTP port can
+                assert_can_connect_from_everywhere_4_6(8979, 2.0),
+                ]
+
+        loop.run_sync(f)
 
         with Client('127.0.0.1:8978', loop=loop) as c:
             assert len(c.ncores()) == 0

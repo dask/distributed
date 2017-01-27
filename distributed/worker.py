@@ -221,7 +221,7 @@ class WorkerBase(Server):
             self.ip = get_address_host_port(self.address)[0]
 
         self.name = self.name or self.address
-        # XXX Which address should services listen on?
+        # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
         self.start_services()
