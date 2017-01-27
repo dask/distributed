@@ -328,7 +328,7 @@ def addr_from_args(addr=None, ip=None, port=None):
 class rpc(object):
     """ Conveniently interact with a remote server
 
-    >>> remote = rpc(ip=ip, port=port)  # doctest: +SKIP
+    >>> remote = rpc(address)  # doctest: +SKIP
     >>> response = yield remote.add(x=10, y=20)  # doctest: +SKIP
 
     One rpc object can be reused for several interactions.
