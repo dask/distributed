@@ -66,19 +66,20 @@ class Server(object):
     **Handlers**
 
     Servers define operations with a ``handlers`` dict mapping operation names
-    to functions.  The first argument of a handler function must be a stream for
-    the connection to the client.  Other arguments will receive inputs from the
-    keys of the incoming message which will always be a dictionary.
+    to functions.  The first argument of a handler function will be a ``Comm``
+    for the communication established with the client.  Other arguments
+    will receive inputs from the keys of the incoming message which will
+    always be a dictionary.
 
-    >>> def pingpong(stream):
+    >>> def pingpong(comm):
     ...     return b'pong'
 
-    >>> def add(stream, x, y):
+    >>> def add(comm, x, y):
     ...     return x + y
 
     >>> handlers = {'ping': pingpong, 'add': add}
     >>> server = Server(handlers)  # doctest: +SKIP
-    >>> server.listen(8000)  # doctest: +SKIP
+    >>> server.listen('tcp://0.0.0.0:8000')  # doctest: +SKIP
 
     **Message Format**
 
@@ -331,7 +332,7 @@ class rpc(object):
     >>> response = yield remote.add(x=10, y=20)  # doctest: +SKIP
 
     One rpc object can be reused for several interactions.
-    Additionally, this object creates and destroys many streams as necessary
+    Additionally, this object creates and destroys many comms as necessary
     and so is safe to use in multiple overlapping communications.
 
     When done, close comms explicitly.

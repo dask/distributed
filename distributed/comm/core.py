@@ -40,7 +40,13 @@ class CommClosedError(IOError):
 class Comm(with_metaclass(ABCMeta)):
     """
     A message-oriented communication object, representing an established
-    communication channel.
+    communication channel.  There should be only one reader and one
+    writer at a time: to manage current communications, even with a
+    single peer, you must create distinct ``Comm`` objects.
+
+    Messages are arbitrary Python objects.  Concrete implementations
+    of this class can implement different serialization mechanisms
+    depending on the underlying transport's characteristics.
     """
 
     # XXX add set_close_callback()?
@@ -48,8 +54,8 @@ class Comm(with_metaclass(ABCMeta)):
     @abstractmethod
     def read(self, deserialize=None):
         """
-        Read and return a message.  If *deserialize* is not None, it
-        overrides this communication's default setting.
+        Read and return a message (a Python object).  If *deserialize*
+        is not None, it overrides this communication's default setting.
 
         This method is a coroutine.
         """
@@ -57,7 +63,7 @@ class Comm(with_metaclass(ABCMeta)):
     @abstractmethod
     def write(self, msg):
         """
-        Write a message (a picklable Python object).
+        Write a message (a Python object).
 
         This method is a coroutine.
         """
@@ -65,7 +71,8 @@ class Comm(with_metaclass(ABCMeta)):
     @abstractmethod
     def close(self):
         """
-        Close the communication cleanly.
+        Close the communication cleanly.  This will attempt to flush
+        outgoing buffers before actually closing the underlying transport.
 
         This method is a coroutine.
         """
@@ -73,7 +80,8 @@ class Comm(with_metaclass(ABCMeta)):
     @abstractmethod
     def abort(self):
         """
-        Close the communication abruptly.
+        Close the communication abruptly.  Useful in destructors or
+        generators' ``finally`` blocks.
         """
 
     @abstractmethod
@@ -232,8 +240,9 @@ def resolve_address(addr):
 @gen.coroutine
 def connect(addr, timeout=3, deserialize=True):
     """
-    Connect to the given address (a URI such as 'tcp://127.0.0.1:1234')
-    and yield a Comm object.
+    Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
+    and yield a ``Comm`` object.  If the connection attempt fails, it is
+    retried until the *timeout* is expired.
     """
     scheme, loc = parse_address(addr)
     connector = connectors.get(scheme)
@@ -269,8 +278,11 @@ def connect(addr, timeout=3, deserialize=True):
 
 def listen(addr, handle_comm, deserialize=True):
     """
-    Listen on the given address (a URI such as 'tcp://192.168.1.254')
-    and call *handle_comm* with a Comm object on each incoming connection.
+    Listen on the given address (a URI such as ``tcp://0.0.0.0``)
+    and call *handle_comm* with a ``Comm`` object for each incoming
+    connection.
+
+    *handle_comm* can be a regular function or a coroutine.
     """
     scheme, loc = parse_address(addr)
     listener_class = listeners.get(scheme)

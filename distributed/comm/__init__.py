@@ -1,6 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
-from .core import connect, listen, CommClosedError
+from .core import connect, listen, Comm, CommClosedError
 # Register transports
 from . import tcp
 try:
