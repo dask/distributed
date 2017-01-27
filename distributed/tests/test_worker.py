@@ -27,7 +27,7 @@ from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
 from distributed.utils import ignoring, tmpfile
 from distributed.utils_test import (loop, inc, mul, gen_cluster, div,
-        slow, slowinc, throws, current_loop, gen_test, readone)
+        slow, slowinc, throws, gen_test, readone)
 
 
 
@@ -268,14 +268,14 @@ def test_worker_with_port_zero():
 
 
 @slow
-def test_worker_waits_for_center_to_come_up(current_loop):
+def test_worker_waits_for_center_to_come_up(loop):
     @gen.coroutine
     def f():
         w = Worker('127.0.0.1', 8007)
         yield w._start()
 
     try:
-        current_loop.run_sync(f, timeout=4)
+        loop.run_sync(f, timeout=4)
     except TimeoutError:
         pass
 

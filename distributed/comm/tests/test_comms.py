@@ -12,9 +12,19 @@ from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
                                     requires_ipv6, has_ipv6)
 
-from distributed.comm import tcp, zmq, connect, listen, CommClosedError
+from distributed.comm import (tcp, connect, listen, CommClosedError,
+                              is_zmq_enabled)
 from distributed.comm.core import (parse_address, parse_host_port,
                                    unparse_host_port, resolve_address)
+
+if is_zmq_enabled():
+    from distributed.comm import zmq
+
+    def requires_zmq(test_func):
+        return test_func
+else:
+    zmq = None
+    requires_zmq = pytest.mark.skip("need to enable zmq using special config option")
 
 
 EXTERNAL_IP4 = get_ip()
@@ -137,6 +147,7 @@ def test_tcp_specific():
     assert set(l) == {1234} | set(range(20))
 
 
+@requires_zmq
 @gen_test()
 def test_zmq_specific():
     """
@@ -306,6 +317,7 @@ def test_tcp_client_server_ipv6():
     yield check_client_server('tcp://[::]:3232',
                               tcp_eq('::', 3232), tcp_eq(EXTERNAL_IP6, 3232))
 
+@requires_zmq
 @gen_test()
 def test_zmq_client_server_ipv4():
     yield check_client_server('zmq://127.0.0.1', zmq_eq('127.0.0.1'))
@@ -319,6 +331,7 @@ def test_zmq_client_server_ipv4():
     yield check_client_server('zmq://:3243',
                               zmq_eq('0.0.0.0'), zmq_eq(EXTERNAL_IP4, 3243))
 
+@requires_zmq
 @requires_ipv6
 @gen_test()
 def test_zmq_client_server_ipv6():
@@ -387,6 +400,7 @@ def check_comm_closed_explicit(addr):
 def test_tcp_comm_closed_explicit():
     yield check_comm_closed_explicit('tcp://127.0.0.1')
 
+@requires_zmq
 @gen_test()
 def test_zmq_comm_closed_explicit():
     yield check_comm_closed_explicit('zmq://127.0.0.1')

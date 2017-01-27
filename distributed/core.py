@@ -26,7 +26,7 @@ from tornado.locks import Event
 
 from .comm import connect, listen, CommClosedError
 from .comm.core import (parse_address, normalize_address, Comm,
-                        parse_host_port, unparse_host_port)
+                        unparse_host_port, get_address_host_port)
 from .compatibility import PY3, unicode, WINDOWS
 from .config import config
 from .metrics import time
@@ -171,8 +171,7 @@ class Server(object):
         The port number this Server is listening on.
         """
         if not self._port:
-            _, loc = parse_address(self.address)
-            _, self._port = parse_host_port(loc)
+            _, self._port = get_address_host_port(self.address)
         return self._port
 
     def identity(self, comm):

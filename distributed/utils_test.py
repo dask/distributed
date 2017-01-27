@@ -54,7 +54,7 @@ def invalid_python_script(tmpdir_factory):
 
 
 @pytest.yield_fixture
-def current_loop():
+def loop():
     IOLoop.clear_instance()
     loop = IOLoop()
     loop.make_current()
@@ -64,28 +64,13 @@ def current_loop():
     for i in range(5):
         try:
             loop.close(all_fds=True)
+            IOLoop.clear_instance()
             break
         except Exception as e:
             f = e
     else:
         print(f)
     IOLoop.clear_instance()
-
-
-@pytest.yield_fixture
-def loop():
-    loop = IOLoop()
-    yield loop
-    if loop._running:
-        sync(loop, loop.stop)
-    for i in range(5):
-        try:
-            loop.close(all_fds=True)
-            break
-        except Exception as e:
-            f = e
-    else:
-        print(f)
 
 
 @pytest.yield_fixture

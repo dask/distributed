@@ -4,11 +4,11 @@ from tornado import gen
 
 from distributed import rpc
 from distributed.submit import RemoteClient
-from distributed.utils_test import current_loop, valid_python_script,\
-    invalid_python_script
+from distributed.utils_test import (
+    loop, valid_python_script, invalid_python_script)
 
 
-def test_remote_client_uploads_a_file(current_loop, tmpdir, ):
+def test_remote_client_uploads_a_file(loop, tmpdir):
     @gen.coroutine
     def test():
         remote_client = RemoteClient(ip='127.0.0.1', local_dir=str(tmpdir))
@@ -21,10 +21,10 @@ def test_remote_client_uploads_a_file(current_loop, tmpdir, ):
 
         yield remote_client._close()
 
-    current_loop.run_sync(test, timeout=5)
+    loop.run_sync(test, timeout=5)
 
 
-def test_remote_client_execution_outputs_to_stdout(current_loop, tmpdir):
+def test_remote_client_execution_outputs_to_stdout(loop, tmpdir):
     @gen.coroutine
     def test():
         remote_client = RemoteClient(ip='127.0.0.1', local_dir=str(tmpdir))
@@ -38,10 +38,10 @@ def test_remote_client_execution_outputs_to_stdout(current_loop, tmpdir):
 
         yield remote_client._close()
 
-    current_loop.run_sync(test, timeout=5)
+    loop.run_sync(test, timeout=5)
 
 
-def test_remote_client_execution_outputs_stderr(current_loop, tmpdir, invalid_python_script):
+def test_remote_client_execution_outputs_stderr(loop, tmpdir, invalid_python_script):
     @gen.coroutine
     def test():
         remote_client = RemoteClient(ip='127.0.0.1', local_dir=str(tmpdir))
@@ -55,4 +55,4 @@ def test_remote_client_execution_outputs_stderr(current_loop, tmpdir, invalid_py
 
         yield remote_client._close()
 
-    current_loop.run_sync(test, timeout=5)
+    loop.run_sync(test, timeout=5)
