@@ -286,7 +286,8 @@ Frames:
 
 *  Header: ``{}``
 *  Administrative Message: ``{'op': 'get-data'}``
-*  Payload header::
+*  Payload header:
+   ::
       {'headers': [{'type': 'numpy.ndarray',
                     'compression': 'lz4',
                     'count': 1,
@@ -295,4 +296,5 @@ Frames:
                     'strides': (8,),
                     'shape': (5,)}],
                    'keys': [('data',)]}
+
 *  Payload Frame: ``b'(\x00\x00\x00\x11\x00\x01\x00!\xf0?\x07\x00\x0f\x08\x00\x03P\x00\x00\x00\xf0?'``
