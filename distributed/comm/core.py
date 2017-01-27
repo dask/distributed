@@ -9,6 +9,7 @@ from six import string_types, with_metaclass
 from tornado import gen
 from tornado.ioloop import IOLoop
 
+from ..config import config
 from ..metrics import time
 
 
@@ -30,7 +31,7 @@ listeners = {
     }
 
 
-DEFAULT_SCHEME = 'tcp'
+DEFAULT_SCHEME = config.get('default-scheme', 'tcp')
 
 
 class CommClosedError(IOError):

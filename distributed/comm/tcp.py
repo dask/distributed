@@ -103,6 +103,9 @@ def convert_stream_closed_error(exc):
 
 
 class TCP(Comm):
+    """
+    An established communication based on an underlying Tornado IOStream.
+    """
 
     def __init__(self, stream, peer_addr, deserialize=True):
         self._peer_addr = peer_addr

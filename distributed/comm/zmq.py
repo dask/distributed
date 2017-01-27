@@ -101,6 +101,10 @@ def get_last_endpoint(sock):
 
 
 class ZMQ(Comm):
+    """
+    An established communication based on an underlying ZeroMQ socket.
+    The socket is assumed to be a DEALER socket.
+    """
 
     def __init__(self, sock, peer_addr, deserialize=True):
         self.sock = sock
