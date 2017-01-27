@@ -423,10 +423,10 @@ class Client(object):
         if self._start_arg is None:
             from distributed.deploy import LocalCluster
             try:
-                self.cluster = LocalCluster(loop=self.loop, start=False)
+                self.cluster = LocalCluster(loop=self.loop, start=False, **kwargs)
             except (OSError, socket.error):
                 self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
-                                            start=False)
+                                            start=False, **kwargs)
             self._start_arg = self.cluster.scheduler_address
             while (not self.cluster.workers or
                len(self.cluster.scheduler.ncores) < len(self.cluster.workers)):
