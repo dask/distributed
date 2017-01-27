@@ -16,6 +16,17 @@ from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..worker import Worker, _ncores
 
+scheduler_services = dict()
+worker_services = dict()
+
+with ignoring(ImportError):
+    from ..bokeh.scheduler import BokehScheduler
+    scheduler_services[('bokeh', 8788)] = BokehScheduler
+
+with ignoring(ImportError):
+    from ..bokeh.worker import BokehWorker
+    worker_services[('bokeh', 8789)] = BokehWorker
+
 logger = logging.getLogger(__file__)
 
 
@@ -62,7 +73,8 @@ class LocalCluster(object):
     def __init__(self, n_workers=None, threads_per_worker=None, nanny=True,
             loop=None, start=True, scheduler_port=8786,
             silence_logs=logging.CRITICAL, diagnostics_port=8787,
-            services={}, worker_services={}, **kwargs):
+            services=scheduler_services, worker_services=worker_services,
+            **kwargs):
         self.status = None
         self.nanny = nanny
         self.silence_logs = silence_logs
@@ -104,7 +116,7 @@ class LocalCluster(object):
             _start_worker = partial(self.loop.add_callback, self._start_worker)
         for i in range(n_workers):
             _start_worker(ncores=threads_per_worker, nanny=nanny,
-                    services=worker_services, **kwargs)
+                          services=worker_services, **kwargs)
         self.status = 'running'
 
         self.diagnostics = None
