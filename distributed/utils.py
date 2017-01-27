@@ -598,7 +598,7 @@ def mean(seq):
 
 if hasattr(sys, "is_finalizing"):
     def shutting_down(is_finalizing=sys.is_finalizing):
-        return sys.is_finalizing()
+        return is_finalizing()
 
 else:
     _shutting_down = [False]
