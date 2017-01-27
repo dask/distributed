@@ -60,8 +60,8 @@ def handle_signal(sig, frame):
 class Server(object):
     """ Distributed TCP Server
 
-    Superclass for both Worker and Scheduler objects.
-    Inherits from ``tornado.tcpserver.TCPServer``, adding a protocol for RPC.
+    Superclass for endpoints in a distributed cluster, such as Worker
+    and Scheduler objects.
 
     **Handlers**
 
@@ -282,11 +282,11 @@ def pingpong(comm):
 
 @gen.coroutine
 def send_recv(comm=None, addr=None, reply=True, deserialize=True, **kwargs):
-    """ Send and recv with a stream
+    """ Send and recv with a Comm.
 
     Keyword arguments turn into the message
 
-    response = yield send_recv(stream, op='ping', reply=True)
+    response = yield send_recv(comm, op='ping', reply=True)
     """
     assert (comm is None) != (addr is None)
     if comm is None:
@@ -484,7 +484,7 @@ class ConnectionPool(object):
 
         >>> rpc = ConnectionPool(limit=512)
         >>> scheduler = rpc('127.0.0.1:8786')
-        >>> workers = [rpc(ip=ip, port=port) for ip, port in ...]
+        >>> workers = [rpc(address) for address ...]
 
         >>> info = yield scheduler.identity()
 
@@ -493,7 +493,7 @@ class ConnectionPool(object):
 
         >>> a, b = yield [scheduler.who_has(), scheduler.has_what()]
 
-    It reuses existing streams so that we don't have to continuously reconnect.
+    It reuses existing comms so that we don't have to continuously reconnect.
 
     It also maintains a comm limit to avoid "too many open file handle"
     issues.  Whenever this maximum is reached we clear out all idling comms.
@@ -508,15 +508,12 @@ class ConnectionPool(object):
         Whether or not to deserialize data by default or pass it through
     """
     def __init__(self, limit=512, deserialize=True):
-        # Total number of open comms
-        self.open = 0
-        # Number of comms currently in use
-        self.active = 0
-        # Max number of open comms
-        self.limit = limit
-        # Number of comms in available == open - active
+        self.open = 0          # Total number of open comms
+        self.active = 0        # Number of comms currently in use
+        self.limit = limit     # Max number of open comms
+        # Invariant: len(available) == open - active
         self.available = defaultdict(set)
-        # Number of comms in occupied == active
+        # Invariant: len(occupied) == active
         self.occupied = defaultdict(set)
         self.deserialize = deserialize
         self.event = Event()
@@ -662,5 +659,5 @@ def clean_exception(exception, traceback, **kwargs):
     if isinstance(traceback, bytes):
         traceback = protocol.pickle.loads(traceback)
     elif isinstance(traceback, string_types):
-        traceback = None  # why?
+        traceback = None  # happens if the traceback failed serializing
     return type(exception), exception, traceback

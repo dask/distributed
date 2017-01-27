@@ -14,12 +14,11 @@ from ..utils import sync, ignoring, All
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..worker import Worker, _ncores
-from .core import Cluster
 
 logger = logging.getLogger(__name__)
 
 
-class LocalCluster(Cluster):
+class LocalCluster(object):
     """ Create local Scheduler and Workers
 
     This creates a "cluster" of a scheduler and workers running on the local
@@ -110,12 +109,9 @@ class LocalCluster(Cluster):
             sync(self.loop, self._start)
 
     def __str__(self):
-        try:
-            addr = self.scheduler_address
-        except ValueError:
-            addr = '<unstarted>'
         return ('LocalCluster(%r, workers=%d, ncores=%d)' %
-                (addr, len(self.workers), sum(w.ncores for w in self.workers))
+                (self.scheduler_address, len(self.workers),
+                 sum(w.ncores for w in self.workers))
                 )
 
     __repr__ = __str__
@@ -298,4 +294,7 @@ class LocalCluster(Cluster):
 
     @property
     def scheduler_address(self):
-        return self.scheduler.address
+        try:
+            return self.scheduler.address
+        except ValueError:
+            return '<unstarted>'

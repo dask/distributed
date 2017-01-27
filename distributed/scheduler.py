@@ -416,9 +416,9 @@ class Scheduler(Server):
                 self.start_services(self.ip)
 
             self.status = 'running'
-            logger.info("  Scheduler at: %24s", self.address)
+            logger.info("  Scheduler at: %25s", self.address)
             for k, v in self.services.items():
-                logger.info("%11s at: %20s:%s", k, self.ip, v.port)
+                logger.info("%11s at: %25s", k, '%s:%d' % (self.ip, v.port))
 
         return self.finished()
 

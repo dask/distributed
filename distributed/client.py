@@ -312,10 +312,10 @@ class Client(object):
 
     Parameters
     ----------
-    address: string, tuple, or ``Cluster``
+    address: string, tuple, or ``LocalCluster``
         This can be the address of a ``Scheduler`` server, either
         as a string ``'127.0.0.1:8787'`` or tuple ``('127.0.0.1', 8787)``
-        or it can be a local ``Cluster`` object.
+        or it can be a local ``LocalCluster`` object.
 
     Examples
     --------
@@ -343,8 +343,6 @@ class Client(object):
     """
     def __init__(self, address=None, start=True, loop=None, timeout=3,
                  set_as_default=True):
-        from .deploy import Cluster
-
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
@@ -356,7 +354,8 @@ class Client(object):
         self._pending_msg_buffer = []
         self.extensions = {}
 
-        if isinstance(address, Cluster):
+        if hasattr(address, "scheduler_address"):
+            # It's a LocalCluster or LocalCluster-compatible object
             self.cluster = address
         else:
             self.cluster = None
