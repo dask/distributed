@@ -212,7 +212,10 @@ class ZMQListener(Listener):
 
             cli_sock = make_socket(zmq.DEALER)
             set_socket_options(cli_sock)
-            bind_to_random_port(cli_sock, self.ip)
+            # Need to force a concrete IP, otherwise tests crash on Windows
+            # ("Assertion failed: Can't assign requested address
+            #   (bundled\zeromq\src\tcp_connecter.cpp:341)").
+            bind_to_random_port(cli_sock, ensure_concrete_host(self.ip))
             cli_host, cli_port = get_last_endpoint(cli_sock)
 
             resp = {'zmq-url': make_zmq_url(cli_host, cli_port)}
