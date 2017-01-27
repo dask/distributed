@@ -241,18 +241,20 @@ def run_scheduler(q, nputs, **kwargs):
     from distributed import Scheduler
     from tornado.ioloop import IOLoop, PeriodicCallback
 
-    loop = IOLoop.current()
-    PeriodicCallback(lambda: None, 500).start()
+    # On Python 2.7 and Unix, fork() is used to spawn child processes,
+    # so avoid inheriting the parent's IO loop.
+    with pristine_loop() as loop:
+        PeriodicCallback(lambda: None, 500).start()
 
-    scheduler = Scheduler(validate=True, **kwargs)
-    done = scheduler.start('127.0.0.1')
+        scheduler = Scheduler(validate=True, **kwargs)
+        done = scheduler.start('127.0.0.1')
 
-    for i in range(nputs):
-        q.put(scheduler.address)
-    try:
-        loop.start()
-    finally:
-        loop.close(all_fds=True)
+        for i in range(nputs):
+            q.put(scheduler.address)
+        try:
+            loop.start()
+        finally:
+            loop.close(all_fds=True)
 
 
 def run_worker(q, scheduler_q, **kwargs):
@@ -260,35 +262,36 @@ def run_worker(q, scheduler_q, **kwargs):
     from tornado.ioloop import IOLoop, PeriodicCallback
 
     with log_errors():
-        loop = IOLoop.current()
-        PeriodicCallback(lambda: None, 500).start()
+        with pristine_loop() as loop:
+            PeriodicCallback(lambda: None, 500).start()
 
-        scheduler_addr = scheduler_q.get()
-        worker = Worker(scheduler_addr, validate=True, **kwargs)
-        loop.run_sync(lambda: worker._start(0))
-        q.put(worker.address)
-        try:
-            loop.start()
-        finally:
-            loop.close(all_fds=True)
+            scheduler_addr = scheduler_q.get()
+            worker = Worker(scheduler_addr, validate=True, **kwargs)
+            loop.run_sync(lambda: worker._start(0))
+            q.put(worker.address)
+            try:
+                loop.start()
+            finally:
+                loop.close(all_fds=True)
 
 
 def run_nanny(q, scheduler_q, **kwargs):
     from distributed import Nanny
     from tornado.ioloop import IOLoop, PeriodicCallback
-    with log_errors():
-        loop = IOLoop.current()
-        PeriodicCallback(lambda: None, 500).start()
 
-        scheduler_addr = scheduler_q.get()
-        worker = Nanny(scheduler_addr, validate=True, **kwargs)
-        loop.run_sync(lambda: worker._start(0))
-        q.put(worker.address)
-        try:
-            loop.start()
-        finally:
-            loop.run_sync(worker._close)
-            loop.close(all_fds=True)
+    with log_errors():
+        with pristine_loop() as loop:
+            PeriodicCallback(lambda: None, 500).start()
+
+            scheduler_addr = scheduler_q.get()
+            worker = Nanny(scheduler_addr, validate=True, **kwargs)
+            loop.run_sync(lambda: worker._start(0))
+            q.put(worker.address)
+            try:
+                loop.start()
+            finally:
+                loop.run_sync(worker._close)
+                loop.close(all_fds=True)
 
 
 @contextmanager
