@@ -39,7 +39,7 @@ class LocalCluster(object):
         Level of logs to print out to stdout.  ``logging.CRITICAL`` by default.
         Use a falsey value like False or None for no change.
     ip: string
-        IP range on which the scheduler will listen, defaults to only localhost
+        IP address on which the scheduler will listen, defaults to only localhost
     kwargs: dict
         Extra worker arguments, will be passed to the Worker constructor.
 
