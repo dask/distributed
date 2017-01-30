@@ -12,8 +12,9 @@ import pytest
 from distributed import Client, Worker, Nanny
 from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
-from distributed.utils_test import inc, loop, raises, gen_test
-from distributed.utils import ignoring
+from distributed.utils_test import (inc, loop, raises, gen_test,
+        assert_can_connect_locally_4, assert_can_connect_from_everywhere_4_6)
+from distributed.utils import ignoring, sync
 
 from distributed.deploy.utils_test import ClusterTest
 
@@ -223,3 +224,21 @@ def test_silent_startup(capsys, loop):
     assert not out
     for line in err.split('\n'):
         assert 'worker' not in line
+
+
+def test_only_local_access(loop):
+    from distributed.http import HTTPScheduler
+    import requests
+    with LocalCluster(scheduler_port=0, silence_logs=False,
+            services={('http', 3485): HTTPScheduler}, diagnostics_port=None,
+            loop=loop) as c:
+        sync(loop, assert_can_connect_locally_4, c.scheduler.port)
+
+
+def test_remote_access(loop):
+    from distributed.http import HTTPScheduler
+    import requests
+    with LocalCluster(scheduler_port=0, silence_logs=False,
+            services={('http', 3485): HTTPScheduler}, diagnostics_port=None,
+            ip='*', loop=loop) as c:
+        sync(loop, assert_can_connect_from_everywhere_4_6, c.scheduler.port)
