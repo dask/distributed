@@ -81,6 +81,8 @@ class TaskStream(DashboardComponent):
         self.root.add_layout(LinearAxis(axis_label="Worker Core", ticker=ticker), "left")
         self.root.add_layout(Grid(dimension=1, grid_line_alpha=0.4, ticker=ticker))
 
+        self.root.yaxis.major_label_text_alpha = 0
+
         hover = HoverTool(
             point_policy="follow_mouse",
             tooltips="""
