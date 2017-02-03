@@ -71,7 +71,7 @@ class TaskStream(DashboardComponent):
 
         self.root.add_glyph(
             self.source,
-            Rect(x="start", y="y", width="duration", height=0.8, fill_color="color",
+            Rect(x="start", y="y", width="duration", height=0.4, fill_color="color",
                  line_color="color", line_alpha=0.6, fill_alpha="alpha", line_width=3)
         )
 
