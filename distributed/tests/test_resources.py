@@ -200,3 +200,20 @@ def test_balance_resources(c, s, a, b):
     yield _wait(constrained)
     assert any(f.key in a.data for f in constrained)  # share
     assert any(f.key in b.data for f in constrained)
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 2)])
+def test_set_resources(c, s, a):
+    yield a.set_resources(A=2)
+    assert a.total_resources['A'] == 2
+    assert a.available_resources['A'] == 2
+    assert s.worker_resources[a.address] == {'A': 2}
+
+    future = c.submit(slowinc, 1, delay=1, resources={'A': 1})
+    while a.available_resources['A'] == 2:
+        yield gen.sleep(0.01)
+
+    yield a.set_resources(A=3)
+    assert a.total_resources['A'] == 3
+    assert a.available_resources['A'] == 2
+    assert s.worker_resources[a.address] == {'A': 3}
