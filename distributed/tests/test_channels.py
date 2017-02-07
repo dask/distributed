@@ -35,18 +35,18 @@ def test_channel(c, s, a, b):
 
     x.append(future)
 
-    while not x.futures:
+    while not x.data:
         yield gen.sleep(0.01)
 
     assert len(x) == 1
 
-    assert xx.futures[0].key == future.key
+    assert xx.data[0].key == future.key
 
     xxx = c.channel('x')
-    while not xxx.futures:
+    while not xxx.data:
         yield gen.sleep(0.01)
 
-    assert xxx.futures[0].key == future.key
+    assert xxx.data[0].key == future.key
 
     assert 'x' in repr(x)
     assert '1' in repr(x)
@@ -74,7 +74,7 @@ def test_local_client(loop):
             y.flush()
 
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.channel('x')
             y = c.channel('y')
 
@@ -121,7 +121,7 @@ def test_channel_scheduler(c, s, a, b):
             assert time() < start + 2
             yield gen.sleep(0.01)
 
-    results = yield c._gather(list(chan.futures))
+    results = yield c._gather(list(chan.data))
     assert results == [6, 7, 8, 9, 10]
 
 
@@ -131,9 +131,9 @@ def test_multiple_maxlen(c, s, a, b):
     yield c2._start()
 
     x = c.channel('x', maxlen=10)
-    assert x.futures.maxlen == 10
+    assert x.data.maxlen == 10
     x2 = c2.channel('x', maxlen=20)
-    assert x2.futures.maxlen == 20
+    assert x2.data.maxlen == 20
 
     for i in range(10):
         x.append(c.submit(inc, i))
@@ -167,7 +167,7 @@ def test_stop(loop):
             x.flush()
 
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address']) as c:
             x = c.channel('x')
 
             producer = c.submit(produce, 5)
@@ -178,7 +178,27 @@ def test_stop(loop):
             with pytest.raises(StopIteration):
                 x.append(c.submit(inc, 1))
 
-            with Client(('127.0.0.1', s['port']), loop=loop) as c2:
+            with Client(s['address']) as c2:
                 xx = c2.channel('x')
                 futures = list(xx)
                 assert len(futures) == 5
+
+
+@gen_cluster(client=True)
+def test_values(c, s, a, b):
+    c2 = Client((s.ip, s.port), start=False)
+    yield c2._start()
+
+    x = c.channel('x')
+    x2 = c2.channel('x')
+
+    data = [123, 'Hello!', {'x': [1, 2, 3]}]
+    for item in data:
+        x.append(item)
+
+    while len(x2.data) < 3:
+        yield gen.sleep(0.01)
+
+    assert list(x2.data) == data
+
+    yield c2._shutdown()

@@ -497,7 +497,7 @@ def test_steal_twice(c, s, a, b):
     while len(s.task_state) < 100:  # tasks are all allocated
         yield gen.sleep(0.01)
 
-    workers = [Worker(s.ip, s.port, ip=a.ip, loop=s.loop) for _ in range(30)]
+    workers = [Worker(s.ip, s.port, loop=s.loop) for _ in range(30)]
     yield [w._start() for w in workers]  # army of new workers arrives to help
 
     yield _wait(futures)
@@ -506,3 +506,21 @@ def test_steal_twice(c, s, a, b):
     assert max(map(len, s.has_what.values())) < 20
 
     yield [w._close() for w in workers]
+
+
+@gen_cluster(client=True)
+def test_accept_old_result_if_stolen(c, s, a, b):
+    future = c.submit(slowinc, 1, delay=0.5, workers=a.address)
+    while not a.executing:
+        yield gen.sleep(0.01)
+    steal = s.extensions['stealing']
+
+    yield gen.sleep(0.25)
+
+    steal.move_task(future.key, a.address, b.address)
+    while not b.executing:
+        yield gen.sleep(0.01)
+
+    yield gen.sleep(0.25)
+
+    assert future.key in s.who_has
