@@ -109,6 +109,7 @@ class LocalCluster(object):
         self.status = 'running'
 
         self.diagnostics = None
+        self.cluster_monitor = None
         if diagnostics_port is not None:
             self.start_diagnostics_server(diagnostics_port,
                                           silence=silence_logs)
@@ -222,6 +223,8 @@ class LocalCluster(object):
         del self.workers[:]
         if self.diagnostics:
             self.diagnostics.close()
+        if self.cluster_monitor:
+            self.cluster_monitor.close()
 
     def close(self):
         """ Close the cluster """
@@ -234,6 +237,20 @@ class LocalCluster(object):
                 self._thread.join(timeout=1)
                 self.loop.close()
                 del self._thread
+
+    def kill(self, i):
+        w = self.workers.pop(i)
+        if hasattr(w, 'restart'):
+            # nanny-like
+            w._kill()
+        else:
+            w._close()
+
+    def stop(self):
+        for w in self.workers:
+            w._kill()
+        self.workers = []
+        self.scheduler.stop()
 
     @gen.coroutine
     def scale_up(self, n, **kwargs):
@@ -281,8 +298,15 @@ class LocalCluster(object):
         self.scheduler.restart()
 
     def restart_worker(self, i):
-        self.workers[i].restart()
+        w = self.workers[i]
+        if hasattr(w, 'restart'):
+            # nanny-like
+            w.restart()
+        else:
+            # bare worker-like
+            self.new(None, w.ncores, False)
+            w._close()
+            self.workers.remove(w)
 
     def new(self, machine, ncores, nanny):
-        print('New: ', machine, ncores, nanny)
         self._start_worker(ncores=ncores, nanny=nanny)

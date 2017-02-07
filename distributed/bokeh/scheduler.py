@@ -300,7 +300,7 @@ class ClusterTable(DashboardComponent):
             d = {'status': sched + works}
             self.source.data.update(d)
             s = self.source.selected
-            self.output.text = str(s)
+            self.output.text = " "  # str(s)
             self.selected = s.get('1d', {}).get('indices', [])
 
     def restart(self):
@@ -308,11 +308,21 @@ class ClusterTable(DashboardComponent):
             return
         s = self.selected[0]
         if s == 0:
-            # change to self.cluster.restart
             self.cluster.restart()
         else:
-            # change to self.cluster.restart_worker
             self.cluster.restart_worker(s - 1)
+
+    def stop(self):
+        if not self.selected:
+            return
+        s = self.selected[0]
+        if s == 0:
+            try:
+                self.cluster.stop()
+            except Exception as e:
+                logger.warning(str(e))
+        else:
+            self.cluster.kill(s - 1)
 
 def status_doc(cluster, doc):
     with log_errors():
@@ -324,6 +334,7 @@ def status_doc(cluster, doc):
         b3 = Button(label='Dashboard')
         b4 = Button(label='Log')
         b1.on_click(table.restart)
+        b2.on_click(table.stop)
         r1 = row(b2, b1, b3, b4)
 
         s1 = Select(options=cluster.machines, title='Machine',
