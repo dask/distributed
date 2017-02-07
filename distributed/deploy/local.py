@@ -96,9 +96,8 @@ class LocalCluster(object):
 
         self.scheduler = Scheduler(loop=self.loop,
                                    services=services)
-        self.machines = ['127.0.0.1']
-        self.scheduler.start(scheduler_port)
         self.scheduler_port = scheduler_port
+        self.machines = ['127.0.0.1']
 
         self.diagnostics_port = diagnostics_port
         self.diagnostics = None
