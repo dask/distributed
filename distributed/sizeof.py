@@ -68,7 +68,7 @@ def register_pandas():
 def register_spmatrix():
     from scipy import sparse
     @sizeof.register(sparse.dok_matrix)
-    def sizeof_spmatrix(s):
+    def sizeof_spmatrix_dok(s):
         return s.__sizeof__()
 
     @sizeof.register(sparse.spmatrix)
