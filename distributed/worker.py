@@ -465,6 +465,12 @@ class WorkerBase(Server):
                         reload(import_module(pkg.project_name))
                     if not pkgs:
                         logger.warning("Found no packages in egg file")
+                if ext == '.zip':
+                    logger.info("Reload module %s from .zip file", name)
+                    if out_filename not in sys.path:
+                        sys.path.insert(0, out_filename)
+                    name = name.split('-')[0]
+                    reload(import_module(name))
             except Exception as e:
                 logger.exception(e)
                 return {'status': 'error', 'exception': dumps(e)}

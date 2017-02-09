@@ -14,6 +14,7 @@ import sys
 from threading import Thread, Semaphore
 from time import sleep
 import traceback
+import zipfile
 
 import mock
 import pytest
@@ -1116,6 +1117,27 @@ def test_upload_file(c, s, a, b):
     result = yield y._result()
     assert result == 456
 
+@gen_cluster(client=True)
+def test_upload_file_zip(c, s, a, b):
+    def g():
+        import myfile
+        return myfile.f()
+
+    with tmp_text('myfile.py', 'def f():\n    return 123') as fn_my_file, \
+         tmp_text('init.py', '') as fn_init:
+        try:
+            with zipfile.ZipFile('myfile.zip', 'w') as z:
+                for fn in (fn_my_file, fn_init):
+                    z.write(fn, arcname=os.path.basename(fn))
+            yield c._upload_file('myfile.zip')
+        finally:
+            if os.path.exists('myfile.zip'):
+                os.remove('myfile.zip')
+
+    sleep(1)  # TODO:  why is this necessary?
+    x = c.submit(g, pure=False)
+    result = yield x._result()
+    assert result == 123
 
 @gen_cluster(client=True)
 def test_upload_large_file(c, s, a, b):
