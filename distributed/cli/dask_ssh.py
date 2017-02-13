@@ -39,9 +39,36 @@ def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
     try:
         hostnames = list(hostnames)
         if hostfile:
-            with open(hostfile) as f:
-                hosts = f.read().split()
-            hostnames.extend(hosts)
+
+            # Dictionary of resources: it enables us to handle different
+            # possible inputs, such as:
+            # hostname --nthreads 4 --nprocs 1
+            # hostname --nprocs (nthreads)
+            resources = {'hosts': [], 'nthreads': [], 'nprocs': []}
+
+            with open(hostfile, 'r') as f:
+
+                # Let's parse the hostfile line by line
+                for line in f:
+
+                    line_content = line.split('--')
+
+                    resources['hosts'].append(line_content[0].split()[0])
+
+                    # default values for --nthreads and --nprocs
+                    resources['nthreads'].append(nthreads)
+                    resources['nprocs'].append(nprocs)
+
+                    for item in line_content[1:]:
+
+                        key = item.split()[0]
+                        value = item.split()[1]
+                        resources[key][-1] = int(value)
+
+                nthreads = resources['nthreads']
+                nprocs = resources['nprocs']
+
+            hostnames.extend(resources['hosts'])
 
         if not scheduler:
             scheduler = hostnames[0]

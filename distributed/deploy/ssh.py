@@ -232,8 +232,16 @@ class SSHCluster(object):
 
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
-        self.nthreads = nthreads
-        self.nprocs = nprocs
+
+        if not isinstance(nthreads, list):
+            self.nthreads = [nthreads] * len(worker_addrs)
+        else:
+            self.nthreads = nthreads
+
+        if not isinstance(nprocs, list):
+            self.nprocs = [nprocs] * len(worker_addrs)
+        else:
+            self.nprocs = nprocs
 
         self.ssh_username = ssh_username
         self.ssh_port = ssh_port
@@ -256,8 +264,9 @@ class SSHCluster(object):
 
         # Start worker nodes
         self.workers = []
-        for i, addr in enumerate(worker_addrs):
-            self.add_worker(addr)
+        for addr, nthreads, nprocs in zip(worker_addrs, self.threads,
+                                          self.nprocs):
+            self.add_worker(addr, nthreads, nprocs)
 
     @gen.coroutine
     def _start(self):
@@ -287,9 +296,12 @@ class SSHCluster(object):
         except KeyboardInterrupt:
             pass   # Return execution to the calling process
 
-    def add_worker(self, address):
-        self.workers.append(start_worker(self.logdir, self.scheduler_addr, self.scheduler_port, address, self.nthreads,
-                                         self.nprocs, self.ssh_username, self.ssh_port, self.ssh_private_key, self.nohost))
+    def add_worker(self, address, nthreads, nprocs):
+        self.workers.append(start_worker(self.logdir, self.scheduler_addr,
+                                         self.scheduler_port, address,
+                                         nthreads, nprocs, self.ssh_username,
+                                         self.ssh_port, self.ssh_private_key,
+                                         self.nohost))
 
     def shutdown(self):
         all_processes = [self.scheduler] + self.workers
