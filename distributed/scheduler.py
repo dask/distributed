@@ -719,6 +719,7 @@ class Scheduler(Server):
             recommendations = self.transition(key, 'memory', worker=worker,
                                               **kwargs)
         else:
+            self.worker_comms[worker].send({'op': 'release-task', 'key': key})
             recommendations = {}
 
         if self.task_state[key] == 'memory':
@@ -2162,7 +2163,9 @@ class Scheduler(Server):
                 self.occupancy[w] -= duration
             self.check_idle_saturated(w)
             if w != worker:
-                pass
+                logger.info("Unexpected worker completed task, likely due to"
+                            " work stealing.  Expected: %s, Got: %s, Key: %s",
+                            w, worker, key)
                 # msg = {'op': 'release-task', 'key': key}
                 # self.worker_comms[w].send(msg)
 

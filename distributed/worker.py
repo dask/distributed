@@ -1653,7 +1653,7 @@ class Worker(WorkerBase):
         try:
             if key not in self.task_state:
                 return
-            if reason == 'stolen' and key in self.executing:
+            if reason == 'stolen':
                 return
             state = self.task_state.pop(key)
             if cause:
