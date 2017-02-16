@@ -1359,8 +1359,13 @@ class Scheduler(Server):
             data = yield gather_from_workers(who_has, rpc=self.rpc, close=False)
             result = {'status': 'OK', 'data': data}
         except KeyError as e:
-            logger.debug("Couldn't gather keys %s", e)
+            key = e.args[0]
+            logger.info("Couldn't gather keys %s state: %s", key,
+                    self.task_state[key])
             result = {'status': 'error', 'keys': e.args}
+            with log_errors():
+                for worker in list(self.who_has[key]):
+                    self.remove_worker(address=worker)  # this is extreme
 
         raise gen.Return(result)
 
