@@ -1653,9 +1653,10 @@ class Worker(WorkerBase):
         try:
             if key not in self.task_state:
                 return
-            if reason == 'stolen':
-                return
             state = self.task_state.pop(key)
+            if reason == 'stolen' and state in ('executing', 'long-running', 'memory'):
+                self.task_state[key] = state
+                return
             if cause:
                 self.log.append((key, 'release-key', cause))
             else:
@@ -1817,7 +1818,7 @@ class Worker(WorkerBase):
                 if self.digests is not None:
                     self.digests['disk-load-duration'].add(stop - start)
 
-            logger.debug("Execute key: %s", key)  # TODO: comment out?
+            logger.debug("Execute key: %s worker: %s", key, self.address)  # TODO: comment out?
             try:
                 result = yield self.executor_submit(key, apply_function, function,
                                                     args2, kwargs2,

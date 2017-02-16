@@ -718,16 +718,19 @@ class Scheduler(Server):
         if self.task_state[key] == 'processing':
             recommendations = self.transition(key, 'memory', worker=worker,
                                               **kwargs)
+
+            if self.task_state[key] == 'memory':
+                if key not in self.has_what[worker]:
+                    self.worker_bytes[worker] += self.nbytes.get(key,
+                                                                 DEFAULT_DATA_SIZE)
+                self.who_has[key].add(worker)
+                self.has_what[worker].add(key)
         else:
+            logger.debug("Received already computed task, worker: %s, state: %s"
+                         ", key: %s",
+                         worker, self.task_state[key], key)
             self.worker_comms[worker].send({'op': 'release-task', 'key': key})
             recommendations = {}
-
-        if self.task_state[key] == 'memory':
-            if key not in self.has_what[worker]:
-                self.worker_bytes[worker] += self.nbytes.get(key,
-                                                             DEFAULT_DATA_SIZE)
-            self.who_has[key].add(worker)
-            self.has_what[worker].add(key)
 
         return recommendations
 
