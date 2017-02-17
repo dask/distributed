@@ -13,7 +13,7 @@ import click
 
 import distributed
 from distributed import Scheduler
-from distributed.utils import ignoring
+from distributed.utils import ignoring, open_port
 from distributed.http import HTTPScheduler
 from distributed.cli.utils import (check_python_3, install_signal_handlers,
                                    uri_from_host_port)
@@ -78,6 +78,8 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
 
     bokeh_proc = None
     if _bokeh:
+        if bokeh_port == 0:
+            bokeh_port = open_port()
         try:
             from distributed.bokeh.application import BokehWebInterface
             bokeh_proc = BokehWebInterface(http_port=http_port,
