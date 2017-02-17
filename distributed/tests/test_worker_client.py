@@ -134,4 +134,4 @@ def test_async(c, s, a, b):
     start = time()
     while len(a.data) + len(b.data) > 1:
         yield gen.sleep(0.1)
-        assert time() < start + 5
+        assert time() < start + 3
