@@ -194,7 +194,7 @@ class Scheduler(Server):
                  delete_interval=500, synchronize_worker_interval=60000,
                  services=None, allowed_failures=ALLOWED_FAILURES,
                  extensions=[ChannelScheduler, PublishExtension, WorkStealing],
-                 validate=False, filename=None, **kwargs):
+                 validate=False, scheduler_file=None, **kwargs):
 
         # Attributes
         self.allowed_failures = allowed_failures
@@ -205,7 +205,7 @@ class Scheduler(Server):
         self.digests = None
         self.service_specs = services or {}
         self.services = {}
-        self.filename = filename
+        self.scheduler_file = scheduler_file
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -424,9 +424,9 @@ class Scheduler(Server):
             for k, v in self.services.items():
                 logger.info("%11s at: %25s", k, '%s:%d' % (self.ip, v.port))
 
-        if self.filename:
+        if self.scheduler_file:
             with ignoring(ImportError):
-                with open(self.filename, 'w') as f:
+                with open(self.scheduler_file, 'w') as f:
                     json.dump(self.identity(), f, indent=2)
 
         return self.finished()

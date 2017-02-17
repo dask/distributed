@@ -42,8 +42,10 @@ logger = logging.getLogger('distributed.scheduler')
               help="User xheaders in bokeh app for ssl termination in header")
 @click.option('--pid-file', type=str, default='',
               help="File to write the process PID")
+@click.option('--scheduler-file', type=str, default='',
+              help="File to write connection information")
 def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
-         bokeh_whitelist, prefix, use_xheaders, pid_file):
+         bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file):
 
     if pid_file:
         with open(pid_file, 'w') as f:
@@ -70,7 +72,8 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
         with ignoring(ImportError):
             from distributed.bokeh.scheduler import BokehScheduler
             services[('bokeh', bokeh_internal_port)] = BokehScheduler
-    scheduler = Scheduler(loop=loop, services=services)
+    scheduler = Scheduler(loop=loop, services=services,
+                          scheduler_file=scheduler_file)
     scheduler.start(addr)
 
     bokeh_proc = None
