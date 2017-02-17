@@ -59,6 +59,7 @@ def test_dumps_serialize_numpy(x):
     y = deserialize(header, frames)
 
     np.testing.assert_equal(x, y)
+    assert np.isfortran(x) == np.isfortran(y)
 
 
 def test_memmap():

@@ -42,11 +42,14 @@ def serialize_numpy_ndarray(x):
     else:
         dt = x.dtype.str
 
+    fortran = np.isfortran(x)
+
     x = np.ascontiguousarray(x)  # cannot get .data attribute from discontiguous
 
     header = {'dtype': dt,
               'strides': x.strides,
-              'shape': x.shape}
+              'shape': x.shape,
+              'order': 'F' if fortran else 'C'}
 
     data = x.ravel().view('u1').data
 
@@ -90,6 +93,9 @@ def deserialize_numpy_ndarray(header, frames):
 
         x = np.ndarray(header['shape'], dtype=dt, buffer=frames[0],
                        strides=header['strides'])
+
+        if header['order'] == 'F':
+            x = np.asfortranarray(x)
 
         return x
 
