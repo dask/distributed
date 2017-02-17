@@ -216,3 +216,11 @@ def test_pid_file(loop):
             with popen(['dask-worker', '127.0.0.1:8786', '--pid-file', w,
                         '--no-bokeh']) as worker:
                 check_pidfile(worker, w)
+
+
+def test_port_zero(loop):
+    with tmpfile() as fn:
+        with popen(['dask-scheduler', '--no-bokeh', '--scheduler-file', fn,
+                    '--port', '0']) as sched:
+            with Client(scheduler_file=fn, loop=loop) as c:
+                assert c.scheduler.port

@@ -55,7 +55,8 @@ def uri_from_host_port(host_arg, port_arg, default_port):
     if port and port_arg and port != port_arg:
         raise ValueError("port number given twice in options: "
                          "host %r and port %r" % (host_arg, port_arg))
-    port = port_arg or port
+    if port_arg is not None:
+        port = port_arg
     # Note `port = 0` means "choose a random port"
     if port is None:
         port = default_port
