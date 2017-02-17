@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timedelta
 from functools import partial
+import json
 import logging
 import math
 from math import log
@@ -193,7 +194,7 @@ class Scheduler(Server):
                  delete_interval=500, synchronize_worker_interval=60000,
                  services=None, allowed_failures=ALLOWED_FAILURES,
                  extensions=[ChannelScheduler, PublishExtension, WorkStealing],
-                 validate=False, **kwargs):
+                 validate=False, filename=None, **kwargs):
 
         # Attributes
         self.allowed_failures = allowed_failures
@@ -204,6 +205,7 @@ class Scheduler(Server):
         self.digests = None
         self.service_specs = services or {}
         self.services = {}
+        self.filename = filename
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -340,10 +342,11 @@ class Scheduler(Server):
 
     __repr__ = __str__
 
-    def identity(self, comm):
+    def identity(self, comm=None):
         """ Basic information about ourselves and our cluster """
         d = {'type': type(self).__name__,
              'id': str(self.id),
+             'address': self.address,
              'services': {key: v.port for (key, v) in self.services.items()},
              'workers': dict(self.worker_info)}
         return d
@@ -420,6 +423,11 @@ class Scheduler(Server):
             logger.info("  Scheduler at: %25s", self.address)
             for k, v in self.services.items():
                 logger.info("%11s at: %25s", k, '%s:%d' % (self.ip, v.port))
+
+        if self.filename:
+            with ignoring(ImportError):
+                with open(self.filename, 'w') as f:
+                    json.dump(self.identity(), f, indent=2)
 
         return self.finished()
 
