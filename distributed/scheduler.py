@@ -725,11 +725,14 @@ class Scheduler(Server):
                                                                  DEFAULT_DATA_SIZE)
                 self.who_has[key].add(worker)
                 self.has_what[worker].add(key)
-        else:
+        elif self.task_state[key] == 'memory':
             logger.debug("Received already computed task, worker: %s, state: %s"
-                         ", key: %s",
-                         worker, self.task_state[key], key)
-            self.worker_comms[worker].send({'op': 'release-task', 'key': key})
+                         ", key: %s, who_has: %s",
+                         worker, self.task_state[key], key, self.who_has[key])
+            if worker not in self.who_has[key]:
+                self.worker_comms[worker].send({'op': 'release-task', 'key': key})
+            recommendations = {}
+        else:
             recommendations = {}
 
         return recommendations
@@ -1368,6 +1371,8 @@ class Scheduler(Server):
                 for worker in missing_workers:
                     self.remove_worker(address=worker)  # this is extreme
                 for key, workers in missing_keys.items():
+                    logger.exception("Workers don't have promised keys. "
+                                     "This should never occur")
                     for worker in workers:
                         if key in self.has_what[worker]:
                             self.has_what[worker].remove(key)
