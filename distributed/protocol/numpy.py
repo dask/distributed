@@ -43,7 +43,10 @@ def serialize_numpy_ndarray(x):
     else:
         dt = x.dtype.str
 
-    if np.isfortran(x) or not x.shape:
+    if not x.shape:
+        strides = x.strides
+        data = x.ravel().view('u1').data
+    elif np.isfortran(x):
         strides = x.strides
         data = stride_tricks.as_strided(x, shape=(np.prod(x.shape),),
                                            strides=(x.dtype.itemsize,)).view('u1').data
