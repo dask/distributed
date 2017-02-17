@@ -515,12 +515,12 @@ class WorkerBase(Server):
         who_has = {k: [coerce_to_address(addr) for addr in v]
                     for k, v in who_has.items()
                     if k not in self.data}
-        try:
-            result = yield gather_from_workers(who_has)
-        except KeyError as e:
+        result, missing_keys, missing_workers = yield gather_from_workers(
+                who_has, permissive=True)
+        if missing_keys:
             logger.warn("Could not find data", e)
             raise Return({'status': 'missing-data',
-                          'keys': e.args})
+                          'keys': missing_keys})
         else:
             self.update_data(data=result, report=False)
             raise Return({'status': 'OK'})

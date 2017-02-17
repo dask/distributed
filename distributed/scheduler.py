@@ -1355,17 +1355,25 @@ class Scheduler(Server):
         keys = list(keys)
         who_has = {key: self.who_has.get(key, ()) for key in keys}
 
-        try:
-            data = yield gather_from_workers(who_has, rpc=self.rpc, close=False)
+        data, missing_keys, missing_workers = yield gather_from_workers(
+                who_has, rpc=self.rpc, close=False, permissive=True)
+        if not missing_keys:
             result = {'status': 'OK', 'data': data}
-        except KeyError as e:
-            key = e.args[0]
-            logger.info("Couldn't gather keys %s state: %s", key,
-                    self.task_state[key])
-            result = {'status': 'error', 'keys': e.args}
+        else:
+            logger.info("Couldn't gather keys %s state: %s workers: %s", missing_keys,
+                    [self.task_state[key] for key in missing_keys],
+                    missing_workers)
+            result = {'status': 'error', 'keys': missing_keys}
             with log_errors():
-                for worker in list(self.who_has[key]):
+                for worker in missing_workers:
                     self.remove_worker(address=worker)  # this is extreme
+                for key, workers in missing_keys.items():
+                    for worker in workers:
+                        if key in self.has_what[worker]:
+                            self.has_what[worker].remove(key)
+                            self.who_has[key].remove(worker)
+                            self.worker_bytes[worker] -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                            self.transitions({key: 'released'})
 
         raise gen.Return(result)
 
