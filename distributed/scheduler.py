@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import atexit
 from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timedelta
 from functools import partial
@@ -428,6 +429,12 @@ class Scheduler(Server):
             with ignoring(ImportError):
                 with open(self.scheduler_file, 'w') as f:
                     json.dump(self.identity(), f, indent=2)
+
+            fn = self.scheduler_file  # remove file when we close the process
+            def del_scheduler_file():
+                if os.path.exists(fn):
+                    os.remove(fn)
+            atexit.register(del_scheduler_file)
 
         return self.finished()
 
