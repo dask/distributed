@@ -1374,7 +1374,7 @@ class Scheduler(Server):
                     logger.exception("Workers don't have promised keys. "
                                      "This should never occur")
                     for worker in workers:
-                        if key in self.has_what[worker]:
+                        if worker in self.workers and key in self.has_what[worker]:
                             self.has_what[worker].remove(key)
                             self.who_has[key].remove(worker)
                             self.worker_bytes[worker] -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
