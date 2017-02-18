@@ -10,7 +10,7 @@ def serialize_keras_model(model):
     weights = model.get_weights()
     headers, frames = list(zip(*map(serialize, weights)))
     header['headers'] = headers
-    header['lengths'] = [len(L) for L in frames]
+    header['nframes'] = [len(L) for L in frames]
     frames = [frame for L in frames for frame in L]
     return header, frames
 
@@ -19,7 +19,7 @@ def deserialize_keras_model(header, frames):
     from keras.models import model_from_config
     n = 0
     weights = []
-    for head, length in zip(header['headers'], header['lengths']):
+    for head, length in zip(header['headers'], header['nframes']):
         x = deserialize(head, frames[n: n + length])
         weights.append(x)
         n += length
