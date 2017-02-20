@@ -7,7 +7,7 @@ matrix:
   fast_finish: true
   include:
     - python: "2.7"
-      env: PACKAGES=blosc
+      env: PACKAGES="blosc futures"
     - python: "3.4"
       env: COVERAGE=true DASK_EXPERIMENTAL_ZMQ=1
     - python: "3.5"
@@ -52,7 +52,7 @@ install:
   # Install dependencies
   - conda create -q -n test-environment python=$TRAVIS_PYTHON_VERSION
   - source activate test-environment
-  - conda install -q pytest pytest-timeout coverage tornado toolz dill futures dask ipywidgets psutil bokeh requests joblib mock ipykernel jupyter_client h5py netcdf4 lz4 paramiko tblib click $PACKAGES -c conda-forge
+  - conda install -q pytest pytest-timeout coverage tornado toolz dill dask ipywidgets psutil bokeh requests joblib mock ipykernel jupyter_client h5py netcdf4 lz4 paramiko tblib click $PACKAGES -c conda-forge
   - |
     if [[ $HDFS == true ]]; then
         conda install -q libxml2 krb5 boost
@@ -64,7 +64,11 @@ install:
   - pip install -q git+https://github.com/dask/s3fs.git --upgrade
   - pip install -q git+https://github.com/dask/zict.git --upgrade
   - pip install -q sortedcollections msgpack-python
-  - if [[ $CRICK == true ]]; then pip install git+https://github.com/jcrist/crick.git; fi
+  - |
+    if [[ $CRICK == true ]]; then
+        conda install -q cython
+        pip install git+https://github.com/jcrist/crick.git
+    fi;
 
   # Install distributed
   - pip install --no-deps -e .
