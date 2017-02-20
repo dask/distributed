@@ -426,9 +426,8 @@ class Scheduler(Server):
                 logger.info("%11s at: %25s", k, '%s:%d' % (self.ip, v.port))
 
         if self.scheduler_file:
-            with ignoring(ImportError):
-                with open(self.scheduler_file, 'w') as f:
-                    json.dump(self.identity(), f, indent=2)
+            with open(self.scheduler_file, 'w') as f:
+                json.dump(self.identity(), f, indent=2)
 
             fn = self.scheduler_file  # remove file when we close the process
             def del_scheduler_file():

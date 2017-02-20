@@ -224,6 +224,7 @@ def test_scheduler_port_zero(loop):
                     '--port', '0']) as sched:
             with Client(scheduler_file=fn, loop=loop) as c:
                 assert c.scheduler.port
+                assert c.scheduler.port != 8786
 
 
 def test_bokeh_port_zero(loop):

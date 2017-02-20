@@ -78,7 +78,7 @@ def handle_signal(sig, frame):
 @click.option('--resources', type=str, default='',
               help='Resources for task constraints like "GPU=2 MEM=10e9"')
 @click.option('--scheduler-file', type=str, default='',
-              help='Filename to JSON encoded scheduler information.'
+              help='Filename to JSON encoded scheduler information. '
                    'Use with dask-scheduler --scheduler-file')
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
          nanny, name, memory_limit, pid_file, temp_filename, reconnect,

@@ -193,7 +193,7 @@ def unparse_host_port(host, port=None):
     """
     if ':' in host and not host.startswith('['):
         host = '[%s]' % host
-    if port is not None:
+    if port:
         return '%s:%s' % (host, port)
     else:
         return host
