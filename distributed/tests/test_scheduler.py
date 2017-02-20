@@ -1075,7 +1075,7 @@ def test_fifo_submission(c, s, w):
 @gen_test()
 def test_scheduler_file():
     with tmpfile() as fn:
-        s = Scheduler(filename=fn)
+        s = Scheduler(scheduler_file=fn)
         s.start(0)
         with open(fn) as f:
             data = json.load(f)
