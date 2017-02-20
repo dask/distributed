@@ -112,9 +112,6 @@ class Listener(with_metaclass(ABCMeta)):
         Stop listening.  This does not shutdown already established
         communications, but prevents accepting new ones.
         """
-        tcp_server, self.tcp_server = self.tcp_server, None
-        if tcp_server is not None:
-            tcp_server.stop()
 
     @abstractproperty
     def listen_address(self):

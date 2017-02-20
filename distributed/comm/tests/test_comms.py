@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from functools import partial
+import os
 
 import pytest
 
@@ -12,7 +13,7 @@ from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
                                     requires_ipv6, has_ipv6)
 
-from distributed.comm import (tcp, connect, listen, CommClosedError,
+from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
                               is_zmq_enabled)
 from distributed.comm.core import (parse_address, parse_host_port,
                                    unparse_host_port, resolve_address)
@@ -191,6 +192,56 @@ def test_zmq_specific():
     assert set(l) == {1234} | set(range(20))
 
 
+@gen_test()
+def test_inproc_specific():
+    """
+    Test concrete InProc API.
+    """
+    listener_addr = inproc.global_manager.new_address()
+    addr_head = listener_addr.rpartition('/')[0]
+
+    client_addresses = set()
+
+    @gen.coroutine
+    def handle_comm(comm):
+        assert comm.peer_address.startswith('inproc://' + addr_head)
+        client_addresses.add(comm.peer_address)
+        msg = yield comm.read()
+        msg['op'] = 'pong'
+        yield comm.write(msg)
+        yield comm.close()
+
+    listener = inproc.InProcListener(listener_addr, handle_comm)
+    listener.start()
+    assert listener.listen_address == listener.contact_address == 'inproc://' + listener_addr
+
+    connector = inproc.InProcConnector(inproc.global_manager)
+    l = []
+
+    @gen.coroutine
+    def client_communicate(key, delay=0):
+        comm = yield connector.connect(listener_addr)
+        assert comm.peer_address == 'inproc://' + listener_addr
+        yield comm.write({'op': 'ping', 'data': key})
+        if delay:
+            yield gen.sleep(delay)
+        msg = yield comm.read()
+        assert msg == {'op': 'pong', 'data': key}
+        l.append(key)
+        yield comm.close()
+
+    yield client_communicate(key=1234)
+
+    # Many clients at once
+    N = 200
+    futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
+    yield futures
+    assert set(l) == {1234} | set(range(N))
+
+    assert len(client_addresses) == N + 1
+    assert listener.contact_address not in client_addresses
+
+
 @gen.coroutine
 def check_client_server(addr, check_listen_addr=None, check_contact_addr=None):
     """
@@ -217,7 +268,7 @@ def check_client_server(addr, check_listen_addr=None, check_contact_addr=None):
     # Check listener properties
     bound_addr = listener.listen_address
     bound_scheme, bound_loc = parse_address(bound_addr)
-    assert bound_scheme in ('tcp', 'zmq')
+    assert bound_scheme in ('inproc', 'tcp', 'zmq')
     assert bound_scheme == parse_address(addr)[0]
 
     if check_listen_addr is not None:
@@ -256,6 +307,8 @@ def check_client_server(addr, check_listen_addr=None, check_contact_addr=None):
     yield futures
     assert set(l) == {1234} | set(range(20))
 
+    listener.stop()
+
 
 def tcp_eq(expected_host, expected_port=None):
     def checker(loc):
@@ -269,6 +322,17 @@ def tcp_eq(expected_host, expected_port=None):
     return checker
 
 zmq_eq = tcp_eq
+
+def inproc_check():
+    expected_ip = get_ip()
+    expected_pid = os.getpid()
+
+    def checker(loc):
+        ip, pid, suffix = loc.split('/')
+        assert ip == expected_ip
+        assert int(pid) == expected_pid
+
+    return checker
 
 
 @gen_test()
@@ -343,8 +407,14 @@ def test_zmq_client_server_ipv6():
                               zmq_eq('::', 3252), zmq_eq(EXTERNAL_IP6, 3252))
 
 
+@gen_test()
+def test_inproc_client_server():
+    yield check_client_server('inproc://', inproc_check())
+    yield check_client_server(inproc.new_address(), inproc_check())
+
+
 @gen.coroutine
-def check_comm_closed_implicit(addr):
+def check_comm_closed_implicit(addr, delay=None):
     @gen.coroutine
     def handle_comm(comm):
         yield comm.close()
@@ -371,6 +441,10 @@ def test_tcp_comm_closed_implicit():
 #def test_zmq_comm_closed():
     #yield check_comm_closed('zmq://127.0.0.1')
 
+@gen_test()
+def test_inproc_comm_closed_implicit():
+    yield check_comm_closed_implicit(inproc.new_address())
+
 
 @gen.coroutine
 def check_comm_closed_explicit(addr):
@@ -396,6 +470,9 @@ def check_comm_closed_explicit(addr):
     with pytest.raises(CommClosedError):
         yield comm.read()
 
+    yield gen.moment
+
+
 @gen_test()
 def test_tcp_comm_closed_explicit():
     yield check_comm_closed_explicit('tcp://127.0.0.1')
@@ -404,6 +481,57 @@ def test_tcp_comm_closed_explicit():
 @gen_test()
 def test_zmq_comm_closed_explicit():
     yield check_comm_closed_explicit('zmq://127.0.0.1')
+
+@gen_test()
+def test_inproc_comm_closed_explicit():
+    yield check_comm_closed_explicit(inproc.new_address())
+
+@gen_test()
+def test_inproc_comm_closed_explicit_2():
+    listener_errors = []
+
+    @gen.coroutine
+    def handle_comm(comm):
+        # Wait
+        try:
+            yield comm.read()
+        except CommClosedError:
+            assert comm.closed()
+            listener_errors.append(True)
+        else:
+            comm.close()
+
+    listener = listen('inproc://', handle_comm)
+    listener.start()
+    contact_addr = listener.contact_address
+
+    comm = yield connect(contact_addr)
+    comm.close()
+    assert comm.closed()
+    yield gen.sleep(0.01)
+    assert len(listener_errors) == 1
+
+    with pytest.raises(CommClosedError):
+        yield comm.read()
+    with pytest.raises(CommClosedError):
+        yield comm.write("foo")
+
+    comm = yield connect(contact_addr)
+    comm.write("foo")
+    with pytest.raises(CommClosedError):
+        yield comm.read()
+    with pytest.raises(CommClosedError):
+        yield comm.write("foo")
+    assert comm.closed()
+
+    comm = yield connect(contact_addr)
+    comm.write("foo")
+    yield gen.sleep(0.01)
+    # XXX comm.closed() is only true after the first time read() raises CommClosedError
+    #assert comm.closed()
+
+    comm.close()
+    comm.close()
 
 
 @gen.coroutine
@@ -419,6 +547,10 @@ def check_connect_timeout(addr):
 def test_tcp_connect_timeout():
     yield check_connect_timeout('tcp://127.0.0.1:44444')
 
+@gen_test()
+def test_inproc_connect_timeout():
+    yield check_connect_timeout(inproc.new_address())
+
 
 def check_many_listeners(addr):
     @gen.coroutine
@@ -426,10 +558,15 @@ def check_many_listeners(addr):
         pass
 
     listeners = []
-    for i in range(100):
+    N = 100
+
+    for i in range(N):
         listener = listen(addr, handle_comm)
         listener.start()
         listeners.append(listener)
+
+    assert len(set(l.listen_address for l in listeners)) == N
+    assert len(set(l.contact_address for l in listeners)) == N
 
     for listener in listeners:
         listener.stop()
@@ -440,3 +577,7 @@ def test_tcp_many_listeners():
     check_many_listeners('tcp://127.0.0.1')
     check_many_listeners('tcp://0.0.0.0')
     check_many_listeners('tcp://')
+
+@gen_test()
+def test_inproc_many_listeners():
+    check_many_listeners('inproc://')
