@@ -11,6 +11,9 @@ matrix:
     - python: "3.4"
       env: COVERAGE=true DASK_EXPERIMENTAL_ZMQ=1
     - python: "3.5"
+      env: CRICK=true
+    - python: "3.6"
+      env: PACKAGES=blosc CRICK=true
     - python: "2.7"
       env: HDFS=true
       sudo: true
@@ -61,7 +64,7 @@ install:
   - pip install -q git+https://github.com/dask/s3fs.git --upgrade
   - pip install -q git+https://github.com/dask/zict.git --upgrade
   - pip install -q sortedcollections msgpack-python
-  - if [[ $PYTHON == '3.5' ]]; then pip install git+https://github.com/jcrist/crick.git; fi
+  - if [[ $CRICK == true ]]; then pip install git+https://github.com/jcrist/crick.git; fi
 
   # Install distributed
   - pip install --no-deps -e .
