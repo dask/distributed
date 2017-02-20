@@ -99,51 +99,54 @@ def test_local_directory(loop, nanny):
 @pytest.mark.parametrize('nanny', ['--nanny', '--no-nanny'])
 def test_lifetime(loop, nanny):
     worker1_cmd = ['dask-worker', '127.0.0.1:8786', nanny, '--no-bokeh',
-                   '--nprocs=1', '--worker-port=11111', '--lifetime=s=2']
+                   '--nprocs=1', '--name=a', '--lifetime=s=5']
     worker2_cmd = ['dask-worker', '127.0.0.1:8786', nanny, '--no-bokeh',
-                   '--nprocs=1', '--worker-port=22222']
-    with popen(['dask-scheduler', '--no-bokeh']) as _:
+                   '--nprocs=1', '--name=b']
+    with popen(['dask-scheduler', '--no-bokeh']) as w1:
         with Client('127.0.0.1:8786', loop=loop) as c:
-            with popen(worker1_cmd) as _, popen(worker2_cmd) as _:
-                start = time()
-                # submit random function to ensure replication not
-                # recomputation
-                f = c.submit(randominc, 1, workers=['127.0.0.1:11111'])
+            with popen(worker1_cmd) as w1, popen(worker2_cmd) as w2:
+                # submit random function to ensure replication
+                f = c.submit(randominc, 1, workers=['a'])
                 r = f.result()
-                assert f.key not in c.has_what()['127.0.0.1:22222']
+
+                start = time()
                 while len(c.has_what()) != 1:
-                    sleep(0.01)  # wait for first worker to retire itself
-                    if time() - start > 5:  # but not too long ...
+                    sleep(0.1)
+                    if time() - start > 10:
                         raise TimeoutError
-                assert f.key in c.has_what()['127.0.0.1:22222']
+
+                assert f.status != 'lost'
                 assert f.result() == r
 
 
 @pytest.mark.parametrize('nanny', ['--nanny', '--no-nanny'])
 def test_auto_retire_multi_worker(loop, nanny):
     worker1_cmd = ['dask-worker', '127.0.0.1:8786', nanny, '--no-bokeh',
-                   '--nprocs=2', '--lifetime=s=2']
+                   '--nprocs=2', '--lifetime=s=5']
     worker2_cmd = ['dask-worker', '127.0.0.1:8786', nanny, '--no-bokeh',
                    '--nprocs=1', '--worker-port=22222']
     with popen(['dask-scheduler', '--no-bokeh']) as _:
         with Client('127.0.0.1:8786', loop=loop) as c:
             with popen(worker1_cmd) as _:
+
                 start = time()
                 while len(c.has_what()) != 2:
-                        sleep(0.1)
+                    sleep(0.1)
+                    if time() - start > 10:
+                        raise TimeoutError
+
                 worker1_addresses = c.has_what().keys()
                 fs = [c.submit(randominc, i, workers=worker1_addresses)
                       for i in range(4)]
                 rs = [f.result() for f in fs]
+
                 with popen(worker2_cmd) as _:
-                    while len(c.has_what()) != 3:
-                        sleep(0.1)
-                    assert all(f.key not in c.has_what()['127.0.0.1:22222']
-                               for f in fs)
+
+                    start = time()
                     while len(c.has_what()) != 1:
-                        sleep(0.1)  # wait for first workers to retire
-                        if time() - start > 5:  # but not too long ...
+                        sleep(0.1)
+                        if time() - start > 10:
                             raise TimeoutError
-                    assert all(f.key in c.has_what()['127.0.0.1:22222']
-                               for f in fs)
+
+                    assert all(f.status != 'lost' for f in fs)
                     assert [f.result() for f in fs] == rs

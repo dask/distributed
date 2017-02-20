@@ -184,12 +184,11 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         def retire():
             yield gen.sleep(lifetime)
             logger.info("Retiring worker...")
-            with rpc(ip=nannies[0].scheduler.ip,
-                     port=nannies[0].scheduler.port) as scheduler:
-                workers = ([n.worker_address for n in nannies
-                            if n.process and n.worker_port] if nanny else
-                           [n.address for n in nannies])
-                scheduler.retire_workers(workers=workers, remove=False)
+            workers = ([n.worker_address for n in nannies
+                        if n.process and n.worker_address] if nanny else
+                       [n.address for n in nannies])
+            with rpc(nannies[0].scheduler.address) as scheduler:
+                scheduler.retire_workers(workers=workers, remove=True)
             retired[0] = True
             logger.info("Worker retired")
 
