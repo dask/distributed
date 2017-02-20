@@ -43,7 +43,9 @@ logger = logging.getLogger('distributed.scheduler')
 @click.option('--pid-file', type=str, default='',
               help="File to write the process PID")
 @click.option('--scheduler-file', type=str, default='',
-              help="File to write connection information")
+              help="File to write connection information. "
+              "This may be a good way to share connection information if your "
+              "cluster is on a shared network file system.")
 def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
          bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file):
 
