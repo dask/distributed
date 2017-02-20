@@ -1514,7 +1514,7 @@ class Client(object):
             if tokey(key) in self.futures:
                 if not changed:
                     changed = True
-                    dsk = dsk.copy()
+                    dsk = dict(dsk)
                 dsk[key] = Future(key, self)
 
         if changed:
