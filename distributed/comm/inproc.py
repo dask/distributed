@@ -1,15 +1,16 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import namedtuple
+from collections import deque, namedtuple
 import itertools
+import logging
 import os
 import sys
 import threading
 import weakref
 
 from tornado import gen, locks
+from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
-from tornado.queues import Queue
 
 from ..compatibility import finalize
 from ..utils import get_ip
@@ -17,14 +18,17 @@ from .core import (connectors, listeners, Comm, Listener, CommClosedError,
                    )
 
 
+logger = logging.getLogger(__name__)
+
 ConnectionRequest = namedtuple('ConnectionRequest',
                                ('c2s_q', 's2c_q', 'c_loop', 'c_addr',
-                                'conn_event', 'close_request'))
-
-_Close = object()
+                                'conn_event'))
 
 
 class Manager(object):
+    """
+    An object coordinating listeners and their addresses.
+    """
 
     def __init__(self):
         self.listeners = weakref.WeakValueDictionary()
@@ -69,32 +73,86 @@ def new_address():
     return 'inproc://' + global_manager.new_address()
 
 
+class QueueEmpty(Exception):
+    pass
+
+
+class Queue(object):
+    """
+    A single-reader, single-writer, non-threadsafe, peekable queue.
+    """
+
+    def __init__(self):
+        self._q = deque()
+        self._read_future = None
+
+    def get_nowait(self):
+        q = self._q
+        if not q:
+            raise QueueEmpty
+        return q.popleft()
+
+    def get(self):
+        assert not self._read_future, "Only one reader allowed"
+        fut = Future()
+        q = self._q
+        if q:
+            fut.set_result(q.popleft())
+        else:
+            self._read_future = fut
+        return fut
+
+    def put_nowait(self, value):
+        q = self._q
+        fut = self._read_future
+        if fut is not None:
+            assert len(q) == 0
+            self._read_future = None
+            fut.set_result(value)
+        else:
+            q.append(value)
+
+    put = put_nowait
+
+    _omitted = object()
+
+    def peek(self, default=_omitted):
+        """
+        Get the next object in the queue without removing it from the queue.
+        """
+        q = self._q
+        if q:
+            return q[0]
+        elif default is not self._omitted:
+            return default
+        else:
+            raise QueueEmpty
+
+
+_EOF = object()
+
 class InProc(Comm):
     """
     An established communication based on a pair of in-process queues.
     """
 
     def __init__(self, peer_addr, read_q, write_q, write_loop,
-                 close_request, deserialize=True):
+                 deserialize=True):
         self._peer_addr = peer_addr
         self.deserialize = deserialize
         self._read_q = read_q
         self._write_q = write_q
         self._write_loop = write_loop
         self._closed = False
-        # A "close request" event shared between both comms
-        self._close_request = close_request
 
         self._finalizer = finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
 
     def _get_finalizer(self):
         def finalize(write_q=self._write_q, write_loop=self._write_loop,
-                     close_request=self._close_request):
-            if not close_request.is_set():
-                logger.warn("Closing dangling queue in %s" % (r,))
-                close_request.set()
-                write_loop.add_callback(write_q.put_nowait, _Close)
+                     r=repr(self)):
+            logger.warn("Closing dangling queue in %s" % (r,))
+            write_loop.add_callback(write_q.put_nowait, _EOF)
 
         return finalize
 
@@ -111,8 +169,7 @@ class InProc(Comm):
             raise CommClosedError
 
         msg = yield self._read_q.get()
-        if msg is _Close:
-            assert self._close_request.is_set()
+        if msg is _EOF:
             self._closed = True
             self._finalizer.detach()
             raise CommClosedError
@@ -122,9 +179,7 @@ class InProc(Comm):
 
     @gen.coroutine
     def write(self, msg):
-        if self._close_request.is_set():
-            self._closed = True
-            self._finalizer.detach()
+        if self.closed():
             raise CommClosedError
 
         self._write_loop.add_callback(self._write_q.put_nowait, msg)
@@ -136,15 +191,28 @@ class InProc(Comm):
         self.abort()
 
     def abort(self):
-        if not self._closed:
-            self._close_request.set()
-            self._write_loop.add_callback(self._write_q.put_nowait, _Close)
+        if not self.closed():
+            # Putting EOF is cheap enough that we do it on abort() too
+            self._write_loop.add_callback(self._write_q.put_nowait, _EOF)
             self._write_q = self._read_q = None
             self._closed = True
             self._finalizer.detach()
 
     def closed(self):
-        return self._closed
+        """
+        Whether this InProc comm is closed.  It is closed iff:
+            1) close() or abort() was called on this comm
+            2) close() or abort() was called on the other end and the
+               read queue is empty
+        """
+        if self._closed:
+            return True
+        if self._read_q.peek(None) is _EOF:
+            self._closed = True
+            self._finalizer.detach()
+            return True
+        else:
+            return False
 
 
 class InProcListener(Listener):
@@ -166,7 +234,6 @@ class InProcListener(Listener):
                           read_q=conn_req.c2s_q,
                           write_q=conn_req.s2c_q,
                           write_loop=conn_req.c_loop,
-                          close_request=conn_req.close_request,
                           deserialize=self.deserialize)
             # Notify connector
             conn_req.c_loop.add_callback(conn_req.conn_event.set)
@@ -209,7 +276,6 @@ class InProcConnector(object):
                                      c_loop=IOLoop.current(),
                                      c_addr=global_manager.new_address(),
                                      conn_event=locks.Event(),
-                                     close_request=threading.Event(),
                                      )
         listener.connect_threadsafe(conn_req)
         # Wait for connection acknowledgement
@@ -221,7 +287,6 @@ class InProcConnector(object):
                       read_q=conn_req.s2c_q,
                       write_q=conn_req.c2s_q,
                       write_loop=listener.loop,
-                      close_request=conn_req.close_request,
                       deserialize=deserialize)
         raise gen.Return(comm)
 

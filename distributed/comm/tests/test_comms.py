@@ -527,8 +527,7 @@ def test_inproc_comm_closed_explicit_2():
     comm = yield connect(contact_addr)
     comm.write("foo")
     yield gen.sleep(0.01)
-    # XXX comm.closed() is only true after the first time read() raises CommClosedError
-    #assert comm.closed()
+    assert comm.closed()
 
     comm.close()
     comm.close()
