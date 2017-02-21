@@ -28,8 +28,8 @@ from dask.core import reverse_dict
 from dask.order import order
 
 from .batched import BatchedSend
-from .comm.core import (normalize_address, resolve_address,
-                        get_address_host_port, unparse_host_port)
+from .comm import (normalize_address, resolve_address,
+                   get_address_host_port, unparse_host_port)
 from .config import config
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
@@ -412,7 +412,11 @@ class Scheduler(Server):
                 self.listen(('', addr_or_port))
             else:
                 self.listen(addr_or_port)
-                self.ip, _ = get_address_host_port(self.listen_address)
+                try:
+                    self.ip, _ = get_address_host_port(self.listen_address)
+                except ValueError:
+                    # Address scheme does not have a notion of host and port
+                    self.ip = get_ip()
 
             # Services listen on all addresses
             self.start_services()

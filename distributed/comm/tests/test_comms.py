@@ -20,9 +20,8 @@ from distributed.protocol import (loads, dumps,
                                   to_serialize, Serialized, serialize, deserialize)
 
 from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
-                              is_zmq_enabled)
-from distributed.comm.core import (parse_address, parse_host_port,
-                                   unparse_host_port, resolve_address)
+                              is_zmq_enabled, parse_address, parse_host_port,
+                              unparse_host_port, resolve_address)
 
 if is_zmq_enabled():
     from distributed.comm import zmq
