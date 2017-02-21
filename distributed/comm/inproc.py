@@ -168,6 +168,9 @@ _EOF = object()
 class InProc(Comm):
     """
     An established communication based on a pair of in-process queues.
+
+    Reminder: a Comm must always be used from a single thread.
+    Its peer Comm can be running in any thread.
     """
 
     def __init__(self, peer_addr, read_q, write_q, write_loop,
@@ -218,6 +221,7 @@ class InProc(Comm):
         if self.closed():
             raise CommClosedError
 
+        # Ensure we feed the queue in the same thread it is read from.
         self._write_loop.add_callback(self._write_q.put_nowait, msg)
 
         raise gen.Return(1)
@@ -236,7 +240,7 @@ class InProc(Comm):
 
     def closed(self):
         """
-        Whether this InProc comm is closed.  It is closed iff:
+        Whether this comm is closed.  An InProc comm is closed if:
             1) close() or abort() was called on this comm
             2) close() or abort() was called on the other end and the
                read queue is empty

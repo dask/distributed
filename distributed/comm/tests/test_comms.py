@@ -2,10 +2,13 @@ from __future__ import print_function, division, absolute_import
 
 from functools import partial
 import os
+import sys
+import threading
 
 import pytest
 
 from tornado import gen, ioloop, queues
+from tornado.concurrent import Future
 
 from distributed.core import pingpong
 from distributed.metrics import time
@@ -154,9 +157,10 @@ def test_tcp_specific():
     yield client_communicate(key=1234)
 
     # Many clients at once
-    futures = [client_communicate(key=i, delay=0.05) for i in range(20)]
+    N = 100
+    futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
     yield futures
-    assert set(l) == {1234} | set(range(20))
+    assert set(l) == {1234} | set(range(N))
 
 
 @requires_zmq
@@ -198,13 +202,14 @@ def test_zmq_specific():
     yield client_communicate(key=1234)
 
     # Many clients at once
-    futures = [client_communicate(key=i, delay=0.05) for i in range(20)]
+    N = 20
+    futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
     yield futures
-    assert set(l) == {1234} | set(range(20))
+    assert set(l) == {1234} | set(range(N))
 
 
-@gen_test()
-def test_inproc_specific():
+@gen.coroutine
+def check_inproc_specific(run_client):
     """
     Test concrete InProc API.
     """
@@ -213,13 +218,16 @@ def test_inproc_specific():
 
     client_addresses = set()
 
+    N_MSGS = 3
+
     @gen.coroutine
     def handle_comm(comm):
         assert comm.peer_address.startswith('inproc://' + addr_head)
         client_addresses.add(comm.peer_address)
-        msg = yield comm.read()
-        msg['op'] = 'pong'
-        yield comm.write(msg)
+        for i in range(N_MSGS):
+            msg = yield comm.read()
+            msg['op'] = 'pong'
+            yield comm.write(msg)
         yield comm.close()
 
     listener = inproc.InProcListener(listener_addr, handle_comm)
@@ -233,24 +241,58 @@ def test_inproc_specific():
     def client_communicate(key, delay=0):
         comm = yield connector.connect(listener_addr)
         assert comm.peer_address == 'inproc://' + listener_addr
-        yield comm.write({'op': 'ping', 'data': key})
-        if delay:
-            yield gen.sleep(delay)
-        msg = yield comm.read()
+        for i in range(N_MSGS):
+            yield comm.write({'op': 'ping', 'data': key})
+            if delay:
+                yield gen.sleep(delay)
+            msg = yield comm.read()
         assert msg == {'op': 'pong', 'data': key}
         l.append(key)
         yield comm.close()
 
+    client_communicate = partial(run_client, client_communicate)
+
     yield client_communicate(key=1234)
 
     # Many clients at once
-    N = 200
-    futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
+    N = 20
+    futures = [client_communicate(key=i, delay=0.001) for i in range(N)]
     yield futures
     assert set(l) == {1234} | set(range(N))
 
     assert len(client_addresses) == N + 1
     assert listener.contact_address not in client_addresses
+
+
+def run_coro(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+def run_coro_in_thread(func, *args, **kwargs):
+    fut = Future()
+    main_loop = ioloop.IOLoop.current()
+
+    def run():
+        thread_loop = ioloop.IOLoop()  # need fresh IO loop for run_sync()
+        try:
+            res = thread_loop.run_sync(partial(func, *args, **kwargs),
+                                       timeout=10)
+        except:
+            main_loop.add_callback(fut.set_exc_info, sys.exc_info())
+        else:
+            main_loop.add_callback(fut.set_result, res)
+
+    t = threading.Thread(target=run)
+    t.start()
+    return fut
+
+
+@gen_test()
+def test_inproc_specific_same_thread():
+    yield check_inproc_specific(run_coro)
+
+@gen_test()
+def test_inproc_specific_different_threads():
+    yield check_inproc_specific(run_coro_in_thread)
 
 
 #
