@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import copy
 import pickle
 
 import numpy as np
@@ -7,7 +8,7 @@ import pytest
 from toolz import identity
 
 from distributed.protocol import (register_serialization, serialize,
-        deserialize, Serialize, Serialized, to_serialize)
+        deserialize, nested_deserialize, Serialize, Serialized, to_serialize)
 from distributed.protocol import decompress
 
 
@@ -76,6 +77,22 @@ def test_Serialized():
     assert not (s != u)
     assert s != t
     assert not (s == t)
+
+
+def test_nested_deserialize():
+    x = {'op': 'update',
+         'x': [to_serialize(123), to_serialize(456), 789],
+         'y': {'a': ['abc', Serialized(*serialize('def'))],
+               'b': 'ghi'}
+         }
+    x_orig = copy.deepcopy(x)
+
+    assert nested_deserialize(x) == {'op': 'update',
+                                     'x': [123, 456, 789],
+                                     'y': {'a': ['abc', 'def'],
+                                           'b': 'ghi'}
+                                     }
+    assert x == x_orig  # x wasn't mutated
 
 
 from distributed.utils_test import gen_cluster

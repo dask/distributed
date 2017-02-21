@@ -271,6 +271,43 @@ def _extract_serialize(x, ser, path=()):
                 ser[path + (k,)] = v
 
 
+def nested_deserialize(x):
+    """
+    Replace all Serialize and Serialized values nested in *x*
+    with the original values.  Returns a copy of *x*.
+
+    >>> msg = {'op': 'update', 'data': to_serialize(123)}
+    >>> nested_deserialize(msg)
+    {'op': 'update', 'data': 123}
+    """
+    def replace_inner(x):
+        if type(x) is dict:
+            x = x.copy()
+            for k, v in x.items():
+                typ = type(v)
+                if typ is dict or typ is list:
+                    x[k] = replace_inner(v)
+                elif typ is Serialize:
+                    x[k] = v.data
+                elif typ is Serialized:
+                    x[k] = deserialize(v.header, v.frames)
+
+        elif type(x) is list:
+            x = list(x)
+            for k, v in enumerate(x):
+                typ = type(v)
+                if typ is dict or typ is list:
+                    x[k] = replace_inner(v)
+                elif typ is Serialize:
+                    x[k] = v.data
+                elif typ is Serialized:
+                    x[k] = deserialize(v.header, v.frames)
+
+        return x
+
+    return replace_inner(x)
+
+
 
 @partial(normalize_token.register, Serialized)
 def normalize_Serialized(o):
