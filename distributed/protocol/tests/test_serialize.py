@@ -58,8 +58,24 @@ def test_Serialize():
     assert '123' in str(s)
     assert s.data == 123
 
-    s = Serialize((1, 2))
-    assert str(s)
+    t = Serialize((1, 2))
+    assert str(t)
+
+    u = Serialize(123)
+    assert s == u
+    assert not (s != u)
+    assert s != t
+    assert not (s == t)
+
+
+def test_Serialized():
+    s = Serialized(*serialize(123))
+    t = Serialized(*serialize((1, 2)))
+    u = Serialized(*serialize(123))
+    assert s == u
+    assert not (s != u)
+    assert s != t
+    assert not (s == t)
 
 
 from distributed.utils_test import gen_cluster

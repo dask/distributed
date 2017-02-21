@@ -13,6 +13,9 @@ from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
                                     requires_ipv6, has_ipv6)
 
+from distributed.protocol import (loads, dumps,
+                                  to_serialize, Serialized, serialize, deserialize)
+
 from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
                               is_zmq_enabled)
 from distributed.comm.core import (parse_address, parse_host_port,
@@ -43,6 +46,10 @@ def debug_loop():
         print('.', loop, loop._handlers)
         yield gen.sleep(0.50)
 
+
+#
+# Test utility functions
+#
 
 def test_parse_host_port():
     f = parse_host_port
@@ -104,6 +111,10 @@ def test_resolve_address():
     assert f('tcp://localhost:456') == 'tcp://127.0.0.1:456'
     assert f('zmq://localhost:789') == 'zmq://127.0.0.1:789'
 
+
+#
+# Test concrete transport APIs
+#
 
 @gen_test()
 def test_tcp_specific():
@@ -241,6 +252,10 @@ def test_inproc_specific():
     assert len(client_addresses) == N + 1
     assert listener.contact_address not in client_addresses
 
+
+#
+# Test communications through the abstract API
+#
 
 @gen.coroutine
 def check_client_server(addr, check_listen_addr=None, check_contact_addr=None):
@@ -413,6 +428,10 @@ def test_inproc_client_server():
     yield check_client_server(inproc.new_address(), inproc_check())
 
 
+#
+# Test communication closing
+#
+
 @gen.coroutine
 def check_comm_closed_implicit(addr, delay=None):
     @gen.coroutine
@@ -533,6 +552,10 @@ def test_inproc_comm_closed_explicit_2():
     comm.close()
 
 
+#
+# Various stress tests
+#
+
 @gen.coroutine
 def check_connect_timeout(addr):
     t1 = time()
@@ -580,3 +603,126 @@ def test_tcp_many_listeners():
 @gen_test()
 def test_inproc_many_listeners():
     check_many_listeners('inproc://')
+
+
+#
+# Test deserialization
+#
+
+@gen.coroutine
+def check_listener_deserialize(addr, deserialize, in_value, check_out):
+    q = queues.Queue()
+
+    @gen.coroutine
+    def handle_comm(comm):
+        msg = yield comm.read()
+        q.put_nowait(msg)
+        yield comm.close()
+
+    with listen(addr, handle_comm, deserialize=deserialize) as listener:
+        comm = yield connect(listener.contact_address)
+
+    yield comm.write(in_value)
+    yield comm.close()
+
+    out_value = yield q.get()
+    check_out(out_value)
+
+@gen.coroutine
+def check_connector_deserialize(addr, deserialize, in_value, check_out):
+    q = queues.Queue()
+
+    @gen.coroutine
+    def handle_comm(comm):
+        msg = yield q.get()
+        yield comm.write(msg)
+        yield comm.close()
+
+    with listen(addr, handle_comm) as listener:
+        comm = yield connect(listener.contact_address, deserialize=deserialize)
+
+    q.put_nowait(in_value)
+    out_value = yield comm.read()
+    yield comm.close()
+    check_out(out_value)
+
+@gen.coroutine
+def check_deserialize(addr):
+    # Create a valid Serialized object
+    # (if using serialize(), it will lack a compression header)
+    ser = loads(dumps({'x': to_serialize(456)}), deserialize=False)['x']
+    assert isinstance(ser, Serialized)
+
+    # Test with Serialize and Serialized objects
+
+    msg = {'op': 'update',
+           'x': b'abc',
+           'to_ser': [to_serialize(123)],
+           'ser': ser,
+           }
+    msg_orig = msg.copy()
+
+    def check_out_false(out_value):
+        # Check output with deserialize=False
+        out_value = out_value.copy()  # in case transport passed the object as-is
+        to_ser = out_value.pop('to_ser')
+        ser = out_value.pop('ser')
+        expected_msg = msg_orig.copy()
+        del expected_msg['ser']
+        del expected_msg['to_ser']
+        assert out_value == expected_msg
+
+        assert isinstance(ser, Serialized)
+        assert deserialize(ser.header, ser.frames) == 456
+
+        assert isinstance(to_ser, list)
+        to_ser, = to_ser
+        # The to_serialize() value could have been actually serialized
+        # or not (it's a transport-specific optimization)
+        if isinstance(to_ser, Serialized):
+            assert deserialize(to_ser.header, to_ser.frames) == 123
+        else:
+            assert to_ser == to_serialize(123)
+
+    def check_out_true(out_value):
+        # Check output with deserialize=True
+        expected_msg = msg.copy()
+        expected_msg['ser'] = 456
+        expected_msg['to_ser'] = [123]
+        assert out_value == expected_msg
+
+    yield check_listener_deserialize(addr, False, msg, check_out_false)
+    yield check_connector_deserialize(addr, False, msg, check_out_false)
+
+    yield check_listener_deserialize(addr, True, msg, check_out_true)
+    yield check_connector_deserialize(addr, True, msg, check_out_true)
+
+    # Test with a long bytestring
+
+    msg = {'op': 'update',
+           'x': b'abc',
+           'y': b'def\n' * (2 ** 20),
+           }
+    msg_orig = msg.copy()
+
+    def check_out(out_value):
+        assert out_value == msg_orig
+
+    yield check_listener_deserialize(addr, False, msg, check_out)
+    yield check_connector_deserialize(addr, False, msg, check_out)
+
+    yield check_listener_deserialize(addr, True, msg, check_out)
+    yield check_connector_deserialize(addr, True, msg, check_out)
+
+
+@gen_test()
+def test_tcp_deserialize():
+    yield check_deserialize('tcp://')
+
+@gen_test()
+def test_zmq_deserialize():
+    yield check_deserialize('zmq://0.0.0.0')
+
+@gen_test()
+def test_inproc_deserialize():
+    yield check_deserialize('inproc://')

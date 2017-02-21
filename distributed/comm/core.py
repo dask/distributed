@@ -127,6 +127,13 @@ class Listener(with_metaclass(ABCMeta)):
         address such as 'tcp://0.0.0.0:123'.
         """
 
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.stop()
+
 
 def parse_address(addr):
     """

@@ -174,6 +174,13 @@ class Serialize(object):
 
     __repr__ = __str__
 
+    def __eq__(self, other):
+        return (isinstance(other, Serialize) and
+                other.data == self.data)
+
+    def __ne__(self, other):
+        return not (self == other)
+
 
 to_serialize = Serialize
 
@@ -194,6 +201,14 @@ class Serialized(object):
         from .core import decompress
         frames = decompress(self.header, self.frames)
         return deserialize(self.header, frames)
+
+    def __eq__(self, other):
+        return (isinstance(other, Serialized) and
+                other.header == self.header and
+                other.frames == self.frames)
+
+    def __ne__(self, other):
+        return not (self == other)
 
 
 def container_copy(c):

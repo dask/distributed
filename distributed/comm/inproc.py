@@ -13,6 +13,7 @@ from tornado.concurrent import Future
 from tornado.ioloop import IOLoop
 
 from ..compatibility import finalize
+from ..protocol import deserialize, Serialize, Serialized
 from ..utils import get_ip
 from .core import (connectors, listeners, Comm, Listener, CommClosedError,
                    )
@@ -129,7 +130,40 @@ class Queue(object):
             raise QueueEmpty
 
 
+def _maybe_deserialize(msg):
+    """
+    Replace all nested Serialize and Serialized values in *msg*
+    with their original object.  Returns a copy of *msg*.
+    """
+    def replace_inner(x):
+        if type(x) is dict:
+            x = x.copy()
+            for k, v in x.items():
+                typ = type(v)
+                if typ is dict or typ is list:
+                    x[k] = replace_inner(v)
+                elif typ is Serialize:
+                    x[k] = v.data
+                elif typ is Serialized:
+                    x[k] = deserialize(v.header, v.frames)
+
+        elif type(x) is list:
+            x = list(x)
+            for k, v in enumerate(x):
+                typ = type(v)
+                if typ is dict or typ is list:
+                    x[k] = replace_inner(v)
+                elif typ is Serialize:
+                    x[k] = v.data
+                elif typ is Serialized:
+                    x[k] = deserialize(v.header, v.frames)
+
+        return x
+
+    return replace_inner(msg)
+
 _EOF = object()
+
 
 class InProc(Comm):
     """
@@ -174,7 +208,9 @@ class InProc(Comm):
             self._finalizer.detach()
             raise CommClosedError
 
-        # XXX does deserialize matter?
+        deserialize = deserialize if deserialize is not None else self.deserialize
+        if deserialize:
+            msg = _maybe_deserialize(msg)
         raise gen.Return(msg)
 
     @gen.coroutine
