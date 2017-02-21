@@ -13,6 +13,7 @@ def is_zmq_enabled():
 
 
 def _register_transports():
+    from . import inproc
     from . import tcp
 
     if is_zmq_enabled():

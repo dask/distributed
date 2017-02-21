@@ -309,7 +309,7 @@ class InProcConnector(object):
     def connect(self, address, deserialize=True):
         listener = self.manager.get_listener_for(address)
         if listener is None:
-            raise IOError("no endpoint for inproc address %r")
+            raise IOError("no endpoint for inproc address %r" % (address,))
 
         conn_req = ConnectionRequest(c2s_q=Queue(),
                                      s2c_q=Queue(),
