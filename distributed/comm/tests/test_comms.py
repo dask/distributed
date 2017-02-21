@@ -689,17 +689,12 @@ def check_connector_deserialize(addr, deserialize, in_value, check_out):
 
 @gen.coroutine
 def check_deserialize(addr):
-    # Create a valid Serialized object
-    # (if using serialize(), it will lack a compression header)
-    ser = loads(dumps({'x': to_serialize(456)}), deserialize=False)['x']
-    assert isinstance(ser, Serialized)
-
     # Test with Serialize and Serialized objects
 
     msg = {'op': 'update',
            'x': b'abc',
            'to_ser': [to_serialize(123)],
-           'ser': ser,
+           'ser': Serialized(*serialize(456)),
            }
     msg_orig = msg.copy()
 
