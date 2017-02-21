@@ -760,6 +760,7 @@ def check_deserialize(addr):
 def test_tcp_deserialize():
     yield check_deserialize('tcp://')
 
+@requires_zmq
 @gen_test()
 def test_zmq_deserialize():
     yield check_deserialize('zmq://0.0.0.0')
