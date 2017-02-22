@@ -37,6 +37,7 @@ from .metrics import time
 from .publish import PublishExtension
 from .channels import ChannelScheduler
 from .stealing import WorkStealing
+from.recreate_exceptions import ExceptionScheduler
 from .utils import (All, ignoring, get_ip, ignore_exceptions,
         ensure_ip, get_fileno_limit, log_errors, key_split, mean,
         divide_n_among_bins, validate_key)
@@ -192,7 +193,8 @@ class Scheduler(Server):
     def __init__(self, center=None, loop=None,
                  delete_interval=500, synchronize_worker_interval=60000,
                  services=None, allowed_failures=ALLOWED_FAILURES,
-                 extensions=[ChannelScheduler, PublishExtension, WorkStealing],
+                 extensions=[ChannelScheduler, PublishExtension, WorkStealing,
+                             ExceptionScheduler],
                  validate=False, **kwargs):
 
         # Attributes
@@ -302,8 +304,7 @@ class Scheduler(Server):
                          'start_ipython': self.start_ipython,
                          'run_function': self.run_function,
                          'update_data': self.update_data,
-                         'set_resources': self.add_resources,
-                         'cause_of_failure': self.cause_of_failure}
+                         'set_resources': self.add_resources}
 
         self._transitions = {
                  ('released', 'waiting'): self.transition_released_waiting,
@@ -2910,13 +2911,6 @@ class Scheduler(Server):
         start_time = comm_bytes / BANDWIDTH + stack_time
         return (start_time, self.worker_bytes[worker])
 
-    def cause_of_failure(self, stream=None, keys=None):
-        for key in keys:
-            if key in self.exceptions_blame:
-                cause = self.exceptions_blame[key]
-                # cannot serialize sets
-                return (list(self.dependencies[cause]), cause,
-                        self.tasks[cause])
 
 def decide_worker(dependencies, occupancy, who_has, valid_workers,
                   loose_restrictions, objective, key):
