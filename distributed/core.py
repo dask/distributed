@@ -170,6 +170,9 @@ class Server(object):
     def port(self):
         """
         The port number this Server is listening on.
+
+        This will raise ValueError if the Server is listening on a
+        non-IP based protocol.
         """
         if not self._port:
             _, self._port = get_address_host_port(self.address)

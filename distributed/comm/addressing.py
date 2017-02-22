@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 import six
 
 from ..config import config
-from ..utils import ensure_ip
+from ..utils import ensure_ip, get_ip
 
 
 DEFAULT_SCHEME = config.get('default-scheme', 'tcp')
@@ -84,15 +84,36 @@ def unparse_host_port(host, port=None):
         return host
 
 
+# TODO: refactor to let each scheme define its implementation of the functions below
+
 def get_address_host_port(addr):
     """
     Get a (host, port) tuple out of the given address.
+
+    ValueError is raised if the address scheme doesn't allow extracting
+    the requested information.
     """
     scheme, loc = parse_address(addr)
     if scheme not in ('tcp', 'zmq'):
         raise ValueError("don't know how to extract host and port "
                          "for address %r" % (addr,))
     return parse_host_port(loc)
+
+
+def get_address_host(addr):
+    """
+    Return a hostname / IP address identifying the machine this address
+    is located on.
+
+    In contrast to get_address_host_port(), this function should always
+    succeed for well-formed addresses.
+    """
+    scheme, loc = parse_address(addr)
+    if scheme in ('tcp', 'zmq'):
+        return parse_host_port(loc)[0]
+    else:
+        # XXX This is assuming a local transport such as 'inproc'
+        return get_ip()
 
 
 def resolve_address(addr):
@@ -103,8 +124,6 @@ def resolve_address(addr):
 
     In practice, this means hostnames are resolved to IP addresses.
     """
-    # XXX circular import; reorganize APIs into a distributed.comms.addressing module?
-    #from ..utils import ensure_ip
     scheme, loc = parse_address(addr)
     if scheme not in ('tcp', 'zmq'):
         return addr
