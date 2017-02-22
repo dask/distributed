@@ -3754,7 +3754,7 @@ def test_dont_clear_waiting_data(c, s, a, b):
 @gen_cluster(client=True)
 def test_recreate_error_simple(c, s, a, b):
     def makes_error(x):
-        return x / 0
+        return 1 / x
 
     f = c.submit(makes_error, 0)
     yield _wait(f)
@@ -3762,5 +3762,25 @@ def test_recreate_error_simple(c, s, a, b):
 
     function, args, kwargs, deps = yield c._get_futures_error(f)
     assert function.__name__ == 'makes_error'
+    with pytest.raises(ZeroDivisionError):
+        function(*args, **kwargs)
+
+
+@gen_cluster(client=True)
+def test_recreate_error_complex(c, s, a, b):
+    def makes_error(x):
+        return 1 / x
+
+    x = delayed(makes_error)(1)
+    y = delayed(makes_error)(0)
+    tot = delayed(sum)(x, y)
+
+    f = c.compute(tot)
+    yield _wait(f)
+    assert f.status == 'error'
+
+    function, args, kwargs, deps = yield c._get_futures_error(f)
+    assert function.__name__ == 'makes_error'
+    assert args ==  (0,)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
