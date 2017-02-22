@@ -473,9 +473,9 @@ class WorkerBase(Server):
                 if not names_to_import:
                     logger.warning("Found nothing to import from %s", filename)
                 else:
+                    invalidate_caches()
                     for name in names_to_import:
                         logger.info("Reload module %s from %s file", name, ext)
-                        invalidate_caches()
                         reload(import_module(name))
             except Exception as e:
                 logger.exception(e)
