@@ -302,7 +302,8 @@ class Scheduler(Server):
                          'start_ipython': self.start_ipython,
                          'run_function': self.run_function,
                          'update_data': self.update_data,
-                         'set_resources': self.add_resources}
+                         'set_resources': self.add_resources,
+                         'cause_of_failure': self.cause_of_failure}
 
         self._transitions = {
                  ('released', 'waiting'): self.transition_released_waiting,
@@ -2909,6 +2910,13 @@ class Scheduler(Server):
         start_time = comm_bytes / BANDWIDTH + stack_time
         return (start_time, self.worker_bytes[worker])
 
+    def cause_of_failure(self, stream=None, keys=None):
+        for key in keys:
+            if key in self.exceptions_blame:
+                cause = self.exceptions_blame[key]
+                # cannot serialize sets
+                return (list(self.dependencies[cause]), cause,
+                        self.tasks[cause])
 
 def decide_worker(dependencies, occupancy, who_has, valid_workers,
                   loose_restrictions, objective, key):

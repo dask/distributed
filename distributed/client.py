@@ -36,7 +36,7 @@ from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import connect, rpc, clean_exception, CommClosedError
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
-from .worker import dumps_function, dumps_task
+from .worker import dumps_function, dumps_task, Worker
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)
 from .versions import get_versions
@@ -2381,6 +2381,58 @@ class Client(object):
 
         return dsk
 
+    @gen.coroutine
+    def _get_futures_error(self, future):
+        """
+        Ask the scheduler details of the sub-task of the given failed future
+
+        Parameters
+        ----------
+        future: future that failed
+
+        Returns
+        -------
+        The function that failed, its arguments, and the keys that it depends
+        on.
+        """
+        futures = futures_of(future)
+        deps, cause, task = yield self.scheduler.cause_of_failure(
+                keys=[f.key for f in futures])
+        function, args, kwargs = Worker._deserialize(None, **task)
+        raise gen.Return((function, args, kwargs, deps))
+
+    @gen.coroutine
+    def _get_specific_keys(self, keys):
+        # Inform scheduler that we want these keys.
+        futures = self._graph_to_futures({}, keys)
+
+        # Get data from remote workers, pack into args and kwargs
+        raise gen.Return(self._gather(futures))
+
+    def recreate_error_locally(self, future):
+        """
+        For a failed calculation, perform the blamed task locally for debugging.
+
+        Parameters
+        ----------
+        future: future that failed
+            The same thing as was given to ``gather``, but came back with
+            an exception/stack-trace.
+
+        Returns
+        -------
+        Nothing; the function runs and should raise an exception, allowing
+        the debugger to run.
+        """
+        function, args, kwargs, deps = sync(self.loop, self._get_futures_error,
+                                            future)
+        data = sync(self.loop, self._get_specific_keys, deps)
+        data = dict(zip(deps, data))
+        args = pack_data(args, data)
+        kwargs = pack_data(kwargs, data)
+
+        # run the function, hopefully trigger exception.
+        func(*args, **kwargs)
 
 Executor = Client
 
