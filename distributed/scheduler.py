@@ -1249,7 +1249,8 @@ class Scheduler(Server):
                             break
 
                         if 'status' in msg and 'error' in msg['status']:
-                            logger.exception(clean_exception(**msg)[1])
+                            logger.error("error from worker %s: %s",
+                                         worker, clean_exception(**msg)[1])
 
                         op = msg.pop('op')
                         if op:
@@ -2187,8 +2188,8 @@ class Scheduler(Server):
                 logger.info("Unexpected worker completed task, likely due to"
                             " work stealing.  Expected: %s, Got: %s, Key: %s",
                             w, worker, key)
-                # msg = {'op': 'release-task', 'key': key}
-                # self.worker_comms[w].send(msg)
+                msg = {'op': 'release-task', 'key': key, 'reason': 'stolen'}
+                self.worker_comms[w].send(msg)
 
             recommendations = OrderedDict()
 
