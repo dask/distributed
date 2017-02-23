@@ -80,9 +80,9 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
 
     bokeh_proc = None
     if _bokeh:
-        if bokeh_port == 0:
-            bokeh_port = open_port()
-        try:
+        if bokeh_port == 0:          # This is a hack and not robust
+            bokeh_port = open_port() # This port may be taken by the OS
+        try:                         # before we successfully pass it to Bokeh
             from distributed.bokeh.application import BokehWebInterface
             bokeh_proc = BokehWebInterface(http_port=http_port,
                     tcp_port=scheduler.port, bokeh_port=bokeh_port,
