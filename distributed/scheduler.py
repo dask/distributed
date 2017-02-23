@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-import atexit
 from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timedelta
 from functools import partial
@@ -32,6 +31,7 @@ from dask.order import order
 from .batched import BatchedSend
 from .comm.core import (normalize_address, resolve_address,
                         get_address_host_port, unparse_host_port)
+from .compatibility import finalize
 from .config import config
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
@@ -433,7 +433,8 @@ class Scheduler(Server):
             def del_scheduler_file():
                 if os.path.exists(fn):
                     os.remove(fn)
-            atexit.register(del_scheduler_file)
+
+            finalize(self, del_scheduler_file)
 
         return self.finished()
 
