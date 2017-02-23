@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 import six
 
 from ..config import config
-from ..utils import ensure_ip, get_ip
+from . import registry
 
 
 DEFAULT_SCHEME = config.get('default-scheme', 'tcp')
@@ -41,8 +41,6 @@ def parse_host_port(address, default_port=None):
     """
     if isinstance(address, tuple):
         return address
-    if address.startswith('tcp:'):
-        address = address[4:]
 
     def _fail():
         raise ValueError("invalid address %r" % (address,))
@@ -53,6 +51,8 @@ def parse_host_port(address, default_port=None):
         return default_port
 
     if address.startswith('['):
+        # IPv6 notation: '[addr]:port' or '[addr]'.
+        # The address may contain multiple colons.
         host, sep, tail = address[1:].partition(']')
         if not sep:
             _fail()
@@ -63,6 +63,7 @@ def parse_host_port(address, default_port=None):
                 _fail()
             port = tail[1:]
     else:
+        # Generic notation: 'addr:port' or 'addr'.
         host, sep, port = address.partition(':')
         if not sep:
             port = _default()
@@ -84,8 +85,6 @@ def unparse_host_port(host, port=None):
         return host
 
 
-# TODO: refactor to let each scheme define its implementation of the functions below
-
 def get_address_host_port(addr):
     """
     Get a (host, port) tuple out of the given address.
@@ -94,10 +93,12 @@ def get_address_host_port(addr):
     the requested information.
     """
     scheme, loc = parse_address(addr)
-    if scheme not in ('tcp', 'zmq'):
+    backend = registry.get_backend(scheme)
+    try:
+        return backend.get_address_host_port(loc)
+    except NotImplementedError:
         raise ValueError("don't know how to extract host and port "
                          "for address %r" % (addr,))
-    return parse_host_port(loc)
 
 
 def get_address_host(addr):
@@ -109,11 +110,8 @@ def get_address_host(addr):
     succeed for well-formed addresses.
     """
     scheme, loc = parse_address(addr)
-    if scheme in ('tcp', 'zmq'):
-        return parse_host_port(loc)[0]
-    else:
-        # XXX This is assuming a local transport such as 'inproc'
-        return get_ip()
+    backend = registry.get_backend(scheme)
+    return backend.get_address_host(loc)
 
 
 def resolve_address(addr):
@@ -125,10 +123,5 @@ def resolve_address(addr):
     In practice, this means hostnames are resolved to IP addresses.
     """
     scheme, loc = parse_address(addr)
-    if scheme not in ('tcp', 'zmq'):
-        return addr
-
-    host, port = parse_host_port(loc)
-    loc = unparse_host_port(ensure_ip(host), port)
-    addr = unparse_address(scheme, loc)
-    return addr
+    backend = registry.get_backend(scheme)
+    return unparse_address(scheme, backend.resolve_address(loc))
