@@ -380,8 +380,8 @@ class Client(object):
 
         from distributed.channels import ChannelClient
         ChannelClient(self)  # registers itself on construction
-        from distributed.recreate_exceptions import ExceptionsClient
-        ExceptionsClient(self)
+        from distributed.recreate_exceptions import ReplayExceptionClient
+        ReplayExceptionClient(self)
 
     def __str__(self):
         if hasattr(self, '_loop_thread'):

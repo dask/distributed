@@ -37,7 +37,7 @@ from .metrics import time
 from .publish import PublishExtension
 from .channels import ChannelScheduler
 from .stealing import WorkStealing
-from.recreate_exceptions import ExceptionScheduler
+from .recreate_exceptions import ReplayExceptionScheduler
 from .utils import (All, ignoring, get_ip, ignore_exceptions,
         ensure_ip, get_fileno_limit, log_errors, key_split, mean,
         divide_n_among_bins, validate_key)
@@ -194,7 +194,7 @@ class Scheduler(Server):
                  delete_interval=500, synchronize_worker_interval=60000,
                  services=None, allowed_failures=ALLOWED_FAILURES,
                  extensions=[ChannelScheduler, PublishExtension, WorkStealing,
-                             ExceptionScheduler],
+                             ReplayExceptionScheduler],
                  validate=False, **kwargs):
 
         # Attributes
