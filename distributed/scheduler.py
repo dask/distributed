@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timedelta
 from functools import partial
+import json
 import logging
 import math
 from math import log
@@ -30,6 +31,7 @@ from dask.order import order
 from .batched import BatchedSend
 from .comm.core import (normalize_address, resolve_address,
                         get_address_host_port, unparse_host_port)
+from .compatibility import finalize
 from .config import config
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
@@ -195,7 +197,7 @@ class Scheduler(Server):
                  services=None, allowed_failures=ALLOWED_FAILURES,
                  extensions=[ChannelScheduler, PublishExtension, WorkStealing,
                              ReplayExceptionScheduler],
-                 validate=False, **kwargs):
+                 validate=False, scheduler_file=None, **kwargs):
 
         # Attributes
         self.allowed_failures = allowed_failures
@@ -206,6 +208,7 @@ class Scheduler(Server):
         self.digests = None
         self.service_specs = services or {}
         self.services = {}
+        self.scheduler_file = scheduler_file
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -342,11 +345,11 @@ class Scheduler(Server):
 
     __repr__ = __str__
 
-    def identity(self, comm):
+    def identity(self, comm=None):
         """ Basic information about ourselves and our cluster """
         d = {'type': type(self).__name__,
              'id': str(self.id),
-             'workers': list(self.workers),
+             'address': self.address,
              'services': {key: v.port for (key, v) in self.services.items()},
              'workers': dict(self.worker_info)}
         return d
@@ -423,6 +426,17 @@ class Scheduler(Server):
             logger.info("  Scheduler at: %25s", self.address)
             for k, v in self.services.items():
                 logger.info("%11s at: %25s", k, '%s:%d' % (self.ip, v.port))
+
+        if self.scheduler_file:
+            with open(self.scheduler_file, 'w') as f:
+                json.dump(self.identity(), f, indent=2)
+
+            fn = self.scheduler_file  # remove file when we close the process
+            def del_scheduler_file():
+                if os.path.exists(fn):
+                    os.remove(fn)
+
+            finalize(self, del_scheduler_file)
 
         return self.finished()
 
@@ -521,6 +535,8 @@ class Scheduler(Server):
 
             if host_info:
                 self.host_info[host].update(host_info)
+
+            self.worker_info[address]['ncores'] = ncores
 
             delay = time() - now
             self.worker_info[address]['time-delay'] = delay

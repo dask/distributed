@@ -914,6 +914,7 @@ class Worker(WorkerBase):
         self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
+        self.extensions = {}
 
         self.data_needed = deque()  # TODO: replace with heap?
 

@@ -40,6 +40,9 @@ class ReplayExceptionScheduler(object):
 
         keys = kwargs.pop('keys', [])
         for key in keys:
+            if isinstance(key, list):
+                key = tuple(key)
+                key = tuple(key)
             if key in self.scheduler.exceptions_blame:
                 cause = self.scheduler.exceptions_blame[key]
                 # cannot serialize sets
@@ -73,11 +76,9 @@ class ReplayExceptionClient(object):
 
     @gen.coroutine
     def _get_futures_error(self, future):
-        print('get futures')
         futures = futures_of(future)
         out = yield self.scheduler.cause_of_failure(
             keys=[f.key for f in futures])
-        print('got cause')
         deps, cause, task = out['deps'], out['cause'], out['task']
         function, args, kwargs = _deserialize(**task)
         raise gen.Return((function, args, kwargs, deps))

@@ -3832,3 +3832,15 @@ def test_recreate_error(c, s, a, b):
     assert args ==  (0,)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
+
+
+@gen_cluster(client=True)
+def test_recreate_error_collection(c, s, a, b):
+    import dask.bag as db
+    b = db.range(10, npartitions=4)
+    b = b.map(lambda x: 1 / x)
+    b = b.persist()
+    f = c.compute(b)
+    yield _wait(f)
+
+    function, args, kwargs = yield c._recreate_error_locally(f)
