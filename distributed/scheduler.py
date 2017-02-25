@@ -307,7 +307,8 @@ class Scheduler(Server):
                          'start_ipython': self.start_ipython,
                          'run_function': self.run_function,
                          'update_data': self.update_data,
-                         'set_resources': self.add_resources}
+                         'set_resources': self.add_resources,
+                         'retire_workers': self.retire_workers}
 
         self._transitions = {
                  ('released', 'waiting'): self.transition_released_waiting,
@@ -2203,8 +2204,8 @@ class Scheduler(Server):
                 self.occupancy[w] -= duration
             self.check_idle_saturated(w)
             if w != worker:
-                logger.info("Unexpected worker completed task, likely due to"
-                            " work stealing.  Expected: %s, Got: %s, Key: %s",
+                logger.debug("Unexpected worker completed task, likely due to"
+                             " work stealing.  Expected: %s, Got: %s, Key: %s",
                             w, worker, key)
                 msg = {'op': 'release-task', 'key': key, 'reason': 'stolen'}
                 self.worker_comms[w].send(msg)

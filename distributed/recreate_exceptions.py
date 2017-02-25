@@ -76,7 +76,8 @@ class ReplayExceptionClient(object):
 
     @gen.coroutine
     def _get_futures_error(self, future):
-        futures = futures_of(future)
+        # only get errors for futures that errored.
+        futures = [f for f in futures_of(future) if f.status == 'error']
         out = yield self.scheduler.cause_of_failure(
             keys=[f.key for f in futures])
         deps, cause, task = out['deps'], out['cause'], out['task']
@@ -115,7 +116,8 @@ class ReplayExceptionClient(object):
         ----------
         future: future that failed
             The same thing as was given to ``gather``, but came back with
-            an exception/stack-trace.
+            an exception/stack-trace. Can also be a (persisted) dask collection
+            containing any errored futures.
 
         Returns
         -------

@@ -3751,6 +3751,7 @@ def test_dont_clear_waiting_data(c, s, a, b):
         assert s.waiting_data[x.key]
         yield gen.moment
 
+<<<<<<< HEAD
 @gen_cluster(client=True)
 def test_get_future_error_simple(c, s, a, b):
     def makes_error(x):
@@ -3844,3 +3845,10 @@ def test_recreate_error_collection(c, s, a, b):
     yield _wait(f)
 
     function, args, kwargs = yield c._recreate_error_locally(f)
+
+
+@gen_cluster(client=True)
+def test_retire_workers(c, s, a, b):
+    assert s.workers == {a.address, b.address}
+    yield c.scheduler.retire_workers(workers=[a.address])
+    assert s.workers == {b.address}

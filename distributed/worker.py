@@ -1077,7 +1077,12 @@ class Worker(WorkerBase):
 
             self.log.append((key, 'new'))
             try:
-                self.tasks[key] = _deserialize(function, args, kwargs, task)
+                start = time()
+                self.tasks[key] = self._deserialize(function, args, kwargs, task)
+                stop = time()
+
+                if stop - start > 0.010:
+                    self.startstops[key].append(('deserialize', start, stop))
                 raw = {'function': function, 'args': args, 'kwargs': kwargs,
                         'task': task}
             except Exception as e:
