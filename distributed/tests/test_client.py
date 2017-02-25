@@ -26,7 +26,7 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import delayed
 from dask.context import _globals
-from distributed import Worker, Nanny
+from distributed import Worker, Nanny, recreate_exceptions
 from distributed.comm import CommClosedError
 from distributed.utils_comm import WrappedKey
 from distributed.client import (Client, Future, CompatibleExecutor, _wait,
@@ -3751,7 +3751,6 @@ def test_dont_clear_waiting_data(c, s, a, b):
         assert s.waiting_data[x.key]
         yield gen.moment
 
-<<<<<<< HEAD
 @gen_cluster(client=True)
 def test_get_future_error_simple(c, s, a, b):
     def makes_error(x):
@@ -3844,7 +3843,24 @@ def test_recreate_error_collection(c, s, a, b):
     f = c.compute(b)
     yield _wait(f)
 
+    out = yield c._recreate_error_locally(f)
+    with pytest.raises(ZeroDivisionError):
+        recreate_exceptions.exec_tuple(out)
+
+    dd = pytest.importorskip('dask.dataframe')
+    import pandas as pd
+    df = dd.from_pandas(pd.DataFrame({'a': [0, 1,2,3,4]}), chunksize=2)
+    def make_err(x):
+        # because pandas would happily work with NaN
+        if x == 0 :
+            raise ValueError
+        return x
+    df2 = df.a.map(make_err)
+    f = c.compute(df2)
+    yield _wait(f)
     function, args, kwargs = yield c._recreate_error_locally(f)
+    with pytest.raises(ValueError):
+        function(*args, **kwargs)
 
 
 @gen_cluster(client=True)

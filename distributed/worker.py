@@ -1078,7 +1078,7 @@ class Worker(WorkerBase):
             self.log.append((key, 'new'))
             try:
                 start = time()
-                self.tasks[key] = self._deserialize(function, args, kwargs, task)
+                self.tasks[key] = _deserialize(function, args, kwargs, task)
                 stop = time()
 
                 if stop - start > 0.010:
