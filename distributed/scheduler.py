@@ -482,6 +482,7 @@ class Scheduler(Server):
         signal to the worker to shut down.  This works regardless of whether or
         not the worker has a nanny process restarting it
         """
+        logger.info("Closing worker %s", worker)
         with log_errors():
             nanny_addr = self.get_worker_service_addr(worker, 'nanny')
             address = nanny_addr or worker
@@ -489,7 +490,7 @@ class Scheduler(Server):
             self.remove_worker(address=worker)
 
             with rpc(address) as r:
-                yield r.terminate(report=False)
+                yield r.terminate(report=False, reply=False)
 
             self.remove_worker(address=worker)
 
@@ -1678,7 +1679,12 @@ class Scheduler(Server):
             return to_close
 
     @gen.coroutine
-    def retire_workers(self, comm=None, workers=None, remove=True, close=False):
+    def retire_workers(self, comm=None, workers=None, remove=True, close=False,
+                       close_workers=False):
+        if close:
+            logger.warn("The keyword close= has been deprecated. "
+                        "Use close_workers= instead")
+        close_workers = close_workers or close
         with log_errors():
             if workers is None:
                 while True:
