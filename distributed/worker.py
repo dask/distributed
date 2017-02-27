@@ -535,7 +535,8 @@ class WorkerBase(Server):
         result, missing_keys, missing_workers = yield gather_from_workers(
                 who_has)
         if missing_keys:
-            logger.warn("Could not find data", e)
+            logger.warn("Could not find data: %s on workers: %s",
+                        missing_keys, missing_workers)
             raise Return({'status': 'missing-data',
                           'keys': missing_keys})
         else:
