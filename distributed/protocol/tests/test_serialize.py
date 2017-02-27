@@ -67,6 +67,8 @@ def test_Serialize():
     assert not (s != u)
     assert s != t
     assert not (s == t)
+    assert hash(s) == hash(u)
+    assert hash(s) != hash(t)  # most probably
 
 
 def test_Serialized():
