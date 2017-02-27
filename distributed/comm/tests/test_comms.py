@@ -134,6 +134,10 @@ def test_resolve_address():
 # Test concrete transport APIs
 #
 
+#
+# Test concrete transport APIs
+#
+
 @gen_test()
 def test_tcp_specific():
     """
@@ -222,6 +226,97 @@ def test_zmq_specific():
     yield futures
     assert set(l) == {1234} | set(range(N))
 
+
+@gen.coroutine
+def check_inproc_specific(run_client):
+    """
+    Test concrete InProc API.
+    """
+    listener_addr = inproc.global_manager.new_address()
+    addr_head = listener_addr.rpartition('/')[0]
+
+    client_addresses = set()
+
+    N_MSGS = 3
+
+    @gen.coroutine
+    def handle_comm(comm):
+        assert comm.peer_address.startswith('inproc://' + addr_head)
+        client_addresses.add(comm.peer_address)
+        for i in range(N_MSGS):
+            msg = yield comm.read()
+            msg['op'] = 'pong'
+            yield comm.write(msg)
+        yield comm.close()
+
+    listener = inproc.InProcListener(listener_addr, handle_comm)
+    listener.start()
+    assert listener.listen_address == listener.contact_address == 'inproc://' + listener_addr
+
+    connector = inproc.InProcConnector(inproc.global_manager)
+    l = []
+
+    @gen.coroutine
+    def client_communicate(key, delay=0):
+        comm = yield connector.connect(listener_addr)
+        assert comm.peer_address == 'inproc://' + listener_addr
+        for i in range(N_MSGS):
+            yield comm.write({'op': 'ping', 'data': key})
+            if delay:
+                yield gen.sleep(delay)
+            msg = yield comm.read()
+        assert msg == {'op': 'pong', 'data': key}
+        l.append(key)
+        yield comm.close()
+
+    client_communicate = partial(run_client, client_communicate)
+
+    yield client_communicate(key=1234)
+
+    # Many clients at once
+    N = 20
+    futures = [client_communicate(key=i, delay=0.001) for i in range(N)]
+    yield futures
+    assert set(l) == {1234} | set(range(N))
+
+    assert len(client_addresses) == N + 1
+    assert listener.contact_address not in client_addresses
+
+
+def run_coro(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+def run_coro_in_thread(func, *args, **kwargs):
+    fut = Future()
+    main_loop = ioloop.IOLoop.current()
+
+    def run():
+        thread_loop = ioloop.IOLoop()  # need fresh IO loop for run_sync()
+        try:
+            res = thread_loop.run_sync(partial(func, *args, **kwargs),
+                                       timeout=10)
+        except:
+            main_loop.add_callback(fut.set_exc_info, sys.exc_info())
+        else:
+            main_loop.add_callback(fut.set_result, res)
+
+    t = threading.Thread(target=run)
+    t.start()
+    return fut
+
+
+@gen_test()
+def test_inproc_specific_same_thread():
+    yield check_inproc_specific(run_coro)
+
+@gen_test()
+def test_inproc_specific_different_threads():
+    yield check_inproc_specific(run_coro_in_thread)
+
+
+#
+# Test communications through the abstract API
+#
 
 @gen.coroutine
 def check_inproc_specific(run_client):

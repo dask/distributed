@@ -212,6 +212,7 @@ class WorkerBase(Server):
         # XXX Factor this out
         if isinstance(addr_or_port, int):
             # Default ip is the required one to reach the scheduler
+            # XXX get local listening address
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
                 )
