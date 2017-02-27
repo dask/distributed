@@ -490,7 +490,10 @@ class Scheduler(Server):
             self.remove_worker(address=worker)
 
             with rpc(address) as r:
-                yield r.terminate(report=False, reply=False)
+                try:
+                    yield r.terminate(report=False)
+                except EnvironmentError as e:
+                    logger.info("Exception from worker while closing: %s", e)
 
             self.remove_worker(address=worker)
 
@@ -1692,7 +1695,7 @@ class Scheduler(Server):
                         workers = self.workers_to_close()
                         if workers:
                             yield self.retire_workers(workers=workers,
-                                    remove=remove, close=close)
+                                    remove=remove, close_workers=close_workers)
                         raise gen.Return(list(workers))
                     except KeyError:  # keys left during replicate
                         pass
@@ -1709,7 +1712,7 @@ class Scheduler(Server):
                 else:
                     raise gen.Return([])
 
-            if close and workers:
+            if close_workers and workers:
                 yield [self.close_worker(worker=w) for w in workers]
             if remove:
                 for w in workers:
