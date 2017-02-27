@@ -474,7 +474,7 @@ class WorkerBase(Server):
                             names_to_import.append(pkg.project_name)
                     elif ext == '.zip':
                         names_to_import.append(name)
-                
+
                 if not names_to_import:
                     logger.warning("Found nothing to import from %s", filename)
                 else:
@@ -918,6 +918,7 @@ class Worker(WorkerBase):
         self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
+        self.extensions = {}
 
         self.data_needed = deque()  # TODO: replace with heap?
 
@@ -1080,7 +1081,12 @@ class Worker(WorkerBase):
 
             self.log.append((key, 'new'))
             try:
+                start = time()
                 self.tasks[key] = self._deserialize(function, args, kwargs, task)
+                stop = time()
+
+                if stop - start > 0.010:
+                    self.startstops[key].append(('deserialize', start, stop))
                 raw = {'function': function, 'args': args, 'kwargs': kwargs,
                         'task': task}
             except Exception as e:
