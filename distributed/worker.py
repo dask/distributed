@@ -533,7 +533,7 @@ class WorkerBase(Server):
                     for k, v in who_has.items()
                     if k not in self.data}
         result, missing_keys, missing_workers = yield gather_from_workers(
-                who_has, permissive=True)
+                who_has)
         if missing_keys:
             logger.warn("Could not find data", e)
             raise Return({'status': 'missing-data',
