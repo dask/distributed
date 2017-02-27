@@ -918,13 +918,14 @@ class Client(object):
                     if errors == 'raise':
                         try:
                             st = self.futures[key]
-                            six.reraise(type(st.exception),
-                                        st.exception,
-                                        st.traceback)
                         except (AttributeError, KeyError):
                             six.reraise(CancelledError,
                                         CancelledError(key),
                                         None)
+                        else:
+                            six.reraise(type(st.exception),
+                                        st.exception,
+                                        st.traceback)
                     if errors == 'skip':
                         bad_keys.add(key)
                         bad_data[key] = None
