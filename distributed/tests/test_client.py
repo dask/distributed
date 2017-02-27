@@ -3843,9 +3843,9 @@ def test_recreate_error_collection(c, s, a, b):
     f = c.compute(b)
     yield _wait(f)
 
-    out = yield c._recreate_error_locally(f)
+    function, args, kwargs = yield c._recreate_error_locally(f)
     with pytest.raises(ZeroDivisionError):
-        recreate_exceptions.exec_tuple(out)
+        function(*args, **kwargs)
 
     dd = pytest.importorskip('dask.dataframe')
     import pandas as pd

@@ -41,8 +41,7 @@ class ReplayExceptionScheduler(object):
         keys = kwargs.pop('keys', [])
         for key in keys:
             if isinstance(key, list):
-                key = tuple(key)
-                key = tuple(key)
+                key = tuple(key)  # ensure not a list from msgpack
             if key in self.scheduler.exceptions_blame:
                 cause = self.scheduler.exceptions_blame[key]
                 # cannot serialize sets
@@ -85,7 +84,8 @@ class ReplayExceptionClient(object):
             function, args, kwargs = _deserialize(**task)
             raise gen.Return((function, args, kwargs, deps))
         else:
-            raise gen.Return(task)
+            function, args, kwargs = _deserialize(task=task)
+            raise gen.Return((function, args, kwargs, []))
 
     def get_futures_error(self, future):
         """
@@ -105,15 +105,12 @@ class ReplayExceptionClient(object):
     @gen.coroutine
     def _recreate_error_locally(self, future):
         out = yield self._get_futures_error(future)
-        if len(out) == 4:
-            function, args, kwargs, deps = out
-            futures = self.client._graph_to_futures({}, deps)
-            data = yield self.client._gather(futures)
-            args = pack_data(args, data)
-            kwargs = pack_data(kwargs, data)
-            raise gen.Return((function, args, kwargs))
-        else:
-            raise gen.Return(out)
+        function, args, kwargs, deps = out
+        futures = self.client._graph_to_futures({}, deps)
+        data = yield self.client._gather(futures)
+        args = pack_data(args, data)
+        kwargs = pack_data(kwargs, data)
+        raise gen.Return((function, args, kwargs))
 
     def recreate_error_locally(self, future):
         """
@@ -131,13 +128,5 @@ class ReplayExceptionClient(object):
         Nothing; the function runs and should raise an exception, allowing
         the debugger to run.
         """
-        out = sync(self.client.loop, self._recreate_error_locally, future)
-        if len(out) == 3 and isinstance(out[2], dict):
-            func, args, kwargsfunc(*args, **kwargs)
-        else:
-            exec_tuple(out)
-
-
-def exec_tuple(t):
-    newt = (exec_tuple(v) if isinstance(v, tuple) else v for v in t[1:])
-    return t[0](*newt)
+        func, args, kwargs = sync(self.client.loop, self._recreate_error_locally, future)
+        func(*args, **kwargs)
