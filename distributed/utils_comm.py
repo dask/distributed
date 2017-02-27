@@ -58,10 +58,7 @@ def gather_from_workers(who_has, rpc=rpc, close=True):
             except IndexError:
                 bad_keys.add(key)
         if bad_keys:
-            if permissive:
-                all_bad_keys |= bad_keys
-            else:
-                raise KeyError(*bad_keys)
+            all_bad_keys |= bad_keys
 
         rpcs = {addr: rpc(addr) for addr in d}
         try:
