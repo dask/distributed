@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 import pytest
 
 from distributed.utils_test import gen_cluster
-from distributed.utils_comm import ( scatter_to_workers, pack_data,
+from distributed.utils_comm import (scatter_to_workers, pack_data,
         gather_from_workers)
 
 
@@ -16,12 +16,14 @@ def test_pack_data():
 
 @gen_cluster()
 def test_gather_from_workers_permissive(s, a, b):
+    while not a.batched_stream:
+        yield gen.sleep(0.01)
     a.update_data(data={'x': 1})
     with pytest.raises(KeyError):
         yield gather_from_workers({'x': [a.address], 'y': [b.address]})
 
-    data, bad = yield gather_from_workers({'x': [a.address], 'y': [b.address]},
-                                          permissive=True)
+    data, missing, bad_workers = yield gather_from_workers(
+            {'x': [a.address], 'y': [b.address]}, permissive=True)
 
     assert data == {'x': 1}
-    assert list(bad) == ['y']
+    assert list(missing) == ['y']

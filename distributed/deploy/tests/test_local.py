@@ -12,15 +12,16 @@ import pytest
 from distributed import Client, Worker, Nanny
 from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
-from distributed.utils_test import inc, loop, raises, gen_test
-from distributed.utils import ignoring
+from distributed.utils_test import (inc, loop, raises, gen_test,
+        assert_can_connect_locally_4, assert_can_connect_from_everywhere_4_6)
+from distributed.utils import ignoring, sync
 
 from distributed.deploy.utils_test import ClusterTest
 
 def test_simple(loop):
     with LocalCluster(4, scheduler_port=0, nanny=False, silence_logs=False,
-            diagnostics_port=None, loop=loop) as c:
-        with Client((c.scheduler.ip, c.scheduler.port), loop=loop) as e:
+                      diagnostics_port=None, loop=loop) as c:
+        with Client(c.scheduler_address, loop=loop) as e:
             x = e.submit(inc, 1)
             x.result()
             assert x.key in c.scheduler.tasks
@@ -33,7 +34,7 @@ def test_procs(loop):
             diagnostics_port=None, silence_logs=False) as c:
         assert len(c.workers) == 2
         assert all(isinstance(w, Worker) for w in c.workers)
-        with Client((c.scheduler.ip, c.scheduler.port), loop=loop) as e:
+        with Client(c.scheduler.address, loop=loop) as e:
             assert all(w.ncores == 3 for w in c.workers)
         repr(c)
 
@@ -41,7 +42,7 @@ def test_procs(loop):
             diagnostics_port=None, silence_logs=False) as c:
         assert len(c.workers) == 2
         assert all(isinstance(w, Nanny) for w in c.workers)
-        with Client((c.scheduler.ip, c.scheduler.port), loop=loop) as e:
+        with Client(c.scheduler.address, loop=loop) as e:
             assert all(v == 3 for v in e.ncores().values())
 
             c.start_worker(nanny=False)
@@ -223,3 +224,15 @@ def test_silent_startup(capsys, loop):
     assert not out
     for line in err.split('\n'):
         assert 'worker' not in line
+
+
+def test_only_local_access(loop):
+    with LocalCluster(scheduler_port=0, silence_logs=False,
+                      diagnostics_port=None, loop=loop) as c:
+        sync(loop, assert_can_connect_locally_4, c.scheduler.port)
+
+
+def test_remote_access(loop):
+    with LocalCluster(scheduler_port=0, silence_logs=False,
+                      diagnostics_port=None, ip='', loop=loop) as c:
+        sync(loop, assert_can_connect_from_everywhere_4_6, c.scheduler.port)

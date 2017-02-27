@@ -13,7 +13,7 @@ from tornado import gen
 
 import dask
 from dask import delayed
-from distributed import Worker, Nanny
+from distributed import Worker, Nanny, worker_client
 from distributed.config import config
 from distributed.client import Client, _wait, wait
 from distributed.metrics import time
@@ -186,23 +186,30 @@ def test_work_steal_no_kwargs(c, s, a, b):
 
     assert result == sum(map(inc, range(100)))
 
+
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)])
 def test_dont_steal_worker_restrictions(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     yield future._result()
 
     futures = c.map(slowinc, range(100), delay=0.1, workers=a.address)
-    yield gen.sleep(0.1)
+
+    while len(a.task_state) + len(b.task_state) < 100:
+        yield gen.sleep(0.01)
+
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
 
     result = s.extensions['stealing'].balance()
 
     yield gen.sleep(0.1)
+
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
 
 
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1), ('127.0.0.2', 1)])
 def test_dont_steal_host_restrictions(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
@@ -221,7 +228,7 @@ def test_dont_steal_host_restrictions(c, s, a, b):
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 2}}),
-                                  ('127.0.0.2', 1)])
+                                  ('127.0.0.1', 1)])
 def test_dont_steal_resource_restrictions(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     yield future._result()
@@ -275,7 +282,7 @@ def test_balance_without_dependencies(c, s, *workers):
     yield _wait(futures)
 
     durations = [sum(w.data.values()) for w in workers]
-    assert max(durations) / min(durations) < 2
+    assert max(durations) / min(durations) < 3
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 4)] * 2)
@@ -480,3 +487,62 @@ def test_steal_communication_heavy_tasks(c, s, a, b):
     s.extensions['stealing'].balance()
 
     assert s.processing[b.address]
+
+
+@gen_cluster(client=True)
+def test_steal_twice(c, s, a, b):
+    x = c.submit(inc, 1, workers=a.address)
+    yield _wait(x)
+
+    futures = [c.submit(slowadd, x, i, delay=0.2) for i in range(100)]
+
+    while len(s.task_state) < 100:  # tasks are all allocated
+        yield gen.sleep(0.01)
+
+    workers = [Worker(s.ip, s.port, loop=s.loop) for _ in range(30)]
+    yield [w._start() for w in workers]  # army of new workers arrives to help
+
+    yield _wait(futures)
+
+    assert all(s.has_what.values())
+    assert max(map(len, s.has_what.values())) < 20
+
+    yield [w._close() for w in workers]
+
+
+@gen_cluster(client=True)
+def test_accept_old_result_if_stolen(c, s, a, b):
+    future = c.submit(slowinc, 1, delay=0.5, workers=a.address)
+    while not a.executing:
+        yield gen.sleep(0.01)
+    steal = s.extensions['stealing']
+
+    yield gen.sleep(0.25)
+
+    steal.move_task(future.key, a.address, b.address)
+    while not b.executing:
+        yield gen.sleep(0.01)
+
+    yield gen.sleep(0.25)
+
+    assert future.key in s.who_has
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_dont_steal_long_running_tasks(c, s, a, b):
+    def long(delay):
+        with worker_client() as c:
+            sleep(delay)
+
+    yield c.submit(long, 0.1)._result()  # learn duration
+    yield c.submit(inc, 1)._result()  # learn duration
+
+    long_tasks = c.map(long, [0.5, 0.6], workers=a.address,
+                       allow_other_workers=True)
+    yield gen.sleep(0.1)  # let them start
+    incs = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
+
+    yield gen.sleep(0.2)
+    assert not any(k.startswith('long') for k in s.processing[b.address])
+
+    yield _wait(long_tasks)

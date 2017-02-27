@@ -9,7 +9,7 @@ from distributed.protocol import (serialize, deserialize, decompress, dumps,
         loads, to_serialize)
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.utils import tmpfile
-from distributed.utils_test import slow
+from distributed.utils_test import slow, gen_cluster
 from distributed.protocol.numpy import itemsize
 from distributed.protocol.compression import maybe_compress
 
@@ -30,6 +30,8 @@ def test_serialize():
         [np.ones(5),
          np.array(5),
          np.asfortranarray(np.random.random((5, 5))),
+         np.asfortranarray(np.random.random((5, 5)))[::2, :],
+         np.asfortranarray(np.random.random((5, 5)))[:, ::2],
          np.random.random(5).astype('f4'),
          np.random.random(5).astype('>i8'),
          np.random.random(5).astype('<i8'),
@@ -47,6 +49,10 @@ def test_serialize():
          np.ones(shape=(5,), dtype=('f8', 32)),
          np.ones(shape=(5,), dtype=[('x', 'f8', 32)]),
          np.array([(1, 'abc')], dtype=[('x', 'i4'), ('s', object)]),
+         np.zeros(5000, dtype=[('x%d'%i,'<f8') for i in range(4)]),
+         np.zeros(5000, dtype='S32'),
+         np.zeros((1, 1000, 1000)),
+         np.arange(12)[::2],  # non-contiguous array
          np.ones(shape=(5, 6)).astype(dtype=[('total', '<f8'), ('n', '<f8')])])
 def test_dumps_serialize_numpy(x):
     header, frames = serialize(x)
@@ -55,6 +61,8 @@ def test_dumps_serialize_numpy(x):
     y = deserialize(header, frames)
 
     np.testing.assert_equal(x, y)
+    if np.isfortran(x):
+        assert x.strides == y.strides
 
 
 def test_memmap():
@@ -136,4 +144,11 @@ def test_dont_compress_uncompressable_data():
     x = np.ones(100)
     header, [data] = serialize(x)
     assert 'compression' not in header
-    assert data.obj.ctypes.data == x.ctypes.data
+    if isinstance(data, memoryview):
+        assert data.obj.ctypes.data == x.ctypes.data
+
+
+@gen_cluster(client=True, timeout=60)
+def test_dumps_large_blosc(c, s, a, b):
+    x = c.submit(np.ones, BIG_BYTES_SHARD_SIZE * 2, dtype='u1')
+    result = yield x._result()

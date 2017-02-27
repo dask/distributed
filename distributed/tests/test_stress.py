@@ -37,7 +37,7 @@ def test_stress_1(c, s, a, b):
 @pytest.mark.parametrize(('func', 'n'), [(slowinc, 100), (inc, 1000)])
 def test_stress_gc(loop, func, n):
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.submit(func, 1)
             for i in range(n):
                 x = c.submit(func, x)
@@ -65,7 +65,7 @@ def test_cancel_stress_sync(loop):
     da = pytest.importorskip('dask.array')
     x = da.random.random((40, 40), chunks=(1, 1))
     with cluster() as (s, [a, b]):
-        with Client(('127.0.0.1', s['port']), loop=loop) as c:
+        with Client(s['address'], loop=loop) as c:
             x = c.persist(x)
             y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
             wait(x)
@@ -176,10 +176,10 @@ def test_stress_communication(c, s, *workers):
         if soft < lim:
             resource.setrlimit(resource.RLIMIT_NOFILE, (lim, max(hard, lim)))
     except Exception as e:
-        pytest.skip("file descriptor limit too low and couldn't be increased :"
+        pytest.skip("file descriptor limit too low and can't be increased :"
                     + str(e))
 
-    n = 40
+    n = 20
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
     ys = [x + x.T for x in xs]
     z = da.atop(vsum, 'ij', *concat(zip(ys, ['ij'] * n)), dtype='float64')
@@ -215,3 +215,25 @@ def test_stress_steal(c, s, *workers):
                 s.work_steal(a.address, b.address, 0.5)
         if not s.processing:
             break
+
+
+@slow
+@gen_cluster(ncores=[('127.0.0.1', 1)] * 10, client=True, timeout=120)
+def test_close_connections(c, s, *workers):
+    da = pytest.importorskip('dask.array')
+    x = da.random.random(size=(1000, 1000), chunks=(1000, 1))
+    for i in range(3):
+        x = x.rechunk((1, 1000))
+        x = x.rechunk((1000, 1))
+
+    future = c.compute(x.sum())
+    while any(s.processing.values()):
+        yield gen.sleep(0.5)
+        worker = random.choice(list(workers))
+        for comm in worker._comms:
+            comm.abort()
+        # print(frequencies(s.task_state.values()))
+        # for w in workers:
+        #     print(w)
+
+    yield _wait(future)

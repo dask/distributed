@@ -4,7 +4,8 @@ from functools import partial
 
 from .compression import compressions, default_compression
 from .core import dumps, loads, maybe_compress, decompress, msgpack
-from .serialize import (serialize, deserialize, Serialize, Serialized,
+from .serialize import (
+    serialize, deserialize, nested_deserialize, Serialize, Serialized,
     to_serialize, register_serialization, register_serialization_lazy)
 
 from ..utils  import ignoring
@@ -21,3 +22,7 @@ def _register_h5py():
 @partial(register_serialization_lazy, "netCDF4")
 def _register_netcdf4():
     from . import netcdf4
+
+@partial(register_serialization_lazy, "keras")
+def _register_keras():
+    from . import keras

@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 import sys
 
 import numpy as np
+from numpy.lib import stride_tricks
 
 try:
     import blosc
@@ -42,15 +43,23 @@ def serialize_numpy_ndarray(x):
     else:
         dt = x.dtype.str
 
-    x = np.ascontiguousarray(x)  # cannot get .data attribute from discontiguous
+    if not x.shape:
+        strides = x.strides
+        data = x.ravel().view('u1').data
+    elif np.isfortran(x):
+        strides = x.strides
+        data = stride_tricks.as_strided(x, shape=(np.prod(x.shape),),
+                                           strides=(x.dtype.itemsize,)).view('u1').data
+    else:
+        x = np.ascontiguousarray(x)
+        strides = x.strides
+        data = x.ravel().view('u1').data
 
     header = {'dtype': dt,
-              'strides': x.strides,
-              'shape': x.shape}
+              'shape': x.shape,
+              'strides': strides}
 
-    data = x.view('u1').data
-
-    if blosc and len(data) > 1e5:
+    if blosc and x.nbytes > 1e5:
         frames = frame_split_size([data])
         if sys.version_info.major == 2:
             frames = [ensure_bytes(frame) for frame in frames]
@@ -58,7 +67,7 @@ def serialize_numpy_ndarray(x):
         out = []
         compression = []
         for frame in frames:
-            sample = byte_sample(frame, 10000 * size, 5)
+            sample = byte_sample(frame, 10000 // size * size, 5)
             csample = blosc.compress(sample, typesize=size, cname='lz4', clevel=3)
             if len(csample) < 0.8 * len(sample):
                 compressed = blosc.compress(frame, typesize=size, cname='lz4', clevel=5)
@@ -89,7 +98,9 @@ def deserialize_numpy_ndarray(header, frames):
             dt = list(dt)
 
         x = np.ndarray(header['shape'], dtype=dt, buffer=frames[0],
-                       strides=header['strides'])
+                strides=header['strides'])
+
+        x = stride_tricks.as_strided(x, strides=header['strides'])
 
         return x
 

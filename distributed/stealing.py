@@ -7,10 +7,10 @@ import os
 from time import time
 
 from toolz import topk
-from tornado.iostream import StreamClosedError
 from tornado.ioloop import PeriodicCallback
 
 from .config import config
+from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import key_split, log_errors, ignoring
 
@@ -50,6 +50,8 @@ class WorkStealing(SchedulerPlugin):
         self.log = deque(maxlen=100000)
         self.count = 0
 
+        scheduler.worker_handlers['long-running'] = self.transition_long_running
+
     def add_worker(self, scheduler=None, worker=None):
         self.stealable[worker] = [set() for i in range(15)]
 
@@ -72,6 +74,9 @@ class WorkStealing(SchedulerPlugin):
                     for k in self.stealable_unknown_durations.pop(ks):
                         if self.scheduler.task_state[k] == 'processing':
                             self.put_key_in_stealable(k, split=ks)
+
+    def transition_long_running(self, key=None, worker=None):
+        self.remove_key_from_stealable(key)
 
     def put_key_in_stealable(self, key, split=None):
         worker = self.scheduler.rprocessing[key]
@@ -160,16 +165,18 @@ class WorkStealing(SchedulerPlugin):
             self.scheduler.rprocessing[key] = thief
             self.scheduler.occupancy[thief] += duration
             self.scheduler.total_occupancy += duration
+            self.put_key_in_stealable(key)
 
-            self.scheduler.worker_streams[victim].send({'op': 'release-task',
-                                                        'key': key})
+            self.scheduler.worker_comms[victim].send({'op': 'release-task',
+                                                      'reason': 'stolen',
+                                                      'key': key})
 
             try:
                 self.scheduler.send_task_to_worker(thief, key)
-            except StreamClosedError:
+            except CommClosedError:
                 self.scheduler.remove_worker(thief)
-        except StreamClosedError:
-            logger.info("Worker stream closed while stealing: %s", victim)
+        except CommClosedError:
+            logger.info("Worker comm closed while stealing: %s", victim)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -195,7 +202,9 @@ class WorkStealing(SchedulerPlugin):
 
             if not s.saturated:
                 saturated = topk(10, s.workers, key=occupancy.get)
-                saturated = [w for w in saturated if occupancy[w] > 0.2]
+                saturated = [w for w in saturated
+                                if occupancy[w] > 0.2
+                               and len(s.processing[w]) > s.ncores[w]]
             elif len(s.saturated) < 20:
                 saturated = sorted(saturated, key=occupancy.get, reverse=True)
 
@@ -236,9 +245,13 @@ class WorkStealing(SchedulerPlugin):
                     for key in list(stealable):
                         if not idle:
                             break
+
                         sat = s.rprocessing[key]
                         if occupancy[sat] < 0.2:
                             continue
+                        if len(s.processing[sat]) <= s.ncores[sat]:
+                            continue
+
                         i += 1
                         idl = idle[i % len(idle)]
                         duration = s.processing[sat][key]
@@ -272,6 +285,10 @@ class WorkStealing(SchedulerPlugin):
             s.clear()
         self.key_stealable.clear()
         self.stealable_unknown_durations.clear()
+
+    def story(self, *keys):
+        keys = set(keys)
+        return [t for L in self.log for t in L if any(x in keys for x in t)]
 
 
 fast_tasks = {'shuffle-split'}

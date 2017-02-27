@@ -23,11 +23,12 @@ from ..utils import ignoring
 _deserialize = deserialize
 
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 def dumps(msg):
     """ Transform Python message to bytestream suitable for communication """
+    original = msg
     try:
         data = {}
         # Only lists and dicts can contain serialized values
@@ -54,7 +55,7 @@ def dumps(msg):
 
         for key, (head, frames) in data.items():
             if 'lengths' not in head:
-                head['lengths'] = list(map(len, frames))
+                head['lengths'] = tuple(map(len, frames))
             if 'compression' not in head:
                 frames = frame_split_size(frames)
                 if frames:
@@ -69,13 +70,11 @@ def dumps(msg):
 
         for key, (head, frames) in pre.items():
             if 'lengths' not in head:
-                head['lengths'] = list(map(len, frames))
+                head['lengths'] = tuple(map(len, frames))
             head['count'] = len(frames)
             header['headers'][key] = head
             header['keys'].append(key)
             out_frames.extend(frames)
-
-        out_frames = [bytes(f) for f in out_frames]
 
         return [small_header, small_payload,
                 msgpack.dumps(header, use_bin_type=True)] + out_frames
@@ -106,11 +105,15 @@ def loads(frames, deserialize=True):
             head = headers[key]
             lengths = head['lengths']
             count = head['count']
-            fs = frames[-count::][::-1]
-            del frames[-count:]
+            if count:
+                fs = frames[-count::][::-1]
+                del frames[-count:]
+            else:
+                fs = []
 
             if deserialize or key in bytestrings:
-                fs = decompress(head, fs)
+                if 'compression' in head:
+                    fs = decompress(head, fs)
                 fs = merge_frames(head, fs)
                 value = _deserialize(head, fs)
             else:

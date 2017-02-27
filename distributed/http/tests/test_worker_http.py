@@ -4,18 +4,18 @@ import json
 import tornado
 
 from tornado.ioloop import IOLoop
-from tornado import web
+from tornado import web, gen
 from tornado.httpclient import AsyncHTTPClient
 from tornado.httpserver import HTTPServer
 
-from distributed.utils_test import gen_cluster, gen_test
+from distributed.utils_test import gen_cluster, gen_test, slowinc
 from distributed import Worker
 from distributed.http.worker import HTTPWorker
 from distributed.sizeof import sizeof
 
 
-@gen_cluster()
-def test_simple(s, a, b):
+@gen_cluster(client=True)
+def test_simple(c, s, a, b):
     server = HTTPWorker(a)
     server.listen(0)
     client = AsyncHTTPClient()
@@ -29,7 +29,7 @@ def test_simple(s, a, b):
             server.port)
     response = json.loads(response.body.decode())
 
-    a.data['x'] = 1
+    futures = yield c._scatter(list(range(10)))
 
     try:
         import psutil
@@ -48,10 +48,26 @@ def test_simple(s, a, b):
     server.stop()
 
 
+@gen_cluster(client=True)
+def test_processing(c, s, a, b):
+    server = HTTPWorker(a)
+    server.listen(0)
+    client = AsyncHTTPClient()
+
+    futures = c.map(slowinc, range(10), delay=1)
+    while not a.executing:
+        yield gen.sleep(0.01)
+
+    response = yield client.fetch('http://localhost:%d/processing.json' % server.port)
+
+    response = json.loads(response.body.decode())
+    assert response
+    assert response['processing']
+
+
 @gen_cluster()
 def test_services(s, a, b):
-    c = Worker(s.ip, s.port, ncores=1, ip='127.0.0.1',
-               services={'http': HTTPWorker})
+    c = Worker(s.ip, s.port, ncores=1, services={'http': HTTPWorker})
     yield c._start()
     assert isinstance(c.services['http'], HTTPServer)
     assert c.service_ports['http'] == c.services['http'].port
@@ -62,8 +78,7 @@ def test_services(s, a, b):
 
 @gen_cluster()
 def test_services_port(s, a, b):
-    c = Worker(s.ip, s.port, ncores=1, ip='127.0.0.1',
-               services={('http', 9898): HTTPWorker})
+    c = Worker(s.ip, s.port, ncores=1, services={('http', 9898): HTTPWorker})
     yield c._start()
     assert isinstance(c.services['http'], HTTPServer)
     assert (c.service_ports['http']
@@ -75,19 +90,20 @@ def test_services_port(s, a, b):
     yield c._close()
 
 
-@gen_cluster()
-def test_nbytes(s, a, b):
+@gen_cluster(client=True)
+def test_nbytes(c, s, a, b):
     server = HTTPWorker(a)
     server.listen(0)
     client = AsyncHTTPClient()
 
-    a.data['x-1'] = 1
-    a.data['x-2'] = 1
+    futures = yield c._scatter(list(range(10)))
 
     nbytes = yield client.fetch('http://localhost:%d/nbytes.json' % server.port)
     nbytes = json.loads(nbytes.body.decode())
     summary = yield client.fetch('http://localhost:%d/nbytes-summary.json' % server.port)
     summary = json.loads(summary.body.decode())
 
-    assert nbytes == {'x-1': sizeof(1), 'x-2': sizeof(2)}
-    assert summary == {'x': sizeof(1) * 2}
+    assert nbytes
+    assert summary
+    assert len(summary) == 1
+    assert len(nbytes) == len(a.data)

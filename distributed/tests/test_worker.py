@@ -17,7 +17,7 @@ import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
 
-from distributed.core import rpc, connect, read, write
+from distributed.core import rpc, connect
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
@@ -25,9 +25,9 @@ from distributed.protocol import to_serialize
 from distributed.protocol.pickle import dumps, loads
 from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
-from distributed.utils import ignoring
-from distributed.utils_test import (loop, inc, mul, gen_cluster,
-        slow, slowinc, throws, current_loop, gen_test, readone)
+from distributed.utils import ignoring, tmpfile
+from distributed.utils_test import (loop, inc, mul, gen_cluster, div,
+        slow, slowinc, throws, gen_test, readone)
 
 
 
@@ -53,7 +53,7 @@ def test_identity():
     w = Worker('127.0.0.1', 8019)
     ident = w.identity(None)
     assert 'Worker' in ident['type']
-    assert ident['scheduler'] == ('127.0.0.1', 8019)
+    assert ident['scheduler'] == 'tcp://127.0.0.1:8019'
     assert isinstance(ident['ncores'], int)
     assert isinstance(ident['memory_limit'], Number)
 
@@ -194,8 +194,8 @@ def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_dir, 'foobar.py'))
     assert a.local_dir != b.local_dir
 
-    aa = rpc(ip=a.ip, port=a.port)
-    bb = rpc(ip=b.ip, port=b.port)
+    aa = rpc(a.address)
+    bb = rpc(b.address)
     yield [aa.upload_file(filename='foobar.py', data=b'x = 123'),
            bb.upload_file(filename='foobar.py', data='x = 123')]
 
@@ -225,8 +225,8 @@ def test_upload_egg(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_dir, eggname))
     assert a.local_dir != b.local_dir
 
-    aa = rpc(ip=a.ip, port=a.port)
-    bb = rpc(ip=b.ip, port=b.port)
+    aa = rpc(a.address)
+    bb = rpc(b.address)
     with open(local_file, 'rb') as f:
         payload = f.read()
     yield [aa.upload_file(filename=eggname, data=payload),
@@ -252,7 +252,7 @@ def test_upload_egg(c, s, a, b):
 
 @gen_cluster()
 def test_broadcast(s, a, b):
-    with rpc(ip=s.ip, port=s.port) as cc:
+    with rpc(s.address) as cc:
         results = yield cc.broadcast(msg={'op': 'ping'})
         assert results == {a.address: b'pong', b.address: b'pong'}
 
@@ -260,22 +260,22 @@ def test_broadcast(s, a, b):
 @gen_test()
 def test_worker_with_port_zero():
     s = Scheduler()
-    s.listen(8007)
-    w = Worker(s.ip, s.port, ip='127.0.0.1')
+    s.start(8007)
+    w = Worker(s.ip, s.port)
     yield w._start()
     assert isinstance(w.port, int)
     assert w.port > 1024
 
 
 @slow
-def test_worker_waits_for_center_to_come_up(current_loop):
+def test_worker_waits_for_center_to_come_up(loop):
     @gen.coroutine
     def f():
-        w = Worker('127.0.0.1', 8007, ip='127.0.0.1')
+        w = Worker('127.0.0.1', 8007)
         yield w._start()
 
     try:
-        current_loop.run_sync(f, timeout=4)
+        loop.run_sync(f, timeout=4)
     except TimeoutError:
         pass
 
@@ -303,7 +303,7 @@ def test_error_message():
 def test_gather(s, a, b):
     b.data['x'] = 1
     b.data['y'] = 2
-    with rpc(ip=a.ip, port=a.port) as aa:
+    with rpc(a.address) as aa:
         resp = yield aa.gather(who_has={'x': [b.address], 'y': [b.address]})
         assert resp['status'] == 'OK'
 
@@ -315,14 +315,14 @@ def test_io_loop(loop):
     s = Scheduler(loop=loop)
     s.listen(0)
     assert s.io_loop is loop
-    w = Worker(s.ip, s.port, loop=loop)
+    w = Worker(s.address, loop=loop)
     assert w.io_loop is loop
 
 
 @gen_cluster(client=True, ncores=[])
 def test_spill_to_disk(e, s):
     np = pytest.importorskip('numpy')
-    w = Worker(s.ip, s.port, loop=s.loop, memory_limit=1000)
+    w = Worker(s.address, loop=s.loop, memory_limit=1000)
     yield w._start()
 
     x = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')
@@ -446,8 +446,8 @@ def test_clean(c, s, a, b):
 
     yield y._result()
 
-    collections = [a.tasks, a.task_state, a.response, a.data, a.nbytes,
-                   a.durations, a.priorities]
+    collections = [a.tasks, a.task_state, a.startstops, a.data, a.nbytes,
+                   a.durations, a.priorities, a.types, a.threads]
     for c in collections:
         assert c
 
@@ -507,43 +507,12 @@ def test_system_monitor(s, a, b):
 
 
 
-@pytest.mark.skipif(not sys.platform.startswith('linux'),
-                    reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 2, {'resources': {'A': 1}}),
-                                  ('127.0.0.2', 1)])
+                                  ('127.0.0.1', 1)])
 def test_restrictions(c, s, a, b):
-    # Worker restrictions
-    x = c.submit(inc, 1, workers=a.address)
-    yield x._result()
-    assert a.host_restrictions == {}
-    assert a.worker_restrictions == {x.key: {a.address}}
-    assert a.resource_restrictions == {}
-
-    yield c._cancel(x)
-
-    while x.key in a.task_state:
-        yield gen.sleep(0.01)
-
-    assert a.worker_restrictions == {}
-
-    # Host restrictions
-    x = c.submit(inc, 1, workers=['127.0.0.1'])
-    yield x._result()
-    assert a.host_restrictions == {x.key: {'127.0.0.1'}}
-    assert a.worker_restrictions == {}
-    assert a.resource_restrictions == {}
-    yield c._cancel(x)
-
-    while x.key in a.task_state:
-        yield gen.sleep(0.01)
-
-    assert a.host_restrictions == {}
-
     # Resource restrictions
     x = c.submit(inc, 1, resources={'A': 1})
     yield x._result()
-    assert a.host_restrictions == {}
-    assert a.worker_restrictions == {}
     assert a.resource_restrictions == {x.key: {'A': 1}}
     yield c._cancel(x)
 
@@ -587,3 +556,98 @@ def test_gather_many_small(c, s, a, *workers):
     assert min(recv) > max(req)
 
     assert a.comm_nbytes == 0
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
+def test_multiple_transfers(c, s, w1, w2, w3):
+    x = c.submit(inc, 1, workers=w1.address)
+    y = c.submit(inc, 2, workers=w2.address)
+    z = c.submit(add, x, y, workers=w3.address)
+
+    yield _wait(z)
+
+    r = w3.startstops[z.key]
+    transfers = [t for t in r if t[0] == 'transfer']
+    assert len(transfers) == 2
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
+def test_share_communication(c, s, w1, w2, w3):
+    x = c.submit(mul, b'1', int(w3.target_message_size + 1), workers=w1.address)
+    y = c.submit(mul, b'2', int(w3.target_message_size + 1), workers=w2.address)
+    yield _wait([x, y])
+    yield c._replicate([x, y], workers=[w1.address, w2.address])
+    z = c.submit(add, x, y, workers=w3.address)
+    yield _wait(z)
+    assert len(w3.incoming_transfer_log) == 2
+    assert w1.outgoing_transfer_log
+    assert w2.outgoing_transfer_log
+
+
+@gen_cluster(client=True)
+def test_dont_overlap_communications_to_same_worker(c, s, a, b):
+    x = c.submit(mul, b'1', int(b.target_message_size + 1), workers=a.address)
+    y = c.submit(mul, b'2', int(b.target_message_size + 1), workers=a.address)
+    yield _wait([x, y])
+    z = c.submit(add, x, y, workers=b.address)
+    yield _wait(z)
+    assert len(b.incoming_transfer_log) == 2
+    l1, l2 = b.incoming_transfer_log
+
+    assert l1['stop'] < l2['start']
+
+
+@pytest.mark.avoid_travis
+@gen_cluster(client=True)
+def test_log_exception_on_failed_task(c, s, a, b):
+    with tmpfile() as fn:
+        fh = logging.FileHandler(fn)
+        try:
+            from distributed.worker import logger
+            logger.addHandler(fh)
+
+            future = c.submit(div, 1, 0)
+            yield _wait(future)
+
+            yield gen.sleep(0.1)
+            fh.flush()
+            with open(fn) as f:
+                text = f.read()
+
+            assert "ZeroDivisionError" in text
+            assert "Exception" in text
+        finally:
+            logger.removeHandler(fh)
+
+
+@gen_cluster(client=True)
+def test_clean_up_dependencies(c, s, a, b):
+    x = delayed(inc)(1)
+    y = delayed(inc)(2)
+    xx = delayed(inc)(x)
+    yy = delayed(inc)(y)
+    z = delayed(add)(xx, yy)
+
+    zz = c.persist(z)
+    yield _wait(zz)
+
+    start = time()
+    while len(a.data) + len(b.data) > 1:
+        yield gen.sleep(0.01)
+        assert time() < start + 2
+
+    assert set(a.data) | set(b.data) == {zz.key}
+
+
+@gen_cluster(client=True)
+def test_hold_onto_dependents(c, s, a, b):
+    x = c.submit(inc, 1, workers=a.address)
+    y = c.submit(inc, x, workers=b.address)
+    yield _wait(y)
+
+    assert x.key in b.data
+
+    yield c._cancel(y)
+    yield gen.sleep(0.1)
+
+    assert x.key in b.data

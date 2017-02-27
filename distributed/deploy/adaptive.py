@@ -6,7 +6,7 @@ from ..utils import log_errors
 from tornado import gen
 from tornado.ioloop import PeriodicCallback
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class Adaptive(object):
@@ -64,15 +64,13 @@ class Adaptive(object):
     @gen.coroutine
     def _retire_workers(self):
         with log_errors():
-            workers = yield self.scheduler.retire_workers(remove=False)
+            workers = yield self.scheduler.retire_workers(remove=True,
+                    close=True)
 
             logger.info("Retiring workers %s", workers)
             f = self.cluster.scale_down(workers)
             if gen.is_future(f):
                 yield f
-
-            for w in workers:
-                self.scheduler.remove_worker(address=w, safe=True)
 
     @gen.coroutine
     def _adapt(self):

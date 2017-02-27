@@ -53,8 +53,8 @@ class StateTable(DashboardComponent):
                  'Executing': ['%d / %d' % (len(w.executing), w.ncores)],
                  'Ready': [len(w.ready)],
                  'Waiting': [len(w.waiting_for_data)],
-                 'Connections': [len(w.connections)],
-                 'Serving': [len(w._listen_streams)]}
+                 'Connections': [len(w.in_flight_workers)],
+                 'Serving': [len(w._comms)]}
             self.source.data.update(d)
 
 
@@ -168,8 +168,8 @@ class CommunicatingTimeSeries(DashboardComponent):
     def update(self):
         with log_errors():
             self.source.stream({'x': [time() * 1000],
-                                'out': [len(self.worker._listen_streams)],
-                                'in': [len(self.worker.connections)]},
+                                'out': [len(self.worker._comms)],
+                                'in': [len(self.worker.in_flight_workers)]},
                                 10000)
 
 
@@ -554,6 +554,7 @@ def main_doc(worker, doc):
         communicating_ts.root.x_range = xr
         communicating_stream.root.x_range = xr
 
+        doc.title = "Dask Worker Internal Monitor"
         doc.add_periodic_callback(statetable.update, 200)
         doc.add_periodic_callback(executing_ts.update, 200)
         doc.add_periodic_callback(communicating_ts.update, 200)
@@ -570,6 +571,7 @@ def crossfilter_doc(worker, doc):
         statetable = StateTable(worker)
         crossfilter = CrossFilter(worker)
 
+        doc.title = "Dask Worker Cross-filter"
         doc.add_periodic_callback(statetable.update, 500)
         doc.add_periodic_callback(crossfilter.update, 500)
 
@@ -579,6 +581,7 @@ def crossfilter_doc(worker, doc):
 def systemmonitor_doc(worker, doc):
     with log_errors():
         sysmon = SystemMonitor(worker, sizing_mode='scale_width')
+        doc.title = "Dask Worker Monitor"
         doc.add_periodic_callback(sysmon.update, 500)
 
         doc.add_root(sysmon.root)
@@ -586,6 +589,7 @@ def systemmonitor_doc(worker, doc):
 
 def counters_doc(server, doc):
     with log_errors():
+        doc.title = "Dask Worker Counters"
         counter = Counters(server, sizing_mode='stretch_both')
         doc.add_periodic_callback(counter.update, 500)
 

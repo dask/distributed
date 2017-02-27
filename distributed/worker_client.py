@@ -1,15 +1,16 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
+from time import sleep
 from tornado import gen
-from toolz import keymap, valmap, merge
-import uuid
+from toolz import keymap, valmap, merge, assoc
 import uuid
 
 from dask.base import tokenize
 from tornado import gen
 
 from .client import AllExit, Client, Future, pack_data, unpack_remotedata
+from dask.compatibility import apply
 from .sizeof import sizeof
 from .threadpoolexecutor import secede
 from .utils import All, log_errors, sync, tokey, ignoring
@@ -17,7 +18,7 @@ from .worker import thread_state
 
 
 @contextmanager
-def local_client():
+def worker_client(timeout=3):
     """ Get client for this thread
 
     Note: This interface is new and experimental.  It may change without
@@ -31,7 +32,7 @@ def local_client():
     --------
 
     >>> def func(x):
-    ...     with local_client() as e:  # connect from worker back to scheduler
+    ...     with worker_client() as e:  # connect from worker back to scheduler
     ...         a = e.submit(inc, x)     # this task can submit more tasks
     ...         b = e.submit(dec, x)
     ...         result = e.gather([a, b])  # and gather results
@@ -44,9 +45,15 @@ def local_client():
     secede()  # have this thread secede from the thread pool
               # so that it doesn't take up a fixed resource while waiting
     worker.loop.add_callback(worker.transition, thread_state.key, 'long-running')
-    with WorkerClient(address) as e:
-        yield e
 
+    with WorkerClient(address, loop=worker.loop) as wc:
+        # Make sure connection errors are bubbled to the caller
+        sync(wc.loop, wc._start, timeout=timeout)
+        assert wc.status == 'running'
+        yield wc
+
+
+local_client = worker_client
 
 def get_worker():
     return thread_state.execution_state['worker']
@@ -60,8 +67,9 @@ class WorkerClient(Client):
     look to the local data dictionary rather than sending data over the network
     """
     def __init__(self, *args, **kwargs):
+        loop = kwargs.get('loop')
         self.worker = get_worker()
-        Client.__init__(self, *args, **kwargs)
+        sync(loop, apply, Client.__init__, (self,) + args, assoc(kwargs, 'start', False))
 
     @gen.coroutine
     def _scatter(self, data, workers=None, broadcast=False):
@@ -99,10 +107,7 @@ class WorkerClient(Client):
             else:
                 raise TypeError("Don't know how to scatter %s" % type(data))
 
-            nbytes = valmap(sizeof, data2)
-
-            # self.worker.data.update(data2)  # thread safety matters
-            self.worker.loop.add_callback(self.worker.data.update, data2)
+            self.worker.update_data(data=data2, report=False)
 
             yield self.scheduler.update_data(
                     who_has={key: [self.worker.address] for key in data2},
@@ -145,13 +150,8 @@ class WorkerClient(Client):
         with ignoring(AllExit):
             yield All([wait(key) for key in keys if key in self.futures])
 
-        while True:  # not threadsafe, so try until success
-            try:
-                local = {k: self.worker.data[k] for k in keys
-                         if k in self.worker.data}
-                break
-            except KeyError as e:
-                pass
+        local = {k: self.worker.data[k] for k in keys
+                 if k in self.worker.data}
 
         futures3 = {k: Future(k, self) for k in keys if k not in local}
 

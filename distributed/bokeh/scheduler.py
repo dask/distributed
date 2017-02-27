@@ -12,7 +12,7 @@ from bokeh.models import (
     DatetimeAxis, Grid, BasicTicker, HoverTool, BoxZoomTool, ResetTool,
     PanTool, WheelZoomTool, Title, Range1d, Quad, Text, value, Line,
     NumeralTickFormatter, ToolbarBox, Legend, LegendItem, BoxSelectTool,
-    Circle, CategoricalAxis, Select
+    Circle, CategoricalAxis, Select, TapTool, OpenURL
 )
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
 from bokeh.plotting import figure
@@ -76,7 +76,8 @@ class Occupancy(DashboardComponent):
                                             'x': [0.0, 0.1],
                                             'y': [1, 2],
                                             'ms': [1, 2],
-                                            'color': ['red', 'blue']})
+                                            'color': ['red', 'blue'],
+                                            'bokeh_address': ['', '']})
 
             fig = figure(title='Occupancy', tools='resize', id='bk-occupancy-plot',
                          x_axis_type='datetime', **kwargs)
@@ -89,10 +90,12 @@ class Occupancy(DashboardComponent):
             # fig.xaxis[0].formatter = NumeralTickFormatter(format='0.0s')
             fig.x_range.start = 0
 
+            tap = TapTool(callback=OpenURL(url='http://@bokeh_address/'))
+
             hover = HoverTool()
-            hover.tooltips = "@worker : @occupancy s"
+            hover.tooltips = "@worker : @occupancy s.  Click for worker page"
             hover.point_policy = 'follow_mouse'
-            fig.add_tools(hover)
+            fig.add_tools(hover, tap)
 
             self.root = fig
 
@@ -100,6 +103,12 @@ class Occupancy(DashboardComponent):
         with log_errors():
             o = self.scheduler.occupancy
             workers = list(self.scheduler.workers)
+
+            bokeh_addresses = []
+            for worker in workers:
+                addr = self.scheduler.get_worker_service_addr(worker, 'bokeh')
+                bokeh_addresses.append('%s:%d' % addr if addr is not None else '')
+
             y = list(range(len(workers)))
             occupancy = [o[w] for w in workers]
             ms = [occ * 1000 for occ in occupancy]
@@ -124,6 +133,7 @@ class Occupancy(DashboardComponent):
                                      'worker': workers,
                                      'ms': ms,
                                      'color': color,
+                                     'bokeh_address': bokeh_addresses,
                                      'x': x, 'y': y})
 
 
@@ -228,6 +238,7 @@ def systemmonitor_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
         sysmon = SystemMonitor(scheduler, sizing_mode='scale_width')
+        doc.title = "Dask Scheduler Internal Monitor"
         doc.add_periodic_callback(table.update, 500)
         doc.add_periodic_callback(sysmon.update, 500)
 
@@ -242,6 +253,7 @@ def workers_doc(scheduler, doc):
         stealing_ts = StealingTimeSeries(scheduler, sizing_mode='scale_width')
         stealing_events = StealingEvents(scheduler, sizing_mode='scale_width')
         stealing_events.root.x_range = stealing_ts.root.x_range
+        doc.title = "Dask Workers Monitor"
         doc.add_periodic_callback(table.update, 500)
         doc.add_periodic_callback(occupancy.update, 500)
         doc.add_periodic_callback(stealing_ts.update, 500)
