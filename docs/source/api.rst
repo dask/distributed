@@ -12,6 +12,7 @@ API
    Client.gather
    Client.get
    Client.get_dataset
+   Client.get_futures_error
    Client.has_what
    Client.list_datasets
    Client.map
@@ -19,6 +20,7 @@ API
    Client.persist
    Client.publish_dataset
    Client.rebalance
+   Client.recreate_error_locally
    Client.replicate
    Client.restart
    Client.run
