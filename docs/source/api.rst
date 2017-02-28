@@ -12,7 +12,6 @@ API
    Client.gather
    Client.get
    Client.get_dataset
-   Client.get_futures_error
    Client.has_what
    Client.list_datasets
    Client.map
@@ -20,7 +19,6 @@ API
    Client.persist
    Client.publish_dataset
    Client.rebalance
-   Client.recreate_error_locally
    Client.replicate
    Client.restart
    Client.run
@@ -35,6 +33,15 @@ API
    Client.unpublish_dataset
    Client.upload_file
    Client.who_has
+
+.. currentmodule:: distributed.recreate_exceptions
+
+.. autosummary::
+   ReplayExceptionClient.get_futures_error
+   ReplayExceptionClient.recreate_error_locally
+
+.. currentmodule:: distributed.client
+
 
 **Future**
 
@@ -74,6 +81,9 @@ Client
 --------
 
 .. autoclass:: Client
+   :members:
+
+.. autoclass:: distributed.recreate_exceptions.ReplayExceptionClient
    :members:
 
 CompatibleExecutor

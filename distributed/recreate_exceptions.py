@@ -54,9 +54,10 @@ class ReplayExceptionClient(object):
     """
     A plugin for the client allowing replay of remote exceptions locally
 
-    Adds the following methods to the given client:
-    * [_]recreate_error_locally: main user method
-    * [_]get_futures_error: gets the task, its details and dependencies,
+    Adds the following methods (and their async variants)to the given client:
+
+    - ``recreate_error_locally``: main user method
+    - ``get_futures_error``: gets the task, its details and dependencies,
         responsible for failure of the given future.
     """
 
@@ -95,21 +96,25 @@ class ReplayExceptionClient(object):
         was raised in a task within its graph, we an get information from
         the scheduler. This function gets the details of the specific task
         that raised the exception and led to the error, but does not fetch
-        data from the cluster or execute the function. To actually run the
-        function locally and be able to debug, see
-        ``client.recreate_error_locally``.
+        data from the cluster or execute the function.
 
         Parameters
         ----------
-        future: future that failed
+        future : future that failed, having ``status=="error"``, typically
+            after an attempt to ``gather()`` shows a stack-stace.
 
         Returns
         -------
+
         Tuple:
         - the function that raised an exception
         - argument list (a tuple), may include values and keys
         - keyword arguments (a dictionary), may include values and keys
         - list of keys that the function requires to be fetched to run
+
+        See Also
+        --------
+        ReplayExceptionClient.recreate_error_locally
         """
         return sync(self.client.loop, self._get_futures_error, future)
 
@@ -132,12 +137,26 @@ class ReplayExceptionClient(object):
         trace is not informative enough to diagnose the problem. The specific
         task (part of the graph pointing to the future) responsible for the
         error will be fetched from the scheduler, together with the values of
-        it's inputs. The function will then be executed, so that ``pdb`` can
+        its inputs. The function will then be executed, so that ``pdb`` can
         be used for debugging.
+
+        Examples
+        --------
+        >>> x0 = delayed(dec)(2)         # doctest: +SKIP
+        >>> y0 = delayed(dec)(1)         # doctest: +SKIP
+        >>> x = delayed(div)(1, x0)      # doctest: +SKIP
+        >>> y = delayed(div)(1, y0)      # doctest: +SKIP
+        >>> tot = delayed(sum)(x, y)     # doctest: +SKIP
+        >>> f = c.compute(tot)           # doctest: +SKIP
+        >>> wait(f)                      # doctest: +SKIP
+        >>> #  f's status becomes "error"
+        >>> c.recreate_error_locally(f)  # doctest: +SKIP
+        >>> #  a real ZeroDivisionError occurs in `div` with inputs (1, 0)
+
 
         Parameters
         ----------
-        future: future that failed
+        future : future that failed
             The same thing as was given to ``gather``, but came back with
             an exception/stack-trace. Can also be a (persisted) dask collection
             containing any errored futures.
