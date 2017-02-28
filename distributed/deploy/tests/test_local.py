@@ -240,13 +240,13 @@ def test_remote_access(loop):
 
 
 def test_memory(loop):
-    with LocalCluster(4, scheduler_port=0, nanny=False, silence_logs=False,
+    with LocalCluster(scheduler_port=0, nanny=False, silence_logs=False,
                       diagnostics_port=None, loop=loop) as cluster:
         assert sum(w.memory_limit for w in cluster.workers) < TOTAL_MEMORY * 0.8
 
 
 def test_memory_nanny(loop):
-    with LocalCluster(4, scheduler_port=0, nanny=True, silence_logs=False,
+    with LocalCluster(scheduler_port=0, nanny=True, silence_logs=False,
                       diagnostics_port=None, loop=loop) as cluster:
         with Client(cluster.scheduler_address, loop=loop) as c:
             info = c.scheduler_info()
