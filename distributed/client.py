@@ -915,7 +915,7 @@ class Client(object):
             bad_keys = set()
             for key in keys:
                 if (key not in self.futures or
-                    self.futures[key].status in failed):
+                        self.futures[key].status in failed):
                     exceptions.add(key)
                     if errors == 'raise':
                         try:

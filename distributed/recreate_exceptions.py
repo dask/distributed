@@ -91,14 +91,25 @@ class ReplayExceptionClient(object):
         """
         Ask the scheduler details of the sub-task of the given failed future
 
+        When a future evaluates to a status of "error", i.e., an exception
+        was raised in a task within its graph, we an get information from
+        the scheduler. This function gets the details of the specific task
+        that raised the exception and led to the error, but does not fetch
+        data from the cluster or execute the function. To actually run the
+        function locally and be able to debug, see
+        ``client.recreate_error_locally``.
+
         Parameters
         ----------
         future: future that failed
 
         Returns
         -------
-        The function that failed, its arguments, and the keys that it depends
-        on.
+        Tuple:
+        - the function that raised an exception
+        - argument list (a tuple), may include values and keys
+        - keyword arguments (a dictionary), may include values and keys
+        - list of keys that the function requires to be fetched to run
         """
         return sync(self.client.loop, self._get_futures_error, future)
 
@@ -116,6 +127,14 @@ class ReplayExceptionClient(object):
         """
         For a failed calculation, perform the blamed task locally for debugging.
 
+        This operation should be performed after a future (result of ``gather``,
+        ``compute``, etc) comes back with a status of "error", if the stack-
+        trace is not informative enough to diagnose the problem. The specific
+        task (part of the graph pointing to the future) responsible for the
+        error will be fetched from the scheduler, together with the values of
+        it's inputs. The function will then be executed, so that ``pdb`` can
+        be used for debugging.
+
         Parameters
         ----------
         future: future that failed
@@ -128,5 +147,6 @@ class ReplayExceptionClient(object):
         Nothing; the function runs and should raise an exception, allowing
         the debugger to run.
         """
-        func, args, kwargs = sync(self.client.loop, self._recreate_error_locally, future)
+        func, args, kwargs = sync(self.client.loop,
+                                  self._recreate_error_locally, future)
         func(*args, **kwargs)

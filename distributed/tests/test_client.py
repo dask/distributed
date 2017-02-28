@@ -3753,32 +3753,23 @@ def test_dont_clear_waiting_data(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_get_future_error_simple(c, s, a, b):
-    def makes_error(x):
-        return 1 / x
-
-    f = c.submit(makes_error, 0)
+    f = c.submit(div, 1, 0)
     yield _wait(f)
     assert f.status == 'error'
 
     function, args, kwargs, deps = yield c._get_futures_error(f)
     # args contains only solid values, not keys
-    assert function.__name__ == 'makes_error'
+    assert function.__name__ == 'div'
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
 
 @gen_cluster(client=True)
 def test_get_futures_error(c, s, a, b):
-    def dec(x):
-        return x - 1
-
-    def makes_error(x):
-        return 1 / x
-
     x0 = delayed(dec)(2)
     y0 = delayed(dec)(1)
-    x = delayed(makes_error)(x0)
-    y = delayed(makes_error)(y0)
+    x = delayed(div)(1, x0)
+    y = delayed(div)(1, y0)
     tot = delayed(sum)(x, y)
 
     f = c.compute(tot)
@@ -3786,23 +3777,16 @@ def test_get_futures_error(c, s, a, b):
     assert f.status == 'error'
 
     function, args, kwargs, deps = yield c._get_futures_error(f)
-    assert function.__name__ == 'makes_error'
-    assert args == (y0.key,)
+    assert function.__name__ == 'div'
+    assert args == (1, y0.key)
 
 
 @gen_cluster(client=True)
-def test_recreate_error(c, s, a, b):
-    def dec(x):
-        return x - 1
-
-    def makes_error(x):
-        return 1 / x
-
-    # with delayed
+def test_recreate_error_delayed(c, s, a, b):
     x0 = delayed(dec)(2)
     y0 = delayed(dec)(1)
-    x = delayed(makes_error)(x0)
-    y = delayed(makes_error)(y0)
+    x = delayed(div)(1, x0)
+    y = delayed(div)(1, y0)
     tot = delayed(sum)(x, y)
 
     f = c.compute(tot)
@@ -3811,16 +3795,18 @@ def test_recreate_error(c, s, a, b):
     assert f.status == 'error'
 
     function, args, kwargs = yield c._recreate_error_locally(f)
-    assert function.__name__ == 'makes_error'
-    assert args ==  (0,)
+    assert function.__name__ == 'div'
+    assert args ==  (1, 0)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
-    # with futures
+
+@gen_cluster(client=True)
+def test_recreate_error_futures(c, s, a, b):
     x0 = c.submit(dec, 2)
     y0 = c.submit(dec, 1)
-    x = c.submit(makes_error, x0)
-    y = c.submit(makes_error, y0)
+    x = c.submit(div, 1, x0)
+    y = c.submit(div, 1, y0)
     tot = c.submit(sum, x, y)
     f = c.compute(tot)
 
@@ -3828,8 +3814,8 @@ def test_recreate_error(c, s, a, b):
     assert f.status == 'error'
 
     function, args, kwargs = yield c._recreate_error_locally(f)
-    assert function.__name__ == 'makes_error'
-    assert args ==  (0,)
+    assert function.__name__ == 'div'
+    assert args ==  (1, 0)
     with pytest.raises(ZeroDivisionError):
         function(*args, **kwargs)
 
@@ -3861,6 +3847,23 @@ def test_recreate_error_collection(c, s, a, b):
     function, args, kwargs = yield c._recreate_error_locally(f)
     with pytest.raises(ValueError):
         function(*args, **kwargs)
+
+
+def test_recreate_error_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x0 = c.submit(dec, 2)
+            y0 = c.submit(dec, 1)
+            x = c.submit(div, 1, x0)
+            y = c.submit(div, 1, y0)
+            tot = c.submit(sum, x, y)
+            f = c.compute(tot)
+
+            wait(f)
+            assert f.status == 'error'
+
+            with pytest.raises(ZeroDivisionError) as e:
+                c.recreate_error_locally(f)
 
 
 @gen_cluster(client=True)
