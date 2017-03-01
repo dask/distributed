@@ -99,6 +99,7 @@ class Server(object):
         self.counters = None
         self.digests = None
         self.events = None
+        self.event_counts = None
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
@@ -112,6 +113,7 @@ class Server(object):
             from .counter import Counter
             self.counters = defaultdict(partial(Counter, loop=self.loop))
             self.events = defaultdict(lambda: deque(maxlen=10000))
+            self.event_counts = defaultdict(lambda: 0)
 
             pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.loop)
             self.loop.add_callback(pc.start)
@@ -138,8 +140,10 @@ class Server(object):
         if isinstance(name, list):
             for n in name:
                 self.events[n].append(msg)
+                self.event_counts[n] += 1
         else:
             self.events[name].append(msg)
+            self.event_counts[name] += 1
 
     @property
     def address(self):
