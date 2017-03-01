@@ -25,7 +25,7 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
 from .batched import BatchedSend
-from .comm import get_address_host
+from .comm import get_address_host, get_local_address_for
 from .config import config
 from .compatibility import reload, unicode, invalidate_caches, cache_from_source
 from .core import (connect, send_recv, error_message, CommClosedError,
@@ -210,9 +210,12 @@ class WorkerBase(Server):
         assert self.status is None
 
         # XXX Factor this out
-        if isinstance(addr_or_port, int):
-            # Default ip is the required one to reach the scheduler
-            # XXX get local listening address
+        if not addr_or_port:
+            # Default address is the required one to reach the scheduler
+            self.listen(get_local_address_for(self.scheduler.address))
+            self.ip = get_address_host(self.address)
+        elif isinstance(addr_or_port, int):
+            # addr_or_port is an integer => assume TCP
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
                 )

@@ -125,3 +125,15 @@ def resolve_address(addr):
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
     return unparse_address(scheme, backend.resolve_address(loc))
+
+
+def get_local_address_for(addr):
+    """
+    Get the local listening address suitable for reaching *addr*.
+
+    For instance, trying to reach an external TCP address will return
+    a local TCP address that's routable to that external address.
+    """
+    scheme, loc = parse_address(addr)
+    backend = registry.get_backend(scheme)
+    return unparse_address(scheme, backend.get_local_address_for(loc))

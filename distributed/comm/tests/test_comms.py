@@ -22,7 +22,7 @@ from distributed.protocol import (loads, dumps,
 from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
                               is_zmq_enabled, parse_address, parse_host_port,
                               unparse_host_port, resolve_address,
-                              get_address_host)
+                              get_address_host, get_local_address_for)
 
 if is_zmq_enabled():
     from distributed.comm import zmq
@@ -128,6 +128,26 @@ def test_resolve_address():
         assert f('zmq://localhost:789') == 'zmq://127.0.0.1:789'
         if has_ipv6():
             assert f('zmq://[::1]:456') == 'zmq://[::1]:456'
+
+
+def test_get_local_address_for():
+    f = get_local_address_for
+
+    assert f('tcp://127.0.0.1:80') == 'tcp://127.0.0.1'
+    assert f('tcp://8.8.8.8:4444') == 'tcp://' + get_ip()
+    if has_ipv6():
+        assert f('tcp://[::1]:123') == 'tcp://[::1]'
+
+    if is_zmq_enabled():
+        assert f('zmq://127.0.0.1:80') == 'zmq://127.0.0.1'
+        assert f('zmq://8.8.8.8:4444') == 'zmq://' + get_ip()
+        if has_ipv6():
+            assert f('zmq://[::1]:123') == 'zmq://[::1]'
+
+    inproc_arg = 'inproc://%s/%d/444' % (get_ip(), os.getpid())
+    inproc_res = f(inproc_arg)
+    assert inproc_res.startswith('inproc://')
+    assert inproc_res != inproc_arg
 
 
 #

@@ -12,7 +12,7 @@ import pytest
 from distributed import Client, Worker, Nanny
 from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
-from distributed.utils_test import (inc, loop, raises, gen_test,
+from distributed.utils_test import (inc, loop, raises, gen_test, pristine_loop,
         assert_can_connect_locally_4, assert_can_connect_from_everywhere_4_6)
 from distributed.utils import ignoring, sync
 from distributed.worker import TOTAL_MEMORY, _ncores
@@ -37,6 +37,7 @@ def test_procs(loop):
         assert all(isinstance(w, Worker) for w in c.workers)
         with Client(c.scheduler.address, loop=loop) as e:
             assert all(w.ncores == 3 for w in c.workers)
+            assert all(isinstance(w, Worker) for w in c.workers)
         repr(c)
 
     with LocalCluster(2, scheduler_port=0, nanny=True, threads_per_worker=3,
@@ -46,9 +47,34 @@ def test_procs(loop):
         with Client(c.scheduler.address, loop=loop) as e:
             assert all(v == 3 for v in e.ncores().values())
 
-            c.start_worker(nanny=False)
-            assert isinstance(c.workers[-1], Worker)
+            c.start_worker()
+            assert all(isinstance(w, Nanny) for w in c.workers)
         repr(c)
+
+
+def test_transports():
+    """
+    Test the transport chosen by LocalCluster depending on arguments.
+    """
+    with LocalCluster(1, nanny=False, silence_logs=False) as c:
+        assert c.scheduler_address.startswith('inproc://')
+        assert c.workers[0].address.startswith('inproc://')
+        with Client(c.scheduler.address) as e:
+            assert e.submit(inc, 4).result() == 5
+
+    # Have nannies => need TCP
+    with LocalCluster(1, nanny=True, silence_logs=False) as c:
+        assert c.scheduler_address.startswith('tcp://')
+        assert c.workers[0].address.startswith('tcp://')
+        with Client(c.scheduler.address) as e:
+            assert e.submit(inc, 4).result() == 5
+
+    # Scheduler port specified => need TCP
+    with LocalCluster(1, nanny=False, scheduler_port=8786, silence_logs=False) as c:
+        assert c.scheduler_address == 'tcp://127.0.0.1:8786'
+        assert c.workers[0].address.startswith('tcp://')
+        with Client(c.scheduler.address) as e:
+            assert e.submit(inc, 4).result() == 5
 
 
 @pytest.mark.skipif('sys.version_info[0] == 2', reason='')
