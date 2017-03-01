@@ -2,7 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 import logging
 from tornado import gen
-from .client import futures_of
+from .client import futures_of, _wait
 from .utils import sync
 from .utils_comm import pack_data
 from .worker import _deserialize
@@ -78,6 +78,8 @@ class ReplayExceptionClient(object):
     def _get_futures_error(self, future):
         # only get errors for futures that errored.
         futures = [f for f in futures_of(future) if f.status == 'error']
+        if not futures:
+            raise ValueError("No errored futures passed")
         out = yield self.scheduler.cause_of_failure(
             keys=[f.key for f in futures])
         deps, cause, task = out['deps'], out['cause'], out['task']
@@ -120,6 +122,7 @@ class ReplayExceptionClient(object):
 
     @gen.coroutine
     def _recreate_error_locally(self, future):
+        yield _wait(future)
         out = yield self._get_futures_error(future)
         function, args, kwargs, deps = out
         futures = self.client._graph_to_futures({}, deps)
@@ -142,21 +145,26 @@ class ReplayExceptionClient(object):
 
         Examples
         --------
-        >>> x0 = delayed(dec)(2)         # doctest: +SKIP
-        >>> y0 = delayed(dec)(1)         # doctest: +SKIP
-        >>> x = delayed(div)(1, x0)      # doctest: +SKIP
-        >>> y = delayed(div)(1, y0)      # doctest: +SKIP
-        >>> tot = delayed(sum)(x, y)     # doctest: +SKIP
-        >>> f = c.compute(tot)           # doctest: +SKIP
-        >>> wait(f)                      # doctest: +SKIP
-        >>> #  f's status becomes "error"
-        >>> c.recreate_error_locally(f)  # doctest: +SKIP
-        >>> #  a real ZeroDivisionError occurs in `div` with inputs (1, 0)
+        >>> future = c.submit(div, 1, 0)         # doctest: +SKIP
+        >>> future.status                        # doctest: +SKIP
+        'error'
+        >>> c.recreate_error_locally(future)     # doctest: +SKIP
+        ZeroDivisionError: division by zero
 
+        If you're in IPython you might take this opportunity to use pdb
+
+        >>> %pdb                                 # doctest: +SKIP
+        Automatic pdb calling has been turned ON
+
+        >>> c.recreate_error_locally(future)     # doctest: +SKIP
+        ZeroDivisionError: division by zero
+              1 def div(x, y):
+        ----> 2     return x / y
+        ipdb>
 
         Parameters
         ----------
-        future : future that failed
+        future : future or collection that failed
             The same thing as was given to ``gather``, but came back with
             an exception/stack-trace. Can also be a (persisted) dask collection
             containing any errored futures.

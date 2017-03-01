@@ -3791,10 +3791,10 @@ def test_recreate_error_delayed(c, s, a, b):
 
     f = c.compute(tot)
 
-    yield _wait(f)
-    assert f.status == 'error'
+    assert f.status == 'pending'
 
     function, args, kwargs = yield c._recreate_error_locally(f)
+    assert f.status == 'error'
     assert function.__name__ == 'div'
     assert args ==  (1, 0)
     with pytest.raises(ZeroDivisionError):
@@ -3810,10 +3810,10 @@ def test_recreate_error_futures(c, s, a, b):
     tot = c.submit(sum, x, y)
     f = c.compute(tot)
 
-    yield _wait(f)
-    assert f.status == 'error'
+    assert f.status == 'pending'
 
     function, args, kwargs = yield c._recreate_error_locally(f)
+    assert f.status == 'error'
     assert function.__name__ == 'div'
     assert args ==  (1, 0)
     with pytest.raises(ZeroDivisionError):
@@ -3827,7 +3827,6 @@ def test_recreate_error_collection(c, s, a, b):
     b = b.map(lambda x: 1 / x)
     b = b.persist()
     f = c.compute(b)
-    yield _wait(f)
 
     function, args, kwargs = yield c._recreate_error_locally(f)
     with pytest.raises(ZeroDivisionError):
@@ -3843,7 +3842,6 @@ def test_recreate_error_collection(c, s, a, b):
         return x
     df2 = df.a.map(make_err)
     f = c.compute(df2)
-    yield _wait(f)
     function, args, kwargs = yield c._recreate_error_locally(f)
     with pytest.raises(ValueError):
         function(*args, **kwargs)
@@ -3859,11 +3857,20 @@ def test_recreate_error_sync(loop):
             tot = c.submit(sum, x, y)
             f = c.compute(tot)
 
-            wait(f)
-            assert f.status == 'error'
 
             with pytest.raises(ZeroDivisionError) as e:
                 c.recreate_error_locally(f)
+            assert f.status == 'error'
+
+
+def test_recreate_error_not_error(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            f = c.submit(dec, 2)
+            with pytest.raises(ValueError) as e:
+                c.recreate_error_locally(f)
+            assert "No errored futures passed" in str(e)
+
 
 
 @gen_cluster(client=True)
