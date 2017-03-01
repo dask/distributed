@@ -74,7 +74,7 @@ def dumps(msg):
 
         return [small_header, small_payload,
                 msgpack.dumps(header, use_bin_type=True)] + out_frames
-    except Exception as e:
+    except Exception:
         logger.critical("Failed to Serialize", exc_info=True)
         raise
 
@@ -117,7 +117,7 @@ def loads(frames, deserialize=True):
             get_in(key[:-1], msg)[key[-1]] = value
 
         return msg
-    except Exception as e:
+    except Exception:
         logger.critical("Failed to deserialize", exc_info=True)
         raise
 

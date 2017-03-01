@@ -863,7 +863,7 @@ class Client(object):
                     " for a sequence of length %d" % (len(workers), len(keys)))
                 restrictions = dict(zip(keys, workers))
             else:
-                restrictions = {key: workers for key in keys}
+                restrictions = {k: workers for k in keys}
         elif workers is None:
             restrictions = {}
         else:
@@ -878,7 +878,7 @@ class Client(object):
         priority = dict(zip(keys, range(len(keys))))
 
         if resources:
-            resources = {key: resources for key in keys}
+            resources = {k: resources for k in keys}
         else:
             resources = None
 
@@ -886,7 +886,7 @@ class Client(object):
                 loose_restrictions, priority=priority, resources=resources)
         logger.debug("map(%s, ...)", funcname(func))
 
-        return [futures[tokey(key)] for key in keys]
+        return [futures[tokey(k)] for k in keys]
 
     @gen.coroutine
     def _gather(self, futures, errors='raise'):
