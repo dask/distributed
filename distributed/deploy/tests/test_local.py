@@ -15,6 +15,7 @@ from distributed.metrics import time
 from distributed.utils_test import (inc, loop, raises, gen_test,
         assert_can_connect_locally_4, assert_can_connect_from_everywhere_4_6)
 from distributed.utils import ignoring, sync
+from distributed.worker import TOTAL_MEMORY, _ncores
 
 from distributed.deploy.utils_test import ClusterTest
 
@@ -148,6 +149,7 @@ def test_http(loop):
 
 
 def test_bokeh(loop):
+    pytest.importorskip('bokeh')
     from distributed.http import HTTPScheduler
     import requests
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
@@ -170,6 +172,7 @@ def test_bokeh(loop):
 
 
 def test_start_diagnostics(loop):
+    pytest.importorskip('bokeh')
     from distributed.http import HTTPScheduler
     import requests
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
@@ -236,3 +239,18 @@ def test_remote_access(loop):
     with LocalCluster(scheduler_port=0, silence_logs=False,
                       diagnostics_port=None, ip='', loop=loop) as c:
         sync(loop, assert_can_connect_from_everywhere_4_6, c.scheduler.port)
+
+
+def test_memory(loop):
+    with LocalCluster(scheduler_port=0, nanny=False, silence_logs=False,
+                      diagnostics_port=None, loop=loop) as cluster:
+        assert sum(w.memory_limit for w in cluster.workers) < TOTAL_MEMORY * 0.8
+
+
+def test_memory_nanny(loop):
+    with LocalCluster(scheduler_port=0, nanny=True, silence_logs=False,
+                      diagnostics_port=None, loop=loop) as cluster:
+        with Client(cluster.scheduler_address, loop=loop) as c:
+            info = c.scheduler_info()
+            assert (sum(w['memory_limit'] for w in info['workers'].values())
+                    < TOTAL_MEMORY * 0.8)
