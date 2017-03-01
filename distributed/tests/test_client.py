@@ -3772,15 +3772,18 @@ def test_retire_workers(c, s, a, b):
         assert time() < start + 5
 
 
+class MyException(Exception):
+    pass
+
+
 @gen_cluster(client=True)
 def test_robust_unserializable(c, s, a, b):
     class Foo(object):
         def __getstate__(self):
-            raise Exception('hello')
+            raise MyException()
 
-    with pytest.raises(Exception) as e:
+    with pytest.raises(MyException):
         future = c.submit(identity, Foo())
-    assert e.value.args == ('hello',)
 
     futures = c.map(inc, range(10))
     results = yield c._gather(futures)
@@ -3795,12 +3798,11 @@ def test_robust_undeserializable(c, s, a, b):
         def __getstate__(self):
             return 1
         def __setstate__(self, state):
-            raise Exception('hello')
+            raise MyException('hello')
 
     future = c.submit(identity, Foo())
-    with pytest.raises(Exception) as e:
+    with pytest.raises(MyException):
         yield future._result()
-    assert e.value.args == ('hello',)
 
     futures = c.map(inc, range(10))
     results = yield c._gather(futures)
@@ -3815,14 +3817,13 @@ def test_robust_undeserializable_function(c, s, a, b):
         def __getstate__(self):
             return 1
         def __setstate__(self, state):
-            raise Exception('hello')
+            raise MyException('hello')
         def __call__(self, *args):
             return 1
 
     future = c.submit(Foo(), 1)
-    with pytest.raises(Exception) as e:
+    with pytest.raises(MyException) as e:
         yield future._result()
-    assert e.value.args == ('hello',)
 
     futures = c.map(inc, range(10))
     results = yield c._gather(futures)
