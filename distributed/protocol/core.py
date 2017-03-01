@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-from functools import partial
 import logging
 
 try:
@@ -15,10 +14,8 @@ except ImportError:
 
 from .compression import compressions, maybe_compress
 from .serialize import (serialize, deserialize, Serialize, Serialized,
-        to_serialize, extract_serialize)
+        extract_serialize)
 from .utils import frame_split_size, merge_frames
-
-from ..utils import ignoring
 
 _deserialize = deserialize
 
@@ -28,7 +25,6 @@ logger = logging.getLogger(__name__)
 
 def dumps(msg):
     """ Transform Python message to bytestream suitable for communication """
-    original = msg
     try:
         data = {}
         # Only lists and dicts can contain serialized values
@@ -103,7 +99,6 @@ def loads(frames, deserialize=True):
 
         for key in keys:
             head = headers[key]
-            lengths = head['lengths']
             count = head['count']
             if count:
                 fs = frames[-count::][::-1]

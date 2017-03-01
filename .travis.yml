@@ -85,6 +85,7 @@ script:
       else
         py.test -m "not avoid_travis" distributed $PYTEST_OPTIONS;
       fi;
+    - flake8 distributed/*.py distributed/{bokeh,protocol,deploy}/*.py # no tests yet
 
 after_success:
     - if [[ $COVERAGE == true ]]; then coverage report; pip install -q coveralls ; coveralls ; fi
