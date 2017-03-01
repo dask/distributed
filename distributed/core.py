@@ -1,6 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from functools import partial
 import logging
 import six
@@ -98,6 +98,7 @@ class Server(object):
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
+        self.events = None
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
@@ -110,6 +111,7 @@ class Server(object):
 
             from .counter import Counter
             self.counters = defaultdict(partial(Counter, loop=self.loop))
+            self.events = defaultdict(lambda: deque(maxlen=10000))
 
             pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.loop)
             self.loop.add_callback(pc.start)
@@ -130,6 +132,14 @@ class Server(object):
         now = time()
         self.digests['tick-duration'].add(now - self._last_tick)
         self._last_tick = now
+
+    def log_event(self, name, msg):
+        msg['time'] = time()
+        if isinstance(name, list):
+            for n in name:
+                self.events[n].append(msg)
+        else:
+            self.events[name].append(msg)
 
     @property
     def address(self):

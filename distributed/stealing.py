@@ -48,10 +48,14 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.loop.add_callback(self._pc.start)
         self.scheduler.plugins.append(self)
         self.scheduler.extensions['stealing'] = self
-        self.log = deque(maxlen=100000)
+        self.scheduler.events['stealing'] = deque(maxlen=100000)
         self.count = 0
 
         scheduler.worker_handlers['long-running'] = self.transition_long_running
+
+    @property
+    def log(self):
+        return self.scheduler.events
 
     def add_worker(self, scheduler=None, worker=None):
         self.stealable[worker] = [set() for i in range(15)]
@@ -270,6 +274,7 @@ class WorkStealing(SchedulerPlugin):
                     break
 
             if log:
+                self.scheduler.log_event('stealing', log)
                 self.log.append(log)
                 self.count += 1
             stop = time()
