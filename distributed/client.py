@@ -497,6 +497,8 @@ class Client(object):
         comm = yield connect(self.scheduler.address,
                              timeout=timeout)
 
+        yield self.scheduler.identity()
+
         yield comm.write({'op': 'register-client',
                           'client': self.id, 'reply': False})
         msg = yield comm.read()
