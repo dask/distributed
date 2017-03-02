@@ -11,9 +11,9 @@ import six
 
 from sortedcontainers import SortedSet
 try:
-    from cytoolz import frequencies, merge
+    from cytoolz import frequencies, merge, pluck
 except ImportError:
-    from toolz import frequencies, merge
+    from toolz import frequencies, merge, pluck
 from toolz import memoize, valmap, first, second, concat
 from tornado import gen
 from tornado.gen import Return
@@ -1505,7 +1505,6 @@ class Scheduler(Server):
         average expected load.
         """
         with log_errors():
-            self.log_event('all', {'action': 'rebalance'})
             keys = set(keys or self.who_has)
             workers = set(workers or self.workers)
 
@@ -1560,6 +1559,15 @@ class Scheduler(Server):
 
             result = yield {r: self.rpc(addr=r).gather(who_has=v)
                             for r, v in to_recipients.items()}
+            for r, v in to_recipients.items():
+                self.log_event(r, {'action': 'rebalance',
+                                   'who_has': v})
+
+            self.log_event('all', {'action': 'rebalance',
+                                   'total-keys': len(keys),
+                                   'senders': valmap(len, to_senders),
+                                   'recipients': valmap(len, to_recipients),
+                                   'moved_keys': len(msgs)})
 
             if not all(r['status'] == 'OK' for r in result.values()):
                 raise Return({'status': 'missing-data',
@@ -1571,6 +1579,10 @@ class Scheduler(Server):
                 self.has_what[recipient].add(key)
                 self.worker_bytes[recipient] += self.nbytes.get(key,
                                                         DEFAULT_DATA_SIZE)
+                self.transition_log.append((key, 'memory', 'memory', {},
+                                            self._transition_counter, sender,
+                                            recipient))
+            self._transition_counter += 1
 
             result = yield {r: self.rpc(addr=r).delete_data(keys=v, report=False)
                             for r, v in to_senders.items()}
@@ -1604,7 +1616,6 @@ class Scheduler(Server):
         --------
         Scheduler.rebalance
         """
-        self.log_event('all', {'action': 'replicate', 'workers': workers, 'n': n})
         workers = set(self.workers_list(workers))
         if n is None:
             n = len(workers)
@@ -1635,6 +1646,8 @@ class Scheduler(Server):
                     self.who_has[key].remove(worker)
                     self.worker_bytes[worker] -= self.nbytes.get(key,
                                                             DEFAULT_DATA_SIZE)
+                self.log_event(worker, {'action': 'replicate-remove',
+                                        'keys': keys})
 
         keys = {k for k in keys if len(self.who_has[k] & workers) < n}
         # Copy not-yet-filled data
@@ -1656,6 +1669,14 @@ class Scheduler(Server):
             for w, v in results.items():
                 if v['status'] == 'OK':
                     self.add_keys(worker=w, keys=list(gathers[w]))
+
+                self.log_event(w, {'action': 'replicate-add',
+                                   'keys': gathers[w]})
+
+        self.log_event('all', {'action': 'replicate',
+                               'workers': list(workers),
+                               'key-count': len(keys),
+                               'branching-factor': branching_factor})
 
     def workers_to_close(self, memory_ratio=2):
         """
@@ -1741,9 +1762,9 @@ class Scheduler(Server):
                 for w in workers:
                     self.remove_worker(address=w, safe=True)
 
-            self.log_event('all', {'action': 'retire_workers',
+            self.log_event('all', {'action': 'retire-workers',
                                    'workers': workers,
-                                   'moved-keys': keys})
+                                   'moved-keys': len(keys)})
             self.log_event(list(workers), {'action': 'retired'})
 
             raise gen.Return(list(workers))

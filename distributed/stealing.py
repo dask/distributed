@@ -274,7 +274,6 @@ class WorkStealing(SchedulerPlugin):
                     break
 
             if log:
-                self.scheduler.log_event('stealing', log)
                 self.log.append(log)
                 self.count += 1
             stop = time()
