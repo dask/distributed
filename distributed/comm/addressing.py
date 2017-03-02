@@ -12,6 +12,9 @@ DEFAULT_SCHEME = config.get('default-scheme', 'tcp')
 def parse_address(addr):
     """
     Split address into its scheme and scheme-dependent location string.
+
+    >>> parse_address('tcp://127.0.0.1')
+    ('tcp', '127.0.0.1')
     """
     if not isinstance(addr, six.string_types):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
@@ -24,6 +27,9 @@ def parse_address(addr):
 def unparse_address(scheme, loc):
     """
     Undo parse_address().
+
+    >>> unparse_address('tcp', '127.0.0.1')
+    'tcp://127.0.0.1'
     """
     return '%s://%s' % (scheme, loc)
 
@@ -31,6 +37,11 @@ def unparse_address(scheme, loc):
 def normalize_address(addr):
     """
     Canonicalize address, adding a default scheme if necessary.
+
+    >>> normalize_address('zmq://[::1]')
+    'zmq://[::1]'
+    >>> normalize_address('[::1]')
+    'tcp://[::1]'
     """
     return unparse_address(*parse_address(addr))
 
@@ -114,19 +125,6 @@ def get_address_host(addr):
     return backend.get_address_host(loc)
 
 
-def resolve_address(addr):
-    """
-    Apply scheme-specific address resolution to *addr*, ensuring
-    all symbolic references are replaced with concrete location
-    specifiers.
-
-    In practice, this means hostnames are resolved to IP addresses.
-    """
-    scheme, loc = parse_address(addr)
-    backend = registry.get_backend(scheme)
-    return unparse_address(scheme, backend.resolve_address(loc))
-
-
 def get_local_address_for(addr):
     """
     Get the local listening address suitable for reaching *addr*.
@@ -137,3 +135,18 @@ def get_local_address_for(addr):
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
     return unparse_address(scheme, backend.get_local_address_for(loc))
+
+
+def resolve_address(addr):
+    """
+    Apply scheme-specific address resolution to *addr*, replacing
+    all symbolic references with concrete location specifiers.
+
+    In practice, this can mean hostnames are resolved to IP addresses.
+
+    >>> resolve_address('tcp://localhost:8786')
+    'tcp://127.0.0.1:8786'
+    """
+    scheme, loc = parse_address(addr)
+    backend = registry.get_backend(scheme)
+    return unparse_address(scheme, backend.resolve_address(loc))

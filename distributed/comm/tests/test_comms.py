@@ -24,6 +24,7 @@ from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
                               unparse_host_port, resolve_address,
                               get_address_host, get_local_address_for)
 
+
 if is_zmq_enabled():
     from distributed.comm import zmq
 

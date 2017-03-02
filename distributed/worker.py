@@ -8,17 +8,16 @@ import logging
 import os
 import random
 import tempfile
-from threading import current_thread, Lock, local
-from timeit import default_timer
+from threading import current_thread, local
 import shutil
 import sys
 
 from dask.core import istask
 from dask.compatibility import apply
 try:
-    from cytoolz import valmap, merge, pluck, concat
+    from cytoolz import pluck
 except ImportError:
-    from toolz import valmap, merge, pluck, concat
+    from toolz import pluck
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
@@ -29,13 +28,13 @@ from .comm import get_address_host, get_local_address_for
 from .config import config
 from .compatibility import reload, unicode, invalidate_caches, cache_from_source
 from .core import (connect, send_recv, error_message, CommClosedError,
-                   rpc, Server, pingpong, coerce_to_address, RPCClosed)
+                   rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
-                    All, ignoring, validate_key, mp_context)
+                    ignoring, validate_key, mp_context)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
@@ -218,7 +217,7 @@ class WorkerBase(Server):
             # addr_or_port is an integer => assume TCP
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
-                )
+            )
             self.listen((self.ip, addr_or_port))
         else:
             self.listen(addr_or_port)
@@ -291,22 +290,6 @@ class WorkerBase(Server):
     def wait_until_closed(self):
         yield self._closed.wait()
         assert self.status == 'closed'
-
-    def _deserialize(self, function=None, args=None, kwargs=None, task=None):
-        """ Deserialize task inputs and regularize to func, args, kwargs """
-        if function is not None:
-            function = loads(function)
-        if args:
-            args = loads(args)
-        if kwargs:
-            kwargs = loads(kwargs)
-
-        if task is not None:
-            assert not function and not args and not kwargs
-            function = execute_task
-            args = (task,)
-
-        return function, args or (), kwargs or {}
 
     @gen.coroutine
     def executor_submit(self, key, function, *args, **kwargs):
@@ -546,6 +529,23 @@ class WorkerBase(Server):
 job_counter = [0]
 
 
+def _deserialize(function=None, args=None, kwargs=None, task=None):
+    """ Deserialize task inputs and regularize to func, args, kwargs """
+    if function is not None:
+        function = loads(function)
+    if args:
+        args = loads(args)
+    if kwargs:
+        kwargs = loads(kwargs)
+
+    if task is not None:
+        assert not function and not args and not kwargs
+        function = execute_task
+        args = (task,)
+
+    return function, args or (), kwargs or {}
+
+
 def execute_task(task):
     """ Evaluate a nested task
 
@@ -646,8 +646,10 @@ def get_msg_safe_str(msg):
         def __init__(self, f, val):
             self._f = f
             self._val = val
+
         def __repr__(self):
             return self._f(self._val)
+
     msg = msg.copy()
     if "args" in msg:
         msg["args"] = Repr(convert_args_to_str, msg["args"])
@@ -670,7 +672,7 @@ def convert_args_to_str(args, max_len=None):
         strs[i] = sarg
         length += len(sarg) + 2
         if max_len is not None and length > max_len:
-            return "({}".format(", ".join(strs[:i+1]))[:max_len]
+            return "({}".format(", ".join(strs[:i + 1]))[:max_len]
     else:
         return "({})".format(", ".join(strs))
 
@@ -690,7 +692,7 @@ def convert_kwargs_to_str(kwargs, max_len=None):
         strs[i] = skwarg
         length += len(skwarg) + 2
         if max_len is not None and length > max_len:
-            return "{{{}".format(", ".join(strs[:i+1]))[:max_len]
+            return "{{{}".format(", ".join(strs[:i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
 
@@ -699,15 +701,18 @@ from .protocol import compressions, default_compression, to_serialize
 
 # TODO: use protocol.maybe_compress and proper file/memoryview objects
 
+
 def dumps_to_disk(x):
     b = dumps(x)
     c = compressions[default_compression]['compress'](b)
     return c
 
+
 def loads_from_disk(c):
     b = compressions[default_compression]['decompress'](c)
     x = loads(b)
     return x
+
 
 def weight(k, v):
     return sizeof(v)
@@ -972,7 +977,7 @@ class Worker(WorkerBase):
                 ('waiting', 'memory'): self.transition_dep_waiting_memory,
                 ('flight', 'waiting'): self.transition_dep_flight_waiting,
                 ('flight', 'memory'): self.transition_dep_flight_memory
-                }
+        }
 
         self.incoming_transfer_log = deque(maxlen=(100000))
         self.incoming_count = 0
@@ -1082,13 +1087,11 @@ class Worker(WorkerBase):
             self.log.append((key, 'new'))
             try:
                 start = time()
-                self.tasks[key] = self._deserialize(function, args, kwargs, task)
+                self.tasks[key] = _deserialize(function, args, kwargs, task)
                 stop = time()
 
                 if stop - start > 0.010:
                     self.startstops[key].append(('deserialize', start, stop))
-                raw = {'function': function, 'args': args, 'kwargs': kwargs,
-                        'task': task}
             except Exception as e:
                 logger.warn("Could not deserialize task", exc_info=True)
                 emsg = error_message(e)
@@ -1734,7 +1737,7 @@ class Worker(WorkerBase):
             if dep not in self.dep_state:
                 return
             self.log.append((dep, 'release-dep'))
-            state = self.dep_state.pop(dep)
+            self.dep_state.pop(dep)
 
             if dep in self.suspicious_deps:
                 del self.suspicious_deps[dep]
@@ -2004,9 +2007,9 @@ class Worker(WorkerBase):
             for key, deps in self.waiting_for_data.items():
                 if key not in self.data_needed:
                     for dep in deps:
-                         assert (dep in self.in_flight_tasks or
-                                 dep in self._missing_dep_flight or
-                                 self.who_has[dep].issubset(self.in_flight_workers))
+                        assert (dep in self.in_flight_tasks or
+                                dep in self._missing_dep_flight or
+                                self.who_has[dep].issubset(self.in_flight_workers))
 
             for key in self.tasks:
                 if self.task_state[key] == 'memory':
