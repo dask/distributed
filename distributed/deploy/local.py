@@ -166,7 +166,7 @@ class LocalCluster(object):
             w = W(self.scheduler.address, loop=self.loop,
                   silence_logs=self.silence_logs, **kwargs)
             yield w._start()
-        except Exception as e:
+        except Exception:
             raise
 
         self.workers.append(w)
