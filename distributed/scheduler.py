@@ -484,6 +484,7 @@ class Scheduler(Server):
         """
         logger.info("Closing worker %s", worker)
         with log_errors():
+            self.log_event(worker, {'action': 'close-worker'})
             nanny_addr = self.get_worker_service_addr(worker, 'nanny')
             address = nanny_addr or worker
 
