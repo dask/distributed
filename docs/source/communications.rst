@@ -6,10 +6,10 @@ Communications
 
 Workers, the Scheduler, and Clients communicate by sending each other
 Python objects (such as :ref:`protocol` messages or user data).
-The communication layer handlers appropriate encoding and shipping
+The communication layer handles appropriate encoding and shipping
 of those Python objects between the distributed endpoints.  The
 communication layer is able to select between different transport
-implementations, depending on user choise or (possibly) internal
+implementations, depending on user choice or (possibly) internal
 optimizations.
 
 The communication layer lives in the :mod:`distributed.comm` package.
