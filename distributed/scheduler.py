@@ -1,30 +1,24 @@
 from __future__ import print_function, division, absolute_import
 
 from collections import defaultdict, deque, OrderedDict
-from datetime import datetime, timedelta
 from functools import partial
 import json
 import logging
-import math
-from math import log
 import os
 import pickle
 import random
 import six
-import socket
-from timeit import default_timer
 
 from sortedcontainers import SortedSet
 try:
-    from cytoolz import frequencies, topk
+    from cytoolz import frequencies
 except ImportError:
-    from toolz import frequencies, topk
-from toolz import memoize, valmap, first, second, keymap, unique, concat, merge
+    from toolz import frequencies
+from toolz import memoize, valmap, first, second, concat
 from tornado import gen
 from tornado.gen import Return
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 
-from dask.compatibility import PY3, unicode
 from dask.core import reverse_dict
 from dask.order import order
 
@@ -39,9 +33,9 @@ from .metrics import time
 from .publish import PublishExtension
 from .channels import ChannelScheduler
 from .stealing import WorkStealing
-from .utils import (All, ignoring, get_ip, ignore_exceptions,
-        ensure_ip, get_fileno_limit, log_errors, key_split, mean,
-        divide_n_among_bins, validate_key)
+from .recreate_exceptions import ReplayExceptionScheduler
+from .utils import (All, ignoring, get_ip, get_fileno_limit, log_errors,
+        key_split, validate_key)
 from .utils_comm import (scatter_to_workers, gather_from_workers)
 from .versions import get_versions
 
@@ -194,7 +188,8 @@ class Scheduler(Server):
     def __init__(self, center=None, loop=None,
                  delete_interval=500, synchronize_worker_interval=60000,
                  services=None, allowed_failures=ALLOWED_FAILURES,
-                 extensions=[ChannelScheduler, PublishExtension, WorkStealing],
+                 extensions=[ChannelScheduler, PublishExtension, WorkStealing,
+                             ReplayExceptionScheduler],
                  validate=False, scheduler_file=None, **kwargs):
 
         # Attributes
@@ -431,6 +426,7 @@ class Scheduler(Server):
                 json.dump(self.identity(), f, indent=2)
 
             fn = self.scheduler_file  # remove file when we close the process
+
             def del_scheduler_file():
                 if os.path.exists(fn):
                     os.remove(fn)
@@ -619,7 +615,6 @@ class Scheduler(Server):
         This happens whenever the Client calls submit, map, get, or compute.
         """
         start = time()
-        original_keys = keys
         keys = set(keys)
         self.client_desires_keys(keys=keys, client=client)
 
@@ -1365,7 +1360,7 @@ class Scheduler(Server):
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
         if broadcast:
-            if broadcast == True:
+            if broadcast == True:  # flake8: noqa
                 n = len(ncores)
             else:
                 n = broadcast
@@ -1407,7 +1402,6 @@ class Scheduler(Server):
     @gen.coroutine
     def restart(self, client=None):
         """ Restart all workers.  Reset local state. """
-        n = len(self.workers)
         with log_errors():
             logger.debug("Send shutdown signal to workers")
 
@@ -1795,7 +1789,6 @@ class Scheduler(Server):
                          'traceback': self.tracebacks.get(failing_key, None)},
                          client=client)
 
-
     @gen.coroutine
     def feed(self, comm, function=None, setup=None, teardown=None, interval=1, **kwargs):
         """
@@ -2088,7 +2081,7 @@ class Scheduler(Server):
 
             deps = self.dependents.get(key, [])
             if len(deps) > 1:
-               deps = sorted(deps, key=self.priority.get, reverse=True)
+                deps = sorted(deps, key=self.priority.get, reverse=True)
 
             for dep in deps:
                 if dep in self.waiting:
@@ -2221,7 +2214,7 @@ class Scheduler(Server):
 
             deps = self.dependents.get(key, [])
             if len(deps) > 1:
-               deps = sorted(deps, key=self.priority.get, reverse=True)
+                deps = sorted(deps, key=self.priority.get, reverse=True)
 
             for dep in deps:
                 if dep in self.waiting:
@@ -2387,7 +2380,7 @@ class Scheduler(Server):
                 recommendations[key] = 'forgotten'
 
             elif (key not in self.exceptions_blame and
-                (key in self.who_wants or self.waiting_data.get(key))):
+                 (key in self.who_wants or self.waiting_data.get(key))):
                 recommendations[key] = 'waiting'
 
             del self.waiting_data[key]
@@ -2745,7 +2738,6 @@ class Scheduler(Server):
         reach a steady state
         """
         keys = set()
-        original = recommendations
         recommendations = recommendations.copy()
         while recommendations:
             key, finish = recommendations.popitem()
