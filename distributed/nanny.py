@@ -91,7 +91,7 @@ class Nanny(Server):
             # Default ip is the required one to reach the scheduler
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
-                )
+            )
             self.listen((self.ip, addr_or_port))
         else:
             self.listen(addr_or_port)
