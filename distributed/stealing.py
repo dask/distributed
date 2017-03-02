@@ -55,7 +55,7 @@ class WorkStealing(SchedulerPlugin):
 
     @property
     def log(self):
-        return self.scheduler.events
+        return self.scheduler.events['stealing']
 
     def add_worker(self, scheduler=None, worker=None):
         self.stealable[worker] = [set() for i in range(15)]

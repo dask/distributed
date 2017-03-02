@@ -1669,6 +1669,9 @@ class Scheduler(Server):
             for w, v in results.items():
                 if v['status'] == 'OK':
                     self.add_keys(worker=w, keys=list(gathers[w]))
+                else:
+                    logger.warn("Communication failed during replication: %s",
+                                v)
 
                 self.log_event(w, {'action': 'replicate-add',
                                    'keys': gathers[w]})
