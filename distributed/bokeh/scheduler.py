@@ -235,13 +235,7 @@ class Events(DashboardComponent):
         self.action_ys = dict()
         self.last = 0
         self.name = name
-        """
-        self.source = ColumnDataSource({'time': [(time() - 20), time()],
-                                        'action': ['', ''], 'hover': ['', ''],
-                                        'y': [0, 1], 'color': ['white', 'white']})
-        """
-        self.source = ColumnDataSource({'time': [],
-                                        'action': [], 'hover': [],
+        self.source = ColumnDataSource({'time': [], 'action': [], 'hover': [],
                                         'y': [], 'color': []})
 
         x_range = DataRange1d(follow='end', follow_interval=200000)
@@ -334,20 +328,11 @@ def workers_doc(scheduler, doc):
 
 def events_doc(scheduler, doc):
     with log_errors():
-        L = []
-        height = int(800 / len(scheduler.events))
-        for name in unique(['all'] + sorted(scheduler.events)):
-            e = Events(scheduler, name, height=200 if name == 'all' else height)
-            e.update()
-            doc.add_periodic_callback(e.update, 500)
-            L.append(e)
-
-        for e in L:
-            e.root.x_range = L[0].root.x_range
-
+        events = Events(scheduler, 'all', height=250)
+        events.update()
+        doc.add_periodic_callback(events.update, 500)
         doc.title = "Dask Scheduler Events"
-
-        doc.add_root(column(*[e.root for e in L], sizing_mode='scale_width'))
+        doc.add_root(column(events.root, sizing_mode='scale_width'))
 
 
 class BokehScheduler(BokehServer):
