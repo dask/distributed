@@ -81,8 +81,8 @@ def test_stealing_events(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_stealing_events(c, s, a, b):
-    e = Events(s)
+def test_events(c, s, a, b):
+    e = Events(s, 'all')
 
     futures = c.map(slowinc, range(100), delay=0.1, workers=a.address,
                     allow_other_workers=True)
