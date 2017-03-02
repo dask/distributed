@@ -12,7 +12,7 @@ from bokeh.models import ( ColumnDataSource, DataRange1d, HoverTool, ResetTool,
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
-from toolz import pipe, unique
+from toolz import pipe
 
 from .components import DashboardComponent
 from .core import BokehServer
@@ -285,7 +285,6 @@ class Events(DashboardComponent):
                         ys.append(self.action_ys[action])
                     colors.append(color_of(action))
                     hovers.append('TODO')
-
 
                 new = {'time': times,
                        'action': actions,
