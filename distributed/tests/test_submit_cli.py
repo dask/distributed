@@ -44,7 +44,7 @@ def test_cli_runs_remote_client():
 
     _remote('127.0.0.1:8799', 8788, loop=mock_ioloop, client=mock_remote_client)
 
-    mock_remote_client.assert_called_once_with(ip='127.0.0.1', loop=mock_ioloop, ssl_options=None)
+    mock_remote_client.assert_called_once_with(ip='127.0.0.1', loop=mock_ioloop)
     mock_remote_client().start.assert_called_once_with(port=8799)
 
     assert mock_ioloop.start.called
