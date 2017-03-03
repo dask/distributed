@@ -58,13 +58,12 @@ class Nanny(Server):
         self.status = None
         self.process = None
         self.loop = loop or IOLoop.current()
-        self.scheduler = rpc(scheduler_addr, connection_kwargs=self.connection_kwargs)
+        self.scheduler = rpc(scheduler_addr, connection_kwargs=connection_kwargs or {})
         self.services = services
         self.name = name
         self.memory_limit = memory_limit
         self.quiet = quiet
         self.should_watch = True
-        self.connection_kwargs = connection_kwargs or {}
 
         handlers = {'instantiate': self.instantiate,
                     'kill': self._kill,
