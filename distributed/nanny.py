@@ -32,7 +32,7 @@ class Nanny(Server):
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
-                 **kwargs):
+                 connection_kwargs=None, **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -64,6 +64,7 @@ class Nanny(Server):
         self.memory_limit = memory_limit
         self.quiet = quiet
         self.should_watch = True
+        self.connection_kwargs = connection_kwargs or {}
 
         handlers = {'instantiate': self.instantiate,
                     'kill': self._kill,

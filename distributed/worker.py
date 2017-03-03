@@ -69,7 +69,7 @@ class WorkerBase(Server):
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
-                 silence_logs=None, **kwargs):
+                 silence_logs=None, connection_kwargs=None, **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -117,6 +117,7 @@ class WorkerBase(Server):
         self._last_disk_io = None
         self._last_net_io = None
         self._ipython_kernel = None
+        self.connection_kwargs = connection_kwargs or {}
 
         if self.local_dir not in sys.path:
             sys.path.insert(0, self.local_dir)
@@ -965,6 +966,7 @@ class Worker(WorkerBase):
 
         self.log = deque(maxlen=100000)
         self.validate = kwargs.pop('validate', False)
+        self.connection_kwargs = kwargs.pop("connection_kwargs", {})
 
         self._transitions = {
                 ('waiting', 'ready'): self.transition_waiting_ready,

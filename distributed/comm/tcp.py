@@ -321,7 +321,7 @@ class TCPBackend(Backend):
         return TCPConnector()
 
     def get_listener(self, loc, handle_comm, deserialize, connection_kwargs):
-        return TCPListener(loc, handle_comm, deserialize, connection_kwargs)
+        return TCPListener(loc, handle_comm, deserialize, connection_kwargs=connection_kwargs)
 
     # Address handling
 
