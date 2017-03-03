@@ -1628,7 +1628,7 @@ class Client(object):
 
         variables = [a for a in collections if isinstance(a, Base)]
 
-        dsk = collections_to_dsk(variables, optimize_graph, **kwargs)
+        dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
         names = ['finalize-%s' % tokenize(v) for v in variables]
         dsk2 = {name: (v._finalize, v._keys()) for name, v in zip(names, variables)}
 
@@ -1709,7 +1709,7 @@ class Client(object):
 
         assert all(isinstance(c, Base) for c in collections)
 
-        dsk = collections_to_dsk(collections, optimize_graph, **kwargs)
+        dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
 
         names = {k for c in collections for k in flatten(c._keys())}
 
@@ -2376,6 +2376,10 @@ class Client(object):
             loose_restrictions = []
 
         return restrictions, loose_restrictions
+
+    @staticmethod
+    def collections_to_dsk(collections, optimize_graph=True, **kwargs):
+        return collections_to_dsk(collections, optimize_graph=True, **kwargs)
 
 
 Executor = Client
