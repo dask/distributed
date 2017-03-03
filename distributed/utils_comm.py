@@ -99,7 +99,7 @@ _round_robin_counter = [0]
 
 
 @gen.coroutine
-def scatter_to_workers(ncores, data, report=True, serialize=True):
+def scatter_to_workers(ncores, data, report=True, serialize=True, connection_kwargs=None):
     """ Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
@@ -132,7 +132,7 @@ def scatter_to_workers(ncores, data, report=True, serialize=True):
                    for _, key, value in v}
           for worker, v in d.items()}
 
-    rpcs = {addr: rpc(addr) for addr in d}
+    rpcs = {addr: rpc(addr, connection_kwargs=connection_kwargs) for addr in d}
     try:
         out = yield All([rpcs[address].update_data(data=v,
                                                  close=True, report=report)

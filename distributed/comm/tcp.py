@@ -211,34 +211,48 @@ class TCP(Comm):
         return self.stream is None or self.stream.closed()
 
 
+def _protocol_name(connection_kwargs):
+    """
+    The communication protocol that this connection is using
+    """
+    if connection_kwargs.get("ssl_options") is not None:
+        return "tls://"
+    else:
+        return "tcp://"
+
+
 class TCPConnector(object):
 
     @gen.coroutine
-    def connect(self, address, deserialize=True):
+    def connect(self, address, deserialize=True, connection_kwargs=None):
         ip, port = parse_host_port(address)
+
+        connection_kwargs = connection_kwargs or {}
 
         client = TCPClient()
         try:
             stream = yield client.connect(ip, port,
-                                          max_buffer_size=MAX_BUFFER_SIZE)
+                                          max_buffer_size=MAX_BUFFER_SIZE, **connection_kwargs)
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(e)
 
-        raise gen.Return(TCP(stream, 'tcp://' + address, deserialize))
+        raise gen.Return(TCP(stream, _protocol_name(connection_kwargs) + address, deserialize))
+
 
 
 class TCPListener(Listener):
 
-    def __init__(self, address, comm_handler, deserialize=True, default_port=0):
+    def __init__(self, address, comm_handler, deserialize=True, default_port=0, connection_kwargs=None):
         self.ip, self.port = parse_host_port(address, default_port)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.tcp_server = None
         self.bound_address = None
+        self.connection_kwargs = connection_kwargs or {}
 
     def start(self):
-        self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE)
+        self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE, **self.connection_kwargs)
         self.tcp_server.handle_stream = self.handle_stream
         for i in range(5):
             try:
@@ -275,11 +289,15 @@ class TCPListener(Listener):
         return self.bound_address[:2]
 
     @property
+    def protocol(self):
+        return _protocol_name(self.connection_kwargs)
+
+    @property
     def listen_address(self):
         """
         The listening address as a string.
         """
-        return 'tcp://' + unparse_host_port(*self.get_host_port())
+        return self.protocol + unparse_host_port(*self.get_host_port())
 
     @property
     def contact_address(self):
@@ -288,10 +306,10 @@ class TCPListener(Listener):
         """
         host, port = self.get_host_port()
         host = ensure_concrete_host(host)
-        return 'tcp://' + unparse_host_port(host, port)
+        return self.protocol + unparse_host_port(host, port)
 
     def handle_stream(self, stream, address):
-        address = 'tcp://' + unparse_host_port(*address[:2])
+        address = self.protocol + unparse_host_port(*address[:2])
         comm = TCP(stream, address, self.deserialize)
         self.comm_handler(comm)
 
@@ -320,3 +338,4 @@ class TCPBackend(Backend):
 
 
 backends['tcp'] = TCPBackend()
+backends['tls'] = TCPBackend()

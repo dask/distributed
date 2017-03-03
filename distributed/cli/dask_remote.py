@@ -9,8 +9,12 @@ from distributed.submit import _remote
 @click.option('--host', type=str, default=None,
               help="IP or hostname of this server")
 @click.option('--port', type=int, default=8788, help="Remote Client Port")
-def main(host, port):
-    _remote(host, port)
+@click.option('--certfile', default=None,
+              help='path to certfile to use for ssl connection')
+@click.option('--keyfile', default=None,
+              help='path to keyfile to use for ssl connection')
+def main(host, port, certfile, keyfile):
+    _remote(host, port, certfile=certfile, keyfile=keyfile)
 
 
 def go():

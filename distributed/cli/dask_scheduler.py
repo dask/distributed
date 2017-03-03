@@ -1,23 +1,19 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-import json
 import logging
 import os
-import socket
-import subprocess
 import sys
-from time import sleep
 
 import click
+from tornado.ioloop import IOLoop
 
-import distributed
 from distributed import Scheduler
 from distributed.utils import ignoring, open_port
-from distributed.http import HTTPScheduler
 from distributed.cli.utils import (check_python_3, install_signal_handlers,
-                                   uri_from_host_port)
-from tornado.ioloop import IOLoop
+                                   uri_from_host_port, create_ssl_context)
+from distributed.http import HTTPScheduler
+from distributed.utils import ignoring
 
 logger = logging.getLogger('distributed.scheduler')
 
@@ -46,8 +42,12 @@ logger = logging.getLogger('distributed.scheduler')
               help="File to write connection information. "
               "This may be a good way to share connection information if your "
               "cluster is on a shared network file system.")
+@click.option('--certfile', default=None,
+              help='path to certfile to use for ssl connection')
+@click.option('--keyfile', default=None,
+              help='path to keyfile to use for ssl connection')
 def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
-         bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file):
+         bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file, certfile, keyfile):
 
     if pid_file:
         with open(pid_file, 'w') as f:
@@ -74,8 +74,11 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
         with ignoring(ImportError):
             from distributed.bokeh.scheduler import BokehScheduler
             services[('bokeh', bokeh_internal_port)] = BokehScheduler
-    scheduler = Scheduler(loop=loop, services=services,
-                          scheduler_file=scheduler_file)
+
+    ssl_ctx = create_ssl_context(certfile, keyfile)
+    connection_kwargs = dict(ssl_options=ssl_ctx)
+
+    scheduler = Scheduler(loop=loop, services=services, connection_kwargs=connection_kwargs, scheduler_file=scheduler_file)
     scheduler.start(addr)
 
     bokeh_proc = None

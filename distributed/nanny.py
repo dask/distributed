@@ -58,7 +58,7 @@ class Nanny(Server):
         self.status = None
         self.process = None
         self.loop = loop or IOLoop.current()
-        self.scheduler = rpc(scheduler_addr)
+        self.scheduler = rpc(scheduler_addr, connection_kwargs=self.connection_kwargs)
         self.services = services
         self.name = name
         self.memory_limit = memory_limit
@@ -124,7 +124,7 @@ class Nanny(Server):
         if isalive(self.process):
             try:
                 # Ask worker to close
-                with rpc(self.worker_address) as worker:
+                with rpc(self.worker_address, connection_kwargs=self.connection_kwargs) as worker:
                     result = yield gen.with_timeout(
                                 timedelta(seconds=min(1, timeout)),
                                 worker.terminate(report=False),

@@ -107,7 +107,7 @@ class WorkerBase(Server):
         self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
-        self.scheduler = rpc(scheduler_addr)
+        self.scheduler = rpc(scheduler_addr, connection_kwargs=self.connection_kwargs)
         self.name = name
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False

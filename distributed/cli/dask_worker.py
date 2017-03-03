@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
+import ssl
 from datetime import timedelta
 import json
 import logging
@@ -18,7 +19,7 @@ from distributed.utils import All, ignoring
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
 from distributed.metrics import time
-from distributed.cli.utils import check_python_3
+from distributed.cli.utils import check_python_3, create_ssl_context
 
 from toolz import valmap
 from tornado.ioloop import IOLoop, TimeoutError
@@ -80,9 +81,13 @@ def handle_signal(sig, frame):
 @click.option('--scheduler-file', type=str, default='',
               help='Filename to JSON encoded scheduler information. '
                    'Use with dask-scheduler --scheduler-file')
+@click.option('--certfile', default=None,
+              help='path to certfile to use for ssl connection')
+@click.option('--keyfile', default=None,
+              help='path to keyfile to use for ssl connection')
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
          nanny, name, memory_limit, pid_file, temp_filename, reconnect,
-         resources, bokeh, bokeh_port, local_directory, scheduler_file):
+         resources, bokeh, bokeh_port, local_directory, scheduler_file, certfile, keyfile):
     if nanny:
         port = nanny_port
     else:
@@ -152,10 +157,13 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         raise ValueError("Need to provide scheduler address like\n"
                          "dask-worker SCHEDULER_ADDRESS:8786")
 
+    ssl_ctx = create_ssl_context(certfile, keyfile)
+    connection_kwargs = dict(ssl_options=ssl_ctx)
+
     nannies = [t(scheduler, ncores=nthreads,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
-                 local_dir=local_directory, **kwargs)
+                 local_dir=local_directory, connection_kwargs=connection_kwargs, **kwargs)
                for i in range(nprocs)]
 
     for n in nannies:
@@ -197,7 +205,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
     @gen.coroutine
     def f():
-        scheduler = rpc(nannies[0].scheduler.address)
+        scheduler = rpc(nannies[0].scheduler.address, connection_kwargs=connection_kwargs)
         if nanny:
             yield gen.with_timeout(timedelta(seconds=2),
                     All([scheduler.unregister(address=n.worker_address, close=True)
