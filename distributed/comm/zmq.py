@@ -276,8 +276,8 @@ class ZMQBackend(Backend):
     def get_connector(self):
         return ZMQConnector()
 
-    def get_listener(self, loc, handle_comm, deserialize):
-        return ZMQListener(loc, handle_comm, deserialize)
+    def get_listener(self, loc, handle_comm, deserialize, connection_kwargs):
+        return ZMQListener(loc, handle_comm, deserialize, connection_kwargs)
 
     # Address handling
 

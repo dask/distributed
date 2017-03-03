@@ -308,7 +308,7 @@ class InProcBackend(Backend):
     def get_connector(self):
         return InProcConnector(self.manager)
 
-    def get_listener(self, loc, handle_comm, deserialize):
+    def get_listener(self, loc, handle_comm, deserialize, connection_kwargs):
         return InProcListener(loc, handle_comm, deserialize)
 
     # Address handling

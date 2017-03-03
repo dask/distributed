@@ -240,7 +240,6 @@ class TCPConnector(object):
         raise gen.Return(TCP(stream, _protocol_name(connection_kwargs) + address, deserialize))
 
 
-
 class TCPListener(Listener):
 
     def __init__(self, address, comm_handler, deserialize=True, default_port=0, connection_kwargs=None):
@@ -321,8 +320,8 @@ class TCPBackend(Backend):
     def get_connector(self):
         return TCPConnector()
 
-    def get_listener(self, loc, handle_comm, deserialize):
-        return TCPListener(loc, handle_comm, deserialize)
+    def get_listener(self, loc, handle_comm, deserialize, connection_kwargs):
+        return TCPListener(loc, handle_comm, deserialize, connection_kwargs)
 
     # Address handling
 
