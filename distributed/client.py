@@ -20,7 +20,7 @@ import six
 import socket
 
 import dask
-from dask.base import tokenize, normalize_token, Base
+from dask.base import tokenize, normalize_token, Base, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.compatibility import apply, unicode
 from dask.context import _globals
@@ -1628,7 +1628,7 @@ class Client(object):
 
         variables = [a for a in collections if isinstance(a, Base)]
 
-        dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
+        dsk = collections_to_dsk(variables, optimize_graph, **kwargs)
         names = ['finalize-%s' % tokenize(v) for v in variables]
         dsk2 = {name: (v._finalize, v._keys()) for name, v in zip(names, variables)}
 
@@ -1709,7 +1709,7 @@ class Client(object):
 
         assert all(isinstance(c, Base) for c in collections)
 
-        dsk = self.collections_to_dsk(collections, optimize_graph, **kwargs)
+        dsk = collections_to_dsk(collections, optimize_graph, **kwargs)
 
         names = {k for c in collections for k in flatten(c._keys())}
 
@@ -2376,27 +2376,6 @@ class Client(object):
             loose_restrictions = []
 
         return restrictions, loose_restrictions
-
-    @staticmethod
-    def collections_to_dsk(collections, optimize_graph=True, **kwargs):
-        """
-        Convert many collections into a single dask graph, after optimization
-        """
-        optimizations = _globals.get('optimizations', [])
-        if optimize_graph:
-            groups = groupby(lambda x: x._optimize, collections)
-            groups = {opt: [merge([v.dask for v in val]),
-                           [v._keys() for v in val]]
-                      for opt, val in groups.items()}
-            for opt in optimizations:
-                groups = {k: [opt(dsk, keys), keys]
-                          for k, (dsk, keys) in groups.items()}
-            dsk = merge([opt(dsk, keys, **kwargs)
-                         for opt, (dsk, keys) in groups.items()])
-        else:
-            dsk = merge(c.dask for c in collections)
-
-        return dsk
 
 
 Executor = Client
