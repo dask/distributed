@@ -1256,7 +1256,7 @@ class Scheduler(Server):
         Scheduler.handle_client: Equivalent coroutine for clients
         """
         try:
-            comm = yield connect(worker)
+            comm = yield connect(worker, connection_kwargs=self.connection_kwargs)
         except Exception as e:
             logger.error("Failed to connect to worker %r: %s",
                          worker, e)
