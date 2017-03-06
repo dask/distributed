@@ -46,15 +46,9 @@ def test_ssl(ssl_kwargs, loop):
     @gen_cluster(
         scheduler_kwargs={'connection_kwargs': ssl_kwargs},
         worker_kwargs={'connection_kwargs': ssl_kwargs},
+        client_kwargs={'connection_kwargs': ssl_kwargs},
         client=True)
     def f(c, s, a, b):
-
-        assert isinstance(c, Client)
-        assert isinstance(c, Scheduler)
-        assert isinstance(a, Worker)
-        assert isinstance(b, Worker)
-
-
 
         future = c.submit(inc, 1)
         assert future.key in c.futures

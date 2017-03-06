@@ -489,7 +489,7 @@ def end_cluster(s, workers):
 
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
         Worker=Worker, client=False, scheduler_kwargs={}, worker_kwargs={},
-        active_rpc_timeout=0):
+        active_rpc_timeout=0, client_kwargs={}):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -513,7 +513,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
                     args = [s] + workers
 
                     if client:
-                        e = Client(s.address, loop=loop, start=False)
+                        e = Client(s.address, loop=loop, start=False, **client_kwargs)
                         loop.run_sync(e._start)
                         args = [e] + args
                     try:
