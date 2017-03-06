@@ -6,6 +6,7 @@ from importlib import import_module
 import heapq
 import logging
 import os
+import pickle
 import random
 import tempfile
 from threading import current_thread, local
@@ -1462,12 +1463,16 @@ class Worker(WorkerBase):
         if key in self.data:
             nbytes = self.nbytes[key] or sizeof(self.data[key])
             typ = self.types.get(key) or type(self.data[key])
+            try:
+                typ = dumps_function(typ)
+            except pickle.PicklingError:
+                typ = typ.__name__
             d = {'op': 'task-finished',
                  'status': 'OK',
                  'key': key,
                  'nbytes': nbytes,
                  'thread': self.threads.get(key),
-                 'type': dumps_function(typ)}
+                 'type': typ}
         elif key in self.exceptions:
             d = {'op': 'task-erred',
                  'status': 'error',
@@ -1476,7 +1481,6 @@ class Worker(WorkerBase):
                  'exception': self.exceptions[key],
                  'traceback': self.tracebacks[key]}
         else:
-            import pdb; pdb.set_trace()
             logger.error("Key not ready to send to worker, %s: %s",
                          key, self.task_state[key])
             return
