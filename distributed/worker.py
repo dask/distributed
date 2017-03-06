@@ -107,6 +107,7 @@ class WorkerBase(Server):
         self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
+        self.connection_kwargs = connection_kwargs or {}
         self.scheduler = rpc(scheduler_addr, connection_kwargs=self.connection_kwargs)
         self.name = name
         self.heartbeat_interval = heartbeat_interval
@@ -117,7 +118,6 @@ class WorkerBase(Server):
         self._last_disk_io = None
         self._last_net_io = None
         self._ipython_kernel = None
-        self.connection_kwargs = connection_kwargs or {}
 
         if self.local_dir not in sys.path:
             sys.path.insert(0, self.local_dir)
@@ -142,7 +142,7 @@ class WorkerBase(Server):
           'keys': self.keys,
         }
 
-        super(WorkerBase, self).__init__(handlers, io_loop=self.loop, **kwargs)
+        super(WorkerBase, self).__init__(handlers, io_loop=self.loop, connection_kwargs=self.connection_kwargs, **kwargs)
 
         self.heartbeat_callback = PeriodicCallback(self.heartbeat,
                                                    self.heartbeat_interval,
@@ -966,7 +966,6 @@ class Worker(WorkerBase):
 
         self.log = deque(maxlen=100000)
         self.validate = kwargs.pop('validate', False)
-        self.connection_kwargs = kwargs.pop("connection_kwargs", {})
 
         self._transitions = {
                 ('waiting', 'ready'): self.transition_waiting_ready,
