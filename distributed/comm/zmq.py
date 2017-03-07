@@ -178,7 +178,7 @@ class ZMQConnector(Connector):
         raise gen.Return(comm)
 
     @gen.coroutine
-    def connect(self, address, deserialize=True):
+    def connect(self, address, deserialize=True, connection_kwargs=None):
         host, port = parse_host_port(address)
         listener_url = make_zmq_url(host, port)
         sock = make_socket(zmq.DEALER)
