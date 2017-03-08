@@ -27,7 +27,7 @@ from .batched import BatchedSend
 from .comm import get_address_host
 from .config import config
 from .compatibility import reload, unicode, invalidate_caches, cache_from_source
-from .core import (connect, send_recv, error_message, CommClosedError,
+from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
 from .protocol.pickle import dumps, loads
