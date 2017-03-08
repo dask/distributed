@@ -1551,6 +1551,8 @@ class Worker(WorkerBase):
                 stop = time()
                 if self.digests is not None:
                     self.digests['gather-connect-duration'].add(stop - start)
+                if stop - start > 0.020:  # 20ms connect time is longish
+                    self.startstops[cause].append(('connect', start, stop))
 
                 self.log.append(('request-dep', dep, worker, deps))
                 logger.debug("Request %d keys", len(deps))
