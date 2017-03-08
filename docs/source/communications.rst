@@ -30,6 +30,9 @@ source tree:
 * ``tcp`` is the main transport; it uses TCP sockets and allows for IPv4
   and IPv6 addresses.
 
+* ``tls`` is a secure transport.  Using it requires specifying keys and
+  certificates as outlined in :ref:`ssl`
+
 * ``zmq`` is an experimental transport using ZeroMQ sockets; it is not
   recommended for production use.
 
