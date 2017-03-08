@@ -1545,11 +1545,11 @@ class Worker(WorkerBase):
                 if self.validate:
                     self.validate_state()
 
+                self.log.append(('request-dep', dep, worker, deps))
+                logger.debug("Request %d keys", len(deps))
                 start = time()
                 response = yield self.rpc(worker).get_data(keys=list(deps),
                                                            who=self.address)
-                self.log.append(('request-dep', dep, worker, deps))
-                logger.debug("Request %d keys", len(deps))
                 stop = time()
 
                 if cause:
