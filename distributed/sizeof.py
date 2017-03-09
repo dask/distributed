@@ -42,6 +42,8 @@ def register_pandas():
     import numpy as np
 
     def object_size(x):
+        if not len(x):
+            return 0
         sample = np.random.choice(x, size=20, replace=True)
         sample = list(map(sizeof, sample))
         return sum(sample) / 20 * len(x)

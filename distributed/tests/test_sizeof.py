@@ -66,3 +66,15 @@ def test_dataframe_object_dtype():
 
     s = pd.Series(['a' * 1000] * 1000)
     assert sizeof(s) > 1000000
+
+
+def test_empty():
+    pd = pytest.importorskip('pandas')
+    df = pd.DataFrame({'x': [1, 2, 3], 'y': ['a'*100, 'b'*100, 'c'*100]},
+                      index=[10, 20, 30])
+    empty = df.head(0)
+
+    assert sizeof(empty) > 0
+    assert sizeof(empty.x) > 0
+    assert sizeof(empty.y) > 0
+    assert sizeof(empty.index) > 0
