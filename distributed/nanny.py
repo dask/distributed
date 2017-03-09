@@ -314,8 +314,20 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
     """
     Create a worker by forking.
     """
+    import os
+    import random
     from distributed import Worker  # pragma: no cover
+    from distributed.metrics import time
     from tornado.ioloop import IOLoop  # pragma: no cover
+    random.seed((time(), os.getpid()))
+    try:
+        import numpy as np
+    except ImportError:
+        pass
+    else:
+        np.random.seed(hash((time(), os.getpid(), random.randint(0, 2**30)))
+                       % 2**32)
+
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
     loop.make_current()  # pragma: no cover

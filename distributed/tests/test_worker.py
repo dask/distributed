@@ -5,6 +5,7 @@ import logging
 from numbers import Integral, Number
 from operator import add
 import os
+import random
 import re
 import shutil
 import sys
@@ -12,13 +13,14 @@ import traceback
 
 from dask import delayed
 import pytest
+import numpy as np
 from toolz import pluck, sliding_window
 import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
 
 from distributed.core import rpc, connect
-from distributed.client import _wait
+from distributed.client import _wait, Client
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
 from distributed.protocol import to_serialize
@@ -27,8 +29,7 @@ from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
 from distributed.utils import ignoring, tmpfile
 from distributed.utils_test import (loop, inc, mul, gen_cluster, div,
-        slow, slowinc, throws, gen_test, readone)
-
+        slow, slowinc, throws, gen_test, readone, cluster)
 
 
 def test_worker_ncores():
@@ -651,3 +652,23 @@ def test_hold_onto_dependents(c, s, a, b):
     yield gen.sleep(0.1)
 
     assert x.key in b.data
+
+
+def test_random_seed(loop):
+    with cluster(nanny=True) as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            a_address, b_address = c.ncores()
+            for i, func in enumerate([lambda: random.getstate(),
+                                      lambda: np.random.get_state()]):
+                x = c.submit(func, pure=False, workers=a_address)
+                y = c.submit(func, pure=False, workers=b_address)
+                assert x.key != y.key
+                xx, yy = c.gather([x, y])
+                assert str(xx) != str(yy)
+
+            for func in [lambda a, b: random.randint(a, b),
+                         lambda a, b: np.random.randint(a, b)]:
+                x = c.submit(func, 0, 2**31, pure=False, workers=a_address)
+                y = c.submit(func, 0, 2**31, pure=False, workers=b_address)
+                assert x.key != y.key
+                assert x.result() != y.result()
