@@ -80,9 +80,12 @@ def handle_signal(sig, frame):
 @click.option('--scheduler-file', type=str, default='',
               help='Filename to JSON encoded scheduler information. '
                    'Use with dask-scheduler --scheduler-file')
+@click.option('--death-timeout', type=float, default=None,
+              help="Seconds to wait for a scheduler before closing")
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
          nanny, name, memory_limit, pid_file, temp_filename, reconnect,
-         resources, bokeh, bokeh_port, local_directory, scheduler_file):
+         resources, bokeh, bokeh_port, local_directory, scheduler_file,
+         death_timeout):
     if nanny:
         port = nanny_port
     else:
@@ -155,7 +158,8 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     nannies = [t(scheduler, ncores=nthreads,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
-                 local_dir=local_directory, **kwargs)
+                 local_dir=local_directory, death_timeout=death_timeout,
+                 **kwargs)
                for i in range(nprocs)]
 
     for n in nannies:

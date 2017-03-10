@@ -9,7 +9,7 @@ import tempfile
 from time import sleep
 import weakref
 
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
 from .comm import get_address_host
@@ -352,6 +352,8 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
         logger.info("Worker closed")
     try:
         loop.run_sync(run)
+    except TimeoutError:
+        logger.info("Worker timed out")
     finally:
         loop.stop()
         loop.close(all_fds=True)
