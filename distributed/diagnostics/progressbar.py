@@ -137,9 +137,10 @@ class ProgressWidget(ProgressBar):
     def _draw_stop(self, remaining, status, **kwargs):
         if status == 'error':
             self.bar.bar_style = 'danger'
-            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Warning:</b> the computation terminated due to an error after ' + format_time(self.elapsed) + '</div>'
+            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Exception:</b> ' + format_time(self.elapsed) + '</div>'
         elif not remaining:
             self.bar.bar_style = 'success'
+            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Finished:</b> ' + format_time(self.elapsed) + '</div>'
 
     def _draw_bar(self, remaining, all, **kwargs):
         ndone = all - remaining
@@ -255,12 +256,14 @@ class MultiProgressWidget(MultiProgressBar):
         for k, v in remaining.items():
             if not v:
                 self.bars[k].bar_style = 'success'
+            else:
+                self.bars[k].bar_style = 'danger'
 
-        """ TODO
         if status == 'error':
-            self.bars[self.func(key)].bar_style = 'danger'
-            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Warning:</b> the computation terminated due to an error after ' + format_time(self.elapsed) + '</div>'
-        """
+            # self.bars[self.func(key)].bar_style = 'danger'  # TODO
+            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Exception:</b> ' + format_time(self.elapsed) + '</div>'
+        else:
+            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Finished:</b> ' + format_time(self.elapsed) + '</div>'
 
     def _draw_bar(self, remaining, all, status, **kwargs):
         if self.keys and not self.widget.children:
