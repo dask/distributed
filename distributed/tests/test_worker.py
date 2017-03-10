@@ -655,7 +655,7 @@ def test_hold_onto_dependents(c, s, a, b):
 
 @slow
 @gen_test()
-def test_worker_with_port_zero():
+def test_worker_death_timeout():
     w = Worker('127.0.0.1', 38848, death_timeout=1)
     yield w._start()
 

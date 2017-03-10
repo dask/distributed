@@ -278,7 +278,7 @@ class WorkerBase(Server):
                 'memory_limit': self.memory_limit}
 
     @gen.coroutine
-    def _close(self, report=True, timeout=10):
+    def _close(self, report=True, timeout=10, nanny=True):
         if self.status in ('closed', 'closing'):
             return
         logger.info("Stopping worker at %s", self.address)
@@ -297,8 +297,14 @@ class WorkerBase(Server):
 
         for k, v in self.services.items():
             v.stop()
-        self.rpc.close()
+
         self.status = 'closed'
+
+        if nanny and 'nanny' in self.services:
+            with self.rpc(self.services['nanny']) as r:
+                yield r.terminate()
+
+        self.rpc.close()
         self._closed.set()
 
     @gen.coroutine
