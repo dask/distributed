@@ -197,12 +197,13 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
     @gen.coroutine
     def f():
-        scheduler = rpc(nannies[0].scheduler.address)
-        if nanny:
-            yield gen.with_timeout(timedelta(seconds=2),
-                    All([scheduler.unregister(address=n.worker_address, close=True)
-                         for n in nannies if n.process and n.worker_address]),
-                    io_loop=loop2)
+        with rpc(nannies[0].scheduler.address) as scheduler:
+            if nanny:
+                yield gen.with_timeout(
+                        timeout=timedelta(seconds=2),
+                        future=All([scheduler.unregister(address=n.worker_address, close=True)
+                                   for n in nannies if n.process and n.worker_address]),
+                        io_loop=loop2)
 
     loop2.run_sync(f)
 
