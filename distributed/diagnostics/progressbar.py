@@ -144,7 +144,7 @@ class ProgressWidget(ProgressBar):
 
     def _draw_bar(self, remaining, all, **kwargs):
         ndone = all - remaining
-        self.elapsed_time.value = '<div style=\"padding: 0px 10px 5px 10px\"><b>Elapsed time:</b> ' + format_time(self.elapsed) + '</div>'
+        self.elapsed_time.value = '<div style=\"padding: 0px 10px 5px 10px\"><b>Computing:</b> ' + format_time(self.elapsed) + '</div>'
         self.bar.value = ndone / all if all else 1.0
         self.bar_text.value = '<div style="padding: 0px 10px 0px 10px; text-align:right;">%d / %d</div>' % (ndone, all)
 
@@ -270,7 +270,7 @@ class MultiProgressWidget(MultiProgressBar):
             self.make_widget(all)
         for k, ntasks in all.items():
             ndone = ntasks - remaining[k]
-            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Elapsed time:</b> ' + format_time(self.elapsed) + '</div>'
+            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Computing:</b> ' + format_time(self.elapsed) + '</div>'
             self.bars[k].value = ndone / ntasks if ntasks else 1.0
             self.bar_texts[k].value = '<div style="padding: 0px 10px 0px 10px; text-align: right">%d / %d</div>' % (ndone, ntasks)
 
