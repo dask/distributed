@@ -203,6 +203,7 @@ class Nanny(Server):
                         'validate': self.validate,
                         'silence_logs': self.silence_logs})
             self.process.daemon = True
+            processes_to_close.add(self.process)
             self.process.start()
             while True:
                 try:
