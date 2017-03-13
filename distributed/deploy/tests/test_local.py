@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from functools import partial
 import sys
 from time import sleep
+from threading import Lock
 import unittest
 
 from tornado.ioloop import IOLoop
@@ -52,25 +53,41 @@ def test_procs(loop):
         repr(c)
 
 
+def test_move_unserializable_data():
+    with LocalCluster(nanny=False, silence_logs=False,
+                      diagnostics_port=None) as cluster:
+        assert cluster.scheduler_address.startswith('inproc://')
+        assert cluster.workers[0].address.startswith('inproc://')
+        with Client(cluster) as client:
+            lock = Lock()
+            [x] = client.scatter([lock])
+            y = client.submit(lambda x: x, x)
+            assert y.result() is lock
+
+
 def test_transports():
     """
     Test the transport chosen by LocalCluster depending on arguments.
     """
-    with LocalCluster(1, nanny=False, silence_logs=False) as c:
+    with LocalCluster(1, nanny=False, silence_logs=False,
+            diagnostics_port=None) as c:
         assert c.scheduler_address.startswith('inproc://')
         assert c.workers[0].address.startswith('inproc://')
         with Client(c.scheduler.address) as e:
             assert e.submit(inc, 4).result() == 5
 
     # Have nannies => need TCP
-    with LocalCluster(1, nanny=True, silence_logs=False) as c:
+    with LocalCluster(1, nanny=True, silence_logs=False,
+                      diagnostics_port=None) as c:
         assert c.scheduler_address.startswith('tcp://')
         assert c.workers[0].address.startswith('tcp://')
         with Client(c.scheduler.address) as e:
             assert e.submit(inc, 4).result() == 5
 
     # Scheduler port specified => need TCP
-    with LocalCluster(1, nanny=False, scheduler_port=8786, silence_logs=False) as c:
+    with LocalCluster(1, nanny=False, scheduler_port=8786, silence_logs=False,
+                      diagnostics_port=None) as c:
+
         assert c.scheduler_address == 'tcp://127.0.0.1:8786'
         assert c.workers[0].address.startswith('tcp://')
         with Client(c.scheduler.address) as e:

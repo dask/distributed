@@ -592,7 +592,11 @@ class Client(object):
     def _handle_key_in_memory(self, key=None, type=None, workers=None):
         state = self.futures.get(key)
         if state is not None:
-            type = loads(type) if type and not state.type else None
+            if type and not state.type:  # Type exists and not yet set
+                if isinstance(type, bytes):  # worker sends bytes
+                    type = loads(type)       # if serializable, else text
+            else:
+                type = None
             state.finish(type)
 
     def _handle_lost_data(self, key=None):
