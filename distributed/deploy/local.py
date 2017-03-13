@@ -150,7 +150,7 @@ class LocalCluster(object):
         yield [self._start_worker(**kwargs) for i in range(n_workers)]
 
     @gen.coroutine
-    def _start_worker(self, port=0, nanny=None, **kwargs):
+    def _start_worker(self, port=0, nanny=None, death_timeout=60, **kwargs):
         if nanny is not None:
             raise ValueError("overriding `nanny` for individual workers "
                              "in a LocalCluster is not supported anymore")
@@ -162,12 +162,10 @@ class LocalCluster(object):
             kwargs['quiet'] = True
         else:
             W = Worker
-        try:
-            w = W(self.scheduler.address, loop=self.loop,
-                  silence_logs=self.silence_logs, **kwargs)
-            yield w._start()
-        except Exception:
-            raise
+        w = W(self.scheduler.address, loop=self.loop,
+              death_timeout=death_timeout,
+              silence_logs=self.silence_logs, **kwargs)
+        yield w._start()
 
         self.workers.append(w)
 

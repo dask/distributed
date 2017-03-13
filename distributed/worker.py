@@ -28,7 +28,7 @@ from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for
 from .config import config
 from .compatibility import reload, unicode, invalidate_caches, cache_from_source
-from .core import (connect, send_recv, error_message, CommClosedError,
+from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
 from .protocol.pickle import dumps, loads
@@ -51,9 +51,11 @@ no_value = '--no-value-sentinel--'
 try:
     import psutil
     TOTAL_MEMORY = psutil.virtual_memory().total
+    proc = psutil.Process()
 except ImportError:
     logger.warn("Please install psutil to estimate worker memory use")
     TOTAL_MEMORY = 8e9
+    proc = None
 
 
 IN_PLAY = ('waiting', 'ready', 'executing', 'long-running')
@@ -68,7 +70,7 @@ class WorkerBase(Server):
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
-                 silence_logs=None, **kwargs):
+                 silence_logs=None, death_timeout=None, **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -78,6 +80,7 @@ class WorkerBase(Server):
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
+        self.death_timeout = death_timeout
         if silence_logs:
             logger.setLevel(silence_logs)
         if not os.path.exists(self.local_dir):
@@ -157,12 +160,20 @@ class WorkerBase(Server):
             self.heartbeat_active = True
             logger.debug("Heartbeat: %s" % self.address)
             try:
-                yield self.scheduler.register(address=self.address, name=self.name,
-                                        ncores=self.ncores,
-                                        now=time(),
-                                        host_info=self.host_health(),
-                                        services=self.service_ports,
-                                        memory_limit=self.memory_limit)
+                yield self.scheduler.register(
+                        address=self.address,
+                        name=self.name,
+                        ncores=self.ncores,
+                        now=time(),
+                        host_info=self.host_health(),
+                        services=self.service_ports,
+                        memory_limit=self.memory_limit,
+                        memory=proc.memory_info().vms if proc else None,
+                        executing=len(self.executing),
+                        in_memory=len(self.data),
+                        ready=len(self.ready),
+                        in_flight=len(self.in_flight_tasks)
+                )
             finally:
                 self.heartbeat_active = False
         else:
@@ -171,11 +182,15 @@ class WorkerBase(Server):
     @gen.coroutine
     def _register_with_scheduler(self):
         self.heartbeat_callback.stop()
+        start = time()
         while True:
+            if self.death_timeout and time() > start + self.death_timeout:
+                yield self._close(timeout=1)
+                return
             if self.status in ('closed', 'closing'):
                 raise gen.Return
             try:
-                resp = yield self.scheduler.register(
+                future = self.scheduler.register(
                         ncores=self.ncores, address=self.address,
                         keys=list(self.data),
                         name=self.name,
@@ -186,10 +201,18 @@ class WorkerBase(Server):
                         memory_limit=self.memory_limit,
                         local_directory=self.local_dir,
                         resources=self.total_resources)
+                if self.death_timeout:
+                    diff = self.death_timeout - (time() - start)
+                    future = gen.with_timeout(timedelta(seconds=diff), future,
+                                              io_loop=self.loop)
+                resp = yield future
+                self.status = 'running'
                 break
             except EnvironmentError:
                 logger.debug("Unable to register with scheduler.  Waiting")
                 yield gen.sleep(0.1)
+            except gen.TimeoutError:
+                pass
         if resp != 'OK':
             raise ValueError(resp)
         self.heartbeat_callback.start()
@@ -244,9 +267,9 @@ class WorkerBase(Server):
 
         yield self._register_with_scheduler()
 
-        logger.info('        Registered to: %32s', self.scheduler.address)
-        logger.info('-' * 49)
-        self.status = 'running'
+        if self.status == 'running':
+            logger.info('        Registered to: %32s', self.scheduler.address)
+            logger.info('-' * 49)
 
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
@@ -259,14 +282,14 @@ class WorkerBase(Server):
                 'memory_limit': self.memory_limit}
 
     @gen.coroutine
-    def _close(self, report=True, timeout=10):
+    def _close(self, report=True, timeout=10, nanny=True):
         if self.status in ('closed', 'closing'):
             return
         logger.info("Stopping worker at %s", self.address)
         self.status = 'closing'
         self.stop()
         self.heartbeat_callback.stop()
-        with ignoring(EnvironmentError):
+        with ignoring(EnvironmentError, gen.TimeoutError):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
                         self.scheduler.unregister(address=self.address),
@@ -278,8 +301,14 @@ class WorkerBase(Server):
 
         for k, v in self.services.items():
             v.stop()
-        self.rpc.close()
+
         self.status = 'closed'
+
+        if nanny and 'nanny' in self.services:
+            with self.rpc(self.services['nanny']) as r:
+                yield r.terminate()
+
+        self.rpc.close()
         self._closed.set()
 
     @gen.coroutine
@@ -1493,7 +1522,11 @@ class Worker(WorkerBase):
         if key in self.data:
             return
 
+        start = time()
         self.data[key] = value
+        stop = time()
+        if stop - start > 0.020:
+            self.startstops[key].append(('disk-write', start, stop))
 
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
@@ -1536,25 +1569,17 @@ class Worker(WorkerBase):
     def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
         if self.status != 'running':
             return
-        comm = None
         with log_errors():
             response = {}
             try:
                 if self.validate:
                     self.validate_state()
 
-                start = time()
-                comm = yield connect(worker, timeout=3)
-                stop = time()
-                if self.digests is not None:
-                    self.digests['gather-connect-duration'].add(stop - start)
-
                 self.log.append(('request-dep', dep, worker, deps))
                 logger.debug("Request %d keys", len(deps))
-
                 start = time()
-                response = yield send_recv(comm, op='get_data', keys=list(deps),
-                                           close=True, who=self.address)
+                response = yield self.rpc(worker).get_data(keys=list(deps),
+                                                           who=self.address)
                 stop = time()
 
                 if cause:
@@ -1593,8 +1618,6 @@ class Worker(WorkerBase):
                     import pdb; pdb.set_trace()
                 raise
             finally:
-                if comm:
-                    yield comm.close()
                 self.comm_nbytes -= total_nbytes
 
                 for d in self.in_flight_workers.pop(worker):
@@ -1844,7 +1867,7 @@ class Worker(WorkerBase):
             kwargs2 = pack_data(kwargs, self.data, key_types=str)
             stop = time()
             if stop - start > 0.005:
-                self.startstops[key].append(('disk', start, stop))
+                self.startstops[key].append(('disk-read', start, stop))
                 if self.digests is not None:
                     self.digests['disk-load-duration'].add(stop - start)
 
