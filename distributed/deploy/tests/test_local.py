@@ -54,9 +54,6 @@ def test_procs(loop):
 
 
 def test_move_unserializable_data():
-    """
-    Test the transport chosen by LocalCluster depending on arguments.
-    """
     with LocalCluster(nanny=False, silence_logs=False,
                       diagnostics_port=None) as cluster:
         assert cluster.scheduler_address.startswith('inproc://')
