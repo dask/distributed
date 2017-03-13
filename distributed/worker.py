@@ -1495,7 +1495,9 @@ class Worker(WorkerBase):
             try:
                 typ = dumps_function(typ)
             except pickle.PicklingError:
-                typ = typ.__name__
+                # Some types fail pickling (example: _thread.lock objects),
+                # send their name as a best effort.
+                typ = dumps(typ.__name__)
             d = {'op': 'task-finished',
                  'status': 'OK',
                  'key': key,

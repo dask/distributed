@@ -20,6 +20,7 @@ from distributed.worker import TOTAL_MEMORY, _ncores
 
 from distributed.deploy.utils_test import ClusterTest
 
+
 def test_simple(loop):
     with LocalCluster(4, scheduler_port=0, nanny=False, silence_logs=False,
                       diagnostics_port=None, loop=loop) as c:
@@ -54,6 +55,10 @@ def test_procs(loop):
 
 
 def test_move_unserializable_data():
+    """
+    Test that unserializable data is still fine to transfer over inproc
+    transports.
+    """
     with LocalCluster(nanny=False, silence_logs=False,
                       diagnostics_port=None) as cluster:
         assert cluster.scheduler_address.startswith('inproc://')
