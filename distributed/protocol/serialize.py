@@ -8,7 +8,13 @@ try:
 except ImportError:
     from toolz import valmap, get_in
 
+try:
+    import msgpack
+except ImportError:
+    import pandas.msgpack as msgpack
+
 from . import pickle
+from .utils import pack_frames, unpack_frames
 
 
 serializers = {}
@@ -317,14 +323,31 @@ def normalize_Serialized(o):
 
 
 # Teach serialize how to handle bytestrings
-def serialize_bytes(obj):
+def _serialize_bytes(obj):
     header = {}  # no special metadata
     frames = [obj]
     return header, frames
 
 
-def deserialize_bytes(header, frames):
+def _deserialize_bytes(header, frames):
     return frames[0]
 
 
-register_serialization(bytes, serialize_bytes, deserialize_bytes)
+register_serialization(bytes, _serialize_bytes, _deserialize_bytes)
+
+
+def serialize_bytes(x):
+    header, frames = serialize(x)
+    header = msgpack.dumps(header, use_bin_type=True)
+    frames2 = [header] + list(frames)
+    return pack_frames(frames2)
+
+
+def deserialize_bytes(b):
+    frames = unpack_frames(b)
+    header, frames = frames[0], frames[1:]
+    if header:
+        header = msgpack.loads(header, encoding='utf8')
+    else:
+        header = {}
+    return deserialize(header, frames)
