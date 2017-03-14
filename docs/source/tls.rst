@@ -1,9 +1,9 @@
-.. _ssl:
+.. _tls:
 
-SSL
-===
+TLS/SSL
+=======
 
-Currently dask distributed has experimental support for SSL communication.
+Currently dask distributed has experimental support for TLS/SSL communication.
 
 In order to use this all workers / schedulers and clients need to be started with
 these additional arguments.
@@ -11,7 +11,9 @@ these additional arguments.
 .. code-block:: python
 
    >>> from distributed import Client
-   >>> connection_kwargs = {'ssl_options': {'certfile': '/path/to/cert.pem', 'keyfile': '/path/to/key.pem'}}
+   >>> from distribute.cli.utils import create_ssl_context
+   >>> ssl_options = createe_ssl_context(certfile='/path/to/cert.pem', keyfile='/path/to/key.pem')
+   >>> connection_kwargs = {'ssl_options': ssl_options}
    >>> client = Client(connection_kwargs=connection_kwargs)
 
 When starting up the dask workers / scheduler on the command line you have to specify these as command line arguments

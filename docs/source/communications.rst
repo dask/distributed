@@ -31,7 +31,7 @@ source tree:
   and IPv6 addresses.
 
 * ``tls`` is a secure transport.  Using it requires specifying keys and
-  certificates as outlined in :ref:`ssl`
+  certificates as outlined in :ref:`tls`
 
 * ``zmq`` is an experimental transport using ZeroMQ sockets; it is not
   recommended for production use.
