@@ -81,13 +81,17 @@ def handle_signal(sig, frame):
 @click.option('--scheduler-file', type=str, default='',
               help='Filename to JSON encoded scheduler information. '
                    'Use with dask-scheduler --scheduler-file')
+@click.option('--death-timeout', type=float, default=None,
+              help="Seconds to wait for a scheduler before closing")
 @click.option('--certfile', default=None,
               help='path to certfile to use for ssl connection')
 @click.option('--keyfile', default=None,
               help='path to keyfile to use for ssl connection')
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
          nanny, name, memory_limit, pid_file, temp_filename, reconnect,
-         resources, bokeh, bokeh_port, local_directory, scheduler_file, certfile, keyfile):
+         resources, bokeh, bokeh_port, local_directory, scheduler_file,
+         death_timeout, certfile, keyfile):
+
     if nanny:
         port = nanny_port
     else:
@@ -163,7 +167,9 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     nannies = [t(scheduler, ncores=nthreads,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
-                 local_dir=local_directory, connection_kwargs=connection_kwargs, **kwargs)
+                 local_dir=local_directory, death_timeout=death_timeout,
+                 connection_kwargs=connection_kwargs, **kwargs)
+
                for i in range(nprocs)]
 
     for n in nannies:
@@ -205,12 +211,13 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
     @gen.coroutine
     def f():
-        scheduler = rpc(nannies[0].scheduler.address, connection_kwargs=connection_kwargs)
-        if nanny:
-            yield gen.with_timeout(timedelta(seconds=2),
-                    All([scheduler.unregister(address=n.worker_address, close=True)
-                         for n in nannies if n.process and n.worker_address]),
-                    io_loop=loop2)
+        with rpc(nannies[0].scheduler.address, connection_kwargs=connection_kwargs) as scheduler:
+            if nanny:
+                yield gen.with_timeout(
+                        timeout=timedelta(seconds=2),
+                        future=All([scheduler.unregister(address=n.worker_address, close=True)
+                                   for n in nannies if n.process and n.worker_address]),
+                        io_loop=loop2)
 
     loop2.run_sync(f)
 
