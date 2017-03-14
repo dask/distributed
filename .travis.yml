@@ -66,6 +66,7 @@ install:
 
   # Install distributed
   - pip install --no-deps -e .
+  - ./continuous_integration/generate_test_cert.sh
 
 script:
     - export PYTEST_OPTIONS="--verbose -r s --timeout-method=thread --timeout=300 --runslow --durations=20"

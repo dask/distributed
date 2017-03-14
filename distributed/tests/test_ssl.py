@@ -1,44 +1,24 @@
 from __future__ import print_function, division, absolute_import
 
-import subprocess
 
-from distributed import (Client, Scheduler, Worker)
+from distributed.cli.utils import create_ssl_context
 from distributed.utils_test import gen_cluster, inc, loop
 
 import pytest
 import os
 
-@pytest.fixture(scope="function")
-def ssl_kwargs(tmpdir):
+@pytest.fixture(scope="module")
+def ssl_kwargs():
+    """
+    In order to regenerate the cert files run the `continuous_integration/genereate_test_cert.sh` script
 
-    ssl_dir = tmpdir.mkdir("ssl")
-    dirname = ssl_dir.dirname
+    """
 
-    keyfile = os.path.join(dirname, 'test.key')
-    certfile = os.path.join(dirname, 'test.pem')
+    root = os.path.dirname(__file__)
+    certfile = os.path.join(root, 'test.pem')
+    keyfile = os.path.join(root, 'test.key')
 
-    p = subprocess.Popen([
-        'openssl', 'req',
-        '-x509',
-        '-nodes',
-        '-newkey',
-        'rsa:2048',
-        '-days', '365',
-        '-subj', "/O=dask/CN=localhost"
-        '-nodes',
-        '-passout', 'pass:',
-        '-keyout', 'test.key',
-        '-out', 'test.pem'],
-        cwd=ssl_dir.dirname,
-    )
-
-    p.communicate()
-    assert p.returncode == 0
-
-    return {'ssl_options': {
-        'certfile': certfile,
-        'keyfile': keyfile,
-    }}
+    return {'ssl_options': create_ssl_context(certfile, keyfile)}
 
 
 def test_ssl(ssl_kwargs, loop):
