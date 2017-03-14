@@ -74,9 +74,12 @@ def uri_from_host_port(host_arg, port_arg, default_port):
 
 
 def create_ssl_context(certfile, keyfile):
-    if certfile and keyfile:
+    if (certfile is None) and (keyfile is None):
+        return None
+    elif certfile:
+        # since our connections are client-server we are using the Purpose.SERVER_AUTH (default under python 3.6)
         ssl_ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         ssl_ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
+        return ssl_ctx
     else:
-        ssl_ctx = None
-    return ssl_ctx
+        raise ValueError("ssl_context requires a certfile! ")
