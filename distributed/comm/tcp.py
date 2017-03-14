@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 import errno
 import logging
@@ -24,6 +25,9 @@ from .utils import (to_frames, from_frames,
 
 
 logger = logging.getLogger(__name__)
+
+
+executor = ThreadPoolExecutor(2)
 
 
 def get_total_physical_memory():
@@ -167,8 +171,10 @@ class TCP(Comm):
         if stream is None:
             raise CommClosedError
 
+        frames = yield executor.submit(to_frames, msg)
+
         # IOStream.write() only takes bytes objects, not memoryviews
-        frames = [ensure_bytes(f) for f in to_frames(msg)]
+        frames = [ensure_bytes(f) for f in frames]
 
         try:
             lengths = ([struct.pack('Q', len(frames))] +
