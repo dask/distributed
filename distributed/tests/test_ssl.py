@@ -29,7 +29,7 @@ def test_ssl(ssl_kwargs, loop):
         backup[k] = config[k]
 
     config['default-scheme'] = 'tls'
-    config['tls-certificate'] = ssl_kwargs['certfile']
+    config['tls-certfile'] = ssl_kwargs['certfile']
     config['tls-keyfile'] = ssl_kwargs['keyfile']
 
     @gen_cluster(

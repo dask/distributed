@@ -221,16 +221,13 @@ class TLS(TCP):
 
 class BaseTornadoConnector(object):
 
-    def _protocol_name(self):
-        pass
+    _protocol_name = None
+    _comm_class = None
 
     def _create_client(self):
-        pass
+        return TCPClient()
 
     def _connect_client(self, client, ip, port):
-        pass
-
-    def _comm_class(self):
         pass
 
     @gen.coroutine
@@ -250,35 +247,24 @@ class BaseTornadoConnector(object):
 
 class TCPConnector(BaseTornadoConnector):
 
-    def _protocol_name(self):
-        return 'tcp://'
-
-    def _create_client(self):
-        return TCPClient()
+    _protocol_name = 'tcp://'
+    _comm_class = TCP
 
     @gen.coroutine
     def _connect_client(self, client, ip, port):
         stream = yield client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE)
-        return gen.Return(stream)
-
-    def _comm_class(self):
-        return TCP
+        raise gen.Return(stream)
 
 
 class TLSConnector(BaseTornadoConnector):
-    def _protocol_name(self):
-        return 'tls://'
 
-    def _create_client(self):
-        return TCPClient()
+    _protocol_name = 'tls://'
+    _comm_class = TLS
 
     @gen.coroutine
     def _connect_client(self, client, ip, port):
         stream = yield client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE, ssl_options=create_ssl_context())
-        return gen.Return(stream)
-
-    def _comm_class(self):
-        return TLS
+        raise gen.Return(stream)
 
 
 class TornadoListener(Listener):
@@ -348,13 +334,14 @@ class TornadoListener(Listener):
 
     def handle_stream(self, stream, address):
         address = self.protocol + unparse_host_port(*address[:2])
-        comm = TCP(stream, address, self.deserialize)
+        comm = self.handler_class(stream, address, self.deserialize)
         self.comm_handler(comm)
 
 
 class TCPListener(TornadoListener):
 
     protocol = 'tcp://'
+    handler_class = TCP
 
     def _create_server(self):
         return TCPServer(max_buffer_size=MAX_BUFFER_SIZE)
@@ -363,6 +350,7 @@ class TCPListener(TornadoListener):
 class TLSListener(TornadoListener):
 
     protocol = 'tls://'
+    handler_class = TLS
 
     def _create_server(self):
         return TCPServer(max_buffer_size=MAX_BUFFER_SIZE, ssl_options=create_ssl_context())

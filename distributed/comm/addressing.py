@@ -6,7 +6,8 @@ from ..config import config
 from . import registry
 
 
-DEFAULT_SCHEME = config.get('default-scheme', 'tcp')
+def DEFAULT_SCHEME():
+    return config.get('default-scheme', 'tcp')
 
 
 def parse_address(addr):
@@ -20,7 +21,7 @@ def parse_address(addr):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
     scheme, sep, loc = addr.rpartition('://')
     if not sep:
-        scheme = DEFAULT_SCHEME
+        scheme = DEFAULT_SCHEME()
     return scheme, loc
 
 

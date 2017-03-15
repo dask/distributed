@@ -84,6 +84,8 @@ def create_ssl_context():
         # since our connections are client-server we are using the Purpose.SERVER_AUTH (default under python 3.6)
         ssl_ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         ssl_ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
+        # certain versions of python don't play nice with this.
+        ssl_ctx.check_hostname = False
         return ssl_ctx
     else:
         raise ValueError("ssl_context requires a certfile! ")
