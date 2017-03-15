@@ -158,14 +158,11 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         raise ValueError("Need to provide scheduler address like\n"
                          "dask-worker SCHEDULER_ADDRESS:8786")
 
-    ssl_ctx = create_ssl_context(certfile, keyfile)
-    connection_kwargs = dict(ssl_options=ssl_ctx)
-
     nannies = [t(scheduler, ncores=nthreads,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
                  local_dir=local_directory, death_timeout=death_timeout,
-                 connection_kwargs=connection_kwargs, **kwargs)
+                 **kwargs)
 
                for i in range(nprocs)]
 
@@ -208,7 +205,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
     @gen.coroutine
     def f():
-        with rpc(nannies[0].scheduler.address, connection_kwargs=connection_kwargs) as scheduler:
+        with rpc(nannies[0].scheduler.address) as scheduler:
             if nanny:
                 yield gen.with_timeout(
                         timeout=timedelta(seconds=2),

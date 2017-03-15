@@ -85,7 +85,7 @@ class Server(object):
     default_port = 0
 
     def __init__(self, handlers, connection_limit=512, deserialize=True,
-                 io_loop=None, connection_kwargs=None):
+                 io_loop=None):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._address = None
@@ -93,8 +93,7 @@ class Server(object):
         self._port = None
         self._comms = {}
         self.rpc = ConnectionPool(limit=connection_limit,
-                                  deserialize=deserialize,
-                                  connection_kwargs=connection_kwargs)
+                                  deserialize=deserialize)
         self.deserialize = deserialize
         self.monitor = SystemMonitor()
         self.counters = None
@@ -104,8 +103,6 @@ class Server(object):
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
-
-        self.connection_kwargs = connection_kwargs or {}
 
         if hasattr(self, 'loop'):
             # XXX?
@@ -197,8 +194,7 @@ class Server(object):
             addr = port_or_addr
             assert isinstance(addr, string_types)
         self.listener = listen(addr, self.handle_comm,
-                               deserialize=self.deserialize,
-                               connection_kwargs=self.connection_kwargs)
+                               deserialize=self.deserialize)
         self.listener.start()
 
     @gen.coroutine
@@ -358,13 +354,12 @@ class rpc(object):
     comms = ()
     address = None
 
-    def __init__(self, arg=None, comm=None, deserialize=True, timeout=3, connection_kwargs=None):
+    def __init__(self, arg=None, comm=None, deserialize=True, timeout=3):
         self.comms = {}
         self.address = coerce_to_address(arg)
         self.timeout = timeout
         self.status = 'running'
         self.deserialize = deserialize
-        self.connection_kwargs = connection_kwargs or {}
         rpc.active += 1
 
     @gen.coroutine
@@ -399,7 +394,7 @@ class rpc(object):
             del self.comms[s]
         if not open or comm.closed():
             comm = yield connect(self.address, self.timeout,
-                                 deserialize=self.deserialize, connection_kwargs=self.connection_kwargs)
+                                 deserialize=self.deserialize)
         self.comms[comm] = False     # mark as taken
         raise gen.Return(comm)
 
@@ -522,7 +517,7 @@ class ConnectionPool(object):
     deserialize: bool
         Whether or not to deserialize data by default or pass it through
     """
-    def __init__(self, limit=512, deserialize=True, connection_kwargs=None):
+    def __init__(self, limit=512, deserialize=True):
         self.open = 0          # Total number of open comms
         self.active = 0        # Number of comms currently in use
         self.limit = limit     # Max number of open comms
@@ -532,7 +527,6 @@ class ConnectionPool(object):
         self.occupied = defaultdict(set)
         self.deserialize = deserialize
         self.event = Event()
-        self.connection_kwargs = connection_kwargs or {}
 
     def __str__(self):
         return "<ConnectionPool: open=%d, active=%d>" % (self.open,
@@ -569,8 +563,7 @@ class ConnectionPool(object):
         self.open += 1
         try:
             comm = yield connect(addr, timeout=timeout,
-                                 deserialize=self.deserialize,
-                                 connection_kwargs=self.connection_kwargs)
+                                 deserialize=self.deserialize)
         except Exception:
             self.open -= 1
             raise

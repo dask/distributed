@@ -2,6 +2,8 @@ from __future__ import print_function, division, absolute_import
 
 import ssl
 
+from distributed import config
+
 py3_err_msg = """
 Your terminal does not properly support unicode text required by command line
 utilities running Python 3.  This is commonly solved by specifying encoding
@@ -73,10 +75,12 @@ def uri_from_host_port(host_arg, port_arg, default_port):
     return addr
 
 
-def create_ssl_context(certfile, keyfile):
-    if (certfile is None) and (keyfile is None):
-        return None
-    elif certfile:
+def create_ssl_context():
+
+    certfile = config['tls-certfile']
+    keyfile = config['tls-keyfile']
+
+    if certfile:
         # since our connections are client-server we are using the Purpose.SERVER_AUTH (default under python 3.6)
         ssl_ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
         ssl_ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)

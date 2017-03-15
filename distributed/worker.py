@@ -69,7 +69,7 @@ class WorkerBase(Server):
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
-                 silence_logs=None, death_timeout=None, connection_kwargs=None, 
+                 silence_logs=None, death_timeout=None,
                  **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
@@ -109,8 +109,7 @@ class WorkerBase(Server):
         self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
-        self.connection_kwargs = connection_kwargs or {}
-        self.scheduler = rpc(scheduler_addr, connection_kwargs=self.connection_kwargs)
+        self.scheduler = rpc(scheduler_addr)
         self.name = name
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
@@ -146,7 +145,6 @@ class WorkerBase(Server):
 
         super(WorkerBase, self).__init__(handlers,
                                          io_loop=self.loop,
-                                         connection_kwargs=self.connection_kwargs,
                                          **kwargs)
 
         self.heartbeat_callback = PeriodicCallback(self.heartbeat,

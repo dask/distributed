@@ -32,7 +32,7 @@ class Nanny(Server):
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
-                 death_timeout=None, connection_kwargs=None, **kwargs):
+                 death_timeout=None, **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -59,7 +59,7 @@ class Nanny(Server):
         self.status = None
         self.process = None
         self.loop = loop or IOLoop.current()
-        self.scheduler = rpc(scheduler_addr, connection_kwargs=connection_kwargs or {})
+        self.scheduler = rpc(scheduler_addr)
         self.services = services
         self.name = name
         self.memory_limit = memory_limit
@@ -130,7 +130,7 @@ class Nanny(Server):
         if isalive(self.process):
             try:
                 # Ask worker to close
-                with rpc(self.worker_address, connection_kwargs=self.connection_kwargs) as worker:
+                with rpc(self.worker_address) as worker:
                     result = yield gen.with_timeout(
                                 timedelta(seconds=min(1, timeout)),
                                 worker.terminate(report=False),

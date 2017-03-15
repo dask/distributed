@@ -14,6 +14,7 @@ from distributed.cli.utils import (check_python_3, install_signal_handlers,
                                    uri_from_host_port, create_ssl_context)
 from distributed.http import HTTPScheduler
 from distributed.utils import ignoring
+from distributed import config
 
 logger = logging.getLogger('distributed.scheduler')
 
@@ -42,12 +43,18 @@ logger = logging.getLogger('distributed.scheduler')
               help="File to write connection information. "
               "This may be a good way to share connection information if your "
               "cluster is on a shared network file system.")
-@click.option('--certfile', default=None,
+@click.option('--certfile', default=config.get('tls-certfile'),
               help='path to certfile to use for ssl connection')
-@click.option('--keyfile', default=None,
+@click.option('--keyfile', default=config.get('tls-keyfile'),
               help='path to keyfile to use for ssl connection')
+@click.option('--default-scheme', type='str', default=config.get("default-scheme"),
+              "Default comminiocation scheme to use.")
 def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
-         bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file, certfile, keyfile):
+         bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file, certfile, keyfile, default_scheme):
+
+    config['default-scheme'] = default_scheme
+    config['tls-certfile'] = certfile
+    config['tls-keyfile'] = keyfile
 
     if pid_file:
         with open(pid_file, 'w') as f:
@@ -75,10 +82,7 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
             from distributed.bokeh.scheduler import BokehScheduler
             services[('bokeh', bokeh_internal_port)] = BokehScheduler
 
-    ssl_ctx = create_ssl_context(certfile, keyfile)
-    connection_kwargs = dict(ssl_options=ssl_ctx)
-
-    scheduler = Scheduler(loop=loop, services=services, connection_kwargs=connection_kwargs, scheduler_file=scheduler_file)
+    scheduler = Scheduler(loop=loop, services=services, scheduler_file=scheduler_file)
     scheduler.start(addr)
 
     bokeh_proc = None

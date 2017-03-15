@@ -486,7 +486,7 @@ class Scheduler(Server):
 
             self.remove_worker(address=worker)
 
-            with rpc(address, connection_kwargs=self.connection_kwargs) as r:
+            with rpc(address) as r:
                 try:
                     yield r.terminate(report=False)
                 except EnvironmentError as e:
@@ -1256,7 +1256,7 @@ class Scheduler(Server):
         Scheduler.handle_client: Equivalent coroutine for clients
         """
         try:
-            comm = yield connect(worker, connection_kwargs=self.connection_kwargs)
+            comm = yield connect(worker)
         except Exception as e:
             logger.error("Failed to connect to worker %r: %s",
                          worker, e)
@@ -1437,7 +1437,7 @@ class Scheduler(Server):
 
             logger.debug("Send kill signal to nannies: %s", nannies)
 
-            nannies = [rpc(nanny_address, connection_kwargs=self.connection_kwargs)
+            nannies = [rpc(nanny_address)
                        for nanny_address in nannies.values()
                        if nanny_address is not None]
             try:

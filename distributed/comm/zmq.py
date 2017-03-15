@@ -161,10 +161,9 @@ class ZMQ(Comm):
 class ZMQConnector(Connector):
 
     @gen.coroutine
-    def _do_connect(self, sock, address, listener_url, deserialize=True, connection_kwargs=None):
-        connection_kwargs = connection_kwargs or {}
+    def _do_connect(self, sock, address, listener_url, deserialize=True):
 
-        sock.connect(listener_url, **connection_kwargs)
+        sock.connect(listener_url)
 
         req = {'op': 'zmq-connect'}
         yield sock.send_multipart(to_frames(req))
@@ -178,7 +177,7 @@ class ZMQConnector(Connector):
         raise gen.Return(comm)
 
     @gen.coroutine
-    def connect(self, address, deserialize=True, connection_kwargs=None):
+    def connect(self, address, deserialize=True):
         host, port = parse_host_port(address)
         listener_url = make_zmq_url(host, port)
         sock = make_socket(zmq.DEALER)
@@ -191,7 +190,7 @@ class ZMQConnector(Connector):
 
 class ZMQListener(Listener):
 
-    def __init__(self, address, comm_handler, deserialize=True, default_port=0, connection_kwargs=None):
+    def __init__(self, address, comm_handler, deserialize=True, default_port=0):
         self.ip, self.port = parse_host_port(address, default_port)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
@@ -199,7 +198,6 @@ class ZMQListener(Listener):
         self.bound_host = None
         self.bound_port = None
         self.please_stop = False
-        self.connection_kwargs = connection_kwargs or {}
 
     def start(self):
         self.sock = make_socket(zmq.ROUTER)
@@ -276,8 +274,8 @@ class ZMQBackend(Backend):
     def get_connector(self):
         return ZMQConnector()
 
-    def get_listener(self, loc, handle_comm, deserialize, connection_kwargs):
-        return ZMQListener(loc, handle_comm, deserialize, connection_kwargs=connection_kwargs)
+    def get_listener(self, loc, handle_comm, deserialize):
+        return ZMQListener(loc, handle_comm, deserialize)
 
     # Address handling
 

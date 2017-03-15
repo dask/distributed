@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 
 from distributed.cli.utils import create_ssl_context
 from distributed.utils_test import gen_cluster, inc, loop
+from distributed import config
 
 import pytest
 import os
@@ -18,15 +19,20 @@ def ssl_kwargs():
     certfile = os.path.join(root, 'test.pem')
     keyfile = os.path.join(root, 'test.key')
 
-    return {'ssl_options': create_ssl_context(certfile, keyfile)}
+    return {'certfile': certfile, 'keyfile': keyfile}
 
 
 def test_ssl(ssl_kwargs, loop):
 
+    backup = {}
+    for k in ['default-scheme', 'tls-certfile', 'tls-keyfile']:
+        backup[k] = config[k]
+
+    config['default-scheme'] = 'tls'
+    config['tls-certificate'] = ssl_kwargs['certfile']
+    config['tls-keyfile'] = ssl_kwargs['keyfile']
+
     @gen_cluster(
-        scheduler_kwargs={'connection_kwargs': ssl_kwargs},
-        worker_kwargs={'connection_kwargs': ssl_kwargs},
-        client_kwargs={'connection_kwargs': ssl_kwargs},
         client=True)
     def f(c, s, a, b):
 
@@ -41,3 +47,7 @@ def test_ssl(ssl_kwargs, loop):
         assert future.key in a.data or future.key in b.data
 
     loop.run_sync(f)
+
+    # Unset these
+    for k, v in backup.items():
+        config[k] = v

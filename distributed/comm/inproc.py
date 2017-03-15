@@ -274,8 +274,7 @@ class InProcConnector(Connector):
         self.manager = manager
 
     @gen.coroutine
-    def connect(self, address, deserialize=True, connection_kwargs=None):
-        connection_kwargs = connection_kwargs or {}
+    def connect(self, address, deserialize=True):
         listener = self.manager.get_listener_for(address)
         if listener is None:
             raise IOError("no endpoint for inproc address %r" % (address,))
@@ -308,7 +307,7 @@ class InProcBackend(Backend):
     def get_connector(self):
         return InProcConnector(self.manager)
 
-    def get_listener(self, loc, handle_comm, deserialize, connection_kwargs):
+    def get_listener(self, loc, handle_comm, deserialize):
         return InProcListener(loc, handle_comm, deserialize)
 
     # Address handling

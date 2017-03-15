@@ -19,7 +19,7 @@ class Backend(with_metaclass(ABCMeta)):
         """
 
     @abstractmethod
-    def get_listener(self, loc, handle_comm, deserialize, connection_kwargs):
+    def get_listener(self, loc, handle_comm, deserialize):
         """
         Get a listener object for the scheme-less address *loc*.
         """
