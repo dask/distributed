@@ -3017,6 +3017,22 @@ def test_as_completed_list(loop):
             assert set(c.gather(seq2)) == {1, 2, 3, 4, 5}
 
 
+@gen_cluster(client=True)
+def test_as_completed_async_for(c, s, a, b):
+    futures = c.map(inc, range(10))
+    ac = as_completed(futures)
+    results = []
+
+    async def f():
+        async for future in ac:
+            result = await future._result()
+            results.append(result)
+
+    yield f()
+
+    assert set(results) == set(range(1, 11))
+
+
 @gen_test()
 def test_status():
     s = Scheduler()

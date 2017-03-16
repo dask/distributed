@@ -2523,6 +2523,7 @@ class AsCompleted(object):
         self.queue = pyQueue()
         self.lock = Lock()
         self.loop = loop or default_client().loop
+        self.event = Event()
 
         if futures:
             for future in futures:
@@ -2536,6 +2537,7 @@ class AsCompleted(object):
             if not self.futures[future]:
                 del self.futures[future]
             self.queue.put_nowait(future)
+            self.event.set()
 
     def add(self, future):
         """ Add a future to the collection
@@ -2551,11 +2553,26 @@ class AsCompleted(object):
     def __iter__(self):
         return self
 
+    def __aiter__(self):
+        return self
+
     def __next__(self):
         with self.lock:
             if not self.futures and self.queue.empty():
                 raise StopIteration()
         return self.queue.get()
+
+    @gen.coroutine
+    def __anext__(self):
+        if not self.futures and self.queue.empty():
+            raise StopAsyncIteration
+        while self.queue.empty():
+            yield self.event.wait()
+        return self.queue.get()
+
+
+
+
 
     next = __next__
 
