@@ -7,7 +7,7 @@ from . import registry
 
 
 def DEFAULT_SCHEME():
-    return config.get('default-scheme', 'tcp')
+    return config.get('default-scheme', 'tcp') or 'tcp'
 
 
 def parse_address(addr):

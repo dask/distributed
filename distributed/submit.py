@@ -12,7 +12,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 from distributed import rpc
-from distributed.cli.utils import create_ssl_context
 from distributed.compatibility import unicode
 from distributed.core import Server
 from distributed.utils import get_ip

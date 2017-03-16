@@ -86,7 +86,7 @@ def handle_signal(sig, frame):
 @click.option('--keyfile', default=None,
               help='path to keyfile to use for ssl connection')
 @click.option('--default-scheme', type=str, default=config.get("default-scheme"),
-              "Default communication scheme to use.")
+              help="Default communication scheme to use.")
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
          nanny, name, memory_limit, pid_file, temp_filename, reconnect,
          resources, bokeh, bokeh_port, local_directory, scheduler_file,
