@@ -2568,7 +2568,7 @@ class AsCompleted(object):
     @gen.coroutine
     def __anext__(self):
         if not self.futures and self.queue.empty():
-            raise StopAsyncIteration
+            raise StopAsyncIteration  # flake8: noqa
         while self.queue.empty():
             yield self.event.wait()
         raise gen.Return(self.queue.get())
