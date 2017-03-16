@@ -2573,10 +2573,6 @@ class AsCompleted(object):
             yield self.event.wait()
         return self.queue.get()
 
-
-
-
-
     next = __next__
 
 
