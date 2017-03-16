@@ -47,8 +47,8 @@ logger = logging.getLogger('distributed.scheduler')
               help='path to certfile to use for ssl connection')
 @click.option('--keyfile', default=config.get('tls-keyfile'),
               help='path to keyfile to use for ssl connection')
-@click.option('--default-scheme', type='str', default=config.get("default-scheme"),
-              "Default comminiocation scheme to use.")
+@click.option('--default-scheme', type=str, default=config.get("default-scheme"),
+              "Default communication scheme to use.")
 def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
          bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file, certfile, keyfile, default_scheme):
 

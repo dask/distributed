@@ -354,7 +354,7 @@ class Client(object):
         self.status = None
         self._pending_msg_buffer = []
         self.extensions = {}
-        self.scheduler_file = scheduler_fileF
+        self.scheduler_file = scheduler_file
 
         if hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object

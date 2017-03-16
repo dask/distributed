@@ -11,6 +11,7 @@ from time import sleep
 
 import click
 from distributed import Nanny, Worker, rpc
+from distributed import config
 from distributed.nanny import isalive
 from distributed.utils import All
 from distributed.worker import _ncores
@@ -84,10 +85,16 @@ def handle_signal(sig, frame):
               help='path to certfile to use for ssl connection')
 @click.option('--keyfile', default=None,
               help='path to keyfile to use for ssl connection')
+@click.option('--default-scheme', type=str, default=config.get("default-scheme"),
+              "Default communication scheme to use.")
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
          nanny, name, memory_limit, pid_file, temp_filename, reconnect,
          resources, bokeh, bokeh_port, local_directory, scheduler_file,
-         death_timeout, certfile, keyfile):
+         death_timeout, certfile, keyfile, default_scheme):
+
+    config['default-scheme'] = default_scheme
+    config['tls-certfile'] = certfile
+    config['tls-keyfile'] = keyfile
 
     if nanny:
         port = nanny_port
