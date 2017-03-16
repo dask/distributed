@@ -19,6 +19,9 @@ def ssl_kwargs():
     certfile = os.path.join(root, 'test.pem')
     keyfile = os.path.join(root, 'test.key')
 
+    assert os.path.exists(certfile)
+    assert os.path.exists(keyfile)
+
     return {'certfile': certfile, 'keyfile': keyfile}
 
 

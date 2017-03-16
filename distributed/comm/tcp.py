@@ -236,8 +236,7 @@ class BaseTornadoConnector(object):
 
         client = self._create_client()
         try:
-            stream = yield client.connect(ip, port,
-                                          max_buffer_size=MAX_BUFFER_SIZE)
+            stream = yield self._connect_client(client, ip, port)
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(e)
