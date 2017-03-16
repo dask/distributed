@@ -32,7 +32,7 @@ from .core import (error_message, CommClosedError,
 from .metrics import time
 from .preloading import preload_modules
 from .protocol import (pickle, dumps, loads, to_serialize, serialize_bytes,
-                       deserialize_bytes)
+                       deserialize_bytes, serialize_bytelist)
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
@@ -102,7 +102,7 @@ class WorkerBase(Server):
             except ImportError:
                 raise ImportError("Please `pip install zict` for spill-to-disk workers")
             path = os.path.join(self.local_dir, 'storage')
-            storage = Func(serialize_bytes, deserialize_bytes, File(path))
+            storage = Func(serialize_bytelist, deserialize_bytes, File(path))
             self.data = Buffer({}, storage, int(float(self.memory_limit)), weight)
         else:
             self.data = dict()

@@ -77,6 +77,13 @@ def merge_frames(header, frames):
     return out
 
 
+def pack_frames_prelude(frames):
+    lengths = [len(f) for f in frames]
+    lengths = ([struct.pack('Q', len(frames))] +
+               [struct.pack('Q', len(frame)) for frame in frames])
+    return b''.join(lengths)
+
+
 def pack_frames(frames):
     """ Pack frames into a byte-like object
 
@@ -86,14 +93,12 @@ def pack_frames(frames):
     --------
     unpack_frames
     """
-    lengths = [len(f) for f in frames]
-    lengths = ([struct.pack('Q', len(frames))] +
-               [struct.pack('Q', len(frame)) for frame in frames])
+    prelude = [pack_frames_prelude(frames)]
 
     if not isinstance(frames, list):
         frames = list(frames)
 
-    return b''.join(lengths + frames)
+    return b''.join(prelude + frames)
 
 
 def unpack_frames(b):

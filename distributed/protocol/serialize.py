@@ -14,7 +14,7 @@ except ImportError:
     import pandas.msgpack as msgpack
 
 from . import pickle
-from .utils import pack_frames, unpack_frames
+from .utils import pack_frames, unpack_frames, pack_frames_prelude
 
 
 serializers = {}
@@ -336,11 +336,15 @@ def _deserialize_bytes(header, frames):
 register_serialization(bytes, _serialize_bytes, _deserialize_bytes)
 
 
-def serialize_bytes(x):
+def serialize_bytelist(x):
     header, frames = serialize(x)
     header = msgpack.dumps(header, use_bin_type=True)
     frames2 = [header] + list(frames)
-    return pack_frames(frames2)
+    return [pack_frames_prelude(frames2)] + frames2
+
+
+def serialize_bytes(x):
+    return b''.join(serialize_bytelist(x))
 
 
 def deserialize_bytes(b):
