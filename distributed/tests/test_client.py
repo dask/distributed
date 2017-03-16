@@ -14,7 +14,7 @@ import sys
 from threading import Thread, Semaphore
 from time import sleep
 import traceback
-import zipfile, sys
+import zipfile
 
 import mock
 import pytest
@@ -3017,41 +3017,6 @@ def test_as_completed_list(loop):
             assert set(c.gather(seq2)) == {1, 2, 3, 4, 5}
 
 
-@gen_cluster(client=True)
-def test_as_completed_async_for(c, s, a, b):
-    futures = c.map(inc, range(10))
-    ac = as_completed(futures)
-    results = []
-
-    async def f():
-        async for future in ac:
-            result = await future._result()
-            results.append(result)
-
-    yield f()
-
-    assert set(results) == set(range(1, 11))
-
-
-@gen_cluster(client=True)
-def test_await_future(c, s, a, b):
-    future = c.submit(inc, 1)
-
-    async def f():
-        result = await future
-        assert result == 2
-
-    yield f()
-
-    future = c.submit(div, 1, 0)
-
-    async def f():
-        with pytest.raises(ZeroDivisionError):
-            await future
-
-    yield f()
-
-
 @gen_test()
 def test_status():
     s = Scheduler()
@@ -4003,3 +3968,7 @@ def test_robust_undeserializable_function(c, s, a, b):
 
     assert results == list(map(inc, range(10)))
     assert a.data and b.data
+
+
+if sys.version_info > (3, 5):
+    from distributed.tests.py3_test_client import *

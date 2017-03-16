@@ -2571,7 +2571,7 @@ class AsCompleted(object):
             raise StopAsyncIteration
         while self.queue.empty():
             yield self.event.wait()
-        return self.queue.get()
+        raise gen.Return(self.queue.get())
 
     next = __next__
 
