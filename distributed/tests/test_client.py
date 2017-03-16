@@ -3033,6 +3033,25 @@ def test_as_completed_async_for(c, s, a, b):
     assert set(results) == set(range(1, 11))
 
 
+@gen_cluster(client=True)
+def test_await_future(c, s, a, b):
+    future = c.submit(inc, 1)
+
+    async def f():
+        result = await future
+        assert result == 2
+
+    yield f()
+
+    future = c.submit(div, 1, 0)
+
+    async def f():
+        with pytest.raises(ZeroDivisionError):
+            await future
+
+    yield f()
+
+
 @gen_test()
 def test_status():
     s = Scheduler()

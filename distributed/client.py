@@ -246,6 +246,9 @@ class Future(WrappedKey):
 
     __repr__ = __str__
 
+    def __await__(self):
+        return self._result().__await__()
+
 
 class FutureState(object):
     """A Future's internal state.
