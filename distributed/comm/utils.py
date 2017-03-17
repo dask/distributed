@@ -2,7 +2,9 @@ from __future__ import print_function, division, absolute_import
 
 import logging
 import socket
+import ssl
 
+from distributed import config
 from .. import protocol
 from ..utils import get_ip, get_ipv6
 
@@ -63,3 +65,18 @@ def ensure_concrete_host(host):
         return get_ipv6()
     else:
         return host
+
+
+def create_ssl_context():
+
+    certfile = config['tls-certfile']
+    keyfile = config['tls-keyfile']
+
+    if certfile:
+        # since our connections are client-server we are using the Purpose.SERVER_AUTH (default under python 3.6)
+        ssl_ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        ssl_ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
+        # certain versions of python don't play nice with this.
+        return ssl_ctx
+    else:
+        raise ValueError("ssl_context requires a certfile! ")

@@ -1,39 +1,24 @@
 from __future__ import print_function, division, absolute_import
 
+from distributed.utils_test import gen_cluster, inc, loop, ssl_config
+import distributed.comm.utils as comm_utils
 
-from distributed.cli.utils import create_ssl_context
-from distributed.utils_test import gen_cluster, inc, loop
-from distributed import config
-
-import pytest
-import os
-
-@pytest.fixture(scope="module")
-def ssl_kwargs():
-    """
-    In order to regenerate the cert files run the `continuous_integration/genereate_test_cert.sh` script
-
-    """
-
-    root = os.path.dirname(__file__)
-    certfile = os.path.join(root, 'test.pem')
-    keyfile = os.path.join(root, 'test.key')
-
-    assert os.path.exists(certfile)
-    assert os.path.exists(keyfile)
-
-    return {'certfile': certfile, 'keyfile': keyfile}
+import ssl
 
 
-def test_ssl(ssl_kwargs, loop):
+old_ssl_ctx_fx = comm_utils.create_ssl_context
 
-    backup = {}
-    for k in ['default-scheme', 'tls-certfile', 'tls-keyfile']:
-        backup[k] = config[k]
 
-    config['default-scheme'] = 'tls'
-    config['tls-certfile'] = ssl_kwargs['certfile']
-    config['tls-keyfile'] = ssl_kwargs['keyfile']
+def create_ssl_context_mock():
+    ctx = old_ssl_ctx_fx()
+    ctx.check_hostname = False
+    # ssl_ctx.verify_flags =
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def test_ssl(ssl_config, loop, monkeypatch):
+    monkeypatch.setattr(comm_utils, "create_ssl_context", create_ssl_context_mock)
 
     @gen_cluster(
         client=True)
@@ -50,7 +35,3 @@ def test_ssl(ssl_kwargs, loop):
         assert future.key in a.data or future.key in b.data
 
     loop.run_sync(f)
-
-    # Unset these
-    for k, v in backup.items():
-        config[k] = v

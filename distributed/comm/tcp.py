@@ -22,8 +22,7 @@ from .core import Comm, Connector, Listener, CommClosedError
 from .utils import (to_frames, from_frames,
                     get_tcp_server_address, ensure_concrete_host)
 
-from ..cli.utils import create_ssl_context
-
+from . import utils as _comm_utils
 
 logger = logging.getLogger(__name__)
 
@@ -262,7 +261,8 @@ class TLSConnector(BaseTornadoConnector):
 
     @gen.coroutine
     def _connect_client(self, client, ip, port):
-        stream = yield client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE, ssl_options=create_ssl_context())
+        ssl_context = _comm_utils.create_ssl_context()
+        stream = yield client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE, ssl_options=ssl_context)
         raise gen.Return(stream)
 
 
@@ -352,7 +352,8 @@ class TLSListener(TornadoListener):
     handler_class = TLS
 
     def _create_server(self):
-        return TCPServer(max_buffer_size=MAX_BUFFER_SIZE, ssl_options=create_ssl_context())
+        ssl_context = _comm_utils.create_ssl_context()
+        return TCPServer(max_buffer_size=MAX_BUFFER_SIZE, ssl_options=ssl_context)
 
 
 class TCPBackend(Backend):

@@ -1,9 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-import ssl
-
-from distributed import config
-
 py3_err_msg = """
 Your terminal does not properly support unicode text required by command line
 utilities running Python 3.  This is commonly solved by specifying encoding
@@ -18,7 +14,6 @@ For more information see: http://click.pocoo.org/5/python3/
 
 from distributed.comm import (parse_address, unparse_address,
                               parse_host_port, unparse_host_port)
-from ..utils import get_ip, ensure_ip
 
 
 def check_python_3():
@@ -73,19 +68,3 @@ def uri_from_host_port(host_arg, port_arg, default_port):
     addr = unparse_address(scheme, loc)
 
     return addr
-
-
-def create_ssl_context():
-
-    certfile = config['tls-certfile']
-    keyfile = config['tls-keyfile']
-
-    if certfile:
-        # since our connections are client-server we are using the Purpose.SERVER_AUTH (default under python 3.6)
-        ssl_ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-        ssl_ctx.load_cert_chain(certfile=certfile, keyfile=keyfile)
-        # certain versions of python don't play nice with this.
-        ssl_ctx.check_hostname = False
-        return ssl_ctx
-    else:
-        raise ValueError("ssl_context requires a certfile! ")

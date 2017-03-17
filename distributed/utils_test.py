@@ -784,3 +784,38 @@ def captured_handler(handler):
         yield handler.stream
     finally:
         handler.stream = orig_stream
+
+
+
+
+@pytest.fixture(scope="function")
+def ssl_config(request):
+    """
+    In order to regenerate the cert files run the `continuous_integration/genereate_test_cert.sh` script
+
+    """
+    root = os.path.dirname(__file__)
+    certfile = os.path.join(root, 'tests', 'test.pem')
+    keyfile = os.path.join(root, 'tests', 'test.key')
+
+    assert os.path.exists(certfile)
+    assert os.path.exists(keyfile)
+
+    from .config import config
+
+    backup = {}
+    for k in ['default-scheme', 'tls-certfile', 'tls-keyfile']:
+        backup[k] = config[k]
+
+    config['default-scheme'] = 'tls'
+    config['tls-certfile'] = certfile
+    config['tls-keyfile'] = keyfile
+
+
+    def fin():
+        # Unset these
+        for k, v in backup.items():
+            config[k] = v
+
+    request.addfinalizer(fin)
+    return config  # provide the fixture value

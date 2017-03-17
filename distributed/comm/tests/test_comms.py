@@ -14,7 +14,7 @@ from distributed.core import pingpong
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
-                                    requires_ipv6, has_ipv6)
+                                    requires_ipv6, has_ipv6, ssl_config)
 
 from distributed.protocol import (loads, dumps,
                                   to_serialize, Serialized, serialize, deserialize)
@@ -779,3 +779,8 @@ def test_zmq_deserialize():
 @gen_test()
 def test_inproc_deserialize():
     yield check_deserialize('inproc://')
+
+@gen_test()
+def test_tls_deserializae(ssl_config):
+
+    yield check_deserialize('tls://')

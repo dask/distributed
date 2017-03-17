@@ -17,7 +17,7 @@ from distributed.utils import All
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
 from distributed.metrics import time
-from distributed.cli.utils import check_python_3, create_ssl_context
+from distributed.cli.utils import check_python_3
 
 from toolz import valmap
 from tornado.ioloop import IOLoop, TimeoutError

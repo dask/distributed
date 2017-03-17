@@ -11,7 +11,7 @@ from tornado.ioloop import IOLoop
 from distributed import Scheduler
 from distributed.utils import ignoring, open_port
 from distributed.cli.utils import (check_python_3, install_signal_handlers,
-                                   uri_from_host_port, create_ssl_context)
+                                   uri_from_host_port)
 from distributed.http import HTTPScheduler
 from distributed.utils import ignoring
 from distributed import config
