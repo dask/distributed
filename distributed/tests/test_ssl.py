@@ -1,6 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
-from distributed.utils_test import gen_cluster, inc, loop, ssl_config_no_verify
+from distributed.utils_test import gen_cluster, inc, loop, ssl_config, ssl_config_no_verify
 
 
 def test_ssl(ssl_config_no_verify, loop):
