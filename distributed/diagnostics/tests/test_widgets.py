@@ -87,7 +87,7 @@ def test_progressbar_widget(s, a, b):
                    keys=['z'],
                    dependencies={'y': {'x'}, 'z': {'y'}})
 
-    progress = ProgressWidget(['z'], scheduler=(s.ip, s.port))
+    progress = ProgressWidget(['z'], scheduler=(s.ip, s.port), complete=True)
     yield progress.listen()
 
     assert progress.bar.value == 1.0
@@ -111,7 +111,7 @@ def test_multi_progressbar_widget(s, a, b):
                                  'y-1': ['x-3'], 'y-2': ['y-1'],
                                  'e': ['y-2']})
 
-    p = MultiProgressWidget(['e'], scheduler=(s.ip, s.port))
+    p = MultiProgressWidget(['e'], scheduler=(s.ip, s.port), complete=True)
     yield p.listen()
 
     assert p.bars['x'].value == 1.0
@@ -159,7 +159,7 @@ def test_values(loop):
         with Client(s['address'], loop=loop) as c:
             L = [c.submit(inc, i) for i in range(5)]
             wait(L)
-            p = MultiProgressWidget(L)
+            p = MultiProgressWidget(L, complete=True)
             sync(loop, p.listen)
             assert set(p.bars) == {'inc'}
             assert p.status == 'finished'
