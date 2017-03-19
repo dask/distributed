@@ -5,14 +5,15 @@ from distributed.utils_test import gen_cluster, inc, loop, ssl_config, ssl_confi
 
 def test_ssl(ssl_config_no_verify, loop):
 
-    @gen_cluster(
-        client=True)
+    @gen_cluster(client=True)
     def f(c, s, a, b):
+
+        for w in s.workers:
+            assert w.startswith('tls')
 
         future = c.submit(inc, 1)
         assert future.key in c.futures
 
-        # result = future.result()  # This synchronous API call would block
         result = yield future._result()
         assert result == 2
 

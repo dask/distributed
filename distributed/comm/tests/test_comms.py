@@ -781,7 +781,7 @@ def test_inproc_deserialize():
     yield check_deserialize('inproc://')
 
 
-def test_tls_deserializae(loop, ssl_config_no_verify):
+def test_tls_deserialize(loop, ssl_config_no_verify):
 
     @gen_test()
     def inner():
