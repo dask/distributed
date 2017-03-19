@@ -17,6 +17,7 @@ from tornado import gen
 from distributed import Scheduler, Client
 from distributed.utils import get_ip, ignoring, tmpfile
 from distributed.utils_test import (loop, popen,
+                                    ssl_config_no_verify, ssl_config,
                                     assert_can_connect_from_everywhere_4,
                                     assert_can_connect_from_everywhere_4_6,
                                     assert_can_connect_locally_4,
@@ -239,3 +240,16 @@ def test_bokeh_port_zero(loop):
                 if b'bokeh' in line.lower() or b'web' in line.lower():
                     count += 1
                     assert b':0' not in line
+
+
+def test_ssl(loop, ssl_config_no_verify):
+    from distributed.config import config
+    with popen(['dask-scheduler',
+                '--certfile', config['tls-certfile'],
+                '--keyfile', config['tls-keyfile']]):
+        with popen(['dask-worker', '127.0.0.1:8786',
+                    '--certfile', config['tls-certfile'],
+                    '--keyfile', config['tls-keyfile']]):
+            with Client('127.0.0.1:8786') as client:
+                future = client.submit(lambda x: x + 1, 1)
+                assert future.result() == 2
