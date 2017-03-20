@@ -328,11 +328,15 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
     """
     Create a worker in a forked child.
     """
-    from dask.multiprocessing import initialize_worker_process
     from distributed import Worker  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
 
-    initialize_worker_process()
+    try:
+        from dask.multiprocessing import initialize_worker_process
+    except ImportError:   # old Dask version
+        pass
+    else:
+        initialize_worker_process()
 
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
