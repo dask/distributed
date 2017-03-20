@@ -2571,6 +2571,7 @@ class AsCompleted(object):
             raise StopAsyncIteration  # flake8: noqa
         while self.queue.empty():
             yield self.event.wait()
+        sleep(0.0000000001)
         raise gen.Return(self.queue.get())
 
     next = __next__
