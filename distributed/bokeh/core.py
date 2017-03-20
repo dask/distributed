@@ -18,6 +18,7 @@ class BokehServer(object):
                 self.server = Server(self.apps, io_loop=self.loop,
                                      port=port, address=ip, host=['*'],
                                      check_unused_sessions_milliseconds=500,
+                                     allow_websocket_origin=["*"],
                                      )
                 if bokeh.__version__ <= '0.12.3':
                     self.server.start(start_loop=False)

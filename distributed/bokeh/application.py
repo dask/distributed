@@ -60,6 +60,7 @@ class BokehWebInterface(object):
         args = ([sys.executable, '-m', 'bokeh', 'serve'] + paths +
                 ['--check-unused-sessions=50',
                  '--unused-session-lifetime=1',
+                 '--allow-websocket-origin=*',
                  '--port', str(bokeh_port)] +
                  sum([['--host', h] for h in hosts], []))
 
