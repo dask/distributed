@@ -9,6 +9,7 @@ from tornado import gen
 from tornado.httpclient import AsyncHTTPClient, HTTPError
 from tornado.ioloop import IOLoop
 
+from distributed.config import config
 from distributed.compatibility import ConnectionRefusedError
 from distributed.core import connect, CommClosedError
 from distributed.metrics import time
@@ -29,6 +30,8 @@ client = AsyncHTTPClient()
 messages = distributed.bokeh.messages  # monkey-patching
 
 options = parse_args(sys.argv[1:])
+config['tls-certfile'] = options.get('tls-certfile')
+config['tls-keyfile'] = options.get('tls-keyfile')
 
 
 @gen.coroutine

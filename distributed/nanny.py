@@ -13,6 +13,7 @@ from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
 from .comm import get_address_host
+from .config import config
 from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
 from .utils import get_ip, ignoring, mp_context
@@ -208,7 +209,9 @@ class Nanny(Server):
                         'resources': self.resources,
                         'validate': self.validate,
                         'silence_logs': self.silence_logs,
-                        'death_timeout': self.death_timeout})
+                        'death_timeout': self.death_timeout,
+                        'config': {'tls-certfile': config.get('tls-certfile'),
+                                   'tls-keyfile': config.get('tls-keyfile')}})
             self.process.daemon = True
             self.process.start()
             start = time()
@@ -327,8 +330,9 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
     """
     Create a worker by forking.
     """
-    from distributed import Worker  # pragma: no cover
+    from distributed import Worker, config  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
+    config.update(kwargs.pop('config'))
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
     loop.make_current()  # pragma: no cover

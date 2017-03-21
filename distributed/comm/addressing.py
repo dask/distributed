@@ -7,7 +7,12 @@ from . import registry
 
 
 def DEFAULT_SCHEME():
-    return config.get('default-scheme', 'tcp') or 'tcp'
+    if config.get('default-scheme'):
+        return config['default-scheme']
+    elif config.get('tls-certfile'):
+        return 'tls'
+    else:
+        return 'tcp'
 
 
 def parse_address(addr):
