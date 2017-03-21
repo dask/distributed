@@ -78,9 +78,7 @@ class BokehWebInterface(object):
         bokeh_options = {'host': host,
                          'http-port': http_port,
                          'scheduler-address': scheduler_address,
-                         'bokeh-port': bokeh_port,
-                         'tls-certfile': config.get('tls-certfile'),
-                         'tls-keyfile': config.get('tls-keyfile')}
+                         'bokeh-port': bokeh_port}
 
         args.extend(['--args'] + list(map(str, concat(bokeh_options.items()))))
 

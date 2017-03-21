@@ -30,8 +30,6 @@ client = AsyncHTTPClient()
 messages = distributed.bokeh.messages  # monkey-patching
 
 options = parse_args(sys.argv[1:])
-config['tls-certfile'] = options.get('tls-certfile')
-config['tls-keyfile'] = options.get('tls-keyfile')
 
 
 @gen.coroutine
