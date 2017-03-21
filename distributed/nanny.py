@@ -213,6 +213,7 @@ class Nanny(Server):
                         'config': {'tls-certfile': config.get('tls-certfile'),
                                    'tls-keyfile': config.get('tls-keyfile')}})
             self.process.daemon = True
+            processes_to_close.add(self.process)
             self.process.start()
             start = time()
             while True:
@@ -328,11 +329,19 @@ class Nanny(Server):
 def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
                     worker_ip, worker_port, local_dir, **kwargs):
     """
-    Create a worker by forking.
+    Create a worker in a forked child.
     """
     from distributed import Worker, config  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
     config.update(kwargs.pop('config'))
+
+    try:
+        from dask.multiprocessing import initialize_worker_process
+    except ImportError:   # old Dask version
+        pass
+    else:
+        initialize_worker_process()
+
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
     loop.make_current()  # pragma: no cover
