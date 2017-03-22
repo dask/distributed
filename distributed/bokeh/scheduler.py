@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from functools import partial
 import logging
 from math import sqrt
+from operator import add
 
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
@@ -14,6 +15,7 @@ from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from toolz import pipe
 
+from . import components
 from .components import DashboardComponent
 from .core import BokehServer
 from .worker import SystemMonitor, format_time, counters_doc
@@ -21,6 +23,7 @@ from .utils import transpose
 from ..metrics import time
 from ..utils import log_errors
 from ..diagnostics.progress_stream import color_of
+from .task_stream import TaskStreamPlugin
 
 try:
     from cytoolz.curried import map, concat, groupby
@@ -295,6 +298,41 @@ class Events(DashboardComponent):
                 self.source.stream(new, 10000)
 
 
+class TaskStream(components.TaskStream):
+    def __init__(self, scheduler, n_rectangles=1000, clear_interval=20000, **kwargs):
+        self.scheduler = scheduler
+        es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
+        if not es:
+            self.plugin = TaskStreamPlugin(self.scheduler)
+        else:
+            self.plugin = es[0]
+        self.index = max(0, self.plugin.index - n_rectangles)
+        self.workers = dict()
+
+        components.TaskStream.__init__(self, n_rectangles=n_rectangles,
+                                       clear_interval=clear_interval, **kwargs)
+
+    def update(self):
+        with log_errors():
+            rectangles = self.plugin.rectangles(istart=self.index,
+                                                workers=self.workers)
+            if len(set(map(len, rectangles.values()))) != 1:
+                print(rectangles)
+                import pdb; pdb.set_trace()
+            self.index += len(rectangles['name'])
+
+            # If there has been a significant delay then clear old rectangles
+            if rectangles['start']:
+                m = min(map(add, rectangles['start'], rectangles['duration']))
+                if m > self.last:
+                    self.last, last = m, self.last
+                    if m > last + self.clear_interval:
+                        self.source.data.update(rectangles)
+                        return
+
+            self.source.stream(rectangles, self.n_rectangles)
+
+
 def systemmonitor_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
@@ -334,6 +372,16 @@ def events_doc(scheduler, doc):
         doc.add_root(column(events.root, sizing_mode='scale_width'))
 
 
+def task_stream_doc(scheduler, doc):
+    with log_errors():
+        ts = TaskStream(scheduler)
+        ts.update()
+        doc.add_periodic_callback(ts.update, 200)
+        doc.title = "Task Stream"
+        doc.add_root(column(ts.root, sizing_mode='scale_width'))
+
+
+
 class BokehScheduler(BokehServer):
     def __init__(self, scheduler, io_loop=None):
         self.scheduler = scheduler
@@ -342,11 +390,13 @@ class BokehScheduler(BokehServer):
         workers = Application(FunctionHandler(partial(workers_doc, scheduler)))
         counters = Application(FunctionHandler(partial(counters_doc, scheduler)))
         events = Application(FunctionHandler(partial(events_doc, scheduler)))
+        task_stream = Application(FunctionHandler(partial(task_stream_doc, scheduler)))
 
         self.apps = {'/system': systemmonitor,
                      '/workers': workers,
                      '/events': events,
-                     '/counters': counters}
+                     '/counters': counters,
+                     '/tasks': task_stream}
 
         self.loop = io_loop or scheduler.loop
         self.server = None
