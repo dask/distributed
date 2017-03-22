@@ -42,7 +42,13 @@ class TaskStreamPlugin(SchedulerPlugin):
             key = msg['key']
             name = key_split(key)
             startstops = msg.get('startstops', [])
-            worker_thread = '%s-%d' % (msg['worker'], msg['thread'])
+            try:
+                worker_thread = '%s-%d' % (msg['worker'], msg['thread'])
+            except Exception as e:
+                logger.warning("Message contained bad information: %s", msg,
+                               exc_info=True)
+                worker_thread = ''
+
             if worker_thread not in workers:
                 workers[worker_thread] = len(workers) / 2
 

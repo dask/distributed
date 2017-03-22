@@ -9,7 +9,8 @@ from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.layouts import column
 from bokeh.models import ( ColumnDataSource, DataRange1d, HoverTool, ResetTool,
-        PanTool, WheelZoomTool, TapTool, OpenURL)
+        PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad, Text,
+        value)
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
@@ -22,13 +23,14 @@ from .worker import SystemMonitor, format_time, counters_doc
 from .utils import transpose
 from ..metrics import time
 from ..utils import log_errors
-from ..diagnostics.progress_stream import color_of
+from ..diagnostics.progress_stream import color_of, progress_quads
+from ..diagnostics.progress import AllProgress
 from .task_stream import TaskStreamPlugin
 
 try:
-    from cytoolz.curried import map, concat, groupby
+    from cytoolz.curried import map, concat, groupby, valmap
 except ImportError:
-    from toolz.curried import map, concat, groupby
+    from toolz.curried import map, concat, groupby, valmap
 
 logger = logging.getLogger(__name__)
 
@@ -333,6 +335,104 @@ class TaskStream(components.TaskStream):
             self.source.stream(rectangles, self.n_rectangles)
 
 
+class TaskProgress(DashboardComponent):
+    """ Progress bars per task type """
+
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        ps = [p for p in scheduler.plugins if isinstance(p, AllProgress)]
+        if ps:
+            self.plugin = ps[0]
+        else:
+            self.plugin = AllProgress(scheduler)
+
+        data = progress_quads(dict(all={}, memory={}, erred={}, released={}))
+        self.source = ColumnDataSource(data=data)
+
+        x_range = DataRange1d()
+        y_range = Range1d(-8, 0)
+
+        self.root = Plot(
+            id='bk-task-progress-plot',
+            x_range=x_range, y_range=y_range, toolbar_location=None, **kwargs
+        )
+        self.root.add_glyph(
+            self.source,
+            Quad(top='top', bottom='bottom', left='left', right='right',
+                 fill_color="#aaaaaa", line_color="#aaaaaa", fill_alpha=0.2)
+        )
+        self.root.add_glyph(
+            self.source,
+            Quad(top='top', bottom='bottom', left='left', right='released-loc',
+                 fill_color="color", line_color="color", fill_alpha=0.6)
+        )
+        self.root.add_glyph(
+            self.source,
+            Quad(top='top', bottom='bottom', left='released-loc',
+                 right='memory-loc', fill_color="color", line_color="color",
+                 fill_alpha=1.0)
+        )
+        self.root.add_glyph(
+            self.source,
+            Quad(top='top', bottom='bottom', left='erred-loc',
+                 right='erred-loc', fill_color='#000000', line_color='#000000',
+                 fill_alpha=0.3)
+        )
+        self.root.add_glyph(
+            self.source,
+            Text(text='show-name', y='bottom', x='left', x_offset=5,
+                 text_font_size=value('10pt'))
+        )
+        self.root.add_glyph(
+            self.source,
+            Text(text='done', y='bottom', x='right', x_offset=-5,
+                 text_align='right', text_font_size=value('10pt'))
+        )
+
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">All:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@all</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Memory:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@memory</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
+                </div>
+                """
+        )
+        self.root.add_tools(hover)
+
+    def update(self):
+        with log_errors():
+            state = {'all': valmap(len, self.plugin.all),
+                     'nbytes': self.plugin.nbytes}
+            for k in ['memory', 'erred', 'released']:
+                state[k] = valmap(len, self.plugin.state[k])
+
+            d = progress_quads(state)
+
+            self.source.data.update(d)
+
+            totals = {k: sum(state[k].values())
+                      for k in ['all', 'memory', 'erred', 'released']}
+            totals['processing'] = totals['all'] - sum(v for k, v in
+                    totals.items() if k != 'all')
+
+            self.root.title.text = ("Progress -- total: %(all)s, "
+                "in-memory: %(memory)s, processing: %(processing)s, "
+                "erred: %(erred)s" % totals)
+
+
 def systemmonitor_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
@@ -374,12 +474,23 @@ def events_doc(scheduler, doc):
 
 def task_stream_doc(scheduler, doc):
     with log_errors():
-        ts = TaskStream(scheduler)
+        ts = TaskStream(scheduler, n_rectangles=100000, clear_interval=60000)
         ts.update()
-        doc.add_periodic_callback(ts.update, 200)
-        doc.title = "Task Stream"
+        doc.add_periodic_callback(ts.update, 5000)
+        doc.title = "Dask Task Stream"
         doc.add_root(column(ts.root, sizing_mode='scale_width'))
 
+
+def status_doc(scheduler, doc):
+    with log_errors():
+        ts = TaskStream(scheduler, n_rectangles=1000, clear_interval=10000, height=500)
+        ts.update()
+        tp = TaskProgress(scheduler, height=160)
+        tp.update()
+        doc.add_periodic_callback(ts.update, 200)
+        doc.add_periodic_callback(tp.update, 100)
+        doc.title = "Dask Status"
+        doc.add_root(column(ts.root, tp.root, sizing_mode='scale_width'))
 
 
 class BokehScheduler(BokehServer):
@@ -390,13 +501,17 @@ class BokehScheduler(BokehServer):
         workers = Application(FunctionHandler(partial(workers_doc, scheduler)))
         counters = Application(FunctionHandler(partial(counters_doc, scheduler)))
         events = Application(FunctionHandler(partial(events_doc, scheduler)))
-        task_stream = Application(FunctionHandler(partial(task_stream_doc, scheduler)))
+        tasks = Application(FunctionHandler(partial(task_stream_doc, scheduler)))
+        status = Application(FunctionHandler(partial(status_doc, scheduler)))
 
-        self.apps = {'/system': systemmonitor,
-                     '/workers': workers,
-                     '/events': events,
-                     '/counters': counters,
-                     '/tasks': task_stream}
+        self.apps = {
+                '/system': systemmonitor,
+                '/workers': workers,
+                '/events': events,
+                '/counters': counters,
+                '/tasks': tasks,
+                '/status': status
+        }
 
         self.loop = io_loop or scheduler.loop
         self.server = None
