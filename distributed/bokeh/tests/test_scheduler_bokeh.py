@@ -16,7 +16,7 @@ from distributed.utils_test import gen_cluster, inc, dec, slowinc
 from distributed.bokeh.worker import Counters, BokehWorker
 from distributed.bokeh.scheduler import (BokehScheduler, StateTable,
         SystemMonitor, Occupancy, StealingTimeSeries, StealingEvents, Events,
-        TaskStream, TaskProgress)
+        TaskStream, TaskProgress, MemoryUse)
 
 
 @pytest.mark.skipif(sys.version_info[0] == 2,
@@ -140,3 +140,16 @@ def test_TaskProgress(c, s, a, b):
     d = dict(tp.source.data)
     assert all(len(L) == 2 for L in d.values())
     assert d['name'] == ['slowinc', 'dec']
+
+
+@gen_cluster(client=True)
+def test_MemoryUse(c, s, a, b):
+    mu = MemoryUse(s)
+
+    futures = c.map(slowinc, range(10), delay=0.001)
+    yield _wait(futures)
+
+    mu.update()
+    d = dict(mu.source.data)
+    assert all(len(L) == 1 for L in d.values())
+    assert d['name'] == ['slowinc']

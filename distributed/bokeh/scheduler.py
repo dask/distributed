@@ -10,7 +10,7 @@ from bokeh.application.handlers.function import FunctionHandler
 from bokeh.layouts import column
 from bokeh.models import ( ColumnDataSource, DataRange1d, HoverTool, ResetTool,
         PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad, Text,
-        value)
+        value, LinearAxis)
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
@@ -23,7 +23,7 @@ from .worker import SystemMonitor, format_time, counters_doc
 from .utils import transpose
 from ..metrics import time
 from ..utils import log_errors
-from ..diagnostics.progress_stream import color_of, progress_quads
+from ..diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
 from ..diagnostics.progress import AllProgress
 from .task_stream import TaskStreamPlugin
 
@@ -433,6 +433,62 @@ class TaskProgress(DashboardComponent):
                 "erred: %(erred)s" % totals)
 
 
+class MemoryUse(DashboardComponent):
+    """ The memory usage across the cluster, grouped by task type """
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        ps = [p for p in scheduler.plugins if isinstance(p, AllProgress)]
+        if ps:
+            self.plugin = ps[0]
+        else:
+            self.plugin = AllProgress(scheduler)
+
+        self.source = ColumnDataSource(data=dict(
+            name=[], left=[], right=[], center=[], color=[],
+            percent=[], MB=[], text=[])
+        )
+
+        self.root = Plot(
+            id='bk-nbytes-plot', x_range=DataRange1d(), y_range=DataRange1d(),
+            toolbar_location=None, outline_line_color=None, **kwargs
+        )
+
+        self.root.add_glyph(
+            self.source,
+            Quad(top=1, bottom=0, left='left', right='right',
+                 fill_color='color', fill_alpha=1)
+        )
+
+        self.root.add_layout(LinearAxis(), 'left')
+        self.root.add_layout(LinearAxis(), 'below')
+
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Percent:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@percent</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">MB:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@MB</span>
+                </div>
+                """
+        )
+        self.root.add_tools(hover)
+
+    def update(self):
+        with log_errors():
+            nb = nbytes_bar(self.plugin.nbytes)
+            self.source.data.update(nb)
+            self.root.title.text = \
+                    "Memory Use: %0.2f MB" % (sum(self.plugin.nbytes.values()) / 1e6)
+
+
 def systemmonitor_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
@@ -487,10 +543,12 @@ def status_doc(scheduler, doc):
         ts.update()
         tp = TaskProgress(scheduler, height=160)
         tp.update()
+        mu = MemoryUse(scheduler, height=60)
         doc.add_periodic_callback(ts.update, 200)
         doc.add_periodic_callback(tp.update, 100)
+        doc.add_periodic_callback(mu.update, 200)
         doc.title = "Dask Status"
-        doc.add_root(column(ts.root, tp.root, sizing_mode='scale_width'))
+        doc.add_root(column(ts.root, tp.root, mu.root, sizing_mode='scale_width'))
 
 
 class BokehScheduler(BokehServer):
