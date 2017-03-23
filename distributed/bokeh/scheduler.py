@@ -226,6 +226,7 @@ class NProcessing(DashboardComponent):
             else:
                 self.source.data.update(result)
 
+
 class StealingTimeSeries(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
@@ -494,7 +495,7 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_glyph(
             self.source,
-            Text(text='done', y ='bottom', x='right', x_offset=-5,
+            Text(text='done', y='bottom', x='right', x_offset=-5,
                  text_align='right', text_font_size=value('10pt'))
         )
 

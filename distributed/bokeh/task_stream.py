@@ -1,5 +1,6 @@
+from __future__ import print_function, division, absolute_import
 
-from collections import deque
+import logging
 import random
 
 from bokeh.palettes import viridis
@@ -8,6 +9,9 @@ import itertools
 
 from ..diagnostics.plugin import SchedulerPlugin
 from ..utils import key_split
+
+
+logger = logging.getLogger(__name__)
 
 
 class TaskStreamPlugin(SchedulerPlugin):
@@ -109,6 +113,8 @@ prefix = {'transfer': 'transfer-',
 
 
 counter = itertools.count()
+
+
 @memoize
 def incrementing_index(o):
     return next(counter)
@@ -120,4 +126,3 @@ random.shuffle(task_stream_palette)
 
 def color_of(o, palette=task_stream_palette):
     return palette[incrementing_index(o) % len(palette)]
-
