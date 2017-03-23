@@ -137,6 +137,77 @@ class Occupancy(DashboardComponent):
                                      'x': x, 'y': y})
 
 
+class NProcessing(DashboardComponent):
+    """ How many tasks are on each worker """
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.scheduler = scheduler
+            self.source = ColumnDataSource({'occupancy': [0, 0],
+                                            'worker': ['a', 'b'],
+                                            'x': [0.0, 0.1],
+                                            'y': [1, 2],
+                                            'nprocessing': [1, 2],
+                                            'color': ['red', 'blue'],
+                                            'bokeh_address': ['', '']})
+
+            fig = figure(title='Occupancy', tools='resize', id='bk-nprocessing-plot',
+                          **kwargs)
+            fig.rect(source=self.source, x='x', width='nprocessing', y='y', height=1,
+                     color='color')
+
+            fig.xaxis.minor_tick_line_alpha = 0
+            fig.yaxis.visible = False
+            fig.ygrid.visible = False
+            fig.x_range.start = 0
+
+            tap = TapTool(callback=OpenURL(url='http://@bokeh_address/'))
+
+            hover = HoverTool()
+            hover.tooltips = "@worker : @occupancy s.  Click for worker page"
+            hover.point_policy = 'follow_mouse'
+            fig.add_tools(hover, tap)
+
+            self.root = fig
+
+    def update(self):
+        with log_errors():
+            p = valmap(len, self.scheduler.processing)
+            workers = list(self.scheduler.workers)
+
+            bokeh_addresses = []
+            for worker in workers:
+                addr = self.scheduler.get_worker_service_addr(worker, 'bokeh')
+                bokeh_addresses.append('%s:%d' % addr if addr is not None else '')
+
+            y = list(range(len(workers)))
+            nprocessing = [p[w] for w in workers]
+            x = [np / 2 for np in nprocessing]
+            total = sum(nprocessing)
+            color = []
+            for w in workers:
+                if w in self.scheduler.idle:
+                    color.append('red')
+                elif w in self.scheduler.saturated:
+                    color.append('green')
+                else:
+                    color.append('blue')
+
+            if total:
+                self.root.title.text = ('Processing Count-- total: %6d  avg: %8.2f' %
+                                        (total, total / len(workers)))
+            else:
+                self.root.title.text = 'Processing Count'
+
+            result = {'nprocessing': nprocessing,
+                      'worker': workers,
+                      'color': color,
+                      'bokeh_address': bokeh_addresses,
+                      'x': x, 'y': y}
+            if len(set(map(len, result.values()))) != 1:
+                import pdb; pdb.set_trace()
+            self.source.data.update()
+
+
 class StealingTimeSeries(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
@@ -318,9 +389,6 @@ class TaskStream(components.TaskStream):
         with log_errors():
             rectangles = self.plugin.rectangles(istart=self.index,
                                                 workers=self.workers)
-            if len(set(map(len, rectangles.values()))) != 1:
-                print(rectangles)
-                import pdb; pdb.set_trace()
             self.index += len(rectangles['name'])
 
             # If there has been a significant delay then clear old rectangles
@@ -332,6 +400,8 @@ class TaskStream(components.TaskStream):
                         self.source.data.update(rectangles)
                         return
 
+            if len(set(map(len, rectangles.values()))) != 1:
+                import pdb; pdb.set_trace()
             self.source.stream(rectangles, self.n_rectangles)
 
 
@@ -428,9 +498,9 @@ class TaskProgress(DashboardComponent):
             totals['processing'] = totals['all'] - sum(v for k, v in
                     totals.items() if k != 'all')
 
-            self.root.title.text = ("Progress -- total: %(all)s, "
-                "in-memory: %(memory)s, processing: %(processing)s, "
-                "erred: %(erred)s" % totals)
+            # self.root.title.text = ("Progress -- total: %(all)s, "
+            #     "in-memory: %(memory)s, processing: %(processing)s, "
+            #     "erred: %(erred)s" % totals)
 
 
 class MemoryUse(DashboardComponent):
@@ -544,11 +614,15 @@ def status_doc(scheduler, doc):
         tp = TaskProgress(scheduler, height=160)
         tp.update()
         mu = MemoryUse(scheduler, height=60)
+        mu.update()
+        np = NProcessing(scheduler, height=160)
+        np.update()
         doc.add_periodic_callback(ts.update, 200)
         doc.add_periodic_callback(tp.update, 100)
         doc.add_periodic_callback(mu.update, 200)
+        doc.add_periodic_callback(np.update, 500)
         doc.title = "Dask Status"
-        doc.add_root(column(ts.root, tp.root, mu.root, sizing_mode='scale_width'))
+        doc.add_root(column(ts.root, tp.root, mu.root, np.root, sizing_mode='scale_width'))
 
 
 class BokehScheduler(BokehServer):
