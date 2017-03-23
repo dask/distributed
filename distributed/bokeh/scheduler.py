@@ -16,6 +16,10 @@ from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from bokeh.io import curdoc
 from toolz import pipe
+try:
+    import numpy as np
+except ImportError:
+    np = False
 
 from . import components
 from .components import DashboardComponent
@@ -396,7 +400,8 @@ class TaskStream(components.TaskStream):
         with log_errors():
             rectangles = self.plugin.rectangles(istart=self.index,
                                                 workers=self.workers)
-            self.index += len(rectangles['name'])
+            n = len(rectangles['name'])
+            self.index += n
 
             # If there has been a significant delay then clear old rectangles
             if rectangles['start']:
@@ -411,6 +416,8 @@ class TaskStream(components.TaskStream):
 
             if len(set(map(len, rectangles.values()))) != 1:
                 import pdb; pdb.set_trace()
+            if n > 10 and np:
+                rectangles = valmap(np.array, rectangles)
             curdoc().add_next_tick_callback(lambda:
                     self.source.stream(rectangles, self.n_rectangles))
 
@@ -626,14 +633,14 @@ def status_doc(scheduler, doc):
         tp.update()
         mu = MemoryUse(scheduler, height=60)
         mu.update()
-        np = NProcessing(scheduler, height=160)
-        np.update()
-        doc.add_periodic_callback(ts.update, 1000)
-        doc.add_periodic_callback(tp.update, 10)
-        doc.add_periodic_callback(mu.update, 20)
-        doc.add_periodic_callback(np.update, 20)
+        pp = NProcessing(scheduler, height=160)
+        pp.update()
+        doc.add_periodic_callback(ts.update, 100)
+        doc.add_periodic_callback(tp.update, 100)
+        doc.add_periodic_callback(mu.update, 100)
+        doc.add_periodic_callback(pp.update, 100)
         doc.title = "Dask Status"
-        doc.add_root(column(ts.root, tp.root, mu.root, np.root, sizing_mode='scale_width'))
+        doc.add_root(column(ts.root, tp.root, mu.root, pp.root, sizing_mode='scale_width'))
 
 
 class BokehScheduler(BokehServer):
