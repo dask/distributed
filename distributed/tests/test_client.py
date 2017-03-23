@@ -2196,20 +2196,18 @@ def test_run(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_run_serialize(c, s, a, b):
+def test_run_handles_picklable_data(c, s, a, b):
     futures = c.map(inc, range(10))
     yield _wait(futures)
 
-    func = lambda dask_scheduler=None: dask_scheduler.who_has
+    def func():
+        return {}, set(), [], (), 1, 'hello', b'100'
 
     results = yield c._run_on_scheduler(func)
-    assert results == func(s)
+    assert results == func()
 
-    func = lambda dask_worker=None: (dask_worker.executing,
-                                     dask_worker.in_flight_tasks,
-                                     dask_worker.data_needed)
     results = yield c._run(func)
-    assert results == {w.address: func(w) for w in [a, b]}
+    assert results == {w.address: func() for w in [a, b]}
 
 
 def test_run_sync(loop):
