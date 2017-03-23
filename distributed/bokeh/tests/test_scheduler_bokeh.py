@@ -18,6 +18,10 @@ from distributed.bokeh.scheduler import (BokehScheduler, StateTable,
         SystemMonitor, Occupancy, StealingTimeSeries, StealingEvents, Events,
         TaskStream, TaskProgress, MemoryUse, NProcessing)
 
+from distributed.bokeh import scheduler
+
+scheduler.PROFILING = False
+
 
 @pytest.mark.skipif(sys.version_info[0] == 2,
                     reason='https://github.com/bokeh/bokeh/issues/5494')

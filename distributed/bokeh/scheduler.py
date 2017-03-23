@@ -40,6 +40,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+PROFILING = True
+
+
 class StateTable(DashboardComponent):
     """ Currently running tasks """
     def __init__(self, scheduler):
@@ -68,7 +71,11 @@ class StateTable(DashboardComponent):
                  'No Worker': [len(s.unrunnable)],
                  'Erred': [len(s.exceptions)],
                  'Released': [len(s.released)]}
-            curdoc().add_next_tick_callback(lambda: self.source.data.update(d))
+
+            if PROFILING:
+                curdoc().add_next_tick_callback(lambda: self.source.data.update(d))
+            else:
+                self.source.data.update(d)
 
 
 class Occupancy(DashboardComponent):
@@ -142,7 +149,10 @@ class Occupancy(DashboardComponent):
                       'bokeh_address': bokeh_addresses,
                       'x': x, 'y': y}
 
-            curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
+            if PROFILING:
+                curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
+            else:
+                self.source.data.update(result)
 
 
 class NProcessing(DashboardComponent):
@@ -210,13 +220,11 @@ class NProcessing(DashboardComponent):
                       'color': color,
                       'bokeh_address': bokeh_addresses,
                       'x': x, 'y': y}
-            def f():
-                if len(set(map(len, result.values()))) != 1:
-                    import pdb; pdb.set_trace()
+
+            if PROFILING:
+                curdoc().add_next_tick_callback(self.source.data.update(result))
+            else:
                 self.source.data.update(result)
-
-            curdoc().add_next_tick_callback(f)
-
 
 class StealingTimeSeries(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
@@ -245,7 +253,10 @@ class StealingTimeSeries(DashboardComponent):
             result = {'time': [time() * 1000],
                       'idle': [len(self.scheduler.idle)],
                       'saturated': [len(self.scheduler.saturated)]}
-            curdoc().add_next_tick_callback(lambda: self.source.stream(result, 10000))
+            if PROFILING:
+                curdoc().add_next_tick_callback(lambda: self.source.stream(result, 10000))
+            else:
+                self.source.stream(result, 10000)
 
 
 class StealingEvents(DashboardComponent):
@@ -312,8 +323,11 @@ class StealingEvents(DashboardComponent):
             if log:
                 new = pipe(log, map(groupby(1)), map(dict.values), concat,
                            map(self.convert), list, transpose)
-                curdoc().add_next_tick_callback(
-                        lambda: self.source.stream(new, 10000))
+                if PROFILING:
+                    curdoc().add_next_tick_callback(
+                            lambda: self.source.stream(new, 10000))
+                else:
+                    self.source.stream(new, 10000)
 
 
 class Events(DashboardComponent):
@@ -379,7 +393,10 @@ class Events(DashboardComponent):
                        'y': ys,
                        'color': colors}
 
-                curdoc().add_next_tick_callback(lambda: self.source.stream(new, 10000))
+                if PROFILING:
+                    curdoc().add_next_tick_callback(lambda: self.source.stream(new, 10000))
+                else:
+                    self.source.stream(new, 10000)
 
 
 class TaskStream(components.TaskStream):
@@ -409,17 +426,22 @@ class TaskStream(components.TaskStream):
                 if m > self.last:
                     self.last, last = m, self.last
                     if m > last + self.clear_interval:
-                        curdoc().add_next_tick_callback(lambda:
-                                self.source.data.update(rectangles))
-                        # self.source.data.update(rectangles)
+                        if PROFILING:
+                            curdoc().add_next_tick_callback(lambda:
+                                    self.source.data.update(rectangles))
+                        else:
+                            self.source.data.update(rectangles)
                         return
 
             if len(set(map(len, rectangles.values()))) != 1:
                 import pdb; pdb.set_trace()
             if n > 10 and np:
                 rectangles = valmap(np.array, rectangles)
-            curdoc().add_next_tick_callback(lambda:
-                    self.source.stream(rectangles, self.n_rectangles))
+            if PROFILING:
+                curdoc().add_next_tick_callback(lambda:
+                        self.source.stream(rectangles, self.n_rectangles))
+            else:
+                self.source.stream(rectangles, self.n_rectangles)
 
 
 class TaskProgress(DashboardComponent):
@@ -508,7 +530,10 @@ class TaskProgress(DashboardComponent):
 
             d = progress_quads(state)
 
-            curdoc().add_next_tick_callback(lambda: self.source.data.update(d))
+            if PROFILING:
+                curdoc().add_next_tick_callback(lambda: self.source.data.update(d))
+            else:
+                self.source.data.update(d)
 
             totals = {k: sum(state[k].values())
                       for k in ['all', 'memory', 'erred', 'released']}
@@ -571,8 +596,11 @@ class MemoryUse(DashboardComponent):
     def update(self):
         with log_errors():
             nb = nbytes_bar(self.plugin.nbytes)
-            curdoc().add_next_tick_callback(lambda:
-                    self.source.data.update(nb))
+            if PROFILING:
+                curdoc().add_next_tick_callback(lambda:
+                        self.source.data.update(nb))
+            else:
+                self.source.data.update(nb)
             self.root.title.text = \
                     "Memory Use: %0.2f MB" % (sum(self.plugin.nbytes.values()) / 1e6)
 
