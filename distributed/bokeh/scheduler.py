@@ -14,6 +14,7 @@ from bokeh.models import ( ColumnDataSource, DataRange1d, HoverTool, ResetTool,
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
+from bokeh.io import curdoc
 from toolz import pipe
 
 from . import components
@@ -63,7 +64,7 @@ class StateTable(DashboardComponent):
                  'No Worker': [len(s.unrunnable)],
                  'Erred': [len(s.exceptions)],
                  'Released': [len(s.released)]}
-            self.source.data.update(d)
+            curdoc().add_next_tick_callback(lambda: self.source.data.update(d))
 
 
 class Occupancy(DashboardComponent):
@@ -129,12 +130,15 @@ class Occupancy(DashboardComponent):
                                   format_time(total / self.scheduler.total_ncores)))
             else:
                 self.root.title.text = 'Occupancy'
-            self.source.data.update({'occupancy': occupancy,
-                                     'worker': workers,
-                                     'ms': ms,
-                                     'color': color,
-                                     'bokeh_address': bokeh_addresses,
-                                     'x': x, 'y': y})
+
+            result = {'occupancy': occupancy,
+                      'worker': workers,
+                      'ms': ms,
+                      'color': color,
+                      'bokeh_address': bokeh_addresses,
+                      'x': x, 'y': y}
+
+            curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
 
 
 class NProcessing(DashboardComponent):
@@ -142,11 +146,10 @@ class NProcessing(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         with log_errors():
             self.scheduler = scheduler
-            self.source = ColumnDataSource({'occupancy': [0, 0],
+            self.source = ColumnDataSource({'nprocessing': [1, 2],
                                             'worker': ['a', 'b'],
                                             'x': [0.0, 0.1],
                                             'y': [1, 2],
-                                            'nprocessing': [1, 2],
                                             'color': ['red', 'blue'],
                                             'bokeh_address': ['', '']})
 
@@ -163,7 +166,7 @@ class NProcessing(DashboardComponent):
             tap = TapTool(callback=OpenURL(url='http://@bokeh_address/'))
 
             hover = HoverTool()
-            hover.tooltips = "@worker : @occupancy s.  Click for worker page"
+            hover.tooltips = "@worker : @nprocessing tasks.  Click for worker page"
             hover.point_policy = 'follow_mouse'
             fig.add_tools(hover, tap)
 
@@ -203,9 +206,12 @@ class NProcessing(DashboardComponent):
                       'color': color,
                       'bokeh_address': bokeh_addresses,
                       'x': x, 'y': y}
-            if len(set(map(len, result.values()))) != 1:
-                import pdb; pdb.set_trace()
-            self.source.data.update()
+            def f():
+                if len(set(map(len, result.values()))) != 1:
+                    import pdb; pdb.set_trace()
+                self.source.data.update(result)
+
+            curdoc().add_next_tick_callback(f)
 
 
 class StealingTimeSeries(DashboardComponent):
@@ -232,10 +238,10 @@ class StealingTimeSeries(DashboardComponent):
 
     def update(self):
         with log_errors():
-            self.source.stream({'time': [time() * 1000],
-                                'idle': [len(self.scheduler.idle)],
-                                'saturated': [len(self.scheduler.saturated)]},
-                                10000)
+            result = {'time': [time() * 1000],
+                      'idle': [len(self.scheduler.idle)],
+                      'saturated': [len(self.scheduler.saturated)]}
+            curdoc().add_next_tick_callback(lambda: self.source.stream(result, 10000))
 
 
 class StealingEvents(DashboardComponent):
@@ -302,7 +308,8 @@ class StealingEvents(DashboardComponent):
             if log:
                 new = pipe(log, map(groupby(1)), map(dict.values), concat,
                            map(self.convert), list, transpose)
-                self.source.stream(new, 10000)
+                curdoc().add_next_tick_callback(
+                        lambda: self.source.stream(new, 10000))
 
 
 class Events(DashboardComponent):
@@ -368,7 +375,7 @@ class Events(DashboardComponent):
                        'y': ys,
                        'color': colors}
 
-                self.source.stream(new, 10000)
+                curdoc().add_next_tick_callback(lambda: self.source.stream(new, 10000))
 
 
 class TaskStream(components.TaskStream):
@@ -397,12 +404,15 @@ class TaskStream(components.TaskStream):
                 if m > self.last:
                     self.last, last = m, self.last
                     if m > last + self.clear_interval:
-                        self.source.data.update(rectangles)
+                        curdoc().add_next_tick_callback(lambda:
+                                self.source.data.update(rectangles))
+                        # self.source.data.update(rectangles)
                         return
 
             if len(set(map(len, rectangles.values()))) != 1:
                 import pdb; pdb.set_trace()
-            self.source.stream(rectangles, self.n_rectangles)
+            curdoc().add_next_tick_callback(lambda:
+                    self.source.stream(rectangles, self.n_rectangles))
 
 
 class TaskProgress(DashboardComponent):
@@ -455,7 +465,7 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_glyph(
             self.source,
-            Text(text='done', y='bottom', x='right', x_offset=-5,
+            Text(text='done', y ='bottom', x='right', x_offset=-5,
                  text_align='right', text_font_size=value('10pt'))
         )
 
@@ -491,7 +501,7 @@ class TaskProgress(DashboardComponent):
 
             d = progress_quads(state)
 
-            self.source.data.update(d)
+            curdoc().add_next_tick_callback(lambda: self.source.data.update(d))
 
             totals = {k: sum(state[k].values())
                       for k in ['all', 'memory', 'erred', 'released']}
@@ -554,7 +564,8 @@ class MemoryUse(DashboardComponent):
     def update(self):
         with log_errors():
             nb = nbytes_bar(self.plugin.nbytes)
-            self.source.data.update(nb)
+            curdoc().add_next_tick_callback(lambda:
+                    self.source.data.update(nb))
             self.root.title.text = \
                     "Memory Use: %0.2f MB" % (sum(self.plugin.nbytes.values()) / 1e6)
 
@@ -617,10 +628,10 @@ def status_doc(scheduler, doc):
         mu.update()
         np = NProcessing(scheduler, height=160)
         np.update()
-        doc.add_periodic_callback(ts.update, 200)
-        doc.add_periodic_callback(tp.update, 100)
-        doc.add_periodic_callback(mu.update, 200)
-        doc.add_periodic_callback(np.update, 500)
+        doc.add_periodic_callback(ts.update, 1000)
+        doc.add_periodic_callback(tp.update, 10)
+        doc.add_periodic_callback(mu.update, 20)
+        doc.add_periodic_callback(np.update, 20)
         doc.title = "Dask Status"
         doc.add_root(column(ts.root, tp.root, mu.root, np.root, sizing_mode='scale_width'))
 
