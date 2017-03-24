@@ -48,7 +48,7 @@ class TaskStreamPlugin(SchedulerPlugin):
             startstops = msg.get('startstops', [])
             try:
                 worker_thread = '%s-%d' % (msg['worker'], msg['thread'])
-            except Exception as e:
+            except Exception:
                 continue
                 logger.warning("Message contained bad information: %s", msg,
                                exc_info=True)
