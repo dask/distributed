@@ -4,6 +4,7 @@ from functools import partial
 import logging
 from math import sqrt
 from operator import add
+import os
 
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
@@ -41,6 +42,13 @@ logger = logging.getLogger(__name__)
 
 
 PROFILING = True
+
+import jinja2
+
+with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
+    template_source = f.read()
+
+template = jinja2.Template(template_source)
 
 
 class StateTable(DashboardComponent):
@@ -142,17 +150,18 @@ class Occupancy(DashboardComponent):
             else:
                 self.root.title.text = 'Occupancy'
 
-            result = {'occupancy': occupancy,
-                      'worker': workers,
-                      'ms': ms,
-                      'color': color,
-                      'bokeh_address': bokeh_addresses,
-                      'x': x, 'y': y}
+            if occupancy:
+                result = {'occupancy': occupancy,
+                          'worker': workers,
+                          'ms': ms,
+                          'color': color,
+                          'bokeh_address': bokeh_addresses,
+                          'x': x, 'y': y}
 
-            if PROFILING:
-                curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
-            else:
-                self.source.data.update(result)
+                if PROFILING:
+                    curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
+                else:
+                    self.source.data.update(result)
 
 
 class NProcessing(DashboardComponent):
@@ -215,16 +224,17 @@ class NProcessing(DashboardComponent):
             else:
                 self.root.title.text = 'Processing Count'
 
-            result = {'nprocessing': nprocessing,
-                      'worker': workers,
-                      'color': color,
-                      'bokeh_address': bokeh_addresses,
-                      'x': x, 'y': y}
+            if nprocessing:
+                result = {'nprocessing': nprocessing,
+                          'worker': workers,
+                          'color': color,
+                          'bokeh_address': bokeh_addresses,
+                          'x': x, 'y': y}
 
-            if PROFILING:
-                curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
-            else:
-                self.source.data.update(result)
+                if PROFILING:
+                    curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
+                else:
+                    self.source.data.update(result)
 
 
 class StealingTimeSeries(DashboardComponent):
@@ -436,6 +446,8 @@ class TaskStream(components.TaskStream):
 
             if len(set(map(len, rectangles.values()))) != 1:
                 import pdb; pdb.set_trace()
+            if not n:
+                return
             if n > 10 and np:
                 rectangles = valmap(np.array, rectangles)
             if PROFILING:
@@ -528,6 +540,8 @@ class TaskProgress(DashboardComponent):
                      'nbytes': self.plugin.nbytes}
             for k in ['memory', 'erred', 'released']:
                 state[k] = valmap(len, self.plugin.state[k])
+            if not state['all']:
+                return
 
             d = progress_quads(state)
 
@@ -616,6 +630,7 @@ def systemmonitor_doc(scheduler, doc):
 
         doc.add_root(column(table.root, sysmon.root,
                             sizing_mode='scale_width'))
+        doc.template = template
 
 
 def workers_doc(scheduler, doc):
@@ -635,6 +650,8 @@ def workers_doc(scheduler, doc):
                             stealing_events.root,
                             sizing_mode='scale_width'))
 
+        doc.template = template
+
 
 def events_doc(scheduler, doc):
     with log_errors():
@@ -643,20 +660,22 @@ def events_doc(scheduler, doc):
         doc.add_periodic_callback(events.update, 500)
         doc.title = "Dask Scheduler Events"
         doc.add_root(column(events.root, sizing_mode='scale_width'))
+        doc.template = template
 
 
-def task_stream_doc(scheduler, doc):
+def tasks_doc(scheduler, doc):
     with log_errors():
         ts = TaskStream(scheduler, n_rectangles=100000, clear_interval=60000)
         ts.update()
         doc.add_periodic_callback(ts.update, 5000)
         doc.title = "Dask Task Stream"
         doc.add_root(column(ts.root, sizing_mode='scale_width'))
+        doc.template = template
 
 
 def status_doc(scheduler, doc):
     with log_errors():
-        ts = TaskStream(scheduler, n_rectangles=1000, clear_interval=10000, height=500)
+        ts = TaskStream(scheduler, n_rectangles=1000, clear_interval=10000, height=350)
         ts.update()
         tp = TaskProgress(scheduler, height=160)
         tp.update()
@@ -669,7 +688,8 @@ def status_doc(scheduler, doc):
         doc.add_periodic_callback(mu.update, 100)
         doc.add_periodic_callback(pp.update, 100)
         doc.title = "Dask Status"
-        doc.add_root(column(ts.root, tp.root, mu.root, pp.root, sizing_mode='scale_width'))
+        doc.add_root(column(pp.root, ts.root, tp.root, mu.root, sizing_mode='scale_width'))
+        doc.template = template
 
 
 class BokehScheduler(BokehServer):
@@ -680,7 +700,7 @@ class BokehScheduler(BokehServer):
         workers = Application(FunctionHandler(partial(workers_doc, scheduler)))
         counters = Application(FunctionHandler(partial(counters_doc, scheduler)))
         events = Application(FunctionHandler(partial(events_doc, scheduler)))
-        tasks = Application(FunctionHandler(partial(task_stream_doc, scheduler)))
+        tasks = Application(FunctionHandler(partial(tasks_doc, scheduler)))
         status = Application(FunctionHandler(partial(status_doc, scheduler)))
 
         self.apps = {
