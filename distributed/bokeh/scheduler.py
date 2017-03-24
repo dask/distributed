@@ -222,7 +222,7 @@ class NProcessing(DashboardComponent):
                       'x': x, 'y': y}
 
             if PROFILING:
-                curdoc().add_next_tick_callback(self.source.data.update(result))
+                curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
             else:
                 self.source.data.update(result)
 
