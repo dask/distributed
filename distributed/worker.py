@@ -1066,8 +1066,7 @@ class Worker(WorkerBase):
                         self._close()
                         break
                     elif op == 'compute-task':
-                        priority = msg.pop('priority')
-                        self.add_task(priority=priority, **msg)
+                        self.add_task(**msg)
                     elif op == 'release-task':
                         self.log.append((msg['key'], 'release-task'))
                         self.release_key(**msg)
