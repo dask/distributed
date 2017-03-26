@@ -164,7 +164,7 @@ class Occupancy(DashboardComponent):
                     self.source.data.update(result)
 
 
-class NProcessing(DashboardComponent):
+class CurrentLoad(DashboardComponent):
     """ How many tasks are on each worker """
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():
@@ -724,17 +724,23 @@ def tasks_doc(scheduler, doc):
 
 def status_doc(scheduler, doc):
     with log_errors():
-        ts = TaskStream(scheduler, n_rectangles=1000, clear_interval=10000, height=350)
-        ts.update()
-        tp = TaskProgress(scheduler, height=160)
-        tp.update()
-        pp = NProcessing(scheduler, height=160)
-        pp.update()
-        doc.add_periodic_callback(ts.update, 100)
-        doc.add_periodic_callback(tp.update, 100)
-        doc.add_periodic_callback(pp.update, 100)
+        task_stream = TaskStream(scheduler, n_rectangles=1000, clear_interval=10000, height=350)
+        task_stream.update()
+        doc.add_periodic_callback(task_stream.update, 100)
+
+        task_progress = TaskProgress(scheduler, height=160)
+        task_progress.update()
+        doc.add_periodic_callback(task_progress.update, 100)
+
+        current_load = CurrentLoad(scheduler, height=160)
+        current_load .update()
+        doc.add_periodic_callback(current_load.update, 100)
+
         doc.title = "Dask Status"
-        doc.add_root(column(pp.root, ts.root, tp.root, sizing_mode='scale_width'))
+        doc.add_root(column(current_load.root,
+                            task_stream.root,
+                            task_progress.root,
+                            sizing_mode='scale_width'))
         doc.template = template
 
 
