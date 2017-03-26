@@ -555,9 +555,9 @@ class TaskProgress(DashboardComponent):
             totals['processing'] = totals['all'] - sum(v for k, v in
                     totals.items() if k != 'all')
 
-            # self.root.title.text = ("Progress -- total: %(all)s, "
-            #     "in-memory: %(memory)s, processing: %(processing)s, "
-            #     "erred: %(erred)s" % totals)
+            self.root.title.text = ("Progress -- total: %(all)s, "
+                "in-memory: %(memory)s, processing: %(processing)s, "
+                "erred: %(erred)s" % totals)
 
 
 class MemoryUse(DashboardComponent):
