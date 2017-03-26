@@ -163,13 +163,13 @@ def test_MemoryUse(c, s, a, b):
 def test_NProcessing(c, s, a, b):
     np = NProcessing(s)
     np.update()
-    d = dict(np.processing_source.data)
+    d = dict(np.source.data)
     assert all(len(L) == 2 for L in d.values())
 
     futures = c.map(slowinc, range(10), delay=0.001)
     yield _wait(futures)
 
     np.update()
-    d = dict(np.nbytes_source.data)
+    d = dict(np.source.data)
     assert all(len(L) == 2 for L in d.values())
     assert all(d['nbytes'])

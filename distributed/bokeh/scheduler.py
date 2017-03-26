@@ -169,32 +169,31 @@ class NProcessing(DashboardComponent):
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():
             self.scheduler = scheduler
-            self.processing_source = ColumnDataSource({'nprocessing': [1, 2],
+            self.source = ColumnDataSource({'nprocessing': [1, 2],
+                                            'nprocessing-half': [0.5, 1],
+                                            'nprocessing-color': ['red', 'blue'],
+                                            'nbytes': [1, 2],
+                                            'nbytes-half': [0.5, 1],
                                             'worker': ['a', 'b'],
-                                            'x': [0.0, 0.1],
                                             'y': [1, 2],
-                                            'color': ['red', 'blue'],
+                                            'nbytes-color': ['blue', 'blue'],
                                             'bokeh_address': ['', '']})
 
             processing = figure(title='Tasks Processing', tools='resize', id='bk-nprocessing-plot',
                                 width=int(width / 2), **kwargs)
-            processing.rect(source=self.processing_source, x='x', width='nprocessing', y='y', height=1,
-                            color='color')
+            processing.rect(source=self.source,
+                            x='nprocessing-half', y='y',
+                            width='nprocessing', height=1,
+                            color='nprocessing-color')
             processing.x_range.start = 0
-
-            self.nbytes_source = ColumnDataSource({'nbytes': [1, 2],
-                                                   'worker': ['a', 'b'],
-                                                   'x': [0.0, 0.1],
-                                                   'y': [1, 2],
-                                                   'color': ['red', 'blue'],
-                                                   'bokeh_address': ['', '']})
 
             nbytes = figure(title='Bytes stored', tools='resize',
                             id='bk-nbytes-worker-plot', width=int(width / 2),
                             **kwargs)
-            nbytes.rect(source=self.nbytes_source, x='x', width='nbytes', y='y', height=1,
-                        color='color')
-            # nbytes.x_range.end = 0
+            nbytes.rect(source=self.source,
+                        x='nbytes-half', y='y',
+                        width='nbytes', height=1,
+                        color='nbytes-color')
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format='0 b')
 
             for fig in [processing, nbytes]:
@@ -225,7 +224,7 @@ class NProcessing(DashboardComponent):
             processing.y_range = nbytes.y_range
             self.root = row(nbytes, processing, sizing_mode='scale_width')
 
-    def update_processing(self):
+    def update(self):
         with log_errors():
             processing = valmap(len, self.scheduler.processing)
             workers = list(self.scheduler.workers)
@@ -237,44 +236,17 @@ class NProcessing(DashboardComponent):
 
             y = list(range(len(workers)))
             nprocessing = [processing[w] for w in workers]
-            x = [np / 2 for np in nprocessing]
-            color = []
+            processing_color = []
             for w in workers:
                 if w in self.scheduler.idle:
-                    color.append('red')
+                    processing_color.append('red')
                 elif w in self.scheduler.saturated:
-                    color.append('green')
+                    processing_color.append('green')
                 else:
-                    color.append('blue')
+                    processing_color.append('blue')
 
-            if nprocessing:
-                result = {'nprocessing': nprocessing,
-                          'worker': workers,
-                          'color': color,
-                          'bokeh_address': bokeh_addresses,
-                          'x': x, 'y': y}
-
-                print(result)
-
-                if PROFILING:
-                    curdoc().add_next_tick_callback(lambda: self.processing_source.data.update(result))
-                else:
-                    self.processing_source.data.update(result)
-
-    def update_nbytes(self):
-        with log_errors():
-            workers = list(self.scheduler.workers)
-
-            bokeh_addresses = []
-            for worker in workers:
-                addr = self.scheduler.get_worker_service_addr(worker, 'bokeh')
-                bokeh_addresses.append('%s:%d' % addr if addr is not None else '')
-
-            y = list(range(len(workers)))
             nbytes = [self.scheduler.worker_bytes[w] for w in workers]
-            x = [nb / 2 for nb in nbytes]
-
-            color = []
+            nbytes_color = []
             max_limit = 0
             for w, nb in zip(workers, nbytes):
                 try:
@@ -285,29 +257,30 @@ class NProcessing(DashboardComponent):
                     max_limit = limit
 
                 if nb > limit:
-                    color.append('red')
+                    nbytes_color.append('red')
                 elif nb > limit / 2:
-                    color.append('yellow')
+                    nbytes_color.append('yellow')
                 else:
-                    color.append('blue')
+                    nbytes_color.append('blue')
 
-            result = {'nbytes': nbytes,
-                      'worker': workers,
-                      'color': color,
-                      'bokeh_address': bokeh_addresses,
-                      'x': x, 'y': y}
+            now = time()
+            if nprocessing or last + 1 < now:
+                result = {'nprocessing': nprocessing,
+                          'nprocessing-half': [np / 2 for np in nprocessing],
+                          'nprocessing-color': processing_color,
+                          'nbytes': nbytes,
+                          'nbytes-half': [nb / 2 for nb in nbytes],
+                          'nbytes-color': nbytes_color,
+                          'bokeh_address': bokeh_addresses,
+                          'worker': workers,
+                          'y': y}
 
-            self.nbytes_figure.title.text = 'Bytes stored: ' + format_bytes(sum(nbytes))
-            # self.nbytes_figure.x_range.start = max(nbytes) # max_limit
+                self.nbytes_figure.title.text = 'Bytes stored: ' + format_bytes(sum(nbytes))
 
-            if PROFILING:
-                curdoc().add_next_tick_callback(lambda: self.nbytes_source.data.update(result))
-            else:
-                self.nbytes_source.data.update(result)
-
-    def update(self):
-        self.update_processing()
-        self.update_nbytes()
+                if PROFILING:
+                    curdoc().add_next_tick_callback(lambda: self.source.data.update(result))
+                else:
+                    self.source.data.update(result)
 
 
 class StealingTimeSeries(DashboardComponent):
