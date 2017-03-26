@@ -496,9 +496,9 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_glyph(
             self.source,
-            Quad(top='top', bottom='bottom', left='erred-loc',
-                 right='erred-loc', fill_color='#000000', line_color='#000000',
-                 fill_alpha=0.3)
+            Quad(top='top', bottom='bottom', left='released-loc',
+                 right='erred-loc', fill_color='black', line_color='#000000',
+                 fill_alpha=0.5)
         )
         self.root.add_glyph(
             self.source,
