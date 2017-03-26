@@ -168,6 +168,7 @@ class NProcessing(DashboardComponent):
     """ How many tasks are on each worker """
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():
+            self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource({'nprocessing': [1, 2],
                                             'nprocessing-half': [0.5, 1],
@@ -195,6 +196,7 @@ class NProcessing(DashboardComponent):
                         width='nbytes', height=1,
                         color='nbytes-color')
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format='0 b')
+            nbytes.x_range.start = 0
 
             for fig in [processing, nbytes]:
                 fig.xaxis.minor_tick_line_alpha = 0
@@ -250,7 +252,7 @@ class NProcessing(DashboardComponent):
             max_limit = 0
             for w, nb in zip(workers, nbytes):
                 try:
-                    limit = self.scheduler.worker_info[w]['memory-limit']
+                    limit = self.scheduler.worker_info[w]['memory_limit']
                 except KeyError:
                     limit = 16e9
                 if limit > max_limit:
@@ -259,12 +261,13 @@ class NProcessing(DashboardComponent):
                 if nb > limit:
                     nbytes_color.append('red')
                 elif nb > limit / 2:
-                    nbytes_color.append('yellow')
+                    nbytes_color.append('orange')
                 else:
                     nbytes_color.append('blue')
 
             now = time()
-            if nprocessing or last + 1 < now:
+            if any(nprocessing) or self.last + 1 < now:
+                self.last = now
                 result = {'nprocessing': nprocessing,
                           'nprocessing-half': [np / 2 for np in nprocessing],
                           'nprocessing-color': processing_color,
@@ -725,16 +728,13 @@ def status_doc(scheduler, doc):
         ts.update()
         tp = TaskProgress(scheduler, height=160)
         tp.update()
-        mu = MemoryUse(scheduler, height=60)
-        mu.update()
         pp = NProcessing(scheduler, height=160)
         pp.update()
         doc.add_periodic_callback(ts.update, 100)
         doc.add_periodic_callback(tp.update, 100)
-        doc.add_periodic_callback(mu.update, 100)
         doc.add_periodic_callback(pp.update, 100)
         doc.title = "Dask Status"
-        doc.add_root(column(pp.root, ts.root, tp.root, mu.root, sizing_mode='scale_width'))
+        doc.add_root(column(pp.root, ts.root, tp.root, sizing_mode='scale_width'))
         doc.template = template
 
 
