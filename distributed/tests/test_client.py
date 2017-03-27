@@ -391,6 +391,13 @@ def test_wait(c, s, a, b):
     assert x.status == y.status == 'finished'
 
 
+@gen_cluster(client=True, timeout=2)
+def test_wait_timeout(c, s, a, b):
+    future = c.submit(sleep, 0.3)
+    with pytest.raises(gen.TimeoutError):
+        yield _wait(future, timeout=0.01)
+
+
 def test_wait_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
@@ -401,6 +408,10 @@ def test_wait_sync(loop):
             assert done == {x, y}
             assert not_done == set()
             assert x.status == y.status == 'finished'
+
+            future = c.submit(sleep, 0.3)
+            with pytest.raises(gen.TimeoutError):
+                wait(future, timeout=0.01)
 
 
 @gen_cluster(client=True)
