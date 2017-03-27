@@ -2528,7 +2528,7 @@ class AsCompleted(object):
     4
     3
     """
-    def __init__(self, futures=None, loop=None, results=False):
+    def __init__(self, futures=None, loop=None, with_results=False):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
@@ -2536,7 +2536,7 @@ class AsCompleted(object):
         self.lock = Lock()
         self.loop = loop or default_client().loop
         self.condition = Condition()
-        self.results = results
+        self.with_results = with_results
 
         if futures:
             for future in futures:
@@ -2545,13 +2545,13 @@ class AsCompleted(object):
     @gen.coroutine
     def track_future(self, future):
         yield _wait(future)
-        if self.results:
+        if self.with_results:
             result = yield future._result()
         with self.lock:
             self.futures[future] -= 1
             if not self.futures[future]:
                 del self.futures[future]
-            if self.results:
+            if self.with_results:
                 self.queue.put_nowait((future, result))
             else:
                 self.queue.put_nowait(future)
