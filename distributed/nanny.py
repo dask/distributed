@@ -109,7 +109,7 @@ class Nanny(Server):
         self.loop.add_callback(self._start, addr_or_port)
 
     @gen.coroutine
-    def _kill(self, comm=None, timeout=10):
+    def _kill(self, comm=None, timeout=5):
         """ Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
