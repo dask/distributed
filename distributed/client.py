@@ -11,6 +11,7 @@ from functools import partial
 from glob import glob
 import json
 import logging
+from numbers import Number
 import os
 import sys
 from time import sleep
@@ -2420,6 +2421,11 @@ class CompatibleExecutor(Client):
 
 @gen.coroutine
 def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
+    if timeout is not None and not isinstance(timeout, Number):
+        raise TypeError("timeout= keyword received a non-numeric value.\n"
+                "Beware that wait expects a list of values\n"
+                "  Bad:  wait(x, y, z)\n"
+                "  Good: wait([x, y, z])")
     fs = futures_of(fs)
     if return_when == 'ALL_COMPLETED':
         future = All({f.event.wait() for f in fs})

@@ -414,6 +414,19 @@ def test_wait_sync(loop):
                 wait(future, timeout=0.01)
 
 
+def test_wait_informative_error_for_timeouts(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x = c.submit(inc, 1)
+            y = c.submit(inc, 2)
+
+            try:
+                wait(x, y)
+            except Exception as e:
+                assert "timeout" in str(e)
+                assert "list" in str(e)
+
+
 @gen_cluster(client=True)
 def test_garbage_collection(c, s, a, b):
     x = c.submit(inc, 1)
