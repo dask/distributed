@@ -225,9 +225,9 @@ def test_channel_gets_updates_immediately_2(loop):
 
             with Client(s['address']) as c2:
                 x2 = c.channel('x')
-                future = c.submit(inc, 1)
-                x.append(future)
-                x.flush()
+                future = c2.submit(inc, 1)
+                x2.append(future)
+                x2.flush()
 
             future = next(iter(x))
             assert future.result() == 2
