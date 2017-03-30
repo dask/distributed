@@ -112,6 +112,7 @@ def test_task_stream(c, s, a, b):
     d = dict(ts.source.data)
 
     assert all(len(L) == 10 for L in d.values())
+    assert min(d['start']) == 0  # zero based
 
     ts.update()
     d = dict(ts.source.data)
