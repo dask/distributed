@@ -13,12 +13,15 @@ logger = logging.getLogger(__name__)
 class TaskStreamPlugin(SchedulerPlugin):
     def __init__(self, scheduler):
         self.buffer = []
+        self.scheduler = scheduler
         scheduler.add_plugin(self)
         self.index = 0
         self.maxlen = 100000
 
     def transition(self, key, start, finish, *args, **kwargs):
         if start == 'processing':
+            if key not in self.scheduler.task_state:
+                return
             kwargs['key'] = key
             if finish == 'memory' or finish == 'erred':
                 self.buffer.append(kwargs)

@@ -490,6 +490,8 @@ class TaskStream(components.TaskStream):
                                        clear_interval=clear_interval, **kwargs)
 
     def update(self):
+        if self.index == self.plugin.index:
+            return
         with log_errors():
             if self.index:
                 start = min(self.source.data['start'])
@@ -501,7 +503,7 @@ class TaskStream(components.TaskStream):
                                                 workers=self.workers,
                                                 start_boundary=boundary)
             n = len(rectangles['name'])
-            self.index += n
+            self.index = self.plugin.index
 
             if not rectangles['start']:
                 return
@@ -532,7 +534,6 @@ class TaskStream(components.TaskStream):
 
 class TaskProgress(DashboardComponent):
     """ Progress bars per task type """
-
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         ps = [p for p in scheduler.plugins if isinstance(p, AllProgress)]
