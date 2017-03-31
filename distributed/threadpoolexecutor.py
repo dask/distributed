@@ -26,7 +26,7 @@ from concurrent.futures import thread
 import logging
 from threading import local, Thread
 
-from .compatibility import unicode as str
+from .compatibility import unicode as str  # flake8: noqa
 from .compatibility import get_thread_identity
 
 logger = logging.getLogger(__name__)

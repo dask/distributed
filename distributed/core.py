@@ -15,7 +15,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
-from .compatibility import unicode as str, PY2
+from .compatibility import unicode as str, PY2  # flake8: noqa
 from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)

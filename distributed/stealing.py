@@ -8,7 +8,7 @@ from time import time
 
 from tornado.ioloop import PeriodicCallback
 
-from .compatibility import unicode as str
+from .compatibility import unicode as str  # flake8: noqa
 from .config import config
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin

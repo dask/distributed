@@ -6,7 +6,7 @@ import logging
 from tornado import gen, locks
 from tornado.ioloop import IOLoop
 
-from .compatibility import unicode as str
+from .compatibility import unicode as str  # flake8: noqa
 from .core import CommClosedError
 from .utils import ignoring
 

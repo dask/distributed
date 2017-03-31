@@ -12,7 +12,7 @@ import weakref
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
-from .compatibility import unicode as str
+from .compatibility import unicode as str  # flake8: noqa
 from .comm import get_address_host
 from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time

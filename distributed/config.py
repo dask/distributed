@@ -4,7 +4,7 @@ import logging
 import os
 import sys
 
-from .compatibility import unicode as str
+from .compatibility import unicode as str  # flake8: noqa
 from .compatibility import FileExistsError, logging_names
 
 logger = logging.getLogger(__name__)

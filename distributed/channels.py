@@ -7,7 +7,7 @@ import threading
 import warnings
 
 from .client import Future
-from .compatibility import unicode as str
+from .compatibility import unicode as str  # flake8: noqa
 from .core import CommClosedError
 from .utils import tokey, log_errors
 
