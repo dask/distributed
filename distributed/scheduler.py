@@ -503,9 +503,18 @@ class Scheduler(Server):
         self.status = 'closing'
         logger.debug("Cleaning up coroutines")
 
-        for w, comm in list(self.worker_comms.items()):
-            with ignoring(AttributeError):
-                yield comm.close()
+        close_nannies = {w: self.rpc(self.get_worker_service_addr(w, 'nanny')).terminate()
+                         for w in self.workers
+                         if 'nanny' in self.worker_info[w].get('services', ())}
+
+        close_workers = {w: comm.close()
+                         for w, comm in list(self.worker_comms.items())
+                         if comm}
+
+        if close_nannies:
+            yield close_nannies
+        if close_workers:
+            yield close_workers
 
     ###########
     # Stimuli #
