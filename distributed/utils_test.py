@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from contextlib import contextmanager
 from datetime import timedelta
@@ -22,6 +22,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
+from .compatibility import unicode as str
 from .core import connect, rpc, CommClosedError
 from .metrics import time
 from .utils import ignoring, log_errors, sync, mp_context, get_ip, get_ipv6
@@ -513,14 +514,14 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
                     args = [s] + workers
 
                     if client:
-                        e = Client(s.address, loop=loop, start=False)
-                        loop.run_sync(e._start)
-                        args = [e] + args
+                        c = Client(s.address, loop=loop, start=False)
+                        loop.run_sync(c._start)
+                        args = [c] + args
                     try:
                         return loop.run_sync(lambda: cor(*args), timeout=timeout)
                     finally:
                         if client:
-                            loop.run_sync(e._shutdown)
+                            loop.run_sync(c._shutdown)
                         loop.run_sync(lambda: end_cluster(s, workers))
 
                     for w in workers:

@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from collections import Iterator
 from functools import partial
@@ -16,7 +16,7 @@ from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 import dask
-from distributed.compatibility import Queue, isqueue, PY2
+from distributed.compatibility import Queue, isqueue, PY2, unicode as str
 from distributed.metrics import time
 from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
         truncate_exception, get_traceback, queue_to_iterator,

@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 import atexit
 from collections import Iterable
@@ -26,7 +26,7 @@ from dask import istask
 from toolz import memoize, valmap
 from tornado import gen
 
-from .compatibility import Queue, PY3, PY2, get_thread_identity
+from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode as str
 from .config import config
 
 

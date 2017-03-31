@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from collections import deque
 import logging
@@ -6,6 +6,7 @@ import logging
 from tornado import gen, locks
 from tornado.ioloop import IOLoop
 
+from .compatibility import unicode as str
 from .core import CommClosedError
 from .utils import ignoring
 

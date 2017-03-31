@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 import click
 from distributed.cli.utils import check_python_3, install_signal_handlers

@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from collections import Iterable, defaultdict
 from itertools import cycle
@@ -12,6 +12,7 @@ from dask.base import tokenize
 from toolz import merge, concat, groupby, drop
 
 from .core import rpc, coerce_to_address
+from .compatibility import unicode as str
 from .utils import All, tokey
 from .protocol.pickle import dumps
 

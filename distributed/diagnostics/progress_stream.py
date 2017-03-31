@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 import itertools
 import logging
@@ -10,6 +10,7 @@ from tornado import gen
 
 from .progress import AllProgress
 
+from ..compatibility import unicode as str
 from ..core import connect, coerce_to_address
 from ..scheduler import Scheduler
 from ..utils import key_split

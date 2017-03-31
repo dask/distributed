@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from datetime import datetime, timedelta
 import logging
@@ -12,6 +12,7 @@ import weakref
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
+from .compatibility import unicode as str
 from .comm import get_address_host
 from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time

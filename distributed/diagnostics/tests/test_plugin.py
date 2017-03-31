@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from distributed.utils_test import inc, gen_cluster
 from distributed.diagnostics.plugin import SchedulerPlugin

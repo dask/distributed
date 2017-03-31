@@ -1,7 +1,8 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 import logging
 
+from ..compatibility import unicode as str
 from ..diagnostics.progress_stream import color_of
 from ..diagnostics.plugin import SchedulerPlugin
 from ..utils import key_split

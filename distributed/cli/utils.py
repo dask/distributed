@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 py3_err_msg = """
 Your terminal does not properly support unicode text required by command line

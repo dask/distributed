@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from concurrent.futures import ThreadPoolExecutor
 import logging
@@ -296,7 +296,7 @@ def test_error_message():
             return "MyException(%s)" % self.args
 
     msg = error_message(MyException('Hello', 'World!'))
-    assert 'Hello' in str(msg['exception'])
+    assert b'Hello' in msg['exception']
 
 
 @gen_cluster()

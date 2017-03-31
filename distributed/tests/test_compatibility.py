@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from distributed.compatibility import (
     gzip_compress, gzip_decompress, finalize)
