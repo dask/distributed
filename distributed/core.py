@@ -15,7 +15,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
-from .compatibility import unicode as str, unicode, PY2
+from .compatibility import unicode as str, PY2
 from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)
@@ -237,7 +237,6 @@ class Server(object):
                     op = msg.pop('op')
                 except Exception as e:
                     logger.info("couldn't pop op: %s", msg, exc_info=True)
-                    import pdb; pdb.set_trace()
                     raise
                 if self.counters is not None:
                     self.counters['op'].add(op)
@@ -306,7 +305,7 @@ def send_recv(comm=None, addr=None, reply=True, deserialize=True, **kwargs):
     msg['reply'] = reply
     please_close = kwargs.get('close')
     if PY2:
-        msg = keymap(unicode, msg)
+        msg = keymap(str, msg)
 
     if comm is None:
         comm = yield connect(addr_from_args(addr), deserialize=deserialize)
@@ -425,7 +424,7 @@ class rpc(object):
 
     def __getattr__(self, key):
         if PY2:
-            key = unicode(key)
+            key = str(key)
         @gen.coroutine
         def send_recv_from_rpc(**kwargs):
             try:
@@ -478,7 +477,7 @@ class PooledRPCCall(object):
 
     def __getattr__(self, key):
         if PY2:
-            key = unicode(key)
+            key = str(key)
         @gen.coroutine
         def send_recv_from_rpc(**kwargs):
             comm = yield self.pool.connect(self.addr)
