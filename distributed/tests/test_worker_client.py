@@ -1,8 +1,10 @@
 from __future__ import print_function, division, absolute_import
 
 from datetime import timedelta
+import random
 
 from dask import delayed
+from time import sleep
 from tornado import gen
 
 from distributed import worker_client, Client, as_completed
@@ -135,3 +137,21 @@ def test_async(c, s, a, b):
     while len(a.data) + len(b.data) > 1:
         yield gen.sleep(0.1)
         assert time() < start + 3
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 3)])
+def test_separate_thread_false(c, s, a):
+    a.count = 0
+    def f(i):
+        with worker_client(separate_thread=False) as client:
+            client.worker.count += 1
+            assert client.worker.count <= 3
+            print(client.worker.count)
+            sleep(random.random() / 40)
+            assert client.worker.count <= 3
+            client.worker.count -= 1
+        return i
+
+    futures = c.map(f, range(20))
+    results = yield c._gather(futures)
+    assert list(results) == list(range(20))
