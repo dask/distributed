@@ -2600,6 +2600,34 @@ class AsCompleted(object):
 
     next = __next__
 
+    def batches(self):
+        """
+        Yield all finished futures at once rather than one-by-one
+
+        This returns an iterator of lists of futures or lists of
+        (future, result) tuples rather than individual futures or individual
+        (future, result) tuples.  It will yield these as soon as possible
+        without waiting.
+
+        Examples
+        --------
+
+        >>> for batch in as_completed(futures).batches():
+        ...     results = client.gather(batch)
+        ...     print(results)
+        [4, 2]
+        [1, 3, 7]
+        [5]
+        [6]
+        """
+        seq = iter(self)
+        while True:
+            batch = [next(seq)]
+            with self.lock:
+                while not self.queue.empty():
+                    batch.append(self.queue.get())
+            yield batch
+
 
 as_completed = AsCompleted
 
