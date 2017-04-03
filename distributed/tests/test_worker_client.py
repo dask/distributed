@@ -69,7 +69,6 @@ def test_scatter_from_worker(c, s, a, b):
     start = time()
     while not all(v == 1 for v in s.ncores.values()):
         yield gen.sleep(0.1)
-        print(s.ncores)
         assert time() < start + 5
 
 
@@ -146,7 +145,6 @@ def test_separate_thread_false(c, s, a):
         with worker_client(separate_thread=False) as client:
             client.worker.count += 1
             assert client.worker.count <= 3
-            print(client.worker.count)
             sleep(random.random() / 40)
             assert client.worker.count <= 3
             client.worker.count -= 1
