@@ -3095,6 +3095,15 @@ def test_as_completed_batches(loop, with_results):
                 assert set(out) == set(futures)
 
 
+def test_as_completed_next_batch(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            futures = c.map(slowinc, range(2), delay=0.1)
+            ac = as_completed(futures)
+            assert ac.next_batch(block=False) == []
+            assert set(ac.next_batch(block=True)).issubset(futures)
+
+
 @gen_test()
 def test_status():
     s = Scheduler()
