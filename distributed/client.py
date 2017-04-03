@@ -2626,9 +2626,8 @@ class AsCompleted(object):
             batch = [next(self)]
         else:
             batch = []
-        with self.lock:
-            while not self.queue.empty():
-                batch.append(self.queue.get())
+        while not self.queue.empty():
+            batch.append(self.queue.get())
         return batch
 
     def batches(self):
