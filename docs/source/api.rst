@@ -86,11 +86,6 @@ Client
 .. autoclass:: distributed.recreate_exceptions.ReplayExceptionClient
    :members:
 
-CompatibleExecutor
-------------------
-
-.. autoclass:: CompatibleExecutor
-    :members: map
 
 Future
 ------

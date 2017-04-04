@@ -205,12 +205,7 @@ PEP-3184_.  It has a few notable differences:
    before submission.
 *  The ``map`` function returns ``Future`` objects, not concrete results.  The
    ``map`` function returns immediately.
-*  It is not yet possible to cancel a ``Future`` (though this is theoretically
-   possible please raise an issue if this is of concrete importance to you.)
 *  Distributed generally does not support timeouts or callbacks
 
-``distributed.CompatibleExecutor`` is a subclass of ``distributed.Client`` that
-does conform to the ``concurrent.futures`` API, allowing it to be used as a
-drop-in replacement for other Executors using the common API.
 
 .. _PEP-3184: https://www.python.org/dev/peps/pep-3148/

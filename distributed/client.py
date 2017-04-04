@@ -34,6 +34,7 @@ from tornado.queues import Queue
 
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
+from .cfexecutor import ClientExecutor
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import connect, rpc, clean_exception, CommClosedError
 from .protocol import to_serialize
@@ -690,6 +691,18 @@ class Client(object):
             del _globals['get']
         with ignoring(AttributeError):
             self.cluster.close()
+
+    def get_executor(self, **kwargs):
+        """ Return a concurrent.futures Executor for submitting tasks
+        on this Client.
+
+        Parameters
+        ----------
+        **kwargs:
+            Any submit()- or map()- compatible arguments, such as
+            `workers` or `resources`.
+        """
+        return ClientExecutor(self, **kwargs)
 
     def submit(self, func, *args, **kwargs):
         """ Submit a function application to the scheduler
@@ -2392,31 +2405,6 @@ class Client(object):
 
 
 Executor = Client
-
-
-class CompatibleExecutor(Client):
-    """ A concurrent.futures-compatible Client
-
-    A subclass of Client that conforms to concurrent.futures API,
-    allowing swapping in for other Clients.
-    """
-
-    def map(self, func, *iterables, **kwargs):
-        """ Map a function on a sequence of arguments
-
-        Returns
-        -------
-        iter_results: iterable
-            Iterable yielding results of the map.
-
-        See Also
-        --------
-        Client.map: for more info
-        """
-        list_of_futures = super(CompatibleExecutor, self).map(
-                                func, *iterables, **kwargs)
-        for f in list_of_futures:
-            yield f.result()
 
 
 @gen.coroutine
