@@ -723,6 +723,11 @@ class Client(object):
         **kwargs:
             Any submit()- or map()- compatible arguments, such as
             `workers` or `resources`.
+
+        Returns
+        -------
+        An Executor object that's fully compatible with the concurrent.futures
+        API.
         """
         return ClientExecutor(self, **kwargs)
 
