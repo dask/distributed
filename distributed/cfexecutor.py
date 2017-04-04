@@ -89,7 +89,7 @@ class ClientExecutor(Executor):
         self._futures.add(future)
         return self._wrap_future(future)
 
-    def map(self, fn, *iterables, timeout=None, chunksize=1):
+    def map(self, fn, *iterables, **kwargs):
         """Returns an iterator equivalent to ``map(fn, *iterables)``.
 
         Parameters
@@ -112,8 +112,14 @@ class ClientExecutor(Executor):
             before the given timeout.
         Exception: If ``fn(*args)`` raises for any values.
         """
+        timeout = kwargs.pop('timeout', None)
         if timeout is not None:
             end_time = timeout + time()
+        if 'chunksize' in kwargs:
+            del kwargs['chunksize']
+        if kwargs:
+            raise TypeError("unexpected arguments to map(): %s"
+                            % sorted(kwargs))
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
 
