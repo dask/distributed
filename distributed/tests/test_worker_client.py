@@ -135,3 +135,15 @@ def test_async(c, s, a, b):
     while len(a.data) + len(b.data) > 1:
         yield gen.sleep(0.1)
         assert time() < start + 3
+
+
+@gen_cluster(client=True)
+def test_client_executor(c, s, a, b):
+    def mysum():
+        with worker_client() as c:
+            with c.get_executor() as e:
+                return sum(e.map(double, range(30)))
+
+    future = c.submit(mysum)
+    result = yield future._result()
+    assert result == 30 * 29
