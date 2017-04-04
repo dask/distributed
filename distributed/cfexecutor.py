@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-from functools import partial
 import weakref
 
 import six
@@ -63,6 +62,7 @@ class ClientExecutor(Executor):
         Wrap a distributed Future in a concurrent.futures Future.
         """
         cf_future = Future()
+
         # Support cancelling task through .cancel() on c.f.Future
         def cf_callback(cf_future):
             if cf_future.cancelled() and future.status != 'cancelled':
