@@ -202,6 +202,7 @@ def test_shutdown(loop):
             e.shutdown()
             dt = time.time() - t1
             assert 0.5 <= dt <= 2.0
+            time.sleep(0.1)  # wait for future outcome to propagate
             assert fut.done()
             fut.result()  # doesn't raise
 
@@ -215,7 +216,7 @@ def test_shutdown(loop):
             e.shutdown(wait=False)
             dt = time.time() - t1
             assert dt < 0.3
-            time.sleep(0.1)  # wait for cancellation to propagate
+            time.sleep(0.1)  # wait for future outcome to propagate
             assert fut.cancelled()
 
             with pytest.raises(RuntimeError):
