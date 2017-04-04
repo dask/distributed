@@ -9,8 +9,9 @@ from toolz import merge
 
 from tornado import gen
 
-from concurrent.futures import Future, Executor
+from concurrent.futures import Future, Executor, TimeoutError
 
+from .metrics import time
 from .utils import sync
 
 
@@ -22,13 +23,12 @@ def _cascade_future(future, cf_future):
     result = yield future._result(raiseit=False)
     status = future.status
     if status == 'finished':
-        cf_future.set_running_or_notify_cancel()
         cf_future.set_result(result)
     elif status == 'cancelled':
         cf_future.cancel()
+        # Necessary for wait() and as_completed() to wake up
         cf_future.set_running_or_notify_cancel()
     else:
-        cf_future.set_running_or_notify_cancel()
         try:
             six.reraise(*result)
         except BaseException as exc:
@@ -37,11 +37,11 @@ def _cascade_future(future, cf_future):
 
 @gen.coroutine
 def _wait_on_futures(futures):
-    try:
-        yield [futures]
-    except Exception:
-        # One future errored, ignore
-        pass
+    for fut in futures:
+        try:
+            yield fut
+        except Exception:
+            pass
 
 
 class ClientExecutor(Executor):
@@ -76,11 +76,12 @@ class ClientExecutor(Executor):
     def submit(self, fn, *args, **kwargs):
         """Submits a callable to be executed with the given arguments.
 
-        Schedules the callable to be executed as fn(*args, **kwargs) and returns
-        a Future instance representing the execution of the callable.
+        Schedules the callable to be executed as ``fn(*args, **kwargs)``
+        and returns a Future instance representing the execution of the callable.
 
-        Returns:
-            A Future representing the given call.
+        Returns
+        -------
+        A Future representing the given call.
         """
         if self._shutdown:
             raise RuntimeError('cannot schedule new futures after shutdown')
@@ -89,30 +90,30 @@ class ClientExecutor(Executor):
         return self._wrap_future(future)
 
     def map(self, fn, *iterables, timeout=None, chunksize=1):
-        """Returns an iterator equivalent to map(fn, iter).
+        """Returns an iterator equivalent to ``map(fn, *iterables)``.
 
-        Args:
-            fn: A callable that will take as many arguments as there are
-                passed iterables.
-            timeout: The maximum number of seconds to wait. If None, then there
-                is no limit on the wait time.
-            chunksize: The size of the chunks the iterable will be broken into
-                before being passed to a child process. This argument is only
-                used by ProcessPoolExecutor; it is ignored by
-                ThreadPoolExecutor.
+        Parameters
+        ----------
+        fn: A callable that will take as many arguments as there are
+            passed iterables.
+        iterables: One iterable for each parameter to *fn*.
+        timeout: The maximum number of seconds to wait. If None, then there
+            is no limit on the wait time.
+        chunksize: ignored.
 
-        Returns:
-            An iterator equivalent to: map(func, *iterables) but the calls may
-            be evaluated out-of-order.
+        Returns
+        -------
+        An iterator equivalent to: ``map(fn, *iterables)`` but the calls may
+        be evaluated out-of-order.
 
-        Raises:
-            TimeoutError: If the entire result iterator could not be generated
-                before the given timeout.
-            Exception: If fn(*args) raises for any values.
+        Raises
+        ------
+        TimeoutError: If the entire result iterator could not be generated
+            before the given timeout.
+        Exception: If ``fn(*args)`` raises for any values.
         """
         if timeout is not None:
-            # TODO
-            raise NotImplementedError("timeout argument not support on CompatibleExecutor")
+            end_time = timeout + time()
 
         fs = self._client.map(fn, *iterables, **self._kwargs)
 
@@ -122,7 +123,13 @@ class ClientExecutor(Executor):
             try:
                 for future in fs:
                     self._futures.add(future)
-                    yield future.result()
+                    if timeout is not None:
+                        try:
+                            yield future.result(end_time - time())
+                        except gen.TimeoutError:
+                            raise TimeoutError
+                    else:
+                        yield future.result()
             finally:
                 remaining = list(fs)
                 for future in remaining:
@@ -137,10 +144,11 @@ class ClientExecutor(Executor):
         It is safe to call this method several times. Otherwise, no other
         methods can be called after this one.
 
-        Args:
-            wait: If True then shutdown will not return until all running
-                futures have finished executing and the resources used by the
-                executor have been reclaimed.
+        Parameters
+        ----------
+        wait: If True then shutdown will not return until all running
+            futures have finished executing.  If False then all running
+            futures are cancelled immediately.
         """
         if not self._shutdown:
             self._shutdown = True

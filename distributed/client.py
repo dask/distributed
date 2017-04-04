@@ -49,6 +49,15 @@ logger = logging.getLogger(__name__)
 _global_client = [None]
 
 
+def _timeout_wrapper(timeout, coro_func, *args, **kwargs):
+    coro = coro_func(*args, **kwargs)
+    if timeout is None:
+        return coro
+    else:
+        # XXX should this reraise concurrent.futures.TimeoutError?
+        return gen.with_timeout(timedelta(seconds=timeout), coro)
+
+
 class Future(WrappedKey):
     """ A remotely running computation
 
@@ -108,9 +117,14 @@ class Future(WrappedKey):
         """ Is the computation complete? """
         return self.event.is_set()
 
-    def result(self):
-        """ Wait until computation completes. Gather result to local process """
-        result = sync(self.client.loop, self._result, raiseit=False)
+    def result(self, timeout=None):
+        """ Wait until computation completes. Gather result to local process.
+
+        If `timeout` seconds are elapsed before returning, a TimeoutError
+        is raised.
+        """
+        result = sync(self.client.loop,
+                      _timeout_wrapper, timeout, self._result, raiseit=False)
         if self.status == 'error':
             six.reraise(*result)
         elif self.status == 'cancelled':
@@ -146,14 +160,18 @@ class Future(WrappedKey):
         else:
             raise Return(None)
 
-    def exception(self):
+    def exception(self, timeout=None):
         """ Return the exception of a failed task
+
+        If `timeout` seconds are elapsed before returning, a TimeoutError
+        is raised.
 
         See Also
         --------
         Future.traceback
         """
-        return sync(self.client.loop, self._exception)
+        return sync(self.client.loop,
+                    _timeout_wrapper, timeout, self._exception)
 
     def add_done_callback(self, fn):
         """ Call callback on future when callback has finished
@@ -194,12 +212,15 @@ class Future(WrappedKey):
         else:
             raise Return(None)
 
-    def traceback(self):
+    def traceback(self, timeout=None):
         """ Return the traceback of a failed task
 
         This returns a traceback object.  You can inspect this object using the
         ``traceback`` module.  Alternatively if you call ``future.result()``
         this traceback will accompany the raised exception.
+
+        If `timeout` seconds are elapsed before returning, a TimeoutError
+        is raised.
 
         Examples
         --------
@@ -212,7 +233,8 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
-        return sync(self.client.loop, self._traceback)
+        return sync(self.client.loop,
+                    _timeout_wrapper, timeout, self._traceback)
 
     @property
     def type(self):

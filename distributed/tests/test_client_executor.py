@@ -5,7 +5,7 @@ import random
 import time
 
 from concurrent.futures import (
-    CancelledError, Future, wait, as_completed,
+    CancelledError, TimeoutError, Future, wait, as_completed,
     FIRST_COMPLETED, FIRST_EXCEPTION, ALL_COMPLETED)
 
 import pytest
@@ -96,8 +96,8 @@ def test_wait(loop):
 def test_cancellation(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            with c.get_executor() as e:
-                fut = e.submit(time.sleep, 5.0)
+            with c.get_executor(pure=False) as e:
+                fut = e.submit(time.sleep, 2.0)
                 assert number_of_processing_tasks(c) > 0
                 assert not fut.done()
                 fut.cancel()
@@ -105,6 +105,28 @@ def test_cancellation(loop):
                 assert number_of_processing_tasks(c) == 0
                 with pytest.raises(CancelledError):
                     fut.result()
+
+            # With wait()
+            with c.get_executor(pure=False) as e:
+                N = 10
+                fs = [e.submit(slowinc, i, delay=0.02) for i in range(N)]
+                fs[3].cancel()
+                res = wait(fs, return_when=FIRST_COMPLETED)
+                assert len(res.not_done) > 0
+                assert len(res.done) >= 1
+
+                assert fs[3] in res.done
+                assert fs[3].cancelled()
+
+            # With as_completed()
+            with c.get_executor(pure=False) as e:
+                N = 10
+                fs = [e.submit(slowinc, i, delay=0.02) for i in range(N)]
+                fs[3].cancel()
+                fs[8].cancel()
+
+                n_cancelled = sum(f.cancelled() for f in as_completed(fs))
+                assert n_cancelled == 2
 
 
 def test_map(loop):
@@ -120,6 +142,15 @@ def test_map(loop):
 
             with c.get_executor(pure=False) as e:
                 N = 10
+                it = e.map(slowinc, range(N), [0.1] * N, timeout=0.4)
+                results = []
+                with pytest.raises(TimeoutError):
+                    for x in it:
+                        results.append(x)
+                assert 2 <= len(results) < 7
+
+            with c.get_executor(pure=False) as e:
+                N = 10
                 # Not consuming the iterator will cancel remaining tasks
                 it = e.map(slowinc, range(N), [0.1] * N)
                 for x in take(2, it):
@@ -129,6 +160,7 @@ def test_map(loop):
                 # Garbage collect the iterator => remaining tasks are cancelled
                 del it
                 assert number_of_processing_tasks(c) == 0
+
 
 def get_random():
     return random.random()
@@ -146,6 +178,7 @@ def test_pure(loop):
                 fs = [e.submit(get_random) for i in range(N)]
                 res = [fut.result() for fut in as_completed(fs)]
                 assert len(set(res)) == len(res)
+
 
 def test_workers(loop):
     with cluster() as (s, [a, b]):
@@ -177,7 +210,7 @@ def test_shutdown(loop):
 
             # shutdown(wait=False) cancels pending tasks
             e = c.get_executor()
-            fut = e.submit(time.sleep, 5.0)
+            fut = e.submit(time.sleep, 2.0)
             t1 = time.time()
             e.shutdown(wait=False)
             dt = time.time() - t1

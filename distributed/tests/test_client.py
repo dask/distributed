@@ -222,6 +222,11 @@ def test_thread(loop):
             x = c.submit(inc, 1)
             assert x.result() == 2
 
+            x = c.submit(slowinc, 1, delay=0.3)
+            with pytest.raises(gen.TimeoutError):
+                x.result(timeout=0.01)
+            assert x.result() == 2
+
 
 def test_sync_exceptions(loop):
     with cluster() as (s, [a, b]):
