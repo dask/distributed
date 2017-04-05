@@ -11,6 +11,12 @@ import random
 from dask.context import _globals
 from toolz import identity, partial
 
+try:
+    import blosc
+    n = blosc.set_nthreads(2)
+except ImportError:
+    blosc = False
+
 from ..config import config
 from ..utils import ignoring, ensure_bytes
 
@@ -120,11 +126,21 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
 
     # Compress a sample, return original if not very compressed
     sample = byte_sample(payload, sample_size, nsamples)
-    if len(compress(sample)) > 0.9 * len(sample):  # not very compressible
+    if len(compress(sample)) > 0.9 * len(sample):  # sample not very compressible
         return None, payload
 
-    compressed = compress(ensure_bytes(payload))
-    if len(compressed) > 0.9 * len(payload):  # not very compressible
+    compressed = None
+    if type(payload) is memoryview:
+        nbytes = payload.nbytes
+        if blosc:
+            compressed = blosc.compress(payload, typesize=payload.itemsize, cname='lz4', clevel=5)
+            compression = 'blosc'
+    else:
+        nbytes = len(payload)
+
+    if compressed is None:
+        compressed = compress(ensure_bytes(payload))
+    if len(compressed) > 0.9 * nbytes:  # full data not very compressible
         return None, payload
     else:
         return compression, compressed

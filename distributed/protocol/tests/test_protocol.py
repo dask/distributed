@@ -194,3 +194,18 @@ def test_dumps_loads_Serialized():
 
     result3 = loads(frames2)
     assert result == result3
+
+
+def test_maybe_compress_memoryviews():
+    np = pytest.importorskip('numpy')
+    pytest.importorskip('lz4')
+    x = np.arange(1000000)
+    compression, payload = maybe_compress(x.data)
+    try:
+        import blosc
+    except ImportError:
+        assert compression == 'lz4'
+        assert len(payload) < x.nbytes * 0.75
+    else:
+        assert compression == 'blosc'
+        assert len(payload) < x.nbytes / 10
