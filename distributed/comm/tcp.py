@@ -4,6 +4,7 @@ from datetime import timedelta
 import errno
 import logging
 import socket
+import ssl
 import struct
 import sys
 
@@ -129,7 +130,7 @@ class TCP(Comm):
         return finalize
 
     def __repr__(self):
-        return "<TCP %r>" % (self._peer_addr,)
+        return "<%s %r>" % (self.__class__.__name__, self._peer_addr,)
 
     @property
     def peer_address(self):
@@ -211,34 +212,68 @@ class TCP(Comm):
         return self.stream is None or self.stream.closed()
 
 
-class TCPConnector(object):
+class TLS(TCP):
+    # XXX How can we expose something like getpeercert()?
+    # For example, asyncio transports have a get_extra_info() method.
+    pass
+
+
+class BaseTCPConnector(Connector):
 
     @gen.coroutine
-    def connect(self, address, deserialize=True):
+    def connect(self, address, deserialize=True, **connection_args):
         ip, port = parse_host_port(address)
+        kwargs = self._get_connect_args(**connection_args)
 
         client = TCPClient()
         try:
             stream = yield client.connect(ip, port,
-                                          max_buffer_size=MAX_BUFFER_SIZE)
+                                          max_buffer_size=MAX_BUFFER_SIZE,
+                                          **kwargs)
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(e)
 
-        raise gen.Return(TCP(stream, 'tcp://' + address, deserialize))
+        # XXX
+        raise gen.Return(self.comm_class(stream,
+                                         self.prefix + address,
+                                         deserialize))
 
 
-class TCPListener(Listener):
+class TCPConnector(BaseTCPConnector):
+    prefix = 'tcp://'
+    comm_class = TCP
 
-    def __init__(self, address, comm_handler, deserialize=True, default_port=0):
+    def _get_connect_args(self, **connection_args):
+        return {}
+
+
+class TLSConnector(BaseTCPConnector):
+    prefix = 'tls://'
+    comm_class = TLS
+
+    def _get_connect_args(self, **connection_args):
+        ctx = connection_args.get('ssl_context')
+        if not isinstance(ctx, ssl.SSLContext):
+            raise TypeError("TLS connector expects a `ssl_context` argument "
+                            "of type ssl.SSLContext")
+        return {'ssl_options': ctx}
+
+
+class BaseTCPListener(Listener):
+
+    def __init__(self, address, comm_handler, deserialize=True,
+                 default_port=0, **connection_args):
         self.ip, self.port = parse_host_port(address, default_port)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
+        self.server_args = self._get_server_args(**connection_args)
         self.tcp_server = None
         self.bound_address = None
 
     def start(self):
-        self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE)
+        self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE,
+                                    **self.server_args)
         self.tcp_server.handle_stream = self.handle_stream
         for i in range(5):
             try:
@@ -279,7 +314,7 @@ class TCPListener(Listener):
         """
         The listening address as a string.
         """
-        return 'tcp://' + unparse_host_port(*self.get_host_port())
+        return self.prefix + unparse_host_port(*self.get_host_port())
 
     @property
     def contact_address(self):
@@ -288,23 +323,53 @@ class TCPListener(Listener):
         """
         host, port = self.get_host_port()
         host = ensure_concrete_host(host)
-        return 'tcp://' + unparse_host_port(host, port)
+        return self.prefix + unparse_host_port(host, port)
+
+
+class TCPListener(BaseTCPListener):
+    prefix = 'tcp://'
+
+    def _get_server_args(self, **connection_args):
+        return {}
 
     def handle_stream(self, stream, address):
-        address = 'tcp://' + unparse_host_port(*address[:2])
+        address = self.prefix + unparse_host_port(*address[:2])
         comm = TCP(stream, address, self.deserialize)
         self.comm_handler(comm)
 
 
-class TCPBackend(Backend):
+class TLSListener(BaseTCPListener):
+    prefix = 'tls://'
+
+    def _get_server_args(self, **connection_args):
+        ctx = connection_args.get('ssl_context')
+        if not isinstance(ctx, ssl.SSLContext):
+            raise TypeError("TLS listener expects a `ssl_context` argument "
+                            "of type ssl.SSLContext")
+        return {'ssl_options': ctx}
+
+    @gen.coroutine
+    def handle_stream(self, stream, address):
+        address = self.prefix + unparse_host_port(*address[:2])
+        try:
+            yield stream.wait_for_handshake()
+        except StreamClosedError:
+            # The handshake went wrong, ignore
+            pass
+        else:
+            comm = TLS(stream, address, self.deserialize)
+            self.comm_handler(comm)
+
+
+class BaseTCPBackend(Backend):
 
     # I/O
 
     def get_connector(self):
-        return TCPConnector()
+        return self._connector_class()
 
-    def get_listener(self, loc, handle_comm, deserialize):
-        return TCPListener(loc, handle_comm, deserialize)
+    def get_listener(self, loc, handle_comm, deserialize, **connection_args):
+        return self._listener_class(loc, handle_comm, deserialize, **connection_args)
 
     # Address handling
 
@@ -328,4 +393,15 @@ class TCPBackend(Backend):
         return unparse_host_port(local_host, None)
 
 
+class TCPBackend(BaseTCPBackend):
+    _connector_class = TCPConnector
+    _listener_class = TCPListener
+
+
+class TLSBackend(BaseTCPBackend):
+    _connector_class = TLSConnector
+    _listener_class = TLSListener
+
+
 backends['tcp'] = TCPBackend()
+backends['tls'] = TLSBackend()

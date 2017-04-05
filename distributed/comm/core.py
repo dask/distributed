@@ -131,7 +131,7 @@ class Connector(with_metaclass(ABCMeta)):
 
 
 @gen.coroutine
-def connect(addr, timeout=3, deserialize=True):
+def connect(addr, timeout=3, deserialize=True, connection_args=None):
     """
     Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
     and yield a ``Comm`` object.  If the connection attempt fails, it is
@@ -153,7 +153,8 @@ def connect(addr, timeout=3, deserialize=True):
 
     while True:
         try:
-            future = connector.connect(loc, deserialize=deserialize)
+            future = connector.connect(loc, deserialize=deserialize,
+                                       **(connection_args or {}))
             comm = yield gen.with_timeout(timedelta(seconds=deadline - time()),
                                           future,
                                           quiet_exceptions=EnvironmentError)
@@ -172,7 +173,7 @@ def connect(addr, timeout=3, deserialize=True):
     raise gen.Return(comm)
 
 
-def listen(addr, handle_comm, deserialize=True):
+def listen(addr, handle_comm, deserialize=True, connection_args=None):
     """
     Create a listener object with the given parameters.  When its ``start()``
     method is called, the listener will listen on the given address
@@ -184,4 +185,5 @@ def listen(addr, handle_comm, deserialize=True):
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
 
-    return backend.get_listener(loc, handle_comm, deserialize)
+    return backend.get_listener(loc, handle_comm, deserialize,
+                                **(connection_args or {}))
