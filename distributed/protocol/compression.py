@@ -8,6 +8,7 @@ from __future__ import print_function, division, absolute_import
 import logging
 import random
 
+from dask.context import _globals
 from toolz import identity, partial
 
 from ..config import config
@@ -92,8 +93,7 @@ def byte_sample(b, size, n):
     return b''.join(map(ensure_bytes, parts))
 
 
-def maybe_compress(payload, compression=default_compression, min_size=1e4,
-                   sample_size=1e4, nsamples=5):
+def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
     """
     Maybe compress payload
 
@@ -104,11 +104,13 @@ def maybe_compress(payload, compression=default_compression, min_size=1e4,
         return the original
     4.  We return the compressed result
     """
+    compression = _globals.get('compression', default_compression)
+
     if not compression:
         return None, payload
     if len(payload) < min_size:
         return None, payload
-    if len(payload) > 2**31:
+    if len(payload) > 2**31:  # Too large, compression libraries often fail
         return None, payload
 
     min_size = int(min_size)
