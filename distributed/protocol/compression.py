@@ -131,9 +131,10 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
 
     compressed = None
     if type(payload) is memoryview:
-        nbytes = payload.nbytes
+        nbytes = payload.itemsize * len(payload)
         if blosc:
-            compressed = blosc.compress(payload, typesize=payload.itemsize, cname='lz4', clevel=5)
+            compressed = blosc.compress(payload, typesize=payload.itemsize,
+                                        cname='lz4', clevel=5)
             compression = 'blosc'
     else:
         nbytes = len(payload)
