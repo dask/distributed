@@ -49,15 +49,6 @@ logger = logging.getLogger(__name__)
 _global_client = [None]
 
 
-def _timeout_wrapper(timeout, coro_func, *args, **kwargs):
-    coro = coro_func(*args, **kwargs)
-    if timeout is None:
-        return coro
-    else:
-        # XXX should this reraise concurrent.futures.TimeoutError?
-        return gen.with_timeout(timedelta(seconds=timeout), coro)
-
-
 class Future(WrappedKey):
     """ A remotely running computation
 
@@ -124,7 +115,7 @@ class Future(WrappedKey):
         is raised.
         """
         result = sync(self.client.loop,
-                      _timeout_wrapper, timeout, self._result, raiseit=False)
+                      self._result, raiseit=False, callback_timeout=timeout)
         if self.status == 'error':
             six.reraise(*result)
         elif self.status == 'cancelled':
@@ -171,7 +162,7 @@ class Future(WrappedKey):
         Future.traceback
         """
         return sync(self.client.loop,
-                    _timeout_wrapper, timeout, self._exception)
+                    self._exception, callback_timeout=timeout)
 
     def add_done_callback(self, fn):
         """ Call callback on future when callback has finished
@@ -234,7 +225,7 @@ class Future(WrappedKey):
         Future.exception
         """
         return sync(self.client.loop,
-                    _timeout_wrapper, timeout, self._traceback)
+                    self._traceback, callback_timeout=timeout)
 
     @property
     def type(self):
