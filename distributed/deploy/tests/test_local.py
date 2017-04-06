@@ -118,6 +118,13 @@ def test_Client_solo(loop):
     assert c.cluster.status == 'closed'
 
 
+def test_Client_kwargs(loop):
+    with Client(loop=loop, processes=False, n_workers=2) as c:
+        assert len(c.cluster.workers) == 2
+        assert all(isinstance(w, Worker) for w in c.cluster.workers)
+    assert c.cluster.status == 'closed'
+
+
 def test_Client_twice(loop):
     with Client(loop=loop) as c:
         with Client(loop=loop) as f:
