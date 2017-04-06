@@ -1,4 +1,8 @@
-export PYTEST_OPTIONS="--verbose -r s --timeout-method=thread --timeout=360 --runslow --durations=20"
+export PYTEST_OPTIONS="--verbose -r s --timeout-method=thread --timeout=300 --durations=20"
+if [[ $RUNSLOW != false ]]; then
+    export PYTEST_OPTIONS="$PYTEST_OPTIONS --runslow"
+fi
+
 if [[ $HDFS == true ]]; then
     py.test distributed/tests/test_hdfs.py $PYTEST_OPTIONS
     if [ $? -ne 0 ]; then
