@@ -27,11 +27,10 @@ class LocalCluster(object):
     ----------
     n_workers: int
         Number of workers to start
+    processes: bool
+        Whether to use processes (True) or threads (False).  Defaults to True
     threads_per_worker: int
         Number of threads per each worker
-    nanny: boolean
-        If true start the workers in separate processes managed by a nanny.
-        If False keep the workers in the main calling process
     scheduler_port: int
         Port of the scheduler.  8786 by default, use 0 to choose a random port
     silence_logs: logging level
@@ -59,12 +58,15 @@ class LocalCluster(object):
     Start a diagnostic web server and open a new browser tab
     >>> c.start_diagnostics_server(show=True)  # doctest: +SKIP
     """
-    def __init__(self, n_workers=None, threads_per_worker=None, nanny=True,
+    def __init__(self, n_workers=None, threads_per_worker=None, processes=True,
                  loop=None, start=True, ip=None, scheduler_port=0,
                  silence_logs=logging.CRITICAL, diagnostics_port=8787,
-                 services={}, worker_services={}, **worker_kwargs):
+                 services={}, worker_services={}, nanny=None, **worker_kwargs):
+        if nanny is not None:
+            warnings.warn("nanny has been deprecated, used processes=")
+            processes = nanny
         self.status = None
-        self.nanny = nanny
+        self.processes = processes
         self.silence_logs = silence_logs
         if silence_logs:
             for l in ['distributed.scheduler',
@@ -73,7 +75,7 @@ class LocalCluster(object):
                       'distributed.nanny']:
                 logging.getLogger(l).setLevel(silence_logs)
         if n_workers is None and threads_per_worker is None:
-            if nanny:
+            if processes:
                 n_workers = _ncores
                 threads_per_worker = 1
             else:
@@ -126,7 +128,7 @@ class LocalCluster(object):
         """
         if self.status == 'running':
             return
-        if ip is None and not self.scheduler_port and not self.nanny:
+        if ip is None and not self.scheduler_port and not self.processes:
             # Use inproc transport for optimization
             scheduler_address = 'inproc://'
             enable_diagnostics = False
@@ -152,14 +154,14 @@ class LocalCluster(object):
         yield [self._start_worker(**kwargs) for i in range(n_workers)]
 
     @gen.coroutine
-    def _start_worker(self, port=0, nanny=None, death_timeout=60, **kwargs):
-        if nanny is not None:
-            raise ValueError("overriding `nanny` for individual workers "
+    def _start_worker(self, port=0, processes=None, death_timeout=60, **kwargs):
+        if processes is not None:
+            raise ValueError("overriding `processes` for individual workers "
                              "in a LocalCluster is not supported anymore")
         if port:
             raise ValueError("overriding `port` for individual workers "
                              "in a LocalCluster is not supported anymore")
-        if self.nanny:
+        if self.processes:
             W = Nanny
             kwargs['quiet'] = True
         else:
