@@ -1,8 +1,9 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from collections import deque
 import psutil
 
+from .compatibility import unicode as str  # flake8: noqa
 from .compatibility import WINDOWS
 from .metrics import time
 

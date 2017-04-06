@@ -1,9 +1,10 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 import logging
 import os
 import sys
 
+from .compatibility import unicode as str  # flake8: noqa
 from .compatibility import FileExistsError, logging_names
 
 logger = logging.getLogger(__name__)

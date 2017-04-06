@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from datetime import timedelta
 import errno
@@ -124,7 +124,10 @@ class TCP(Comm):
         def finalize(stream=self.stream, r=repr(self)):
             if not stream.closed():
                 logger.warn("Closing dangling stream in %s" % (r,))
-                stream.close()
+                try:
+                    stream.close()
+                except socket.error:
+                    pass
 
         return finalize
 
@@ -166,6 +169,9 @@ class TCP(Comm):
         stream = self.stream
         if stream is None:
             raise CommClosedError
+
+        if isinstance(msg, dict) and any(isinstance(k, bytes) for k in msg):
+            print(msg)
 
         # IOStream.write() only takes bytes objects, not memoryviews
         frames = [ensure_bytes(f) for f in to_frames(msg)]

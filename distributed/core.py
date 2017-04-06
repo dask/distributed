@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from collections import defaultdict, deque
 from functools import partial
@@ -9,12 +9,13 @@ import uuid
 
 from six import string_types
 
-from toolz import assoc
+from toolz import assoc, keymap
 
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
+from .compatibility import unicode as str, PY2  # flake8: noqa
 from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)
@@ -232,7 +233,11 @@ class Server(object):
                 if not isinstance(msg, dict):
                     raise TypeError("Bad message type.  Expected dict, got\n  "
                                     + str(msg))
-                op = msg.pop('op')
+                try:
+                    op = msg.pop('op')
+                except Exception as e:
+                    logger.info("couldn't pop op: %s", msg, exc_info=True)
+                    raise
                 if self.counters is not None:
                     self.counters['op'].add(op)
                 self._comms[comm] = op
@@ -299,6 +304,8 @@ def send_recv(comm=None, addr=None, reply=True, deserialize=True, **kwargs):
     msg = kwargs
     msg['reply'] = reply
     please_close = kwargs.get('close')
+    if PY2:
+        msg = keymap(str, msg)
 
     if comm is None:
         comm = yield connect(addr_from_args(addr), deserialize=deserialize)
@@ -416,6 +423,8 @@ class rpc(object):
         self.comms.clear()
 
     def __getattr__(self, key):
+        if PY2:
+            key = str(key)
         @gen.coroutine
         def send_recv_from_rpc(**kwargs):
             try:
@@ -467,6 +476,8 @@ class PooledRPCCall(object):
         self.pool = pool
 
     def __getattr__(self, key):
+        if PY2:
+            key = str(key)
         @gen.coroutine
         def send_recv_from_rpc(**kwargs):
             comm = yield self.pool.connect(self.addr)

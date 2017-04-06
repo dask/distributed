@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from contextlib import contextmanager
 from toolz import keymap, valmap, merge, assoc
@@ -7,6 +7,7 @@ import uuid
 from dask.base import tokenize
 from tornado import gen
 
+from .compatibility import unicode as str
 from .client import AllExit, Client, Future, pack_data, unpack_remotedata
 from dask.compatibility import apply
 from .sizeof import sizeof

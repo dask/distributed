@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from .addressing import (parse_address, unparse_address,
                          normalize_address, parse_host_port,

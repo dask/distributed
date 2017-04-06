@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from collections import deque
 import logging
@@ -7,6 +7,7 @@ import threading
 import warnings
 
 from .client import Future
+from .compatibility import unicode as str  # flake8: noqa
 from .core import CommClosedError
 from .utils import tokey, log_errors
 

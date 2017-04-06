@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from collections import defaultdict, deque, OrderedDict
 from functools import partial
@@ -26,6 +26,7 @@ from .batched import BatchedSend
 from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
 from .compatibility import finalize
+from .compatibility import unicode as str
 from .config import config
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)

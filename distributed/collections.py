@@ -1,5 +1,5 @@
 """ This file is experimental and may disappear without warning """
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from itertools import product
 
@@ -8,6 +8,7 @@ from tornado import gen
 
 from .client import (default_client, Future, _first_completed,
         ensure_default_get)
+from .compatibility import unicode as str
 from .utils import sync
 
 

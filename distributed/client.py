@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from collections import defaultdict, Iterator, Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +34,7 @@ from tornado.queues import Queue
 
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
+from .compatibility import unicode as str
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import connect, rpc, clean_exception, CommClosedError
 from .protocol import to_serialize
@@ -421,11 +422,12 @@ class Client(object):
         self.status = 'running'
 
     def _send_to_scheduler(self, msg):
-        if self.status is 'running':
+        if self.status == 'running':
             self.loop.add_callback(self.scheduler_comm.send, msg)
-        elif self.status is 'connecting':
+        elif self.status == 'connecting':
             self._pending_msg_buffer.append(msg)
         else:
+            print(type(self.status))
             raise Exception("Client not running.  Status: %s" % self.status)
 
     @gen.coroutine

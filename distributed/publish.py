@@ -1,4 +1,6 @@
-from distributed.utils import log_errors
+from __future__ import print_function, division, absolute_import, unicode_literals
+
+from .utils import log_errors
 
 
 class PublishExtension(object):

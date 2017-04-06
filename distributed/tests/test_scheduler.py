@@ -1,4 +1,4 @@
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 import cloudpickle
 from collections import defaultdict, deque
@@ -19,6 +19,7 @@ from tornado import gen
 
 import pytest
 
+from distributed.compatibility import unicode as str
 from distributed import Nanny, Worker, Client
 from distributed.core import connect, rpc, CommClosedError
 from distributed.scheduler import validate_state, Scheduler, BANDWIDTH

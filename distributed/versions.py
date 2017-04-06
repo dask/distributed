@@ -1,6 +1,6 @@
 """ utilities for package version introspection """
 
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 import platform
 import struct

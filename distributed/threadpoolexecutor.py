@@ -20,12 +20,13 @@ which is included as a comment at the end of this file:
 
    Copyright 2001-2016 Python Software Foundation; All Rights Reserved
 """
-from __future__ import print_function, division, absolute_import
+from __future__ import print_function, division, absolute_import, unicode_literals
 
 from concurrent.futures import thread
 import logging
 from threading import local, Thread
 
+from .compatibility import unicode as str  # flake8: noqa
 from .compatibility import get_thread_identity
 
 logger = logging.getLogger(__name__)
