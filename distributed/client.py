@@ -2425,6 +2425,10 @@ class Client(object):
 Executor = Client
 
 
+def CompatibleExecutor(*args, **kwargs):
+    raise Exception("This has been moved to the Client.get_executor() method")
+
+
 @gen.coroutine
 def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
     if timeout is not None and not isinstance(timeout, Number):
