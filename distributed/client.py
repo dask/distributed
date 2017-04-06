@@ -120,7 +120,7 @@ class Future(WrappedKey):
     def result(self, timeout=None):
         """ Wait until computation completes. Gather result to local process.
 
-        If `timeout` seconds are elapsed before returning, a TimeoutError
+        If *timeout* seconds are elapsed before returning, a TimeoutError
         is raised.
         """
         result = sync(self.client.loop,
@@ -163,7 +163,7 @@ class Future(WrappedKey):
     def exception(self, timeout=None):
         """ Return the exception of a failed task
 
-        If `timeout` seconds are elapsed before returning, a TimeoutError
+        If *timeout* seconds are elapsed before returning, a TimeoutError
         is raised.
 
         See Also
@@ -219,7 +219,7 @@ class Future(WrappedKey):
         ``traceback`` module.  Alternatively if you call ``future.result()``
         this traceback will accompany the raised exception.
 
-        If `timeout` seconds are elapsed before returning, a TimeoutError
+        If *timeout* seconds are elapsed before returning, a TimeoutError
         is raised.
 
         Examples

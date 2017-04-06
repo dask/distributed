@@ -192,6 +192,15 @@ def test_workers(loop):
                 assert len(has_what[b['address']]) == N
 
 
+def test_unsupported_arguments(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            with pytest.raises(TypeError) as excinfo:
+                c.get_executor(workers=[b['address']], foo=1, bar=2)
+            assert ("unsupported arguments to ClientExecutor: ['bar', 'foo']"
+                    in str(excinfo.value))
+
+
 def test_shutdown(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:

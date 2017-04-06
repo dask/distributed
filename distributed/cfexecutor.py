@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import concurrent.futures as cf
 import weakref
 
 import six
@@ -8,8 +9,6 @@ from toolz import merge
 
 from tornado import gen
 
-from concurrent.futures import Future, Executor, TimeoutError
-
 from .metrics import time
 from .utils import sync
 
@@ -17,7 +16,8 @@ from .utils import sync
 @gen.coroutine
 def _cascade_future(future, cf_future):
     """
-    Coroutine that waits on future, then transmits its outcome to cf_future.
+    Coroutine that waits on Dask future, then transmits its outcome to
+    cf_future.
     """
     result = yield future._result(raiseit=False)
     status = future.status
@@ -43,15 +43,18 @@ def _wait_on_futures(futures):
             pass
 
 
-class ClientExecutor(Executor):
+class ClientExecutor(cf.Executor):
     """
-    A concurrent.futures Executor that executes tasks on a distributed Client.
+    A concurrent.futures Executor that executes tasks on a dask.distributed Client.
     """
 
     _allowed_kwargs = frozenset(['pure', 'workers', 'resources', 'allow_other_workers'])
 
     def __init__(self, client, **kwargs):
-        assert set(kwargs) <= self._allowed_kwargs, "unsupported kwargs to ClientExecutor"
+        sk = set(kwargs)
+        if not sk <= self._allowed_kwargs:
+            raise TypeError("unsupported arguments to ClientExecutor: %s"
+                            % sorted(sk - self._allowed_kwargs))
         self._client = client
         self._futures = weakref.WeakSet()
         self._shutdown = False
@@ -61,7 +64,7 @@ class ClientExecutor(Executor):
         """
         Wrap a distributed Future in a concurrent.futures Future.
         """
-        cf_future = Future()
+        cf_future = cf.Future()
 
         # Support cancelling task through .cancel() on c.f.Future
         def cf_callback(cf_future):
@@ -133,7 +136,7 @@ class ClientExecutor(Executor):
                         try:
                             yield future.result(end_time - time())
                         except gen.TimeoutError:
-                            raise TimeoutError
+                            raise cf.TimeoutError
                     else:
                         yield future.result()
             finally:
