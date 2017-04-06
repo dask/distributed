@@ -27,29 +27,30 @@ conda create -q -n test-environment python=$PYTHON
 source activate test-environment
 
 # Install dependencies
-conda install -q pytest -c conda-forge \
-    pytest-timeout \
-    pytest-faulthandler \
-    coverage \
-    tornado \
-    toolz \
-    dill \
-    dask \
-    ipywidgets \
-    psutil \
+conda install -q -c conda-forge \
     bokeh \
-    requests \
-    joblib \
-    mock \
-    ipykernel \
-    jupyter_client \
-    h5py \
-    netcdf4 \
-    lz4 \
-    paramiko \
-    tblib \
     click \
+    coverage \
+    dask \
+    dill \
     flake8 \
+    h5py \
+    ipykernel \
+    ipywidgets \
+    joblib \
+    jupyter_client \
+    lz4 \
+    mock \
+    netcdf4 \
+    paramiko \
+    psutil \
+    pytest \
+    pytest-faulthandler \
+    pytest-timeout \
+    requests \
+    tblib \
+    toolz \
+    tornado \
     $PACKAGES
 
 if [[ $HDFS == true ]]; then
