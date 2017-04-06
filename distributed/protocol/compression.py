@@ -129,18 +129,18 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
     if len(compress(sample)) > 0.9 * len(sample):  # sample not very compressible
         return None, payload
 
-    compressed = None
     if type(payload) is memoryview:
         nbytes = payload.itemsize * len(payload)
-        if blosc:
-            compressed = blosc.compress(payload, typesize=payload.itemsize,
-                                        cname='lz4', clevel=5)
-            compression = 'blosc'
     else:
         nbytes = len(payload)
 
-    if compressed is None:
+    if blosc and type(payload) is memoryview:
+        compressed = blosc.compress(payload, typesize=payload.itemsize,
+                                    cname='lz4', clevel=5)
+        compression = 'blosc'
+    else:
         compressed = compress(ensure_bytes(payload))
+
     if len(compressed) > 0.9 * nbytes:  # full data not very compressible
         return None, payload
     else:
