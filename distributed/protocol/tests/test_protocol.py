@@ -199,7 +199,7 @@ def test_dumps_loads_Serialized():
 def test_maybe_compress_memoryviews():
     np = pytest.importorskip('numpy')
     pytest.importorskip('lz4')
-    x = np.arange(1000000)
+    x = np.arange(1000000, dtype='int64')
     compression, payload = maybe_compress(x.data)
     try:
         import blosc
