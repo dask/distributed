@@ -163,6 +163,16 @@ class LocalCluster(object):
             kwargs['quiet'] = True
         else:
             W = Worker
+
+        try:
+            from distributed.bokeh.worker import BokehWorker
+        except ImportError:
+            pass
+        else:
+            if 'services' not in kwargs:
+                kwargs['services'] = {}
+            kwargs['services'][('bokeh', 0)] = BokehWorker
+
         w = W(self.scheduler.address, loop=self.loop,
               death_timeout=death_timeout,
               silence_logs=self.silence_logs, **kwargs)
