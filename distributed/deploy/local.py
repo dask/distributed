@@ -54,9 +54,6 @@ class LocalCluster(object):
 
     Shut down the extra worker
     >>> c.remove_worker(w)  # doctest: +SKIP
-
-    Start a diagnostic web server and open a new browser tab
-    >>> c.start_diagnostics_server(show=True)  # doctest: +SKIP
     """
     def __init__(self, n_workers=None, threads_per_worker=None, processes=True,
                  loop=None, start=True, ip=None, scheduler_port=0,
@@ -95,12 +92,18 @@ class LocalCluster(object):
             while not self.loop._running:
                 sleep(0.001)
 
+        if diagnostics_port is not None:
+            try:
+                from distributed.bokeh.scheduler import BokehScheduler
+            except ImportError:
+                logger.info("To start diagnostics web server please install Bokeh")
+                return
+            else:
+                services[('bokeh', diagnostics_port)] = BokehScheduler
+
         self.scheduler = Scheduler(loop=self.loop,
                                    services=services)
         self.scheduler_port = scheduler_port
-
-        self.diagnostics_port = diagnostics_port
-        self.diagnostics = None
 
         self.workers = []
         self.n_workers = n_workers
@@ -131,21 +134,15 @@ class LocalCluster(object):
         if ip is None and not self.scheduler_port and not self.processes:
             # Use inproc transport for optimization
             scheduler_address = 'inproc://'
-            enable_diagnostics = False
         else:
             if ip is None:
                 ip = '127.0.0.1'
             scheduler_address = (ip, self.scheduler_port)
-            enable_diagnostics = self.diagnostics_port is not None
         self.scheduler.start(scheduler_address)
 
         yield self._start_all_workers(
             self.n_workers, ncores=self.threads_per_worker,
             services=self.worker_services, **self.worker_kwargs)
-
-        if enable_diagnostics:
-            self.start_diagnostics_server(self.diagnostics_port,
-                                          silence=self.silence_logs)
 
         self.status = 'running'
 
@@ -215,34 +212,6 @@ class LocalCluster(object):
         """
         sync(self.loop, self._stop_worker, w)
 
-    def start_diagnostics_server(self, port=8787, show=False,
-            silence=logging.CRITICAL):
-        """ Start Diagnostics Web Server
-
-        This starts a web application to show diagnostics of what is happening
-        on the cluster.  This application runs in a separate process and is
-        generally available at the following location:
-
-            http://localhost:8787/status/
-        """
-        try:
-            from distributed.bokeh.application import BokehWebInterface
-        except ImportError:
-            logger.info("To start diagnostics web server please install Bokeh")
-            return
-        from ..http.scheduler import HTTPScheduler
-
-        assert self.diagnostics is None
-        if 'http' not in self.scheduler.services:
-            self.scheduler.services['http'] = HTTPScheduler(self.scheduler,
-                    io_loop=self.scheduler.loop)
-            self.scheduler.services['http'].listen(0)
-        self.diagnostics = BokehWebInterface(
-                scheduler_address=self.scheduler.address,
-                http_port=self.scheduler.services['http'].port,
-                bokeh_port=port, show=show,
-                log_level=logging.getLevelName(silence).lower())
-
     @gen.coroutine
     def _close(self):
         with ignoring(gen.TimeoutError, CommClosedError, OSError):
@@ -250,8 +219,6 @@ class LocalCluster(object):
         with ignoring(gen.TimeoutError, CommClosedError, OSError):
             yield self.scheduler.close(fast=True)
         del self.workers[:]
-        if self.diagnostics:
-            self.diagnostics.close()
 
     def close(self):
         """ Close the cluster """

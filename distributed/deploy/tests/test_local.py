@@ -205,44 +205,21 @@ def test_http(loop):
 
 def test_bokeh(loop):
     pytest.importorskip('bokeh')
-    from distributed.http import HTTPScheduler
     import requests
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
-            diagnostics_port=4724, services={('http', 0): HTTPScheduler},
-            ) as c:
+                      diagnostics_port=0) as c:
+        bokeh_port = c.scheduler.services['bokeh'].port
+        url = 'http://127.0.0.1:%d/status/' % bokeh_port
         start = time()
         while True:
-            with ignoring(Exception):
-                response = requests.get('http://127.0.0.1:%d/status/' %
-                                        c.diagnostics.port)
-                if response.ok:
-                    break
+            response = requests.get(url)
+            if response.ok:
+                break
             assert time() < start + 20
             sleep(0.01)
 
-    start = time()
-    while not raises(lambda: requests.get('http://127.0.0.1:%d/status/' % 4724)):
-        assert time() < start + 10
-        sleep(0.01)
-
-
-def test_start_diagnostics(loop):
-    pytest.importorskip('bokeh')
-    from distributed.http import HTTPScheduler
-    import requests
-    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
-            diagnostics_port=None) as c:
-        c.start_diagnostics_server(show=False, port=3748)
-
-        start = time()
-        while True:
-            with ignoring(Exception):
-                response = requests.get('http://127.0.0.1:%d/status/' %
-                                        c.diagnostics.port)
-                if response.ok:
-                    break
-            assert time() < start + 20
-            sleep(0.01)
+    with pytest.raises(requests.ReadTimeout):
+        requests.get(url, timeout=0.2)
 
 
 def test_blocks_until_full(loop):
