@@ -186,6 +186,20 @@ def test_multiple_workers(loop):
                         assert time() < start + 10
 
 
+def test_interface(loop):
+    with popen(['dask-scheduler', '--no-bokeh', '--interface', 'lo']) as s:
+        with popen(['dask-worker', '127.0.0.1:8786', '--no-bokeh', '--interface', 'lo']) as a:
+            with Client('127.0.0.1:%d' % Scheduler.default_port, loop=loop) as c:
+                start = time()
+                while not len(c.ncores()):
+                    sleep(0.1)
+                    assert time() - start < 5
+                info = c.scheduler_info()
+                assert '127.0.0.1' in info['address']
+                assert all('127.0.0.1' == d['host']
+                           for d in info['workers'].values())
+
+
 def test_pid_file(loop):
     def check_pidfile(proc, pidfile):
         start = time()

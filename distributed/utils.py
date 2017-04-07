@@ -27,7 +27,7 @@ from dask import istask
 from toolz import memoize, valmap
 from tornado import gen
 
-from .compatibility import Queue, PY3, PY2, get_thread_identity
+from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
 from .config import config
 
 
@@ -126,6 +126,22 @@ def get_ipv6(host='2001:4860:4860::8888', port=80):
     The same as get_ip(), but for IPv6.
     """
     return _get_ip(host, port, family=socket.AF_INET6, default='::1')
+
+
+import socket
+import fcntl
+import struct
+
+def get_ip_interface(ifname):
+    # http://stackoverflow.com/a/24196955/616616 by @martin-konecny
+    if isinstance(ifname, unicode):
+        ifname = ifname.encode()
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    return socket.inet_ntoa(fcntl.ioctl(
+        s.fileno(),
+        0x8915,  # SIOCGIFADDR
+        struct.pack('256s', ifname[:15])
+    )[20:24])
 
 
 @contextmanager
