@@ -129,7 +129,6 @@ def get_ipv6(host='2001:4860:4860::8888', port=80):
 
 
 def get_ip_interface(ifname):
-    # http://stackoverflow.com/a/24196955/616616 by @martin-konecny
     import psutil
     return psutil.net_if_addrs()[ifname][0].address
 
