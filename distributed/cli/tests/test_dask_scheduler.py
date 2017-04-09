@@ -15,6 +15,7 @@ from time import sleep
 from tornado import gen
 
 from distributed import Scheduler, Client
+from distributed.compatibility import WINDOWS
 from distributed.utils import get_ip, ignoring, tmpfile
 from distributed.utils_test import (loop, popen,
                                     assert_can_connect_from_everywhere_4,
@@ -186,6 +187,7 @@ def test_multiple_workers(loop):
                         assert time() < start + 10
 
 
+@pytest.mark.skipif(WINDOWS, reason='--interface does not work on windows')
 def test_interface(loop):
     with popen(['dask-scheduler', '--no-bokeh', '--interface', 'lo']) as s:
         with popen(['dask-worker', '127.0.0.1:8786', '--no-bokeh', '--interface', 'lo']) as a:

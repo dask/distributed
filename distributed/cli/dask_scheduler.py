@@ -67,8 +67,11 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    if interface and not host:
-        host = get_ip_interface(interface)
+    if interface:
+        if host:
+            raise ValueError("Can not specify both interface and host")
+        else:
+            host = get_ip_interface(interface)
 
     addr = uri_from_host_port(host, port, 8786)
 

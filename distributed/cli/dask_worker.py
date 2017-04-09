@@ -164,8 +164,11 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
                  **kwargs)
                for i in range(nprocs)]
 
-    if interface and not host:
-        host = get_ip_interface(interface)
+    if interface:
+        if host:
+            raise ValueError("Can not specify both interface and host")
+        else:
+            host = get_ip_interface(interface)
 
     for n in nannies:
         if host:

@@ -128,20 +128,10 @@ def get_ipv6(host='2001:4860:4860::8888', port=80):
     return _get_ip(host, port, family=socket.AF_INET6, default='::1')
 
 
-import socket
-import fcntl
-import struct
-
 def get_ip_interface(ifname):
     # http://stackoverflow.com/a/24196955/616616 by @martin-konecny
-    if isinstance(ifname, unicode):
-        ifname = ifname.encode()
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    return socket.inet_ntoa(fcntl.ioctl(
-        s.fileno(),
-        0x8915,  # SIOCGIFADDR
-        struct.pack('256s', ifname[:15])
-    )[20:24])
+    import psutil
+    return psutil.net_if_addrs()[ifname][0].address
 
 
 @contextmanager
