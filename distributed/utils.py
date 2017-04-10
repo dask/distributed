@@ -130,7 +130,8 @@ def get_ipv6(host='2001:4860:4860::8888', port=80):
 
 def get_ip_interface(ifname):
     import psutil
-    return psutil.net_if_addrs()[ifname][0].address
+    L = psutil.net_if_addrs()[ifname]
+    return [x.address for x in L if x.family == socket.AF_INET][0]
 
 
 @contextmanager
