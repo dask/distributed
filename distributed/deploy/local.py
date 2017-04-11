@@ -1,10 +1,12 @@
 from __future__ import print_function, division, absolute_import
 
+import atexit
 import logging
 import math
 from threading import Thread
 from time import sleep
 import warnings
+import weakref
 
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -114,6 +116,8 @@ class LocalCluster(object):
 
         if start:
             sync(self.loop, self._start, ip)
+
+        clusters_to_close.add(self)
 
     def __str__(self):
         return ('LocalCluster(%r, workers=%d, ncores=%d)' %
@@ -234,6 +238,13 @@ class LocalCluster(object):
     def close(self):
         """ Close the cluster """
         if self.status == 'running':
+            for w in self.workers:
+                self.loop.add_callback(self._stop_worker, w)
+            for i in range(10):
+                if not self.workers:
+                    break
+                else:
+                    sleep(0.01)
             self.status = 'closed'
             if self.loop._running:
                 sync(self.loop, self._close)
@@ -287,3 +298,12 @@ class LocalCluster(object):
             return self.scheduler.address
         except ValueError:
             return '<unstarted>'
+
+
+clusters_to_close = weakref.WeakSet()
+
+
+@atexit.register
+def close_clusters():
+    for cluster in clusters_to_close:
+        cluster.close()
