@@ -9,6 +9,7 @@ from tornado import gen
 from tornado.httpclient import AsyncHTTPClient, HTTPError
 from tornado.ioloop import IOLoop
 
+from distributed.config import config
 from distributed.compatibility import ConnectionRefusedError
 from distributed.core import connect, CommClosedError
 from distributed.metrics import time

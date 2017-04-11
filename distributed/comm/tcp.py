@@ -22,6 +22,7 @@ from .core import Comm, Connector, Listener, CommClosedError
 from .utils import (to_frames, from_frames,
                     get_tcp_server_address, ensure_concrete_host)
 
+from . import utils as _comm_utils
 
 logger = logging.getLogger(__name__)
 
@@ -211,24 +212,61 @@ class TCP(Comm):
         return self.stream is None or self.stream.closed()
 
 
-class TCPConnector(object):
+class TLS(TCP):
+
+    def __repr__(self):
+        return "<TLS %r>" % (self._peer_addr,)
+
+
+class BaseTornadoConnector(object):
+
+    _protocol_name = None
+    _comm_class = None
+
+    def _create_client(self):
+        return TCPClient()
+
+    def _connect_client(self, client, ip, port):
+        pass
 
     @gen.coroutine
     def connect(self, address, deserialize=True):
         ip, port = parse_host_port(address)
 
-        client = TCPClient()
+        client = self._create_client()
         try:
-            stream = yield client.connect(ip, port,
-                                          max_buffer_size=MAX_BUFFER_SIZE)
+            stream = yield self._connect_client(client, ip, port)
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(e)
 
-        raise gen.Return(TCP(stream, 'tcp://' + address, deserialize))
+        raise gen.Return(self._comm_class(stream, self._protocol_name + address, deserialize))
 
 
-class TCPListener(Listener):
+class TCPConnector(BaseTornadoConnector):
+
+    _protocol_name = 'tcp://'
+    _comm_class = TCP
+
+    @gen.coroutine
+    def _connect_client(self, client, ip, port):
+        stream = yield client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE)
+        raise gen.Return(stream)
+
+
+class TLSConnector(BaseTornadoConnector):
+
+    _protocol_name = 'tls://'
+    _comm_class = TLS
+
+    @gen.coroutine
+    def _connect_client(self, client, ip, port):
+        ssl_context = _comm_utils.create_ssl_context()
+        stream = yield client.connect(ip, port, max_buffer_size=MAX_BUFFER_SIZE, ssl_options=ssl_context)
+        raise gen.Return(stream)
+
+
+class TornadoListener(Listener):
 
     def __init__(self, address, comm_handler, deserialize=True, default_port=0):
         self.ip, self.port = parse_host_port(address, default_port)
@@ -237,8 +275,11 @@ class TCPListener(Listener):
         self.tcp_server = None
         self.bound_address = None
 
+    def _create_server(self):
+        pass
+
     def start(self):
-        self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE)
+        self.tcp_server = self._create_server()
         self.tcp_server.handle_stream = self.handle_stream
         for i in range(5):
             try:
@@ -279,7 +320,7 @@ class TCPListener(Listener):
         """
         The listening address as a string.
         """
-        return 'tcp://' + unparse_host_port(*self.get_host_port())
+        return self.protocol + unparse_host_port(*self.get_host_port())
 
     @property
     def contact_address(self):
@@ -288,12 +329,31 @@ class TCPListener(Listener):
         """
         host, port = self.get_host_port()
         host = ensure_concrete_host(host)
-        return 'tcp://' + unparse_host_port(host, port)
+        return self.protocol + unparse_host_port(host, port)
 
     def handle_stream(self, stream, address):
-        address = 'tcp://' + unparse_host_port(*address[:2])
-        comm = TCP(stream, address, self.deserialize)
+        address = self.protocol + unparse_host_port(*address[:2])
+        comm = self.handler_class(stream, address, self.deserialize)
         self.comm_handler(comm)
+
+
+class TCPListener(TornadoListener):
+
+    protocol = 'tcp://'
+    handler_class = TCP
+
+    def _create_server(self):
+        return TCPServer(max_buffer_size=MAX_BUFFER_SIZE)
+
+
+class TLSListener(TornadoListener):
+
+    protocol = 'tls://'
+    handler_class = TLS
+
+    def _create_server(self):
+        ssl_context = _comm_utils.create_ssl_context()
+        return TCPServer(max_buffer_size=MAX_BUFFER_SIZE, ssl_options=ssl_context)
 
 
 class TCPBackend(Backend):
@@ -328,4 +388,14 @@ class TCPBackend(Backend):
         return unparse_host_port(local_host, None)
 
 
+class TLSBackend(TCPBackend):
+
+    def get_connector(self):
+        return TLSConnector()
+
+    def get_listener(self, loc, handle_comm, deserialize):
+        return TLSListener(loc, handle_comm, deserialize)
+
+
 backends['tcp'] = TCPBackend()
+backends['tls'] = TLSBackend()

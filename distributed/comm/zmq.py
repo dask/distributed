@@ -162,6 +162,7 @@ class ZMQConnector(Connector):
 
     @gen.coroutine
     def _do_connect(self, sock, address, listener_url, deserialize=True):
+
         sock.connect(listener_url)
 
         req = {'op': 'zmq-connect'}
@@ -254,7 +255,7 @@ class ZMQListener(Listener):
         """
         The listening address as a string.
         """
-        return 'zmq://'+ unparse_host_port(*self.get_host_port())
+        return 'zmq://' + unparse_host_port(*self.get_host_port())
 
     @property
     def contact_address(self):

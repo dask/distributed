@@ -99,7 +99,7 @@ _round_robin_counter = [0]
 
 
 @gen.coroutine
-def scatter_to_workers(ncores, data, report=True, serialize=True):
+def scatter_to_workers(ncores, data, report=True, serialize=True,):
     """ Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on

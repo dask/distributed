@@ -70,7 +70,8 @@ class WorkerBase(Server):
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
-                 silence_logs=None, death_timeout=None, **kwargs):
+                 silence_logs=None, death_timeout=None,
+                 **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -143,7 +144,9 @@ class WorkerBase(Server):
           'keys': self.keys,
         }
 
-        super(WorkerBase, self).__init__(handlers, io_loop=self.loop, **kwargs)
+        super(WorkerBase, self).__init__(handlers,
+                                         io_loop=self.loop,
+                                         **kwargs)
 
         self.heartbeat_callback = PeriodicCallback(self.heartbeat,
                                                    self.heartbeat_interval,
