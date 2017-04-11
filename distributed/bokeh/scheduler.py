@@ -569,7 +569,7 @@ class TaskStream(components.TaskStream):
         if self.index == self.plugin.index:
             return
         with log_errors():
-            if self.index:
+            if self.index and self.source.data['start']:
                 start = min(self.source.data['start'])
                 duration = max(self.source.data['duration'])
                 boundary = (self.offset + start - duration) / 1000
@@ -808,11 +808,12 @@ def events_doc(scheduler, doc):
 
 def tasks_doc(scheduler, doc):
     with log_errors():
-        ts = TaskStream(scheduler, n_rectangles=100000, clear_interval=60000)
+        ts = TaskStream(scheduler, n_rectangles=100000, clear_interval=60000,
+                        sizing_mode='stretch_both')
         ts.update()
         doc.add_periodic_callback(ts.update, 5000)
         doc.title = "Dask Task Stream"
-        doc.add_root(column(ts.root, sizing_mode='scale_width'))
+        doc.add_root(ts.root)
         doc.template = template
 
 

@@ -34,6 +34,7 @@ from tornado.queues import Queue
 
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
+from .cfexecutor import ClientExecutor
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import connect, rpc, clean_exception, CommClosedError
 from .protocol import to_serialize
@@ -107,9 +108,14 @@ class Future(WrappedKey):
         """ Is the computation complete? """
         return self.event.is_set()
 
-    def result(self):
-        """ Wait until computation completes. Gather result to local process """
-        result = sync(self.client.loop, self._result, raiseit=False)
+    def result(self, timeout=None):
+        """ Wait until computation completes. Gather result to local process.
+
+        If *timeout* seconds are elapsed before returning, a TimeoutError
+        is raised.
+        """
+        result = sync(self.client.loop,
+                      self._result, raiseit=False, callback_timeout=timeout)
         if self.status == 'error':
             six.reraise(*result)
         elif self.status == 'cancelled':
@@ -145,14 +151,18 @@ class Future(WrappedKey):
         else:
             raise Return(None)
 
-    def exception(self):
+    def exception(self, timeout=None):
         """ Return the exception of a failed task
+
+        If *timeout* seconds are elapsed before returning, a TimeoutError
+        is raised.
 
         See Also
         --------
         Future.traceback
         """
-        return sync(self.client.loop, self._exception)
+        return sync(self.client.loop,
+                    self._exception, callback_timeout=timeout)
 
     def add_done_callback(self, fn):
         """ Call callback on future when callback has finished
@@ -193,12 +203,15 @@ class Future(WrappedKey):
         else:
             raise Return(None)
 
-    def traceback(self):
+    def traceback(self, timeout=None):
         """ Return the traceback of a failed task
 
         This returns a traceback object.  You can inspect this object using the
         ``traceback`` module.  Alternatively if you call ``future.result()``
         this traceback will accompany the raised exception.
+
+        If *timeout* seconds are elapsed before returning, a TimeoutError
+        is raised.
 
         Examples
         --------
@@ -211,7 +224,8 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
-        return sync(self.client.loop, self._traceback)
+        return sync(self.client.loop,
+                    self._traceback, callback_timeout=timeout)
 
     @property
     def type(self):
@@ -691,6 +705,23 @@ class Client(object):
         with ignoring(AttributeError):
             self.cluster.close()
 
+    def get_executor(self, **kwargs):
+        """ Return a concurrent.futures Executor for submitting tasks
+        on this Client.
+
+        Parameters
+        ----------
+        **kwargs:
+            Any submit()- or map()- compatible arguments, such as
+            `workers` or `resources`.
+
+        Returns
+        -------
+        An Executor object that's fully compatible with the concurrent.futures
+        API.
+        """
+        return ClientExecutor(self, **kwargs)
+
     def submit(self, func, *args, **kwargs):
         """ Submit a function application to the scheduler
 
@@ -1039,6 +1070,7 @@ class Client(object):
             d = yield self._scatter(keymap(tokey, data), workers, broadcast)
             raise gen.Return({k: d[tokey(k)] for k in data})
 
+        unpack = False
         if isinstance(data, dict):
             data2 = valmap(to_serialize, data)
             types = valmap(type, data)
@@ -1049,7 +1081,9 @@ class Client(object):
             data2 = list(map(to_serialize, data))
             types = list(map(type, data))
         else:
-            raise TypeError("Don't know how to scatter %s" % type(data))
+            data2 = [to_serialize(data)]
+            types = [type(data)]
+            unpack = True
         keys = yield self.scheduler.scatter(data=data2, workers=workers,
                                             client=self.id,
                                             broadcast=broadcast)
@@ -1060,8 +1094,7 @@ class Client(object):
         elif isinstance(data, (Iterable, Iterator)):
             out = [Future(k, self) for k in keys]
         else:
-            raise TypeError(
-                    "Input to scatter must be a list, iterator, or queue")
+            out = [Future(k, self) for k in keys]
 
         for key in keys:
             self.futures[key].finish(type=None)
@@ -1072,6 +1105,9 @@ class Client(object):
         elif isinstance(types, dict):
             for key in keys:
                 self.futures[key].type = types[key]
+
+        if unpack:
+            out = out[0]
 
         raise gen.Return(out)
 
@@ -1106,7 +1142,7 @@ class Client(object):
 
         Parameters
         ----------
-        data: list, iterator, dict, or Queue
+        data: list, iterator, dict, Queue, or object
             Data to scatter out to workers.  Output type matches input type.
         workers: list of tuples (optional)
             Optionally constrain locations of data.
@@ -1124,6 +1160,9 @@ class Client(object):
         Examples
         --------
         >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
+        >>> c.scatter(1) # doctest: +SKIP
+        <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>
+
         >>> c.scatter([1, 2, 3])  # doctest: +SKIP
         [<Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
          <Future: status: finished, key: 58e78e1b34eb49a68c65b54815d1b158>,
@@ -2394,29 +2433,8 @@ class Client(object):
 Executor = Client
 
 
-class CompatibleExecutor(Client):
-    """ A concurrent.futures-compatible Client
-
-    A subclass of Client that conforms to concurrent.futures API,
-    allowing swapping in for other Clients.
-    """
-
-    def map(self, func, *iterables, **kwargs):
-        """ Map a function on a sequence of arguments
-
-        Returns
-        -------
-        iter_results: iterable
-            Iterable yielding results of the map.
-
-        See Also
-        --------
-        Client.map: for more info
-        """
-        list_of_futures = super(CompatibleExecutor, self).map(
-                                func, *iterables, **kwargs)
-        for f in list_of_futures:
-            yield f.result()
+def CompatibleExecutor(*args, **kwargs):
+    raise Exception("This has been moved to the Client.get_executor() method")
 
 
 @gen.coroutine
