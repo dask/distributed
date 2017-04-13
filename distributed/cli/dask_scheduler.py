@@ -11,7 +11,7 @@ from time import sleep
 
 import click
 
-import distributed
+import distributed.preloading
 from distributed import Scheduler
 from distributed.utils import ignoring, open_port, get_ip_interface
 from distributed.http import HTTPScheduler
@@ -48,9 +48,11 @@ logger = logging.getLogger('distributed.scheduler')
               help="File to write connection information. "
               "This may be a good way to share connection information if your "
               "cluster is on a shared network file system.")
+@click.option('--preload', type=str, multiple=True,
+              help='Module that should be loaded by each worker process like "foo.bar"')
 def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
          bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file,
-         interface):
+         interface, preload):
 
     if pid_file:
         with open(pid_file, 'w') as f:
@@ -85,6 +87,7 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
             services[('bokeh', bokeh_internal_port)] = BokehScheduler
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file)
+    distributed.preloading.preload(preload, scheduler)
     scheduler.start(addr)
 
     bokeh_proc = None
