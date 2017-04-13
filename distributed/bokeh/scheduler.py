@@ -777,7 +777,7 @@ def systemmonitor_doc(scheduler, doc):
         doc.template = template
 
 
-def workers_doc(scheduler, doc):
+def stealing_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
         occupancy = Occupancy(scheduler, height=200, sizing_mode='scale_width')
@@ -857,7 +857,7 @@ class BokehScheduler(BokehServer):
         self.scheduler = scheduler
         systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc,
                                                             scheduler)))
-        workers = Application(FunctionHandler(partial(workers_doc, scheduler)))
+        stealing = Application(FunctionHandler(partial(stealing_doc, scheduler)))
         counters = Application(FunctionHandler(partial(counters_doc, scheduler)))
         events = Application(FunctionHandler(partial(events_doc, scheduler)))
         tasks = Application(FunctionHandler(partial(tasks_doc, scheduler)))
@@ -865,7 +865,7 @@ class BokehScheduler(BokehServer):
 
         self.apps = {
                 '/system': systemmonitor,
-                '/workers': workers,
+                '/stealing': stealing,
                 '/events': events,
                 '/counters': counters,
                 '/tasks': tasks,
