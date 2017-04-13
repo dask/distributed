@@ -70,7 +70,7 @@ class WorkerBase(Server):
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
-                 silence_logs=None, death_timeout=None, **kwargs):
+                 silence_logs=None, death_timeout=None, preload=(), **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -81,6 +81,7 @@ class WorkerBase(Server):
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
         self.death_timeout = death_timeout
+        self.preload = preload
         if silence_logs:
             logger.setLevel(silence_logs)
         if not os.path.exists(self.local_dir):
@@ -231,6 +232,10 @@ class WorkerBase(Server):
     @gen.coroutine
     def _start(self, addr_or_port=0):
         assert self.status is None
+
+        for module_name in self.preload:
+            if module_name not in sys.modules:
+                import_module(module_name)
 
         # XXX Factor this out
         if not addr_or_port:
