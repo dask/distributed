@@ -31,6 +31,7 @@ from .compatibility import reload, unicode, invalidate_caches, cache_from_source
 from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
+from .preloading import preload
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
@@ -233,9 +234,7 @@ class WorkerBase(Server):
     def _start(self, addr_or_port=0):
         assert self.status is None
 
-        for module_name in self.preload:
-            if module_name not in sys.modules:
-                import_module(module_name)
+        preload(self.preload, self)
 
         # XXX Factor this out
         if not addr_or_port:
