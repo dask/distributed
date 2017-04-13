@@ -5,7 +5,7 @@ from importlib import import_module
 
 
 def preload(module_names, parameter=None):
-    """ Import modules, handles `dask_setup` and `dask_teardown` functions
+    """ Imports modules, handles `dask_setup` and `dask_teardown` functions
 
     Parameters
     ----------
