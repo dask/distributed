@@ -17,7 +17,7 @@ from distributed.bokeh.worker import Counters, BokehWorker
 from distributed.bokeh.scheduler import (BokehScheduler, StateTable,
         SystemMonitor, Occupancy, StealingTimeSeries, StealingEvents, Events,
         TaskStream, TaskProgress, MemoryUse, CurrentLoad, ProcessingHistogram,
-        NBytesHistogram)
+        NBytesHistogram, WorkerTable)
 
 from distributed.bokeh import scheduler
 
@@ -249,3 +249,11 @@ def test_NBytesHistogram(c, s, a, b):
 
     nh.update()
     assert nh.source.data['right'][-1] > 5 * 20
+
+
+@gen_cluster(client=True)
+def test_WorkerTable(c, s, a, b):
+    wt = WorkerTable(s)
+    wt.update()
+    assert all(wt.source.data.values())
+    assert all(len(v) == 1 for v in wt.source.data.values())
