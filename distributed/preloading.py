@@ -64,9 +64,11 @@ def preload(names, parameter=None, file_dir=None):
             # name is a file path
             if file_dir is not None:
                 basename = os.path.basename(name)
-                if os.path.exists(os.path.join(file_dir, basename)):
+                copy_dst = os.path.join(file_dir, basename)
+                if os.path.exists(copy_dst):
                     logger.error("File name collision: %s", basename)
-                module = load_file(shutil.copy(name, file_dir))[0]
+                shutil.copy(name, copy_dst)
+                module = load_file(copy_dst)[0]
             else:
                 module = load_file(name)[0]
 
