@@ -234,8 +234,6 @@ class WorkerBase(Server):
     def _start(self, addr_or_port=0):
         assert self.status is None
 
-        preload(self.preload, self)
-
         # XXX Factor this out
         if not addr_or_port:
             # Default address is the required one to reach the scheduler
@@ -252,6 +250,7 @@ class WorkerBase(Server):
             self.ip = get_address_host(self.address)
 
         self.name = self.name or self.address
+        preload(self.preload, self)
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
