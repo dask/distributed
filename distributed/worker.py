@@ -31,7 +31,7 @@ from .compatibility import reload, unicode, invalidate_caches, cache_from_source
 from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
-from .preloading import preload
+from .preloading import load_file, preload
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
@@ -250,7 +250,7 @@ class WorkerBase(Server):
             self.ip = get_address_host(self.address)
 
         self.name = self.name or self.address
-        preload(self.preload, self)
+        preload(self.preload, parameter=self, file_dir=self.local_dir)
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
@@ -471,32 +471,7 @@ class WorkerBase(Server):
 
         if load:
             try:
-                name, ext = os.path.splitext(filename)
-                names_to_import = []
-                if ext in ('.py', '.pyc'):
-                    names_to_import.append(name)
-                    # Ensures that no pyc file will be reused
-                    cache_file = cache_from_source(out_filename)
-                    if os.path.exists(cache_file):
-                        os.remove(cache_file)
-                if ext in ('.egg', '.zip'):
-                    if out_filename not in sys.path:
-                        sys.path.insert(0, out_filename)
-                    if ext == '.egg':
-                        import pkg_resources
-                        pkgs = pkg_resources.find_distributions(out_filename)
-                        for pkg in pkgs:
-                            names_to_import.append(pkg.project_name)
-                    elif ext == '.zip':
-                        names_to_import.append(name)
-
-                if not names_to_import:
-                    logger.warning("Found nothing to import from %s", filename)
-                else:
-                    invalidate_caches()
-                    for name in names_to_import:
-                        logger.info("Reload module %s from %s file", name, ext)
-                        reload(import_module(name))
+                load_file(out_filename)
             except Exception as e:
                 logger.exception(e)
                 return {'status': 'error', 'exception': dumps(e)}
