@@ -2,7 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 from collections import defaultdict, deque
 from datetime import timedelta
-from importlib import import_module
 import heapq
 import logging
 import os
@@ -27,7 +26,7 @@ from tornado.locks import Event
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for
 from .config import config
-from .compatibility import reload, unicode, invalidate_caches, cache_from_source
+from .compatibility import unicode
 from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time

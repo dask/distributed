@@ -6,15 +6,13 @@ import json
 import logging
 import os
 import shutil
-import socket
-from sys import argv, exit
-import sys
+from sys import exit
 from time import sleep
 
 import click
 from distributed import Nanny, Worker, rpc
 from distributed.nanny import isalive
-from distributed.utils import All, ignoring, get_ip_interface
+from distributed.utils import All, get_ip_interface
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
 from distributed.metrics import time

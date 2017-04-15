@@ -1,15 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-import json
 import logging
 import os
 import shutil
-import socket
-import subprocess
 import sys
 import tempfile
-from time import sleep
 
 import click
 
