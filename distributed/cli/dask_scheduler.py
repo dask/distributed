@@ -4,9 +4,11 @@ import atexit
 import json
 import logging
 import os
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 from time import sleep
 
 import click
@@ -48,11 +50,13 @@ logger = logging.getLogger('distributed.scheduler')
               help="File to write connection information. "
               "This may be a good way to share connection information if your "
               "cluster is on a shared network file system.")
+@click.option('--local-directory', default='', type=str,
+              help="Directory to place scheduler files")
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process like "foo.bar"')
 def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
          bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file,
-         interface, preload):
+         interface, local_directory, preload):
 
     if pid_file:
         with open(pid_file, 'w') as f:
@@ -62,6 +66,12 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
             if os.path.exists(pid_file):
                 os.remove(pid_file)
         atexit.register(del_pid_file)
+
+    local_directory = local_directory or tempfile.mkdtemp(prefix='scheduler-')
+    if not os.path.exists(local_directory):
+        os.mkdir(local_directory)
+    if local_directory not in sys.path:
+        sys.path.insert(0, local_directory)
 
     if sys.platform.startswith('linux'):
         import resource   # module fails importing on Windows
@@ -87,7 +97,9 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
             services[('bokeh', bokeh_internal_port)] = BokehScheduler
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file)
-    distributed.preloading.preload(preload, scheduler)
+    distributed.preloading.preload(preload,
+                                   parameter=scheduler,
+                                   file_dir=local_directory)
     scheduler.start(addr)
 
     bokeh_proc = None
@@ -105,6 +117,7 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
         except Exception as e:
             logger.warn("Could not start Bokeh web UI", exc_info=True)
 
+    logger.info('      Local Directory: %26s', local_directory)
     logger.info('-' * 47)
     try:
         loop.start()
@@ -113,6 +126,8 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
         scheduler.stop()
         if bokeh_proc:
             bokeh_proc.close()
+        if os.path.exists(local_directory):
+            shutil.rmtree(local_directory)
 
         logger.info("End scheduler at %r", addr)
 
