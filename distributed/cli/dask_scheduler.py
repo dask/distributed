@@ -97,10 +97,10 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
             services[('bokeh', bokeh_internal_port)] = BokehScheduler
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file)
+    scheduler.start(addr)
     distributed.preloading.preload(preload,
                                    parameter=scheduler,
                                    file_dir=local_directory)
-    scheduler.start(addr)
 
     bokeh_proc = None
     if _bokeh:
