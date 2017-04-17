@@ -6,8 +6,7 @@ from uuid import uuid4
 from tornado import gen
 
 from .client import Client, _wait
-from .utils import ignoring, funcname
-
+from .utils import ignoring, funcname, itemgetter
 
 # A user could have installed joblib, sklearn, both, or neither. Further, only
 # joblib >= 0.10.0 supports backends, so we also need to check for that. This
@@ -25,12 +24,11 @@ with ignoring(ImportError):
 
 _bases = []
 if joblib:
-    from joblib.parallel import (ParallelBackendBase,
-        AutoBatchingMixin)
+    from joblib.parallel import AutoBatchingMixin, ParallelBackendBase
     _bases.append(ParallelBackendBase)
 if sk_joblib:
-    from sklearn.externals.joblib.parallel import (
-        ParallelBackendBase, AutoBatchingMixin)
+    from sklearn.externals.joblib.parallel import (AutoBatchingMixin,  # noqa
+            ParallelBackendBase)
     _bases.append(ParallelBackendBase)
 if not _bases:
     raise RuntimeError("Joblib backend requires either `joblib` >= '0.10.2' "
@@ -46,19 +44,6 @@ def joblib_funcname(x):
     except Exception:
         pass
     return funcname(x)
-
-
-class itemgetter(object):
-    __slots__ = ('index',)
-
-    def __init__(self, index):
-        self.index = index
-
-    def __call__(self, x):
-        return x[self.index]
-
-    def __reduce__(self):
-        return (itemgetter, (self.index,))
 
 
 class Batch(object):
