@@ -3,13 +3,12 @@ from __future__ import print_function, division, absolute_import
 import pytest
 pytest.importorskip('requests')
 
-from contextlib import contextmanager
-import itertools
 import os
 import requests
-import signal
 import socket
+import shutil
 import sys
+import tempfile
 from time import sleep
 
 from tornado import gen
@@ -255,3 +254,49 @@ def test_bokeh_port_zero(loop):
                 if b'bokeh' in line.lower() or b'web' in line.lower():
                     count += 1
                     assert b':0' not in line
+
+
+PRELOAD_TEXT = """
+from distributed.scheduler import Scheduler
+
+def dask_setup(scheduler):
+    if isinstance(scheduler, Scheduler):
+        print("setup")
+
+def dask_teardown(scheduler):
+    if isinstance(scheduler, Scheduler):
+        print("teardown")
+"""
+
+
+def test_preload_file(loop):
+    tmpdir = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmpdir, 'scheduler_print_preload.py')
+        with open(path, 'w') as f:
+            f.write(PRELOAD_TEXT)
+        with tmpfile() as fn:
+            with popen(['dask-scheduler', '--scheduler-file', fn,
+                        '--preload', path]) as proc:
+                with Client(scheduler_file=fn, loop=loop) as c:
+                    c.shutdown()
+            assert proc.stdout.read() == b'setup\nteardown\n'
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_preload_module(loop):
+    tmpdir = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmpdir, 'scheduler_print_preload.py')
+        with open(path, 'w') as f:
+            f.write(PRELOAD_TEXT)
+        with tmpfile() as fn:
+            with popen(['dask-scheduler', '--scheduler-file', fn,
+                        '--preload', 'scheduler_print_preload'],
+                       env=dict(os.environ, PYTHONPATH=tmpdir)) as proc:
+                with Client(scheduler_file=fn, loop=loop) as c:
+                    c.shutdown()
+            assert proc.stdout.read() == b'setup\nteardown\n'
+    finally:
+        shutil.rmtree(tmpdir)
