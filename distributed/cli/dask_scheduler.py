@@ -9,12 +9,12 @@ import tempfile
 
 import click
 
-import distributed.preloading
 from distributed import Scheduler
 from distributed.utils import ignoring, open_port, get_ip_interface
 from distributed.http import HTTPScheduler
 from distributed.cli.utils import (check_python_3, install_signal_handlers,
                                    uri_from_host_port)
+from distributed.preloading import preload_modules
 from tornado.ioloop import IOLoop
 
 logger = logging.getLogger('distributed.scheduler')
@@ -94,9 +94,7 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file)
     scheduler.start(addr)
-    distributed.preloading.preload(preload,
-                                   parameter=scheduler,
-                                   file_dir=local_directory)
+    preload_modules(preload, parameter=scheduler, file_dir=local_directory)
 
     bokeh_proc = None
     if _bokeh:

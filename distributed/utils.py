@@ -702,7 +702,7 @@ def open_port(host=''):
     return port
 
 
-def load_file(path):
+def import_file(path):
     """ Loads modules for a file (.py, .pyc, .zip, .egg) """
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)

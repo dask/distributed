@@ -30,12 +30,12 @@ from .compatibility import unicode
 from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
-from .preloading import preload
+from .preloading import preload_modules
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
-                    ignoring, validate_key, mp_context, load_file)
+                    ignoring, validate_key, mp_context, import_file)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
@@ -249,7 +249,7 @@ class WorkerBase(Server):
             self.ip = get_address_host(self.address)
 
         self.name = self.name or self.address
-        preload(self.preload, parameter=self, file_dir=self.local_dir)
+        preload_modules(self.preload, parameter=self, file_dir=self.local_dir)
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
@@ -470,7 +470,7 @@ class WorkerBase(Server):
 
         if load:
             try:
-                load_file(out_filename)
+                import_file(out_filename)
             except Exception as e:
                 logger.exception(e)
                 return {'status': 'error', 'exception': dumps(e)}

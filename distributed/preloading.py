@@ -5,12 +5,12 @@ import shutil
 import sys
 from importlib import import_module
 
-from .utils import load_file
+from .utils import import_file
 
 logger = logging.getLogger(__name__)
 
 
-def preload(names, parameter=None, file_dir=None):
+def preload_modules(names, parameter=None, file_dir=None):
     """ Imports modules, handles `dask_setup` and `dask_teardown` functions
 
     Parameters
@@ -32,9 +32,9 @@ def preload(names, parameter=None, file_dir=None):
                 if os.path.exists(copy_dst):
                     logger.error("File name collision: %s", basename)
                 shutil.copy(name, copy_dst)
-                module = load_file(copy_dst)[0]
+                module = import_file(copy_dst)[0]
             else:
-                module = load_file(name)[0]
+                module = import_file(name)[0]
 
         else:
             # name is a module name
