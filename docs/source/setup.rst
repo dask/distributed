@@ -231,3 +231,13 @@ the workers.
 
 __ https://github.com/jfisteus/ztreamy/issues/26
 
+
+Customizing initialization
+--------------------------
+
+Both ``dask-scheduler`` and ``dask-worker`` support a ``--preload`` option that
+allows custom initialization of each scheduler/worker respectively. A module
+or python file passed as a ``--preload`` value is guaranteed to be imported
+before establishing any connection. A ``dask_setup(service)`` function is called
+if found, with a ``Scheduler`` or ``Worker`` instance as the argument. As the
+service stops, ``dask_teardown(service)`` is called if present.
