@@ -1,49 +1,13 @@
 import atexit
-import shutil
 import logging
 import os
+import shutil
 import sys
 from importlib import import_module
 
-from .compatibility import reload, invalidate_caches, cache_from_source
-
+from .utils import load_file
 
 logger = logging.getLogger(__name__)
-
-
-def load_file(path):
-    """ Loads modules for a file (.py, .pyc, .zip, .egg) """
-    directory, filename = os.path.split(path)
-    name, ext = os.path.splitext(filename)
-    names_to_import = []
-    if ext in ('.py', '.pyc'):
-        if directory not in sys.path:
-            sys.path.insert(0, directory)
-        names_to_import.append(name)
-        # Ensures that no pyc file will be reused
-        cache_file = cache_from_source(path)
-        if os.path.exists(cache_file):
-            os.remove(cache_file)
-    if ext in ('.egg', '.zip'):
-        if path not in sys.path:
-            sys.path.insert(0, path)
-        if ext == '.egg':
-            import pkg_resources
-            pkgs = pkg_resources.find_distributions(path)
-            for pkg in pkgs:
-                names_to_import.append(pkg.project_name)
-        elif ext == '.zip':
-            names_to_import.append(name)
-
-    loaded = []
-    if not names_to_import:
-        logger.warning("Found nothing to import from %s", filename)
-    else:
-        invalidate_caches()
-        for name in names_to_import:
-            logger.info("Reload module %s from %s file", name, ext)
-            loaded.append(reload(import_module(name)))
-    return loaded
 
 
 def preload(names, parameter=None, file_dir=None):

@@ -30,12 +30,12 @@ from .compatibility import unicode
 from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
-from .preloading import load_file, preload
+from .preloading import preload
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
-                    ignoring, validate_key, mp_context)
+                    ignoring, validate_key, mp_context, load_file)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
