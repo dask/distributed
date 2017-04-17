@@ -63,9 +63,14 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
                 os.remove(pid_file)
         atexit.register(del_pid_file)
 
-    local_directory = local_directory or tempfile.mkdtemp(prefix='scheduler-')
-    if not os.path.exists(local_directory):
-        os.mkdir(local_directory)
+    local_directory_created = False
+    if local_directory:
+        if not os.path.exists(local_directory):
+            os.mkdir(local_directory)
+            local_directory_created = True
+    else:
+        local_directory = tempfile.mkdtemp(prefix='scheduler-')
+        local_directory_created = True
     if local_directory not in sys.path:
         sys.path.insert(0, local_directory)
 
@@ -120,7 +125,7 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
         scheduler.stop()
         if bokeh_proc:
             bokeh_proc.close()
-        if os.path.exists(local_directory):
+        if local_directory_created:
             shutil.rmtree(local_directory)
 
         logger.info("End scheduler at %r", addr)
