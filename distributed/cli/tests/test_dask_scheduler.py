@@ -257,46 +257,54 @@ def test_bokeh_port_zero(loop):
 
 
 PRELOAD_TEXT = """
-from distributed.scheduler import Scheduler
+_scheduler_info = {}
 
 def dask_setup(scheduler):
-    if isinstance(scheduler, Scheduler):
-        print("setup")
+    _scheduler_info['address'] = scheduler.address
 
-def dask_teardown(scheduler):
-    if isinstance(scheduler, Scheduler):
-        print("teardown")
+def get_scheduler_address():
+    return _scheduler_info['address']
 """
 
 
 def test_preload_file(loop):
+
+    def check_scheduler():
+        import scheduler_info
+        return scheduler_info.get_scheduler_address()
+
     tmpdir = tempfile.mkdtemp()
     try:
-        path = os.path.join(tmpdir, 'scheduler_print_preload.py')
+        path = os.path.join(tmpdir, 'scheduler_info.py')
         with open(path, 'w') as f:
             f.write(PRELOAD_TEXT)
         with tmpfile() as fn:
             with popen(['dask-scheduler', '--scheduler-file', fn,
-                        '--preload', path]) as proc:
+                        '--preload', path]):
                 with Client(scheduler_file=fn, loop=loop) as c:
-                    c.shutdown()
-            assert proc.stdout.read() == b'setup\nteardown\n'
+                    assert c.run_on_scheduler(check_scheduler) == \
+                           c.scheduler.address
     finally:
         shutil.rmtree(tmpdir)
 
 
 def test_preload_module(loop):
+
+    def check_scheduler():
+        import scheduler_info
+        return scheduler_info.get_scheduler_address()
+
     tmpdir = tempfile.mkdtemp()
     try:
-        path = os.path.join(tmpdir, 'scheduler_print_preload.py')
+        path = os.path.join(tmpdir, 'scheduler_info.py')
         with open(path, 'w') as f:
             f.write(PRELOAD_TEXT)
         with tmpfile() as fn:
             with popen(['dask-scheduler', '--scheduler-file', fn,
-                        '--preload', 'scheduler_print_preload'],
-                       env=dict(os.environ, PYTHONPATH=tmpdir)) as proc:
+                        '--preload', 'scheduler_info'],
+                       env=dict(os.environ, PYTHONPATH=tmpdir)):
                 with Client(scheduler_file=fn, loop=loop) as c:
-                    c.shutdown()
-            assert proc.stdout.read() == b'setup\nteardown\n'
+                    assert c.run_on_scheduler(check_scheduler) == \
+                           c.scheduler.address
     finally:
         shutil.rmtree(tmpdir)
