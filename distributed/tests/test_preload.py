@@ -25,17 +25,19 @@ def test_worker_preload_file(loop):
         return worker_info.get_worker_address()
 
     tmpdir = tempfile.mkdtemp()
-    path = os.path.join(tmpdir, 'worker_info.py')
-    with open(path, 'w') as f:
-        f.write(PRELOAD_TEXT)
-    with cluster(worker_kwargs={'preload': [path]}) as (s, workers), \
-            Client(s['address'], loop=loop) as c:
+    try:
+        path = os.path.join(tmpdir, 'worker_info.py')
+        with open(path, 'w') as f:
+            f.write(PRELOAD_TEXT)
+        with cluster(worker_kwargs={'preload': [path]}) as (s, workers), \
+                Client(s['address'], loop=loop) as c:
 
-        assert c.run(check_worker) == {
-            worker['address']: worker['address']
-            for worker in workers
-        }
-    shutil.rmtree(tmpdir)
+            assert c.run(check_worker) == {
+                worker['address']: worker['address']
+                for worker in workers
+            }
+    finally:
+        shutil.rmtree(tmpdir)
 
 
 def test_worker_preload_module(loop):
@@ -46,16 +48,18 @@ def test_worker_preload_module(loop):
 
     tmpdir = tempfile.mkdtemp()
     sys.path.insert(0, tmpdir)
-    path = os.path.join(tmpdir, 'worker_info.py')
-    with open(path, 'w') as f:
-        f.write(PRELOAD_TEXT)
+    try:
+        path = os.path.join(tmpdir, 'worker_info.py')
+        with open(path, 'w') as f:
+            f.write(PRELOAD_TEXT)
 
-    with cluster(worker_kwargs={'preload': ['worker_info']}) \
-            as (s, workers), Client(s['address'], loop=loop) as c:
+        with cluster(worker_kwargs={'preload': ['worker_info']}) \
+                as (s, workers), Client(s['address'], loop=loop) as c:
 
-        assert c.run(check_worker) == {
-            worker['address']: worker['address']
-            for worker in workers
-        }
-    sys.path.remove(tmpdir)
-    shutil.rmtree(tmpdir)
+            assert c.run(check_worker) == {
+                worker['address']: worker['address']
+                for worker in workers
+            }
+    finally:
+        sys.path.remove(tmpdir)
+        shutil.rmtree(tmpdir)
