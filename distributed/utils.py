@@ -719,7 +719,7 @@ def import_file(path):
             os.remove(cache_file)
     if ext in ('.egg', '.zip'):
         if path not in sys.path:
-            tmp_python_path = path
+            sys.path.insert(0, path)
         if ext == '.egg':
             import pkg_resources
             pkgs = pkg_resources.find_distributions(path)
