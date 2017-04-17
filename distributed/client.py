@@ -26,6 +26,7 @@ from dask.core import flatten, get_dependencies
 from dask.compatibility import apply, unicode
 from dask.context import _globals
 from toolz import first, groupby, merge, valmap, keymap
+import tornado
 from tornado import gen
 from tornado.gen import Return, TimeoutError
 from tornado.locks import Event, Condition
@@ -36,7 +37,7 @@ from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .cfexecutor import ClientExecutor
 from .compatibility import Queue as pyQueue, Empty, isqueue
-from .core import connect, rpc, clean_exception, CommClosedError
+from .core import connect, rpc, clean_exception, CommClosedError, clean_loop
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .worker import dumps_task
@@ -262,7 +263,11 @@ class Future(WrappedKey):
     __repr__ = __str__
 
     def __await__(self):
-        return self._result().__await__()
+        tornado_future = self._result()
+        if isinstance(self.client.loop, tornado.platform.asyncio.BaseAsyncIOLoop):
+            return tornado.platform.asyncio.to_asyncio_future(tornado_future).__await__()
+        else:
+            return tornado_future.__await__()
 
 
 class FutureState(object):
@@ -365,7 +370,7 @@ class Client(object):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
-        self.loop = loop or IOLoop() if start else IOLoop.current()
+        self.loop = clean_loop(loop, new=start)
         self.coroutines = []
         self.id = str(uuid.uuid1())
         self.generation = 0

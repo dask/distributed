@@ -29,7 +29,7 @@ from .comm import get_address_host, get_local_address_for
 from .config import config
 from .compatibility import reload, unicode, invalidate_caches, cache_from_source
 from .core import (error_message, CommClosedError,
-                   rpc, Server, pingpong, coerce_to_address)
+                   rpc, Server, pingpong, coerce_to_address, clean_loop)
 from .metrics import time
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
@@ -104,7 +104,7 @@ class WorkerBase(Server):
             self.data = Buffer({}, storage, int(float(self.memory_limit)), weight)
         else:
             self.data = dict()
-        self.loop = loop or IOLoop.current()
+        self.loop = clean_loop(loop)
         self.status = None
         self._closed = Event()
         self.reconnect = reconnect

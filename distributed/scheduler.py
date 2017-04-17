@@ -28,7 +28,7 @@ from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
 from .compatibility import finalize
 from .config import config
-from .core import (rpc, connect, Server, send_recv,
+from .core import (rpc, connect, Server, send_recv, clean_loop,
                    error_message, clean_exception, CommClosedError)
 from .metrics import time
 from .publish import PublishExtension
@@ -205,7 +205,7 @@ class Scheduler(Server):
         self.scheduler_file = scheduler_file
 
         # Communication state
-        self.loop = loop or IOLoop.current()
+        self.loop = clean_loop(loop)
         self.worker_comms = dict()
         self.comms = dict()
         self.coroutines = []

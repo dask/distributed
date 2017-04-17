@@ -11,6 +11,7 @@ from six import string_types
 
 from toolz import assoc
 
+import tornado
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
@@ -672,3 +673,27 @@ def clean_exception(exception, traceback, **kwargs):
     elif isinstance(traceback, string_types):
         traceback = None  # happens if the traceback failed serializing
     return type(exception), exception, traceback
+
+
+def clean_loop(ioloop, new=False):
+    """ Normalize IOLoop to be Tornado compatible
+
+    If the loop does not exist, create it.
+    If the loop is an asyncio ioloop, then call converter codes
+    If new then start a new ioloop rather than use the global loop of this thread
+    """
+
+    if isinstance(ioloop, tornado.ioloop.IOLoop):
+        return ioloop
+    if not ioloop:
+        if new:
+            return tornado.ioloop.IOLoop()
+        else:
+            return tornado.ioloop.IOLoop.current()
+    try:
+        import asyncio
+    except ImportError:
+        pass
+    else:
+        if isinstance(ioloop, asyncio.BaseEventLoop):
+            return tornado.platform.asyncio.BaseAsyncIOLoop(ioloop)
