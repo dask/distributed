@@ -21,7 +21,7 @@ except ImportError:
     from toolz import pluck
 from tornado.gen import Return
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 from tornado.locks import Event
 
 from .batched import BatchedSend
