@@ -241,3 +241,27 @@ or python file passed as a ``--preload`` value is guaranteed to be imported
 before establishing any connection. A ``dask_setup(service)`` function is called
 if found, with a ``Scheduler`` or ``Worker`` instance as the argument. As the
 service stops, ``dask_teardown(service)`` is called if present.
+
+
+
+As an example, consider the following file that creates a
+:doc:`scheduler plugin <plugins>` and registers it with the scheduler
+
+.. code-block:: python
+
+   # scheduler-setup.py
+   from distributed.diagnostics.plugin import SchedulerPlugin
+
+   class MyPlugin(SchedulerPlugin):
+       def add_worker(self, scheduler=None, worker=None, **kwargs):
+           print("Added a new worker at", worker)
+
+   def dask_setup(scheduler):
+       plugin = MyPlugin()
+       scheduler.add_plugin(plugin)
+
+We can then run this preload script by referring to its filename (or module name
+if it is on the path) when we start the scheduler::
+
+   dask-scheduler --preload scheduler-setup.py
+
