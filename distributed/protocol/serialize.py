@@ -14,7 +14,9 @@ except ImportError:
     import pandas.msgpack as msgpack
 
 from . import pickle
-from .utils import pack_frames, unpack_frames, pack_frames_prelude
+from .compression import maybe_compress, decompress
+from .utils import (pack_frames, unpack_frames, pack_frames_prelude,
+                    frame_split_size)
 
 
 serializers = {}
@@ -338,6 +340,14 @@ register_serialization(bytes, _serialize_bytes, _deserialize_bytes)
 
 def serialize_bytelist(x):
     header, frames = serialize(x)
+    frames = frame_split_size(frames)
+    if frames:
+        compression, frames = zip(*map(maybe_compress, frames))
+    else:
+        compression = []
+    header['compression'] = compression
+    header['count'] = len(frames)
+
     header = msgpack.dumps(header, use_bin_type=True)
     frames2 = [header] + list(frames)
     return [pack_frames_prelude(frames2)] + frames2
@@ -354,4 +364,5 @@ def deserialize_bytes(b):
         header = msgpack.loads(header, encoding='utf8')
     else:
         header = {}
+    frames = decompress(header, frames)
     return deserialize(header, frames)
