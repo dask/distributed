@@ -15,8 +15,7 @@ except ImportError:
 
 from . import pickle
 from .compression import maybe_compress, decompress
-from .utils import (pack_frames, unpack_frames, pack_frames_prelude,
-                    frame_split_size)
+from .utils import unpack_frames, pack_frames_prelude, frame_split_size
 
 
 serializers = {}

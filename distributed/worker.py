@@ -31,8 +31,8 @@ from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
 from .preloading import preload_modules
-from .protocol import (pickle, dumps, loads, to_serialize, serialize_bytes,
-                       deserialize_bytes, serialize_bytelist)
+from .protocol import (pickle, to_serialize, deserialize_bytes,
+                       serialize_bytelist)
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
@@ -703,7 +703,6 @@ def convert_kwargs_to_str(kwargs, max_len=None):
             return "{{{}".format(", ".join(strs[:i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
-
 
 
 def weight(k, v):
