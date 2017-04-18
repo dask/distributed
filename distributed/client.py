@@ -23,7 +23,7 @@ import socket
 import dask
 from dask.base import tokenize, normalize_token, Base, collections_to_dsk
 from dask.core import flatten, get_dependencies
-from dask.compatibility import apply, unicode
+from dask.compatibility import apply, unicode, PY3
 from dask.context import _globals
 from toolz import first, groupby, merge, valmap, keymap
 import tornado
@@ -264,7 +264,7 @@ class Future(WrappedKey):
 
     def __await__(self):
         tornado_future = self._result()
-        if isinstance(self.client.loop, tornado.platform.asyncio.BaseAsyncIOLoop):
+        if PY3 and isinstance(self.client.loop, tornado.platform.asyncio.BaseAsyncIOLoop):
             return tornado.platform.asyncio.to_asyncio_future(tornado_future).__await__()
         else:
             return tornado_future.__await__()
