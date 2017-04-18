@@ -2067,5 +2067,20 @@ class Worker(WorkerBase):
 
 
 def get_worker():
-    """ Get the worker currently running this task """
+    """ Get the worker currently running this task
+
+    Examples
+    --------
+    >>> def f():
+    ...     worker = get_worker()  # The worker on which this task is running
+    ...     return worker.address
+
+    >>> future = client.submit(f)  # doctest: +SKIP
+    >>> future.result()  # doctest: +SKIP
+    'tcp://127.0.0.1:47373'
+
+    See Also
+    --------
+    worker_client
+    """
     return thread_state.execution_state['worker']
