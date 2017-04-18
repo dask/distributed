@@ -2064,3 +2064,8 @@ class Worker(WorkerBase):
                            for key in keys
                            for c in msg
                            if isinstance(c, (tuple, list, set)))]
+
+
+def get_worker():
+    """ Get the worker currently running this task """
+    return thread_state.execution_state['worker']

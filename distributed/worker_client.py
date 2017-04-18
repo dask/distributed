@@ -12,7 +12,7 @@ from dask.compatibility import apply
 from .sizeof import sizeof
 from .threadpoolexecutor import secede
 from .utils import All, log_errors, sync, tokey, ignoring
-from .worker import thread_state
+from .worker import thread_state, get_worker
 
 
 @contextmanager
@@ -59,10 +59,6 @@ def worker_client(timeout=3, separate_thread=True):
 
 
 local_client = worker_client
-
-
-def get_worker():
-    return thread_state.execution_state['worker']
 
 
 class WorkerClient(Client):
