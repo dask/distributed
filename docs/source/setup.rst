@@ -37,6 +37,17 @@ from manualy SSH-ing into all of the nodes to more automated systems like
 SGE/SLURM/Torque or Yarn/Mesos. Additionally, cluster SSH tools exist to
 send the same commands to many machines. One example is `tmux-cssh`__.
 
+.. note::
+
+  - The scheduler and worker both need to accept TCP connections.  By default
+    the scheduler uses port 8786 and the worker binds to a random open port.
+    If you are behind a firewall then you may have to open particular ports or
+    tell Dask to use particular ports with the ``--port`` and ``-worker-port``
+    keywords.    Other ports like 8787, 8788, and 8789 are also useful to keep
+    open for the diagnostic web interfaces.
+  - More information about relevant ports is available by looking at the help
+    pages with ``dask-scheduler --help`` and ``dask-worker --help``
+
 __ https://github.com/dennishafemann/tmux-cssh
 
 
@@ -153,7 +164,7 @@ You can do the work above easily using :doc:`LocalCluster<local-cluster>`.
 .. code-block:: python
 
    from distributed import LocalCluster
-   c = LocalCluster(nanny=False)
+   c = LocalCluster(processes=False)
 
 A scheduler will be available under ``c.scheduler`` and a list of workers under
 ``c.workers``.  There is an IOLoop running in a background thread.
@@ -176,6 +187,7 @@ instructions that may serve as useful starting points.
 Kubernetes
 ~~~~~~~~~~
 
+*  https://github.com/martindurant/dask-kubernetes
 *  https://github.com/ogrisel/docker-distributed
 *  https://github.com/hammerlab/dask-distributed-on-kubernetes/
 
@@ -187,11 +199,13 @@ Marathon
 DRMAA (SGE, SLURM, Torque, etc..)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+*  https://github.com/dask/dask-drmaa
 *  https://github.com/mfouesneau/dasksge
 
 YARN
 ~~~~
 
+*   https://github.com/dask/dask-yarn
 *   https://knit.readthedocs.io/en/latest/
 
 
@@ -230,4 +244,38 @@ on the Windows boxes. This works because the scheduler environment is de-coupled
 the workers.
 
 __ https://github.com/jfisteus/ztreamy/issues/26
+
+
+Customizing initialization
+--------------------------
+
+Both ``dask-scheduler`` and ``dask-worker`` support a ``--preload`` option that
+allows custom initialization of each scheduler/worker respectively. A module
+or python file passed as a ``--preload`` value is guaranteed to be imported
+before establishing any connection. A ``dask_setup(service)`` function is called
+if found, with a ``Scheduler`` or ``Worker`` instance as the argument. As the
+service stops, ``dask_teardown(service)`` is called if present.
+
+
+
+As an example, consider the following file that creates a
+:doc:`scheduler plugin <plugins>` and registers it with the scheduler
+
+.. code-block:: python
+
+   # scheduler-setup.py
+   from distributed.diagnostics.plugin import SchedulerPlugin
+
+   class MyPlugin(SchedulerPlugin):
+       def add_worker(self, scheduler=None, worker=None, **kwargs):
+           print("Added a new worker at", worker)
+
+   def dask_setup(scheduler):
+       plugin = MyPlugin()
+       scheduler.add_plugin(plugin)
+
+We can then run this preload script by referring to its filename (or module name
+if it is on the path) when we start the scheduler::
+
+   dask-scheduler --preload scheduler-setup.py
 

@@ -11,12 +11,16 @@ import os
 import re
 import shutil
 import socket
+from importlib import import_module
+
 import six
 import sys
 import tblib.pickling_support
 import tempfile
 import threading
 import warnings
+
+from .compatibility import cache_from_source, invalidate_caches, reload
 
 try:
     import resource
@@ -27,7 +31,7 @@ from dask import istask
 from toolz import memoize, valmap
 from tornado import gen
 
-from .compatibility import Queue, PY3, PY2, get_thread_identity
+from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
 from .config import config
 
 
@@ -126,6 +130,12 @@ def get_ipv6(host='2001:4860:4860::8888', port=80):
     The same as get_ip(), but for IPv6.
     """
     return _get_ip(host, port, family=socket.AF_INET6, default='::1')
+
+
+def get_ip_interface(ifname):
+    import psutil
+    L = psutil.net_if_addrs()[ifname]
+    return [x.address for x in L if x.family == socket.AF_INET][0]
 
 
 @contextmanager
@@ -307,6 +317,50 @@ except ImportError:
     pass
 else:
     key_split = lru_cache(100000)(key_split)
+
+
+def key_split_group(x):
+    """A more fine-grained version of key_split
+
+    >>> key_split_group('x')
+    'x'
+    >>> key_split_group('x-1')
+    'x-1'
+    >>> key_split_group('x-1-2-3')
+    'x-1-2-3'
+    >>> key_split_group(('x-2', 1))
+    'x-2'
+    >>> key_split_group("('x-2', 1)")
+    'x-2'
+    >>> key_split_group('hello-world-1')
+    'hello-world-1'
+    >>> key_split_group(b'hello-world-1')
+    'hello-world-1'
+    >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
+    'data'
+    >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
+    'myclass'
+    >>> key_split_group(None)
+    'Other'
+    >>> key_split_group('x-abcdefab')  # ignores hex
+    'x-abcdefab'
+    """
+    typ = type(x)
+    if typ is tuple:
+        return x[0]
+    elif typ is str:
+        if x[0] == '(':
+            return x.split(',', 1)[0].strip('()"\'')
+        elif len(x) == 32 and re.match(r'[a-f0-9]{32}', x):
+            return 'data'
+        elif x[0] == '<':
+            return x.strip('<>').split()[0].split('.')[-1]
+        else:
+            return x
+    elif typ is bytes:
+        return key_split_group(x.decode())
+    else:
+        return 'Other'
 
 
 @contextmanager
@@ -646,3 +700,46 @@ def open_port(host=''):
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def import_file(path):
+    """ Loads modules for a file (.py, .pyc, .zip, .egg) """
+    directory, filename = os.path.split(path)
+    name, ext = os.path.splitext(filename)
+    names_to_import = []
+    tmp_python_path = None
+
+    if ext in ('.py', '.pyc'):
+        if directory not in sys.path:
+            tmp_python_path = directory
+        names_to_import.append(name)
+        # Ensures that no pyc file will be reused
+        cache_file = cache_from_source(path)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+    if ext in ('.egg', '.zip'):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+        if ext == '.egg':
+            import pkg_resources
+            pkgs = pkg_resources.find_distributions(path)
+            for pkg in pkgs:
+                names_to_import.append(pkg.project_name)
+        elif ext == '.zip':
+            names_to_import.append(name)
+
+    loaded = []
+    if not names_to_import:
+        logger.warning("Found nothing to import from %s", filename)
+    else:
+        invalidate_caches()
+        if tmp_python_path is not None:
+            sys.path.insert(0, tmp_python_path)
+        try:
+            for name in names_to_import:
+                logger.info("Reload module %s from %s file", name, ext)
+                loaded.append(reload(import_module(name)))
+        finally:
+            if tmp_python_path is not None:
+                sys.path.remove(tmp_python_path)
+    return loaded
