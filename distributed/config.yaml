@@ -17,6 +17,17 @@ multiprocessing-method: forkserver
 # Communication options
 tcp-timeout: 30         # seconds delay before calling an unresponsive connection dead
 default-scheme: tcp
+#tls:
+    #ca-file: xxx.pem
+    #scheduler:
+        #key: xxx.pem
+        #cert: xxx.pem
+    #worker:
+        #key: xxx.pem
+        #cert: xxx.pem
+    #client:
+        #key: xxx.pem
+        #cert: xxx.pem
 
 # Bokeh web dashboard
 bokeh-export-tool: False

@@ -22,6 +22,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
+from .config import config
 from .core import connect, rpc, CommClosedError
 from .metrics import time
 from .utils import ignoring, log_errors, sync, mp_context, get_ip, get_ipv6
@@ -784,3 +785,18 @@ def captured_handler(handler):
         yield handler.stream
     finally:
         handler.stream = orig_stream
+
+
+@contextmanager
+def new_config(new_config):
+    """
+    Temporarily change configuration dictionary.
+    """
+    orig_config = config.copy()
+    try:
+        config.clear()
+        config.update(new_config)
+        yield
+    finally:
+        config.clear()
+        config.update(orig_config)

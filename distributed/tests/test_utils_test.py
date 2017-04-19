@@ -8,11 +8,11 @@ from time import sleep
 import pytest
 from tornado import gen
 
-from distributed import Scheduler, Worker, Client
+from distributed import Scheduler, Worker, Client, config
 from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils_test import (cluster, loop, gen_cluster,
-        gen_test, wait_for_port, slow)
+        gen_test, wait_for_port, slow, new_config)
 from distributed.utils import get_ip
 
 def test_cluster(loop):
@@ -88,3 +88,12 @@ def test_wait_for_port():
         wait_for_port(s1.getsockname())
         t2 = time()
         assert t2 - t1 <= 2.0
+
+
+def test_new_config():
+    c = config.copy()
+    with new_config({'xyzzy': 5}):
+        assert config == {'xyzzy': 5}
+
+    assert config == c
+    assert 'xyzzy' not in config
