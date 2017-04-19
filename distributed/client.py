@@ -360,6 +360,8 @@ class Client(object):
     --------
     distributed.scheduler.Scheduler: Internal scheduler
     """
+    _future = Future
+
     def __init__(self, address=None, start=True, loop=None, timeout=5,
                  set_as_default=True, scheduler_file=None, **kwargs):
         self.futures = dict()
@@ -517,7 +519,7 @@ class Client(object):
                     yield gen.sleep(timeout)
 
     @gen.coroutine
-    def _ensure_connected(self, timeout=3):
+    def _ensure_connected(self, timeout=5):
         if self.scheduler_comm and not self.scheduler_comm.closed():
             return
 
@@ -798,7 +800,7 @@ class Client(object):
         skey = tokey(key)
 
         if skey in self.futures:
-            return Future(key, self)
+            return self._future(key, self)
 
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
@@ -1113,13 +1115,13 @@ class Client(object):
                                             client=self.id,
                                             broadcast=broadcast)
         if isinstance(data, dict):
-            out = {k: Future(k, self) for k in keys}
+            out = {k: self._future(k, self) for k in keys}
         elif isinstance(data, (tuple, list, set, frozenset)):
-            out = type(data)([Future(k, self) for k in keys])
+            out = type(data)([self._future(k, self) for k in keys])
         elif isinstance(data, (Iterable, Iterator)):
-            out = [Future(k, self) for k in keys]
+            out = [self._future(k, self) for k in keys]
         else:
-            out = [Future(k, self) for k in keys]
+            out = [self._future(k, self) for k in keys]
 
         for key in keys:
             self.futures[key].finish(type=None)
@@ -1495,7 +1497,7 @@ class Client(object):
 
         keyset = set(keys)
         flatkeys = list(map(tokey, keys))
-        futures = {key: Future(key, self) for key in keyset}
+        futures = {key: self._future(key, self) for key in keyset}
 
         values = {k for k, v in dsk.items() if isinstance(v, Future)
                                             and k not in keyset}
@@ -1605,7 +1607,7 @@ class Client(object):
                 if not changed:
                     changed = True
                     dsk = dict(dsk)
-                dsk[key] = Future(key, self)
+                dsk[key] = self._future(key, self)
 
         if changed:
             dsk, _ = dask.optimize.cull(dsk, keys)

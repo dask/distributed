@@ -17,6 +17,11 @@ try:
 except:
     pass
 
+try:
+    from .asyncio import AsyncClient
+except:
+    pass
+
 from ._version import get_versions
 versions = get_versions()
 __version__ = versions['version']
