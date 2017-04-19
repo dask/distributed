@@ -517,7 +517,7 @@ class Client(object):
                     yield gen.sleep(timeout)
 
     @gen.coroutine
-    def _ensure_connected(self, timeout=5):
+    def _ensure_connected(self, timeout=3):
         if self.scheduler_comm and not self.scheduler_comm.closed():
             return
 
