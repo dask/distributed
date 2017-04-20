@@ -800,3 +800,15 @@ def new_config(new_config):
     finally:
         config.clear()
         config.update(orig_config)
+
+
+certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__),
+                                         'tests'))
+
+def get_cert(filename):
+    """
+    Get the path to one of the test TLS certificates.
+    """
+    path = os.path.join(certs_dir, filename)
+    assert os.path.exists(path), path
+    return path

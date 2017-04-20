@@ -160,5 +160,8 @@ if __name__ == '__main__':
         f.write(ca_cert)
     with open('tls-key.pem', 'w') as f:
         f.write(key)
+    with open('tls-key-cert.pem', 'w') as f:
+        f.write(key)
+        f.write(cert)
 
     unmake_ca()

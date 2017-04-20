@@ -15,7 +15,7 @@ from distributed.core import pingpong
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
-                                    requires_ipv6, has_ipv6)
+                                    requires_ipv6, has_ipv6, get_cert)
 
 from distributed.protocol import (loads, dumps,
                                   to_serialize, Serialized, serialize, deserialize)
@@ -40,14 +40,6 @@ EXTERNAL_IP4 = get_ip()
 if has_ipv6():
     EXTERNAL_IP6 = get_ipv6()
 
-
-certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__),
-                                         '../../tests'))
-
-def get_cert(filename):
-    path = os.path.join(certs_dir, filename)
-    assert os.path.exists(path), path
-    return path
 
 ca_file = get_cert('tls-ca-cert.pem')
 

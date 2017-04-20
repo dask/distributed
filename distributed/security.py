@@ -1,5 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
+import ssl
+
 from . import config
 
 
@@ -88,4 +90,35 @@ class Security(object):
         for field in per_role_fields:
             k = '%s_%s_%s' % (category, role, field)
             d[field] = getattr(self, k)
+        return d
+
+    def _get_tls_context(self, tls, purpose):
+        if tls.get('ca_file') and tls.get('cert'):
+            ctx = ssl.create_default_context(purpose=purpose,
+                                             cafile=tls['ca_file'])
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            # We expect a dedicated CA for the cluster and people using
+            # IP addresses rather than hostnames
+            ctx.check_hostname = False
+            ctx.load_cert_chain(tls['cert'], tls.get('key'))
+            return ctx
+
+    def get_connection_args(self, role):
+        """
+        Get the *connection_args* argument for a connect() call with
+        the given *role*.
+        """
+        d = {}
+        tls = self.get_tls_config_for_role(role)
+        d['ssl_context'] = self._get_tls_context(tls, ssl.Purpose.SERVER_AUTH)
+        return d
+
+    def get_listen_args(self, role):
+        """
+        Get the *connection_args* argument for a listen() call with
+        the given *role*.
+        """
+        d = {}
+        tls = self.get_tls_config_for_role(role)
+        d['ssl_context'] = self._get_tls_context(tls, ssl.Purpose.CLIENT_AUTH)
         return d
