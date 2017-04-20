@@ -39,6 +39,7 @@ from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import connect, rpc, clean_exception, CommClosedError
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
+from .security import Security
 from .worker import dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)
@@ -361,7 +362,8 @@ class Client(object):
     distributed.scheduler.Scheduler: Internal scheduler
     """
     def __init__(self, address=None, start=True, loop=None, timeout=3,
-                 set_as_default=True, scheduler_file=None, **kwargs):
+                 set_as_default=True, scheduler_file=None,
+                 security=None, **kwargs):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
@@ -374,6 +376,9 @@ class Client(object):
         self.extensions = {}
         self.scheduler_file = scheduler_file
         self._startup_kwargs = kwargs
+        self.security = security or Security()
+        assert isinstance(self.security, Security)
+        self.connection_args = self.security.get_connection_args('client')
 
         if hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object
@@ -388,12 +393,12 @@ class Client(object):
             dask.set_options(shuffle='tasks')
 
         self._handlers = {
-                'key-in-memory': self._handle_key_in_memory,
-                'lost-data': self._handle_lost_data,
-                'cancelled-key': self._handle_cancelled_key,
-                'task-erred': self._handle_task_erred,
-                'restart': self._handle_restart,
-                'error': self._handle_error
+            'key-in-memory': self._handle_key_in_memory,
+            'lost-data': self._handle_lost_data,
+            'cancelled-key': self._handle_cancelled_key,
+            'task-erred': self._handle_task_erred,
+            'restart': self._handle_restart,
+            'error': self._handle_error
         }
 
         if start:
@@ -514,8 +519,8 @@ class Client(object):
         if self.scheduler_comm and not self.scheduler_comm.closed():
             return
 
-        comm = yield connect(self.scheduler.address,
-                             timeout=timeout)
+        comm = yield connect(self.scheduler.address, timeout=timeout,
+                             connection_args=self.connection_args)
 
         yield self.scheduler.identity()
 

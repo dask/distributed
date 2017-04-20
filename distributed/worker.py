@@ -32,6 +32,7 @@ from .core import (error_message, CommClosedError,
 from .metrics import time
 from .preloading import preload_modules
 from .protocol.pickle import dumps, loads
+from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
@@ -70,7 +71,8 @@ class WorkerBase(Server):
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
-                 silence_logs=None, death_timeout=None, preload=(), **kwargs):
+                 silence_logs=None, death_timeout=None, preload=(),
+                 security=None, **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -86,6 +88,11 @@ class WorkerBase(Server):
             logger.setLevel(silence_logs)
         if not os.path.exists(self.local_dir):
             os.mkdir(self.local_dir)
+
+        self.security = security or Security()
+        assert isinstance(self.security, Security)
+        self.connection_args = self.security.get_connection_args('worker')
+        self.listen_args = self.security.get_listen_args('worker')
 
         if memory_limit == 'auto':
             memory_limit = int(TOTAL_MEMORY * 0.6 * min(1, self.ncores / _ncores))
@@ -236,16 +243,18 @@ class WorkerBase(Server):
         # XXX Factor this out
         if not addr_or_port:
             # Default address is the required one to reach the scheduler
-            self.listen(get_local_address_for(self.scheduler.address))
+            self.listen(get_local_address_for(self.scheduler.address),
+                        listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
         elif isinstance(addr_or_port, int):
             # addr_or_port is an integer => assume TCP
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
             )
-            self.listen((self.ip, addr_or_port))
+            self.listen((self.ip, addr_or_port),
+                        listen_args=self.listen_args)
         else:
-            self.listen(addr_or_port)
+            self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
 
         self.name = self.name or self.address

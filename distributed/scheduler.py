@@ -35,6 +35,7 @@ from .publish import PublishExtension
 from .channels import ChannelScheduler
 from .stealing import WorkStealing
 from .recreate_exceptions import ReplayExceptionScheduler
+from .security import Security
 from .utils import (All, ignoring, get_ip, get_fileno_limit, log_errors,
         key_split, validate_key)
 from .utils_comm import (scatter_to_workers, gather_from_workers)
@@ -191,7 +192,8 @@ class Scheduler(Server):
                  services=None, allowed_failures=ALLOWED_FAILURES,
                  extensions=[ChannelScheduler, PublishExtension, WorkStealing,
                              ReplayExceptionScheduler],
-                 validate=False, scheduler_file=None, **kwargs):
+                 validate=False, scheduler_file=None, security=None,
+                 **kwargs):
 
         # Attributes
         self.allowed_failures = allowed_failures
@@ -203,6 +205,10 @@ class Scheduler(Server):
         self.service_specs = services or {}
         self.services = {}
         self.scheduler_file = scheduler_file
+        self.security = security or Security()
+        assert isinstance(self.security, Security)
+        self.connection_args = self.security.get_connection_args('scheduler')
+        self.listen_args = self.security.get_listen_args('scheduler')
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -419,10 +425,10 @@ class Scheduler(Server):
             if isinstance(addr_or_port, int):
                 # Listen on all interfaces.  `get_ip()` is not suitable
                 # as it would prevent connecting via 127.0.0.1.
-                self.listen(('', addr_or_port))
+                self.listen(('', addr_or_port), listen_args=self.listen_args)
                 self.ip = get_ip()
             else:
-                self.listen(addr_or_port)
+                self.listen(addr_or_port, listen_args=self.listen_args)
                 self.ip = get_address_host(self.listen_address)
 
             # Services listen on all addresses
@@ -1273,7 +1279,7 @@ class Scheduler(Server):
         Scheduler.handle_client: Equivalent coroutine for clients
         """
         try:
-            comm = yield connect(worker)
+            comm = yield connect(worker, connection_args=self.connection_args)
         except Exception as e:
             logger.error("Failed to connect to worker %r: %s",
                          worker, e)
@@ -1522,8 +1528,7 @@ class Scheduler(Server):
         @gen.coroutine
         def send_message(addr):
             comm = yield connect(addr, deserialize=self.deserialize,
-                                 connection_args=None #XXX
-                                 )
+                                 connection_args=self.connection_args)
             resp = yield send_recv(comm, close=True, **msg)
             raise gen.Return(resp)
 

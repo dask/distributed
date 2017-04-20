@@ -25,6 +25,7 @@ from tornado.ioloop import IOLoop
 from .config import config
 from .core import connect, rpc, CommClosedError
 from .metrics import time
+from .security import Security
 from .utils import ignoring, log_errors, sync, mp_context, get_ip, get_ipv6
 import pytest
 
@@ -654,19 +655,20 @@ else:
 
 
 @gen.coroutine
-def assert_can_connect(addr, timeout=None):
+def assert_can_connect(addr, timeout=None, connection_args=None):
     """
     Check that it is possible to connect to the distributed *addr*
     within the given *timeout*.
     """
     if timeout is None:
         timeout = 0.2
-    comm = yield connect(addr, timeout=timeout)
+    comm = yield connect(addr, timeout=timeout,
+                         connection_args=connection_args)
     comm.abort()
 
 
 @gen.coroutine
-def assert_cannot_connect(addr, timeout=None):
+def assert_cannot_connect(addr, timeout=None, connection_args=None):
     """
     Check that it is impossible to connect to the distributed *addr*
     within the given *timeout*.
@@ -674,89 +676,95 @@ def assert_cannot_connect(addr, timeout=None):
     if timeout is None:
         timeout = 0.2
     with pytest.raises(EnvironmentError):
-        comm = yield connect(addr, timeout=timeout)
+        comm = yield connect(addr, timeout=timeout,
+                             connection_args=connection_args)
         comm.abort()
 
 
 @gen.coroutine
-def assert_can_connect_from_everywhere_4_6(port, timeout=None):
+def assert_can_connect_from_everywhere_4_6(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is reachable from all IPv4 and IPv6 addresses.
     """
+    args = (timeout, connection_args)
     futures = [
-        assert_can_connect('tcp://127.0.0.1:%d' % port, timeout),
-        assert_can_connect('tcp://%s:%d' % (get_ip(), port), timeout),
+        assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
+        assert_can_connect('tcp://%s:%d' % (get_ip(), port), *args),
         ]
     if has_ipv6():
         futures += [
-            assert_can_connect('tcp://[::1]:%d' % port, timeout),
-            assert_can_connect('tcp://[%s]:%d' % (get_ipv6(), port), timeout),
+            assert_can_connect('tcp://[::1]:%d' % port, *args),
+            assert_can_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
             ]
     yield futures
 
 @gen.coroutine
-def assert_can_connect_from_everywhere_4(port, timeout=None):
+def assert_can_connect_from_everywhere_4(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is reachable from all IPv4 addresses.
     """
+    args = (timeout, connection_args)
     futures = [
-            assert_can_connect('tcp://127.0.0.1:%d' % port, timeout),
-            assert_can_connect('tcp://%s:%d' % (get_ip(), port), timeout),
+            assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
+            assert_can_connect('tcp://%s:%d' % (get_ip(), port), *args),
         ]
     if has_ipv6():
         futures += [
-            assert_cannot_connect('tcp://[::1]:%d' % port, timeout),
-            assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), timeout),
+            assert_cannot_connect('tcp://[::1]:%d' % port, *args),
+            assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
             ]
     yield futures
 
 @gen.coroutine
-def assert_can_connect_locally_4(port, timeout=None):
+def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is only reachable from local IPv4 addresses.
     """
+    args = (timeout, connection_args)
     futures = [
-        assert_can_connect('tcp://127.0.0.1:%d' % port, timeout),
+        assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
         ]
     if get_ip() != '127.0.0.1':  # No outside IPv4 connectivity?
         futures += [
-            assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), timeout),
+            assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), *args),
             ]
     if has_ipv6():
         futures += [
-            assert_cannot_connect('tcp://[::1]:%d' % port, timeout),
-            assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), timeout),
+            assert_cannot_connect('tcp://[::1]:%d' % port, *args),
+            assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
             ]
     yield futures
 
 @gen.coroutine
-def assert_can_connect_from_everywhere_6(port, timeout=None):
+def assert_can_connect_from_everywhere_6(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is reachable from all IPv6 addresses.
     """
     assert has_ipv6()
+    args = (timeout, connection_args)
     futures = [
-        assert_cannot_connect('tcp://127.0.0.1:%d' % port, timeout),
-        assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), timeout),
-        assert_can_connect('tcp://[::1]:%d' % port, timeout),
-        assert_can_connect('tcp://[%s]:%d' % (get_ipv6(), port), timeout),
+        assert_cannot_connect('tcp://127.0.0.1:%d' % port, *args),
+        assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), *args),
+        assert_can_connect('tcp://[::1]:%d' % port, *args),
+        assert_can_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
         ]
     yield futures
 
 @gen.coroutine
-def assert_can_connect_locally_6(port, timeout=None):
+def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is only reachable from local IPv6 addresses.
     """
     assert has_ipv6()
+    args = (timeout, connection_args)
     futures = [
-        assert_cannot_connect('tcp://127.0.0.1:%d' % port, timeout),
-        assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), timeout),
-        assert_can_connect('tcp://[::1]:%d' % port, timeout),
+        assert_cannot_connect('tcp://127.0.0.1:%d' % port, *args),
+        assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), *args),
+        assert_can_connect('tcp://[::1]:%d' % port, *args),
         ]
     if get_ipv6() != '::1':  # No outside IPv6 connectivity?
         futures += [
-            assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), timeout),
+            assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
             ]
     yield futures
 
@@ -812,3 +820,29 @@ def get_cert(filename):
     path = os.path.join(certs_dir, filename)
     assert os.path.exists(path), path
     return path
+
+
+def tls_security():
+    """
+    A Security object with proper TLS configuration.
+    """
+    ca_file = get_cert('tls-ca-cert.pem')
+    keycert = get_cert('tls-key-cert.pem')
+
+    c = {
+        'tls': {
+            'ca-file': ca_file,
+            'client': {
+                'cert': keycert,
+                },
+            'scheduler': {
+                'cert': keycert,
+                },
+            'worker': {
+                'cert': keycert,
+                },
+            },
+        }
+    with new_config(c):
+        sec = Security()
+    return sec

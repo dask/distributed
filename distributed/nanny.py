@@ -16,6 +16,7 @@ from tornado import gen
 from .comm import get_address_host
 from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
+from .security import Security
 from .utils import get_ip, ignoring, mp_context
 from .worker import _ncores, run
 
@@ -33,7 +34,7 @@ class Nanny(Server):
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
-                 death_timeout=None, preload=(), **kwargs):
+                 death_timeout=None, preload=(), security=None, **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -46,6 +47,12 @@ class Nanny(Server):
         self.resources = resources
         self.death_timeout = death_timeout
         self.preload = preload
+
+        self.security = security or Security()
+        assert isinstance(self.security, Security)
+        self.connection_args = self.security.get_connection_args('worker')
+        self.listen_args = self.security.get_listen_args('worker')
+
         if not local_dir:
             local_dir = tempfile.mkdtemp(prefix='nanny-')
             self._should_cleanup_local_dir = True
@@ -95,9 +102,9 @@ class Nanny(Server):
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
             )
-            self.listen((self.ip, addr_or_port))
+            self.listen((self.ip, addr_or_port), listen_args=self.listen_args)
         else:
-            self.listen(addr_or_port)
+            self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
 
         logger.info('        Start Nanny at: %r', self.address)
