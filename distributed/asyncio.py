@@ -2,7 +2,7 @@ import asyncio
 from functools import wraps
 
 from tornado.gen import is_coroutine_function
-from tornado.platform.asyncio import BaseAsyncIOLoop,
+from tornado.platform.asyncio import BaseAsyncIOLoop
 from tornado.platform.asyncio import to_asyncio_future, to_tornado_future
 
 from .client import Client, Future
@@ -15,7 +15,7 @@ def to_asyncio(method):
     return convert
 
 
-class Asyncify(type):
+class Aiofy(type):
 
     def __new__(meta, cls, bases, attrs):
         for base in bases:
@@ -33,14 +33,14 @@ class AsyncIOLoop(BaseAsyncIOLoop):
         return self.asyncio_loop.is_running()
 
 
-class AsyncFuture(Future, metaclass=Asyncify):
+class AsyncIOFuture(Future, metaclass=Aiofy):
 
     def __await__(self):
         return self.result().__await__()
 
 
-class AsyncClient(Client, metaclass=Asyncify):
-    _future = AsyncFuture
+class AsyncIOClient(Client, metaclass=Aiofy):
+    _future = AsyncIOFuture
 
     def __init__(self, address=None, loop=None, timeout=3, start=True,
                  set_as_default=False, scheduler_file=None, **kwargs):

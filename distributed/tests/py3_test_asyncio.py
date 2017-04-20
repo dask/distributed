@@ -5,7 +5,7 @@ aiohttp = pytest.importorskip('aiohttp')  # actually pytest-aiohttp
 from operator import add
 from dask import delayed
 from distributed.utils_test import gen_cluster, inc, div
-from distributed.asyncio import AsyncClient, AsyncFuture
+from distributed.asyncio import AsyncIOClient, AsyncIOFuture
 
 
 @delayed
@@ -14,9 +14,9 @@ def decrement(x):
 
 
 async def test_asyncio_client():
-    async with AsyncClient() as c:
+    async with AsyncIOClient() as c:
         future = c.submit(inc, 1)
-        assert isinstance(future, AsyncFuture)
+        assert isinstance(future, AsyncIOFuture)
 
         result = await future
         assert result == 2
