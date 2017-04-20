@@ -2,8 +2,8 @@ import asyncio
 from functools import wraps
 
 from tornado.gen import is_coroutine_function
-from tornado.platform.asyncio import BaseAsyncIOLoop, to_asyncio_future, to_tornado_future
-
+from tornado.platform.asyncio import BaseAsyncIOLoop,
+from tornado.platform.asyncio import to_asyncio_future, to_tornado_future
 
 from .client import Client, Future
 
@@ -25,6 +25,14 @@ class Asyncify(type):
         return type.__new__(meta, cls, bases, attrs)
 
 
+class AsyncIOLoop(BaseAsyncIOLoop):
+
+    @property
+    def _running(self):
+        """Distributed checks IOLoop's _running property extensively"""
+        return self.asyncio_loop.is_running()
+
+
 class AsyncFuture(Future, metaclass=Asyncify):
 
     def __await__(self):
@@ -34,28 +42,21 @@ class AsyncFuture(Future, metaclass=Asyncify):
 class AsyncClient(Client, metaclass=Asyncify):
     _future = AsyncFuture
 
-    def __init__(self, address=None, loop=None, timeout=3,
-                 set_as_default=True, scheduler_file=None, **kwargs):
-        loop = loop or asyncio.get_event_loop()
-        ioloop = BaseAsyncIOLoop(loop)
-        super().__init__(address=address, start=False, loop=ioloop,
+    def __init__(self, address=None, loop=None, timeout=3, start=True,
+                 set_as_default=False, scheduler_file=None, **kwargs):
+        self.aioloop = loop or asyncio.get_event_loop()
+        tornloop = AsyncIOLoop(self.aioloop)
+        super().__init__(address=address, start=start, loop=tornloop,
                          timeout=timeout, set_as_default=False,
                          scheduler_file=None, **kwargs)
 
+    async def __aenter__(self):
+        if self.status is not 'running':
+            await self.start()
+        return self
 
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    client = AsyncClient('tcp://127.0.0.1:53696', loop=loop)
+    async def __aexit__(self, type, value, traceback):
+        await self.shutdown()
 
-    async def run():
-        print('starting')
-        await client.start()
-        print('started')
-
-        out = await client.scatter([1, 2, 3, 4])
-        print(out)
-
-        first = await out[0]
-        print(first)
-
-    loop.run_until_complete(run())
+    def __del__(self):
+        self.aioloop.run_until_complete(self.shutdown())
