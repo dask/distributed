@@ -413,22 +413,15 @@ def test_send_recv_args():
     server = Server({'echo': echo})
     server.listen(0)
 
-    addr = '127.0.0.1:%d' % server.port
-    addr2 = server.address
-
-    result = yield send_recv(addr=addr, op='echo', x=b'1')
+    comm = yield connect(server.address)
+    result = yield send_recv(comm, op='echo', x=b'1')
     assert result == b'1'
-    result = yield send_recv(addr=addr, op='echo', x=b'2', reply=False)
-    assert result == None
-    result = yield send_recv(addr=addr2, op='echo', x=b'2')
-    assert result == b'2'
-
-    comm = yield connect(addr)
-    result = yield send_recv(comm, op='echo', x=b'3')
-    assert result == b'3'
     assert not comm.closed()
-    result = yield send_recv(comm, op='echo', x=b'4', close=True)
-    assert result == b'4'
+    result = yield send_recv(comm, op='echo', x=b'2', reply=False)
+    assert result == None
+    assert not comm.closed()
+    result = yield send_recv(comm, op='echo', x=b'3', close=True)
+    assert result == b'3'
     assert comm.closed()
 
     server.stop()

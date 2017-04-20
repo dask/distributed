@@ -85,16 +85,15 @@ class Server(object):
     default_port = 0
 
     def __init__(self, handlers, connection_limit=512, deserialize=True,
-                 io_loop=None):
+                 connection_args=None, io_loop=None):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._address = None
         self._listen_address = None
         self._port = None
         self._comms = {}
-        self.rpc = ConnectionPool(limit=connection_limit,
-                                  deserialize=deserialize)
         self.deserialize = deserialize
+        self.connection_args = connection_args
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
@@ -103,6 +102,11 @@ class Server(object):
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
+
+        # XXX This has nothing to do with serving comms
+        self.rpc = ConnectionPool(limit=connection_limit,
+                                  deserialize=deserialize,
+                                  connection_args=connection_args)
 
         if hasattr(self, 'loop'):
             # XXX?
@@ -183,7 +187,7 @@ class Server(object):
     def identity(self, comm):
         return {'type': type(self).__name__, 'id': self.id}
 
-    def listen(self, port_or_addr=None):
+    def listen(self, port_or_addr=None, listen_args=None):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -194,7 +198,8 @@ class Server(object):
             addr = port_or_addr
             assert isinstance(addr, string_types)
         self.listener = listen(addr, self.handle_comm,
-                               deserialize=self.deserialize)
+                               deserialize=self.deserialize,
+                               connection_args=listen_args)
         self.listener.start()
 
     @gen.coroutine
@@ -287,24 +292,17 @@ def pingpong(comm):
 
 
 @gen.coroutine
-def send_recv(comm=None, addr=None, reply=True, deserialize=True, **kwargs):
+def send_recv(comm, reply=True, deserialize=True, **kwargs):
     """ Send and recv with a Comm.
 
     Keyword arguments turn into the message
 
     response = yield send_recv(comm, op='ping', reply=True)
     """
-    assert (comm is None) != (addr is None)
-
     msg = kwargs
     msg['reply'] = reply
     please_close = kwargs.get('close')
-
-    if comm is None:
-        comm = yield connect(addr_from_args(addr), deserialize=deserialize)
-        force_close = True
-    else:
-        force_close = False
+    force_close = False
 
     try:
         yield comm.write(msg)
@@ -355,12 +353,14 @@ class rpc(object):
     comms = ()
     address = None
 
-    def __init__(self, arg=None, comm=None, deserialize=True, timeout=3):
+    def __init__(self, arg=None, comm=None, deserialize=True, timeout=3,
+                 connection_args=None):
         self.comms = {}
         self.address = coerce_to_address(arg)
         self.timeout = timeout
         self.status = 'running'
         self.deserialize = deserialize
+        self.connection_args = connection_args
         rpc.active += 1
 
     @gen.coroutine
@@ -395,7 +395,8 @@ class rpc(object):
             del self.comms[s]
         if not open or comm.closed():
             comm = yield connect(self.address, self.timeout,
-                                 deserialize=self.deserialize)
+                                 deserialize=self.deserialize,
+                                 connection_args=self.connection_args)
         self.comms[comm] = False     # mark as taken
         raise gen.Return(comm)
 
@@ -518,7 +519,7 @@ class ConnectionPool(object):
     deserialize: bool
         Whether or not to deserialize data by default or pass it through
     """
-    def __init__(self, limit=512, deserialize=True):
+    def __init__(self, limit=512, deserialize=True, connection_args=None):
         self.open = 0          # Total number of open comms
         self.active = 0        # Number of comms currently in use
         self.limit = limit     # Max number of open comms
@@ -527,6 +528,7 @@ class ConnectionPool(object):
         # Invariant: len(occupied) == active
         self.occupied = defaultdict(set)
         self.deserialize = deserialize
+        self.connection_args = connection_args
         self.event = Event()
 
     def __str__(self):
@@ -564,7 +566,8 @@ class ConnectionPool(object):
         self.open += 1
         try:
             comm = yield connect(addr, timeout=timeout,
-                                 deserialize=self.deserialize)
+                                 deserialize=self.deserialize,
+                                 connection_args=self.connection_args)
         except Exception:
             self.open -= 1
             raise

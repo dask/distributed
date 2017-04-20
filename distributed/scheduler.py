@@ -1519,8 +1519,15 @@ class Scheduler(Server):
         else:
             addresses = workers
 
-        results = yield All([send_recv(addr=address, close=True,
-                                       deserialize=self.deserialize, **msg)
+        @gen.coroutine
+        def send_message(addr):
+            comm = yield connect(addr, deserialize=self.deserialize,
+                                 connection_args=None #XXX
+                                 )
+            resp = yield send_recv(comm, close=True, **msg)
+            raise gen.Return(resp)
+
+        results = yield All([send_message(self.coerce_address(address))
                              for address in addresses
                              if address is not None])
 
