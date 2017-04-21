@@ -101,6 +101,7 @@ class Security(object):
             # IP addresses rather than hostnames
             ctx.check_hostname = False
             ctx.load_cert_chain(tls['cert'], tls.get('key'))
+            # TODO: allow cipher configuration
             return ctx
 
     def get_connection_args(self, role):

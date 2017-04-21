@@ -29,5 +29,8 @@ default-scheme: tcp
         #key: xxx.pem
         #cert: xxx.pem
 
+# TODO: add TLS cipher suite configuration
+# TODO: add comm security requirement configuration
+
 # Bokeh web dashboard
 bokeh-export-tool: False
