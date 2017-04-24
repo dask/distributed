@@ -118,7 +118,7 @@ class WorkerBase(ServerNode):
         self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
-        self.scheduler = rpc(scheduler_addr)
+        self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.name = name
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
@@ -532,10 +532,10 @@ class WorkerBase(ServerNode):
                     for k, v in who_has.items()
                     if k not in self.data}
         result, missing_keys, missing_workers = yield gather_from_workers(
-                who_has)
+                who_has, rpc=self.rpc)
         if missing_keys:
-            logger.warn("Could not find data: %s on workers: %s",
-                        missing_keys, missing_workers)
+            logger.warn("Could not find data: %s on workers: %s (who_has: %s)",
+                        missing_keys, missing_workers, who_has)
             raise Return({'status': 'missing-data',
                           'keys': missing_keys})
         else:

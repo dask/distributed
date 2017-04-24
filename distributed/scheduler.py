@@ -1392,6 +1392,7 @@ class Scheduler(ServerNode):
             ncores = {w: self.ncores[w] for w in workers}
 
         keys, who_has, nbytes = yield scatter_to_workers(ncores, data,
+                                                         rpc=self.rpc,
                                                          report=False,
                                                          serialize=False)
 
@@ -1682,7 +1683,7 @@ class Scheduler(ServerNode):
             del_workers = {k: v for k, v in reverse_dict(del_keys).items() if v}
             yield [self.rpc(addr=worker).delete_data(keys=list(keys),
                                                      report=False)
-                    for worker, keys in del_workers.items()]
+                   for worker, keys in del_workers.items()]
 
             for worker, keys in del_workers.items():
                 self.has_what[worker] -= keys

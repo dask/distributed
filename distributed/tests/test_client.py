@@ -1188,14 +1188,17 @@ def test_upload_large_file(c, s, a, b):
     assert a.local_dir
     assert b.local_dir
     with tmp_text('myfile', 'abc') as fn:
-        yield c._upload_large_file(fn, remote_filename='x')
-        yield c._upload_large_file(fn)
+        with tmp_text('myfile2', 'def') as fn2:
+            yield c._upload_large_file(fn, remote_filename='x')
+            yield c._upload_large_file(fn2)
 
-        for w in [a, b]:
-            assert os.path.exists(os.path.join(w.local_dir, 'x'))
-            assert os.path.exists(os.path.join(w.local_dir, 'myfile'))
-            with open(os.path.join(w.local_dir, 'x')) as f:
-                assert f.read() == 'abc'
+            for w in [a, b]:
+                assert os.path.exists(os.path.join(w.local_dir, 'x'))
+                assert os.path.exists(os.path.join(w.local_dir, 'myfile2'))
+                with open(os.path.join(w.local_dir, 'x')) as f:
+                    assert f.read() == 'abc'
+                with open(os.path.join(w.local_dir, 'myfile2')) as f:
+                    assert f.read() == 'def'
 
 
 def test_upload_file_sync(loop):

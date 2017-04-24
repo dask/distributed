@@ -13,6 +13,7 @@ class Node(object):
     def __init__(self, connection_limit=512, deserialize=True,
                  connection_args=None, io_loop=None):
         self.io_loop = io_loop or IOLoop.current()
+        self.connection_args = connection_args
         self.rpc = ConnectionPool(limit=connection_limit,
                                   deserialize=deserialize,
                                   connection_args=connection_args)
@@ -22,7 +23,7 @@ class ServerNode(Node, Server):
     """
     Base class for server nodes in a distributed cluster.
     """
-    # TODO factor out listening, services, etc. here
+    # TODO factor out security, listening, services, etc. here
 
     # XXX avoid inheriting from Server? there is some large potential for confusion
     # between base and derived attribute namespaces...

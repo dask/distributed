@@ -69,12 +69,16 @@ class Nanny(ServerNode):
         self.status = None
         self.process = None
         self.loop = loop or IOLoop.current()
-        self.scheduler = rpc(scheduler_addr)
+        self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.services = services
         self.name = name
         self.memory_limit = memory_limit
         self.quiet = quiet
         self.should_watch = True
+
+        if silence_logs:
+            logger.setLevel(silence_logs)
+        self.silence_logs = silence_logs
 
         handlers = {'instantiate': self.instantiate,
                     'kill': self._kill,
@@ -82,10 +86,6 @@ class Nanny(ServerNode):
                     'terminate': self._close,
                     'monitor_resources': self.monitor_resources,
                     'run': self.run}
-
-        if silence_logs:
-            logger.setLevel(silence_logs)
-        self.silence_logs = silence_logs
 
         super(Nanny, self).__init__(handlers, io_loop=self.loop, **kwargs)
 
@@ -140,7 +140,7 @@ class Nanny(ServerNode):
         if isalive(self.process):
             try:
                 # Ask worker to close
-                with rpc(self.worker_address) as worker:
+                with self.rpc(self.worker_address) as worker:
                     result = yield gen.with_timeout(
                                 timedelta(seconds=min(1, timeout)),
                                 worker.terminate(report=False),

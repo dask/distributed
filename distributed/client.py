@@ -493,7 +493,8 @@ class Client(Node):
 
             self._start_arg = self.cluster.scheduler_address
 
-        self.scheduler = rpc(self._start_arg, timeout=timeout)
+        self.scheduler = rpc(self._start_arg, timeout=timeout,
+                             connection_args=self.connection_args)
         self.scheduler_comm = None
 
         yield self.ensure_connected(timeout=timeout)
