@@ -1,3 +1,5 @@
+# flake8: noqa
+
 import pytest
 
 asyncio = pytest.importorskip('asyncio')
