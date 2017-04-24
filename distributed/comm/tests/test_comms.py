@@ -43,6 +43,24 @@ if has_ipv6():
 
 ca_file = get_cert('tls-ca-cert.pem')
 
+# The Subject field of our test certs
+cert_subject = (
+    (('countryName', 'XY'),),
+    (('localityName', 'Dask-distributed'),),
+    (('organizationName', 'Dask'),),
+    (('commonName', 'localhost'),)
+    )
+
+def check_tls_extra(info):
+    assert isinstance(info, dict)
+    assert info['peercert']['subject'] == cert_subject
+    assert 'cipher' in info
+    cipher_name, proto_name, secret_bits = info['cipher']
+    # Most likely
+    assert 'AES' in cipher_name
+    assert 'TLS' in proto_name
+    assert secret_bits >= 128
+
 
 def get_server_ssl_context(certfile='tls-cert.pem', keyfile='tls-key.pem'):
     ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=ca_file)
@@ -57,6 +75,7 @@ def get_client_ssl_context(certfile='tls-cert.pem', keyfile='tls-key.pem'):
     ctx.verify_mode = ssl.CERT_REQUIRED
     ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
     return ctx
+
 
 
 @gen.coroutine
@@ -182,6 +201,7 @@ def test_tcp_specific():
     @gen.coroutine
     def handle_comm(comm):
         assert comm.peer_address.startswith('tcp://' + host)
+        assert comm.extra_info == {}
         msg = yield comm.read()
         msg['op'] = 'pong'
         yield comm.write(msg)
@@ -201,6 +221,7 @@ def test_tcp_specific():
         addr = '%s:%d' % (host, port)
         comm = yield connector.connect(addr)
         assert comm.peer_address == 'tcp://' + addr
+        assert comm.extra_info == {}
         yield comm.write({'op': 'ping', 'data': key})
         if delay:
             yield gen.sleep(delay)
@@ -226,6 +247,7 @@ def test_tls_specific():
     @gen.coroutine
     def handle_comm(comm):
         assert comm.peer_address.startswith('tls://' + host)
+        check_tls_extra(comm.extra_info)
         msg = yield comm.read()
         msg['op'] = 'pong'
         yield comm.write(msg)
@@ -249,6 +271,7 @@ def test_tls_specific():
         addr = '%s:%d' % (host, port)
         comm = yield connector.connect(addr, ssl_context=client_ctx)
         assert comm.peer_address == 'tls://' + addr
+        check_tls_extra(comm.extra_info)
         yield comm.write({'op': 'ping', 'data': key})
         if delay:
             yield gen.sleep(delay)

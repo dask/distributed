@@ -117,9 +117,14 @@ class TCP(Comm):
         self.deserialize = deserialize
         self._finalizer = finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
+        self._extra = {}
 
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
+        self._read_extra()
+
+    def _read_extra(self):
+        pass
 
     def _get_finalizer(self):
         def finalize(stream=self.stream, r=repr(self)):
@@ -211,11 +216,22 @@ class TCP(Comm):
     def closed(self):
         return self.stream is None or self.stream.closed()
 
+    @property
+    def extra_info(self):
+        return self._extra
+
 
 class TLS(TCP):
-    # XXX How can we expose something like getpeercert()?
-    # For example, asyncio transports have a get_extra_info() method.
-    pass
+    """
+    A TLS-specific version of TCP.
+    """
+
+    def _read_extra(self):
+        TCP._read_extra(self)
+        sock = self.stream.socket
+        if sock is not None:
+            self._extra.update(peercert=sock.getpeercert(),
+                               cipher=sock.cipher())
 
 
 class BaseTCPConnector(Connector):

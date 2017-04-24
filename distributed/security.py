@@ -9,7 +9,7 @@ _roles = ['client', 'scheduler', 'worker']
 
 _tls_per_role_fields = ['key', 'cert']
 
-_tls_fields = ['ca_file']
+_tls_fields = ['ca_file', 'ciphers']
 
 _fields = set(['tls_%s' % field for field in _tls_fields] +
               ['tls_%s_%s' % (role, field)
@@ -30,6 +30,7 @@ class Security(object):
 
     Supported fields:
         - tls_ca_file
+        - tls_ciphers
         - tls_client_key
         - tls_client_cert
         - tls_scheduler_key
@@ -101,7 +102,8 @@ class Security(object):
             # IP addresses rather than hostnames
             ctx.check_hostname = False
             ctx.load_cert_chain(tls['cert'], tls.get('key'))
-            # TODO: allow cipher configuration
+            if tls.get('ciphers'):
+                ctx.set_ciphers(tls.get('ciphers'))
             return ctx
 
     def get_connection_args(self, role):

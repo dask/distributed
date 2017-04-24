@@ -80,6 +80,15 @@ class Comm(with_metaclass(ABCMeta)):
         The peer's address.  For logging and debugging purposes only.
         """
 
+    @property
+    def extra_info(self):
+        """
+        Return backend-specific information about the communication,
+        as a dict.  Typically, this is information which is initialized
+        when the communication is established and doesn't vary afterwards.
+        """
+        return {}
+
 
 class Listener(with_metaclass(ABCMeta)):
 
