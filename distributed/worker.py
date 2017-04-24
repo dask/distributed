@@ -30,6 +30,7 @@ from .compatibility import unicode
 from .core import (error_message, CommClosedError,
                    rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
+from .node import ServerNode
 from .preloading import preload_modules
 from .protocol.pickle import dumps, loads
 from .security import Security
@@ -65,7 +66,7 @@ PROCESSING = ('waiting', 'ready', 'constrained', 'executing', 'long-running')
 READY = ('ready', 'constrained')
 
 
-class WorkerBase(Server):
+class WorkerBase(ServerNode):
 
     def __init__(self, scheduler_ip, scheduler_port=None, ncores=None,
                  loop=None, local_dir=None, services=None, service_ports=None,

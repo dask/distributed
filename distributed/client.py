@@ -37,6 +37,7 @@ from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .cfexecutor import ClientExecutor
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import connect, rpc, clean_exception, CommClosedError
+from .node import Node
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .security import Security
@@ -322,7 +323,7 @@ class AllExit(Exception):
     """
 
 
-class Client(object):
+class Client(Node):
     """ Drive computations on a distributed cluster
 
     The Client connects users to a distributed compute cluster.  It provides
@@ -400,6 +401,9 @@ class Client(object):
             'restart': self._handle_restart,
             'error': self._handle_error
         }
+
+        super(Client, self).__init__(connection_args=self.connection_args,
+                                     io_loop=self.loop)
 
         if start:
             self.start(timeout=timeout)

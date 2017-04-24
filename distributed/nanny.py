@@ -16,6 +16,7 @@ from tornado import gen
 from .comm import get_address_host
 from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
+from .node import ServerNode
 from .security import Security
 from .utils import get_ip, ignoring, mp_context
 from .worker import _ncores, run
@@ -24,7 +25,7 @@ from .worker import _ncores, run
 logger = logging.getLogger(__name__)
 
 
-class Nanny(Server):
+class Nanny(ServerNode):
     """ A process to manage worker processes
 
     The nanny spins up Worker processes, watches then, and kills or restarts

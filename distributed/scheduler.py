@@ -31,6 +31,7 @@ from .config import config
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
 from .metrics import time
+from .node import ServerNode
 from .publish import PublishExtension
 from .channels import ChannelScheduler
 from .stealing import WorkStealing
@@ -51,10 +52,7 @@ LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
 DEFAULT_DATA_SIZE = config.get('default-data-size', 1000)
 
 
-# XXX avoid inheriting from Server? there is some large potential for confusion
-# between base and derived attribute namespaces...
-
-class Scheduler(Server):
+class Scheduler(ServerNode):
     """ Dynamic distributed task scheduler
 
     The scheduler tracks the current state of workers, data, and computations.

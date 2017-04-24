@@ -85,7 +85,7 @@ class Server(object):
     default_port = 0
 
     def __init__(self, handlers, connection_limit=512, deserialize=True,
-                 connection_args=None, io_loop=None):
+                 io_loop=None):
         self.handlers = assoc(handlers, 'identity', self.identity)
         self.id = str(uuid.uuid1())
         self._address = None
@@ -93,7 +93,6 @@ class Server(object):
         self._port = None
         self._comms = {}
         self.deserialize = deserialize
-        self.connection_args = connection_args
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
@@ -102,11 +101,6 @@ class Server(object):
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
-
-        # XXX This has nothing to do with serving comms
-        self.rpc = ConnectionPool(limit=connection_limit,
-                                  deserialize=deserialize,
-                                  connection_args=connection_args)
 
         if hasattr(self, 'loop'):
             # XXX?
