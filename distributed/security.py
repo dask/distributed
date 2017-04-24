@@ -11,7 +11,10 @@ _tls_per_role_fields = ['key', 'cert']
 
 _tls_fields = ['ca_file', 'ciphers']
 
-_fields = set(['tls_%s' % field for field in _tls_fields] +
+_misc_fields = ['require_encryption']
+
+_fields = set(_misc_fields +
+              ['tls_%s' % field for field in _tls_fields] +
               ['tls_%s_%s' % (role, field)
                for role in _roles
                for field in _tls_per_role_fields]
@@ -29,6 +32,7 @@ class Security(object):
     can be overriden by constructor args.
 
     Supported fields:
+        - require_encryption
         - tls_ca_file
         - tls_ciphers
         - tls_client_key
@@ -53,21 +57,26 @@ class Security(object):
         """
         Initialize Security from nested dict.
         """
+        self._init_fields_from_dict(d, '', _misc_fields, {})
         self._init_fields_from_dict(d, 'tls', _tls_fields, _tls_per_role_fields)
 
     def _init_fields_from_dict(self, d, category,
                                fields, per_role_fields):
-        d = d.get(category, {})
+        if category:
+            d = d.get(category, {})
+            category_prefix = category + '_'
+        else:
+            category_prefix = ''
         for field in fields:
             k = _field_to_config_key(field)
             if k in d:
-                setattr(self, '%s_%s' % (category, field), d[k])
+                setattr(self, '%s%s' % (category_prefix, field), d[k])
         for role in _roles:
             dd = d.get(role, {})
             for field in per_role_fields:
                 k = _field_to_config_key(field)
                 if k in dd:
-                    setattr(self, '%s_%s_%s' % (category, role, field), dd[k])
+                    setattr(self, '%s%s_%s' % (category_prefix, role, field), dd[k])
 
     def __repr__(self):
         items = sorted((k, getattr(self, k)) for k in _fields)
@@ -114,6 +123,7 @@ class Security(object):
         d = {}
         tls = self.get_tls_config_for_role(role)
         d['ssl_context'] = self._get_tls_context(tls, ssl.Purpose.SERVER_AUTH)
+        d['require_encryption'] = self.require_encryption
         return d
 
     def get_listen_args(self, role):
@@ -124,4 +134,5 @@ class Security(object):
         d = {}
         tls = self.get_tls_config_for_role(role)
         d['ssl_context'] = self._get_tls_context(tls, ssl.Purpose.CLIENT_AUTH)
+        d['require_encryption'] = self.require_encryption
         return d

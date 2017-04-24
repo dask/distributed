@@ -234,10 +234,20 @@ class TLS(TCP):
                                cipher=sock.cipher())
 
 
-class BaseTCPConnector(Connector):
+class RequireEncryptionMixin(object):
+
+    def _check_encryption(self, address, connection_args):
+        if not self.encrypted and connection_args.get('require_encryption'):
+            # XXX Should we have a dedicated SecurityError class?
+            raise RuntimeError("encryption required by Dask configuration, "
+                               "refusing communication from/to %r" % (address,))
+
+
+class BaseTCPConnector(Connector, RequireEncryptionMixin):
 
     @gen.coroutine
     def connect(self, address, deserialize=True, **connection_args):
+        self._check_encryption(address, connection_args)
         ip, port = parse_host_port(address)
         kwargs = self._get_connect_args(**connection_args)
 
@@ -259,6 +269,7 @@ class BaseTCPConnector(Connector):
 class TCPConnector(BaseTCPConnector):
     prefix = 'tcp://'
     comm_class = TCP
+    encrypted = False
 
     def _get_connect_args(self, **connection_args):
         return {}
@@ -267,6 +278,7 @@ class TCPConnector(BaseTCPConnector):
 class TLSConnector(BaseTCPConnector):
     prefix = 'tls://'
     comm_class = TLS
+    encrypted = True
 
     def _get_connect_args(self, **connection_args):
         ctx = connection_args.get('ssl_context')
@@ -276,10 +288,11 @@ class TLSConnector(BaseTCPConnector):
         return {'ssl_options': ctx}
 
 
-class BaseTCPListener(Listener):
+class BaseTCPListener(Listener, RequireEncryptionMixin):
 
     def __init__(self, address, comm_handler, deserialize=True,
                  default_port=0, **connection_args):
+        self._check_encryption(address, connection_args)
         self.ip, self.port = parse_host_port(address, default_port)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
@@ -344,6 +357,7 @@ class BaseTCPListener(Listener):
 
 class TCPListener(BaseTCPListener):
     prefix = 'tcp://'
+    encrypted = False
 
     def _get_server_args(self, **connection_args):
         return {}
@@ -356,6 +370,7 @@ class TCPListener(BaseTCPListener):
 
 class TLSListener(BaseTCPListener):
     prefix = 'tls://'
+    encrypted = True
 
     def _get_server_args(self, **connection_args):
         ctx = connection_args.get('ssl_context')

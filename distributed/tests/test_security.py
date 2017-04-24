@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+from contextlib import contextmanager
 import ssl
 
 import pytest
@@ -23,6 +24,7 @@ FORCED_CIPHER = 'ECDHE-RSA-AES128-GCM-SHA256'
 def test_defaults():
     with new_config({}):
         sec = Security()
+    assert sec.require_encryption in (None, False)
     assert sec.tls_ca_file is None
     assert sec.tls_ciphers is None
     assert sec.tls_client_key is None
@@ -55,9 +57,11 @@ def test_from_config():
                 },
             'ciphers': FORCED_CIPHER,
             },
+        'require-encryption': True,
         }
     with new_config(c):
         sec = Security()
+    assert sec.require_encryption == True
     assert sec.tls_ca_file == 'ca.pem'
     assert sec.tls_ciphers == FORCED_CIPHER
     assert sec.tls_client_key is None
@@ -79,7 +83,9 @@ def test_kwargs():
             },
         }
     with new_config(c):
-        sec = Security(tls_scheduler_cert='newcert.pem')
+        sec = Security(tls_scheduler_cert='newcert.pem',
+                       require_encryption=True)
+    assert sec.require_encryption == True
     assert sec.tls_ca_file == 'ca.pem'
     assert sec.tls_ciphers is None
     assert sec.tls_client_key is None
@@ -161,13 +167,12 @@ def test_connection_args():
         sec = Security()
 
     d = sec.get_connection_args('scheduler')
-    assert set(d) == {'ssl_context'}
+    assert not d['require_encryption']
     ctx = d['ssl_context']
     basic_checks(ctx)
     many_ciphers(ctx)
 
     d = sec.get_connection_args('worker')
-    assert set(d) == {'ssl_context'}
     ctx = d['ssl_context']
     basic_checks(ctx)
     many_ciphers(ctx)
@@ -176,13 +181,16 @@ def test_connection_args():
     d = sec.get_connection_args('client')
     assert d.get('ssl_context') is None
 
-    # With a cipher string
+    # With more settings
     c['tls']['ciphers'] = FORCED_CIPHER
+    c['require-encryption'] = True
 
     with new_config(c):
         sec = Security()
 
-    ctx = sec.get_connection_args('scheduler')['ssl_context']
+    d = sec.get_listen_args('scheduler')
+    assert d['require_encryption']
+    ctx = d['ssl_context']
     basic_checks(ctx)
     assert len(ctx.get_ciphers()) == 1
 
@@ -211,13 +219,12 @@ def test_listen_args():
         sec = Security()
 
     d = sec.get_listen_args('scheduler')
-    assert set(d) == {'ssl_context'}
+    assert not d['require_encryption']
     ctx = d['ssl_context']
     basic_checks(ctx)
     many_ciphers(ctx)
 
     d = sec.get_listen_args('worker')
-    assert set(d) == {'ssl_context'}
     ctx = d['ssl_context']
     basic_checks(ctx)
     many_ciphers(ctx)
@@ -226,13 +233,16 @@ def test_listen_args():
     d = sec.get_listen_args('client')
     assert d.get('ssl_context') is None
 
-    # With a cipher string
+    # With more settings
     c['tls']['ciphers'] = FORCED_CIPHER
+    c['require-encryption'] = True
 
     with new_config(c):
         sec = Security()
 
-    ctx = sec.get_connection_args('scheduler')['ssl_context']
+    d = sec.get_listen_args('scheduler')
+    assert d['require_encryption']
+    ctx = d['ssl_context']
     basic_checks(ctx)
     assert len(ctx.get_ciphers()) == 1
 
@@ -240,7 +250,7 @@ def test_listen_args():
 @gen_test()
 def test_tls_listen_connect():
     """
-    Simple functional test for TLS connection args.
+    Functional test for TLS connection args.
     """
     @gen.coroutine
     def handle_comm(comm):
@@ -287,3 +297,65 @@ def test_tls_listen_connect():
         cipher, _, _, = comm.extra_info['cipher']
         assert cipher == FORCED_CIPHER
         comm.abort()
+
+
+@gen_test()
+def test_require_encryption():
+    """
+    Functional test for "require_encryption" setting.
+    """
+    @gen.coroutine
+    def handle_comm(comm):
+        comm.abort()
+
+    c = {
+        'tls': {
+            'ca-file': ca_file,
+            'scheduler': {
+                'key': key1,
+                'cert': cert1,
+                },
+            'worker': {
+                'cert': keycert1,
+                },
+            },
+        }
+    with new_config(c):
+        sec = Security()
+    c['require-encryption'] = True
+    with new_config(c):
+        sec2 = Security()
+
+    for listen_addr in ['inproc://', 'tls://']:
+        with listen(listen_addr, handle_comm,
+                    connection_args=sec.get_listen_args('scheduler')) as listener:
+            comm = yield connect(listener.contact_address,
+                                 connection_args=sec2.get_connection_args('worker'))
+            comm.abort()
+
+        with listen(listen_addr, handle_comm,
+                    connection_args=sec2.get_listen_args('scheduler')) as listener:
+            comm = yield connect(listener.contact_address,
+                                 connection_args=sec2.get_connection_args('worker'))
+            comm.abort()
+
+    @contextmanager
+    def check_encryption_error():
+        with pytest.raises(RuntimeError) as excinfo:
+            yield
+        assert "encryption required" in str(excinfo.value)
+
+    for listen_addr in ['tcp://']:
+        with listen(listen_addr, handle_comm,
+                    connection_args=sec.get_listen_args('scheduler')) as listener:
+            comm = yield connect(listener.contact_address,
+                                 connection_args=sec.get_connection_args('worker'))
+            comm.abort()
+
+            with pytest.raises(RuntimeError):
+                yield connect(listener.contact_address,
+                              connection_args=sec2.get_connection_args('worker'))
+
+        with pytest.raises(RuntimeError):
+            listen(listen_addr, handle_comm,
+                   connection_args=sec2.get_listen_args('scheduler'))
