@@ -18,7 +18,7 @@ except:
     pass
 
 try:
-    from .asyncio import AsyncClient
+    from .asyncio import AioClient
 except:
     pass
 
