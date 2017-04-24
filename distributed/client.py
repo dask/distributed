@@ -367,7 +367,7 @@ class Client(object):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
-        self.loop = loop or IOLoop() if start else IOLoop.current()
+        self.loop = loop or (IOLoop() if start else IOLoop.current())
         self.coroutines = []
         self.id = str(uuid.uuid1())
         self.generation = 0
