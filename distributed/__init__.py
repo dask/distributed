@@ -17,11 +17,6 @@ try:
 except:
     pass
 
-try:
-    from .asyncio import AioClient
-except:
-    pass
-
 from ._version import get_versions
 versions = get_versions()
 __version__ = versions['version']
