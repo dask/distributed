@@ -43,6 +43,25 @@ async def test_asyncio_submit(loop):
         assert result == 11 + 21
 
 
+async def test_asyncio_future_await(loop):
+    async with AioClient(loop=loop, processes=False) as c:
+        x = c.submit(inc, 10)
+        assert not x.done()
+
+        assert isinstance(x, AioFuture)
+        assert x.client is c
+
+        result = await x
+        assert result == 11
+        assert x.done()
+
+        y = c.submit(inc, 20)
+        z = c.submit(add, x, y)
+
+        result = await z
+        assert result == 11 + 21
+
+
 async def test_asyncio_map(loop):
     async with AioClient(loop=loop, processes=False) as c:
         L1 = c.map(inc, range(5))
@@ -68,8 +87,7 @@ async def test_asyncio_map(loop):
 
         L4 = c.map(add, range(3), range(4))
         results = await c.gather(L4)
-        if sys.version_info[0] >= 3:
-            assert results == list(map(add, range(3), range(4)))
+        assert results == list(map(add, range(3), range(4)))
 
         def f(x, y=10):
             return x + y
@@ -165,3 +183,17 @@ async def test_asyncio_channels(loop):
 
         assert 'x' in repr(x)
         assert '1' in repr(x)
+
+
+async def test_asyncio_exception_on_exception(loop):
+    async with AioClient(loop=loop, processes=False) as c:
+        x = c.submit(lambda: 1 / 0)
+        y = c.submit(inc, x)
+
+        with pytest.raises(ZeroDivisionError):
+            await y.result()
+
+        z = c.submit(inc, y)
+
+        with pytest.raises(ZeroDivisionError):
+            await z.result()
