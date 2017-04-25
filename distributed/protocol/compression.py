@@ -52,12 +52,12 @@ with ignoring(ImportError):
     import lz4
 
     def _fixed_lz4_decompress(data):
-        # lz4.LZ4_uncompress() doesn't accept memoryviews
+        # lz4.block.decompress() doesn't accept memoryviews
         if isinstance(data, memoryview):
             data = data.tobytes()
-        return lz4.LZ4_uncompress(data)
+        return lz4.block.decompress(data)
 
-    compressions['lz4'] = {'compress': lz4.LZ4_compress,
+    compressions['lz4'] = {'compress': lz4.block.compress,
                            'decompress': _fixed_lz4_decompress}
     default_compression = 'lz4'
 
