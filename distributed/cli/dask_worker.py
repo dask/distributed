@@ -210,8 +210,9 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
     @gen.coroutine
     def f():
-        with rpc(nannies[0].scheduler.address) as scheduler:
-            if nanny:
+        if nanny:
+            w = nannies[0]
+            with w.rpc(w.scheduler.address) as scheduler:
                 yield gen.with_timeout(
                         timeout=timedelta(seconds=2),
                         future=All([scheduler.unregister(address=n.worker_address, close=True)
