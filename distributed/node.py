@@ -13,7 +13,6 @@ class Node(object):
     def __init__(self, connection_limit=512, deserialize=True,
                  connection_args=None, io_loop=None):
         self.io_loop = io_loop or IOLoop.current()
-        self.connection_args = connection_args
         self.rpc = ConnectionPool(limit=connection_limit,
                                   deserialize=deserialize,
                                   connection_args=connection_args)
@@ -32,6 +31,7 @@ class ServerNode(Node, Server):
                  connection_args=None, io_loop=None):
         Node.__init__(self, deserialize=deserialize,
                       connection_limit=connection_limit,
+                      connection_args=connection_args,
                       io_loop=io_loop)
         Server.__init__(self, handlers, connection_limit=connection_limit,
                         deserialize=deserialize, io_loop=self.io_loop)

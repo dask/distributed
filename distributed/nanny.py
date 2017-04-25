@@ -13,7 +13,7 @@ import weakref
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
-from .comm import get_address_host
+from .comm import get_address_host, get_local_address_for
 from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
 from .node import ServerNode
@@ -87,7 +87,9 @@ class Nanny(ServerNode):
                     'monitor_resources': self.monitor_resources,
                     'run': self.run}
 
-        super(Nanny, self).__init__(handlers, io_loop=self.loop, **kwargs)
+        super(Nanny, self).__init__(handlers, io_loop=self.loop,
+                                    connection_args=self.connection_args,
+                                    **kwargs)
 
     def __str__(self):
         return "<Nanny: %s, threads: %d>" % (self.worker_address, self.ncores)
@@ -98,15 +100,32 @@ class Nanny(ServerNode):
     def _start(self, addr_or_port=0):
         """ Start nanny, start local process, start watching """
 
-        if isinstance(addr_or_port, int):
-            # Default ip is the required one to reach the scheduler
+        # XXX Factor this out
+        if not addr_or_port:
+            # Default address is the required one to reach the scheduler
+            self.listen(get_local_address_for(self.scheduler.address),
+                        listen_args=self.listen_args)
+            self.ip = get_address_host(self.address)
+        elif isinstance(addr_or_port, int):
+            # addr_or_port is an integer => assume TCP
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
             )
-            self.listen((self.ip, addr_or_port), listen_args=self.listen_args)
+            self.listen((self.ip, addr_or_port),
+                        listen_args=self.listen_args)
         else:
             self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
+
+        #if isinstance(addr_or_port, int):
+            ## Default ip is the required one to reach the scheduler
+            #self.ip = get_ip(
+                #get_address_host(self.scheduler.address)
+            #)
+            #self.listen((self.ip, addr_or_port), listen_args=self.listen_args)
+        #else:
+            #self.listen(addr_or_port, listen_args=self.listen_args)
+            #self.ip = get_address_host(self.address)
 
         logger.info('        Start Nanny at: %r', self.address)
         response = yield self.instantiate()
@@ -219,7 +238,8 @@ class Nanny(ServerNode):
                         'validate': self.validate,
                         'silence_logs': self.silence_logs,
                         'death_timeout': self.death_timeout,
-                        'preload': self.preload})
+                        'preload': self.preload,
+                        'security': self.security})
             self.process.daemon = True
             processes_to_close.add(self.process)
             self.process.start()
@@ -359,7 +379,7 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
     @gen.coroutine  # pragma: no cover
     def run():
         try:  # pragma: no cover
-            yield worker._start((worker_ip, worker_port))  # pragma: no cover
+            yield worker._start(worker_port)  # pragma: no cover
         except Exception as e:  # pragma: no cover
             logger.exception(e)  # pragma: no cover
             q.put(e)  # pragma: no cover

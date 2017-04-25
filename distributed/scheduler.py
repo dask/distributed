@@ -203,6 +203,7 @@ class Scheduler(ServerNode):
         self.service_specs = services or {}
         self.services = {}
         self.scheduler_file = scheduler_file
+
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args('scheduler')
@@ -345,7 +346,9 @@ class Scheduler(ServerNode):
 
         super(Scheduler, self).__init__(
             handlers=self.handlers, io_loop=self.loop,
-            connection_limit=connection_limit, deserialize=False, **kwargs)
+            connection_limit=connection_limit, deserialize=False,
+            connection_args=self.connection_args,
+            **kwargs)
 
         for ext in extensions:
             ext(self)

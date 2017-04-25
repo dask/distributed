@@ -476,6 +476,13 @@ class PooledRPCCall(object):
     def close_rpc(self):
         pass
 
+    # For compatibility with rpc()
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
+
     def __repr__(self):
         return "<pooled rpc to %r>" % (self.addr,)
 

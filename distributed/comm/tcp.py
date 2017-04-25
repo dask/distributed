@@ -234,13 +234,22 @@ class TLS(TCP):
                                cipher=sock.cipher())
 
 
+def _expect_tls_context(connection_args):
+    ctx = connection_args.get('ssl_context')
+    if not isinstance(ctx, ssl.SSLContext):
+        raise TypeError("TLS expects a `ssl_context` argument of type "
+                        "ssl.SSLContext (perhaps check your TLS configuration?)")
+    return ctx
+
+
 class RequireEncryptionMixin(object):
 
     def _check_encryption(self, address, connection_args):
         if not self.encrypted and connection_args.get('require_encryption'):
             # XXX Should we have a dedicated SecurityError class?
             raise RuntimeError("encryption required by Dask configuration, "
-                               "refusing communication from/to %r" % (address,))
+                               "refusing communication from/to %r"
+                               % (self.prefix + address,))
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
@@ -281,10 +290,7 @@ class TLSConnector(BaseTCPConnector):
     encrypted = True
 
     def _get_connect_args(self, **connection_args):
-        ctx = connection_args.get('ssl_context')
-        if not isinstance(ctx, ssl.SSLContext):
-            raise TypeError("TLS connector expects a `ssl_context` argument "
-                            "of type ssl.SSLContext")
+        ctx = _expect_tls_context(connection_args)
         return {'ssl_options': ctx}
 
 
@@ -373,10 +379,7 @@ class TLSListener(BaseTCPListener):
     encrypted = True
 
     def _get_server_args(self, **connection_args):
-        ctx = connection_args.get('ssl_context')
-        if not isinstance(ctx, ssl.SSLContext):
-            raise TypeError("TLS listener expects a `ssl_context` argument "
-                            "of type ssl.SSLContext")
+        ctx = _expect_tls_context(connection_args)
         return {'ssl_options': ctx}
 
     @gen.coroutine

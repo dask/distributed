@@ -152,7 +152,9 @@ class WorkerBase(ServerNode):
           'keys': self.keys,
         }
 
-        super(WorkerBase, self).__init__(handlers, io_loop=self.loop, **kwargs)
+        super(WorkerBase, self).__init__(handlers, io_loop=self.loop,
+                                         connection_args=self.connection_args,
+                                         **kwargs)
 
         self.heartbeat_callback = PeriodicCallback(self.heartbeat,
                                                    self.heartbeat_interval,

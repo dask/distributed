@@ -10,6 +10,7 @@ import tempfile
 import click
 
 from distributed import Scheduler
+from distributed.security import Security
 from distributed.utils import ignoring, open_port, get_ip_interface
 from distributed.http import HTTPScheduler
 from distributed.cli.utils import (check_python_3, install_signal_handlers,
@@ -21,7 +22,12 @@ logger = logging.getLogger('distributed.scheduler')
 
 
 @click.command()
-@click.option('--port', type=int, default=None, help="Serving port")
+@click.option('--host', type=str, default='',
+              help="URI, IP or hostname of this server")
+@click.option('--port', type=int, default=None, help="Serving port (deprecated, --host is preferred)")
+@click.option('--tls-ca-file', type=str, default=None, help="CA cert(s) file for TLS (in PEM format)")
+@click.option('--tls-cert', type=str, default=None, help="certificate file for TLS (in PEM format)")
+@click.option('--tls-key', type=str, default=None, help="private key file for TLS (in PEM format)")
 # XXX default port (or URI) values should be centralized somewhere
 @click.option('--http-port', type=int, default=9786, help="HTTP port")
 @click.option('--bokeh-port', type=int, default=8787, help="Bokeh port")
@@ -29,8 +35,6 @@ logger = logging.getLogger('distributed.scheduler')
               help="Internal Bokeh port")
 @click.option('--bokeh/--no-bokeh', '_bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
-@click.option('--host', type=str, default='',
-              help="IP, hostname or URI of this server")
 @click.option('--interface', type=str, default=None,
               help="Preferred network interface like 'eth0' or 'ib0'")
 @click.option('--show/--no-show', default=False, help="Show web UI")
@@ -52,7 +56,11 @@ logger = logging.getLogger('distributed.scheduler')
               help='Module that should be loaded by each worker process like "foo.bar"')
 def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
          bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file,
-         interface, local_directory, preload):
+         interface, local_directory, preload, tls_ca_file, tls_cert, tls_key):
+    sec = Security(tls_ca_file=tls_ca_file,
+                   tls_scheduler_cert=tls_cert,
+                   tls_scheduler_key=tls_key,
+                   )
 
     if pid_file:
         with open(pid_file, 'w') as f:
@@ -97,7 +105,8 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
             from distributed.bokeh.scheduler import BokehScheduler
             services[('bokeh', bokeh_internal_port)] = BokehScheduler
     scheduler = Scheduler(loop=loop, services=services,
-                          scheduler_file=scheduler_file)
+                          scheduler_file=scheduler_file,
+                          security=sec)
     scheduler.start(addr)
     preload_modules(preload, parameter=scheduler, file_dir=local_directory)
 

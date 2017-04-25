@@ -16,6 +16,7 @@ from distributed.utils import All, get_ip_interface
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
 from distributed.metrics import time
+from distributed.security import Security
 from distributed.cli.utils import check_python_3
 
 from toolz import valmap
@@ -43,6 +44,9 @@ def handle_signal(sig, frame):
 
 @click.command()
 @click.argument('scheduler', type=str, required=False)
+@click.option('--tls-ca-file', type=str, default=None, help="CA cert(s) file for TLS (in PEM format)")
+@click.option('--tls-cert', type=str, default=None, help="certificate file for TLS (in PEM format)")
+@click.option('--tls-key', type=str, default=None, help="private key file for TLS (in PEM format)")
 @click.option('--worker-port', type=int, default=0,
               help="Serving worker port, defaults to randomly assigned")
 @click.option('--http-port', type=int, default=0,
@@ -87,7 +91,12 @@ def handle_signal(sig, frame):
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
          nanny, name, memory_limit, pid_file, temp_filename, reconnect,
          resources, bokeh, bokeh_port, local_directory, scheduler_file,
-         interface, death_timeout, preload):
+         interface, death_timeout, preload, tls_ca_file, tls_cert, tls_key):
+    sec = Security(tls_ca_file=tls_ca_file,
+                   tls_worker_cert=tls_cert,
+                   tls_worker_key=tls_key,
+                   )
+
     if nanny:
         port = nanny_port
     else:
@@ -161,7 +170,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
                  local_dir=local_directory, death_timeout=death_timeout,
-                 preload=preload,
+                 preload=preload, security=sec,
                  **kwargs)
                for i in range(nprocs)]
 
@@ -216,7 +225,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
                 yield gen.with_timeout(
                         timeout=timedelta(seconds=2),
                         future=All([scheduler.unregister(address=n.worker_address, close=True)
-                                   for n in nannies if n.process and n.worker_address]),
+                                    for n in nannies if n.process and n.worker_address]),
                         io_loop=loop2)
 
     loop2.run_sync(f)
