@@ -183,9 +183,8 @@ async def test_asyncio_exception_on_exception(loop):
         y = c.submit(inc, x)
 
         with pytest.raises(ZeroDivisionError):
-            await y.result()
+            await y
 
         z = c.submit(inc, y)
-
         with pytest.raises(ZeroDivisionError):
-            await z.result()
+            await z
