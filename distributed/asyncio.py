@@ -39,7 +39,7 @@ class AioFuture(Future):
 
 class AioClient(Client):
 
-    _future = AioFuture
+    _Future = AioFuture
 
     def __init__(self, *args, loop=None, start=True, **kwargs):
         if loop is None:
@@ -70,9 +70,6 @@ class AioClient(Client):
 
     start = to_asyncio(Client._start)
     shutdown = to_asyncio(Client._shutdown)
-    reconnect = to_asyncio(Client._reconnect)
-    ensure_connected = to_asyncio(Client._ensure_connected)
-    handle_report = to_asyncio(Client._handle_report)
     gather = to_asyncio(Client._gather)
     scatter = to_asyncio(Client._scatter)
     cancel = to_asyncio(Client._cancel)

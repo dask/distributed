@@ -19,11 +19,6 @@ from tornado.platform.asyncio import to_asyncio_future, BaseAsyncIOLoop
 from tornado.ioloop import IOLoop
 
 
-@delayed
-def decrement(x):
-    return x - 1
-
-
 async def test_asyncio_submit(loop):
     async with AioClient(loop=loop, processes=False) as c:
         x = c.submit(inc, 10)
@@ -69,20 +64,20 @@ async def test_asyncio_map(loop):
         assert isdistinct(x.key for x in L1)
         assert all(isinstance(x, AioFuture) for x in L1)
 
-        result = await L1[0].result()
+        result = await L1[0]
         assert result == inc(0)
 
         L2 = c.map(inc, L1)
 
-        result = await L2[1].result()
+        result = await L2[1]
         assert result == inc(inc(1))
 
         total = c.submit(sum, L2)
-        result = await total.result()
+        result = await total
         assert result == sum(map(inc, map(inc, range(5))))
 
         L3 = c.map(add, L1, L2)
-        result = await L3[1].result()
+        result = await L3[1]
         assert result == inc(1) + inc(inc(1))
 
         L4 = c.map(add, range(3), range(4))
@@ -133,16 +128,13 @@ async def test_asyncio_get(loop):
 
 async def test_asyncio_exceptions(loop):
     async with AioClient(loop=loop, processes=False) as c:
-        x = c.submit(div, 1, 2)
-        result = await x.result()
+        result = await c.submit(div, 1, 2)
         assert result == 1 / 2
 
-        x = c.submit(div, 1, 0)
         with pytest.raises(ZeroDivisionError):
-            result = await x.result()
+            result = await c.submit(div, 1, 0)
 
-        x = c.submit(div, 10, 2)  # continues to operate
-        result = await x.result()
+        result = await c.submit(div, 10, 2)  # continues to operate
         assert result == 10 / 2
 
 
