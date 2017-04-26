@@ -3047,6 +3047,7 @@ class Scheduler(Server):
         with log_errors():
             import psutil
             proc = psutil.Process()
+            last = time()
             while self.status != 'closed':
                 yield gen.sleep(0.100)
                 while not self.rprocessing:
