@@ -65,10 +65,14 @@ class Batch(object):
 
 
 class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
-    MIN_IDEAL_BATCH_DURATION = 0.5
-    MAX_IDEAL_BATCH_DURATION = 5.0
+    MIN_IDEAL_BATCH_DURATION = 0.2
+    MAX_IDEAL_BATCH_DURATION = 1.0
 
     def __init__(self, scheduler_host='127.0.0.1:8786', scatter=None, loop=None):
+        if scatter is not None and not isinstance(scatter, (list, tuple)):
+            raise TypeError("scatter must be a list/tuple, got "
+                            "`%s`" % type(scatter).__name__)
+
         self.client = Client(scheduler_host, loop=loop)
         if scatter is not None:
             # Keep a reference to the scattered data to keep the ids the same
@@ -114,7 +118,7 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
         return Batch(tasks), args2
 
     def apply_async(self, func, callback=None):
-        key = '%s-%s' % (joblib_funcname(func), uuid4().hex)
+        key = '%s-batch-%s' % (joblib_funcname(func), uuid4().hex)
         func, args = self._to_func_args(func)
         future = self.client.submit(func, *args, key=key)
         self.futures.add(future)
@@ -131,11 +135,15 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
         future.get = future.result  # monkey patch to achieve AsyncResult API
         return future
 
+    def terminate(self):
+        self.client.shutdown()
+
     def abort_everything(self, ensure_ready=True):
         # Tell the client to cancel any task submitted via this instance
         # as joblib.Parallel will never access those results.
         self.client.cancel(self.futures)
         self.futures.clear()
+        self.terminate()
 
 
 for base in _bases:

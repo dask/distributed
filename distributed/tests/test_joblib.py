@@ -26,7 +26,7 @@ def test_simple(loop, joblib):
     delayed = joblib.delayed
     with cluster() as (s, [a, b]):
         with joblib.parallel_backend('dask.distributed', loop=loop,
-                                     scheduler_host=s['address']):
+                                     scheduler_host=s['address']) as (ba, _):
 
             seq = Parallel()(delayed(inc)(i) for i in range(10))
             assert seq == [inc(i) for i in range(10)]
@@ -38,8 +38,7 @@ def test_simple(loop, joblib):
             seq = Parallel()(delayed(inc)(i) for i in range(10))
             assert seq == [inc(i) for i in range(10)]
 
-            ba, _ = joblib.parallel.get_active_backend()
-            ba.client.shutdown()
+            ba.terminate()
 
 
 def random2():
@@ -54,13 +53,12 @@ def test_dont_assume_function_purity(loop, joblib):
     delayed = joblib.delayed
     with cluster() as (s, [a, b]):
         with joblib.parallel_backend('dask.distributed', loop=loop,
-                                     scheduler_host=s['address']):
+                                     scheduler_host=s['address']) as (ba, _):
 
             x, y = Parallel()(delayed(random2)() for i in range(2))
             assert x != y
 
-            ba, _ = joblib.parallel.get_active_backend()
-            ba.client.shutdown()
+            ba.terminate()
 
 
 @pytest.mark.parametrize('joblib', joblibs)
@@ -116,7 +114,7 @@ def test_joblib_scatter(loop, joblib):
     with cluster() as (s, [a, b]):
         with joblib.parallel_backend('dask.distributed', loop=loop,
                                      scheduler_host=s['address'],
-                                     scatter=[x, y]):
+                                     scatter=[x, y]) as (ba, _):
             f = delayed(add5)
             tasks = [f(x, y, z, d=4, e=5),
                      f(x, z, y, d=5, e=4),
@@ -125,8 +123,14 @@ def test_joblib_scatter(loop, joblib):
             sols = [func(*args, **kwargs) for func, args, kwargs in tasks]
             results = Parallel()(tasks)
 
-            ba, _ = joblib.parallel.get_active_backend()
-            ba.client.shutdown()
+            ba.terminate()
+
+        # Scatter must take a list/tuple
+        with pytest.raises(TypeError):
+            with joblib.parallel_backend('dask.distributed', loop=loop,
+                                         scheduler_host=s['address'],
+                                         scatter=1):
+                pass
 
     for l, r in zip(sols, results):
         assert l == r
