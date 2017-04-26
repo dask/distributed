@@ -14,6 +14,7 @@ except ImportError:
     import pandas.msgpack as msgpack
 
 from . import pickle
+from ..compatibility import PY2
 from .compression import maybe_compress, decompress
 from .utils import unpack_frames, pack_frames_prelude, frame_split_size
 
@@ -353,7 +354,10 @@ def serialize_bytelist(x):
 
 
 def serialize_bytes(x):
-    return b''.join(serialize_bytelist(x))
+    L = serialize_bytelist(x)
+    if PY2:
+        L = [bytes(y) for y in L]
+    return b''.join(L)
 
 
 def deserialize_bytes(b):
