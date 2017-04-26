@@ -1,5 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
+import sys
+
 py3_err_msg = """
 Your terminal does not properly support unicode text required by command line
 utilities running Python 3.  This is commonly solved by specifying encoding
@@ -23,7 +25,6 @@ def check_python_3():
         from click import _unicodefun
         _unicodefun._verify_python3_env()
     except (TypeError, RuntimeError) as e:
-        import sys
         import click
         click.echo(py3_err_msg, err=True)
         sys.exit(1)
@@ -35,8 +36,14 @@ def install_signal_handlers():
     from tornado.ioloop import IOLoop
     import signal
 
+    signal_count = [0]
+
     def handle_signal(sig, frame):
-        IOLoop.instance().add_callback(IOLoop.instance().stop)
+        if signal_count[0]:
+            sys.exit(0)
+        else:
+            IOLoop.instance().add_callback_from_signal(IOLoop.instance().stop)
+            signal_count[0] += 1
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
