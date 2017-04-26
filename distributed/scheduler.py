@@ -3058,6 +3058,9 @@ class Scheduler(Server):
                         yield gen.sleep(0.100)
                         last = time()
 
+                    if w not in self.workers or not processing:
+                        continue
+
                     self._reevaluate_occupancy_worker(w)
 
                     duration = time() - last
@@ -3084,11 +3087,11 @@ class Scheduler(Server):
                     nbytes += self.nbytes.get(key, 0)
 
         comm = nbytes / BANDWIDTH
-        self.occupancy[w] = max(new, comm)
+        self.occupancy[w] = max(new, comm)  # These overlap. Take maximum
         self.total_occupancy += new - old
         self.check_idle_saturated(w)
 
-        if new > old * 1.5:
+        if new > old * 1.3:  # significant increase in duration
             steal = self.extensions['stealing']
             for key in processing:
                 steal.remove_key_from_stealable(key)
