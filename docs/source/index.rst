@@ -103,6 +103,7 @@ Contents
    :caption: Additional Features
 
    local-cluster
+   tls
    ec2
    web
    joblib
