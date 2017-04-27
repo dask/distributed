@@ -12,7 +12,7 @@ from toolz import isdistinct
 from distributed.deploy import LocalCluster
 from distributed.utils_test import gen_cluster, inc, div, slowinc, slowadd, slowdec, randominc
 
-from distributed.asyncio import AioClient, AioFuture
+from distributed.asyncio import AioClient, AioFuture, as_completed, wait
 from distributed import Client, Worker, Scheduler
 
 from tornado.platform.asyncio import to_asyncio_future, BaseAsyncIOLoop
@@ -188,3 +188,29 @@ async def test_asyncio_exception_on_exception(loop):
         z = c.submit(inc, y)
         with pytest.raises(ZeroDivisionError):
             await z
+
+
+async def test_asyncio_as_completed(loop):
+    async with AioClient(loop=loop, processes=False) as c:
+        futures = c.map(inc, range(10))
+
+        results = []
+        async for future in as_completed(futures):
+            results.append(await future)
+
+        assert set(results) == set(range(1, 11))
+
+
+async def test_asyncio_wait(loop):
+    async with AioClient(loop=loop, processes=False) as c:
+        x = c.submit(inc, 1)
+        y = c.submit(inc, 2)
+        z = c.submit(inc, 3)
+
+        await wait(x)
+        assert x.done() is True
+
+        await wait([y, z])
+        assert y.done() is True
+        assert z.done() is True
+

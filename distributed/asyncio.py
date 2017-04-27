@@ -3,11 +3,10 @@
 import asyncio
 from functools import wraps
 
-from tornado.gen import is_coroutine_function
 from tornado.platform.asyncio import BaseAsyncIOLoop
 from tornado.platform.asyncio import to_asyncio_future, to_tornado_future
 
-from .client import Client, Future
+from .client import Client, Future, AsCompleted, _wait
 
 from tornado.ioloop import IOLoop
 
@@ -86,3 +85,15 @@ class AioClient(Client):
     rebalance = to_asyncio(Client._rebalance)
     replicate = to_asyncio(Client._replicate)
     start_ipython_workers = to_asyncio(Client._start_ipython_workers)
+
+
+class AioAsCompleted(AsCompleted):
+
+    __anext__ = to_asyncio(AsCompleted.__anext__)
+
+
+wait = to_asyncio(_wait)
+as_completed = AioAsCompleted
+
+
+

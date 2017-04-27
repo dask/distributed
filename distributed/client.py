@@ -2617,7 +2617,7 @@ class AsCompleted(object):
 
         This future will emit from the iterator once it finishes
         """
-        if type(future) is not Future:
+        if not isinstance(future, Future):
             raise TypeError("Input must be a future, got %s" % str(future))
         with self.lock:
             self.futures[future] += 1
@@ -2740,7 +2740,7 @@ def futures_of(o, client=None):
             stack.extend(x)
         if type(x) is dict:
             stack.extend(x.values())
-        if type(x) is Future:
+        if isinstance(x, Future):
             futures.add(x)
         if hasattr(x, 'dask'):
             stack.extend(x.dask.values())
