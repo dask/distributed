@@ -60,7 +60,7 @@ class AioClient(Client):
         if self._make_current:
             self.loop.make_current()
 
-        if self.status is not 'running':
+        if self.status != 'running':
             await self.start()
 
         return self
