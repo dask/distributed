@@ -67,7 +67,7 @@ def gather_from_workers(who_has, rpc, close=True):
             for worker, c in coroutines.items():
                 try:
                     r = yield c
-                except EnvironmentError as e:
+                except EnvironmentError:
                     missing_workers.add(worker)
                 else:
                     response.update(r)
