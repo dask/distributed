@@ -60,9 +60,9 @@ Security policy
 ---------------
 
 Dask always verifies the certificate presented by a remote endpoint
-against the configure CA certificate(s).  Certificates are verified
+against the configured CA certificate(s).  Certificates are verified
 for both "client" and "server" endpoints (in the TCP sense), ensuring
-the endpoints are mutually authenticated. The hostname or IP address for
+the endpoints are mutually authenticated.  The hostname or IP address for
 which a certificate has been issued is not checked; this should not be an
 issue if you are using your own internal Certificate Authority.
 
