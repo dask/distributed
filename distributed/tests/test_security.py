@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
 import ssl
+import sys
 
 import pytest
 from tornado import gen
@@ -149,7 +150,8 @@ def test_connection_args():
         assert ctx.check_hostname == False
 
     def many_ciphers(ctx):
-        assert len(ctx.get_ciphers()) > 2  # Most likely
+        if sys.version_info >= (3, 6):
+            assert len(ctx.get_ciphers()) > 2  # Most likely
 
     c = {
         'tls': {
@@ -192,7 +194,8 @@ def test_connection_args():
     assert d['require_encryption']
     ctx = d['ssl_context']
     basic_checks(ctx)
-    assert len(ctx.get_ciphers()) == 1
+    if sys.version_info >= (3, 6):
+        assert len(ctx.get_ciphers()) == 1
 
 
 def test_listen_args():
@@ -201,7 +204,8 @@ def test_listen_args():
         assert ctx.check_hostname == False
 
     def many_ciphers(ctx):
-        assert len(ctx.get_ciphers()) > 2  # Most likely
+        if sys.version_info >= (3, 6):
+            assert len(ctx.get_ciphers()) > 2  # Most likely
 
     c = {
         'tls': {
@@ -244,7 +248,8 @@ def test_listen_args():
     assert d['require_encryption']
     ctx = d['ssl_context']
     basic_checks(ctx)
-    assert len(ctx.get_ciphers()) == 1
+    if sys.version_info >= (3, 6):
+        assert len(ctx.get_ciphers()) == 1
 
 
 @gen_test()
