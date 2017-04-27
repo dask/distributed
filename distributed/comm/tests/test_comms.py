@@ -651,11 +651,14 @@ def test_tls_reject_certificate():
                       connection_args={'ssl_context': serv_ctx})
     listener.start()
 
-    with pytest.raises(OSError) as excinfo:
+    with pytest.raises(EnvironmentError) as excinfo:
         yield connect(listener.contact_address, timeout=0.5,
                       connection_args={'ssl_context': bad_cli_ctx})
-    # See https://serverfault.com/questions/793260/what-does-tlsv1-alert-unknown-ca-mean
-    assert "unknown ca" in str(excinfo.value)
+
+    # The wrong error is reported on Python 2, see https://github.com/tornadoweb/tornado/pull/2028
+    if sys.version_info >= (3,):
+        # See https://serverfault.com/questions/793260/what-does-tlsv1-alert-unknown-ca-mean
+        assert "unknown ca" in str(excinfo.value)
 
     # Sanity check
     comm = yield connect(listener.contact_address, timeout=0.5,
@@ -667,10 +670,12 @@ def test_tls_reject_certificate():
                       connection_args={'ssl_context': bad_serv_ctx})
     listener.start()
 
-    with pytest.raises(OSError) as excinfo:
+    with pytest.raises(EnvironmentError) as excinfo:
         yield connect(listener.contact_address, timeout=0.5,
                       connection_args={'ssl_context': cli_ctx})
-    assert "certificate verify failed" in str(excinfo.value)
+    # The wrong error is reported on Python 2, see https://github.com/tornadoweb/tornado/pull/2028
+    if sys.version_info >= (3,):
+        assert "certificate verify failed" in str(excinfo.value)
 
 
 #
