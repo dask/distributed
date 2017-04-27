@@ -15,6 +15,7 @@ signed by a given Certificate Authority (CA).  It is generally recommended
 to use a custom CA for your organization, as it will allow signing
 certificates for internal hostnames or IP addresses.
 
+
 Parameters
 ----------
 
@@ -47,12 +48,38 @@ One can also pass additional parameters:
 * whether to *require encryption*, to avoid using plain TCP communications
   by mistake.
 
-How to pass those parameters can be done in several ways:
+All those parameters can be passed in several ways:
 
-* through the :ref:`configuration file <configuration>` ``.dask/config.yaml``
+* through the :ref:`configuration file <configuration>` ``.dask/config.yaml``;
 * if using the command line, through options to ``dask-scheduler`` and
-  ``dask-worker``
-* if using the API, through a ``Security`` object
+  ``dask-worker``;
+* if using the API, through a ``Security`` object.
 
 
-.. XXX describe configuration file, including ``ciphers`` and ``require-encryption`` options
+Security policy
+---------------
+
+Dask always verifies the certificate presented by a remote endpoint
+against the configure CA certificate(s).  Certificates are verified
+for both "client" and "server" endpoints (in the TCP sense), ensuring
+the endpoints are mutually authenticated. The hostname or IP address for
+which a certificate has been issued is not checked; this should not be an
+issue if you are using your own internal Certificate Authority.
+
+It is not possible to disable certificate verification, as it would render
+the communications vulnerable to Man-in-the-Middle attacks.
+
+
+Performance implications
+------------------------
+
+Encryption is fast on recent CPUs, most of which have hardware acceleration
+for AES-based encryption.  AES is normally selected by the TLS layer
+unless you have forced the *ciphers* parameter to something else.  However,
+encryption may still have a non-negligible overhead if you are transferring
+very large data over very high speed network links.
+
+.. seealso::
+   `A study of AES-NI acceleration <https://calomel.org/aesni_ssl_performance.html>`_
+   shows recent x86 CPUs can AES-encrypt more than 1 GB per second
+   on each CPU core.

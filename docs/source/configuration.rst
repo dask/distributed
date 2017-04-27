@@ -5,8 +5,8 @@ Configuration
 =============
 
 As with any distributed computation system, taking full advantage of
-Dask distributed sometimes require configuring.  Some options can be passed
-as :ref:`API <api>` parameters and/or as command line options to the
+Dask distributed sometimes requires configuration.  Some options can be
+passed as :ref:`API <api>` parameters and/or command line options to the
 various Dask executables.  However, some options can also be entered in
 the Dask configuration file.
 
@@ -71,7 +71,7 @@ Communication options
 """""""""""""""
 
 This key configures the desired compression scheme when transferring data
-over the cluster.  The default value, "auto", applies heuristics to try and
+over the network.  The default value, "auto", applies heuristics to try and
 select the best compression scheme for each piece of data.
 
 
@@ -97,9 +97,9 @@ over TCP without TLS), forcing you to use a secure transport such as
 """""""""""""""
 
 The default "timeout" on TCP sockets.  If a remote endpoint is unresponsive
-(at the TCP layer, not at the distributed layer) for at least this seconds,
-the communication is considered closed.  This helps detect endpoints that
-have been killed or disconnected abruptly.
+(at the TCP layer, not at the distributed layer) for at least the specified
+number of seconds, the communication is considered closed.  This helps detect
+endpoints that have been killed or have disconnected abruptly.
 
 
 ``tls``
@@ -109,15 +109,15 @@ This key configures :ref:`TLS <tls>` communications.  Several sub-keys are
 recognized:
 
 * ``ca-file`` configures the CA certificate file used to authenticate
-  and authorize all endpoints
-* ``ciphers`` restricts allowed ciphers on TLS communications
+  and authorize all endpoints.
+* ``ciphers`` restricts allowed ciphers on TLS communications.
 
 Each kind of endpoint has a dedicated endpoint sub-key: ``scheduler``,
 ``worker`` and ``client``.  Each endpoint sub-key also supports several
 sub-keys:
 
-* ``cert`` configures the certificate file for the endpoint
-* ``key`` configures the private key file for the endpoint
+* ``cert`` configures the certificate file for the endpoint.
+* ``key`` configures the private key file for the endpoint.
 
 
 Scheduler options
@@ -133,9 +133,9 @@ A task is considered "suspicious" if the worker died while executing it.
 ``bandwidth``
 """""""""""""
 
-The estimated bandwidth, in bytes per second, from worker to worker.  This
-value is used to estimate the time it takes to ship data from one node to
-another, and balance tasks and data accordingly.
+The estimated network bandwidth, in bytes per second, from worker to worker.
+This value is used to estimate the time it takes to ship data from one node
+to another, and balance tasks and data accordingly.
 
 
 Misc options
