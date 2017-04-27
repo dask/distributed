@@ -27,7 +27,7 @@ from dask.compatibility import apply, unicode
 from dask.context import _globals
 from toolz import first, groupby, merge, valmap, keymap
 from tornado import gen
-from tornado.gen import Return, TimeoutError
+from tornado.gen import TimeoutError
 from tornado.locks import Event, Condition
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.queues import Queue
@@ -134,7 +134,7 @@ class Future(WrappedKey):
             if raiseit:
                 six.reraise(*exc)
             else:
-                raise Return(exc)
+                raise gen.Return(exc)
         elif self.status == 'cancelled':
             exception = CancelledError(self.key)
             if raiseit:
@@ -149,9 +149,9 @@ class Future(WrappedKey):
     def _exception(self):
         yield self.event.wait()
         if self.status == 'error':
-            raise Return(self._state.exception)
+            raise gen.Return(self._state.exception)
         else:
-            raise Return(None)
+            raise gen.Return(None)
 
     def exception(self, timeout=None):
         """ Return the exception of a failed task
@@ -201,9 +201,9 @@ class Future(WrappedKey):
     def _traceback(self):
         yield self.event.wait()
         if self.status == 'error':
-            raise Return(self._state.traceback)
+            raise gen.Return(self._state.traceback)
         else:
-            raise Return(None)
+            raise gen.Return(None)
 
     def traceback(self, timeout=None):
         """ Return the traceback of a failed task
@@ -362,7 +362,7 @@ class Client(Node):
     --------
     distributed.scheduler.Scheduler: Internal scheduler
     """
-    def __init__(self, address=None, start=True, loop=None, timeout=3,
+    def __init__(self, address=None, start=True, loop=None, timeout=5,
                  set_as_default=True, scheduler_file=None,
                  security=None, **kwargs):
         self.futures = dict()
@@ -453,7 +453,7 @@ class Client(Node):
             raise Exception("Client not running.  Status: %s" % self.status)
 
     @gen.coroutine
-    def _start(self, timeout=3, **kwargs):
+    def _start(self, timeout=5, **kwargs):
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
             yield self.cluster._start()
@@ -497,12 +497,12 @@ class Client(Node):
                              connection_args=self.connection_args)
         self.scheduler_comm = None
 
-        yield self.ensure_connected(timeout=timeout)
+        yield self._ensure_connected(timeout=timeout)
 
         self.coroutines.append(self._handle_report())
 
     @gen.coroutine
-    def reconnect(self, timeout=0.1):
+    def _reconnect(self, timeout=0.1):
         with log_errors():
             assert self.scheduler_comm.comm.closed()
             self.status = 'connecting'
@@ -514,13 +514,13 @@ class Client(Node):
 
             while self.status == 'connecting':
                 try:
-                    yield self.ensure_connected()
+                    yield self._ensure_connected()
                     break
                 except EnvironmentError:
                     yield gen.sleep(timeout)
 
     @gen.coroutine
-    def ensure_connected(self, timeout=3):
+    def _ensure_connected(self, timeout=5):
         if self.scheduler_comm and not self.scheduler_comm.closed():
             return
 
@@ -591,7 +591,7 @@ class Client(Node):
                         logger.warn("Client report stream closed to scheduler")
                         logger.info("Reconnecting...")
                         self.status = 'connecting'
-                        yield self.reconnect()
+                        yield self._reconnect()
                         continue
                     else:
                         break
@@ -670,7 +670,7 @@ class Client(Node):
         """ Send shutdown signal and wait until scheduler completes """
         with log_errors():
             if self.status == 'closed':
-                raise Return()
+                raise gen.Return()
             if self.status == 'running':
                 self._send_to_scheduler({'op': 'close-stream'})
             self.status = 'closed'
@@ -1333,7 +1333,7 @@ class Client(Node):
 
         with temp_default_client(self):
             data = loads(out['data'])
-        raise Return(data)
+        raise gen.Return(data)
 
     def get_dataset(self, name):
         """
@@ -1354,7 +1354,7 @@ class Client(Node):
         if response['status'] == 'error':
             six.reraise(*clean_exception(**response))
         else:
-            raise Return(response['result'])
+            raise gen.Return(response['result'])
 
     def run_on_scheduler(self, function, *args, **kwargs):
         """ Run a function on the scheduler process
@@ -1395,7 +1395,7 @@ class Client(Node):
                 results[key] = resp['result']
             elif resp['status'] == 'error':
                 six.reraise(*clean_exception(**resp))
-        raise Return(results)
+        raise gen.Return(results)
 
     def run(self, function, *args, **kwargs):
         """
@@ -1443,7 +1443,7 @@ class Client(Node):
                                                 wait=wait),
                                                 workers=workers)
         if not wait:
-            raise Return(None)
+            raise gen.Return(None)
         else:
             results = {}
             for key, resp in responses.items():
@@ -1451,7 +1451,7 @@ class Client(Node):
                     results[key] = resp['result']
                 elif resp['status'] == 'error':
                     six.reraise(*clean_exception(**resp))
-            raise Return(results)
+            raise gen.Return(results)
 
     def run_coroutine(self, function, *args, **kwargs):
         """

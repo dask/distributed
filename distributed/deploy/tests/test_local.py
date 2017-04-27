@@ -258,7 +258,7 @@ def test_silent_startup(capsys, loop):
     out, err = capsys.readouterr()
     assert not out
     for line in err.split('\n'):
-        assert 'worker' not in line
+        assert 'worker' not in line or 'Exception ignored' in line
 
 
 def test_only_local_access(loop):
@@ -285,4 +285,4 @@ def test_memory_nanny(loop):
         with Client(cluster.scheduler_address, loop=loop) as c:
             info = c.scheduler_info()
             assert (sum(w['memory_limit'] for w in info['workers'].values())
-                    < TOTAL_MEMORY * 0.8)
+                    < TOTAL_MEMORY * 0.9)
