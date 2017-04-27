@@ -213,4 +213,3 @@ async def test_asyncio_wait(loop):
         await wait([y, z])
         assert y.done() is True
         assert z.done() is True
-

@@ -12,6 +12,7 @@ from tornado.ioloop import IOLoop
 
 
 def to_asyncio(method):
+    """Converts Tornado gen.coroutines and futures to asyncio ones"""
     @wraps(method)
     def convert(*args, **kwargs):
         return to_asyncio_future(method(*args, **kwargs))
@@ -27,6 +28,7 @@ class AioLoop(BaseAsyncIOLoop):
 
 
 class AioFuture(Future):
+    """Provides awaitable syntax for a distributed Future"""
 
     def __await__(self):
         return self.result().__await__()
@@ -40,15 +42,19 @@ class AioClient(Client):
 
     _Future = AioFuture
 
-    def __init__(self, *args, loop=None, start=True, **kwargs):
+    def __init__(self, *args, loop=None, start=True, set_as_default=False,
+                 **kwargs):
+        if set_as_default:
+            raise Exception("AioClient instance can't be sat as default")
         if loop is None:
             loop = asyncio.get_event_loop()
-        ioloop = AioLoop(loop, make_current=False)
-
         # required to handle IOLoop.current() calls
         # ioloop is not injected in nanny and comm protocols
         self._make_current = start
-        super().__init__(*args, loop=ioloop, start=False, **kwargs)
+
+        ioloop = AioLoop(loop, make_current=False)
+        super().__init__(*args, loop=ioloop, start=False, set_as_default=False,
+                         **kwargs)
 
     async def __aenter__(self):
         if self._make_current:
@@ -94,6 +100,3 @@ class AioAsCompleted(AsCompleted):
 
 wait = to_asyncio(_wait)
 as_completed = AioAsCompleted
-
-
-
