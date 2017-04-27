@@ -21,13 +21,18 @@ from tornado.ioloop import IOLoop
 logger = logging.getLogger('distributed.scheduler')
 
 
+pem_file_option_type = click.Path(exists=True, resolve_path=True)
+
 @click.command()
 @click.option('--host', type=str, default='',
               help="URI, IP or hostname of this server")
-@click.option('--port', type=int, default=None, help="Serving port (deprecated, --host is preferred)")
-@click.option('--tls-ca-file', type=str, default=None, help="CA cert(s) file for TLS (in PEM format)")
-@click.option('--tls-cert', type=str, default=None, help="certificate file for TLS (in PEM format)")
-@click.option('--tls-key', type=str, default=None, help="private key file for TLS (in PEM format)")
+@click.option('--port', type=int, default=None, help="Serving port")
+@click.option('--tls-ca-file', type=pem_file_option_type, default=None,
+              help="CA cert(s) file for TLS (in PEM format)")
+@click.option('--tls-cert', type=pem_file_option_type, default=None,
+              help="certificate file for TLS (in PEM format)")
+@click.option('--tls-key', type=pem_file_option_type, default=None,
+              help="private key file for TLS (in PEM format)")
 # XXX default port (or URI) values should be centralized somewhere
 @click.option('--http-port', type=int, default=9786, help="HTTP port")
 @click.option('--bokeh-port', type=int, default=8787, help="Bokeh port")

@@ -42,11 +42,16 @@ def handle_signal(sig, frame):
         exit(1)
 
 
+pem_file_option_type = click.Path(exists=True, resolve_path=True)
+
 @click.command()
 @click.argument('scheduler', type=str, required=False)
-@click.option('--tls-ca-file', type=str, default=None, help="CA cert(s) file for TLS (in PEM format)")
-@click.option('--tls-cert', type=str, default=None, help="certificate file for TLS (in PEM format)")
-@click.option('--tls-key', type=str, default=None, help="private key file for TLS (in PEM format)")
+@click.option('--tls-ca-file', type=pem_file_option_type, default=None,
+              help="CA cert(s) file for TLS (in PEM format)")
+@click.option('--tls-cert', type=pem_file_option_type, default=None,
+              help="certificate file for TLS (in PEM format)")
+@click.option('--tls-key', type=pem_file_option_type, default=None,
+              help="private key file for TLS (in PEM format)")
 @click.option('--worker-port', type=int, default=0,
               help="Serving worker port, defaults to randomly assigned")
 @click.option('--http-port', type=int, default=0,
