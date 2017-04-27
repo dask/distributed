@@ -42,13 +42,14 @@ should probably be the same for all endpoints.
 One can also pass additional parameters:
 
 * a set of allowed *ciphers*, if you have strong requirements as to which
-  algorithms are considered secure;
+  algorithms are considered secure;  this setting's value should be an
+  `OpenSSL cipher string <https://www.openssl.org/docs/man1.1.0/apps/ciphers.html>`_;
 * whether to *require encryption*, to avoid using plain TCP communications
   by mistake.
 
 How to pass those parameters can be done in several ways:
 
-* through the configuration file ``.dask/config.yaml``
+* through the :ref:`configuration file <configuration>` ``.dask/config.yaml``
 * if using the command line, through options to ``dask-scheduler`` and
   ``dask-worker``
 * if using the API, through a ``Security`` object
