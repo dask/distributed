@@ -584,6 +584,7 @@ def test_tls_client_server_ipv4():
     yield check_client_server('tls://', tls_eq('0.0.0.0'),
                               tls_eq(EXTERNAL_IP4), **kwargs)
 
+@requires_ipv6
 @gen_test()
 def test_tls_client_server_ipv6():
     listen_args = {'ssl_context': get_server_ssl_context()}

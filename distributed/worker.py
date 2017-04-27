@@ -28,7 +28,7 @@ from .comm import get_address_host, get_local_address_for
 from .config import config
 from .compatibility import unicode
 from .core import (error_message, CommClosedError,
-                   rpc, Server, pingpong, coerce_to_address)
+                   rpc, pingpong, coerce_to_address)
 from .metrics import time
 from .node import ServerNode
 from .preloading import preload_modules

@@ -11,7 +11,7 @@ from tornado.gen import Return
 from dask.base import tokenize
 from toolz import merge, concat, groupby, drop
 
-from .core import rpc, coerce_to_address
+from .core import coerce_to_address
 from .utils import All, tokey
 from .protocol.pickle import dumps
 

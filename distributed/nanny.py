@@ -14,7 +14,7 @@ from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
 from .comm import get_address_host, get_local_address_for
-from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
+from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
 from .node import ServerNode
 from .security import Security
@@ -116,16 +116,6 @@ class Nanny(ServerNode):
         else:
             self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
-
-        #if isinstance(addr_or_port, int):
-            ## Default ip is the required one to reach the scheduler
-            #self.ip = get_ip(
-                #get_address_host(self.scheduler.address)
-            #)
-            #self.listen((self.ip, addr_or_port), listen_args=self.listen_args)
-        #else:
-            #self.listen(addr_or_port, listen_args=self.listen_args)
-            #self.ip = get_address_host(self.address)
 
         logger.info('        Start Nanny at: %r', self.address)
         response = yield self.instantiate()
