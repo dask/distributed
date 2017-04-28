@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 import atexit
 from collections import Iterable
 from contextlib import contextmanager
+from datetime import timedelta
 import inspect
 import logging
 import multiprocessing
@@ -10,12 +11,16 @@ import os
 import re
 import shutil
 import socket
+from importlib import import_module
+
 import six
 import sys
 import tblib.pickling_support
 import tempfile
 import threading
 import warnings
+
+from .compatibility import cache_from_source, invalidate_caches, reload
 
 try:
     import resource
@@ -26,7 +31,7 @@ from dask import istask
 from toolz import memoize, valmap
 from tornado import gen
 
-from .compatibility import Queue, PY3, PY2, get_thread_identity
+from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
 from .config import config
 
 
@@ -35,7 +40,8 @@ logger = logging.getLogger(__name__)
 
 def _initialize_mp_context():
     if PY3 and not sys.platform.startswith('win'):
-        ctx = multiprocessing.get_context('forkserver')
+        method = config.get('multiprocessing-method', 'forkserver')
+        ctx = multiprocessing.get_context(method)
         # Makes the test suite much faster
         preload = ['distributed']
         if 'pkg_resources' in sys.modules:
@@ -126,6 +132,12 @@ def get_ipv6(host='2001:4860:4860::8888', port=80):
     return _get_ip(host, port, family=socket.AF_INET6, default='::1')
 
 
+def get_ip_interface(ifname):
+    import psutil
+    L = psutil.net_if_addrs()[ifname]
+    return [x.address for x in L if x.family == socket.AF_INET][0]
+
+
 @contextmanager
 def ignoring(*exceptions):
     try:
@@ -172,9 +184,17 @@ def sync(loop, func, *args, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
+    timeout = kwargs.pop('callback_timeout', None)
+    def make_coro():
+        coro = gen.maybe_future(func(*args, **kwargs))
+        if timeout is None:
+            return coro
+        else:
+            return gen.with_timeout(timedelta(seconds=timeout), coro)
+
     if not loop._running:
         try:
-            return loop.run_sync(lambda: func(*args, **kwargs))
+            return loop.run_sync(make_coro)
         except RuntimeError:  # loop already running
             pass
 
@@ -189,14 +209,14 @@ def sync(loop, func, *args, **kwargs):
             if main_tid == get_thread_identity():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
-            result[0] = yield gen.maybe_future(func(*args, **kwargs))
+            result[0] = yield make_coro()
         except Exception as exc:
             logger.exception(exc)
             error[0] = sys.exc_info()
         finally:
             e.set()
 
-    a = loop.add_callback(f)
+    loop.add_callback(f)
     while not e.is_set():
         e.wait(1000000)
     if error[0]:
@@ -299,6 +319,50 @@ else:
     key_split = lru_cache(100000)(key_split)
 
 
+def key_split_group(x):
+    """A more fine-grained version of key_split
+
+    >>> key_split_group('x')
+    'x'
+    >>> key_split_group('x-1')
+    'x-1'
+    >>> key_split_group('x-1-2-3')
+    'x-1-2-3'
+    >>> key_split_group(('x-2', 1))
+    'x-2'
+    >>> key_split_group("('x-2', 1)")
+    'x-2'
+    >>> key_split_group('hello-world-1')
+    'hello-world-1'
+    >>> key_split_group(b'hello-world-1')
+    'hello-world-1'
+    >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
+    'data'
+    >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
+    'myclass'
+    >>> key_split_group(None)
+    'Other'
+    >>> key_split_group('x-abcdefab')  # ignores hex
+    'x-abcdefab'
+    """
+    typ = type(x)
+    if typ is tuple:
+        return x[0]
+    elif typ is str:
+        if x[0] == '(':
+            return x.split(',', 1)[0].strip('()"\'')
+        elif len(x) == 32 and re.match(r'[a-f0-9]{32}', x):
+            return 'data'
+        elif x[0] == '<':
+            return x.strip('<>').split()[0].split('.')[-1]
+        else:
+            return x
+    elif typ is bytes:
+        return key_split_group(x.decode())
+    else:
+        return 'Other'
+
+
 @contextmanager
 def log_errors(pdb=False):
     from .comm import CommClosedError
@@ -341,6 +405,7 @@ def ensure_ip(hostname):
 
 tblib.pickling_support.install()
 
+
 def get_traceback():
     exc_type, exc_value, exc_traceback = sys.exc_info()
     bad = [os.path.join('distributed', 'worker'),
@@ -374,9 +439,11 @@ def queue_to_iterator(q):
             raise result
         yield result
 
+
 def _dump_to_queue(seq, q):
     for item in seq:
         q.put(item)
+
 
 def iterator_to_queue(seq, maxsize=0):
     q = Queue(maxsize=maxsize)
@@ -519,7 +586,6 @@ def read_block(f, offset, length, delimiter=None):
         f.seek(start + length)
         seek_delimiter(f, delimiter, 2**16)
         end = f.tell()
-        eof = not f.read(1)
 
         offset = start
         length = end - start
@@ -560,7 +626,7 @@ def ensure_bytes(s):
         return s
     if isinstance(s, memoryview):
         return s.tobytes()
-    if isinstance(s, bytearray) or PY2 and isinstance(s, buffer):
+    if isinstance(s, bytearray) or PY2 and isinstance(s, buffer):  # flake8: noqa
         return bytes(s)
     if hasattr(s, 'encode'):
         return s.encode()
@@ -634,3 +700,68 @@ def open_port(host=''):
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+def import_file(path):
+    """ Loads modules for a file (.py, .pyc, .zip, .egg) """
+    directory, filename = os.path.split(path)
+    name, ext = os.path.splitext(filename)
+    names_to_import = []
+    tmp_python_path = None
+
+    if ext in ('.py', '.pyc'):
+        if directory not in sys.path:
+            tmp_python_path = directory
+        names_to_import.append(name)
+        # Ensures that no pyc file will be reused
+        cache_file = cache_from_source(path)
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
+    if ext in ('.egg', '.zip'):
+        if path not in sys.path:
+            sys.path.insert(0, path)
+        if ext == '.egg':
+            import pkg_resources
+            pkgs = pkg_resources.find_distributions(path)
+            for pkg in pkgs:
+                names_to_import.append(pkg.project_name)
+        elif ext == '.zip':
+            names_to_import.append(name)
+
+    loaded = []
+    if not names_to_import:
+        logger.warning("Found nothing to import from %s", filename)
+    else:
+        invalidate_caches()
+        if tmp_python_path is not None:
+            sys.path.insert(0, tmp_python_path)
+        try:
+            for name in names_to_import:
+                logger.info("Reload module %s from %s file", name, ext)
+                loaded.append(reload(import_module(name)))
+        finally:
+            if tmp_python_path is not None:
+                sys.path.remove(tmp_python_path)
+    return loaded
+
+
+class itemgetter(object):
+    """A picklable itemgetter.
+
+    Examples
+    --------
+    >>> data = [0, 1, 2]
+    >>> get_1 = itemgetter(1)
+    >>> get_1(data)
+    1
+    """
+    __slots__ = ('index',)
+
+    def __init__(self, index):
+        self.index = index
+
+    def __call__(self, x):
+        return x[self.index]
+
+    def __reduce__(self):
+        return (itemgetter, (self.index,))

@@ -12,6 +12,7 @@ API
    Client.gather
    Client.get
    Client.get_dataset
+   Client.get_executor
    Client.has_what
    Client.list_datasets
    Client.map
@@ -33,6 +34,21 @@ API
    Client.unpublish_dataset
    Client.upload_file
    Client.who_has
+
+.. currentmodule:: distributed
+
+.. autosummary::
+   worker_client
+   get_worker
+
+.. currentmodule:: distributed.recreate_exceptions
+
+.. autosummary::
+   ReplayExceptionClient.get_futures_error
+   ReplayExceptionClient.recreate_error_locally
+
+.. currentmodule:: distributed.client
+
 
 **Future**
 
@@ -74,11 +90,9 @@ Client
 .. autoclass:: Client
    :members:
 
-CompatibleExecutor
-------------------
+.. autoclass:: distributed.recreate_exceptions.ReplayExceptionClient
+   :members:
 
-.. autoclass:: CompatibleExecutor
-    :members: map
 
 Future
 ------
@@ -93,3 +107,8 @@ Other
 .. autofunction:: as_completed
 .. autofunction:: distributed.diagnostics.progress
 .. autofunction:: wait
+
+.. currentmodule:: distributed
+
+.. autofunction:: distributed.worker_client
+.. autofunction:: distributed.get_worker

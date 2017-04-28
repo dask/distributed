@@ -523,7 +523,7 @@ def test_accept_old_result_if_stolen(c, s, a, b):
     while not b.executing:
         yield gen.sleep(0.01)
 
-    yield gen.sleep(0.25)
+    yield gen.sleep(0.35)
 
     assert future.key in s.who_has
 
@@ -539,7 +539,8 @@ def test_dont_steal_long_running_tasks(c, s, a, b):
 
     long_tasks = c.map(long, [0.5, 0.6], workers=a.address,
                        allow_other_workers=True)
-    yield gen.sleep(0.1)  # let them start
+    while sum(map(len, s.processing.values())) < 2:  # let them start
+        yield gen.sleep(0.01)
     incs = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
 
     yield gen.sleep(0.2)

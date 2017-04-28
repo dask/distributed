@@ -5,10 +5,10 @@ from operator import add
 
 from bokeh.layouts import row, column
 from bokeh.models import (
-    ColumnDataSource, Plot, Datetime, DataRange1d, Rect, LinearAxis,
+    ColumnDataSource, Plot, DataRange1d, Rect, LinearAxis,
     DatetimeAxis, Grid, BasicTicker, HoverTool, BoxZoomTool, ResetTool,
     PanTool, WheelZoomTool, Title, Range1d, Quad, Text, value, Line,
-    NumeralTickFormatter, ToolbarBox, Legend, LegendItem, BoxSelectTool,
+    NumeralTickFormatter, ToolbarBox, Legend, BoxSelectTool,
     Circle
 )
 from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
@@ -16,10 +16,14 @@ from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from toolz import valmap
 
+from distributed.config import config
 from distributed.diagnostics.progress_stream import progress_quads, nbytes_bar
 from distributed.utils import log_errors
 
-# from .export_tool import ExportTool
+if config.get('bokeh-export-tool', False):
+    from .export_tool import ExportTool
+else:
+    ExportTool = None
 
 
 class DashboardComponent(object):
@@ -60,7 +64,7 @@ class TaskStream(DashboardComponent):
             worker=[], y=[], worker_thread=[], alpha=[])
         )
 
-        x_range = DataRange1d()
+        x_range = DataRange1d(range_padding=0)
         y_range = DataRange1d(range_padding=0)
 
         self.root = Plot(
@@ -94,17 +98,17 @@ class TaskStream(DashboardComponent):
                 """
         )
 
-        # export = ExportTool()
-        # export.register_plot(self.root)
-
         self.root.add_tools(
             hover,
-            # export,
             BoxZoomTool(),
             ResetTool(reset_size=False),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width")
         )
+        if ExportTool:
+            export = ExportTool()
+            export.register_plot(self.root)
+            self.root.add_tools(export)
 
         # Required for update callback
         self.task_stream_index = [0]
@@ -112,7 +116,7 @@ class TaskStream(DashboardComponent):
     def update(self, messages):
         with log_errors():
             index = messages['task-events']['index']
-            old = rectangles = messages['task-events']['rectangles']
+            rectangles = messages['task-events']['rectangles']
 
             if not index or index[-1] == self.task_stream_index[0]:
                 return
@@ -318,7 +322,7 @@ class ResourceProfiles(DashboardComponent):
             self.source,
             Line(x='time', y='network-send', line_color="#a6cee3", **line_opts)
         )
-        g2 =network_plot.add_glyph(
+        g2 = network_plot.add_glyph(
             self.source,
             Line(x='time', y='network-recv', line_color="#b2df8a", **line_opts)
         )
@@ -475,9 +479,8 @@ class Processing(DashboardComponent):
         self.source = ColumnDataSource(data)
 
         x_range = Range1d(-1, 1)
-        fig = figure(
-            title='Processing and Pending', tools='resize',
-             x_range=x_range, id='bk-processing-stacks-plot', **kwargs)
+        fig = figure(title='Processing and Pending', tools='resize',
+                     x_range=x_range, id='bk-processing-stacks-plot', **kwargs)
         fig.quad(source=self.source, left=0, right='right', color=Spectral9[0],
                  top='top', bottom='bottom')
 

@@ -2,8 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 import bokeh
 from bokeh.server.server import Server
-from bokeh.application.handlers.function import FunctionHandler
-from bokeh.application import Application
 
 
 class BokehServer(object):
@@ -17,9 +15,15 @@ class BokehServer(object):
             ip = None
         for i in range(5):
             try:
+                if bokeh.__version__ <= '0.12.4':
+                    kwargs = {'host': ['*']}
+                else:
+                    kwargs = {}
+
                 self.server = Server(self.apps, io_loop=self.loop,
-                                     port=port, address=ip, host=['*'],
+                                     port=port, address=ip,
                                      check_unused_sessions_milliseconds=500,
+                                     allow_websocket_origin=["*"], **kwargs
                                      )
                 if bokeh.__version__ <= '0.12.3':
                     self.server.start(start_loop=False)

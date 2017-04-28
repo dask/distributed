@@ -1,6 +1,21 @@
 Changelog
 =========
 
+1.16.1 - March 22nd, 2017
+-------------------------
+
+-  Use inproc transport in LocalCluster (:pr:`919`)
+-  Add structured and queryable cluster event logs (:pr:`922`)
+-  Use connection pool for inter-worker communication (:pr:`935`)
+-  Robustly shut down spawned worker processes at shutdown (:pr:`928`)
+-  Worker death timeout (:pr:`940`)
+-  More visual reporting of exceptions in progressbar (:pr:`941`)
+-  Render disk and serialization events to task stream visual (:pr:`943`)
+-  Support async for / await protocol (:pr:`952`)
+-  Ensure random generators are re-seeded in worker processes (:pr:`953`)
+-  Upload sourcecode as zip module (:pr:`886`)
+-  Replay remote exceptions in local process (:pr:`894`)
+
 1.16.0 - February 24th, 2017
 ----------------------------
 
@@ -9,7 +24,7 @@ Changelog
 - Allow stolen tasks to return from either worker (:pr:`853`), (:pr:`875`)
 - Add worker resource constraints during execution (:pr:`857`)
 - Send small data through Channels (:pr:`858`)
-- Better estimates for SciPy sparsse matrix memory costs (:pr:`863`)
+- Better estimates for SciPy sparse matrix memory costs (:pr:`863`)
 - Avoid stealing long running tasks (:pr:`873`)
 - Maintain fortran ordering of NumPy arrays (:pr:`876`)
 - Add ``--scheduler-file`` keyword to dask-scheduler (:pr:`877`)

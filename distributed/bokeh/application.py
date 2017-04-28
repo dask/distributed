@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-import json
 import logging
 import os
 import socket
@@ -33,8 +32,12 @@ logging_level = logging_names[logging_level.upper()]
 
 
 class BokehWebInterface(object):
-    def __init__(self, host='127.0.0.1', http_port=9786, tcp_port=8786,
-                 bokeh_port=8787, bokeh_whitelist=[], log_level=logging_level,
+
+    process = None
+
+    def __init__(self, host='127.0.0.1', http_port=9786, bokeh_port=8787,
+                 scheduler_address='tcp://127.0.0.1:8786',
+                 bokeh_whitelist=[], log_level=logging_level,
                  show=False, prefix=None, use_xheaders=False, quiet=True):
         self.port = bokeh_port
         ip = socket.gethostbyname(host)
@@ -58,8 +61,10 @@ class BokehWebInterface(object):
         args = ([sys.executable, '-m', 'bokeh', 'serve'] + paths +
                 ['--check-unused-sessions=50',
                  '--unused-session-lifetime=1',
-                 '--port', str(bokeh_port)] +
-                 sum([['--host', h] for h in hosts], []))
+                 '--allow-websocket-origin=*',
+                 '--port', str(bokeh_port)])
+        if bokeh.__version__ <= '0.12.4':
+            args += sum([['--host', h] for h in hosts], [])
 
         if prefix:
             args.extend(['--prefix', prefix])
@@ -75,7 +80,7 @@ class BokehWebInterface(object):
 
         bokeh_options = {'host': host,
                          'http-port': http_port,
-                         'tcp-port': tcp_port,
+                         'scheduler-address': scheduler_address,
                          'bokeh-port': bokeh_port}
 
         args.extend(['--args'] + list(map(str, concat(bokeh_options.items()))))
@@ -83,19 +88,20 @@ class BokehWebInterface(object):
         import subprocess
         process = subprocess.Popen(args)
         self.process = process
+
+        @atexit.register
         def cleanup_process():
             try:
                 process.terminate()
             except OSError:
                 pass
-        atexit.register(cleanup_process)
 
         if not quiet:
             logger.info("Web UI: http://%s:%d/status/"
                          % (ip, bokeh_port))
 
     def close(self, join=True, timeout=None):
-        if self.process.poll() is None:
+        if self.process is not None and self.process.poll() is None:
             self.process.terminate()
 
     def __del__(self):

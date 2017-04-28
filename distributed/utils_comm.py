@@ -3,26 +3,24 @@ from __future__ import print_function, division, absolute_import
 from collections import Iterable, defaultdict
 from itertools import cycle
 import random
-import socket
 import uuid
 
 from tornado import gen
 from tornado.gen import Return
-from tornado.ioloop import IOLoop
 
 from dask.base import tokenize
-from toolz import merge, concat, groupby, drop, valmap
+from toolz import merge, concat, groupby, drop
 
 from .core import rpc, coerce_to_address
-from .utils import ignore_exceptions, All, log_errors, tokey, sync
-from .protocol.pickle import dumps, loads
+from .utils import All, tokey
+from .protocol.pickle import dumps
 
 
 no_default = '__no_default__'
 
 
 @gen.coroutine
-def gather_from_workers(who_has, rpc=rpc, close=True, permissive=False):
+def gather_from_workers(who_has, rpc=rpc, close=True):
     """ Gather data directly from peers
 
     Parameters
@@ -58,10 +56,7 @@ def gather_from_workers(who_has, rpc=rpc, close=True, permissive=False):
             except IndexError:
                 bad_keys.add(key)
         if bad_keys:
-            if permissive:
-                all_bad_keys |= bad_keys
-            else:
-                raise KeyError(*bad_keys)
+            all_bad_keys |= bad_keys
 
         rpcs = {addr: rpc(addr) for addr in d}
         try:
@@ -82,11 +77,8 @@ def gather_from_workers(who_has, rpc=rpc, close=True, permissive=False):
         bad_addresses |= {v for k, v in rev.items() if k not in response}
         results.update(response)
 
-    if permissive:
-        bad_keys = {k: list(original_who_has[k]) for k in all_bad_keys}
-        raise Return((results, bad_keys, list(missing_workers)))
-    else:
-        raise Return(results)
+    bad_keys = {k: list(original_who_has[k]) for k in all_bad_keys}
+    raise Return((results, bad_keys, list(missing_workers)))
 
 
 class WrappedKey(object):
@@ -235,7 +227,7 @@ def pack_data(o, d, key_types=object):
     """
     typ = type(o)
     try:
-        if isinstance(o, key_types) and  o in d:
+        if isinstance(o, key_types) and o in d:
             return d[o]
     except TypeError:
         pass

@@ -1,38 +1,26 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import defaultdict
-from datetime import timedelta
+from collections import defaultdict, deque
 from functools import partial
 import logging
 import six
-import socket
-import struct
-import sys
 import traceback
 import uuid
 
 from six import string_types
 
-from toolz import assoc, first
+from toolz import assoc
 
-try:
-    import cPickle as pickle
-except ImportError:
-    import pickle
-import cloudpickle
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
 from .comm import (connect, listen, CommClosedError,
-                   parse_address, normalize_address,
+                   normalize_address,
                    unparse_host_port, get_address_host_port)
-from .comm.core import Comm
-from .compatibility import PY3, unicode, WINDOWS
-from .config import config
 from .metrics import time
 from .system_monitor import SystemMonitor
-from .utils import get_ip, get_traceback, truncate_exception, ignoring, shutting_down
+from .utils import get_traceback, truncate_exception, ignoring, shutting_down
 from . import protocol
 
 
@@ -52,10 +40,6 @@ def get_total_physical_memory():
 
 
 MAX_BUFFER_SIZE = get_total_physical_memory()
-
-
-def handle_signal(sig, frame):
-    IOLoop.instance().add_callback(IOLoop.instance().stop)
 
 
 class Server(object):
@@ -110,6 +94,8 @@ class Server(object):
         self.monitor = SystemMonitor()
         self.counters = None
         self.digests = None
+        self.events = None
+        self.event_counts = None
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
@@ -122,6 +108,8 @@ class Server(object):
 
             from .counter import Counter
             self.counters = defaultdict(partial(Counter, loop=self.loop))
+            self.events = defaultdict(lambda: deque(maxlen=10000))
+            self.event_counts = defaultdict(lambda: 0)
 
             pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.loop)
             self.loop.add_callback(pc.start)
@@ -142,6 +130,16 @@ class Server(object):
         now = time()
         self.digests['tick-duration'].add(now - self._last_tick)
         self._last_tick = now
+
+    def log_event(self, name, msg):
+        msg['time'] = time()
+        if isinstance(name, list):
+            for n in name:
+                self.events[n].append(msg)
+                self.event_counts[n] += 1
+        else:
+            self.events[name].append(msg)
+            self.event_counts[name] += 1
 
     @property
     def address(self):
@@ -170,6 +168,9 @@ class Server(object):
     def port(self):
         """
         The port number this Server is listening on.
+
+        This will raise ValueError if the Server is listening on a
+        non-IP based protocol.
         """
         if not self._port:
             _, self._port = get_address_host_port(self.address)
@@ -261,6 +262,7 @@ class Server(object):
                         logger.warn("Lost connection to %r while sending result for op %r: %s",
                                     address, op, e)
                         break
+                msg = result = None
                 if close_desired:
                     yield comm.close()
                 if comm.closed():

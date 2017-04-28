@@ -21,7 +21,9 @@ from distributed.protocol import (loads, dumps,
 
 from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
                               is_zmq_enabled, parse_address, parse_host_port,
-                              unparse_host_port, resolve_address)
+                              unparse_host_port, resolve_address,
+                              get_address_host, get_local_address_for)
+
 
 if is_zmq_enabled():
     from distributed.comm import zmq
@@ -94,18 +96,26 @@ def test_unparse_host_port():
     assert f('::1', '*') == '[::1]:*'
 
 
+def test_get_address_host():
+    f = get_address_host
+
+    assert f('tcp://127.0.0.1:123') == '127.0.0.1'
+    assert f('inproc://%s/%d/123' % (get_ip(), os.getpid())) == get_ip()
+
+    if is_zmq_enabled():
+        assert f('zmq://192.168.2.3:456') == '192.168.2.3'
+
+
 def test_resolve_address():
     f = resolve_address
 
     assert f('tcp://127.0.0.1:123') == 'tcp://127.0.0.1:123'
-    assert f('zmq://127.0.0.1:456') == 'zmq://127.0.0.1:456'
     assert f('127.0.0.2:789') == 'tcp://127.0.0.2:789'
     assert f('tcp://0.0.0.0:456') == 'tcp://0.0.0.0:456'
     assert f('tcp://0.0.0.0:456') == 'tcp://0.0.0.0:456'
 
     if has_ipv6():
         assert f('tcp://[::1]:123') == 'tcp://[::1]:123'
-        assert f('zmq://[::1]:456') == 'zmq://[::1]:456'
         # OS X returns '::0.0.0.2' as canonical representation
         assert f('[::2]:789') in ('tcp://[::2]:789',
                                   'tcp://[::0.0.0.2]:789')
@@ -113,7 +123,32 @@ def test_resolve_address():
 
     assert f('localhost:123') == 'tcp://127.0.0.1:123'
     assert f('tcp://localhost:456') == 'tcp://127.0.0.1:456'
-    assert f('zmq://localhost:789') == 'zmq://127.0.0.1:789'
+
+    if is_zmq_enabled():
+        assert f('zmq://127.0.0.1:456') == 'zmq://127.0.0.1:456'
+        assert f('zmq://localhost:789') == 'zmq://127.0.0.1:789'
+        if has_ipv6():
+            assert f('zmq://[::1]:456') == 'zmq://[::1]:456'
+
+
+def test_get_local_address_for():
+    f = get_local_address_for
+
+    assert f('tcp://127.0.0.1:80') == 'tcp://127.0.0.1'
+    assert f('tcp://8.8.8.8:4444') == 'tcp://' + get_ip()
+    if has_ipv6():
+        assert f('tcp://[::1]:123') == 'tcp://[::1]'
+
+    if is_zmq_enabled():
+        assert f('zmq://127.0.0.1:80') == 'zmq://127.0.0.1'
+        assert f('zmq://8.8.8.8:4444') == 'zmq://' + get_ip()
+        if has_ipv6():
+            assert f('zmq://[::1]:123') == 'zmq://[::1]'
+
+    inproc_arg = 'inproc://%s/%d/444' % (get_ip(), os.getpid())
+    inproc_res = f(inproc_arg)
+    assert inproc_res.startswith('inproc://')
+    assert inproc_res != inproc_arg
 
 
 #
@@ -605,7 +640,7 @@ def check_connect_timeout(addr):
     with pytest.raises(IOError):
         yield connect(addr, timeout=0.15)
     dt = time() - t1
-    assert 0.3 >= dt >= 0.1
+    assert 0.5 >= dt >= 0.1
 
 
 @gen_test()

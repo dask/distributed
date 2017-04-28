@@ -2,40 +2,40 @@ from __future__ import print_function, division, absolute_import
 
 from collections import defaultdict, deque
 from datetime import timedelta
-from importlib import import_module
 import heapq
 import logging
 import os
+import pickle
 import random
 import tempfile
-from threading import current_thread, Lock, local
-from timeit import default_timer
+from threading import current_thread, local
 import shutil
 import sys
 
 from dask.core import istask
 from dask.compatibility import apply
 try:
-    from cytoolz import valmap, merge, pluck, concat
+    from cytoolz import pluck
 except ImportError:
-    from toolz import valmap, merge, pluck, concat
+    from toolz import pluck
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
 from .batched import BatchedSend
-from .comm import get_address_host_port
+from .comm import get_address_host, get_local_address_for
 from .config import config
-from .compatibility import reload, unicode, invalidate_caches, cache_from_source
-from .core import (connect, send_recv, error_message, CommClosedError,
-                   rpc, Server, pingpong, coerce_to_address, RPCClosed)
+from .compatibility import unicode
+from .core import (error_message, CommClosedError,
+                   rpc, Server, pingpong, coerce_to_address)
 from .metrics import time
+from .preloading import preload_modules
 from .protocol.pickle import dumps, loads
 from .sizeof import sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
-                    All, ignoring, validate_key, mp_context)
+                    ignoring, validate_key, mp_context, import_file)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
@@ -51,9 +51,11 @@ no_value = '--no-value-sentinel--'
 try:
     import psutil
     TOTAL_MEMORY = psutil.virtual_memory().total
+    proc = psutil.Process()
 except ImportError:
     logger.warn("Please install psutil to estimate worker memory use")
     TOTAL_MEMORY = 8e9
+    proc = None
 
 
 IN_PLAY = ('waiting', 'ready', 'executing', 'long-running')
@@ -68,7 +70,7 @@ class WorkerBase(Server):
                  loop=None, local_dir=None, services=None, service_ports=None,
                  name=None, heartbeat_interval=5000, reconnect=True,
                  memory_limit='auto', executor=None, resources=None,
-                 silence_logs=None, **kwargs):
+                 silence_logs=None, death_timeout=None, preload=(), **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -78,6 +80,8 @@ class WorkerBase(Server):
         self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
+        self.death_timeout = death_timeout
+        self.preload = preload
         if silence_logs:
             logger.setLevel(silence_logs)
         if not os.path.exists(self.local_dir):
@@ -157,12 +161,20 @@ class WorkerBase(Server):
             self.heartbeat_active = True
             logger.debug("Heartbeat: %s" % self.address)
             try:
-                yield self.scheduler.register(address=self.address, name=self.name,
-                                        ncores=self.ncores,
-                                        now=time(),
-                                        host_info=self.host_health(),
-                                        services=self.service_ports,
-                                        memory_limit=self.memory_limit)
+                yield self.scheduler.register(
+                        address=self.address,
+                        name=self.name,
+                        ncores=self.ncores,
+                        now=time(),
+                        host_info=self.host_health(),
+                        services=self.service_ports,
+                        memory_limit=self.memory_limit,
+                        memory=proc.memory_info().vms if proc else None,
+                        executing=len(self.executing),
+                        in_memory=len(self.data),
+                        ready=len(self.ready),
+                        in_flight=len(self.in_flight_tasks)
+                )
             finally:
                 self.heartbeat_active = False
         else:
@@ -171,11 +183,15 @@ class WorkerBase(Server):
     @gen.coroutine
     def _register_with_scheduler(self):
         self.heartbeat_callback.stop()
+        start = time()
         while True:
+            if self.death_timeout and time() > start + self.death_timeout:
+                yield self._close(timeout=1)
+                return
             if self.status in ('closed', 'closing'):
                 raise gen.Return
             try:
-                resp = yield self.scheduler.register(
+                future = self.scheduler.register(
                         ncores=self.ncores, address=self.address,
                         keys=list(self.data),
                         name=self.name,
@@ -186,10 +202,18 @@ class WorkerBase(Server):
                         memory_limit=self.memory_limit,
                         local_directory=self.local_dir,
                         resources=self.total_resources)
+                if self.death_timeout:
+                    diff = self.death_timeout - (time() - start)
+                    future = gen.with_timeout(timedelta(seconds=diff), future,
+                                              io_loop=self.loop)
+                resp = yield future
+                self.status = 'running'
                 break
             except EnvironmentError:
                 logger.debug("Unable to register with scheduler.  Waiting")
                 yield gen.sleep(0.1)
+            except gen.TimeoutError:
+                pass
         if resp != 'OK':
             raise ValueError(resp)
         self.heartbeat_callback.start()
@@ -210,22 +234,22 @@ class WorkerBase(Server):
         assert self.status is None
 
         # XXX Factor this out
-        if isinstance(addr_or_port, int):
-            # Default ip is the required one to reach the scheduler
-            # XXX get local listening address
+        if not addr_or_port:
+            # Default address is the required one to reach the scheduler
+            self.listen(get_local_address_for(self.scheduler.address))
+            self.ip = get_address_host(self.address)
+        elif isinstance(addr_or_port, int):
+            # addr_or_port is an integer => assume TCP
             self.ip = get_ip(
-                get_address_host_port(self.scheduler.address)[0]
-                )
+                get_address_host(self.scheduler.address)
+            )
             self.listen((self.ip, addr_or_port))
         else:
             self.listen(addr_or_port)
-            try:
-                self.ip = get_address_host_port(self.address)[0]
-            except ValueError:
-                # Address scheme does not have a notion of host and port
-                self.ip = get_ip()
+            self.ip = get_address_host(self.address)
 
         self.name = self.name or self.address
+        preload_modules(self.preload, parameter=self, file_dir=self.local_dir)
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
@@ -245,9 +269,9 @@ class WorkerBase(Server):
 
         yield self._register_with_scheduler()
 
-        logger.info('        Registered to: %32s', self.scheduler.address)
-        logger.info('-' * 49)
-        self.status = 'running'
+        if self.status == 'running':
+            logger.info('        Registered to: %32s', self.scheduler.address)
+            logger.info('-' * 49)
 
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
@@ -260,14 +284,14 @@ class WorkerBase(Server):
                 'memory_limit': self.memory_limit}
 
     @gen.coroutine
-    def _close(self, report=True, timeout=10):
+    def _close(self, report=True, timeout=10, nanny=True):
         if self.status in ('closed', 'closing'):
             return
         logger.info("Stopping worker at %s", self.address)
         self.status = 'closing'
         self.stop()
         self.heartbeat_callback.stop()
-        with ignoring(EnvironmentError):
+        with ignoring(EnvironmentError, gen.TimeoutError):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
                         self.scheduler.unregister(address=self.address),
@@ -279,8 +303,14 @@ class WorkerBase(Server):
 
         for k, v in self.services.items():
             v.stop()
-        self.rpc.close()
+
         self.status = 'closed'
+
+        if nanny and 'nanny' in self.services:
+            with self.rpc(self.services['nanny']) as r:
+                yield r.terminate()
+
+        self.rpc.close()
         self._closed.set()
 
     @gen.coroutine
@@ -292,22 +322,6 @@ class WorkerBase(Server):
     def wait_until_closed(self):
         yield self._closed.wait()
         assert self.status == 'closed'
-
-    def _deserialize(self, function=None, args=None, kwargs=None, task=None):
-        """ Deserialize task inputs and regularize to func, args, kwargs """
-        if function is not None:
-            function = loads(function)
-        if args:
-            args = loads(args)
-        if kwargs:
-            kwargs = loads(kwargs)
-
-        if task is not None:
-            assert not function and not args and not kwargs
-            function = execute_task
-            args = (task,)
-
-        return function, args or (), kwargs or {}
 
     @gen.coroutine
     def executor_submit(self, key, function, *args, **kwargs):
@@ -456,32 +470,7 @@ class WorkerBase(Server):
 
         if load:
             try:
-                name, ext = os.path.splitext(filename)
-                names_to_import = []
-                if ext in ('.py', '.pyc'):
-                    names_to_import.append(name)
-                    # Ensures that no pyc file will be reused
-                    cache_file = cache_from_source(out_filename)
-                    if os.path.exists(cache_file):
-                        os.remove(cache_file)
-                if ext in ('.egg', '.zip'):
-                    if out_filename not in sys.path:
-                        sys.path.insert(0, out_filename)
-                    if ext == '.egg':
-                        import pkg_resources
-                        pkgs = pkg_resources.find_distributions(out_filename)
-                        for pkg in pkgs:
-                            names_to_import.append(pkg.project_name)
-                    elif ext == '.zip':
-                        names_to_import.append(name)
-
-                if not names_to_import:
-                    logger.warning("Found nothing to import from %s", filename)
-                else:
-                    invalidate_caches()
-                    for name in names_to_import:
-                        logger.info("Reload module %s from %s file", name, ext)
-                        reload(import_module(name))
+                import_file(out_filename)
             except Exception as e:
                 logger.exception(e)
                 return {'status': 'error', 'exception': dumps(e)}
@@ -533,9 +522,10 @@ class WorkerBase(Server):
                     for k, v in who_has.items()
                     if k not in self.data}
         result, missing_keys, missing_workers = yield gather_from_workers(
-                who_has, permissive=True)
+                who_has)
         if missing_keys:
-            logger.warn("Could not find data", e)
+            logger.warn("Could not find data: %s on workers: %s",
+                        missing_keys, missing_workers)
             raise Return({'status': 'missing-data',
                           'keys': missing_keys})
         else:
@@ -544,6 +534,23 @@ class WorkerBase(Server):
 
 
 job_counter = [0]
+
+
+def _deserialize(function=None, args=None, kwargs=None, task=None):
+    """ Deserialize task inputs and regularize to func, args, kwargs """
+    if function is not None:
+        function = loads(function)
+    if args:
+        args = loads(args)
+    if kwargs:
+        kwargs = loads(kwargs)
+
+    if task is not None:
+        assert not function and not args and not kwargs
+        function = execute_task
+        args = (task,)
+
+    return function, args or (), kwargs or {}
 
 
 def execute_task(task):
@@ -646,8 +653,10 @@ def get_msg_safe_str(msg):
         def __init__(self, f, val):
             self._f = f
             self._val = val
+
         def __repr__(self):
             return self._f(self._val)
+
     msg = msg.copy()
     if "args" in msg:
         msg["args"] = Repr(convert_args_to_str, msg["args"])
@@ -670,7 +679,7 @@ def convert_args_to_str(args, max_len=None):
         strs[i] = sarg
         length += len(sarg) + 2
         if max_len is not None and length > max_len:
-            return "({}".format(", ".join(strs[:i+1]))[:max_len]
+            return "({}".format(", ".join(strs[:i + 1]))[:max_len]
     else:
         return "({})".format(", ".join(strs))
 
@@ -690,7 +699,7 @@ def convert_kwargs_to_str(kwargs, max_len=None):
         strs[i] = skwarg
         length += len(skwarg) + 2
         if max_len is not None and length > max_len:
-            return "{{{}".format(", ".join(strs[:i+1]))[:max_len]
+            return "{{{}".format(", ".join(strs[:i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
 
@@ -699,15 +708,18 @@ from .protocol import compressions, default_compression, to_serialize
 
 # TODO: use protocol.maybe_compress and proper file/memoryview objects
 
+
 def dumps_to_disk(x):
     b = dumps(x)
     c = compressions[default_compression]['compress'](b)
     return c
 
+
 def loads_from_disk(c):
     b = compressions[default_compression]['decompress'](c)
     x = loads(b)
     return x
+
 
 def weight(k, v):
     return sizeof(v)
@@ -949,7 +961,8 @@ class Worker(WorkerBase):
         self.long_running = set()
 
         self.batched_stream = None
-        self.target_message_size = 200e6  # 200 MB
+        self.recent_messages_log = deque(maxlen=10000)
+        self.target_message_size = 50e6  # 50 MB
 
         self.log = deque(maxlen=100000)
         self.validate = kwargs.pop('validate', False)
@@ -972,7 +985,7 @@ class Worker(WorkerBase):
                 ('waiting', 'memory'): self.transition_dep_waiting_memory,
                 ('flight', 'waiting'): self.transition_dep_flight_waiting,
                 ('flight', 'memory'): self.transition_dep_flight_memory
-                }
+        }
 
         self.incoming_transfer_log = deque(maxlen=(100000))
         self.incoming_count = 0
@@ -1007,8 +1020,6 @@ class Worker(WorkerBase):
                 else:
                     self._close(report=False)
 
-            #stream.set_close_callback(on_closed)
-
             closed = False
 
             while not closed:
@@ -1023,6 +1034,7 @@ class Worker(WorkerBase):
                 start = time()
 
                 for msg in msgs:
+                    self.recent_messages_log.append(msg)
                     op = msg.pop('op', None)
                     if 'key' in msg:
                         validate_key(msg['key'])
@@ -1031,8 +1043,7 @@ class Worker(WorkerBase):
                         self._close()
                         break
                     elif op == 'compute-task':
-                        priority = msg.pop('priority')
-                        self.add_task(priority=priority, **msg)
+                        self.add_task(**msg)
                     elif op == 'release-task':
                         self.log.append((msg['key'], 'release-task'))
                         self.release_key(**msg)
@@ -1040,6 +1051,8 @@ class Worker(WorkerBase):
                         self.delete_data(**msg)
                     else:
                         logger.warning("Unknown operation %s, %s", op, msg)
+
+                self.priority_counter -= 1
 
                 self.ensure_communicating()
                 self.ensure_computing()
@@ -1057,6 +1070,8 @@ class Worker(WorkerBase):
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
             who_has=None, nbytes=None, priority=None, duration=None,
             resource_restrictions=None, **kwargs2):
+        if isinstance(priority, list):
+            priority.insert(1, self.priority_counter)
         try:
             if key in self.tasks:
                 state = self.task_state[key]
@@ -1082,13 +1097,11 @@ class Worker(WorkerBase):
             self.log.append((key, 'new'))
             try:
                 start = time()
-                self.tasks[key] = self._deserialize(function, args, kwargs, task)
+                self.tasks[key] = _deserialize(function, args, kwargs, task)
                 stop = time()
 
                 if stop - start > 0.010:
                     self.startstops[key].append(('deserialize', start, stop))
-                raw = {'function': function, 'args': args, 'kwargs': kwargs,
-                        'task': task}
             except Exception as e:
                 logger.warn("Could not deserialize task", exc_info=True)
                 emsg = error_message(e)
@@ -1459,12 +1472,18 @@ class Worker(WorkerBase):
         if key in self.data:
             nbytes = self.nbytes[key] or sizeof(self.data[key])
             typ = self.types.get(key) or type(self.data[key])
+            try:
+                typ = dumps_function(typ)
+            except pickle.PicklingError:
+                # Some types fail pickling (example: _thread.lock objects),
+                # send their name as a best effort.
+                typ = dumps(typ.__name__)
             d = {'op': 'task-finished',
                  'status': 'OK',
                  'key': key,
                  'nbytes': nbytes,
                  'thread': self.threads.get(key),
-                 'type': dumps_function(typ)}
+                 'type': typ}
         elif key in self.exceptions:
             d = {'op': 'task-erred',
                  'status': 'error',
@@ -1473,7 +1492,6 @@ class Worker(WorkerBase):
                  'exception': self.exceptions[key],
                  'traceback': self.tracebacks[key]}
         else:
-            import pdb; pdb.set_trace()
             logger.error("Key not ready to send to worker, %s: %s",
                          key, self.task_state[key])
             return
@@ -1486,7 +1504,11 @@ class Worker(WorkerBase):
         if key in self.data:
             return
 
+        start = time()
         self.data[key] = value
+        stop = time()
+        if stop - start > 0.020:
+            self.startstops[key].append(('disk-write', start, stop))
 
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
@@ -1529,25 +1551,17 @@ class Worker(WorkerBase):
     def gather_dep(self, worker, dep, deps, total_nbytes, cause=None):
         if self.status != 'running':
             return
-        comm = None
         with log_errors():
             response = {}
             try:
                 if self.validate:
                     self.validate_state()
 
-                start = time()
-                comm = yield connect(worker, timeout=3)
-                stop = time()
-                if self.digests is not None:
-                    self.digests['gather-connect-duration'].add(stop - start)
-
                 self.log.append(('request-dep', dep, worker, deps))
                 logger.debug("Request %d keys", len(deps))
-
                 start = time()
-                response = yield send_recv(comm, op='get_data', keys=list(deps),
-                                           close=True, who=self.address)
+                response = yield self.rpc(worker).get_data(keys=list(deps),
+                                                           who=self.address)
                 stop = time()
 
                 if cause:
@@ -1586,8 +1600,6 @@ class Worker(WorkerBase):
                     import pdb; pdb.set_trace()
                 raise
             finally:
-                if comm:
-                    yield comm.close()
                 self.comm_nbytes -= total_nbytes
 
                 for d in self.in_flight_workers.pop(worker):
@@ -1734,7 +1746,7 @@ class Worker(WorkerBase):
             if dep not in self.dep_state:
                 return
             self.log.append((dep, 'release-dep'))
-            state = self.dep_state.pop(dep)
+            self.dep_state.pop(dep)
 
             if dep in self.suspicious_deps:
                 del self.suspicious_deps[dep]
@@ -1837,7 +1849,7 @@ class Worker(WorkerBase):
             kwargs2 = pack_data(kwargs, self.data, key_types=str)
             stop = time()
             if stop - start > 0.005:
-                self.startstops[key].append(('disk', start, stop))
+                self.startstops[key].append(('disk-read', start, stop))
                 if self.digests is not None:
                     self.digests['disk-load-duration'].add(stop - start)
 
@@ -2004,9 +2016,9 @@ class Worker(WorkerBase):
             for key, deps in self.waiting_for_data.items():
                 if key not in self.data_needed:
                     for dep in deps:
-                         assert (dep in self.in_flight_tasks or
-                                 dep in self._missing_dep_flight or
-                                 self.who_has[dep].issubset(self.in_flight_workers))
+                        assert (dep in self.in_flight_tasks or
+                                dep in self._missing_dep_flight or
+                                self.who_has[dep].issubset(self.in_flight_workers))
 
             for key in self.tasks:
                 if self.task_state[key] == 'memory':
@@ -2033,3 +2045,23 @@ class Worker(WorkerBase):
                            for key in keys
                            for c in msg
                            if isinstance(c, (tuple, list, set)))]
+
+
+def get_worker():
+    """ Get the worker currently running this task
+
+    Examples
+    --------
+    >>> def f():
+    ...     worker = get_worker()  # The worker on which this task is running
+    ...     return worker.address
+
+    >>> future = client.submit(f)  # doctest: +SKIP
+    >>> future.result()  # doctest: +SKIP
+    'tcp://127.0.0.1:47373'
+
+    See Also
+    --------
+    worker_client
+    """
+    return thread_state.execution_state['worker']

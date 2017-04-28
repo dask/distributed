@@ -10,13 +10,10 @@ if sys.version_info.major == 2:
 else:
     import pickle
 
-from ..utils import ignoring
-
 logger = logging.getLogger(__name__)
 
 
 def _always_use_pickle_for(x):
-    pickle_types = (str, bytes)
     mod, _, _ = x.__class__.__module__.partition('.')
     if mod == 'numpy':
         import numpy as np
@@ -52,8 +49,8 @@ def dumps(x):
     except:
         try:
             return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
-        except Exception:
-            logger.info("Failed to serialize %s", x, exc_info=True)
+        except Exception as e:
+            logger.info("Failed to serialize %s. Exception: %s", x, e)
             raise
 
 

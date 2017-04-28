@@ -6,6 +6,7 @@ import sys
 
 from .compatibility import FileExistsError, logging_names
 
+logger = logging.getLogger(__name__)
 
 config = {}
 
@@ -17,7 +18,6 @@ else:
     dirname = os.path.dirname(__file__)
     default_path = os.path.join(dirname, 'config.yaml')
     dask_config_path = os.path.join(os.path.expanduser('~'), '.dask', 'config.yaml')
-
 
     def ensure_config_file(destination=dask_config_path):
         if not os.path.exists(destination):
@@ -44,9 +44,12 @@ else:
             text = f.read()
             config.update(yaml.load(text))
 
-
-    ensure_config_file()
-    load_config_file(config)
+    try:
+        ensure_config_file()
+        load_config_file(config)
+    except OSError as e:
+        logger.warn("Could not write default config file to %s. Received error %s",
+                    default_path, e)
 
 
 def load_env_vars(config):

@@ -3,18 +3,18 @@ from __future__ import print_function, division, absolute_import
 import pytest
 pytest.importorskip('requests')
 
-from contextlib import contextmanager
-import itertools
 import os
 import requests
-import signal
 import socket
+import shutil
 import sys
+import tempfile
 from time import sleep
 
 from tornado import gen
 
 from distributed import Scheduler, Client
+from distributed.compatibility import WINDOWS
 from distributed.utils import get_ip, ignoring, tmpfile
 from distributed.utils_test import (loop, popen,
                                     assert_can_connect_from_everywhere_4,
@@ -186,6 +186,21 @@ def test_multiple_workers(loop):
                         assert time() < start + 10
 
 
+@pytest.mark.skipif(WINDOWS, reason='--interface does not work on windows')
+def test_interface(loop):
+    with popen(['dask-scheduler', '--no-bokeh', '--interface', 'lo']) as s:
+        with popen(['dask-worker', '127.0.0.1:8786', '--no-bokeh', '--interface', 'lo']) as a:
+            with Client('127.0.0.1:%d' % Scheduler.default_port, loop=loop) as c:
+                start = time()
+                while not len(c.ncores()):
+                    sleep(0.1)
+                    assert time() - start < 5
+                info = c.scheduler_info()
+                assert '127.0.0.1' in info['address']
+                assert all('127.0.0.1' == d['host']
+                           for d in info['workers'].values())
+
+
 def test_pid_file(loop):
     def check_pidfile(proc, pidfile):
         start = time()
@@ -228,6 +243,7 @@ def test_scheduler_port_zero(loop):
 
 
 def test_bokeh_port_zero(loop):
+    pytest.importorskip('bokeh')
     with tmpfile() as fn:
         with popen(['dask-scheduler',
                     '--bokeh-port', '0',
@@ -238,3 +254,57 @@ def test_bokeh_port_zero(loop):
                 if b'bokeh' in line.lower() or b'web' in line.lower():
                     count += 1
                     assert b':0' not in line
+
+
+PRELOAD_TEXT = """
+_scheduler_info = {}
+
+def dask_setup(scheduler):
+    _scheduler_info['address'] = scheduler.address
+
+def get_scheduler_address():
+    return _scheduler_info['address']
+"""
+
+
+def test_preload_file(loop):
+
+    def check_scheduler():
+        import scheduler_info
+        return scheduler_info.get_scheduler_address()
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmpdir, 'scheduler_info.py')
+        with open(path, 'w') as f:
+            f.write(PRELOAD_TEXT)
+        with tmpfile() as fn:
+            with popen(['dask-scheduler', '--scheduler-file', fn,
+                        '--preload', path]):
+                with Client(scheduler_file=fn, loop=loop) as c:
+                    assert c.run_on_scheduler(check_scheduler) == \
+                           c.scheduler.address
+    finally:
+        shutil.rmtree(tmpdir)
+
+
+def test_preload_module(loop):
+
+    def check_scheduler():
+        import scheduler_info
+        return scheduler_info.get_scheduler_address()
+
+    tmpdir = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmpdir, 'scheduler_info.py')
+        with open(path, 'w') as f:
+            f.write(PRELOAD_TEXT)
+        with tmpfile() as fn:
+            with popen(['dask-scheduler', '--scheduler-file', fn,
+                        '--preload', 'scheduler_info'],
+                       env=dict(os.environ, PYTHONPATH=tmpdir)):
+                with Client(scheduler_file=fn, loop=loop) as c:
+                    assert c.run_on_scheduler(check_scheduler) == \
+                           c.scheduler.address
+    finally:
+        shutil.rmtree(tmpdir)

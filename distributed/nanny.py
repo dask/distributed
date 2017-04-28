@@ -1,26 +1,23 @@
 from __future__ import print_function, division, absolute_import
 
+import atexit
 from datetime import datetime, timedelta
-import json
 import logging
 from multiprocessing.queues import Empty
 import os
 import shutil
-import sys
 import tempfile
 from time import sleep
 import weakref
 
-from tornado.ioloop import IOLoop
+from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
-from .comm import get_address_host_port
-from .compatibility import JSONDecodeError
+from .comm import get_address_host
 from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
-from .protocol import to_serialize
-from .utils import get_ip, ignoring, log_errors, mp_context, tmpfile
-from .worker import _ncores, Worker, run, TOTAL_MEMORY
+from .utils import get_ip, ignoring, mp_context
+from .worker import _ncores, run
 
 
 logger = logging.getLogger(__name__)
@@ -34,9 +31,9 @@ class Nanny(Server):
     """
     def __init__(self, scheduler_ip, scheduler_port=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
-                 name=None, memory_limit=TOTAL_MEMORY, reconnect=True,
+                 name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
-                 **kwargs):
+                 death_timeout=None, preload=(), **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -47,13 +44,16 @@ class Nanny(Server):
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
+        self.death_timeout = death_timeout
+        self.preload = preload
         if not local_dir:
             local_dir = tempfile.mkdtemp(prefix='nanny-')
             self._should_cleanup_local_dir = True
+
+            @atexit.register
             def _cleanup_local_dir():
                 if os.path.exists(local_dir):
                     shutil.rmtree(local_dir)
-            atexit.register(_cleanup_local_dir)
         else:
             self._should_cleanup_local_dir = False
         self.local_dir = local_dir
@@ -93,18 +93,19 @@ class Nanny(Server):
         if isinstance(addr_or_port, int):
             # Default ip is the required one to reach the scheduler
             self.ip = get_ip(
-                get_address_host_port(self.scheduler.address)[0]
-                )
+                get_address_host(self.scheduler.address)
+            )
             self.listen((self.ip, addr_or_port))
         else:
             self.listen(addr_or_port)
-            self.ip = get_address_host_port(self.address)[0]
+            self.ip = get_address_host(self.address)
 
         logger.info('        Start Nanny at: %r', self.address)
-        yield self.instantiate()
-        self.loop.add_callback(self._watch)
-        assert self.worker_address
-        self.status = 'running'
+        response = yield self.instantiate()
+        if response == 'OK':
+            self.loop.add_callback(self._watch)
+            assert self.worker_address
+            self.status = 'running'
 
     def start(self, addr_or_port=0):
         self.loop.add_callback(self._start, addr_or_port)
@@ -116,8 +117,12 @@ class Nanny(Server):
         Blocks until both the process is down and the scheduler is properly
         informed
         """
+        timeout_time = time() + timeout
+
         while not self.worker_address:
             yield gen.sleep(0.1)
+            if time() > timeout_time:
+                raise gen.TimeoutError()
 
         if self.process is None:
             raise gen.Return('OK')
@@ -131,14 +136,16 @@ class Nanny(Server):
                     result = yield gen.with_timeout(
                                 timedelta(seconds=min(1, timeout)),
                                 worker.terminate(report=False),
-                                )
+                    )
 
             except gen.TimeoutError:
                 logger.info("Worker non-responsive.  Terminating.")
             except CommClosedError:
                 pass
             except BaseException as e:
-                logger.exception(e)
+                if (not self.loop._closing and self.loop._running and not
+                        self.loop._stopped):
+                    logger.exception(e)
 
             allowed_errors = (gen.TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
             try:
@@ -202,10 +209,16 @@ class Nanny(Server):
                         'reconnect': self.reconnect,
                         'resources': self.resources,
                         'validate': self.validate,
-                        'silence_logs': self.silence_logs})
+                        'silence_logs': self.silence_logs,
+                        'death_timeout': self.death_timeout,
+                        'preload': self.preload})
             self.process.daemon = True
+            processes_to_close.add(self.process)
             self.process.start()
+            start = time()
             while True:
+                if self.death_timeout and time() > start + self.death_timeout:
+                    yield self._close(timeout=1)
                 try:
                     msg = q.get_nowait()
                     if isinstance(msg, Exception):
@@ -219,6 +232,8 @@ class Nanny(Server):
 
             logger.info("Nanny %r starts worker process %r",
                         self.address, self.worker_address)
+        except gen.Return:
+            raise
         except Exception as e:
             logger.exception(e)
             raise
@@ -282,7 +297,8 @@ class Nanny(Server):
             raise gen.Return('OK')
         logger.info("Closing Nanny at %r", self.address)
         self.status = 'closed'
-        yield self._kill(timeout=timeout)
+        with ignoring(gen.TimeoutError):
+            yield self._kill(timeout=timeout)
         self.rpc.close()
         self.scheduler.close_rpc()
         self.stop()
@@ -313,10 +329,18 @@ class Nanny(Server):
 def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
                     worker_ip, worker_port, local_dir, **kwargs):
     """
-    Create a worker by forking.
+    Create a worker in a forked child.
     """
     from distributed import Worker  # pragma: no cover
     from tornado.ioloop import IOLoop  # pragma: no cover
+
+    try:
+        from dask.multiprocessing import initialize_worker_process
+    except ImportError:   # old Dask version
+        pass
+    else:
+        initialize_worker_process()
+
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
     loop.make_current()  # pragma: no cover
@@ -340,9 +364,14 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
         logger.info("Worker closed")
     try:
         loop.run_sync(run)
+    except TimeoutError:
+        logger.info("Worker timed out")
+    except KeyboardInterrupt:
+        pass
     finally:
         loop.stop()
         loop.close(all_fds=True)
+
 
 def isalive(proc):
     return proc is not None and proc.is_alive()
@@ -353,12 +382,12 @@ def join(proc, timeout):
         proc.join(timeout)
 
 
-import atexit
-
 closing = [False]
 
 processes_to_close = weakref.WeakSet()
 
+
+@atexit.register
 def _closing():
     for proc in processes_to_close:
         try:
@@ -367,5 +396,3 @@ def _closing():
             pass
 
     closing[0] = True
-
-atexit.register(_closing)

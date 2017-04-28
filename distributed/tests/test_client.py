@@ -14,7 +14,7 @@ import sys
 from threading import Thread, Semaphore
 from time import sleep
 import traceback
-import zipfile, sys
+import zipfile
 
 import mock
 import pytest
@@ -26,10 +26,10 @@ from tornado.ioloop import IOLoop
 import dask
 from dask import delayed
 from dask.context import _globals
-from distributed import Worker, Nanny
+from distributed import Worker, Nanny, recreate_exceptions
 from distributed.comm import CommClosedError
 from distributed.utils_comm import WrappedKey
-from distributed.client import (Client, Future, CompatibleExecutor, _wait,
+from distributed.client import (Client, Future, _wait,
         wait, _as_completed, as_completed, tokenize, _global_client,
         default_client, _first_completed, ensure_default_get, futures_of,
         temp_default_client)
@@ -130,30 +130,6 @@ def test_map_keynames(c, s, a, b):
     assert [f.key for f in futures] == keys
 
 
-@gen_cluster()
-def test_compatible_map(s, a, b):
-    e = CompatibleExecutor((s.ip, s.port), start=False)
-    yield e._start()
-
-    results = e.map(inc, range(5))
-    assert not isinstance(results, list)
-    # Since this map blocks as it waits for results,
-    # waiting here will block the current IOLoop,
-    # which happens to also be running the test Workers.
-    # So wait on the results in a background thread to avoid blocking.
-    f = gen.Future()
-    def wait_on_results():
-        f.set_result(list(results))
-    t = Thread(target=wait_on_results)
-    t.daemon = True
-    t.start()
-    result_list = yield f
-    # getting map results blocks
-    assert result_list == list(map(inc, range(5)))
-
-    yield e._shutdown()
-
-
 @gen_cluster(client=True)
 def test_future(c, s, a, b):
     x = c.submit(inc, 10)
@@ -244,6 +220,11 @@ def test_thread(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             x = c.submit(inc, 1)
+            assert x.result() == 2
+
+            x = c.submit(slowinc, 1, delay=0.3)
+            with pytest.raises(gen.TimeoutError):
+                x.result(timeout=0.01)
             assert x.result() == 2
 
 
@@ -391,6 +372,13 @@ def test_wait(c, s, a, b):
     assert x.status == y.status == 'finished'
 
 
+@gen_cluster(client=True, timeout=2)
+def test_wait_timeout(c, s, a, b):
+    future = c.submit(sleep, 0.3)
+    with pytest.raises(gen.TimeoutError):
+        yield _wait(future, timeout=0.01)
+
+
 def test_wait_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
@@ -401,6 +389,23 @@ def test_wait_sync(loop):
             assert done == {x, y}
             assert not_done == set()
             assert x.status == y.status == 'finished'
+
+            future = c.submit(sleep, 0.3)
+            with pytest.raises(gen.TimeoutError):
+                wait(future, timeout=0.01)
+
+
+def test_wait_informative_error_for_timeouts(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x = c.submit(inc, 1)
+            y = c.submit(inc, 2)
+
+            try:
+                wait(x, y)
+            except Exception as e:
+                assert "timeout" in str(e)
+                assert "list" in str(e)
 
 
 @gen_cluster(client=True)
@@ -755,6 +760,17 @@ def test_aliases(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test_aliases_2(c, s, a, b):
+    dsk_keys = [
+        ({'x': (inc, 1), 'y': 'x', 'z': 'x', 'w': (add, 'y', 'z')}, ['y', 'w']),
+        ({'x': 'y', 'y': 1}, ['x']),
+        ({'x': 1, 'y': 'x', 'z': 'y', 'w': (inc, 'z')}, ['w'])]
+    for dsk, keys in dsk_keys:
+        result = yield c._get(dsk, keys)
+        assert list(result) == list(dask.get(dsk, keys))
+
+
+@gen_cluster(client=True)
 def test__scatter(c, s, a, b):
     d = yield c._scatter({'y': 20})
     assert isinstance(d['y'], Future)
@@ -799,6 +815,14 @@ def test__scatter_types(c, s, a, b):
     assert isinstance(seq, list)
     assert len(seq) == 5
     s.validate_state()
+
+
+@gen_cluster(client=True)
+def test__scatter_non_list(c, s, a, b):
+    x = yield c._scatter(1)
+    assert isinstance(x, Future)
+    result = yield x._result()
+    assert result == 1
 
 
 @gen_cluster(client=True)
@@ -2195,6 +2219,21 @@ def test_run(c, s, a, b):
     assert results == {}
 
 
+@gen_cluster(client=True)
+def test_run_handles_picklable_data(c, s, a, b):
+    futures = c.map(inc, range(10))
+    yield _wait(futures)
+
+    def func():
+        return {}, set(), [], (), 1, 'hello', b'100'
+
+    results = yield c._run_on_scheduler(func)
+    assert results == func()
+
+    results = yield c._run(func)
+    assert results == {w.address: func() for w in [a, b]}
+
+
 def test_run_sync(loop):
     def func(x, y=10):
         return x + y
@@ -2503,6 +2542,14 @@ def test_rebalance_sync(loop):
             has_what = c.has_what()
             assert len(has_what) == 2
             assert list(valmap(len, has_what).values()) == [5, 5]
+
+
+@gen_cluster(client=True)
+def test_rebalance_unprepared(c, s, a, b):
+    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    yield gen.sleep(0.1)
+    yield c._rebalance(futures)
+    s.validate_state()
 
 
 @gen_cluster(client=True)
@@ -3007,6 +3054,43 @@ def test_as_completed_list(loop):
             seq = c.map(inc, iter(range(5)))
             seq2 = list(as_completed(seq))
             assert set(c.gather(seq2)) == {1, 2, 3, 4, 5}
+
+
+def test_as_completed_results(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            seq = c.map(inc, range(5))
+            seq2 = list(as_completed(seq, with_results=True))
+            assert set(pluck(1, seq2)) == {1, 2, 3, 4, 5}
+            assert set(pluck(0, seq2)) == set(seq)
+
+
+@pytest.mark.parametrize('with_results', [True, False])
+def test_as_completed_batches(loop, with_results):
+    n = 50
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            futures = c.map(slowinc, range(n), delay=0.01)
+            out = []
+            for batch in as_completed(futures, with_results=with_results).batches():
+                assert isinstance(batch, (tuple, list))
+                sleep(0.05)
+                out.extend(batch)
+
+            assert len(out) == n
+            if with_results:
+                assert set(pluck(1, out)) == set(range(1, n + 1))
+            else:
+                assert set(out) == set(futures)
+
+
+def test_as_completed_next_batch(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            futures = c.map(slowinc, range(2), delay=0.1)
+            ac = as_completed(futures)
+            assert ac.next_batch(block=False) == []
+            assert set(ac.next_batch(block=True)).issubset(futures)
 
 
 @gen_test()
@@ -3768,6 +3852,127 @@ def test_dont_clear_waiting_data(c, s, a, b):
         assert s.waiting_data[x.key]
         yield gen.moment
 
+@gen_cluster(client=True)
+def test_get_future_error_simple(c, s, a, b):
+    f = c.submit(div, 1, 0)
+    yield _wait(f)
+    assert f.status == 'error'
+
+    function, args, kwargs, deps = yield c._get_futures_error(f)
+    # args contains only solid values, not keys
+    assert function.__name__ == 'div'
+    with pytest.raises(ZeroDivisionError):
+        function(*args, **kwargs)
+
+
+@gen_cluster(client=True)
+def test_get_futures_error(c, s, a, b):
+    x0 = delayed(dec)(2)
+    y0 = delayed(dec)(1)
+    x = delayed(div)(1, x0)
+    y = delayed(div)(1, y0)
+    tot = delayed(sum)(x, y)
+
+    f = c.compute(tot)
+    yield _wait(f)
+    assert f.status == 'error'
+
+    function, args, kwargs, deps = yield c._get_futures_error(f)
+    assert function.__name__ == 'div'
+    assert args == (1, y0.key)
+
+
+@gen_cluster(client=True)
+def test_recreate_error_delayed(c, s, a, b):
+    x0 = delayed(dec)(2)
+    y0 = delayed(dec)(1)
+    x = delayed(div)(1, x0)
+    y = delayed(div)(1, y0)
+    tot = delayed(sum)(x, y)
+
+    f = c.compute(tot)
+
+    assert f.status == 'pending'
+
+    function, args, kwargs = yield c._recreate_error_locally(f)
+    assert f.status == 'error'
+    assert function.__name__ == 'div'
+    assert args ==  (1, 0)
+    with pytest.raises(ZeroDivisionError):
+        function(*args, **kwargs)
+
+
+@gen_cluster(client=True)
+def test_recreate_error_futures(c, s, a, b):
+    x0 = c.submit(dec, 2)
+    y0 = c.submit(dec, 1)
+    x = c.submit(div, 1, x0)
+    y = c.submit(div, 1, y0)
+    tot = c.submit(sum, x, y)
+    f = c.compute(tot)
+
+    assert f.status == 'pending'
+
+    function, args, kwargs = yield c._recreate_error_locally(f)
+    assert f.status == 'error'
+    assert function.__name__ == 'div'
+    assert args ==  (1, 0)
+    with pytest.raises(ZeroDivisionError):
+        function(*args, **kwargs)
+
+
+@gen_cluster(client=True)
+def test_recreate_error_collection(c, s, a, b):
+    import dask.bag as db
+    b = db.range(10, npartitions=4)
+    b = b.map(lambda x: 1 / x)
+    b = b.persist()
+    f = c.compute(b)
+
+    function, args, kwargs = yield c._recreate_error_locally(f)
+    with pytest.raises(ZeroDivisionError):
+        function(*args, **kwargs)
+
+    dd = pytest.importorskip('dask.dataframe')
+    import pandas as pd
+    df = dd.from_pandas(pd.DataFrame({'a': [0, 1,2,3,4]}), chunksize=2)
+    def make_err(x):
+        # because pandas would happily work with NaN
+        if x == 0 :
+            raise ValueError
+        return x
+    df2 = df.a.map(make_err)
+    f = c.compute(df2)
+    function, args, kwargs = yield c._recreate_error_locally(f)
+    with pytest.raises(ValueError):
+        function(*args, **kwargs)
+
+
+def test_recreate_error_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x0 = c.submit(dec, 2)
+            y0 = c.submit(dec, 1)
+            x = c.submit(div, 1, x0)
+            y = c.submit(div, 1, y0)
+            tot = c.submit(sum, x, y)
+            f = c.compute(tot)
+
+
+            with pytest.raises(ZeroDivisionError) as e:
+                c.recreate_error_locally(f)
+            assert f.status == 'error'
+
+
+def test_recreate_error_not_error(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            f = c.submit(dec, 2)
+            with pytest.raises(ValueError) as e:
+                c.recreate_error_locally(f)
+            assert "No errored futures passed" in str(e)
+
+
 
 @gen_cluster(client=True)
 def test_retire_workers(c, s, a, b):
@@ -3779,3 +3984,67 @@ def test_retire_workers(c, s, a, b):
     while a.status != 'closed':
         yield gen.sleep(0.01)
         assert time() < start + 5
+
+
+class MyException(Exception):
+    pass
+
+
+@gen_cluster(client=True)
+def test_robust_unserializable(c, s, a, b):
+    class Foo(object):
+        def __getstate__(self):
+            raise MyException()
+
+    with pytest.raises(MyException):
+        future = c.submit(identity, Foo())
+
+    futures = c.map(inc, range(10))
+    results = yield c._gather(futures)
+
+    assert results == list(map(inc, range(10)))
+    assert a.data and b.data
+
+
+@gen_cluster(client=True)
+def test_robust_undeserializable(c, s, a, b):
+    class Foo(object):
+        def __getstate__(self):
+            return 1
+        def __setstate__(self, state):
+            raise MyException('hello')
+
+    future = c.submit(identity, Foo())
+    with pytest.raises(MyException):
+        yield future._result()
+
+    futures = c.map(inc, range(10))
+    results = yield c._gather(futures)
+
+    assert results == list(map(inc, range(10)))
+    assert a.data and b.data
+
+
+@gen_cluster(client=True)
+def test_robust_undeserializable_function(c, s, a, b):
+    class Foo(object):
+        def __getstate__(self):
+            return 1
+        def __setstate__(self, state):
+            raise MyException('hello')
+        def __call__(self, *args):
+            return 1
+
+    future = c.submit(Foo(), 1)
+    with pytest.raises(MyException) as e:
+        yield future._result()
+
+    futures = c.map(inc, range(10))
+    results = yield c._gather(futures)
+
+    assert results == list(map(inc, range(10)))
+    assert a.data and b.data
+
+
+if sys.version_info > (3, 5):
+    from distributed.tests.py3_test_client import *

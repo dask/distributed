@@ -1,10 +1,8 @@
 #!/usr/bin/env python
 from __future__ import print_function, division, absolute_import
 
-from collections import deque
 import json
 import logging
-import os
 import sys
 
 from tornado import gen
@@ -12,7 +10,7 @@ from tornado.httpclient import AsyncHTTPClient, HTTPError
 from tornado.ioloop import IOLoop
 
 from distributed.compatibility import ConnectionRefusedError
-from distributed.core import connect, CommClosedError, coerce_to_address
+from distributed.core import connect, CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.diagnostics.eventstream import eventstream
@@ -51,6 +49,8 @@ def http_get(route):
 
 
 last_index = [0]
+
+
 @gen.coroutine
 def workers():
     """ Get data from JSON route, store in messages deques """
@@ -73,7 +73,8 @@ def workers():
 @gen.coroutine
 def progress():
     with log_errors():
-        comm = yield progress_stream('%(host)s:%(tcp-port)d' % options, 0.050)
+        addr = options['scheduler-address']
+        comm = yield progress_stream(addr, 0.050)
         while True:
             try:
                 msg = yield comm.read()
@@ -87,7 +88,7 @@ def progress():
 def processing():
     with log_errors():
         from distributed.diagnostics.scheduler import processing
-        addr = coerce_to_address((options['host'], options['tcp-port']))
+        addr = options['scheduler-address']
         comm = yield connect(addr)
         yield comm.write({'op': 'feed',
                           'function': dumps(processing),
@@ -105,7 +106,8 @@ def processing():
 def task_events(interval, deque, times, index, rectangles, workers, last_seen):
     i = 0
     try:
-        comm = yield eventstream('%(host)s:%(tcp-port)d' % options, 0.100)
+        addr = options['scheduler-address']
+        comm = yield eventstream(addr, 0.100)
         while True:
             msgs = yield comm.read()
             if not msgs:
@@ -124,11 +126,6 @@ def task_events(interval, deque, times, index, rectangles, workers, last_seen):
         pass  # don't log CommClosedErrors
     except Exception as e:
         logger.exception(e)
-    finally:
-        try:
-            sys.exit(0)
-        except:
-            pass
 
 
 def on_server_loaded(server_context):

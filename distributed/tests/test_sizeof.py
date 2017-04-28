@@ -41,10 +41,41 @@ def test_pandas():
 def test_sparse_matrix():
     sparse = pytest.importorskip('scipy.sparse')
     sp = sparse.eye(10)
+    # These are the 32-bit Python 2.7 values.
     assert sizeof(sp.todia()) >= 152
     assert sizeof(sp.tobsr()) >= 232
-    assert sizeof(sp.tocoo()) >= 252
+    assert sizeof(sp.tocoo()) >= 240
     assert sizeof(sp.tocsc()) >= 232
-    assert sizeof(sp.tocsr()) >= 260
-    assert sizeof(sp.todok()) >= 260
-    assert sizeof(sp.tolil()) >= 324
+    assert sizeof(sp.tocsr()) >= 232
+    assert sizeof(sp.todok()) >= 192
+    assert sizeof(sp.tolil()) >= 204
+
+
+def test_serires_object_dtype():
+    pd = pytest.importorskip('pandas')
+    s = pd.Series(['a'] * 1000)
+    assert sizeof('a') * 1000 < sizeof(s) < 2 * sizeof('a') * 1000
+
+    s = pd.Series(['a' * 1000] * 1000)
+    assert sizeof(s) > 1000000
+
+
+def test_dataframe_object_dtype():
+    pd = pytest.importorskip('pandas')
+    df = pd.DataFrame({'x': ['a'] * 1000})
+    assert sizeof('a') * 1000 < sizeof(df) < 2 * sizeof('a') * 1000
+
+    s = pd.Series(['a' * 1000] * 1000)
+    assert sizeof(s) > 1000000
+
+
+def test_empty():
+    pd = pytest.importorskip('pandas')
+    df = pd.DataFrame({'x': [1, 2, 3], 'y': ['a'*100, 'b'*100, 'c'*100]},
+                      index=[10, 20, 30])
+    empty = df.head(0)
+
+    assert sizeof(empty) > 0
+    assert sizeof(empty.x) > 0
+    assert sizeof(empty.y) > 0
+    assert sizeof(empty.index) > 0

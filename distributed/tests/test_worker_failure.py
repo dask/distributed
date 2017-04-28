@@ -277,8 +277,12 @@ def test_multiple_clients_restart(s, a, b):
 @gen_cluster(Worker=Nanny)
 def test_restart_scheduler(s, a, b):
     import gc; gc.collect()
+    addrs = (a.worker_address, b.worker_address)
     yield s.restart()
     assert len(s.ncores) == 2
+    addrs2 = (a.worker_address, b.worker_address)
+
+    assert addrs != addrs2
 
 
 @gen_cluster(Worker=Nanny, client=True)
@@ -294,6 +298,7 @@ def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
 
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 def test_broken_worker_during_computation(c, s, a, b):
+    s.allowed_failures = 100
     n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
     n.start(0)
 

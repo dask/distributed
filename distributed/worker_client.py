@@ -1,8 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
-from time import sleep
-from tornado import gen
 from toolz import keymap, valmap, merge, assoc
 import uuid
 
@@ -14,37 +12,45 @@ from dask.compatibility import apply
 from .sizeof import sizeof
 from .threadpoolexecutor import secede
 from .utils import All, log_errors, sync, tokey, ignoring
-from .worker import thread_state
+from .worker import thread_state, get_worker
 
 
 @contextmanager
-def worker_client(timeout=3):
+def worker_client(timeout=3, separate_thread=True):
     """ Get client for this thread
-
-    Note: This interface is new and experimental.  It may change without
-    notice.
 
     This context manager is intended to be called within functions that we run
     on workers.  When run as a context manager it delivers a client
     ``Client`` object that can submit other tasks directly from that worker.
 
+    Parameters
+    ----------
+    timeout: Number
+        Timeout after which to err
+    separate_thread: bool, optional
+        Whether to run this function outside of the normal thread pool
+        defaults to True
+
     Examples
     --------
-
     >>> def func(x):
-    ...     with worker_client() as e:  # connect from worker back to scheduler
-    ...         a = e.submit(inc, x)     # this task can submit more tasks
-    ...         b = e.submit(dec, x)
-    ...         result = e.gather([a, b])  # and gather results
+    ...     with worker_client() as c:  # connect from worker back to scheduler
+    ...         a = c.submit(inc, x)     # this task can submit more tasks
+    ...         b = c.submit(dec, x)
+    ...         result = c.gather([a, b])  # and gather results
     ...     return result
 
-    >>> future = e.submit(func, 1)  # submit func(1) on cluster
+    >>> future = client.submit(func, 1)  # submit func(1) on cluster
+
+    See Also
+    --------
+    get_worker
     """
     address = thread_state.execution_state['scheduler']
     worker = thread_state.execution_state['worker']
-    secede()  # have this thread secede from the thread pool
-              # so that it doesn't take up a fixed resource while waiting
-    worker.loop.add_callback(worker.transition, thread_state.key, 'long-running')
+    if separate_thread:
+        secede()  # have this thread secede from the thread pool
+        worker.loop.add_callback(worker.transition, thread_state.key, 'long-running')
 
     with WorkerClient(address, loop=worker.loop) as wc:
         # Make sure connection errors are bubbled to the caller
@@ -54,9 +60,6 @@ def worker_client(timeout=3):
 
 
 local_client = worker_client
-
-def get_worker():
-    return thread_state.execution_state['worker']
 
 
 class WorkerClient(Client):

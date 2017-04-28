@@ -1,16 +1,13 @@
 from __future__ import print_function, division, absolute_import
 
-from datetime import timedelta
-from functools import partial
+from collections import deque
 import logging
-from timeit import default_timer
 
 from tornado import gen, locks
-from tornado.queues import Queue
-from tornado.ioloop import PeriodicCallback, IOLoop
+from tornado.ioloop import IOLoop
 
 from .core import CommClosedError
-from .utils import ignoring, log_errors
+from .utils import ignoring
 
 
 logger = logging.getLogger(__name__)
@@ -54,6 +51,7 @@ class BatchedSend(object):
         self.batch_count = 0
         self.byte_count = 0
         self.next_deadline = None
+        self.recent_message_log = deque(maxlen=100)
 
     def start(self, comm):
         self.comm = comm
@@ -82,6 +80,7 @@ class BatchedSend(object):
             self.batch_count += 1
             self.next_deadline = self.loop.time() + self.interval
             try:
+                self.recent_message_log.append(payload)
                 nbytes = yield self.comm.write(payload)
                 self.byte_count += nbytes
             except CommClosedError as e:
@@ -130,4 +129,3 @@ class BatchedSend(object):
         self.waker.set()
         if not self.comm.closed():
             self.comm.abort()
-

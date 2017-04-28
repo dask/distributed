@@ -6,16 +6,17 @@ from math import log
 import os
 from time import time
 
-from toolz import topk
 from tornado.ioloop import PeriodicCallback
 
 from .config import config
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from .utils import key_split, log_errors, ignoring
+from .utils import key_split, log_errors
 
-with ignoring(ImportError):
+try:
     from cytoolz import topk
+except ImportError:
+    from toolz import topk
 
 BANDWIDTH = 100e6
 LATENCY = 10e-3
@@ -47,10 +48,14 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.loop.add_callback(self._pc.start)
         self.scheduler.plugins.append(self)
         self.scheduler.extensions['stealing'] = self
-        self.log = deque(maxlen=100000)
+        self.scheduler.events['stealing'] = deque(maxlen=100000)
         self.count = 0
 
         scheduler.worker_handlers['long-running'] = self.transition_long_running
+
+    @property
+    def log(self):
+        return self.scheduler.events['stealing']
 
     def add_worker(self, scheduler=None, worker=None):
         self.stealable[worker] = [set() for i in range(15)]
@@ -196,7 +201,6 @@ class WorkStealing(SchedulerPlugin):
             log = list()
             start = time()
 
-            broken = False
             seen = False
             acted = False
 

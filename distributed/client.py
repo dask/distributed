@@ -11,6 +11,7 @@ from functools import partial
 from glob import glob
 import json
 import logging
+from numbers import Number
 import os
 import sys
 from time import sleep
@@ -20,24 +21,25 @@ import six
 import socket
 
 import dask
-from dask.base import tokenize, normalize_token, Base
+from dask.base import tokenize, normalize_token, Base, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.compatibility import apply, unicode
 from dask.context import _globals
 from toolz import first, groupby, merge, valmap, keymap
 from tornado import gen
-from tornado.gen import Return, TimeoutError
-from tornado.locks import Event
+from tornado.gen import TimeoutError
+from tornado.locks import Event, Condition
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.queues import Queue
 
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
+from .cfexecutor import ClientExecutor
 from .compatibility import Queue as pyQueue, Empty, isqueue
 from .core import connect, rpc, clean_exception, CommClosedError
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
-from .worker import dumps_function, dumps_task
+from .worker import dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)
 from .versions import get_versions
@@ -79,11 +81,11 @@ class Future(WrappedKey):
 
     def __init__(self, key, client):
         self.key = key
+        self._cleared = False
         tkey = tokey(key)
         self.client = client
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
-        self._cleared = False
 
         if tkey in client.futures:
             self._state = client.futures[tkey]
@@ -106,9 +108,14 @@ class Future(WrappedKey):
         """ Is the computation complete? """
         return self.event.is_set()
 
-    def result(self):
-        """ Wait until computation completes. Gather result to local process """
-        result = sync(self.client.loop, self._result, raiseit=False)
+    def result(self, timeout=None):
+        """ Wait until computation completes. Gather result to local process.
+
+        If *timeout* seconds are elapsed before returning, a TimeoutError
+        is raised.
+        """
+        result = sync(self.client.loop,
+                      self._result, raiseit=False, callback_timeout=timeout)
         if self.status == 'error':
             six.reraise(*result)
         elif self.status == 'cancelled':
@@ -125,7 +132,7 @@ class Future(WrappedKey):
             if raiseit:
                 six.reraise(*exc)
             else:
-                raise Return(exc)
+                raise gen.Return(exc)
         elif self.status == 'cancelled':
             exception = CancelledError(self.key)
             if raiseit:
@@ -140,18 +147,22 @@ class Future(WrappedKey):
     def _exception(self):
         yield self.event.wait()
         if self.status == 'error':
-            raise Return(self._state.exception)
+            raise gen.Return(self._state.exception)
         else:
-            raise Return(None)
+            raise gen.Return(None)
 
-    def exception(self):
+    def exception(self, timeout=None):
         """ Return the exception of a failed task
+
+        If *timeout* seconds are elapsed before returning, a TimeoutError
+        is raised.
 
         See Also
         --------
         Future.traceback
         """
-        return sync(self.client.loop, self._exception)
+        return sync(self.client.loop,
+                    self._exception, callback_timeout=timeout)
 
     def add_done_callback(self, fn):
         """ Call callback on future when callback has finished
@@ -188,16 +199,19 @@ class Future(WrappedKey):
     def _traceback(self):
         yield self.event.wait()
         if self.status == 'error':
-            raise Return(self._state.traceback)
+            raise gen.Return(self._state.traceback)
         else:
-            raise Return(None)
+            raise gen.Return(None)
 
-    def traceback(self):
+    def traceback(self, timeout=None):
         """ Return the traceback of a failed task
 
         This returns a traceback object.  You can inspect this object using the
         ``traceback`` module.  Alternatively if you call ``future.result()``
         this traceback will accompany the raised exception.
+
+        If *timeout* seconds are elapsed before returning, a TimeoutError
+        is raised.
 
         Examples
         --------
@@ -210,7 +224,8 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
-        return sync(self.client.loop, self._traceback)
+        return sync(self.client.loop,
+                    self._traceback, callback_timeout=timeout)
 
     @property
     def type(self):
@@ -245,6 +260,9 @@ class Future(WrappedKey):
             return '<Future: status: %s, key: %s>' % (self.status, self.key)
 
     __repr__ = __str__
+
+    def __await__(self):
+        return self._result().__await__()
 
 
 class FutureState(object):
@@ -342,8 +360,8 @@ class Client(object):
     --------
     distributed.scheduler.Scheduler: Internal scheduler
     """
-    def __init__(self, address=None, start=True, loop=None, timeout=3,
-                 set_as_default=True, scheduler_file=None):
+    def __init__(self, address=None, start=True, loop=None, timeout=5,
+                 set_as_default=True, scheduler_file=None, **kwargs):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self._should_close_loop = loop is None and start
@@ -355,6 +373,7 @@ class Client(object):
         self._pending_msg_buffer = []
         self.extensions = {}
         self.scheduler_file = scheduler_file
+        self._startup_kwargs = kwargs
 
         if hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object
@@ -382,6 +401,8 @@ class Client(object):
 
         from distributed.channels import ChannelClient
         ChannelClient(self)  # registers itself on construction
+        from distributed.recreate_exceptions import ReplayExceptionClient
+        ReplayExceptionClient(self)
 
     def __str__(self):
         if hasattr(self, '_loop_thread'):
@@ -423,7 +444,7 @@ class Client(object):
             raise Exception("Client not running.  Status: %s" % self.status)
 
     @gen.coroutine
-    def _start(self, timeout=3, **kwargs):
+    def _start(self, timeout=5, **kwargs):
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
             yield self.cluster._start()
@@ -445,14 +466,15 @@ class Client(object):
             from .deploy import LocalCluster
 
             try:
-                self.cluster = LocalCluster(loop=self.loop, start=False)
+                self.cluster = LocalCluster(loop=self.loop, start=False,
+                                            **self._startup_kwargs)
                 yield self.cluster._start()
             except (OSError, socket.error) as e:
                 if e.errno != errno.EADDRINUSE:
                     raise
                 # The default port was taken, use a random one
                 self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
-                                            start=False)
+                                            start=False, **self._startup_kwargs)
                 yield self.cluster._start()
 
             # Wait for all workers to be ready
@@ -465,12 +487,12 @@ class Client(object):
         self.scheduler = rpc(self._start_arg, timeout=timeout)
         self.scheduler_comm = None
 
-        yield self.ensure_connected(timeout=timeout)
+        yield self._ensure_connected(timeout=timeout)
 
         self.coroutines.append(self._handle_report())
 
     @gen.coroutine
-    def reconnect(self, timeout=0.1):
+    def _reconnect(self, timeout=0.1):
         with log_errors():
             assert self.scheduler_comm.comm.closed()
             self.status = 'connecting'
@@ -482,20 +504,20 @@ class Client(object):
 
             while self.status == 'connecting':
                 try:
-                    yield self.ensure_connected()
+                    yield self._ensure_connected()
                     break
                 except EnvironmentError:
                     yield gen.sleep(timeout)
 
     @gen.coroutine
-    def ensure_connected(self, timeout=3):
+    def _ensure_connected(self, timeout=5):
         if self.scheduler_comm and not self.scheduler_comm.closed():
             return
 
         comm = yield connect(self.scheduler.address,
                              timeout=timeout)
 
-        ident = yield self.scheduler.identity()
+        yield self.scheduler.identity()
 
         yield comm.write({'op': 'register-client',
                           'client': self.id, 'reply': False})
@@ -559,7 +581,7 @@ class Client(object):
                         logger.warn("Client report stream closed to scheduler")
                         logger.info("Reconnecting...")
                         self.status = 'connecting'
-                        yield self.reconnect()
+                        yield self._reconnect()
                         continue
                     else:
                         break
@@ -590,7 +612,12 @@ class Client(object):
     def _handle_key_in_memory(self, key=None, type=None, workers=None):
         state = self.futures.get(key)
         if state is not None:
-            type = loads(type) if type and not state.type else None
+            if type and not state.type:  # Type exists and not yet set
+                type = loads(type)
+                # Here, `type` may be a str if actual type failed
+                # serializing in Worker
+            else:
+                type = None
             state.finish(type)
 
     def _handle_lost_data(self, key=None):
@@ -633,7 +660,7 @@ class Client(object):
         """ Send shutdown signal and wait until scheduler completes """
         with log_errors():
             if self.status == 'closed':
-                raise Return()
+                raise gen.Return()
             if self.status == 'running':
                 self._send_to_scheduler({'op': 'close-stream'})
             self.status = 'closed'
@@ -679,6 +706,23 @@ class Client(object):
             del _globals['get']
         with ignoring(AttributeError):
             self.cluster.close()
+
+    def get_executor(self, **kwargs):
+        """ Return a concurrent.futures Executor for submitting tasks
+        on this Client.
+
+        Parameters
+        ----------
+        **kwargs:
+            Any submit()- or map()- compatible arguments, such as
+            `workers` or `resources`.
+
+        Returns
+        -------
+        An Executor object that's fully compatible with the concurrent.futures
+        API.
+        """
+        return ClientExecutor(self, **kwargs)
 
     def submit(self, func, *args, **kwargs):
         """ Submit a function application to the scheduler
@@ -776,7 +820,6 @@ class Client(object):
             f = self.submit(func, *args, **kwargs)
             q_out.put(f)
 
-
     def map(self, func, *iterables, **kwargs):
         """ Map a function on a sequence of arguments
 
@@ -862,7 +905,7 @@ class Client(object):
                     " for a sequence of length %d" % (len(workers), len(keys)))
                 restrictions = dict(zip(keys, workers))
             else:
-                restrictions = {key: workers for key in keys}
+                restrictions = {k: workers for k in keys}
         elif workers is None:
             restrictions = {}
         else:
@@ -877,7 +920,7 @@ class Client(object):
         priority = dict(zip(keys, range(len(keys))))
 
         if resources:
-            resources = {key: resources for key in keys}
+            resources = {k: resources for k in keys}
         else:
             resources = None
 
@@ -885,7 +928,7 @@ class Client(object):
                 loose_restrictions, priority=priority, resources=resources)
         logger.debug("map(%s, ...)", funcname(func))
 
-        return [futures[tokey(key)] for key in keys]
+        return [futures[tokey(k)] for k in keys]
 
     @gen.coroutine
     def _gather(self, futures, errors='raise'):
@@ -913,7 +956,7 @@ class Client(object):
             bad_keys = set()
             for key in keys:
                 if (key not in self.futures or
-                    self.futures[key].status in failed):
+                        self.futures[key].status in failed):
                     exceptions.add(key)
                     if errors == 'raise':
                         try:
@@ -973,8 +1016,8 @@ class Client(object):
         Accepts a future, nested container of futures, iterator, or queue.
         The return type will match the input type.
 
-        Parametrs
-        ---------
+        Parameters
+        ----------
         futures: Collection of futures
             This can be a possibly nested collection of Future objects.
             Collections can be lists, sets, iterators, queues or dictionaries
@@ -1029,6 +1072,7 @@ class Client(object):
             d = yield self._scatter(keymap(tokey, data), workers, broadcast)
             raise gen.Return({k: d[tokey(k)] for k in data})
 
+        unpack = False
         if isinstance(data, dict):
             data2 = valmap(to_serialize, data)
             types = valmap(type, data)
@@ -1039,7 +1083,9 @@ class Client(object):
             data2 = list(map(to_serialize, data))
             types = list(map(type, data))
         else:
-            raise TypeError("Don't know how to scatter %s" % type(data))
+            data2 = [to_serialize(data)]
+            types = [type(data)]
+            unpack = True
         keys = yield self.scheduler.scatter(data=data2, workers=workers,
                                             client=self.id,
                                             broadcast=broadcast)
@@ -1050,8 +1096,7 @@ class Client(object):
         elif isinstance(data, (Iterable, Iterator)):
             out = [Future(k, self) for k in keys]
         else:
-            raise TypeError(
-                    "Input to scatter must be a list, iterator, or queue")
+            out = [Future(k, self) for k in keys]
 
         for key in keys:
             self.futures[key].finish(type=None)
@@ -1062,6 +1107,9 @@ class Client(object):
         elif isinstance(types, dict):
             for key in keys:
                 self.futures[key].type = types[key]
+
+        if unpack:
+            out = out[0]
 
         raise gen.Return(out)
 
@@ -1096,7 +1144,7 @@ class Client(object):
 
         Parameters
         ----------
-        data: list, iterator, dict, or Queue
+        data: list, iterator, dict, Queue, or object
             Data to scatter out to workers.  Output type matches input type.
         workers: list of tuples (optional)
             Optionally constrain locations of data.
@@ -1114,6 +1162,9 @@ class Client(object):
         Examples
         --------
         >>> c = Client('127.0.0.1:8787')  # doctest: +SKIP
+        >>> c.scatter(1) # doctest: +SKIP
+        <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>
+
         >>> c.scatter([1, 2, 3])  # doctest: +SKIP
         [<Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
          <Future: status: finished, key: 58e78e1b34eb49a68c65b54815d1b158>,
@@ -1159,6 +1210,7 @@ class Client(object):
         else:
             return sync(self.loop, self._scatter, data, workers=workers,
                         broadcast=broadcast)
+
     @gen.coroutine
     def _cancel(self, futures):
         keys = {tokey(f.key) for f in futures_of(futures)}
@@ -1191,7 +1243,7 @@ class Client(object):
                 coroutines.append(self.scheduler.publish_put(keys=keys,
                     name=tokey(name), data=dumps(data), client=self.id))
 
-            outs = yield coroutines
+            yield coroutines
 
     def publish_dataset(self, **kwargs):
         """
@@ -1271,7 +1323,7 @@ class Client(object):
 
         with temp_default_client(self):
             data = loads(out['data'])
-        raise Return(data)
+        raise gen.Return(data)
 
     def get_dataset(self, name):
         """
@@ -1292,7 +1344,7 @@ class Client(object):
         if response['status'] == 'error':
             six.reraise(*clean_exception(**response))
         else:
-            raise Return(response['result'])
+            raise gen.Return(response['result'])
 
     def run_on_scheduler(self, function, *args, **kwargs):
         """ Run a function on the scheduler process
@@ -1333,7 +1385,7 @@ class Client(object):
                 results[key] = resp['result']
             elif resp['status'] == 'error':
                 six.reraise(*clean_exception(**resp))
-        raise Return(results)
+        raise gen.Return(results)
 
     def run(self, function, *args, **kwargs):
         """
@@ -1381,7 +1433,7 @@ class Client(object):
                                                 wait=wait),
                                                 workers=workers)
         if not wait:
-            raise Return(None)
+            raise gen.Return(None)
         else:
             results = {}
             for key, resp in responses.items():
@@ -1389,7 +1441,7 @@ class Client(object):
                     results[key] = resp['result']
                 elif resp['status'] == 'error':
                     six.reraise(*clean_exception(**resp))
-            raise Return(results)
+            raise gen.Return(results)
 
     def run_coroutine(self, function, *args, **kwargs):
         """
@@ -1753,7 +1805,7 @@ class Client(object):
                 assert os.path.exists(os.path.join(c, name[:-4]))
                 return c
 
-        responses = yield self._run(unzip, nanny=True)
+        yield self._run(unzip, nanny=True)
         raise gen.Return(name[:-4])
 
     def upload_environment(self, name, zipfile):
@@ -2376,62 +2428,30 @@ class Client(object):
         return restrictions, loose_restrictions
 
     @staticmethod
-    def collections_to_dsk(collections, optimize_graph=True, **kwargs):
-        """
-        Convert many collections into a single dask graph, after optimization
-        """
-        optimizations = _globals.get('optimizations', [])
-        if optimize_graph:
-            groups = groupby(lambda x: x._optimize, collections)
-            groups = {opt: [merge([v.dask for v in val]),
-                           [v._keys() for v in val]]
-                      for opt, val in groups.items()}
-            for opt in optimizations:
-                groups = {k: [opt(dsk, keys), keys]
-                          for k, (dsk, keys) in groups.items()}
-            dsk = merge([opt(dsk, keys, **kwargs)
-                         for opt, (dsk, keys) in groups.items()])
-        else:
-            dsk = merge(c.dask for c in collections)
-
-        return dsk
+    def collections_to_dsk(collections, *args, **kwargs):
+        return collections_to_dsk(collections, *args, **kwargs)
 
 
 Executor = Client
 
 
-class CompatibleExecutor(Client):
-    """ A concurrent.futures-compatible Client
-
-    A subclass of Client that conforms to concurrent.futures API,
-    allowing swapping in for other Clients.
-    """
-
-    def map(self, func, *iterables, **kwargs):
-        """ Map a function on a sequence of arguments
-
-        Returns
-        -------
-        iter_results: iterable
-            Iterable yielding results of the map.
-
-        See Also
-        --------
-        Client.map: for more info
-        """
-        list_of_futures = super(CompatibleExecutor, self).map(
-                                func, *iterables, **kwargs)
-        for f in list_of_futures:
-            yield f.result()
+def CompatibleExecutor(*args, **kwargs):
+    raise Exception("This has been moved to the Client.get_executor() method")
 
 
 @gen.coroutine
 def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
+    if timeout is not None and not isinstance(timeout, Number):
+        raise TypeError("timeout= keyword received a non-numeric value.\n"
+                "Beware that wait expects a list of values\n"
+                "  Bad:  wait(x, y, z)\n"
+                "  Good: wait([x, y, z])")
     fs = futures_of(fs)
-    if timeout is not None:
-        raise NotImplementedError("Timeouts not yet supported")
     if return_when == 'ALL_COMPLETED':
-        yield All({f.event.wait() for f in fs})
+        future = All({f.event.wait() for f in fs})
+        if timeout is not None:
+            future = gen.with_timeout(timedelta(seconds=timeout), future)
+        yield future
         done, not_done = set(fs), set()
         cancelled = [f.key for f in done
                      if f.status == 'cancelled']
@@ -2452,13 +2472,16 @@ def wait(fs, timeout=None, return_when='ALL_COMPLETED'):
     Parameters
     ----------
     fs: list of futures
+    timeout: number, optional
+        Time in seconds after which to raise a gen.TimeoutError
 
     Returns
     -------
     Named tuple of completed, not completed
     """
     client = default_client()
-    result = sync(client.loop, _wait, fs, timeout, return_when)
+    result = sync(client.loop, _wait, fs, timeout=timeout,
+                  return_when=return_when)
     return result
 
 
@@ -2525,14 +2548,25 @@ class AsCompleted(object):
     6
     12
     24
+
+    Optionally wait until the result has been gathered as well
+
+    >>> ac = as_completed([x, y, z], results=True)  # doctest: +SKIP
+    >>> for future, result in ac:  # doctest: +SKIP
+    ...     print(result)  # doctest: +SKIP
+    2
+    4
+    3
     """
-    def __init__(self, futures=None, loop=None):
+    def __init__(self, futures=None, loop=None, with_results=False):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
         self.queue = pyQueue()
         self.lock = Lock()
         self.loop = loop or default_client().loop
+        self.condition = Condition()
+        self.with_results = with_results
 
         if futures:
             for future in futures:
@@ -2541,11 +2575,17 @@ class AsCompleted(object):
     @gen.coroutine
     def track_future(self, future):
         yield _wait(future)
+        if self.with_results:
+            result = yield future._result()
         with self.lock:
             self.futures[future] -= 1
             if not self.futures[future]:
                 del self.futures[future]
-            self.queue.put_nowait(future)
+            if self.with_results:
+                self.queue.put_nowait((future, result))
+            else:
+                self.queue.put_nowait(future)
+            self.condition.notify()
 
     def add(self, future):
         """ Add a future to the collection
@@ -2561,13 +2601,76 @@ class AsCompleted(object):
     def __iter__(self):
         return self
 
+    def __aiter__(self):
+        return self
+
     def __next__(self):
         with self.lock:
             if not self.futures and self.queue.empty():
                 raise StopIteration()
         return self.queue.get()
 
+    @gen.coroutine
+    def __anext__(self):
+        if not self.futures and self.queue.empty():
+            raise StopAsyncIteration  # flake8: noqa
+        while self.queue.empty():
+            yield self.condition.wait()
+        raise gen.Return(self.queue.get())
+
     next = __next__
+
+    def next_batch(self, block=True):
+        """ Get next batch of futures from as_completed iterator
+
+        Parameters
+        ----------
+        block: bool, optional
+            If True then wait until we have some result, otherwise return
+            immediately, even with an empty list.  Defaults to True.
+
+        Examples
+        --------
+        >>> ac = as_completed(futures)  # doctest: +SKIP
+        >>> client.gather(ac.next_batch())  # doctest: +SKIP
+        [4, 1, 3]
+
+        >>> client.gather(ac.next_batch(block=False))  # doctest: +SKIP
+        []
+
+        Returns
+        -------
+        List of futures or (future, result) tuples
+        """
+        if block:
+            batch = [next(self)]
+        else:
+            batch = []
+        while not self.queue.empty():
+            batch.append(self.queue.get())
+        return batch
+
+    def batches(self):
+        """
+        Yield all finished futures at once rather than one-by-one
+
+        This returns an iterator of lists of futures or lists of
+        (future, result) tuples rather than individual futures or individual
+        (future, result) tuples.  It will yield these as soon as possible
+        without waiting.
+
+        Examples
+        --------
+        >>> for batch in as_completed(futures).batches():  # doctest: +SKIP
+        ...     results = client.gather(batch)
+        ...     print(results)
+        [4, 2]
+        [1, 3, 7]
+        [5]
+        [6]
+        """
+        while True:
+            yield self.next_batch(block=True)
 
 
 as_completed = AsCompleted

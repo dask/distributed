@@ -3,12 +3,13 @@ from __future__ import print_function, division, absolute_import
 from time import sleep
 
 import pytest
+pytest.importorskip('bokeh')
 from tornado import gen
 
 from dask import do
 from distributed.client import _wait
 from distributed.diagnostics.progress_stream import (progress_quads,
-        nbytes_bar, progress_stream, task_stream_append)
+        nbytes_bar, progress_stream, _incrementing_index_cache)
 from distributed.metrics import time
 from distributed.utils_test import inc, div, dec, gen_cluster
 from distributed.worker import dumps_task
@@ -18,6 +19,8 @@ def test_progress_quads():
            'memory': {'inc': 2, 'dec': 0, 'add': 1},
            'erred': {'inc': 0, 'dec': 1, 'add': 0},
            'released': {'inc': 1, 'dec': 0, 'add': 1}}
+
+    _incrementing_index_cache.clear()
 
     d = progress_quads(msg, nrows=2)
     color = d.pop('color')
