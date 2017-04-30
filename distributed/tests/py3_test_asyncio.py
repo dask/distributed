@@ -11,13 +11,14 @@ from dask import delayed
 from toolz import isdistinct
 from concurrent.futures import CancelledError
 from distributed.deploy import LocalCluster
-from distributed.utils_test import gen_cluster, inc, div, slowinc, slowadd, slowdec, randominc, slow
+from distributed.utils_test import gen_cluster, slow
+from distributed.utils_test import inc, div, slowinc, slowadd, slowdec, randominc
 
 from distributed.asyncio import AioClient, AioFuture, as_completed, wait
 from distributed import Client, Worker, Scheduler
 
-from tornado.platform.asyncio import to_asyncio_future, BaseAsyncIOLoop
 from tornado.ioloop import IOLoop
+from tornado.platform.asyncio import to_asyncio_future, BaseAsyncIOLoop
 
 
 async def test_asyncio_start_shutdown(loop):
@@ -334,6 +335,3 @@ async def test_asyncio_restart(loop):
 async def test_asyncio_nanny_workers(loop):
     async with AioClient(loop=loop, n_workers=2) as c:
         assert await c.submit(inc, 1) == 2
-
-
-

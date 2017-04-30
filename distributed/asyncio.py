@@ -48,7 +48,66 @@ class AioFuture(Future):
 
 
 class AioClient(Client):
+    """ Drive computations on a distributed cluster
 
+    It provides an asyncio compatible async/await interface for distributed.
+
+    The Client connects users to a distributed compute cluster. It provides
+    an asynchronous user interface around functions and futures. This class
+    resembles executors in ``concurrent.futures`` but also allows ``Future``
+    objects within ``submit/map`` calls.
+
+    Parameters
+    ----------
+    address: string, tuple, or ``LocalCluster``
+        This can be the address of a ``Scheduler`` server, either
+        as a string ``'127.0.0.1:8787'`` or tuple ``('127.0.0.1', 8787)``
+        or it can be a local ``LocalCluster`` object.
+
+    Examples
+    --------
+    Provide cluster's head node address on initialization.
+
+    >>> client = AioClient('127.0.0.1:8786')  # doctest: +SKIP
+
+    The AioClient can receive an asyncio loop explicitly:
+
+    >>> client = AioClient('127.0.0.1:8786', loop=loop)
+
+    Start the client:
+
+    >>> await client.start()
+
+    Use ``submit`` method to send individual computations to the cluster
+
+    >>> a = client.submit(add, 1, 2)  # doctest: +SKIP
+    >>> b = client.submit(add, 10, 20)  # doctest: +SKIP
+
+    Await on the returned future to retrieve the result
+
+    >>> await a
+    3
+
+    Continue using submit or map on results to build up larger computations
+
+    >>> c = client.submit(add, a, b)  # doctest: +SKIP
+
+    Gather results with the ``gather`` method.
+
+    >>> await client.gather([c])  # doctest: +SKIP
+    [33]
+
+    Alternatively async context manager makes it more convenient to use:
+
+    >>> async with AioClient() as client:
+    ...     await client.submit(lambda x: x**2, 3)
+    9
+
+    See Also
+    --------
+    distributed.client.Client: Blocking Client
+    distributed.scheduler.Scheduler: Internal scheduler
+    """
     _Future = AioFuture
 
     def __init__(self, *args, loop=None, start=True, set_as_default=False,
@@ -132,3 +191,4 @@ class AioAsCompleted(AsCompleted):
 
 wait = to_asyncio(_wait)
 as_completed = AioAsCompleted
+
