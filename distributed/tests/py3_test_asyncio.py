@@ -1,22 +1,37 @@
 # flake8: noqa
-
+import sys
 import pytest
 
 asyncio = pytest.importorskip('asyncio')
 aiohttp = pytest.importorskip('aiohttp')  # pytest-aiohttp
 
-import sys
+from time import time
 from operator import add
 from dask import delayed
 from toolz import isdistinct
+from concurrent.futures import CancelledError
 from distributed.deploy import LocalCluster
-from distributed.utils_test import gen_cluster, inc, div, slowinc, slowadd, slowdec, randominc
+from distributed.utils_test import gen_cluster, inc, div, slowinc, slowadd, slowdec, randominc, slow
 
 from distributed.asyncio import AioClient, AioFuture, as_completed, wait
 from distributed import Client, Worker, Scheduler
 
 from tornado.platform.asyncio import to_asyncio_future, BaseAsyncIOLoop
 from tornado.ioloop import IOLoop
+
+
+async def test_asyncio_start_shutdown(loop):
+    c = AioClient(loop=loop, processes=False)
+    assert c.status is None
+
+    await c.start()
+    assert c.status == 'running'
+
+    result = await c.submit(inc, 10)
+    assert result == 11
+
+    await c.shutdown()
+    assert c.status == 'closed'
 
 
 async def test_asyncio_submit(loop):
@@ -201,6 +216,44 @@ async def test_asyncio_as_completed(loop):
         assert set(results) == set(range(1, 11))
 
 
+async def test_asyncio_cancel(loop):
+    async with AioClient(loop=loop, processes=False) as c:
+        s = c.cluster.scheduler
+
+        x = c.submit(slowinc, 1)
+        y = c.submit(slowinc, x)
+
+        while y.key not in s.tasks:
+            await asyncio.sleep(0.01)
+
+        await c.cancel([x])
+
+        assert x.cancelled()
+        assert 'cancel' in str(x)
+        s.validate_state()
+
+        start = time()
+        while not y.cancelled():
+            await asyncio.sleep(0.01)
+            assert time() < start + 5
+
+        assert not s.tasks
+        assert not s.who_has
+        s.validate_state()
+
+
+async def test_asyncio_cancel_tuple_key(loop):
+    async with AioClient(loop=loop, processes=False) as c:
+        s = c.cluster.scheduler
+
+        x = c.submit(inc, 1, key=('x', 0, 1))
+
+        result = await x
+        await c.cancel(x)
+        with pytest.raises(CancelledError):
+            await x
+
+
 async def test_asyncio_wait(loop):
     async with AioClient(loop=loop, processes=False) as c:
         x = c.submit(inc, 1)
@@ -213,3 +266,74 @@ async def test_asyncio_wait(loop):
         await wait([y, z])
         assert y.done() is True
         assert z.done() is True
+
+
+async def test_asyncio_run(loop):
+    async with AioClient(loop=loop, processes=False) as c:
+        results = await c.run(inc, 1)
+        assert len(results) > 0
+        assert [value == 2 for value in results.values()]
+
+        results = await c.run(inc, 1, workers=[])
+        assert results == {}
+
+
+async def test_asyncio_run_on_scheduler(loop):
+    def f(dask_scheduler=None):
+        return dask_scheduler.address
+
+    async with AioClient(loop=loop, processes=False) as c:
+        address = await c.run_on_scheduler(f)
+        assert address == c.cluster.scheduler.address
+
+        with pytest.raises(ZeroDivisionError):
+            await c.run_on_scheduler(div, 1, 0)
+
+
+async def test_asyncio_run_coroutine(loop):
+    async def aioinc(x, delay=0.02):
+        await asyncio.sleep(delay)
+        return x + 1
+
+    async def aiothrows(x, delay=0.02):
+        await asyncio.sleep(delay)
+        raise RuntimeError('hello')
+
+    async with AioClient(loop=loop, processes=False) as c:
+        results = await c.run_coroutine(aioinc, 1, delay=0.05)
+        assert len(results) > 0
+        assert [value == 2 for value in results.values()]
+
+        results = await c.run_coroutine(aioinc, 1, workers=[])
+        assert results == {}
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await c.run_coroutine(aiothrows, 1)
+        exc_info.match("hello")
+
+
+@slow
+async def test_asyncio_restart(loop):
+    c = AioClient(loop=loop, processes=False)
+    await c.start()
+
+    assert c.status == 'running'
+    x = c.submit(inc, 1)
+    assert x.key in c.refcount
+
+    await c.restart()
+    assert x.key not in c.refcount
+
+    key = x.key
+    del x
+    import gc; gc.collect()
+
+    assert key not in c.refcount
+
+
+async def test_asyncio_nanny_workers(loop):
+    async with AioClient(loop=loop, n_workers=2) as c:
+        assert await c.submit(inc, 1) == 2
+
+
+

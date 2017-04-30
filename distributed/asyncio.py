@@ -7,15 +7,24 @@ from tornado.platform.asyncio import BaseAsyncIOLoop
 from tornado.platform.asyncio import to_asyncio_future, to_tornado_future
 
 from .client import Client, Future, AsCompleted, _wait
+from .utils import ignoring
 
 from tornado.ioloop import IOLoop
 
 
-def to_asyncio(method):
+def to_asyncio(fn):
     """Converts Tornado gen.coroutines and futures to asyncio ones"""
+    @wraps(fn)
+    def convert(*args, **kwargs):
+        return to_asyncio_future(fn(*args, **kwargs))
+    return convert
+
+
+def to_tornado(fn):
+    """Turns Asyncio futures to tornado ones"""
     @wraps(method)
     def convert(*args, **kwargs):
-        return to_asyncio_future(method(*args, **kwargs))
+        return to_tornado_future(fn(*args, **kwargs))
     return convert
 
 
@@ -57,24 +66,47 @@ class AioClient(Client):
                          **kwargs)
 
     async def __aenter__(self):
-        if self._make_current:
-            self.loop.make_current()
-
-        if self.status != 'running':
-            await self.start()
-
+        await self.start()
         return self
 
     async def __aexit__(self, type, value, traceback):
         await self.shutdown()
+
+    def __del__(self):
+        if self.loop._running:
+            self.loop.asyncio_loop.run_until_complete(self.shutdown())
+
+    async def start(self, timeout=5, **kwargs):
+        if self.status == 'running':
+            return
+
+        if self._make_current:
+            self.loop.make_current()
+        future = self._start(timeout=timeout, **kwargs)
+        result = await to_asyncio_future(future)
+        self.status = 'running'
+
+        return result
+
+    async def shutdown(self, fast=False):
+        if self.status == 'closed':
+            return
+
+        future = self._shutdown(fast=fast)
+        await to_asyncio_future(future)
+
+        with ignoring(AttributeError):
+            future = self.cluster._close()
+            await to_asyncio_future(future)
+
         if self._make_current:
             IOLoop.clear_current()
 
-    def __del__(self):
-        self.loop.asyncio_loop.run_until_complete(self.shutdown())
+    async def run_coroutine(self, function, *args, **kwargs):
+        tornfn = to_tornado(function)
+        future = self._run_coroutine(tornfn, *args, **kwargs)
+        return await to_asyncio_future(future)
 
-    start = to_asyncio(Client._start)
-    shutdown = to_asyncio(Client._shutdown)
     gather = to_asyncio(Client._gather)
     scatter = to_asyncio(Client._scatter)
     cancel = to_asyncio(Client._cancel)
@@ -82,7 +114,7 @@ class AioClient(Client):
     get_dataset = to_asyncio(Client._get_dataset)
     run_on_scheduler = to_asyncio(Client._run_on_scheduler)
     run = to_asyncio(Client._run)
-    run_cocoutine = to_asyncio(Client._run_coroutine)
+    run_coroutine = to_asyncio(Client._run_coroutine)
     get = to_asyncio(Client._get)
     upload_environment = to_asyncio(Client._upload_environment)
     restart = to_asyncio(Client._restart)
