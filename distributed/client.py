@@ -445,6 +445,12 @@ class Client(object):
             raise Exception("Client not running.  Status: %s" % self.status)
 
     @gen.coroutine
+    def _start_cluster(self, **kwargs):
+        from .deploy import LocalCluster
+        self.cluster = LocalCluster(**kwargs)
+        yield self.cluster._start()
+
+    @gen.coroutine
     def _start(self, timeout=5, **kwargs):
         address = self._start_arg
         if self.cluster is not None:
@@ -471,19 +477,15 @@ class Client(object):
         elif self._start_arg is None:
             # Special case: if Client() was instantiated without a
             # scheduler address or cluster reference, spawn a new cluster
-            from .deploy import LocalCluster
-
             try:
-                self.cluster = LocalCluster(loop=self.loop, start=False,
-                                            **self._startup_kwargs)
-                yield self.cluster._start()
+                yield self._start_cluster(loop=self.loop, start=False,
+                                          **self._startup_kwargs)
             except (OSError, socket.error) as e:
                 if e.errno != errno.EADDRINUSE:
                     raise
                 # The default port was taken, use a random one
-                self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
-                                            start=False, **self._startup_kwargs)
-                yield self.cluster._start()
+                yield self._start_cluster(scheduler_port=0, loop=self.loop,
+                                          start=False, **self._startup_kwargs)
 
             # Wait for all workers to be ready
             while (not self.cluster.workers or

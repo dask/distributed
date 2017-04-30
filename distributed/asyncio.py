@@ -3,10 +3,12 @@
 import asyncio
 from functools import wraps
 
+from tornado import gen
 from tornado.platform.asyncio import BaseAsyncIOLoop
 from tornado.platform.asyncio import to_asyncio_future, to_tornado_future
 
 from .client import Client, Future, AsCompleted, _wait
+from .deploy import LocalCluster
 from .utils import ignoring
 
 from tornado.ioloop import IOLoop
@@ -45,6 +47,12 @@ class AioFuture(Future):
     result = to_asyncio(Future._result)
     exception = to_asyncio(Future._exception)
     traceback = to_asyncio(Future._traceback)
+
+
+class PatchedLocalCluster(LocalCluster):
+
+    def __del__(self):
+        pass
 
 
 class AioClient(Client):
@@ -132,9 +140,15 @@ class AioClient(Client):
     async def __aexit__(self, type, value, traceback):
         await self.shutdown()
 
+    @gen.coroutine
+    def _start_cluster(self, **kwargs):
+        self.cluster = PatchedLocalCluster(**kwargs)
+        yield self.cluster._start()
+
     def __del__(self):
-        if self.loop._running:
-            self.loop.asyncio_loop.run_until_complete(self.shutdown())
+        pass
+        # if self.loop._running:
+        #     self.loop.asyncio_loop.run_until_complete(self.shutdown())
 
     async def start(self, timeout=5, **kwargs):
         if self.status == 'running':
