@@ -322,25 +322,24 @@ class AllExit(Exception):
 
 
 class Client(object):
-    """ Drive computations on a distributed cluster
+    """ Connect to and drive computation on a distributed Dask cluster
 
-    The Client connects users to a distributed compute cluster.  It provides
-    an asynchronous user interface around functions and futures.  This class
-    resembles executors in ``concurrent.futures`` but also allows ``Future``
-    objects within ``submit/map`` calls.
+    The Client connects users to a dask.distributed compute cluster.  It
+    provides an asynchronous user interface around functions and futures.  This
+    class resembles executors in ``concurrent.futures`` but also allows
+    ``Future`` objects within ``submit/map`` calls.
 
     Parameters
     ----------
-    address: string, tuple, or ``LocalCluster``
-        This can be the address of a ``Scheduler`` server, either
-        as a string ``'127.0.0.1:8787'`` or tuple ``('127.0.0.1', 8787)``
-        or it can be a local ``LocalCluster`` object.
+    address: string, or Cluster
+        This can be the address of a ``Scheduler`` server like a string
+        ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
 
     Examples
     --------
-    Provide cluster's head node address on initialization:
+    Provide cluster's scheduler node address on initialization:
 
-    >>> client = Client('127.0.0.1:8787')  # doctest: +SKIP
+    >>> client = Client('127.0.0.1:8786')  # doctest: +SKIP
 
     Use ``submit`` method to send individual computations to the cluster
 

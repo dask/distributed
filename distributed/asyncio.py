@@ -48,35 +48,36 @@ class AioFuture(Future):
 
 
 class AioClient(Client):
-    """ Drive computations on a distributed cluster
+    """ Connect to and drive computation on a distributed Dask cluster
 
-    It provides an asyncio compatible async/await interface for distributed.
+    This class provides an asyncio compatible async/await interface for
+    dask.distributed.
 
-    The Client connects users to a distributed compute cluster. It provides
-    an asynchronous user interface around functions and futures. This class
-    resembles executors in ``concurrent.futures`` but also allows ``Future``
-    objects within ``submit/map`` calls.
+    The Client connects users to a dask.distributed compute cluster. It
+    provides an asynchronous user interface around functions and futures. This
+    class resembles executors in ``concurrent.futures`` but also allows
+    ``Future`` objects within ``submit/map`` calls.
 
     Parameters
     ----------
-    address: string, tuple, or ``LocalCluster``
-        This can be the address of a ``Scheduler`` server, either
-        as a string ``'127.0.0.1:8787'`` or tuple ``('127.0.0.1', 8787)``
-        or it can be a local ``LocalCluster`` object.
+    address: string, or Cluster
+        This can be the address of a ``Scheduler`` server like a string
+        ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
 
     Examples
     --------
-    Provide cluster's head node address on initialization.
+    Provide cluster's scheduler address on initialization.
 
     >>> client = AioClient('127.0.0.1:8786')  # doctest: +SKIP
 
     The AioClient can receive an asyncio loop explicitly:
 
-    >>> client = AioClient('127.0.0.1:8786', loop=loop)
+    >>> loop = syncio.get_event_loop()  # doctest: +SKIP
+    >>> client = AioClient('127.0.0.1:8786', loop=loop)  # doctest: +SKIP
 
     Start the client:
 
-    >>> await client.start()
+    >>> await client.start()  # doctest: +SKIP
 
     Use ``submit`` method to send individual computations to the cluster
 
@@ -85,7 +86,7 @@ class AioClient(Client):
 
     Await on the returned future to retrieve the result
 
-    >>> await a
+    >>> await a  # doctest: +SKIP
     3
 
     Continue using submit or map on results to build up larger computations
@@ -99,7 +100,7 @@ class AioClient(Client):
 
     Alternatively async context manager makes it more convenient to use:
 
-    >>> async with AioClient() as client:
+    >>> async with AioClient() as client:  # doctest: +SKIP
     ...     await client.submit(lambda x: x**2, 3)
     9
 
