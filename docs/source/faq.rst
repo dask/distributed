@@ -15,6 +15,15 @@ for larger modules.
 __ http://stackoverflow.com/questions/39295200/can-i-use-functions-imported-from-py-files-in-dask-distributed
 .. _API docs: https://distributed.readthedocs.io/en/latest/api.html#distributed.executor.Executor.upload_file
 
+Can I launch a tasks from a task?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This could be while averaging inside another function submitted with
+dask.distributed. For more detail and explanation, see
+http://distributed.readthedocs.io/en/latest/task-launch.html#submit-tasks-from-worker
+
+
+
 Too many open file descriptors?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
