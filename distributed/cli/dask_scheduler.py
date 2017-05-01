@@ -27,6 +27,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--host', type=str, default='',
               help="URI, IP or hostname of this server")
 @click.option('--port', type=int, default=None, help="Serving port")
+@click.option('--interface', type=str, default=None,
+              help="Preferred network interface like 'eth0' or 'ib0'")
 @click.option('--tls-ca-file', type=pem_file_option_type, default=None,
               help="CA cert(s) file for TLS (in PEM format)")
 @click.option('--tls-cert', type=pem_file_option_type, default=None,
@@ -36,12 +38,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 # XXX default port (or URI) values should be centralized somewhere
 @click.option('--http-port', type=int, default=9786, help="HTTP port")
 @click.option('--bokeh-port', type=int, default=8787, help="Bokeh port")
-@click.option('--bokeh-internal-port', type=int, default=8788,
+@click.option('--bokeh-external-port', type=int, default=None,
               help="Internal Bokeh port")
+@click.option('--bokeh-internal-port', type=int, default=None,
+              help="Deprecated.")
 @click.option('--bokeh/--no-bokeh', '_bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
-@click.option('--interface', type=str, default=None,
-              help="Preferred network interface like 'eth0' or 'ib0'")
 @click.option('--show/--no-show', default=False, help="Show web UI")
 @click.option('--bokeh-whitelist', default=None, multiple=True,
               help="IP addresses to whitelist for bokeh.")
@@ -59,9 +61,17 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="Directory to place scheduler files")
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process like "foo.bar"')
-def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
-         bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file,
-         interface, local_directory, preload, tls_ca_file, tls_cert, tls_key):
+def main(host, port, http_port, bokeh_port, bokeh_external_port,
+         bokeh_internal_port, show, _bokeh, bokeh_whitelist, prefix,
+         use_xheaders, pid_file, scheduler_file, interface, local_directory,
+         preload, tls_ca_file, tls_cert, tls_key):
+
+    if bokeh_internal_port:
+        print("The --bokeh-internal-port keyword has been removed.\n"
+              "The internal bokeh server is now the default bokeh server.\n"
+              "Use --bokeh-port %d instead" % bokeh_internal_port)
+        sys.exit(1)
+
     sec = Security(tls_ca_file=tls_ca_file,
                    tls_scheduler_cert=tls_cert,
                    tls_scheduler_key=tls_key,
@@ -108,7 +118,7 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
     if _bokeh:
         with ignoring(ImportError):
             from distributed.bokeh.scheduler import BokehScheduler
-            services[('bokeh', bokeh_internal_port)] = BokehScheduler
+            services[('bokeh', bokeh_port)] = BokehScheduler
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file,
                           security=sec)
@@ -116,13 +126,14 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
     preload_modules(preload, parameter=scheduler, file_dir=local_directory)
 
     bokeh_proc = None
-    if _bokeh:
-        if bokeh_port == 0:          # This is a hack and not robust
+    if _bokeh and bokeh_external_port is not None:
+        if bokeh_external_port == 0: # This is a hack and not robust
             bokeh_port = open_port() # This port may be taken by the OS
         try:                         # before we successfully pass it to Bokeh
             from distributed.bokeh.application import BokehWebInterface
             bokeh_proc = BokehWebInterface(http_port=http_port,
-                    scheduler_address=scheduler.address, bokeh_port=bokeh_port,
+                    scheduler_address=scheduler.address,
+                    bokeh_port=bokeh_external_port,
                     bokeh_whitelist=bokeh_whitelist, show=show, prefix=prefix,
                     use_xheaders=use_xheaders, quiet=False)
         except ImportError:

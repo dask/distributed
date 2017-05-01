@@ -2315,7 +2315,12 @@ class Scheduler(ServerNode):
                              " work stealing.  Expected: %s, Got: %s, Key: %s",
                             w, worker, key)
                 msg = {'op': 'release-task', 'key': key, 'reason': 'stolen'}
-                self.worker_comms[w].send(msg)
+                try:
+                    self.worker_comms[w].send(msg)
+                except CommClosedError:
+                    # Don't try to resolve this now.  Proceed normally and
+                    # let normal resiliency mechanisms handle it later
+                    logger.info("Worker comm closed unexpectedly")
 
             recommendations = OrderedDict()
 
