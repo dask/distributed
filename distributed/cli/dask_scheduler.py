@@ -27,6 +27,8 @@ logger = logging.getLogger('distributed.scheduler')
 @click.option('--bokeh-port', type=int, default=8787, help="Bokeh port")
 @click.option('--bokeh-external-port', type=int, default=None,
               help="Internal Bokeh port")
+@click.option('--bokeh-internal-port', type=int, default=None,
+             help="Deprecated.")
 @click.option('--bokeh/--no-bokeh', '_bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
 @click.option('--host', type=str, default='',
@@ -50,9 +52,16 @@ logger = logging.getLogger('distributed.scheduler')
               help="Directory to place scheduler files")
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process like "foo.bar"')
-def main(host, port, http_port, bokeh_port, bokeh_external_port, show, _bokeh,
-         bokeh_whitelist, prefix, use_xheaders, pid_file, scheduler_file,
-         interface, local_directory, preload):
+def main(host, port, http_port, bokeh_port, bokeh_external_port,
+         bokeh_internal_port, show, _bokeh, bokeh_whitelist, prefix,
+         use_xheaders, pid_file, scheduler_file, interface, local_directory,
+         preload):
+
+    if bokeh_internal_port:
+        print("The --bokeh-internal-port keyword has been removed.\n"
+              "The internal bokeh server is now the default bokeh server.\n"
+              "Use --bokeh-port %d instead" % bokeh_internal_port)
+        sys.exit(1)
 
     if pid_file:
         with open(pid_file, 'w') as f:
