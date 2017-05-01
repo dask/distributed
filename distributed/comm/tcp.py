@@ -387,9 +387,11 @@ class TLSListener(BaseTCPListener):
         address = self.prefix + unparse_host_port(*address[:2])
         try:
             yield stream.wait_for_handshake()
-        except StreamClosedError:
-            # The handshake went wrong, ignore
-            pass
+        except EnvironmentError as e:
+            # The handshake went wrong, log and ignore
+            logger.warn("listener on %r: TLS handshake failed with remote %r: %s",
+                        self.listen_address, address,
+                        getattr(e, "real_error", None) or e)
         else:
             comm = TLS(stream, address, self.deserialize)
             self.comm_handler(comm)

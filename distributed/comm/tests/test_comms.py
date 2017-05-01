@@ -656,9 +656,15 @@ def test_tls_reject_certificate():
                       connection_args={'ssl_context': bad_cli_ctx})
 
     # The wrong error is reported on Python 2, see https://github.com/tornadoweb/tornado/pull/2028
-    if sys.version_info >= (3,):
-        # See https://serverfault.com/questions/793260/what-does-tlsv1-alert-unknown-ca-mean
-        assert "unknown ca" in str(excinfo.value)
+    if sys.version_info >= (3,) and os.name != 'nt':
+        try:
+            # See https://serverfault.com/questions/793260/what-does-tlsv1-alert-unknown-ca-mean
+            assert "unknown ca" in str(excinfo.value)
+        except AssertionError:
+            if os.name == 'nt':
+                assert "An existing connection was forcibly closed" in str(excinfo.value)
+            else:
+                raise
 
     # Sanity check
     comm = yield connect(listener.contact_address, timeout=0.5,
