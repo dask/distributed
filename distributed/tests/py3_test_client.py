@@ -1,7 +1,7 @@
 import pytest
 
-from distributed.utils_test import gen_cluster, inc, div
-from distributed import as_completed
+from distributed.utils_test import gen_cluster, inc, div, loop
+from distributed import as_completed, Client
 
 
 @gen_cluster(client=True)
@@ -37,3 +37,21 @@ def test_as_completed_async_for(c, s, a, b):
     yield f()
 
     assert set(results) == set(range(1, 11))
+
+
+def test_async_with(loop):
+    results = []
+    ns = {}
+    async def f():
+        async with Client(processes=False, start=False) as c:
+            result = await c.submit(lambda x: x + 1, 10)
+            results.append(result)
+
+            ns['client'] = c
+            ns['cluster'] = c.cluster
+
+    loop.run_sync(f)
+
+    assert results == [11]
+    assert ns['client'].status == 'closed'
+    assert ns['cluster'].status == 'closed'
