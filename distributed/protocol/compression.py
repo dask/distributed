@@ -68,7 +68,7 @@ with ignoring(ImportError):
 
     compressions['lz4'] = {'compress': lz4_compress,
                            'decompress': _fixed_lz4_decompress}
-     default_compression = 'lz4'
+    default_compression = 'lz4'
 
 with ignoring(ImportError):
     import blosc
