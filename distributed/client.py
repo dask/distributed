@@ -691,6 +691,10 @@ class Client(object):
         # XXX handling of self.status here is not thread-safe
         if self.status == 'closed':
             return
+
+        with ignoring(AttributeError):
+            self.cluster.close()
+
         sync(self.loop, self._shutdown, fast=True)
         assert self.status == 'closed'
 
@@ -704,8 +708,6 @@ class Client(object):
             dask.set_options(shuffle=self._previous_shuffle)
         if self.get == _globals.get('get'):
             del _globals['get']
-        with ignoring(AttributeError):
-            self.cluster.close()
 
     def get_executor(self, **kwargs):
         """ Return a concurrent.futures Executor for submitting tasks
