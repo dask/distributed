@@ -717,6 +717,6 @@ def test_priorities_2(c, s, w):
 @gen_cluster(client=True, worker_kwargs={'heartbeat_interval': 0.020})
 def test_heartbeats(c, s, a, b):
     start = time()
-    while not all(s.worker_info[w]['memory-rss'] for w in s.workers):
+    while not all(s.worker_info[w].get('memory-rss') for w in s.workers):
         yield gen.sleep(0.01)
         assert time() < start + 2
