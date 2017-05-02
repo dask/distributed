@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import textwrap
 from time import sleep
 import uuid
@@ -815,6 +816,26 @@ def new_config(new_config):
         config.update(orig_config)
 
 
+@contextmanager
+def new_config_file(c):
+    """
+    Temporarily change configuration file to match dictionary *c*.
+    """
+    import yaml
+    old_file = os.environ.get('DASK_CONFIG')
+    with tempfile.NamedTemporaryFile('w', prefix='dask-config') as f:
+        f.write(yaml.dump(c))
+        f.flush()
+        os.environ['DASK_CONFIG'] = f.name
+        try:
+            yield
+        finally:
+            if old_file:
+                os.environ['DASK_CONFIG'] = old_file
+            else:
+                del os.environ['DASK_CONFIG']
+
+
 certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__),
                                          'tests'))
 
@@ -851,6 +872,16 @@ def tls_config():
     return c
 
 
+def tls_only_config():
+    """
+    A functional TLS configuration with our test certs, disallowing
+    plain TCP communications.
+    """
+    c = tls_config()
+    c['require-encryption'] = True
+    return c
+
+
 def tls_security():
     """
     A Security object with proper TLS configuration.
@@ -865,9 +896,7 @@ def tls_only_security():
     A Security object with proper TLS configuration and disallowing plain
     TCP communications.
     """
-    c = tls_config()
-    c['require-encryption'] = True
-    with new_config(c):
+    with new_config(tls_only_config()):
         sec = Security()
     assert sec.require_encryption
     return sec

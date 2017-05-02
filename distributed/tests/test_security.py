@@ -85,8 +85,10 @@ def test_kwargs():
         }
     with new_config(c):
         sec = Security(tls_scheduler_cert='newcert.pem',
-                       require_encryption=True)
+                       require_encryption=True,
+                       tls_ca_file=None)
     assert sec.require_encryption == True
+    # None value didn't override default
     assert sec.tls_ca_file == 'ca.pem'
     assert sec.tls_ciphers is None
     assert sec.tls_client_key is None

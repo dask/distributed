@@ -48,7 +48,8 @@ class Security(object):
     def __init__(self, **kwargs):
         self._init_from_dict(config)
         for k, v in kwargs.items():
-            setattr(self, k, v)
+            if v is not None:
+                setattr(self, k, v)
         for k in _fields:
             if not hasattr(self, k):
                 setattr(self, k, None)

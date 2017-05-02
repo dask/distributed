@@ -31,6 +31,11 @@ class Nanny(ServerNode):
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary.
     """
+    _should_cleanup_local_dir = False
+    worker_dir = ''
+    process = None
+    status = None
+
     def __init__(self, scheduler_ip, scheduler_port=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit='auto', reconnect=True,
@@ -62,12 +67,8 @@ class Nanny(ServerNode):
             def _cleanup_local_dir():
                 if os.path.exists(local_dir):
                     shutil.rmtree(local_dir)
-        else:
-            self._should_cleanup_local_dir = False
+
         self.local_dir = local_dir
-        self.worker_dir = ''
-        self.status = None
-        self.process = None
         self.loop = loop or IOLoop.current()
         self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.services = services
