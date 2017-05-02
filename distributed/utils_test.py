@@ -450,16 +450,17 @@ from .client import Client
 
 
 @gen.coroutine
-def start_cluster(ncores, loop, Worker=Worker, scheduler_kwargs={},
-                  worker_kwargs={}):
-    s = Scheduler(loop=loop, validate=True, **scheduler_kwargs)
-    done = s.start('127.0.0.1')
-    workers = [Worker(s.address, ncores=ncore[1], name=i,
+def start_cluster(ncores, scheduler_addr, loop, security=None,
+                  Worker=Worker, scheduler_kwargs={}, worker_kwargs={}):
+    s = Scheduler(loop=loop, validate=True, security=security,
+                  **scheduler_kwargs)
+    done = s.start(scheduler_addr)
+    workers = [Worker(s.address, ncores=ncore[1], name=i, security=security,
                       loop=loop, validate=True,
                       **(merge(worker_kwargs, ncore[2])
                          if len(ncore) > 2
                          else worker_kwargs))
-                for i, ncore in enumerate(ncores)]
+               for i, ncore in enumerate(ncores)]
     for w in workers:
         w.rpc = workers[0].rpc
 
@@ -489,9 +490,10 @@ def end_cluster(s, workers):
     s.stop()
 
 
-def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
-        Worker=Worker, client=False, scheduler_kwargs={}, worker_kwargs={},
-        active_rpc_timeout=0):
+def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
+                scheduler='127.0.0.1', timeout=10, security=None,
+                Worker=Worker, client=False, scheduler_kwargs={},
+                worker_kwargs={}, active_rpc_timeout=0):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -509,13 +511,16 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)], timeout=10,
         def test_func():
             with pristine_loop() as loop:
                 with check_active_rpc(loop, active_rpc_timeout):
-                    s, workers = loop.run_sync(lambda: start_cluster(ncores, loop,
-                                    Worker=Worker, scheduler_kwargs=scheduler_kwargs,
+                    s, workers = loop.run_sync(lambda: start_cluster(ncores,
+                                    scheduler, loop, security=security,
+                                    Worker=Worker,
+                                    scheduler_kwargs=scheduler_kwargs,
                                     worker_kwargs=worker_kwargs))
                     args = [s] + workers
 
                     if client:
-                        e = Client(s.address, loop=loop, start=False)
+                        e = Client(s.address, loop=loop, security=security,
+                                   start=False)
                         loop.run_sync(e._start)
                         args = [e] + args
                     try:
@@ -822,9 +827,9 @@ def get_cert(filename):
     return path
 
 
-def tls_security():
+def tls_config():
     """
-    A Security object with proper TLS configuration.
+    A functional TLS configuration with our test certs.
     """
     ca_file = get_cert('tls-ca-cert.pem')
     keycert = get_cert('tls-key-cert.pem')
@@ -843,6 +848,26 @@ def tls_security():
                 },
             },
         }
+    return c
+
+
+def tls_security():
+    """
+    A Security object with proper TLS configuration.
+    """
+    with new_config(tls_config()):
+        sec = Security()
+    return sec
+
+
+def tls_only_security():
+    """
+    A Security object with proper TLS configuration and disallowing plain
+    TCP communications.
+    """
+    c = tls_config()
+    c['require-encryption'] = True
     with new_config(c):
         sec = Security()
+    assert sec.require_encryption
     return sec
