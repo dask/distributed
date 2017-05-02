@@ -17,6 +17,7 @@ import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
 
+import distributed
 from distributed.core import rpc, connect
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
@@ -714,6 +715,7 @@ def test_priorities_2(c, s, w):
     assert any(key.startswith('b1') for key in log[:len(log) // 2])
 
 
+@pytest.mark.skipif(not distributed.worker.proc, reason="no psutil")
 @gen_cluster(client=True, worker_kwargs={'heartbeat_interval': 0.020})
 def test_heartbeats(c, s, a, b):
     start = time()
