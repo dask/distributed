@@ -220,7 +220,8 @@ class WorkerBase(ServerNode):
                 self.status = 'running'
                 break
             except EnvironmentError:
-                logger.debug("Unable to register with scheduler.  Waiting")
+                logger.info("Trying to connect to scheduler: %s" %
+                            str(self.scheduler.address))
                 yield gen.sleep(0.1)
             except gen.TimeoutError:
                 pass
