@@ -20,7 +20,7 @@ except ImportError:
     from toolz import pluck
 from tornado.gen import Return
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import PeriodicCallback
 from tornado.locks import Event
 
 from .batched import BatchedSend
@@ -28,7 +28,7 @@ from .comm import get_address_host, get_local_address_for
 from .config import config
 from .compatibility import unicode
 from .core import (error_message, CommClosedError,
-                   rpc, Server, pingpong, coerce_to_address)
+                   rpc, Server, pingpong, coerce_to_address, clean_loop)
 from .metrics import time
 from .preloading import preload_modules
 from .protocol import (pickle, to_serialize, deserialize_bytes,
@@ -105,7 +105,7 @@ class WorkerBase(Server):
             self.data = Buffer({}, storage, int(float(self.memory_limit)), weight)
         else:
             self.data = dict()
-        self.loop = loop or IOLoop.current()
+        self.loop = clean_loop(loop)
         self.status = None
         self._closed = Event()
         self.reconnect = reconnect
