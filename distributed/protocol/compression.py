@@ -53,12 +53,12 @@ with ignoring(ImportError):
 
     try:
         # try using the new lz4 API
-        lz4_compress=lz4.block.compress
-        lz4_decompress=lz4.block.decompress
+        lz4_compress = lz4.block.compress
+        lz4_decompress = lz4.block.decompress
     except AttributeError as err:
         # fall back to old one
-        lz4_compress=lz4.LZ4_compress
-        lz4_decompress=lz4.LZ4_uncompress
+        lz4_compress = lz4.LZ4_compress
+        lz4_decompress = lz4.LZ4_uncompress
 
     def _fixed_lz4_decompress(data):
         # helper to bypass missing memoryview support in lz4
