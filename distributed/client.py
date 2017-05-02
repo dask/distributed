@@ -664,6 +664,9 @@ class Client(object):
                 raise gen.Return()
             if self.status == 'running':
                 self._send_to_scheduler({'op': 'close-stream'})
+            if self._start_arg is None:
+                with ignoring(AttributeError):
+                    yield self.cluster._close()
             self.status = 'closed'
             if _global_client[0] is self:
                 _global_client[0] = None
