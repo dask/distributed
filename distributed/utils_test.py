@@ -823,10 +823,11 @@ def new_config_file(c):
     """
     import yaml
     old_file = os.environ.get('DASK_CONFIG')
-    with tempfile.NamedTemporaryFile('w', prefix='dask-config') as f:
-        f.write(yaml.dump(c))
-        f.flush()
-        os.environ['DASK_CONFIG'] = f.name
+    fd, path = tempfile.mkstemp(prefix='dask-config')
+    try:
+        with os.fdopen(fd, 'w') as f:
+            f.write(yaml.dump(c))
+        os.environ['DASK_CONFIG'] = path
         try:
             yield
         finally:
@@ -834,6 +835,8 @@ def new_config_file(c):
                 os.environ['DASK_CONFIG'] = old_file
             else:
                 del os.environ['DASK_CONFIG']
+    finally:
+        os.remove(path)
 
 
 certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__),
