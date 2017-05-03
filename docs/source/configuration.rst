@@ -14,11 +14,14 @@ the Dask configuration file.
 User-wide configuration
 =======================
 
-Dask accepts some configuration options in a file ``.dask/config.yaml``
-located in your home directory.  The file is written in the YAML format,
-which allows for a human-readable hierarchical key-value configuration.
-All keys in the configuration file are optional, though Dask will create
-a default configuration file for you on its first launch.
+Dask accepts some configuration options in a configuration file, which by
+default is a ``.dask/config.yaml`` file located in your home directory.
+The file path can be overriden using the ``DASK_CONFIG`` environment variable.
+
+The file is written in the YAML format, which allows for a human-readable
+hierarchical key-value configuration.  All keys in the configuration file
+are optional, though Dask will create a default configuration file for you
+on its first launch.
 
 Here is a synopsis of the configuration file:
 

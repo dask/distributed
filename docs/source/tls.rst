@@ -50,10 +50,21 @@ One can also pass additional parameters:
 
 All those parameters can be passed in several ways:
 
-* through the :ref:`configuration file <configuration>` ``.dask/config.yaml``;
+* through the Dask :ref:`configuration file <configuration>`;
 * if using the command line, through options to ``dask-scheduler`` and
   ``dask-worker``;
-* if using the API, through a ``Security`` object.
+* if using the API, through a ``Security`` object.  For example, here is
+  how you might configure a ``Security`` object for client use::
+
+     from distributed import Client
+     from distributed.security import Security
+
+     sec = Security(tls_ca_file='cluster_ca.pem',
+                    tls_client_cert='cli_cert.pem',
+                    tls_client_key='cli_key.pem',
+                    require_encryption=True)
+
+     client = Client(..., security=sec)
 
 
 Security policy
