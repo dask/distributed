@@ -40,18 +40,19 @@ def test_as_completed_async_for(c, s, a, b):
 
 
 def test_async_with(loop):
-    results = []
-    ns = {}
+    result = None
+    client = None
+    cluster = None
     async def f():
         async with Client(processes=False, start=False) as c:
+            nonlocal result, client, cluster
             result = await c.submit(lambda x: x + 1, 10)
-            results.append(result)
 
-            ns['client'] = c
-            ns['cluster'] = c.cluster
+            client = c
+            cluster = c.cluster
 
     loop.run_sync(f)
 
-    assert results == [11]
-    assert ns['client'].status == 'closed'
-    assert ns['cluster'].status == 'closed'
+    assert result == 11
+    assert client.status == 'closed'
+    assert cluster.status == 'closed'
