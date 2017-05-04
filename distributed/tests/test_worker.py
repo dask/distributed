@@ -338,11 +338,11 @@ def test_spill_to_disk(e, s):
     yield _wait(z)
     assert set(w.data) == {x.key, y.key, z.key}
     assert set(w.data.fast) == {y.key, z.key}
-    assert set(w.data.slow) == {x.key}
+    assert set(w.data.slow) == {x.key} or set(w.data.slow) == {x.key, y.key}
 
     yield x._result()
     assert set(w.data.fast) == {x.key, z.key}
-    assert set(w.data.slow) == {y.key}
+    assert set(w.data.slow) == {y.key} or set(w.data.slow) == {x.key, y.key}
     yield w._close()
 
 
@@ -714,9 +714,9 @@ def test_priorities_2(c, s, w):
     assert any(key.startswith('b1') for key in log[:len(log) // 2])
 
 
-@pytest.mark.skipif(not distributed.worker.proc, reason="no psutil")
 @gen_cluster(client=True, worker_kwargs={'heartbeat_interval': 0.020})
 def test_heartbeats(c, s, a, b):
+    pytest.importorskip('psutil')
     start = time()
     while not all(s.worker_info[w].get('memory-rss') for w in s.workers):
         yield gen.sleep(0.01)
