@@ -54,7 +54,9 @@ All those parameters can be passed in several ways:
 * if using the command line, through options to ``dask-scheduler`` and
   ``dask-worker``;
 * if using the API, through a ``Security`` object.  For example, here is
-  how you might configure a ``Security`` object for client use::
+  how you might configure a ``Security`` object for client use:
+
+  .. code-block:: python
 
      from distributed import Client
      from distributed.security import Security
