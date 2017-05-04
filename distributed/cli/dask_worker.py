@@ -17,7 +17,7 @@ from distributed.worker import _ncores
 from distributed.http import HTTPWorker
 from distributed.metrics import time
 from distributed.security import Security
-from distributed.cli.utils import check_python_3
+from distributed.cli.utils import check_python_3, uri_from_host_port
 
 from toolz import valmap
 from tornado.ioloop import IOLoop, TimeoutError
@@ -191,11 +191,14 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         else:
             host = get_ip_interface(interface)
 
+    if host or port:
+        addr = uri_from_host_port(host, port, 0)
+    else:
+        # Choose appropriate address for scheduler
+        addr = None
+
     for n in nannies:
-        if host:
-            n.start((host, port))
-        else:
-            n.start(port)
+        n.start(addr)
         if t is Nanny:
             global_nannies.append(n)
 
