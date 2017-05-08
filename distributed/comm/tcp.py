@@ -232,6 +232,9 @@ class TLS(TCP):
         if sock is not None:
             self._extra.update(peercert=sock.getpeercert(),
                                cipher=sock.cipher())
+            cipher, proto, bits = self._extra['cipher']
+            logger.debug("TLS connection with %r: protocol=%s, cipher=%s, bits=%d",
+                         self._peer_addr, proto, cipher, bits)
 
 
 def _expect_tls_context(connection_args):
