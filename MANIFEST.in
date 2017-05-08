@@ -1,6 +1,7 @@
 recursive-include distributed *.py
 recursive-include distributed *.js
 recursive-include distributed *.coffee
+recursive-include distributed *.html
 recursive-include docs *.rst
 
 include setup.py

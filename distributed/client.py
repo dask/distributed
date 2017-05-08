@@ -457,7 +457,13 @@ class Client(Node):
         address = self._start_arg
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
-            yield self.cluster._start()
+            try:
+                yield self.cluster._start()
+            except AttributeError:  # Some clusters don't have this method
+                pass
+            except Exception:
+                logger.info("Tried to start cluster and received an error. "
+                            "Proceeding.", exc_info=True)
             address = self.cluster.scheduler_address
         elif self.scheduler_file is not None:
             while not os.path.exists(self.scheduler_file):
@@ -715,6 +721,7 @@ class Client(Node):
         if self.status == 'closed':
             return
 
+        self.status = 'closing'
         if self._start_arg is None:
             with ignoring(AttributeError):
                 self.cluster.close()
@@ -724,7 +731,7 @@ class Client(Node):
 
         if self._should_close_loop:
             sync(self.loop, self.loop.stop)
-            self.loop.close(all_fds=True)
+            self.loop.close(all_fds=False)
             self._loop_thread.join(timeout=timeout)
         with ignoring(AttributeError):
             dask.set_options(get=self._previous_get)
