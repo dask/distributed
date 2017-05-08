@@ -1109,3 +1109,21 @@ def test_correct_bad_time_estimate(c, s, *workers):
     yield _wait(futures)
 
     assert all(w.data for w in workers)
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
+def test_lose_all_workers(c, s, a):
+    future = c.submit(inc, 1)
+    yield _wait(future)
+
+    yield a._close()
+    while future.status != 'lost':
+        yield gen.sleep(0.01)
+
+    w = Worker(s.ip, s.port, loop=s.loop)
+    yield w._start()
+
+    result = yield future._result()
+    assert result == 2
+
+    yield w._close()
