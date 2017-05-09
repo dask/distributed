@@ -2693,7 +2693,10 @@ class AsCompleted(object):
         [6]
         """
         while True:
-            yield self.next_batch(block=True)
+            try:
+                yield self.next_batch(block=True)
+            except StopIteration:
+                return
 
 
 as_completed = AsCompleted
