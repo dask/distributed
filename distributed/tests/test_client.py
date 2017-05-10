@@ -4062,5 +4062,5 @@ def test_quiet_client_shutdown(loop):
         assert not out
 
 
-if sys.version_info > (3, 5):
+if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *
