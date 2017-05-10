@@ -121,7 +121,7 @@ class TCP(Comm):
         set_tcp_timeout(stream)
 
     def _get_finalizer(self):
-        def finalize(stream=self.stream, r=repr(self)):
+        def finalize(stream=self.stream, r=repr(self), p=print):
             if not stream.closed():
                 logger.warn("Closing dangling stream in %s" % (r,))
                 stream.close()
