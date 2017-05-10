@@ -18,7 +18,7 @@ from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
 from .node import ServerNode
 from .security import Security
-from .utils import get_ip, ignoring, mp_context
+from .utils import get_ip, ignoring, mp_context, log_errors
 from .worker import _ncores, run
 
 
@@ -273,12 +273,14 @@ class Nanny(ServerNode):
         return run(self, *args, **kwargs)
 
     def cleanup(self):
-        if self.worker_dir and os.path.exists(self.worker_dir):
-            shutil.rmtree(self.worker_dir)
-        self.worker_dir = None
-        if self.process:
-            with ignoring(OSError):
-                self.process.terminate()
+        with ignoring(Exception):
+            with log_errors():
+                if self.worker_dir and os.path.exists(self.worker_dir):
+                    shutil.rmtree(self.worker_dir)
+                self.worker_dir = None
+                if self.process:
+                    with ignoring(OSError):
+                        self.process.terminate()
 
     def __del__(self):
         if self._should_cleanup_local_dir and os.path.exists(self.local_dir):
