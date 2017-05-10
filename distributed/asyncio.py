@@ -1,3 +1,5 @@
+"""Experimental interface for asyncio, may disappear without warning"""
+
 # flake8: noqa
 
 import asyncio
@@ -55,9 +57,12 @@ class AioClient(Client):
     dask.distributed.
 
     The Client connects users to a dask.distributed compute cluster. It
-    provides an asynchronous user interface around functions and futures. This
-    class resembles executors in ``concurrent.futures`` but also allows
-    ``Future`` objects within ``submit/map`` calls.
+    provides an asynchronous user interface around functions and futures.
+    This class resembles executors in ``concurrent.futures`` but also
+    allows ``Future`` objects within ``submit/map`` calls.
+
+    AioClient is an **experimental** interface for distributed and may
+    disappear without warning!
 
     Parameters
     ----------
@@ -194,4 +199,3 @@ class AioAsCompleted(AsCompleted):
 
 wait = to_asyncio(_wait)
 as_completed = AioAsCompleted
-
