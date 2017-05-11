@@ -973,8 +973,9 @@ def status_doc(scheduler, doc):
 
 
 class BokehScheduler(BokehServer):
-    def __init__(self, scheduler, io_loop=None, prefix='', **kwargs):
+    def __init__(self, scheduler, io_loop=None, **kwargs):
         self.scheduler = scheduler
+        self.server_kwargs = kwargs
 
         systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc,
                                                             scheduler)))
@@ -994,10 +995,6 @@ class BokehScheduler(BokehServer):
                 '/tasks': tasks,
                 '/status': status
         }
-        if prefix:
-            prefix = '/' + prefix.lstrip('/')
-            self.prefix = prefix
-            # self.apps = {prefix + k: v for k, v in self.apps.items()}
 
         self.loop = io_loop or scheduler.loop
         self.server = None

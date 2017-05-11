@@ -5,7 +5,7 @@ from bokeh.server.server import Server
 
 
 class BokehServer(object):
-    prefix = ''
+    server_kwargs = {}
     def listen(self, addr):
         if self.server:
             return
@@ -21,11 +21,13 @@ class BokehServer(object):
                 else:
                     kwargs = {}
 
+                kwargs.update(self.server_kwargs)
+
                 self.server = Server(self.apps, io_loop=self.loop,
                                      port=port, address=ip,
                                      check_unused_sessions_milliseconds=500,
                                      allow_websocket_origin=["*"],
-                                     prefix=self.prefix, **kwargs)
+                                     **kwargs)
                 if bokeh.__version__ <= '0.12.3':
                     self.server.start(start_loop=False)
                 else:
