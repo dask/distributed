@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
+from functools import partial
 import logging
 import os
 import shutil
