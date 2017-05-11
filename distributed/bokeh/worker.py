@@ -590,7 +590,7 @@ class BokehWorker(BokehServer):
         if prefix:
             prefix = '/' + prefix.lstrip('/')
             self.prefix = prefix
-            self.apps = {prefix + k: v for k, v in self.apps.items()}
+            # self.apps = {prefix + k: v for k, v in self.apps.items()}
 
         self.loop = io_loop or worker.loop
         self.server = None
