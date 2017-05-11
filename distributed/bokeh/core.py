@@ -6,6 +6,7 @@ from bokeh.server.server import Server
 
 class BokehServer(object):
     server_kwargs = {}
+
     def listen(self, addr):
         if self.server:
             return
