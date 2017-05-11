@@ -106,7 +106,8 @@ def main(host, port, http_port, bokeh_port, bokeh_external_port,
     if _bokeh:
         with ignoring(ImportError):
             from distributed.bokeh.scheduler import BokehScheduler
-            services[('bokeh', bokeh_port)] = BokehScheduler
+            services[('bokeh', bokeh_port)] = partial(BokehScheduler,
+                                                      prefix=prefix)
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file)
     scheduler.start(addr)
@@ -115,8 +116,8 @@ def main(host, port, http_port, bokeh_port, bokeh_external_port,
     bokeh_proc = None
     if _bokeh and bokeh_external_port is not None:
         if bokeh_external_port == 0: # This is a hack and not robust
-            bokeh_port = open_port() # This port may be taken by the OS
-        try:                         # before we successfully pass it to Bokeh
+            bokeh_external_port = open_port() # This port may be taken by the OS
+        try:                                  # before we successfully pass it to Bokeh
             from distributed.bokeh.application import BokehWebInterface
             bokeh_proc = BokehWebInterface(http_port=http_port,
                     scheduler_address=scheduler.address,
