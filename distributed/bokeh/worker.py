@@ -576,7 +576,7 @@ def counters_doc(server, doc):
 
 
 class BokehWorker(BokehServer):
-    def __init__(self, worker, io_loop=None):
+    def __init__(self, worker, io_loop=None, prefix=''):
         self.worker = worker
         main = Application(FunctionHandler(partial(main_doc, worker)))
         crossfilter = Application(FunctionHandler(partial(crossfilter_doc, worker)))
@@ -587,6 +587,10 @@ class BokehWorker(BokehServer):
                      '/counters': counters,
                      '/crossfilter': crossfilter,
                      '/system': systemmonitor}
+        if prefix:
+            prefix = '/' + prefix.lstrip('/')
+            self.prefix = prefix
+            self.apps = {prefix + k: v for k, v in self.apps.items()}
 
         self.loop = io_loop or worker.loop
         self.server = None
