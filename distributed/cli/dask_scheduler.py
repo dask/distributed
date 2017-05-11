@@ -43,6 +43,8 @@ logger = logging.getLogger('distributed.scheduler')
               help="IP addresses to whitelist for bokeh.")
 @click.option('--bokeh-prefix', type=str, default=None,
               help="Prefix for the bokeh app")
+@click.option('--prefix', type=str, default=None,
+              help="Deprecated, see --bokeh-prefix")
 @click.option('--use-xheaders', type=bool, default=False, show_default=True,
               help="User xheaders in bokeh app for ssl termination in header")
 @click.option('--pid-file', type=str, default='',
