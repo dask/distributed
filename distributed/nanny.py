@@ -6,7 +6,6 @@ import logging
 from multiprocessing.queues import Empty
 import os
 import shutil
-import tempfile
 from time import sleep
 import weakref
 
