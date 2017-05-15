@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import atexit
 from collections import defaultdict, Iterator, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
@@ -19,6 +20,7 @@ import uuid
 from threading import Thread, Lock
 import six
 import socket
+import weakref
 
 import dask
 from dask.base import tokenize, normalize_token, Base, collections_to_dsk
@@ -46,9 +48,18 @@ from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph)
 from .versions import get_versions
 
+
 logger = logging.getLogger(__name__)
 
 _global_client = [None]
+
+
+def _get_global_client():
+    wr = _global_client[0]
+    return wr and wr()
+
+def _set_global_client(c):
+    _global_client[0] = weakref.ref(c) if c is not None else None
 
 
 class Future(WrappedKey):
@@ -381,6 +392,7 @@ class Client(Node):
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args('client')
+        self._connecting_to_scheduler = False
 
         if hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object
@@ -441,7 +453,7 @@ class Client(Node):
                 sleep(0.001)
         pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
         self.loop.add_callback(pc.start)
-        _global_client[0] = self
+        _set_global_client(self)
         sync(self.loop, self._start, **kwargs)
         self.status = 'running'
 
@@ -527,16 +539,23 @@ class Client(Node):
 
     @gen.coroutine
     def _ensure_connected(self, timeout=5):
-        if self.scheduler_comm and not self.scheduler_comm.closed():
+        if (self.scheduler_comm and not self.scheduler_comm.closed() or
+            self._connecting_to_scheduler):
             return
 
-        comm = yield connect(self.scheduler.address, timeout=timeout,
-                             connection_args=self.connection_args)
+        self._connecting_to_scheduler = True
 
-        yield self.scheduler.identity()
+        try:
+            comm = yield connect(self.scheduler.address, timeout=timeout,
+                                 connection_args=self.connection_args)
 
-        yield comm.write({'op': 'register-client',
-                          'client': self.id, 'reply': False})
+            yield self.scheduler.identity()
+
+            yield comm.write({'op': 'register-client',
+                              'client': self.id,
+                              'reply': False})
+        finally:
+            self._connecting_to_scheduler = False
         msg = yield comm.read()
         assert len(msg) == 1
         assert msg[0]['op'] == 'stream-start'
@@ -545,7 +564,7 @@ class Client(Node):
         bcomm.start(comm)
         self.scheduler_comm = bcomm
 
-        _global_client[0] = self
+        _set_global_client(self)
         self.status = 'running'
 
         for msg in self._pending_msg_buffer:
@@ -692,8 +711,8 @@ class Client(Node):
                 with ignoring(AttributeError):
                     yield self.cluster._close()
             self.status = 'closed'
-            if _global_client[0] is self:
-                _global_client[0] = None
+            if _get_global_client() is self:
+                _set_global_client(None)
             if not fast:
                 with ignoring(TimeoutError):
                     yield [gen.with_timeout(timedelta(seconds=2), f)
@@ -2702,7 +2721,10 @@ class AsCompleted(object):
         [6]
         """
         while True:
-            yield self.next_batch(block=True)
+            try:
+                yield self.next_batch(block=True)
+            except StopIteration:
+                return
 
 
 as_completed = AsCompleted
@@ -2710,10 +2732,9 @@ as_completed = AsCompleted
 
 def default_client(c=None):
     """ Return an client if exactly one has started """
+    c = c or _get_global_client()
     if c:
         return c
-    if _global_client[0]:
-        return _global_client[0]
     else:
         raise ValueError("No clients found\n"
                 "Start an client and point it to the scheduler address\n"
@@ -2770,8 +2791,21 @@ def temp_default_client(c):
         This is what default_client() will return within the with-block.
     """
     old_exec = default_client()
-    _global_client[0] = c
+    _set_global_client(c)
     try:
         yield
     finally:
-        _global_client[0] = old_exec
+        _set_global_client(old_exec)
+
+
+def _shutdown_global_client():
+    """
+    Force shutdown of global client.  This cleans up when a client
+    wasn't shutdown explicitly, e.g. interactive sessions.
+    """
+    c = _get_global_client()
+    if c is not None:
+        c.shutdown(timeout=2)
+
+
+atexit.register(_shutdown_global_client)

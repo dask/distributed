@@ -26,8 +26,10 @@ from tornado.ioloop import IOLoop
 from .config import config
 from .core import connect, rpc, CommClosedError
 from .metrics import time
+from .nanny import Nanny
 from .security import Security
 from .utils import ignoring, log_errors, sync, mp_context, get_ip, get_ipv6
+from .worker import Worker
 import pytest
 
 
@@ -483,8 +485,12 @@ def end_cluster(s, workers):
     def end_worker(w):
         with ignoring(TimeoutError, CommClosedError, EnvironmentError):
             yield w._close(report=False)
-        if w.local_dir and os.path.exists(w.local_dir):
-            shutil.rmtree(w.local_dir)
+        if isinstance(w, Nanny):
+            dir = w.worker_dir
+        else:
+            dir = w.local_dir
+        if dir and os.path.exists(dir):
+            shutil.rmtree(dir)
 
     yield [end_worker(w) for w in workers]
     yield s.close() # wait until scheduler stops completely
@@ -573,7 +579,9 @@ def terminate_process(proc):
             if sys.version_info[0] == 3:
                 proc.wait(10)
             else:
-                proc.wait()
+                start = time()
+                while proc.poll() is None and time() < start + 10:
+                    sleep(0.02)
         finally:
             # Make sure we don't leave the process lingering around
             with ignoring(OSError):
@@ -603,12 +611,12 @@ def popen(*args, **kwargs):
             if dump_stdout:
                 line = '\n\nPrint from stderr\n=================\n'
                 while line:
-                    print(line)
+                    print(line, end='')
                     line = proc.stderr.readline()
 
                 line = '\n\nPrint from stdout\n=================\n'
                 while line:
-                    print(line)
+                    print(line, end='')
                     line = proc.stdout.readline()
 
 

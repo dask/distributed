@@ -6,7 +6,6 @@ import logging
 from multiprocessing.queues import Empty
 import os
 import shutil
-import tempfile
 from time import sleep
 import weakref
 
@@ -31,7 +30,6 @@ class Nanny(ServerNode):
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary.
     """
-    _should_cleanup_local_dir = False
     worker_dir = ''
     process = None
     status = None
@@ -59,16 +57,8 @@ class Nanny(ServerNode):
         self.connection_args = self.security.get_connection_args('worker')
         self.listen_args = self.security.get_listen_args('worker')
 
-        if not local_dir:
-            local_dir = tempfile.mkdtemp(prefix='nanny-')
-            self._should_cleanup_local_dir = True
-
-            @atexit.register
-            def _cleanup_local_dir():
-                if os.path.exists(local_dir):
-                    shutil.rmtree(local_dir)
-
         self.local_dir = local_dir
+
         self.loop = loop or IOLoop.current()
         self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.services = services
@@ -283,8 +273,6 @@ class Nanny(ServerNode):
                         self.process.terminate()
 
     def __del__(self):
-        if self._should_cleanup_local_dir and os.path.exists(self.local_dir):
-            shutil.rmtree(self.local_dir)
         self.cleanup()
 
     @gen.coroutine

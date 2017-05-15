@@ -1805,8 +1805,11 @@ class Scheduler(ServerNode):
                         pass
 
             workers = set(workers)
-            keys = set.union(*[self.has_what[w] for w in workers])
-            keys = {k for k in keys if self.who_has[k].issubset(workers)}
+            if len(workers) > 0:
+                keys = set.union(*[self.has_what[w] for w in workers])
+                keys = {k for k in keys if self.who_has[k].issubset(workers)}
+            else:
+                keys = set()
 
             other_workers = set(self.worker_info) - workers
             if keys:
@@ -2258,8 +2261,11 @@ class Scheduler(ServerNode):
                 return {key: 'released'}
 
             if startstops:
-                compute_start, compute_stop = [(b, c) for a, b, c in startstops
-                                              if a == 'compute'][0]
+                L = [(b, c) for a, b, c in startstops if a == 'compute']
+                if L:
+                    compute_start, compute_stop = L[0]
+                else:  # This is very rare
+                    compute_start = compute_stop = None
             else:
                 compute_start = compute_stop = None
 

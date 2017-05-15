@@ -244,12 +244,12 @@ def test_scheduler_port_zero(loop):
 def test_bokeh_port_zero(loop):
     pytest.importorskip('bokeh')
     with tmpfile() as fn:
-        with popen(['dask-scheduler',
-                    '--bokeh-port', '0']) as proc:
+        with popen(['dask-scheduler', '--bokeh-port', '0']) as proc:
             count = 0
             while count < 1:
                 line = proc.stderr.readline()
                 if b'bokeh' in line.lower() or b'web' in line.lower():
+                    sleep(0.01)
                     count += 1
                     assert b':0' not in line
 

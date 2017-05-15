@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 import atexit
 from datetime import timedelta
+from functools import partial
 import json
 import logging
 import os
@@ -87,8 +88,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="File to write the process PID")
 @click.option('--local-directory', default='', type=str,
               help="Directory to place worker files")
-@click.option('--temp-filename', default=None,
-              help="Internal use only")
 @click.option('--resources', type=str, default='',
               help='Resources for task constraints like "GPU=2 MEM=10e9"')
 @click.option('--scheduler-file', type=str, default='',
@@ -96,13 +95,16 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
                    'Use with dask-scheduler --scheduler-file')
 @click.option('--death-timeout', type=float, default=None,
               help="Seconds to wait for a scheduler before closing")
+@click.option('--bokeh-prefix', type=str, default=None,
+              help="Prefix for the bokeh app")
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process '
                    'like "foo.bar" or "/path/to/foo.py"')
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
-         nanny, name, memory_limit, pid_file, temp_filename, reconnect,
+         nanny, name, memory_limit, pid_file, reconnect,
          resources, bokeh, bokeh_port, local_directory, scheduler_file,
-         interface, death_timeout, preload, tls_ca_file, tls_cert, tls_key):
+         interface, death_timeout, preload, bokeh_prefix,
+         tls_ca_file, tls_cert, tls_key):
     sec = Security(tls_ca_file=tls_ca_file,
                    tls_worker_cert=tls_cert,
                    tls_worker_key=tls_key,
@@ -141,7 +143,8 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         except ImportError:
             pass
         else:
-            services[('bokeh', bokeh_port)] = BokehWorker
+            services[('bokeh', bokeh_port)] = partial(BokehWorker,
+                                                      prefix=bokeh_prefix)
 
     if resources:
         resources = resources.replace(',', ' ').split()
@@ -201,18 +204,6 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         n.start(addr)
         if t is Nanny:
             global_nannies.append(n)
-
-    if temp_filename:
-        @gen.coroutine
-        def f():
-            while nannies[0].status != 'running':
-                yield gen.sleep(0.01)
-            import json
-            msg = {'port': nannies[0].port,
-                   'local_directory': nannies[0].local_dir}
-            with open(temp_filename, 'w') as f:
-                json.dump(msg, f)
-        loop.add_callback(f)
 
     @gen.coroutine
     def run():

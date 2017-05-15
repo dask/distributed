@@ -79,15 +79,18 @@ class WorkerBase(ServerNode):
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self._port = 0
         self.ncores = ncores or _ncores
-        self.local_dir = local_dir or tempfile.mkdtemp(prefix='worker-')
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
         self.death_timeout = death_timeout
         self.preload = preload
         if silence_logs:
             logger.setLevel(silence_logs)
-        if not os.path.exists(self.local_dir):
-            os.mkdir(self.local_dir)
+
+        if local_dir:
+            local_dir = os.path.abspath(local_dir)
+            if not os.path.exists(local_dir):
+                os.mkdir(local_dir)
+        self.local_dir = tempfile.mkdtemp(prefix='worker-', dir=local_dir)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
