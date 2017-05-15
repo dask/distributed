@@ -157,11 +157,7 @@ def test_no_workers(client, s):
 
 @gen_cluster(ncores=[])
 def test_retire_workers_empty(s):
-	x = s.retire_workers(workers=[])
-	while not x.done():
-		yield gen.sleep(0.01)
-
-	assert x.exception() is None
+    yield s.retire_workers(workers=[])
 
 
 @pytest.mark.skip
