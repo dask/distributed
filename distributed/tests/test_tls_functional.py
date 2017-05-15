@@ -119,7 +119,7 @@ def test_work_stealing(c, s, a, b):
     yield _wait(futures)
     assert len(a.data) > 10
     assert len(b.data) > 10
-    assert len(a.data) > len(b.data)
+    assert len(a.data) > len(b.data) - 5
 
 
 @gen_tls_cluster(client=True)
