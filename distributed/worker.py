@@ -903,7 +903,7 @@ class Worker(WorkerBase):
     ncores: int, optional
     loop: tornado.ioloop.IOLoop
     local_dir: str, optional
-        Directory where we place local resources
+        Directory where we place local resources. This will be destroyed when the worker exits.
     name: str, optional
     heartbeat_interval: int
         Milliseconds between heartbeats to scheduler
