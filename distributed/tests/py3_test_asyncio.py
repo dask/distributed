@@ -1,5 +1,4 @@
 # flake8: noqa
-import sys
 import pytest
 
 asyncio = pytest.importorskip('asyncio')
@@ -7,18 +6,13 @@ aiohttp = pytest.importorskip('aiohttp')  # pytest-aiohttp
 
 from time import time
 from operator import add
-from dask import delayed
 from toolz import isdistinct
 from concurrent.futures import CancelledError
-from distributed.deploy import LocalCluster
-from distributed.utils_test import gen_cluster, slow
-from distributed.utils_test import inc, div, slowinc, slowadd, slowdec, randominc
+from distributed.utils_test import slow
+from distributed.utils_test import slowinc
 
 from distributed.asyncio import AioClient, AioFuture, as_completed, wait
-from distributed import Client, Worker, Scheduler
-
-from tornado.ioloop import IOLoop
-from tornado.platform.asyncio import to_asyncio_future, BaseAsyncIOLoop
+from distributed.utils_test import inc, div, loop
 
 
 async def test_asyncio_start_shutdown(loop):
