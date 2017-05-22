@@ -29,8 +29,8 @@ from dask.context import _globals
 from distributed import Worker, Nanny, recreate_exceptions
 from distributed.comm import CommClosedError
 from distributed.utils_comm import WrappedKey
-from distributed.client import (Client, Future, CompatibleExecutor, _wait,
-        wait, _as_completed, as_completed, tokenize, _global_client,
+from distributed.client import (Client, Future, _wait,
+        wait, _as_completed, as_completed, tokenize, _get_global_client,
         default_client, _first_completed, ensure_default_get, futures_of,
         temp_default_client)
 from distributed.metrics import time
@@ -39,7 +39,7 @@ from distributed.sizeof import sizeof
 from distributed.utils import sync, tmp_text, ignoring, tokey, All, mp_context
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
         randominc, loop, inc, dec, div, throws, geninc, asyncinc,
-        gen_cluster, gen_test, double, deep, popen)
+        gen_cluster, gen_test, double, deep, popen, captured_logger)
 
 
 @gen_cluster(client=True, timeout=None)
@@ -128,30 +128,6 @@ def test_map_keynames(c, s, a, b):
     keys = ['inc-1', 'inc-2', 'inc-3', 'inc-4']
     futures = c.map(inc, range(4), key=keys)
     assert [f.key for f in futures] == keys
-
-
-@gen_cluster()
-def test_compatible_map(s, a, b):
-    e = CompatibleExecutor((s.ip, s.port), start=False)
-    yield e._start()
-
-    results = e.map(inc, range(5))
-    assert not isinstance(results, list)
-    # Since this map blocks as it waits for results,
-    # waiting here will block the current IOLoop,
-    # which happens to also be running the test Workers.
-    # So wait on the results in a background thread to avoid blocking.
-    f = gen.Future()
-    def wait_on_results():
-        f.set_result(list(results))
-    t = Thread(target=wait_on_results)
-    t.daemon = True
-    t.start()
-    result_list = yield f
-    # getting map results blocks
-    assert result_list == list(map(inc, range(5)))
-
-    yield e._shutdown()
 
 
 @gen_cluster(client=True)
@@ -244,6 +220,11 @@ def test_thread(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             x = c.submit(inc, 1)
+            assert x.result() == 2
+
+            x = c.submit(slowinc, 1, delay=0.3)
+            with pytest.raises(gen.TimeoutError):
+                x.result(timeout=0.01)
             assert x.result() == 2
 
 
@@ -837,6 +818,14 @@ def test__scatter_types(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test__scatter_non_list(c, s, a, b):
+    x = yield c._scatter(1)
+    assert isinstance(x, Future)
+    result = yield x._result()
+    assert result == 1
+
+
+@gen_cluster(client=True)
 def test_scatter_hash(c, s, a, b):
     [a] = yield c._scatter([1])
     [b] = yield c._scatter([1])
@@ -853,20 +842,20 @@ def test_get_releases_data(c, s, a, b):
 
 
 def test_global_clients(loop):
-    assert not _global_client[0]
+    assert _get_global_client() is None
     with pytest.raises(ValueError):
         default_client()
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            assert _global_client == [c]
+            assert _get_global_client() is c
             assert default_client() is c
             with Client(s['address'], loop=loop) as f:
-                assert _global_client == [f]
+                assert _get_global_client() is f
                 assert default_client() is f
                 assert default_client(c) is c
                 assert default_client(f) is f
 
-    assert not _global_client[0]
+    assert _get_global_client() is None
 
 
 @gen_cluster(client=True)
@@ -1199,14 +1188,17 @@ def test_upload_large_file(c, s, a, b):
     assert a.local_dir
     assert b.local_dir
     with tmp_text('myfile', 'abc') as fn:
-        yield c._upload_large_file(fn, remote_filename='x')
-        yield c._upload_large_file(fn)
+        with tmp_text('myfile2', 'def') as fn2:
+            yield c._upload_large_file(fn, remote_filename='x')
+            yield c._upload_large_file(fn2)
 
-        for w in [a, b]:
-            assert os.path.exists(os.path.join(w.local_dir, 'x'))
-            assert os.path.exists(os.path.join(w.local_dir, 'myfile'))
-            with open(os.path.join(w.local_dir, 'x')) as f:
-                assert f.read() == 'abc'
+            for w in [a, b]:
+                assert os.path.exists(os.path.join(w.local_dir, 'x'))
+                assert os.path.exists(os.path.join(w.local_dir, 'myfile2'))
+                with open(os.path.join(w.local_dir, 'x')) as f:
+                    assert f.read() == 'abc'
+                with open(os.path.join(w.local_dir, 'myfile2')) as f:
+                    assert f.read() == 'def'
 
 
 def test_upload_file_sync(loop):
@@ -4057,5 +4049,17 @@ def test_robust_undeserializable_function(c, s, a, b):
     assert a.data and b.data
 
 
-if sys.version_info > (3, 5):
+def test_quiet_client_shutdown(loop):
+    import logging
+    with captured_logger(logging.getLogger('distributed')) as logger:
+        with Client(loop=loop, processes=False, threads_per_worker=4) as c:
+            futures = c.map(slowinc, range(1000), delay=0.01)
+            sleep(0.200)  # stop part-way
+        sleep(0.5)  # let things settle
+
+        out = logger.getvalue()
+        assert not out
+
+
+if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *

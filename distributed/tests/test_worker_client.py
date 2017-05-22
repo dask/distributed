@@ -1,8 +1,8 @@
 from __future__ import print_function, division, absolute_import
 
-from datetime import timedelta
 import random
 
+import dask
 from dask import delayed
 from time import sleep
 from tornado import gen
@@ -74,8 +74,10 @@ def test_scatter_from_worker(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
 def test_gather_multi_machine(c, s, a, b):
-    a_address = b.address
+    a_address = a.address
     b_address = b.address
+    assert a_address != b_address
+
     def func():
         with worker_client() as ee:
             x = ee.submit(inc, 1, workers=a_address)
@@ -153,3 +155,32 @@ def test_separate_thread_false(c, s, a):
     futures = c.map(f, range(20))
     results = yield c._gather(futures)
     assert list(results) == list(range(20))
+
+
+@gen_cluster(client=True)
+def test_client_executor(c, s, a, b):
+    def mysum():
+        with worker_client() as c:
+            with c.get_executor() as e:
+                return sum(e.map(double, range(30)))
+
+    future = c.submit(mysum)
+    result = yield future._result()
+    assert result == 30 * 29
+
+
+def test_dont_override_default_get(loop):
+    import dask.bag as db
+    def f(x):
+        with worker_client() as c:
+            return True
+
+    b = db.from_sequence([1, 2])
+    b2 = b.map(f)
+
+    with Client(loop=loop, processes=False, set_as_default=True) as c:
+        assert dask.context._globals['get'] == c.get
+        for i in range(2):
+            b2.compute()
+
+        assert dask.context._globals['get'] == c.get

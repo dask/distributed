@@ -2,23 +2,23 @@ from __future__ import print_function, division, absolute_import
 
 import atexit
 from datetime import timedelta
+from functools import partial
 import json
 import logging
 import os
 import shutil
-import socket
-from sys import argv, exit
-import sys
+from sys import exit
 from time import sleep
 
 import click
 from distributed import Nanny, Worker, rpc
 from distributed.nanny import isalive
-from distributed.utils import All, ignoring
+from distributed.utils import All, get_ip_interface
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
 from distributed.metrics import time
-from distributed.cli.utils import check_python_3
+from distributed.security import Security
+from distributed.cli.utils import check_python_3, uri_from_host_port
 
 from toolz import valmap
 from tornado.ioloop import IOLoop, TimeoutError
@@ -38,43 +38,56 @@ def handle_signal(sig, frame):
         except (OSError, IOError, TypeError):
             pass
     if loop._running:
-        loop.add_callback(loop.stop)
+        loop.add_callback_from_signal(loop.stop)
     else:
         exit(1)
 
 
+pem_file_option_type = click.Path(exists=True, resolve_path=True)
+
 @click.command()
 @click.argument('scheduler', type=str, required=False)
+@click.option('--tls-ca-file', type=pem_file_option_type, default=None,
+              help="CA cert(s) file for TLS (in PEM format)")
+@click.option('--tls-cert', type=pem_file_option_type, default=None,
+              help="certificate file for TLS (in PEM format)")
+@click.option('--tls-key', type=pem_file_option_type, default=None,
+              help="private key file for TLS (in PEM format)")
 @click.option('--worker-port', type=int, default=0,
-              help="Serving worker port, defaults to randomly assigned")
+              help="Serving computation port, defaults to random")
 @click.option('--http-port', type=int, default=0,
-              help="Serving http port, defaults to randomly assigned")
+              help="Serving http port, defaults to random")
 @click.option('--nanny-port', type=int, default=0,
-              help="Serving nanny port, defaults to randomly assigned")
-@click.option('--bokeh-port', type=int, default=8789, help="Bokeh port")
+              help="Serving nanny port, defaults to random")
+@click.option('--bokeh-port', type=int, default=8789,
+              help="Bokeh port, defaults to 8789")
 @click.option('--bokeh/--no-bokeh', 'bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
 @click.option('--host', type=str, default=None,
-              help="Serving host. Defaults to an ip address that can hopefully"
-                   " be visible from the scheduler network.")
+              help="Serving host. Should be an ip address that is"
+                   " visible to the scheduler and other workers. "
+                   "See --interface.")
+@click.option('--interface', type=str, default=None,
+              help="Network interface like 'eth0' or 'ib0'")
 @click.option('--nthreads', type=int, default=0,
-              help="Number of threads per process. Defaults to number of cores")
+              help="Number of threads per process.")
 @click.option('--nprocs', type=int, default=1,
               help="Number of worker processes.  Defaults to one.")
-@click.option('--name', type=str, default='', help="Alias")
+@click.option('--name', type=str, default='',
+              help="A unique name for this worker like 'worker-1'")
 @click.option('--memory-limit', default='auto',
               help="Number of bytes before spilling data to disk. "
-              "This can be an integer (nbytes) float (fraction of total memory) or auto")
+                   "This can be an integer (nbytes) "
+                   "float (fraction of total memory) "
+                   "or 'auto'")
 @click.option('--reconnect/--no-reconnect', default=True,
-              help="Try to automatically reconnect to scheduler if disconnected")
+              help="Reconnect to scheduler if disconnected")
 @click.option('--nanny/--no-nanny', default=True,
               help="Start workers in nanny process for management")
 @click.option('--pid-file', type=str, default='',
               help="File to write the process PID")
 @click.option('--local-directory', default='', type=str,
               help="Directory to place worker files")
-@click.option('--temp-filename', default=None,
-              help="Internal use only")
 @click.option('--resources', type=str, default='',
               help='Resources for task constraints like "GPU=2 MEM=10e9"')
 @click.option('--scheduler-file', type=str, default='',
@@ -82,10 +95,21 @@ def handle_signal(sig, frame):
                    'Use with dask-scheduler --scheduler-file')
 @click.option('--death-timeout', type=float, default=None,
               help="Seconds to wait for a scheduler before closing")
+@click.option('--bokeh-prefix', type=str, default=None,
+              help="Prefix for the bokeh app")
+@click.option('--preload', type=str, multiple=True,
+              help='Module that should be loaded by each worker process '
+                   'like "foo.bar" or "/path/to/foo.py"')
 def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
-         nanny, name, memory_limit, pid_file, temp_filename, reconnect,
+         nanny, name, memory_limit, pid_file, reconnect,
          resources, bokeh, bokeh_port, local_directory, scheduler_file,
-         death_timeout):
+         interface, death_timeout, preload, bokeh_prefix,
+         tls_ca_file, tls_cert, tls_key):
+    sec = Security(tls_ca_file=tls_ca_file,
+                   tls_worker_cert=tls_cert,
+                   tls_worker_key=tls_key,
+                   )
+
     if nanny:
         port = nanny_port
     else:
@@ -119,7 +143,11 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         except ImportError:
             pass
         else:
-            services[('bokeh', bokeh_port)] = BokehWorker
+            if bokeh_prefix:
+                result = (BokehWorker, {'prefix': bokeh_prefix})
+            else:
+                result = BokehWorker
+            services[('bokeh', bokeh_port)] = result
 
     if resources:
         resources = resources.replace(',', ' ').split()
@@ -159,28 +187,26 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
                  local_dir=local_directory, death_timeout=death_timeout,
+                 preload=preload, security=sec,
                  **kwargs)
                for i in range(nprocs)]
 
-    for n in nannies:
+    if interface:
         if host:
-            n.start((host, port))
+            raise ValueError("Can not specify both interface and host")
         else:
-            n.start(port)
+            host = get_ip_interface(interface)
+
+    if host or port:
+        addr = uri_from_host_port(host, port, 0)
+    else:
+        # Choose appropriate address for scheduler
+        addr = None
+
+    for n in nannies:
+        n.start(addr)
         if t is Nanny:
             global_nannies.append(n)
-
-    if temp_filename:
-        @gen.coroutine
-        def f():
-            while nannies[0].status != 'running':
-                yield gen.sleep(0.01)
-            import json
-            msg = {'port': nannies[0].port,
-                   'local_directory': nannies[0].local_dir}
-            with open(temp_filename, 'w') as f:
-                json.dump(msg, f)
-        loop.add_callback(f)
 
     @gen.coroutine
     def run():
@@ -201,12 +227,13 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 
     @gen.coroutine
     def f():
-        with rpc(nannies[0].scheduler.address) as scheduler:
-            if nanny:
+        if nanny:
+            w = nannies[0]
+            with w.rpc(w.scheduler.address) as scheduler:
                 yield gen.with_timeout(
                         timeout=timedelta(seconds=2),
                         future=All([scheduler.unregister(address=n.worker_address, close=True)
-                                   for n in nannies if n.process and n.worker_address]),
+                                    for n in nannies if n.process and n.worker_address]),
                         io_loop=loop2)
 
     loop2.run_sync(f)

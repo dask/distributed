@@ -17,6 +17,8 @@ import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
 
+import distributed
+from distributed import Nanny
 from distributed.core import rpc, connect
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
@@ -26,7 +28,7 @@ from distributed.protocol.pickle import dumps, loads
 from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
 from distributed.utils import ignoring, tmpfile
-from distributed.utils_test import (loop, inc, mul, gen_cluster, div,
+from distributed.utils_test import (loop, inc, mul, gen_cluster, div, dec,
         slow, slowinc, throws, gen_test, readone)
 
 
@@ -337,11 +339,11 @@ def test_spill_to_disk(e, s):
     yield _wait(z)
     assert set(w.data) == {x.key, y.key, z.key}
     assert set(w.data.fast) == {y.key, z.key}
-    assert set(w.data.slow) == {x.key}
+    assert set(w.data.slow) == {x.key} or set(w.data.slow) == {x.key, y.key}
 
     yield x._result()
     assert set(w.data.fast) == {x.key, z.key}
-    assert set(w.data.slow) == {y.key}
+    assert set(w.data.slow) == {y.key} or set(w.data.slow) == {x.key, y.key}
     yield w._close()
 
 
@@ -395,7 +397,6 @@ def test_Executor(c, s):
         yield w._close()
 
 
-@slow
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)], timeout=30)
 def test_spill_by_default(c, s, w):
     da = pytest.importorskip('dask.array')
@@ -654,10 +655,84 @@ def test_hold_onto_dependents(c, s, a, b):
 
 
 @slow
-@gen_test()
-def test_worker_death_timeout():
-    w = Worker('127.0.0.1', 38848, death_timeout=1)
+@gen_cluster(client=False, ncores=[])
+def test_worker_death_timeout(s):
+    yield s.close()
+    w = Worker(s.address, death_timeout=1)
     yield w._start()
 
     yield gen.sleep(3)
     assert w.status == 'closed'
+
+
+@gen_cluster(client=True)
+def test_stop_doing_unnecessary_work(c, s, a, b):
+    futures = c.map(slowinc, range(1000), delay=0.01)
+    yield gen.sleep(0.1)
+
+    del futures
+
+    start = time()
+    while a.executing:
+        yield gen.sleep(0.01)
+        assert time() - start < 0.5
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
+def test_priorities(c, s, w):
+    a = delayed(slowinc)(1, dask_key_name='a', delay=0.05)
+    b = delayed(slowinc)(2, dask_key_name='b', delay=0.05)
+    a1 = delayed(slowinc)(a, dask_key_name='a1', delay=0.05)
+    a2 = delayed(slowinc)(a1, dask_key_name='a2', delay=0.05)
+    b1 = delayed(slowinc)(b, dask_key_name='b1', delay=0.05)
+
+    z = delayed(add)(a2, b1)
+    future = yield c.compute(z)._result()
+
+    log = [t for t in w.log if t[1] == 'executing' and t[2] == 'memory']
+    assert [t[0] for t in log[:5]] == ['a', 'b', 'a1', 'b1', 'a2']
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
+def test_priorities_2(c, s, w):
+    values = []
+    for i in range(10):
+        a = delayed(slowinc)(i, dask_key_name='a-%d' % i, delay=0.01)
+        a1 = delayed(inc)(a, dask_key_name='a1-%d' % i)
+        a2 = delayed(inc)(a1, dask_key_name='a2-%d' % i)
+        b1 = delayed(dec)(a, dask_key_name='b1-%d' % i)  # <<-- least favored
+
+        values.append(a2)
+        values.append(b1)
+
+    futures = c.compute(values)
+    yield _wait(futures)
+
+    log = [t[0] for t in w.log
+                if t[1] == 'executing'
+                and t[2] == 'memory'
+                and not t[0].startswith('finalize')]
+
+    assert any(key.startswith('b1') for key in log[:len(log) // 2])
+
+
+@gen_cluster(client=True, worker_kwargs={'heartbeat_interval': 0.020})
+def test_heartbeats(c, s, a, b):
+    pytest.importorskip('psutil')
+    start = time()
+    while not all(s.worker_info[w].get('memory-rss') for w in s.workers):
+        yield gen.sleep(0.01)
+        assert time() < start + 2
+
+
+@pytest.mark.parametrize('worker', [Worker, Nanny])
+def test_worker_dir(worker):
+    with tmpfile() as fn:
+        @gen_cluster(client=True, worker_kwargs={'local_dir': fn})
+        def test_worker_dir(c, s, a, b):
+            directories = [info['local_directory']
+                           for info in s.worker_info.values()]
+            assert all(d.startswith(fn) for d in directories)
+            assert len(set(directories)) == 2  # distinct
+
+        test_worker_dir()

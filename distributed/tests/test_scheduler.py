@@ -155,6 +155,11 @@ def test_no_workers(client, s):
         yield gen.with_timeout(timedelta(milliseconds=50), x._result())
 
 
+@gen_cluster(ncores=[])
+def test_retire_workers_empty(s):
+    yield s.retire_workers(workers=[])
+
+
 @pytest.mark.skip
 def test_validate_state():
     dsk = {'x': 1, 'y': (inc, 'x')}
@@ -1094,3 +1099,18 @@ def test_non_existent_worker(c, s):
     yield gen.sleep(4)
     assert not s.workers
     assert all(v == 'no-worker' for v in s.task_state.values())
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
+def test_correct_bad_time_estimate(c, s, *workers):
+    future = c.submit(slowinc, 1, delay=0)
+    yield _wait(future)
+
+    futures = [c.submit(slowinc, future, delay=0.1, pure=False)
+               for i in range(20)]
+
+    yield gen.sleep(0.5)
+
+    yield _wait(futures)
+
+    assert all(w.data for w in workers)

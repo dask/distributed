@@ -8,6 +8,8 @@ set PIP_INSTALL=pip install -q
 
 @rem Deactivate any environment
 call deactivate
+@rem Update conda
+%CONDA% update -q -y conda
 @rem Display root environment (for debugging)
 %CONDA% list
 @rem Clean up any left-over from a previous build
@@ -15,11 +17,12 @@ call deactivate
 
 @rem Create test environment
 @rem (note: no cytoolz as it seems to prevent faulthandler tracebacks on crash)
-%CONDA% create -n %CONDA_ENV% -q -y python=%PYTHON% pytest toolz dill futures dask ipywidgets psutil bokeh requests joblib mock ipykernel jupyter_client tblib msgpack-python cloudpickle click zict lz4 -c conda-forge
+%CONDA% create -n %CONDA_ENV% -q -y python=%PYTHON% pytest toolz dill futures dask ipywidgets psutil bokeh requests joblib mock ipykernel jupyter_client tblib msgpack-python cloudpickle click zict lz4 tornado=4.4 -c conda-forge
 
 call activate %CONDA_ENV%
 
 %CONDA% uninstall -q -y --force dask joblib zict
+%PIP_INSTALL% pytest-aiohttp
 %PIP_INSTALL% git+https://github.com/dask/dask --upgrade
 %PIP_INSTALL% git+https://github.com/joblib/joblib.git --upgrade
 %PIP_INSTALL% git+https://github.com/dask/zict --upgrade
@@ -29,5 +32,7 @@ call activate %CONDA_ENV%
 @rem Display final environment (for reproducing)
 %CONDA% list
 %CONDA% list --explicit
+where python
+where pip
 pip list
 python -m site

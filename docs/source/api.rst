@@ -1,3 +1,5 @@
+.. _api:
+
 API
 ===
 
@@ -12,6 +14,7 @@ API
    Client.gather
    Client.get
    Client.get_dataset
+   Client.get_executor
    Client.has_what
    Client.list_datasets
    Client.map
@@ -33,6 +36,12 @@ API
    Client.unpublish_dataset
    Client.upload_file
    Client.who_has
+
+.. currentmodule:: distributed
+
+.. autosummary::
+   worker_client
+   get_worker
 
 .. currentmodule:: distributed.recreate_exceptions
 
@@ -78,7 +87,7 @@ regardless; these do not have a coroutine-equivalent.
 
 
 Client
---------
+------
 
 .. autoclass:: Client
    :members:
@@ -86,11 +95,6 @@ Client
 .. autoclass:: distributed.recreate_exceptions.ReplayExceptionClient
    :members:
 
-CompatibleExecutor
-------------------
-
-.. autoclass:: CompatibleExecutor
-    :members: map
 
 Future
 ------
@@ -105,3 +109,16 @@ Other
 .. autofunction:: as_completed
 .. autofunction:: distributed.diagnostics.progress
 .. autofunction:: wait
+
+.. currentmodule:: distributed
+
+.. autofunction:: distributed.worker_client
+.. autofunction:: distributed.get_worker
+
+
+Asyncio Client
+--------------
+
+.. currentmodule:: distributed.asyncio
+.. autoclass:: AioClient
+   :members:

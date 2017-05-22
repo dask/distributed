@@ -8,8 +8,8 @@ env:
   matrix:
     - PYTHON=2.7 PACKAGES="blosc futures faulthandler"
     - PYTHON=3.4 COVERAGE=true DASK_EXPERIMENTAL_ZMQ=1
-    - PYTHON=3.5 CRICK=true
-    - PYTHON=3.6 PACKAGES=blosc
+    - PYTHON=3.5 CRICK=true ASYNCIO=true
+    - PYTHON=3.6 PACKAGES=blosc ASYNCIO=true
     - HDFS=true PYTHON=2.7
     - HDFS=true PYTHON=3.5 PACKAGES=blosc
 
@@ -41,14 +41,14 @@ before_install:
     fi;
 
 install:
-    - source continuous_integration/travis/install.sh
+  - source continuous_integration/travis/install.sh
 
 script:
-    - source continuous_integration/travis/run_tests.sh
-    - flake8 distributed/*.py distributed/{bokeh,protocol,deploy}/*.py # no tests yet
+  - source continuous_integration/travis/run_tests.sh
+  - flake8 distributed/*.py distributed/{bokeh,protocol,deploy}/*.py # no tests yet
 
 after_success:
-    - if [[ $COVERAGE == true ]]; then coverage report; pip install -q coveralls ; coveralls ; fi
+  - if [[ $COVERAGE == true ]]; then coverage report; pip install -q coveralls ; coveralls ; fi
 
 notifications:
   email: false

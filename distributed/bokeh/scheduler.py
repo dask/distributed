@@ -12,8 +12,9 @@ from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.layouts import column, row
 from bokeh.models import ( ColumnDataSource, DataRange1d, HoverTool, ResetTool,
-        PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad, Text,
-        value, LinearAxis, NumeralTickFormatter)
+        PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad,
+        value, LinearAxis, NumeralTickFormatter, BasicTicker, NumberFormatter,
+        BoxSelectTool)
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
@@ -288,6 +289,7 @@ class CurrentLoad(DashboardComponent):
                         x='nbytes-half', y='y',
                         width='nbytes', height=1,
                         color='nbytes-color')
+            nbytes.axis[0].ticker = BasicTicker(mantissas=[1,256,512], base=1024)
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format='0.0 b')
             nbytes.xaxis.major_label_orientation = -math.pi / 12
             nbytes.x_range.start = 0
@@ -380,7 +382,9 @@ class CurrentLoad(DashboardComponent):
 class StealingTimeSeries(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
-        self.source = ColumnDataSource({'time': [], 'idle': [], 'saturated': []})
+        self.source = ColumnDataSource({'time': [time(), time() + 1],
+                                        'idle': [0, 0.1],
+                                        'saturated': [0, 0.1]})
 
         x_range = DataRange1d(follow='end', follow_interval=20000, range_padding=0)
 
@@ -569,7 +573,7 @@ class TaskStream(components.TaskStream):
         if self.index == self.plugin.index:
             return
         with log_errors():
-            if self.index:
+            if self.index and self.source.data['start']:
                 start = min(self.source.data['start'])
                 duration = max(self.source.data['duration'])
                 boundary = (self.offset + start - duration) / 1000
@@ -621,45 +625,53 @@ class TaskProgress(DashboardComponent):
         data = progress_quads(dict(all={}, memory={}, erred={}, released={}))
         self.source = ColumnDataSource(data=data)
 
-        x_range = DataRange1d()
+        x_range = DataRange1d(range_padding=0)
         y_range = Range1d(-8, 0)
 
-        self.root = Plot(
+        self.root = figure(
             id='bk-task-progress-plot',
             x_range=x_range, y_range=y_range, toolbar_location=None, **kwargs
         )
-        self.root.add_glyph(
-            self.source,
-            Quad(top='top', bottom='bottom', left='left', right='right',
-                 fill_color="#aaaaaa", line_color="#aaaaaa", fill_alpha=0.2)
+        self.root.line(  # just to define early ranges
+            x=[0, 1], y=[-1, 0], line_color="#FFFFFF", alpha=0.0)
+        self.root.quad(
+            source=self.source,
+            top='top', bottom='bottom', left='left', right='right',
+            fill_color="#aaaaaa", line_color="#aaaaaa", fill_alpha=0.2
         )
-        self.root.add_glyph(
-            self.source,
-            Quad(top='top', bottom='bottom', left='left', right='released-loc',
-                 fill_color="color", line_color="color", fill_alpha=0.6)
+        self.root.quad(
+            source=self.source,
+            top='top', bottom='bottom', left='left', right='released-loc',
+            fill_color="color", line_color="color", fill_alpha=0.6
         )
-        self.root.add_glyph(
-            self.source,
-            Quad(top='top', bottom='bottom', left='released-loc',
-                 right='memory-loc', fill_color="color", line_color="color",
-                 fill_alpha=1.0)
+        self.root.quad(
+            source=self.source,
+            top='top', bottom='bottom', left='released-loc',
+            right='memory-loc', fill_color="color", line_color="color",
+            fill_alpha=1.0
         )
-        self.root.add_glyph(
-            self.source,
-            Quad(top='top', bottom='bottom', left='released-loc',
-                 right='erred-loc', fill_color='black', line_color='#000000',
-                 fill_alpha=0.5)
+        self.root.quad(
+            source=self.source,
+            top='top', bottom='bottom', left='released-loc',
+            right='erred-loc', fill_color='black', line_color='#000000',
+            fill_alpha=0.5
         )
-        self.root.add_glyph(
-            self.source,
-            Text(text='show-name', y='bottom', x='left', x_offset=5,
-                 text_font_size=value('10pt'))
+        self.root.text(
+            source=self.source,
+            text='show-name', y='bottom', x='left', x_offset=5,
+            text_font_size=value('10pt')
         )
-        self.root.add_glyph(
-            self.source,
-            Text(text='done', y='bottom', x='right', x_offset=-5,
-                 text_align='right', text_font_size=value('10pt'))
+        self.root.text(
+            source=self.source,
+            text='done', y='bottom', x='right', x_offset=-5,
+            text_align='right', text_font_size=value('10pt')
         )
+        self.root.ygrid.visible = False
+        self.root.yaxis.minor_tick_line_alpha = 0
+        self.root.yaxis.visible = False
+        self.root.xgrid.visible = False
+        self.root.xaxis.minor_tick_line_alpha = 0
+        self.root.xaxis.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -690,7 +702,7 @@ class TaskProgress(DashboardComponent):
                      'nbytes': self.plugin.nbytes}
             for k in ['memory', 'erred', 'released']:
                 state[k] = valmap(len, self.plugin.state[k])
-            if not state['all'] and not self.source.data['all']:
+            if not state['all'] and not len(self.source.data['all']):
                 return
 
             d = progress_quads(state)
@@ -763,6 +775,105 @@ class MemoryUse(DashboardComponent):
                     "Memory Use: %0.2f MB" % (sum(self.plugin.nbytes.values()) / 1e6)
 
 
+class WorkerTable(DashboardComponent):
+    """ Status of the current workers
+
+    This is two plots, a text-based table for each host and a thin horizontal
+    plot laying out hosts by their current memory use.
+    """
+    def __init__(self, scheduler, **kwargs):
+        self.scheduler = scheduler
+        self.names = ['disk-read', 'cores', 'cpu', 'disk-write',
+                      'memory', 'last-seen', 'memory_percent', 'host',
+                      'network-send', 'network-recv']
+        self.source = ColumnDataSource({k: [] for k in self.names})
+
+        columns = {name: TableColumn(field=name,
+                                     title=name.replace('_percent', ' %'))
+                   for name in self.names}
+
+        cnames = ['host', 'cores', 'memory', 'cpu', 'memory_percent',
+                  'network-send', 'network-recv']
+
+        formatters = {'cpu': NumberFormatter(format='0.0 %'),
+                      'memory_percent': NumberFormatter(format='0.0 %'),
+                      'memory': NumberFormatter(format='0 b'),
+                      'latency': NumberFormatter(format='0.00000'),
+                      'last-seen': NumberFormatter(format='0.000'),
+                      'disk-read': NumberFormatter(format='0 b'),
+                      'disk-write': NumberFormatter(format='0 b'),
+                      'network-send': NumberFormatter(format='0 b'),
+                      'network-recv': NumberFormatter(format='0 b')}
+
+        table = DataTable(
+            source=self.source, columns=[columns[n] for n in cnames],
+        )
+
+        for name in cnames:
+            if name in formatters:
+                table.columns[cnames.index(name)].formatter = formatters[name]
+
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">@host: </span>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">@memory_percent</span>
+                </div>
+                """
+        )
+
+        mem_plot = figure(title='Memory Use (%)', toolbar_location=None,
+                          x_range=(0, 1), y_range=(-0.1, 0.1), height=80,
+                          **kwargs)
+        mem_plot.circle(source=self.source, x='memory_percent', y=0,
+                        size=10, fill_alpha=0.5)
+        mem_plot.ygrid.visible = False
+        mem_plot.yaxis.minor_tick_line_alpha = 0
+        mem_plot.yaxis.visible = False
+        mem_plot.add_tools(hover, BoxSelectTool())
+
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">@host: </span>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">@cpu</span>
+                </div>
+                """
+        )
+
+        cpu_plot = figure(title='CPU Use (%)', toolbar_location=None,
+                          x_range=(0, 1), y_range=(-0.1, 0.1), height=80,
+                          **kwargs)
+        cpu_plot.circle(source=self.source, x='cpu', y=0,
+                        size=10, fill_alpha=0.5)
+        cpu_plot.ygrid.visible = False
+        cpu_plot.yaxis.minor_tick_line_alpha = 0
+        cpu_plot.yaxis.visible = False
+        cpu_plot.add_tools(hover, BoxSelectTool())
+
+        if 'sizing_mode' in kwargs:
+            sizing_mode = {'sizing_mode': kwargs['sizing_mode']}
+        else:
+            sizing_mode = {}
+
+        self.root = column(cpu_plot, mem_plot, table, id='bk-worker-table', **sizing_mode)
+
+    def update(self):
+        data = {name: [] for name in self.names}
+        for host in sorted(self.scheduler.host_info):
+            info = self.scheduler.host_info[host]
+            for name in self.names:
+                data[name].append(info.get(name, None))
+            data['host'][-1] = host
+
+        for name in ['cpu', 'memory_percent']:
+            data[name] = [x / 100 for x in data[name]]
+
+        self.source.data.update(data)
+
+
 def systemmonitor_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
@@ -776,7 +887,7 @@ def systemmonitor_doc(scheduler, doc):
         doc.template = template
 
 
-def workers_doc(scheduler, doc):
+def stealing_doc(scheduler, doc):
     with log_errors():
         table = StateTable(scheduler)
         occupancy = Occupancy(scheduler, height=200, sizing_mode='scale_width')
@@ -806,13 +917,24 @@ def events_doc(scheduler, doc):
         doc.template = template
 
 
+def workers_doc(scheduler, doc):
+    with log_errors():
+        table = WorkerTable(scheduler)
+        table.update()
+        doc.add_periodic_callback(table.update, 500)
+        doc.title = "Dask Workers"
+        doc.add_root(table.root)
+        doc.template = template
+
+
 def tasks_doc(scheduler, doc):
     with log_errors():
-        ts = TaskStream(scheduler, n_rectangles=100000, clear_interval=60000)
+        ts = TaskStream(scheduler, n_rectangles=100000, clear_interval=60000,
+                        sizing_mode='stretch_both')
         ts.update()
         doc.add_periodic_callback(ts.update, 5000)
         doc.title = "Dask Task Stream"
-        doc.add_root(column(ts.root, sizing_mode='scale_width'))
+        doc.add_root(ts.root)
         doc.template = template
 
 
@@ -851,11 +973,14 @@ def status_doc(scheduler, doc):
 
 
 class BokehScheduler(BokehServer):
-    def __init__(self, scheduler, io_loop=None):
+    def __init__(self, scheduler, io_loop=None, **kwargs):
         self.scheduler = scheduler
+        self.server_kwargs = kwargs
+
         systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc,
                                                             scheduler)))
         workers = Application(FunctionHandler(partial(workers_doc, scheduler)))
+        stealing = Application(FunctionHandler(partial(stealing_doc, scheduler)))
         counters = Application(FunctionHandler(partial(counters_doc, scheduler)))
         events = Application(FunctionHandler(partial(events_doc, scheduler)))
         tasks = Application(FunctionHandler(partial(tasks_doc, scheduler)))
@@ -863,6 +988,7 @@ class BokehScheduler(BokehServer):
 
         self.apps = {
                 '/system': systemmonitor,
+                '/stealing': stealing,
                 '/workers': workers,
                 '/events': events,
                 '/counters': counters,

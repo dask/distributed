@@ -1,38 +1,44 @@
 from __future__ import print_function, division, absolute_import
 
+import atexit
 from datetime import datetime, timedelta
 import logging
 from multiprocessing.queues import Empty
 import os
 import shutil
-import tempfile
 from time import sleep
 import weakref
 
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
-from .comm import get_address_host
-from .core import Server, rpc, RPCClosed, CommClosedError, coerce_to_address
+from .comm import get_address_host, get_local_address_for
+from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
-from .utils import get_ip, ignoring, mp_context
+from .node import ServerNode
+from .security import Security
+from .utils import get_ip, ignoring, mp_context, log_errors
 from .worker import _ncores, run
 
 
 logger = logging.getLogger(__name__)
 
 
-class Nanny(Server):
+class Nanny(ServerNode):
     """ A process to manage worker processes
 
     The nanny spins up Worker processes, watches then, and kills or restarts
     them as necessary.
     """
+    worker_dir = ''
+    process = None
+    status = None
+
     def __init__(self, scheduler_ip, scheduler_port=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
-                 death_timeout=None, **kwargs):
+                 death_timeout=None, preload=(), security=None, **kwargs):
         if scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -44,27 +50,26 @@ class Nanny(Server):
         self.validate = validate
         self.resources = resources
         self.death_timeout = death_timeout
-        if not local_dir:
-            local_dir = tempfile.mkdtemp(prefix='nanny-')
-            self._should_cleanup_local_dir = True
+        self.preload = preload
 
-            @atexit.register
-            def _cleanup_local_dir():
-                if os.path.exists(local_dir):
-                    shutil.rmtree(local_dir)
-        else:
-            self._should_cleanup_local_dir = False
+        self.security = security or Security()
+        assert isinstance(self.security, Security)
+        self.connection_args = self.security.get_connection_args('worker')
+        self.listen_args = self.security.get_listen_args('worker')
+
         self.local_dir = local_dir
-        self.worker_dir = ''
-        self.status = None
-        self.process = None
+
         self.loop = loop or IOLoop.current()
-        self.scheduler = rpc(scheduler_addr)
+        self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.services = services
         self.name = name
         self.memory_limit = memory_limit
         self.quiet = quiet
         self.should_watch = True
+
+        if silence_logs:
+            logger.setLevel(silence_logs)
+        self.silence_logs = silence_logs
 
         handlers = {'instantiate': self.instantiate,
                     'kill': self._kill,
@@ -73,11 +78,9 @@ class Nanny(Server):
                     'monitor_resources': self.monitor_resources,
                     'run': self.run}
 
-        if silence_logs:
-            logger.setLevel(silence_logs)
-        self.silence_logs = silence_logs
-
-        super(Nanny, self).__init__(handlers, io_loop=self.loop, **kwargs)
+        super(Nanny, self).__init__(handlers, io_loop=self.loop,
+                                    connection_args=self.connection_args,
+                                    **kwargs)
 
     def __str__(self):
         return "<Nanny: %s, threads: %d>" % (self.worker_address, self.ncores)
@@ -88,14 +91,21 @@ class Nanny(Server):
     def _start(self, addr_or_port=0):
         """ Start nanny, start local process, start watching """
 
-        if isinstance(addr_or_port, int):
-            # Default ip is the required one to reach the scheduler
+        # XXX Factor this out
+        if not addr_or_port:
+            # Default address is the required one to reach the scheduler
+            self.listen(get_local_address_for(self.scheduler.address),
+                        listen_args=self.listen_args)
+            self.ip = get_address_host(self.address)
+        elif isinstance(addr_or_port, int):
+            # addr_or_port is an integer => assume TCP
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
             )
-            self.listen((self.ip, addr_or_port))
+            self.listen((self.ip, addr_or_port),
+                        listen_args=self.listen_args)
         else:
-            self.listen(addr_or_port)
+            self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
 
         logger.info('        Start Nanny at: %r', self.address)
@@ -130,7 +140,7 @@ class Nanny(Server):
         if isalive(self.process):
             try:
                 # Ask worker to close
-                with rpc(self.worker_address) as worker:
+                with self.rpc(self.worker_address) as worker:
                     result = yield gen.with_timeout(
                                 timedelta(seconds=min(1, timeout)),
                                 worker.terminate(report=False),
@@ -208,7 +218,9 @@ class Nanny(Server):
                         'resources': self.resources,
                         'validate': self.validate,
                         'silence_logs': self.silence_logs,
-                        'death_timeout': self.death_timeout})
+                        'death_timeout': self.death_timeout,
+                        'preload': self.preload,
+                        'security': self.security})
             self.process.daemon = True
             processes_to_close.add(self.process)
             self.process.start()
@@ -251,16 +263,16 @@ class Nanny(Server):
         return run(self, *args, **kwargs)
 
     def cleanup(self):
-        if self.worker_dir and os.path.exists(self.worker_dir):
-            shutil.rmtree(self.worker_dir)
-        self.worker_dir = None
-        if self.process:
-            with ignoring(OSError):
-                self.process.terminate()
+        with ignoring(Exception):
+            with log_errors():
+                if self.worker_dir and os.path.exists(self.worker_dir):
+                    shutil.rmtree(self.worker_dir)
+                self.worker_dir = None
+                if self.process:
+                    with ignoring(OSError):
+                        self.process.terminate()
 
     def __del__(self):
-        if self._should_cleanup_local_dir and os.path.exists(self.local_dir):
-            shutil.rmtree(self.local_dir)
         self.cleanup()
 
     @gen.coroutine
@@ -348,7 +360,7 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
     @gen.coroutine  # pragma: no cover
     def run():
         try:  # pragma: no cover
-            yield worker._start((worker_ip, worker_port))  # pragma: no cover
+            yield worker._start(worker_port)  # pragma: no cover
         except Exception as e:  # pragma: no cover
             logger.exception(e)  # pragma: no cover
             q.put(e)  # pragma: no cover
@@ -363,6 +375,8 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
         loop.run_sync(run)
     except TimeoutError:
         logger.info("Worker timed out")
+    except KeyboardInterrupt:
+        pass
     finally:
         loop.stop()
         loop.close(all_fds=True)
@@ -376,8 +390,6 @@ def join(proc, timeout):
     if proc is not None:
         proc.join(timeout)
 
-
-import atexit
 
 closing = [False]
 

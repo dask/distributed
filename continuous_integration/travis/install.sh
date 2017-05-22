@@ -27,6 +27,7 @@ conda create -q -n test-environment python=$PYTHON
 source activate test-environment
 
 # Install dependencies
+# (Tornado pinned to 4.4 until a new Bokeh is released)
 conda install -q -c conda-forge \
     bokeh \
     click \
@@ -50,7 +51,7 @@ conda install -q -c conda-forge \
     requests \
     tblib \
     toolz \
-    tornado \
+    tornado=4.4 \
     $PACKAGES
 
 if [[ $HDFS == true ]]; then
@@ -68,7 +69,11 @@ pip install -q keras --upgrade --no-deps
 
 if [[ $CRICK == true ]]; then
     conda install -q cython
-    pip install git+https://github.com/jcrist/crick.git
+    pip install -q git+https://github.com/jcrist/crick.git
+fi;
+
+if [[ $ASYNCIO == true ]]; then
+    pip install -q pytest-aiohttp
 fi;
 
 # Install distributed

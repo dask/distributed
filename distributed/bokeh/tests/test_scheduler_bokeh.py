@@ -17,7 +17,7 @@ from distributed.bokeh.worker import Counters, BokehWorker
 from distributed.bokeh.scheduler import (BokehScheduler, StateTable,
         SystemMonitor, Occupancy, StealingTimeSeries, StealingEvents, Events,
         TaskStream, TaskProgress, MemoryUse, CurrentLoad, ProcessingHistogram,
-        NBytesHistogram)
+        NBytesHistogram, WorkerTable)
 
 from distributed.bokeh import scheduler
 
@@ -35,7 +35,7 @@ def test_simple(c, s, a, b):
     yield gen.sleep(0.1)
 
     http_client = AsyncHTTPClient()
-    for suffix in ['system', 'counters', 'workers']:
+    for suffix in ['system', 'counters', 'workers', 'status', 'tasks', 'stealing']:
         response = yield http_client.fetch('http://localhost:%d/%s'
                                            % (s.services['bokeh'].port, suffix))
         assert 'bokeh' in response.body.decode().lower()
@@ -138,6 +138,19 @@ def test_task_stream_n_rectangles(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test_task_stream_second_plugin(c, s, a, b):
+    ts = TaskStream(s, n_rectangles=10, clear_interval=10)
+    ts.update()
+    futures = c.map(inc, range(10))
+    yield _wait(futures)
+    ts.update()
+
+    ts2 = TaskStream(s, n_rectangles=5, clear_interval=10)
+    ts2.update()
+
+
+
+@gen_cluster(client=True)
 def test_task_stream_clear_interval(c, s, a, b):
     ts = TaskStream(s, clear_interval=100)
 
@@ -183,6 +196,23 @@ def test_TaskProgress(c, s, a, b):
 
     tp.update()
     assert not tp.source.data['all']
+
+
+@gen_cluster(client=True)
+def test_TaskProgress_empty(c, s, a, b):
+    tp = TaskProgress(s)
+    tp.update()
+
+    futures = [c.submit(inc, i, key='f-' + 'a' * i) for i in range(20)]
+    yield _wait(futures)
+    tp.update()
+
+    del futures
+    while s.tasks:
+        yield gen.sleep(0.01)
+    tp.update()
+
+    assert not any(len(v) for v in tp.source.data.values())
 
 
 @gen_cluster(client=True)
@@ -236,3 +266,11 @@ def test_NBytesHistogram(c, s, a, b):
 
     nh.update()
     assert nh.source.data['right'][-1] > 5 * 20
+
+
+@gen_cluster(client=True)
+def test_WorkerTable(c, s, a, b):
+    wt = WorkerTable(s)
+    wt.update()
+    assert all(wt.source.data.values())
+    assert all(len(v) == 1 for v in wt.source.data.values())
