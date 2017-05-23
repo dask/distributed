@@ -38,7 +38,7 @@ def serialize_numpy_ndarray(x):
         # Preserving all the information works best when pickling
         try:
             # Only use stdlib pickle as cloudpickle is slow when failing
-            # (milliseconds instead of microseconds)
+            # (microseconds instead of nanoseconds)
             dt = (1, pickle.pickle.dumps(x.dtype))
             pickle.loads(dt[1])  # does it unpickle fine?
         except Exception:
