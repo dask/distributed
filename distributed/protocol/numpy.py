@@ -33,10 +33,23 @@ def serialize_numpy_ndarray(x):
         frames = [pickle.dumps(x)]
         return header, frames
 
+    # We cannot blindly pickle the dtype as some may fail pickling,
+    # so we have a mixture of strategies.
     if x.dtype.kind == 'V':
-        dt = x.dtype.descr
+        # Preserving all the information works best when pickling
+        try:
+            # Only use stdlib pickle as cloudpickle is slow when failing
+            # (milliseconds instead of microseconds)
+            dt = (1, pickle.pickle.dumps(x.dtype))
+            pickle.loads(dt[1])  # does it unpickle fine?
+        except Exception:
+            # dtype fails pickling => fall back on the descr if reasonable.
+            if x.dtype.type is not np.void or x.dtype.alignment != 1:
+                raise
+            else:
+                dt = (0, x.dtype.descr)
     else:
-        dt = x.dtype.str
+        dt = (0, x.dtype.str)
 
     if not x.shape:
         strides = x.strides
@@ -72,16 +85,21 @@ def deserialize_numpy_ndarray(header, frames):
         if header.get('pickle'):
             return pickle.loads(frames[0])
 
-        dt = header['dtype']
-        if isinstance(dt, tuple):
+        is_custom, dt = header['dtype']
+        if is_custom:
+            dt = pickle.loads(dt)
+        elif isinstance(dt, tuple):
             dt = list(dt)
 
         x = np.ndarray(header['shape'], dtype=dt, buffer=frames[0],
-                strides=header['strides'])
+                       strides=header['strides'])
 
-        x = stride_tricks.as_strided(x, strides=header['strides'])
+        new_x = stride_tricks.as_strided(x, strides=header['strides'])
+        if new_x.dtype != x.dtype:
+            assert new_x.dtype.kind == x.dtype.kind
+            new_x = new_x.view(x.dtype)
 
-        return x
+        return new_x
 
 
 register_serialization(np.ndarray, serialize_numpy_ndarray, deserialize_numpy_ndarray)

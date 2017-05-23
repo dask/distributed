@@ -1,9 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
+import sys
 from zlib import crc32
 
 import numpy as np
 import pytest
+import six
 
 from distributed.protocol import (serialize, deserialize, decompress, dumps,
         loads, to_serialize, msgpack)
@@ -48,6 +50,10 @@ def test_serialize():
          np.array(['abc'], dtype=object),
          np.ones(shape=(5,), dtype=('f8', 32)),
          np.ones(shape=(5,), dtype=[('x', 'f8', 32)]),
+         np.ones(shape=(5,), dtype=np.dtype([('a', 'i1'), ('b', 'f8')], align=False)),
+         np.ones(shape=(5,), dtype=np.dtype([('a', 'i1'), ('b', 'f8')], align=True)),
+         np.ones(shape=(5,), dtype=np.dtype([('a', 'm8[us]')], align=False)),
+         np.ones(shape=(5,), dtype=np.dtype([('a', 'm8')], align=False)),  # this dtype fails unpickling
          np.array([(1, 'abc')], dtype=[('x', 'i4'), ('s', object)]),
          np.zeros(5000, dtype=[('x%d'%i,'<f8') for i in range(4)]),
          np.zeros(5000, dtype='S32'),
@@ -63,6 +69,21 @@ def test_dumps_serialize_numpy(x):
     np.testing.assert_equal(x, y)
     if np.isfortran(x):
         assert x.strides == y.strides
+
+
+def test_dumps_serialize_numpy_custom_dtype():
+    from six.moves import builtins
+    test_rational = pytest.importorskip('numpy.core.test_rational')
+    rational = test_rational.rational
+    try:
+        builtins.rational = rational  # Work around https://github.com/numpy/numpy/issues/9160
+        x = np.array([1], dtype=rational)
+        header, frames = serialize(x)
+        y = deserialize(header, frames)
+
+        np.testing.assert_equal(x, y)
+    finally:
+        del builtins.rational
 
 
 def test_memmap():
