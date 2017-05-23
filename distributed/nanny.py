@@ -323,7 +323,7 @@ class Nanny(ServerNode):
                 'cpu_percent': psutil.cpu_percent(),
                 'status': p.status(),
                 'memory_percent': p.memory_percent(),
-                'memory_info_ex': p.memory_info_ex()._asdict(),
+                'memory_info': p.memory_info()._asdict(),
                 'disk_io_counters': disk_io_counters()._asdict(),
                 'net_io_counters': net_io_counters()._asdict()}
 
