@@ -31,6 +31,9 @@ def test_serialize():
 @pytest.mark.parametrize('x',
         [np.ones(5),
          np.array(5),
+         np.random.random((5, 5)),
+         np.random.random((5, 5))[::2, :],
+         np.random.random((5, 5))[:, ::2],
          np.asfortranarray(np.random.random((5, 5))),
          np.asfortranarray(np.random.random((5, 5)))[::2, :],
          np.asfortranarray(np.random.random((5, 5)))[:, ::2],
@@ -67,7 +70,7 @@ def test_dumps_serialize_numpy(x):
     y = deserialize(header, frames)
 
     np.testing.assert_equal(x, y)
-    if np.isfortran(x):
+    if x.flags.c_contiguous or x.flags.f_contiguous:
         assert x.strides == y.strides
 
 
