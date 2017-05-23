@@ -170,8 +170,8 @@ class Nanny(ServerNode):
                                 self.worker_address)
             except allowed_errors as e:
                 # Maybe the scheduler is gone, or it is unresponsive
-                logger.warn("Nanny %r failed to unregister worker %r: %s",
-                            self.address, self.worker_address, e)
+                logger.warning("Nanny %r failed to unregister worker %r: %s",
+                               self.address, self.worker_address, e)
             except Exception as e:
                 logger.exception(e)
 
@@ -283,7 +283,7 @@ class Nanny(ServerNode):
                 yield self._close()
                 break
             elif self.should_watch and self.process and not isalive(self.process):
-                logger.warn("Discovered failed worker")
+                logger.warning("Discovered failed worker")
                 self.cleanup()
                 try:
                     yield self.scheduler.unregister(address=self.worker_address)
@@ -294,7 +294,7 @@ class Nanny(ServerNode):
                         yield self._close()
                         break
                 if self.status != 'closed':
-                    logger.warn('Restarting worker...')
+                    logger.warning('Restarting worker...')
                     yield self.instantiate()
             else:
                 yield gen.sleep(wait_seconds)

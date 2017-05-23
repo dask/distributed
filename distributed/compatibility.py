@@ -7,6 +7,8 @@ if sys.version_info[0] == 2:
     from Queue import Queue, Empty
     from io import BytesIO
     from thread import get_ident as get_thread_identity
+    from inspect import getargspec
+
     reload = reload  # flake8: noqa
     unicode = unicode  # flake8: noqa
     PY2 = True
@@ -51,6 +53,7 @@ if sys.version_info[0] == 3:
     from threading import get_ident as get_thread_identity
     from importlib import invalidate_caches
     from importlib.util import cache_from_source
+    from inspect import getfullargspec as getargspec
 
     PY2 = False
     PY3 = True
