@@ -1354,6 +1354,7 @@ class Worker(WorkerBase):
                 assert key not in self.waiting_for_data
                 assert key not in self.ready
 
+            out = None
             if key in self.resource_restrictions:
                 for resource, quantity in self.resource_restrictions[key].items():
                     self.available_resources[resource] += quantity
@@ -1366,23 +1367,25 @@ class Worker(WorkerBase):
 
             if value is not no_value:
                 try:
-                    self.put_key_in_memory(key, value)
+                    self.task_state[key] = 'memory'
+                    self.put_key_in_memory(key, value, transition=False)
                 except Exception as e:
                     logger.info("Failed to put key in memory", exc_info=True)
                     msg = error_message(e)
                     self.exceptions[key] = msg['exception']
                     self.tracebacks[key] = msg['traceback']
                     self.task_state[key] = 'error'
-                else:
-                    self.task_state[key] = 'memory'
+                    out = 'error'
+
                 if key in self.dep_state:
                     self.transition_dep(key, 'memory')
 
             if self.batched_stream:
                 self.send_task_state_to_scheduler(key)
-                return self.task_state[key]
             else:
                 raise CommClosedError
+
+            return out
 
         except EnvironmentError:
             logger.info("Comm closed")
@@ -1519,7 +1522,7 @@ class Worker(WorkerBase):
             d['startstops'] = self.startstops[key]
         self.batched_stream.send(d)
 
-    def put_key_in_memory(self, key, value):
+    def put_key_in_memory(self, key, value, transition=True):
         if key in self.data:
             return
 
@@ -1544,7 +1547,7 @@ class Worker(WorkerBase):
                 if not self.waiting_for_data[dep]:
                     self.transition(dep, 'ready')
 
-        if key in self.task_state:
+        if transition and key in self.task_state:
             self.transition(key, 'memory')
 
         self.log.append((key, 'put-in-memory'))
