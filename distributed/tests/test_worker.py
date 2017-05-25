@@ -768,3 +768,7 @@ def test_fail_write_to_disk(c, s, a, b):
 
     with pytest.raises(TypeError):
         yield future._result()
+
+    futures = c.map(inc, range(10))
+    results = yield c._gather(futures)
+    assert results == list(map(inc, range(10)))
