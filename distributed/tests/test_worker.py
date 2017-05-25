@@ -736,3 +736,24 @@ def test_worker_dir(worker):
             assert len(set(directories)) == 2  # distinct
 
         test_worker_dir()
+
+
+@gen_cluster(client=True)
+def test_undeserializble_callable(c, s, a, b):
+    class UnDeserializableCallable(object):
+        def __call__(self, x):
+            pass
+
+        def __getstate__(self):
+            return 1
+
+        def __setstate__(self, state):
+            print("Hello!")
+            raise Exception()
+
+    future = c.submit(UnDeserializableCallable(), 1)
+    yield _wait(future)
+    assert future.status == 'error'
+
+    with pytest.raises(Exception):
+        result = yield future._result()
