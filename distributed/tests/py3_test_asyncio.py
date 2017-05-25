@@ -12,6 +12,9 @@ from concurrent.futures import CancelledError
 from distributed.utils_test import slow
 from distributed.utils_test import slowinc
 
+from tornado.ioloop import IOLoop
+from tornado.platform.asyncio import BaseAsyncIOLoop
+
 from distributed.asyncio import AioClient, AioFuture, as_completed, wait
 from distributed.utils_test import inc, div
 
@@ -22,12 +25,15 @@ async def test_asyncio_start_shutdown():
 
     await c.start()
     assert c.status == 'running'
+    # AioClient has installed its AioLoop shim.
+    assert isinstance(IOLoop.current(instance=False), BaseAsyncIOLoop)
 
     result = await c.submit(inc, 10)
     assert result == 11
 
     await c.shutdown()
     assert c.status == 'closed'
+    assert IOLoop.current(instance=False) is None
 
 
 async def test_asyncio_submit():
