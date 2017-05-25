@@ -1365,13 +1365,22 @@ class Worker(WorkerBase):
                 self.long_running.remove(key)
 
             if value is not no_value:
-                self.task_state[key] = 'memory'
-                self.put_key_in_memory(key, value)
+                try:
+                    self.put_key_in_memory(key, value)
+                except Exception as e:
+                    logger.info("Failed to put key in memory", exc_info=True)
+                    msg = error_message(e)
+                    self.exceptions[key] = msg['exception']
+                    self.tracebacks[key] = msg['traceback']
+                    self.task_state[key] = 'error'
+                else:
+                    self.task_state[key] = 'memory'
                 if key in self.dep_state:
                     self.transition_dep(key, 'memory')
 
             if self.batched_stream:
                 self.send_task_state_to_scheduler(key)
+                return self.task_state[key]
             else:
                 raise CommClosedError
 

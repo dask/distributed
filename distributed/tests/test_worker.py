@@ -750,3 +750,21 @@ def test_dataframe_attribute_error(c, s, a, b):
     future = c.submit(BadSize, 123)
     result = yield future._result()
     assert result.data == 123
+
+
+@gen_cluster(client=True)
+def test_fail_write_to_disk(c, s, a, b):
+    class Bad(object):
+        def __getstate__(self):
+            raise TypeError()
+
+        def __sizeof__(self):
+            return int(100e9)
+
+    future = c.submit(Bad)
+    yield _wait(future)
+
+    assert future.status == 'error'
+
+    with pytest.raises(TypeError):
+        yield future._result()
