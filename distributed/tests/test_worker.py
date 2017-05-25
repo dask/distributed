@@ -772,3 +772,26 @@ def test_fail_write_to_disk(c, s, a, b):
     futures = c.map(inc, range(10))
     results = yield c._gather(futures)
     assert results == list(map(inc, range(10)))
+
+
+@gen_cluster(client=True, worker_kwargs={'memory_limit': 1000})
+def test_fail_write_many_to_disk(c, s, a, b):
+    a.validate = False
+    b.validate = False
+    class Bad(object):
+        def __init__(self, x):
+            pass
+
+        def __getstate__(self):
+            raise TypeError()
+
+        def __sizeof__(self):
+            return 500
+
+    futures = c.map(Bad, range(10))
+    future = c.submit(lambda *args: 123, *futures)
+
+    yield _wait(future)
+
+    with pytest.raises(Exception) as info:
+        yield future._result()
