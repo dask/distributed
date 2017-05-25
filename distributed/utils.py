@@ -607,9 +607,9 @@ def read_block(f, offset, length, delimiter=None):
 
 
 @contextmanager
-def tmpfile(extension=''):
+def tmpfile(extension='', **kwargs):
     extension = '.' + extension.lstrip('.')
-    handle, filename = tempfile.mkstemp(extension)
+    handle, filename = tempfile.mkstemp(extension, **kwargs)
     os.close(handle)
     os.remove(filename)
 

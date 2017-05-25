@@ -757,3 +757,31 @@ def test_undeserializble_callable(c, s, a, b):
 
     with pytest.raises(Exception):
         result = yield future._result()
+
+
+@gen_cluster(client=True, ncores=[])
+def test_missing_file(c, s):
+    try:
+        with tmpfile() as filedir:
+            os.mkdir(filedir)
+            with open(os.path.join(filedir, 'foo123.py'), mode='w') as f:
+                f.write("def f(): return 123")
+
+            with tmpfile() as local_dir:
+                w = Nanny(s.ip, s.port, local_dir=local_dir)
+                yield w._start()
+
+                sys.path.append(filedir)
+                import foo123
+                assert foo123.f() == 123
+
+                future = c.submit(foo123.f)
+                yield _wait(future)
+
+                with pytest.raises(ImportError) as info:
+                    yield future._result()
+
+                assert 'foo123' in str(info.value)
+    finally:
+        sys.path.remove(filedir)
+        yield w._close()
