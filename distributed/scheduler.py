@@ -1991,7 +1991,7 @@ class Scheduler(ServerNode):
 
     def get_task_duration(self, key, default=0.5):
         """
-        Get the estimate computation cost of the given key
+        Get the estimated computation cost of the given key
         (not including any communication cost).
         """
         ks = key_split(key)
