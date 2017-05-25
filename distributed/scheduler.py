@@ -1980,6 +1980,15 @@ class Scheduler(ServerNode):
 
             return result
 
+    def get_comm_cost(self, key, worker):
+        """
+        Get the estimated communication cost (in s.) to compute key
+        on the given worker.
+        """
+        return (sum(self.nbytes[d] for d in
+                    self.dependencies[key] - self.has_what[worker])
+                / BANDWIDTH)
+
     def run_function(self, stream, function, args=(), kwargs={}):
         """ Run a function within this process
 
@@ -2148,9 +2157,7 @@ class Scheduler(ServerNode):
                 self.unknown_durations[ks].add(key)
                 duration = 0.5
 
-            comm = (sum(self.nbytes[dep]
-                       for dep in self.dependencies[key] - self.has_what[worker])
-                    / BANDWIDTH)
+            comm = self.get_comm_cost(key, worker)
 
             self.processing[worker][key] = duration + comm
             self.rprocessing[key] = worker
@@ -2291,9 +2298,7 @@ class Scheduler(ServerNode):
                         if k in self.rprocessing:
                             w = self.rprocessing[k]
                             old = self.processing[w][k]
-                            comm = (sum(self.nbytes[d] for d in
-                                         self.dependencies[k] - self.has_what[w])
-                                    / BANDWIDTH)
+                            comm = self.get_comm_cost(k, w)
                             self.processing[w][k] = avg_duration + comm
                             self.occupancy[w] += avg_duration + comm - old
                             self.total_occupancy += avg_duration + comm - old
@@ -3076,19 +3081,21 @@ class Scheduler(ServerNode):
         lets us avoid this fringe optimization when we have better things to
         think about.
         """
+        DELAY = 0.1
         with log_errors():
             import psutil
             proc = psutil.Process()
             last = time()
+
             while self.status != 'closed':
-                yield gen.sleep(0.100)
+                yield gen.sleep(DELAY)
                 while not self.rprocessing:
-                    yield gen.sleep(0.100)
-                    last = time()
+                    yield gen.sleep(DELAY)
+                last = time()
 
                 for w, processing in list(self.processing.items()):
                     while proc.cpu_percent() > 50:
-                        yield gen.sleep(0.100)
+                        yield gen.sleep(DELAY)
                         last = time()
 
                     if w not in self.workers or not processing:
@@ -3113,14 +3120,11 @@ class Scheduler(ServerNode):
         nbytes = 0
         for key in processing:
             duration = self.task_duration.get(key_split(key), 0.5)
-            processing[key] = duration
-            new += duration
-            for dep in self.dependencies[key]:
-                if dep not in self.has_what[w]:
-                    nbytes += self.nbytes.get(key, 0)
+            comm = self.get_comm_cost(key, worker)
+            processing[key] = duration + comm
+            new += duration + comm
 
-        comm = nbytes / BANDWIDTH
-        self.occupancy[w] = max(new, comm)  # These overlap. Take maximum
+        self.occupancy[w] = new
         self.total_occupancy += new - old
         self.check_idle_saturated(w)
 
