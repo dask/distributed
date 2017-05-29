@@ -5,6 +5,7 @@ asyncio = pytest.importorskip('asyncio')
 # pytest-aiohttp is required to run `async def` test functions
 aiohttp = pytest.importorskip('aiohttp')
 
+import functools
 from time import time
 from operator import add
 from toolz import isdistinct
@@ -19,6 +20,27 @@ from distributed.asyncio import AioClient, AioFuture, as_completed, wait
 from distributed.utils_test import inc, div
 
 
+def coro_test(fn):
+    assert asyncio.iscoroutinefunction(fn)
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        loop = None
+        try:
+            IOLoop.clear_current()
+            loop = asyncio.new_event_loop()
+            loop.run_until_complete(fn(*args, **kwargs))
+        finally:
+            if loop is not None:
+                loop.close()
+
+            IOLoop.clear_current()
+            asyncio.set_event_loop(None)
+
+    return wrapper
+
+
+@coro_test
 async def test_asyncio_start_shutdown():
     c = AioClient(processes=False)
     assert c.status is None
@@ -36,6 +58,7 @@ async def test_asyncio_start_shutdown():
     assert IOLoop.current(instance=False) is None
 
 
+@coro_test
 async def test_asyncio_submit():
     async with AioClient(processes=False) as c:
         x = c.submit(inc, 10)
@@ -55,6 +78,7 @@ async def test_asyncio_submit():
         assert result == 11 + 21
 
 
+@coro_test
 async def test_asyncio_future_await():
     async with AioClient(processes=False) as c:
         x = c.submit(inc, 10)
@@ -74,6 +98,7 @@ async def test_asyncio_future_await():
         assert result == 11 + 21
 
 
+@coro_test
 async def test_asyncio_map():
     async with AioClient(processes=False) as c:
         L1 = c.map(inc, range(5))
@@ -114,6 +139,7 @@ async def test_asyncio_map():
         assert results == list(range(20, 25))
 
 
+@coro_test
 async def test_asyncio_gather():
     async with AioClient(processes=False) as c:
         x = c.submit(inc, 10)
@@ -127,6 +153,7 @@ async def test_asyncio_gather():
         assert result == {'x': 11, 'y': [12]}
 
 
+@coro_test
 async def test_asyncio_get():
     async with AioClient(processes=False) as c:
         result = await c.get({'x': (inc, 1)}, 'x')
@@ -143,6 +170,7 @@ async def test_asyncio_get():
         assert result == 3
 
 
+@coro_test
 async def test_asyncio_exceptions():
     async with AioClient(processes=False) as c:
         result = await c.submit(div, 1, 2)
@@ -155,6 +183,7 @@ async def test_asyncio_exceptions():
         assert result == 10 / 2
 
 
+@coro_test
 async def test_asyncio_channels():
     async with AioClient(processes=False) as c:
         x = c.channel('x')
@@ -194,6 +223,7 @@ async def test_asyncio_channels():
         assert '1' in repr(x)
 
 
+@coro_test
 async def test_asyncio_exception_on_exception():
     async with AioClient(processes=False) as c:
         x = c.submit(lambda: 1 / 0)
@@ -207,6 +237,7 @@ async def test_asyncio_exception_on_exception():
             await z
 
 
+@coro_test
 async def test_asyncio_as_completed():
     async with AioClient(processes=False) as c:
         futures = c.map(inc, range(10))
@@ -218,6 +249,7 @@ async def test_asyncio_as_completed():
         assert set(results) == set(range(1, 11))
 
 
+@coro_test
 async def test_asyncio_cancel():
     async with AioClient(processes=False) as c:
         s = c.cluster.scheduler
@@ -244,6 +276,7 @@ async def test_asyncio_cancel():
         s.validate_state()
 
 
+@coro_test
 async def test_asyncio_cancel_tuple_key():
     async with AioClient(processes=False) as c:
         x = c.submit(inc, 1, key=('x', 0, 1))
@@ -253,6 +286,7 @@ async def test_asyncio_cancel_tuple_key():
             await x
 
 
+@coro_test
 async def test_asyncio_wait():
     async with AioClient(processes=False) as c:
         x = c.submit(inc, 1)
@@ -267,6 +301,7 @@ async def test_asyncio_wait():
         assert z.done() is True
 
 
+@coro_test
 async def test_asyncio_run():
     async with AioClient(processes=False) as c:
         results = await c.run(inc, 1)
@@ -277,6 +312,7 @@ async def test_asyncio_run():
         assert results == {}
 
 
+@coro_test
 async def test_asyncio_run_on_scheduler():
     def f(dask_scheduler=None):
         return dask_scheduler.address
@@ -289,6 +325,7 @@ async def test_asyncio_run_on_scheduler():
             await c.run_on_scheduler(div, 1, 0)
 
 
+@coro_test
 async def test_asyncio_run_coroutine():
     async def aioinc(x, delay=0.02):
         await asyncio.sleep(delay)
@@ -312,6 +349,7 @@ async def test_asyncio_run_coroutine():
 
 
 @slow
+@coro_test
 async def test_asyncio_restart():
     c = AioClient(processes=False)
     await c.start()
@@ -331,6 +369,7 @@ async def test_asyncio_restart():
     await c.shutdown()
 
 
+@coro_test
 async def test_asyncio_nanny_workers():
     async with AioClient(n_workers=2) as c:
         assert await c.submit(inc, 1) == 2
