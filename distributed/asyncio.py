@@ -164,7 +164,6 @@ class AioClient(Client):
     run_on_scheduler = to_asyncio(Client._run_on_scheduler)
     run = to_asyncio(Client._run)
     run_coroutine = to_asyncio(Client._run_coroutine)
-    get = to_asyncio(Client._get)
     upload_environment = to_asyncio(Client._upload_environment)
     restart = to_asyncio(Client._restart)
     upload_file = to_asyncio(Client._upload_file)
