@@ -5,6 +5,8 @@
 import asyncio
 from functools import wraps
 
+from toolz import merge
+
 from tornado.platform.asyncio import BaseAsyncIOLoop
 from tornado.platform.asyncio import to_asyncio_future
 
@@ -16,7 +18,9 @@ def to_asyncio(fn, **default_kwargs):
     """Converts Tornado gen.coroutines and futures to asyncio ones"""
     @wraps(fn)
     def convert(*args, **kwargs):
-        return to_asyncio_future(fn(*args, **default_kwargs, **kwargs))
+        if default_kwargs:
+            kwargs = merge(default_kwargs, kwargs)
+        return to_asyncio_future(fn(*args, **kwargs))
     return convert
 
 
