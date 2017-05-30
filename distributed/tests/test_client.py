@@ -301,10 +301,14 @@ def test_gather_strict(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_get(c, s, a, b):
-    result = yield c.get({'x': (inc, 1)}, 'x', sync=False)
+    result = c.get({'x': (inc, 1)}, 'x', sync=False)
+    assert isinstance(result, Future)
+    result = yield result
     assert result == 2
 
-    result = yield c.get({'x': (inc, 1)}, ['x'], sync=False)
+    result = c.get({'x': (inc, 1)}, ['x'], sync=False)
+    assert isinstance(result[0], Future)
+    result = yield result
     assert result == [2]
 
     result = yield c.get({}, [], sync=False)
