@@ -2620,8 +2620,7 @@ class AsCompleted(object):
         self.with_results = with_results
 
         if futures:
-            for future in futures:
-                self.add(future)
+            self.update(futures)
 
     @gen.coroutine
     def track_future(self, future):
@@ -2642,8 +2641,8 @@ class AsCompleted(object):
         """ Add multiple futures to the collection.
 
         The added futures will emit from the iterator once they finish"""
-        for f in futures:
-            with self.lock:
+        with self.lock:
+            for f in futures:
                 if not isinstance(f, Future):
                     raise TypeError("Input must be a future, got %s" % f)
                 self.futures[f] += 1

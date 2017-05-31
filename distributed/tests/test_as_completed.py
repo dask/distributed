@@ -5,8 +5,7 @@ import random
 import pytest
 
 from distributed import Client
-from distributed.client import (_as_completed, as_completed, _first_completed,
-        AsCompleted)
+from distributed.client import _as_completed, as_completed, _first_completed
 from distributed.utils_test import gen_cluster, inc, loop, cluster
 from distributed.compatibility import Queue
 
@@ -43,7 +42,7 @@ def test_as_completed(loop):
 
 def test_as_completed_with_non_futures(loop):
     with cluster() as (s, [a, b]):
-        with Client(s['address'], loop=loop) as c:
+        with Client(s['address'], loop=loop):
             with pytest.raises(TypeError):
                 list(as_completed([1, 2, 3]))
 
@@ -54,7 +53,7 @@ def test_as_completed_add(loop):
             total = 0
             expected = sum(map(inc, range(10)))
             futures = c.map(inc, range(10))
-            ac = AsCompleted(futures)
+            ac = as_completed(futures)
             for future in ac:
                 result = future.result()
                 total += result
@@ -71,7 +70,7 @@ def test_as_completed_update(loop):
             total = 0
             todo = list(range(10))
             expected = sum(map(inc, todo))
-            ac = AsCompleted([])
+            ac = as_completed([])
             while todo or not ac.is_empty():
                 if todo:
                     work, todo = todo[:4], todo[4:]
@@ -84,7 +83,7 @@ def test_as_completed_update(loop):
 def test_as_completed_repeats(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            ac = AsCompleted()
+            ac = as_completed()
             x = c.submit(inc, 1)
             ac.add(x)
             ac.add(x)
@@ -102,7 +101,7 @@ def test_as_completed_repeats(loop):
 def test_as_completed_is_empty(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            ac = AsCompleted()
+            ac = as_completed()
             assert ac.is_empty()
             x = c.submit(inc, 1)
             ac.add(x)
