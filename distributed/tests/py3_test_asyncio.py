@@ -2,8 +2,6 @@
 import pytest
 
 asyncio = pytest.importorskip('asyncio')
-# pytest-aiohttp is required to run `async def` test functions
-aiohttp = pytest.importorskip('aiohttp')
 
 import functools
 from time import time
