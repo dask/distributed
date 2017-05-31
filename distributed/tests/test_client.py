@@ -633,14 +633,13 @@ def test_restrictions_map(c, s, a, b):
         c.map(inc, [10, 11, 12], workers=[{a.ip}])
 
 
-@pytest.mark.skipif(not sys.platform.startswith('linux'),
-                    reason="Need 127.0.0.2 to mean localhost")
-@gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], client=True)
+@gen_cluster(client=True)
 def test_restrictions_get(c, s, a, b):
     dsk = {'x': 1, 'y': (inc, 'x'), 'z': (inc, 'y')}
-    restrictions = {'y': {a.ip}, 'z': {b.ip}}
+    restrictions = {'y': {a.address}, 'z': {b.address}}
 
-    result = yield c.get(dsk, ['y', 'z'], restrictions, sync=False)
+    futures = c.get(dsk, ['y', 'z'], restrictions, sync=False)
+    result = yield futures
     assert result == [2, 3]
     assert 'y' in a.data
     assert 'z' in b.data
