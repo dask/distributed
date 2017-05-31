@@ -301,14 +301,14 @@ def test_gather_strict(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_get(c, s, a, b):
-    result = c.get({'x': (inc, 1)}, 'x', sync=False)
-    assert isinstance(result, Future)
-    result = yield result
+    future = c.get({'x': (inc, 1)}, 'x', sync=False)
+    assert isinstance(future, Future)
+    result = yield future
     assert result == 2
 
-    result = c.get({'x': (inc, 1)}, ['x'], sync=False)
-    assert isinstance(result[0], Future)
-    result = yield result
+    futures = c.get({'x': (inc, 1)}, ['x'], sync=False)
+    assert isinstance(futures[0], Future)
+    result = yield futures
     assert result == [2]
 
     result = yield c.get({}, [], sync=False)
@@ -633,10 +633,12 @@ def test_restrictions_map(c, s, a, b):
         c.map(inc, [10, 11, 12], workers=[{a.ip}])
 
 
-@gen_cluster(client=True)
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Need 127.0.0.2 to mean localhost")
+@gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], client=True)
 def test_restrictions_get(c, s, a, b):
     dsk = {'x': 1, 'y': (inc, 'x'), 'z': (inc, 'y')}
-    restrictions = {'y': {a.address}, 'z': {b.address}}
+    restrictions = {'y': {a.ip}, 'z': {b.ip}}
 
     futures = c.get(dsk, ['y', 'z'], restrictions, sync=False)
     result = yield futures
