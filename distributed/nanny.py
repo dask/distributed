@@ -335,7 +335,8 @@ class Nanny(ServerNode):
 
 
 def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
-                    worker_ip, worker_port, local_dir, **kwargs):
+                    worker_ip, worker_port, local_dir, silence_logs,
+                    **kwargs):
     """
     Create a worker in a forked child.
     """
@@ -349,11 +350,15 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
     else:
         initialize_worker_process()
 
+    if silence_logs:
+        logger.setLevel(silence_logs)
+
     IOLoop.clear_instance()  # pragma: no cover
     loop = IOLoop()  # pragma: no cover
     loop.make_current()  # pragma: no cover
     worker = Worker(scheduler_addr, ncores=ncores,
-                    service_ports={'nanny': nanny_port}, local_dir=local_dir,
+                    service_ports={'nanny': nanny_port},
+                    local_dir=local_dir, silence_logs=silence_logs,
                     **kwargs)  # pragma: no cover
 
     @gen.coroutine  # pragma: no cover
