@@ -2649,6 +2649,11 @@ class AsCompleted(object):
             self.futures[future] += 1
         self.loop.add_callback(self.track_future, future)
 
+    def is_empty(self):
+        """Return True if there no waiting futures, False otherwise"""
+        with self.lock:
+            return not self.futures and self.queue.empty()
+
     def __iter__(self):
         return self
 
@@ -2656,9 +2661,8 @@ class AsCompleted(object):
         return self
 
     def __next__(self):
-        with self.lock:
-            if not self.futures and self.queue.empty():
-                raise StopIteration()
+        if self.is_empty():
+            raise StopIteration()
         return self.queue.get()
 
     @gen.coroutine

@@ -81,3 +81,15 @@ def test_as_completed_repeats(loop):
 
             ac.add(x)
             assert next(ac) is x
+
+
+def test_as_completed_is_empty(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            ac = AsCompleted()
+            assert ac.is_empty()
+            x = c.submit(inc, 1)
+            ac.add(x)
+            assert not ac.is_empty()
+            assert next(ac) is x
+            assert ac.is_empty()
