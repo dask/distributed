@@ -7,7 +7,7 @@ import pytest
 from distributed import Client
 from distributed.client import (_as_completed, as_completed, _first_completed,
         AsCompleted)
-from distributed.utils_test import gen_cluster, inc, dec, loop, cluster
+from distributed.utils_test import gen_cluster, inc, loop, cluster
 from distributed.compatibility import Queue
 
 
@@ -62,6 +62,22 @@ def test_as_completed_add(loop):
                     future = c.submit(add, future, 10)
                     ac.add(future)
                     expected += result + 10
+            assert total == expected
+
+
+def test_as_completed_update(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            total = 0
+            todo = list(range(10))
+            expected = sum(map(inc, todo))
+            ac = AsCompleted([])
+            while todo or not ac.is_empty():
+                if todo:
+                    work, todo = todo[:4], todo[4:]
+                    ac.update(c.map(inc, work))
+                batch = ac.next_batch(block=True)
+                total += sum(r.result() for r in batch)
             assert total == expected
 
 

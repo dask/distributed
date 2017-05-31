@@ -2638,16 +2638,23 @@ class AsCompleted(object):
                 self.queue.put_nowait(future)
             self.condition.notify()
 
+    def update(self, futures):
+        """ Add multiple futures to the collection.
+
+        The added futures will emit from the iterator once they finish"""
+        for f in futures:
+            with self.lock:
+                if not isinstance(f, Future):
+                    raise TypeError("Input must be a future, got %s" % f)
+                self.futures[f] += 1
+                self.loop.add_callback(self.track_future, f)
+
     def add(self, future):
         """ Add a future to the collection
 
         This future will emit from the iterator once it finishes
         """
-        if not isinstance(future, Future):
-            raise TypeError("Input must be a future, got %s" % str(future))
-        with self.lock:
-            self.futures[future] += 1
-        self.loop.add_callback(self.track_future, future)
+        self.update((future,))
 
     def is_empty(self):
         """Return True if there no waiting futures, False otherwise"""
