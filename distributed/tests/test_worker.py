@@ -795,3 +795,9 @@ def test_fail_write_many_to_disk(c, s, a, b):
 
     with pytest.raises(Exception) as info:
         yield future._result()
+
+    # workers still operational
+    result = yield c.submit(inc, 1, workers=a.address)
+    assert result == 2
+    result = yield c.submit(inc, 2, workers=b.address)
+    assert result == 3
