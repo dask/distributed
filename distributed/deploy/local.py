@@ -11,6 +11,7 @@ import weakref
 from tornado import gen
 from tornado.ioloop import IOLoop
 
+from ..config import silence_logging
 from ..core import CommClosedError
 from ..utils import sync, ignoring, All
 from ..nanny import Nanny
@@ -69,11 +70,7 @@ class LocalCluster(object):
         self.processes = processes
         self.silence_logs = silence_logs
         if silence_logs:
-            for l in ['distributed.scheduler',
-                      'distributed.worker',
-                      'distributed.core',
-                      'distributed.nanny']:
-                logging.getLogger(l).setLevel(silence_logs)
+            silence_logging(level=silence_logs)
         if n_workers is None and threads_per_worker is None:
             if processes:
                 n_workers = _ncores

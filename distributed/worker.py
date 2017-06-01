@@ -25,7 +25,7 @@ from tornado.locks import Event
 
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for
-from .config import config
+from .config import config, silence_logging
 from .compatibility import unicode
 from .core import (error_message, CommClosedError,
                    rpc, pingpong, coerce_to_address)
@@ -84,7 +84,7 @@ class WorkerBase(ServerNode):
         self.death_timeout = death_timeout
         self.preload = preload
         if silence_logs:
-            logger.setLevel(silence_logs)
+            silence_logging(level=silence_logs)
 
         if local_dir:
             local_dir = os.path.abspath(local_dir)

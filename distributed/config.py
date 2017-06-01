@@ -68,23 +68,42 @@ def load_env_vars(config):
             config[varname] = value
 
 
-def initialize_logging(config):
+def _get_logging_config(config):
     loggers = config.get('logging', {})
     loggers.setdefault('distributed', 'info')
-    # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
+    # We could remove those lines and let the default config.yaml handle it
     loggers.setdefault('tornado', 'critical')
     loggers.setdefault('tornado.application', 'error')
+    return loggers
+
+
+def initialize_logging(config):
+    loggers = _get_logging_config(config)
 
     fmt = '%(name)s - %(levelname)s - %(message)s'
 
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(fmt))
     for name, level in loggers.items():
-        LEVEL = logging_names[level.upper()]
+        if isinstance(level, str):
+            level = logging_names[level.upper()]
         logger = logging.getLogger(name)
-        logger.setLevel(LEVEL)
+        logger.setLevel(level)
         logger.addHandler(handler)
         logger.propagate = False
+
+
+def silence_logging(level, root='distributed'):
+    loggers = _get_logging_config(config)
+
+    if isinstance(level, str):
+        level = logging_names[level.upper()]
+    for name in loggers:
+        if name.startswith(root + '.'):
+            logger = logging.getLogger(name)
+            logger.setLevel(level)
+
+    logging.getLogger(root).setLevel(level)
 
 
 try:

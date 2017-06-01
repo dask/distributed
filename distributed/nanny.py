@@ -13,6 +13,7 @@ from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
 from .comm import get_address_host, get_local_address_for
+from .config import silence_logging
 from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
 from .node import ServerNode
@@ -68,7 +69,7 @@ class Nanny(ServerNode):
         self.should_watch = True
 
         if silence_logs:
-            logger.setLevel(silence_logs)
+            silence_logging(level=silence_logs)
         self.silence_logs = silence_logs
 
         handlers = {'instantiate': self.instantiate,
