@@ -383,7 +383,7 @@ def run_worker_fork(q, scheduler_addr, ncores, nanny_port,
         pass
     finally:
         loop.stop()
-        loop.close(all_fds=True)
+        loop.close()
 
 
 def isalive(proc):
