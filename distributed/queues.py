@@ -39,6 +39,8 @@ class QueueExtension(object):
                                         'queue_get': self.get,
                                         'queue_qsize': self.qsize})
 
+        self.scheduler.client_handlers['queue-future-release'] = self.future_release
+
         self.scheduler.extensions['queues'] = self
 
     def create(self, stream=None, name=None, client=None, maxsize=0):
@@ -55,16 +57,20 @@ class QueueExtension(object):
             futures = self.queues[name].queue
             del self.queues[name]
             self.scheduler.client_releases_keys(keys=[f.key for f in futures],
-                                                client='queue-plugin')
+                                                client='queue-%s' % name)
 
     @gen.coroutine
     def put(self, stream=None, name=None, key=None, data=None, client=None, timeout=None):
         if key is not None:
             record = {'type': 'Future', 'value': key}
-            self.scheduler.client_desires_keys(keys=[key], client='queue-plugin')
+            self.scheduler.client_desires_keys(keys=[key], client='queue-%s' % name)
         else:
             record = {'type': 'msgpack', 'value': data}
         yield self.queues[name].put(record, timeout=timeout)
+
+    def future_release(self, name=None, key=None, client=None):
+        self.scheduler.client_releases_keys(keys=[key],
+                                            client='queue-%s' % name)
 
     @gen.coroutine
     def get(self, stream=None, name=None, client=None, timeout=None):
@@ -121,6 +127,9 @@ class Queue(object):
         d = yield self.client.scheduler.queue_get(timeout=timeout, name=self.name)
         if d['type'] == 'Future':
             value = Future(d['value'], self.client)
+            self.client._send_to_scheduler({'op': 'queue-future-release',
+                                            'name': self.name,
+                                            'key': d['value']})
         else:
             value = d['value']
         raise gen.Return(value)
