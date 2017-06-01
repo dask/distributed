@@ -1094,7 +1094,7 @@ def test_scheduler_file():
         assert data['address'] == s.address
 
         c = Client(scheduler_file=fn, loop=s.loop, start=False)
-        yield c._start()
+        yield c
     yield s.close()
 
 

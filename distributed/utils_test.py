@@ -538,15 +538,19 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                     args = [s] + workers
 
                     if client:
-                        e = Client(s.address, loop=loop, security=security,
-                                   start=False)
-                        loop.run_sync(e._start)
-                        args = [e] + args
+                        c = []
+                        @gen.coroutine
+                        def f():
+                            c2 = Client(s.address, loop=loop, security=security)
+                            yield c2._started
+                            c.append(c2)
+                        loop.run_sync(f)
+                        args = c + args
                     try:
                         return loop.run_sync(lambda: cor(*args), timeout=timeout)
                     finally:
                         if client:
-                            loop.run_sync(e._shutdown)
+                            loop.run_sync(c[0]._shutdown)
                         loop.run_sync(lambda: end_cluster(s, workers))
 
                     for w in workers:

@@ -15,6 +15,7 @@ import logging
 from numbers import Number
 import os
 import sys
+import threading
 from time import sleep
 import uuid
 from threading import Thread, Lock
@@ -374,13 +375,11 @@ class Client(Node):
     """
     _Future = Future
 
-    def __init__(self, address=None, start=True, loop=None, timeout=5,
+    def __init__(self, address=None, loop=None, timeout=5,
                  set_as_default=True, scheduler_file=None,
-                 security=None, **kwargs):
+                 security=None, start=None, **kwargs):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
-        self._should_close_loop = loop is None and start
-        self.loop = loop or (IOLoop() if start else IOLoop.current())
         self.coroutines = []
         self.id = str(uuid.uuid1())
         self.generation = 0
@@ -393,6 +392,16 @@ class Client(Node):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args('client')
         self._connecting_to_scheduler = False
+
+        if loop is None:
+            self._should_close_loop = None
+            if IOLoop.current()._running and IOLoop.current()._thread_ident == threading.get_ident():
+                self.loop = IOLoop.current()
+            else:
+                self.loop = IOLoop()
+        else:
+            self._should_close_loop = False
+            self.loop = loop
 
         if hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object
@@ -418,8 +427,7 @@ class Client(Node):
         super(Client, self).__init__(connection_args=self.connection_args,
                                      io_loop=self.loop)
 
-        if start:
-            self.start(timeout=timeout)
+        self.start(timeout=timeout)
 
         from distributed.channels import ChannelClient
         ChannelClient(self)  # registers itself on construction
@@ -449,13 +457,21 @@ class Client(Node):
             self._loop_thread = Thread(target=self.loop.start)
             self._loop_thread.daemon = True
             self._loop_thread.start()
+            if self._should_close_loop is None:
+                self._should_close_loop = True
             while not self.loop._running:
                 sleep(0.001)
         pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
         self.loop.add_callback(pc.start)
         _set_global_client(self)
-        sync(self.loop, self._start, **kwargs)
+        if self.loop._thread_ident == threading.get_ident():
+            self._started = self._start(**kwargs)
+        else:
+            sync(self.loop, self._start, **kwargs)
         self.status = 'running'
+
+    def __await__(self):
+        return self._started.__await__()
 
     def _send_to_scheduler(self, msg):
         if self.status is 'running':
@@ -519,6 +535,8 @@ class Client(Node):
 
         self.coroutines.append(self._handle_report())
 
+        raise gen.Return(self)
+
     @gen.coroutine
     def _reconnect(self, timeout=0.1):
         with log_errors():
@@ -580,7 +598,7 @@ class Client(Node):
 
     @gen.coroutine
     def __aenter__(self):
-        yield self._start()
+        yield self._started
         raise gen.Return(self)
 
     @gen.coroutine

@@ -201,8 +201,7 @@ def test_exceptions(c, s, a, b):
 
 @gen_cluster()
 def test_gc(s, a, b):
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
+    c = yield Client((s.ip, s.port))
 
     x = c.submit(inc, 10)
     yield x._result()
@@ -332,18 +331,6 @@ def test_get_sync_optimize_graph_passes_through(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             dask.compute(bag.sum(), optimize_graph=False, get=c.get)
-
-
-def test_submit_errors(loop):
-    def f(a, b, c):
-        pass
-
-    c = Client('127.0.0.1:8787', start=False, loop=loop)
-
-    with pytest.raises(TypeError):
-        c.submit(1, 2, 3)
-    with pytest.raises(TypeError):
-        c.map([1, 2, 3])
 
 
 @gen_cluster(client=True)
@@ -514,8 +501,7 @@ def test_missing_worker(s, a, b):
     s.who_has['b'] = {bad}
     s.has_what[bad] = {'b'}
 
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
+    c = yield Client((s.ip, s.port))
 
     dsk = {'a': 1, 'b': (inc, 'a'), 'c': (inc, 'b')}
 
@@ -728,14 +714,13 @@ def test_map_quotes(c, s, a, b):
 @gen_cluster()
 def test_two_consecutive_clients_share_results(s, a, b):
     from random import randint
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
+    c = yield Client((s.ip, s.port))
 
     x = c.submit(randint, 0, 1000, pure=True)
     xx = yield x._result()
 
-    f = Client((s.ip, s.port), start=False)
-    yield f._start()
+    f = Client((s.ip, s.port))
+    yield f
 
     y = f.submit(randint, 0, 1000, pure=True)
     yy = yield y._result()
@@ -1237,10 +1222,10 @@ def test_upload_file_exception_sync(loop):
 @pytest.mark.xfail
 @gen_cluster()
 def test_multiple_clients(s, a, b):
-    a = Client((s.ip, s.port), start=False)
-    yield a._start()
-    b = Client((s.ip, s.port), start=False)
-    yield b._start()
+    a = Client((s.ip, s.port))
+    yield a
+    b = Client((s.ip, s.port))
+    yield b
 
     x = a.submit(inc, 1)
     y = b.submit(inc, 2)
@@ -1649,11 +1634,9 @@ def test_waiting_data(c, s, a, b):
 
 @gen_cluster()
 def test_multi_client(s, a, b):
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
+    c = yield Client((s.ip, s.port))
 
-    f = Client((s.ip, s.port), start=False)
-    yield f._start()
+    f = yield Client((s.ip, s.port))
 
     assert set(s.comms) == {c.id, f.id}
 
@@ -1711,11 +1694,9 @@ def test_cleanup_after_broken_client_connection(s, a, b):
 
 @gen_cluster()
 def test_multi_garbage_collection(s, a, b):
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
+    c = yield Client((s.ip, s.port))
 
-    f = Client((s.ip, s.port), start=False)
-    yield f._start()
+    f = yield Client((s.ip, s.port))
 
     x = c.submit(inc, 1)
     y = f.submit(inc, 2)
@@ -1832,10 +1813,8 @@ def test__cancel_tuple_key(c, s, a, b):
 
 @gen_cluster()
 def test__cancel_multi_client(s, a, b):
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
-    f = Client((s.ip, s.port), start=False)
-    yield f._start()
+    c = yield Client((s.ip, s.port))
+    f = yield Client((s.ip, s.port))
 
     x = c.submit(slowinc, 1)
     y = f.submit(slowinc, 1)
@@ -2380,8 +2359,7 @@ def test_worker_aliases():
     b = Worker(s.ip, s.port, name='bob')
     yield [a._start(), b._start()]
 
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
+    c = yield Client((s.ip, s.port))
 
     L = c.map(inc, range(10), workers='alice')
     yield _wait(L)
@@ -2449,20 +2427,17 @@ def test_client_num_fds(loop):
 
 @gen_cluster()
 def test_startup_shutdown_startup(s, a, b):
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
+    c = yield Client((s.ip, s.port))
     yield c._shutdown()
 
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
+    c = yield Client((s.ip, s.port))
     yield c._shutdown()
 
 
 def test_startup_shutdown_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            pass
-        sleep(0.1)
+            sleep(0.1)
         with Client(s['address'], loop=loop) as c:
             pass
         with Client(s['address']) as c:
@@ -3107,13 +3082,7 @@ def test_status():
     s = Scheduler()
     s.start(0)
 
-    c = Client((s.ip, s.port), start=False)
-    assert c.status != 'running'
-
-    with pytest.raises(Exception):
-        x = c.submit(inc, 1)
-
-    yield c._start()
+    c = yield Client((s.ip, s.port))
     assert c.status == 'running'
     x = c.submit(inc, 1)
 
@@ -3258,10 +3227,8 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
 @gen_cluster(client=False, timeout=None)
 def test_idempotence(s, a, b):
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
-    f = Client((s.ip, s.port), start=False)
-    yield f._start()
+    c = yield Client((s.ip, s.port))
+    f = yield Client((s.ip, s.port))
 
     # Submit
     x = c.submit(inc, 1)
@@ -3457,10 +3424,8 @@ def test_scatter_compute_store_lose_processing(c, s, a, b):
 
 @gen_cluster(client=False)
 def test_serialize_future(s, a, b):
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
-    f = Client((s.ip, s.port), start=False)
-    yield f._start()
+    c = yield Client((s.ip, s.port))
+    f = yield Client((s.ip, s.port))
 
     future = c.submit(lambda: 1)
     result = yield future._result()
@@ -3478,10 +3443,8 @@ def test_serialize_future(s, a, b):
 
 @gen_cluster(client=False)
 def test_temp_client(s, a, b):
-    c = Client((s.ip, s.port), start=False)
-    yield c._start()
-    f = Client((s.ip, s.port), start=False)
-    yield f._start()
+    c = yield Client((s.ip, s.port))
+    f = yield Client((s.ip, s.port))
 
     with temp_default_client(c):
         assert default_client() is c
@@ -3809,8 +3772,7 @@ def test_scatter_dict_workers(c, s, a, b):
 @gen_test()
 def test_client_timeout():
     loop = IOLoop.current()
-    c = Client('127.0.0.1:57484', loop=loop, start=False)
-    loop.add_callback(c._start, timeout=10)
+    c = Client('127.0.0.1:57484', loop=loop)
 
     s = Scheduler(loop=loop)
     yield gen.sleep(4)
