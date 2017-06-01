@@ -55,3 +55,17 @@ def test_queue_with_data(c, s, a, b):
 
     with pytest.raises(gen.TimeoutError):
         yield x._get(timeout=0.1)
+
+
+def test_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address']) as c:
+            future = c.submit(lambda x: x + 1, 10)
+            x = Queue('x')
+            xx = Queue('x')
+            x.put(future)
+            assert x.qsize() == 1
+            assert xx.qsize() == 1
+            future2 = xx.get()
+
+            assert future2.result() == 11

@@ -121,6 +121,14 @@ class Queue(object):
             yield self.client.scheduler.queue_put(data=value,
                                                   timeout=timeout,
                                                   name=self.name)
+    def put(self, value, timeout=None):
+        return sync(self.client.loop, self._put, value, timeout=timeout)
+
+    def get(self, timeout=None):
+        return sync(self.client.loop, self._get, timeout=timeout)
+
+    def qsize(self):
+        return sync(self.client.loop, self._qsize)
 
     @gen.coroutine
     def _get(self, timeout=None):
