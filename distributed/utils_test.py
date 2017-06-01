@@ -24,7 +24,6 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .compatibility import PY3
 from .config import config
 from .core import connect, rpc, CommClosedError
 from .metrics import time
@@ -500,9 +499,7 @@ def end_cluster(s, workers):
 
 
 def iscoroutinefunction(f):
-    if gen.is_coroutine_function(f):
-        return True
-    if PY3 and inspect.iscoroutinefunction(f):
+    if sys.version_info >= (3, 5) and inspect.iscoroutinefunction(f):
         return True
     return False
 
