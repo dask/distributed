@@ -98,10 +98,12 @@ class LocalCluster(object):
         if diagnostics_port is not None:
             try:
                 from distributed.bokeh.scheduler import BokehScheduler
+                from distributed.bokeh.worker import BokehWorker
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
                 services[('bokeh', diagnostics_port)] = BokehScheduler
+                worker_services[('bokeh', 0)] = BokehWorker
 
         self.scheduler = Scheduler(loop=self.loop,
                                    services=services)
@@ -167,15 +169,6 @@ class LocalCluster(object):
             kwargs['quiet'] = True
         else:
             W = Worker
-
-        try:
-            from distributed.bokeh.worker import BokehWorker
-        except ImportError:
-            pass
-        else:
-            if 'services' not in kwargs:
-                kwargs['services'] = {}
-            kwargs['services'][('bokeh', 0)] = BokehWorker
 
         w = W(self.scheduler.address, loop=self.loop,
               death_timeout=death_timeout,
