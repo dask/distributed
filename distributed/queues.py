@@ -58,9 +58,13 @@ class QueueExtension(object):
                                                 client='queue-plugin')
 
     @gen.coroutine
-    def put(self, stream=None, name=None, key=None, client=None, timeout=None):
-        yield self.queues[name].put(key, timeout=timeout)
-        self.scheduler.client_desires_keys(keys=[key], client='queue-plugin')
+    def put(self, stream=None, name=None, key=None, data=None, client=None, timeout=None):
+        if key is not None:
+            record = {'type': 'Future', 'value': key}
+            self.scheduler.client_desires_keys(keys=[key], client='queue-plugin')
+        else:
+            record = {'type': 'msgpack', 'value': data}
+        yield self.queues[name].put(record, timeout=timeout)
 
     @gen.coroutine
     def get(self, stream=None, name=None, client=None, timeout=None):
@@ -102,16 +106,24 @@ class Queue(object):
         return _().__await__()
 
     @gen.coroutine
-    def _put(self, future, timeout=None):
-        yield self.client.scheduler.queue_put(key=tokey(future.key),
-                                              timeout=timeout,
-                                              name=self.name)
+    def _put(self, value, timeout=None):
+        if isinstance(value, Future):
+            yield self.client.scheduler.queue_put(key=tokey(value.key),
+                                                  timeout=timeout,
+                                                  name=self.name)
+        else:
+            yield self.client.scheduler.queue_put(data=value,
+                                                  timeout=timeout,
+                                                  name=self.name)
 
     @gen.coroutine
     def _get(self, timeout=None):
-        key = yield self.client.scheduler.queue_get(timeout=timeout, name=self.name)
-        future = Future(key, self.client)
-        raise gen.Return(future)
+        d = yield self.client.scheduler.queue_get(timeout=timeout, name=self.name)
+        if d['type'] == 'Future':
+            value = Future(d['value'], self.client)
+        else:
+            value = d['value']
+        raise gen.Return(value)
 
     @gen.coroutine
     def _qsize(self):

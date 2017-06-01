@@ -27,3 +27,18 @@ def test_queue(c, s, a, b):
 
     with pytest.raises(gen.TimeoutError):
         yield x._get(timeout=0.1)
+
+
+@gen_cluster(client=True)
+def test_queue_with_data(c, s, a, b):
+    x = yield Queue('x')
+    xx = yield Queue('x')
+    assert x.client is c
+
+    yield x._put([1, 'hello'])
+    data = yield xx._get()
+
+    assert data == [1, 'hello']
+
+    with pytest.raises(gen.TimeoutError):
+        yield x._get(timeout=0.1)
