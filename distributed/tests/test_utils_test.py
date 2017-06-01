@@ -114,4 +114,4 @@ def test_new_config():
 
 
 if sys.version_info >= (3, 5):
-    from distributed.tests.py3_test_utils_test import *
+    from distributed.tests.py3_test_utils_tst import *
