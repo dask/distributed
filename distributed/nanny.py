@@ -13,12 +13,11 @@ from tornado.ioloop import IOLoop, TimeoutError
 from tornado import gen
 
 from .comm import get_address_host, get_local_address_for
-from .config import silence_logging
 from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import disk_io_counters, net_io_counters, time
 from .node import ServerNode
 from .security import Security
-from .utils import get_ip, ignoring, mp_context, log_errors
+from .utils import get_ip, ignoring, mp_context, log_errors, silence_logging
 from .worker import _ncores, run
 
 

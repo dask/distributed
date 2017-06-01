@@ -11,9 +11,8 @@ import weakref
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from ..config import silence_logging
 from ..core import CommClosedError
-from ..utils import sync, ignoring, All
+from ..utils import sync, ignoring, All, silence_logging
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..worker import Worker, _ncores

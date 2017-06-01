@@ -25,7 +25,7 @@ from tornado.locks import Event
 
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for
-from .config import config, silence_logging
+from .config import config
 from .compatibility import unicode
 from .core import (error_message, CommClosedError,
                    rpc, pingpong, coerce_to_address)
@@ -38,7 +38,8 @@ from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
-                    ignoring, validate_key, mp_context, import_file)
+                    ignoring, validate_key, mp_context, import_file,
+                    silence_logging)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
