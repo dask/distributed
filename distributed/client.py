@@ -1568,30 +1568,8 @@ class Client(Node):
 
         return futures
 
-    @gen.coroutine
-    def _get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-             resources=None, raise_on_error=True):
-        futures = self._graph_to_futures(dsk, set(flatten([keys])),
-                restrictions, loose_restrictions, resources=resources)
-
-        packed = pack_data(keys, futures)
-        try:
-            result = yield self._gather(packed)
-        except Exception as e:
-            if raise_on_error:
-                raise
-            else:
-                result = 'error', e
-                raise gen.Return(result)
-        finally:
-            for f in futures.values():
-                f.release()
-        if not raise_on_error:
-            result = 'OK', result
-        raise gen.Return(result)
-
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-            resources=None, **kwargs):
+            resources=None, sync=True, **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -1601,6 +1579,8 @@ class Client(Node):
         restrictions: dict (optional)
             A mapping of {key: {set of worker hostnames}} that restricts where
             jobs can take place
+        sync: bool (optional)
+            Returns Futures if False or concrete values if True (default).
 
         Examples
         --------
@@ -1613,9 +1593,18 @@ class Client(Node):
         --------
         Client.compute: Compute asynchronous collections
         """
-        return sync(self.loop, self._get, dsk, keys, restrictions=restrictions,
-                    loose_restrictions=loose_restrictions,
-                    resources=resources)
+        futures = self._graph_to_futures(dsk, set(flatten([keys])),
+                                         restrictions, loose_restrictions,
+                                         resources=resources)
+        packed = pack_data(keys, futures)
+        if sync:
+            try:
+                results = self.gather(packed)
+            finally:
+                for f in futures.values():
+                    f.release()
+            return results
+        return packed
 
     def _optimize_insert_futures(self, dsk, keys):
         """ Replace known keys in dask graph with Futures
@@ -2620,8 +2609,7 @@ class AsCompleted(object):
         self.with_results = with_results
 
         if futures:
-            for future in futures:
-                self.add(future)
+            self.update(futures)
 
     @gen.coroutine
     def track_future(self, future):
@@ -2638,16 +2626,28 @@ class AsCompleted(object):
                 self.queue.put_nowait(future)
             self.condition.notify()
 
+    def update(self, futures):
+        """ Add multiple futures to the collection.
+
+        The added futures will emit from the iterator once they finish"""
+        with self.lock:
+            for f in futures:
+                if not isinstance(f, Future):
+                    raise TypeError("Input must be a future, got %s" % f)
+                self.futures[f] += 1
+                self.loop.add_callback(self.track_future, f)
+
     def add(self, future):
         """ Add a future to the collection
 
         This future will emit from the iterator once it finishes
         """
-        if not isinstance(future, Future):
-            raise TypeError("Input must be a future, got %s" % str(future))
+        self.update((future,))
+
+    def is_empty(self):
+        """Return True if there no waiting futures, False otherwise"""
         with self.lock:
-            self.futures[future] += 1
-        self.loop.add_callback(self.track_future, future)
+            return not self.futures and self.queue.empty()
 
     def __iter__(self):
         return self
@@ -2656,9 +2656,8 @@ class AsCompleted(object):
         return self
 
     def __next__(self):
-        with self.lock:
-            if not self.futures and self.queue.empty():
-                raise StopIteration()
+        if self.is_empty():
+            raise StopIteration()
         return self.queue.get()
 
     @gen.coroutine
