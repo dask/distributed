@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 import gc
 from glob import glob
+import inspect
 import logging
 import os
 import shutil
@@ -23,6 +24,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
+from .compatibility import PY3
 from .config import config
 from .core import connect, rpc, CommClosedError
 from .metrics import time
@@ -497,6 +499,14 @@ def end_cluster(s, workers):
     s.stop()
 
 
+def iscoroutinefunction(f):
+    if gen.is_coroutine_function(f):
+        return True
+    if PY3 and inspect.iscoroutinefunction(f):
+        return True
+    return False
+
+
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
@@ -513,7 +523,9 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         end
     """
     def _(func):
-        cor = gen.coroutine(func)
+        cor = func
+        if not iscoroutinefunction(func):
+            cor = gen.coroutine(func)
 
         def test_func():
             with pristine_loop() as loop:
