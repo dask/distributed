@@ -126,6 +126,7 @@ class Security(object):
         """
         d = {}
         tls = self.get_tls_config_for_role(role)
+        # Ensure backwards compatibility (ssl.Purpose is Python 2.7.9+ only)
         purpose = ssl.Purpose.SERVER_AUTH if hasattr(ssl, "Purpose") else None
         d['ssl_context'] = self._get_tls_context(tls, purpose)
         d['require_encryption'] = self.require_encryption
@@ -138,6 +139,7 @@ class Security(object):
         """
         d = {}
         tls = self.get_tls_config_for_role(role)
+        # Ensure backwards compatibility (ssl.Purpose is Python 2.7.9+ only)
         purpose = ssl.Purpose.CLIENT_AUTH if hasattr(ssl, "Purpose") else None
         d['ssl_context'] = self._get_tls_context(tls, purpose)
         d['require_encryption'] = self.require_encryption
