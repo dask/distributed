@@ -398,6 +398,7 @@ class Client(Node):
         self.connection_args = self.security.get_connection_args('client')
         self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
+        self._set_as_default = set_as_default
 
         if loop is None:
             self._should_close_loop = None
@@ -433,7 +434,8 @@ class Client(Node):
         super(Client, self).__init__(connection_args=self.connection_args,
                                      io_loop=self.loop)
 
-        self.start(timeout=timeout, asynchronous=asynchronous)
+        self.start(timeout=timeout, asynchronous=asynchronous,
+                   set_as_default=set_as_default)
 
         from distributed.channels import ChannelClient
         ChannelClient(self)  # registers itself on construction
@@ -454,7 +456,7 @@ class Client(Node):
 
     __repr__ = __str__
 
-    def start(self, asynchronous=None, **kwargs):
+    def start(self, asynchronous=None, set_as_default=True, **kwargs):
         """ Start scheduler running in separate thread """
         if hasattr(self, '_loop_thread'):
             return
@@ -469,7 +471,8 @@ class Client(Node):
                 sleep(0.001)
         pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
         self.loop.add_callback(pc.start)
-        _set_global_client(self)
+        if self._set_as_default:
+            _set_global_client(self)
         if asynchronous:
             self._started = self._start(**kwargs)
         else:
@@ -588,7 +591,8 @@ class Client(Node):
         bcomm.start(comm)
         self.scheduler_comm = bcomm
 
-        _set_global_client(self)
+        if self._set_as_default:
+            _set_global_client(self)
         self.status = 'running'
 
         for msg in self._pending_msg_buffer:
@@ -2813,12 +2817,15 @@ def temp_default_client(c):
     c : Client
         This is what default_client() will return within the with-block.
     """
-    old_exec = default_client()
+    try:
+        old = default_client()
+    except ValueError:
+        old = None
     _set_global_client(c)
     try:
         yield
     finally:
-        _set_global_client(old_exec)
+        _set_global_client(old)
 
 
 def _shutdown_global_client():

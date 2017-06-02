@@ -3459,6 +3459,24 @@ def test_temp_client(s, a, b):
     yield f._shutdown()
 
 
+@gen_cluster(client=False)
+def test_temp_client_no_default(s, a, b):
+    c = yield Client((s.ip, s.port), asynchronous=True, set_as_default=False)
+
+    with temp_default_client(c):
+        assert default_client() is c
+
+    yield c._shutdown()
+
+
+@gen_cluster(client=False)
+def test_no_default_client(s, a, b):
+    assert not _get_global_client()
+    c = yield Client((s.ip, s.port), asynchronous=True, set_as_default=False)
+    assert not _get_global_client()
+    yield c._shutdown()
+
+
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 3, client=True)
 def test_persist_workers(e, s, a, b, c):
     L1 = [delayed(inc)(i) for i in range(4)]
