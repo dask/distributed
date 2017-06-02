@@ -69,3 +69,23 @@ def test_sync(loop):
             future2 = xx.get()
 
             assert future2.result() == 11
+
+
+@gen_cluster()
+def test_hold_futures(s, a, b):
+    c1 = yield Client(s.address)
+    future = c1.submit(lambda x: x + 1, 10)
+    q1 = yield Queue('q')
+    yield q1._put(future)
+    del q1
+    yield c1._shutdown()
+
+    yield gen.sleep(0.1)
+
+    c2 = yield Client(s.address)
+    q2 = yield Queue('q')
+    future2 = yield q2._get()
+    result = yield future2
+
+    assert result == 11
+    yield c2._shutdown()

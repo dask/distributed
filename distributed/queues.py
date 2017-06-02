@@ -10,7 +10,7 @@ import warnings
 from tornado import gen
 import tornado.queues
 
-from .client import Future, _get_global_client
+from .client import Future, _get_global_client, in_ioloop
 from .core import CommClosedError
 from .utils import tokey, log_errors, sync
 
@@ -101,7 +101,7 @@ class Queue(object):
         self.name = name or 'queue-' + uuid.uuid4().hex
         self._started = self.client.scheduler.queue_create(name=name,
                                                            maxsize=maxsize)
-        if self.client.loop._thread_ident != threading.get_ident():
+        if not in_ioloop():
             sync(self.client.loop, gen.coroutine(lambda: self._started))
 
     def __await__(self):
@@ -134,7 +134,7 @@ class Queue(object):
     def _get(self, timeout=None):
         d = yield self.client.scheduler.queue_get(timeout=timeout, name=self.name)
         if d['type'] == 'Future':
-            value = Future(d['value'], self.client)
+            value = Future(d['value'], self.client, inform=True)
             self.client._send_to_scheduler({'op': 'queue-future-release',
                                             'name': self.name,
                                             'key': d['value']})
