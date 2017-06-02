@@ -50,14 +50,14 @@ def test_submit(c, s, a, b):
     assert isinstance(x, Future)
     assert x.client is c
 
-    result = yield x._result()
+    result = yield x
     assert result == 11
     assert x.done()
 
     y = c.submit(inc, 20)
     z = c.submit(add, x, y)
 
-    result = yield z._result()
+    result = yield z
     assert result == 11 + 21
     s.validate_state()
 
@@ -69,23 +69,23 @@ def test_map(c, s, a, b):
     assert isdistinct(x.key for x in L1)
     assert all(isinstance(x, Future) for x in L1)
 
-    result = yield L1[0]._result()
+    result = yield L1[0]
     assert result == inc(0)
     assert len(s.tasks) == 5
 
     L2 = c.map(inc, L1)
 
-    result = yield L2[1]._result()
+    result = yield L2[1]
     assert result == inc(inc(1))
     assert len(s.tasks) == 10
     # assert L1[0].key in s.tasks[L2[0].key]
 
     total = c.submit(sum, L2)
-    result = yield total._result()
+    result = yield total
     assert result == sum(map(inc, map(inc, range(5))))
 
     L3 = c.map(add, L1, L2)
-    result = yield L3[1]._result()
+    result = yield L3[1]
     assert result == inc(1) + inc(inc(1))
 
     L4 = c.map(add, range(3), range(4))
@@ -187,15 +187,15 @@ def test_submit_naming(c, s, a, b):
 @gen_cluster(client=True)
 def test_exceptions(c, s, a, b):
     x = c.submit(div, 1, 2)
-    result = yield x._result()
+    result = yield x
     assert result == 1 / 2
 
     x = c.submit(div, 1, 0)
     with pytest.raises(ZeroDivisionError):
-        result = yield x._result()
+        result = yield x
 
     x = c.submit(div, 10, 2)  # continues to operate
-    result = yield x._result()
+    result = yield x
     assert result == 10 / 2
 
 
@@ -204,7 +204,7 @@ def test_gc(s, a, b):
     c = yield Client((s.ip, s.port))
 
     x = c.submit(inc, 10)
-    yield x._result()
+    yield x
 
     assert s.who_has[x.key]
 
@@ -411,7 +411,7 @@ def test_garbage_collection(c, s, a, b):
     z = c.submit(inc, y)
     y.__del__()
 
-    result = yield z._result()
+    result = yield z
     assert result == 3
 
     ykey = y.key
@@ -443,7 +443,7 @@ def test_garbage_collection_with_scatter(c, s, a, b):
 @gen_cluster(timeout=1000, client=True)
 def test_recompute_released_key(c, s, a, b):
     x = c.submit(inc, 100)
-    result1 = yield x._result()
+    result1 = yield x
     xkey = x.key
     del x
     import gc; gc.collect()
@@ -455,7 +455,7 @@ def test_recompute_released_key(c, s, a, b):
 
     x = c.submit(inc, 100)
     assert x.key in c.futures
-    result2 = yield x._result()
+    result2 = yield x
     assert result1 == result2
 
 
@@ -464,7 +464,7 @@ def test_recompute_released_key(c, s, a, b):
 def test_long_tasks_dont_trigger_timeout(c, s, a, b):
     from time import sleep
     x = c.submit(sleep, 3)
-    yield x._result()
+    yield x
 
 
 @pytest.mark.skip
@@ -488,7 +488,7 @@ def test_missing_data_heals(c, s, a, b):
 
     w = c.submit(add, y, z)
 
-    result = yield w._result()
+    result = yield w
     assert result == 3 + 4
 
 
@@ -637,7 +637,7 @@ def test_restrictions_get(c, s, a, b):
 def dont_test_bad_restrictions_raise_exception(c, s, a, b):
     z = c.submit(inc, 2, workers={'bad-address'})
     try:
-        yield z._result()
+        yield z
         assert False
     except ValueError as e:
         assert 'bad-address' in str(e)
@@ -679,17 +679,17 @@ def test_submit_quotes(c, s, a, b):
         return isinstance(x, list) and isinstance(z, list)
 
     x = c.submit(assert_list, [1, 2, 3])
-    result = yield x._result()
+    result = yield x
     assert result
 
     x = c.submit(assert_list, [1, 2, 3], z=[4, 5, 6])
-    result = yield x._result()
+    result = yield x
     assert result
 
     x = c.submit(inc, 1)
     y = c.submit(inc, 2)
     z = c.submit(assert_list, [x, y])
-    result = yield z._result()
+    result = yield z
     assert result
 
 
@@ -717,13 +717,13 @@ def test_two_consecutive_clients_share_results(s, a, b):
     c = yield Client((s.ip, s.port))
 
     x = c.submit(randint, 0, 1000, pure=True)
-    xx = yield x._result()
+    xx = yield x
 
     f = Client((s.ip, s.port))
     yield f
 
     y = f.submit(randint, 0, 1000, pure=True)
-    yy = yield y._result()
+    yy = yield y
 
     assert xx == yy
 
@@ -783,7 +783,7 @@ def test__scatter(c, s, a, b):
     assert xx == [10]
 
     z = c.submit(add, x, d['y'])  # submit works on Future
-    result = yield z._result()
+    result = yield z
     assert result == 10 + 20
     result = yield c._gather([z, x])
     assert result == [30, 10]
@@ -811,7 +811,7 @@ def test__scatter_types(c, s, a, b):
 def test__scatter_non_list(c, s, a, b):
     x = yield c._scatter(1)
     assert isinstance(x, Future)
-    result = yield x._result()
+    result = yield x
     assert result == 1
 
 
@@ -854,12 +854,12 @@ def test_exception_on_exception(c, s, a, b):
     y = c.submit(inc, x)
 
     with pytest.raises(ZeroDivisionError):
-        yield y._result()
+        yield y
 
     z = c.submit(inc, y)
 
     with pytest.raises(ZeroDivisionError):
-        yield z._result()
+        yield z
 
 
 @gen_cluster(client=True)
@@ -868,7 +868,7 @@ def test_nbytes(c, s, a, b):
     assert s.nbytes == {x.key: sizeof(1)}
 
     y = c.submit(inc, x)
-    yield y._result()
+    yield y
 
     assert s.nbytes == {x.key: sizeof(1),
                         y.key: sizeof(2)}
@@ -883,7 +883,7 @@ def test_nbytes_determines_worker(c, s, a, b):
     yield c._gather([x, y])
 
     z = c.submit(lambda x, y: None, x, y)
-    yield z._result()
+    yield z
     assert s.who_has[z.key] == {b.address}
 
 
@@ -894,7 +894,7 @@ def test_if_intermediates_clear_on_error(c, s, a, b):
     z = delayed(add, pure=True)(x, y)
     f = c.compute(z)
     with pytest.raises(ZeroDivisionError):
-        yield f._result()
+        yield f
     s.validate_state()
     assert not s.who_has
 
@@ -1139,7 +1139,7 @@ def test_upload_file(c, s, a, b):
                 yield c._upload_file(fn)
 
             x = c.submit(g, pure=False)
-            result = yield x._result()
+            result = yield x
             assert result == value
     finally:
         # Ensure that this test won't impact the others
@@ -1160,7 +1160,7 @@ def test_upload_file_zip(c, s, a, b):
                 yield c._upload_file('myfile.zip')
 
                 x = c.submit(g, pure=False)
-                result = yield x._result()
+                result = yield x
                 assert result == value
     finally:
         # Ensure that this test won't impact the others
@@ -1231,13 +1231,13 @@ def test_multiple_clients(s, a, b):
     y = b.submit(inc, 2)
     assert x.client is a
     assert y.client is b
-    xx = yield x._result()
-    yy = yield y._result()
+    xx = yield x
+    yy = yield y
     assert xx == 2
     assert yy == 3
     z = a.submit(add, x, y)
     assert z.client is a
-    zz = yield z._result()
+    zz = yield z
     assert zz == 5
 
     yield a._shutdown()
@@ -1303,7 +1303,7 @@ def test_remote_scatter_gather(c, s, a, b):
 def test_remote_submit_on_Future(c, s, a, b):
     x = c.submit(lambda x: x + 1, 1)
     y = c.submit(lambda x: x + 1, x)
-    result = yield y._result()
+    result = yield y
     assert result == 3
 
 
@@ -1325,9 +1325,9 @@ def test_client_with_scheduler(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(inc, 2)
     z = c.submit(add, x, y)
-    result = yield x._result()
+    result = yield x
     assert result == 1 + 1
-    result = yield z._result()
+    result = yield z
     assert result == 1 + 1 + 1 + 2
 
     A, B, C = yield c._scatter([1, 2, 3])
@@ -1343,12 +1343,12 @@ def test_client_with_scheduler(c, s, a, b):
 @gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], client=True)
 def test_allow_restrictions(c, s, a, b):
     x = c.submit(inc, 1, workers=a.ip)
-    yield x._result()
+    yield x
     assert s.who_has[x.key] == {a.address}
     assert not s.loose_restrictions
 
     x = c.submit(inc, 2, workers=a.ip, allow_other_workers=True)
-    yield x._result()
+    yield x
     assert s.who_has[x.key] == {a.address}
     assert x.key in s.loose_restrictions
 
@@ -1360,7 +1360,7 @@ def test_allow_restrictions(c, s, a, b):
     """
     x = c.submit(inc, 14, workers='127.0.0.3')
     with ignoring(gen.TimeoutError):
-        yield gen.with_timeout(timedelta(seconds=0.1), x._result())
+        yield gen.with_timeout(timedelta(seconds=0.1), x
         assert False
     assert not s.who_has[x.key]
     assert x.key not in s.loose_restrictions
@@ -1368,7 +1368,7 @@ def test_allow_restrictions(c, s, a, b):
 
     x = c.submit(inc, 15, workers='127.0.0.3', allow_other_workers=True)
 
-    yield x._result()
+    yield x
     assert s.who_has[x.key]
     assert x.key in s.loose_restrictions
 
@@ -1411,7 +1411,7 @@ def test_long_error(c, s, a, b):
     x = c.submit(bad, 10)
 
     try:
-        yield x._result()
+        yield x
     except ValueError as e:
         assert len(str(e)) < 100000
 
@@ -1433,7 +1433,7 @@ def test_map_on_futures_with_kwargs(c, s, a, b):
 
     future = c.submit(inc, 100)
     future2 = c.submit(f, future, y=200)
-    result = yield future2._result()
+    result = yield future2
     assert result == 100 + 1 + 200
 
 
@@ -1809,10 +1809,10 @@ def test__cancel(c, s, a, b):
 def test__cancel_tuple_key(c, s, a, b):
     x = c.submit(inc, 1, key=('x', 0, 1))
 
-    result = yield x._result()
+    result = yield x
     yield c._cancel(x)
     with pytest.raises(CancelledError):
-        yield x._result()
+        yield x
 
 
 @gen_cluster()
@@ -1835,11 +1835,11 @@ def test__cancel_multi_client(s, a, b):
         yield gen.sleep(0.01)
         assert time() < start + 5
 
-    out = yield y._result()
+    out = yield y
     assert out == 2
 
     with pytest.raises(CancelledError):
-        yield x._result()
+        yield x
 
     yield c._shutdown()
     yield f._shutdown()
@@ -1891,7 +1891,7 @@ def test_future_type(c, s, a, b):
 def test_traceback_clean(c, s, a, b):
     x = c.submit(div, 1, 0)
     try:
-        yield x._result()
+        yield x
     except Exception as e:
         f = e
         exc_type, exc_value, tb = sys.exc_info()
@@ -1918,7 +1918,7 @@ def test_map_queue(c, s, a, b):
 
     f = q_4.get()
     assert isinstance(f, Future)
-    result = yield f._result()
+    result = yield f
     assert result == (1 + 1) * 2
 
 
@@ -1940,7 +1940,7 @@ def test_map_iterator_with_return(c, s, a, b):
     try:
         while True:
             f = next(f1)
-            n = yield f._result()
+            n = yield f
             assert n == next(g1)
     except StopIteration as e:
         with pytest.raises(StopIteration) as exc_info:
@@ -1964,12 +1964,12 @@ def test_map_iterator(c, s, a, b):
     assert isinstance(f2, Iterator)
 
     future = next(f2)
-    result = yield future._result()
+    result = yield future
     assert result == (1 + 10) * 2
     futures = list(f2)
     results = []
     for f in futures:
-        r = yield f._result()
+        r = yield f
         results.append(r)
     assert results == [(2 + 20) * 2, (3 + 30) * 2]
 
@@ -1977,12 +1977,12 @@ def test_map_iterator(c, s, a, b):
     futures = c.map(lambda x: x, items)
     assert isinstance(futures, Iterator)
 
-    result = yield next(futures)._result()
+    result = yield next(futures)
     assert result == (0, 0)
     futures_l = list(futures)
     results = []
     for f in futures_l:
-        r = yield f._result()
+        r = yield f
         results.append(r)
     assert results == [(i, i) for i in range(1,10)]
 
@@ -2141,7 +2141,7 @@ def test_futures_of_cancelled_raises(c, s, a, b):
     yield c._cancel([x])
 
     with pytest.raises(CancelledError):
-        yield x._result()
+        yield x
 
     with pytest.raises(CancelledError):
         yield c.get({'x': (inc, x), 'y': (inc, 2)}, ['x', 'y'], sync=False)
@@ -2405,13 +2405,13 @@ def test_persist_get(c, s, a, b):
     result = yield c.get(xxyy3.dask, xxyy3._keys(), sync=False)
     assert result[0] == ((1+1) + (2+2)) + 10
 
-    result = yield c.compute(xxyy3)._result()
+    result = yield c.compute(xxyy3)
     assert result == ((1+1) + (2+2)) + 10
 
-    result = yield c.compute(xxyy3)._result()
+    result = yield c.compute(xxyy3)
     assert result == ((1+1) + (2+2)) + 10
 
-    result = yield c.compute(xxyy3)._result()
+    result = yield c.compute(xxyy3)
     assert result == ((1+1) + (2+2)) + 10
 
 
@@ -2462,7 +2462,7 @@ def test_badly_serialized_exceptions(c, s, a, b):
     x = c.submit(f)
 
     try:
-        result = yield x._result()
+        result = yield x
     except Exception as e:
         assert 'hello world' in str(e)
     else:
@@ -2542,7 +2542,7 @@ def test_rebalance_unprepared(c, s, a, b):
 @gen_cluster(client=True)
 def test_receive_lost_key(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.address])
-    result = yield x._result()
+    result = yield x
     yield a._close()
 
     start = time()
@@ -2556,7 +2556,7 @@ def test_receive_lost_key(c, s, a, b):
 @gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], client=True)
 def test_unrunnable_task_runs(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.ip])
-    result = yield x._result()
+    result = yield x
 
     yield a._close()
     start = time()
@@ -2576,7 +2576,7 @@ def test_unrunnable_task_runs(c, s, a, b):
         yield gen.sleep(0.01)
 
     assert x.key not in s.unrunnable
-    result = yield x._result()
+    result = yield x
     assert result == 2
     yield w._close()
 
@@ -2599,7 +2599,7 @@ def test_add_worker_after_tasks(c, s):
 def test_workers_register_indirect_data(c, s, a, b):
     [x] = yield c._scatter([1], workers=a.address)
     y = c.submit(inc, x, workers=b.ip)
-    yield y._result()
+    yield y
     assert b.data[x.key] == 1
     assert s.who_has[x.key] == {a.address, b.address}
     assert s.has_what[b.address] == {x.key, y.key}
@@ -2609,7 +2609,7 @@ def test_workers_register_indirect_data(c, s, a, b):
 @gen_cluster(client=True)
 def test_submit_on_cancelled_future(c, s, a, b):
     x = c.submit(inc, 1)
-    yield x._result()
+    yield x
 
     yield c._cancel(x)
 
@@ -2939,7 +2939,7 @@ def test_get_foo(c, s, a, b):
 def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 1)
     with pytest.raises(KilledWorker):
-        yield f._result()
+        yield f
 
 
 def test_get_processing_sync(loop):
@@ -3236,14 +3236,14 @@ def test_idempotence(s, a, b):
 
     # Submit
     x = c.submit(inc, 1)
-    yield x._result()
+    yield x
     log = list(s.transition_log)
 
     len_single_submit = len(log)  # see last assert
 
     y = f.submit(inc, 1)
     assert x.key == y.key
-    yield y._result()
+    yield y
     yield gen.sleep(0.1)
     log2 = list(s.transition_log)
     assert log == log2
@@ -3432,13 +3432,13 @@ def test_serialize_future(s, a, b):
     f = yield Client((s.ip, s.port))
 
     future = c.submit(lambda: 1)
-    result = yield future._result()
+    result = yield future
 
     with temp_default_client(f):
         future2 = pickle.loads(pickle.dumps(future))
         assert future2.client is f
         assert tokey(future2.key) in f.futures
-        result2 = yield future2._result()
+        result2 = yield future2
         assert result == result2
 
     yield c._shutdown()
@@ -3662,8 +3662,8 @@ def test_normalize_collection_dask_array(c, s, a, b):
     for k, v in yy.dask.items():
         assert zz.dask[k].key == v.key
 
-    result1 = yield c.compute(z)._result()
-    result2 = yield c.compute(zz)._result()
+    result1 = yield c.compute(z)
+    result2 = yield c.compute(zz)
     assert result1 == result2
 
 @gen_cluster(client=True)
@@ -3681,7 +3681,7 @@ def test_auto_normalize_collection(c, s, a, b):
 
         start = time()
         future = c.compute(y.sum())
-        yield future._result()
+        yield future
         end = time()
         assert end - start < 1
 
@@ -3801,7 +3801,7 @@ def test_submit_list_kwargs(c, s, a, b):
         return sum(L)
 
     future = c.submit(f, L=futures)
-    result = yield future._result()
+    result = yield future
     assert result == 1 + 2 + 3
 
 
@@ -3991,7 +3991,7 @@ def test_robust_undeserializable(c, s, a, b):
 
     future = c.submit(identity, Foo())
     with pytest.raises(MyException):
-        yield future._result()
+        yield future
 
     futures = c.map(inc, range(10))
     results = yield c._gather(futures)
@@ -4012,7 +4012,7 @@ def test_robust_undeserializable_function(c, s, a, b):
 
     future = c.submit(Foo(), 1)
     with pytest.raises(MyException) as e:
-        yield future._result()
+        yield future
 
     futures = c.map(inc, range(10))
     results = yield c._gather(futures)

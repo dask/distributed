@@ -159,7 +159,7 @@ def test_publish_bag(s, a, b):
     assert set(result.dask.keys()) == set(bagp.dask.keys())
     assert {f.key for f in result.dask.values()} == {f.key for f in bagp.dask.values()}
 
-    out = yield f.compute(result)._result()
+    out = yield f.compute(result)
     assert out == [0, 1, 2]
     yield c._shutdown()
     yield f._shutdown()
