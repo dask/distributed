@@ -15,7 +15,6 @@ import logging
 from numbers import Number
 import os
 import sys
-import threading
 from time import sleep
 import uuid
 from threading import Thread, Lock
@@ -38,7 +37,7 @@ from tornado.queues import Queue
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .cfexecutor import ClientExecutor
-from .compatibility import Queue as pyQueue, Empty, isqueue
+from .compatibility import Queue as pyQueue, Empty, isqueue, get_thread_identity
 from .core import connect, rpc, clean_exception, CommClosedError
 from .node import Node
 from .protocol import to_serialize
@@ -329,6 +328,10 @@ def done_callback(future, callback):
 def normalize_future(f):
     return [f.key, type(f)]
 
+def in_ioloop():
+    """ Are we running within the current IOLoop? """
+    return IOLoop.current()._running and IOLoop.current()._thread_ident == get_thread_identity()
+
 
 class AllExit(Exception):
     """Custom exception class to exit All(...) early.
@@ -395,7 +398,7 @@ class Client(Node):
 
         if loop is None:
             self._should_close_loop = None
-            if IOLoop.current()._running and IOLoop.current()._thread_ident == threading.get_ident():
+            if in_ioloop():
                 self.loop = IOLoop.current()
             else:
                 self.loop = IOLoop()
@@ -464,7 +467,7 @@ class Client(Node):
         pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
         self.loop.add_callback(pc.start)
         _set_global_client(self)
-        if self.loop._thread_ident == threading.get_ident():
+        if in_ioloop():
             self._started = self._start(**kwargs)
         else:
             sync(self.loop, self._start, **kwargs)
