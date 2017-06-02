@@ -1,18 +1,14 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import deque, defaultdict
+from collections import defaultdict
 import logging
-from time import sleep
-import threading
 import uuid
-import warnings
 
 from tornado import gen
 import tornado.queues
 
 from .client import Future, _get_global_client, in_ioloop
-from .core import CommClosedError
-from .utils import tokey, log_errors, sync
+from .utils import tokey, sync
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +117,7 @@ class Queue(object):
             yield self.client.scheduler.queue_put(data=value,
                                                   timeout=timeout,
                                                   name=self.name)
+
     def put(self, value, timeout=None):
         return sync(self.client.loop, self._put, value, timeout=timeout)
 
