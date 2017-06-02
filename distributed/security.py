@@ -123,7 +123,8 @@ class Security(object):
         """
         d = {}
         tls = self.get_tls_config_for_role(role)
-        d['ssl_context'] = self._get_tls_context(tls, ssl.Purpose.SERVER_AUTH)
+        purpose = ssl.Purpose.SERVER_AUTH if hasattr(ssl, "Purpose") else None
+        d['ssl_context'] = self._get_tls_context(tls, purpose)
         d['require_encryption'] = self.require_encryption
         return d
 
@@ -134,6 +135,7 @@ class Security(object):
         """
         d = {}
         tls = self.get_tls_config_for_role(role)
-        d['ssl_context'] = self._get_tls_context(tls, ssl.Purpose.CLIENT_AUTH)
+        purpose = ssl.Purpose.CLIENT_AUTH if hasattr(ssl, "Purpose") else None
+        d['ssl_context'] = self._get_tls_context(tls, purpose)
         d['require_encryption'] = self.require_encryption
         return d
