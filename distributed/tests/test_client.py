@@ -1667,15 +1667,19 @@ def test_multi_client(s, a, b):
     assert not s.tasks
 
 
-def long_running_client_connection(ip, port):
-    c = Client((ip, port))
-    x = c.submit(lambda x: x + 1, 10)
-    x.result()
-    sleep(100)
+def long_running_client_connection(address):
+    from distributed.utils_test import pristine_loop
+    with pristine_loop():
+        c = Client(address)
+        x = c.submit(lambda x: x + 1, 10)
+        x.result()
+        sleep(100)
+
 
 @gen_cluster()
 def test_cleanup_after_broken_client_connection(s, a, b):
-    proc = mp_context.Process(target=long_running_client_connection, args=(s.ip, s.port))
+    proc = mp_context.Process(target=long_running_client_connection,
+                              args=(s.address,))
     proc.daemon = True
     proc.start()
 
