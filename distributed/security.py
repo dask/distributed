@@ -108,7 +108,7 @@ class Security(object):
             try:
                 ctx = ssl.create_default_context(purpose=purpose,
                                                  cafile=tls['ca_file'])
-            except AssertionError:
+            except AttributeError:
                 raise RuntimeError("TLS functionality requires Python 2.7.9+")
             ctx.verify_mode = ssl.CERT_REQUIRED
             # We expect a dedicated CA for the cluster and people using
