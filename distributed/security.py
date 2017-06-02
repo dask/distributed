@@ -105,8 +105,11 @@ class Security(object):
 
     def _get_tls_context(self, tls, purpose):
         if tls.get('ca_file') and tls.get('cert'):
-            ctx = ssl.create_default_context(purpose=purpose,
-                                             cafile=tls['ca_file'])
+            try:
+                ctx = ssl.create_default_context(purpose=purpose,
+                                                 cafile=tls['ca_file'])
+            except AssertionError:
+                raise RuntimeError("TLS functionality requires Python 2.7.9+")
             ctx.verify_mode = ssl.CERT_REQUIRED
             # We expect a dedicated CA for the cluster and people using
             # IP addresses rather than hostnames
