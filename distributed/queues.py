@@ -7,7 +7,7 @@ import uuid
 from tornado import gen
 import tornado.queues
 
-from .client import Future, _get_global_client, in_ioloop
+from .client import Future, _get_global_client
 from .utils import tokey, sync
 
 logger = logging.getLogger(__name__)
@@ -95,10 +95,13 @@ class Queue(object):
     def __init__(self, name=None, client=None, maxsize=0):
         self.client = client or _get_global_client()
         self.name = name or 'queue-' + uuid.uuid4().hex
-        self._started = self.client.scheduler.queue_create(name=name,
-                                                           maxsize=maxsize)
-        if not in_ioloop():
-            sync(self.client.loop, gen.coroutine(lambda: self._started))
+        if self.client._asynchronous:
+            self._started = self.client.scheduler.queue_create(name=name,
+                                                               maxsize=maxsize)
+        else:
+            sync(self.client.loop, self.client.scheduler.queue_create,
+                 name=name, maxsize=maxsize)
+            self._started = gen.moment
 
     def __await__(self):
         @gen.coroutine

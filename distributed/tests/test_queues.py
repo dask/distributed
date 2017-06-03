@@ -73,7 +73,7 @@ def test_sync(loop):
 
 @gen_cluster()
 def test_hold_futures(s, a, b):
-    c1 = yield Client(s.address)
+    c1 = yield Client(s.address, asynchronous=True)
     future = c1.submit(lambda x: x + 1, 10)
     q1 = yield Queue('q')
     yield q1._put(future)
@@ -82,7 +82,7 @@ def test_hold_futures(s, a, b):
 
     yield gen.sleep(0.1)
 
-    c2 = yield Client(s.address)
+    c2 = yield Client(s.address, asynchronous=True)
     q2 = yield Queue('q')
     future2 = yield q2._get()
     result = yield future2

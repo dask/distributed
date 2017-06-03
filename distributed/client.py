@@ -397,6 +397,7 @@ class Client(Node):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args('client')
         self._connecting_to_scheduler = False
+        self._asynchronous = asynchronous
 
         if loop is None:
             self._should_close_loop = None
