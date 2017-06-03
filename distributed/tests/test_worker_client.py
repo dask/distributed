@@ -1,13 +1,15 @@
 from __future__ import print_function, division, absolute_import
 
 import random
+from time import sleep
 
 import dask
 from dask import delayed
-from time import sleep
+import pytest
 from tornado import gen
 
 from distributed import worker_client, Client, as_completed
+from distributed.client import default_client
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, double, cluster, loop
 
@@ -26,6 +28,8 @@ def test_submit_from_worker(c, s, a, b):
 
     assert xx == 10 + 1 + (10 + 1) * 2
     assert yy == 20 + 1 + (20 + 1) * 2
+
+    assert default_client() is c
 
     assert len(s.transition_log) > 10
     assert len(s.wants_what) == 1
@@ -109,6 +113,7 @@ def test_sync(loop):
         sub_tasks = [delayed(double)(i) for i in range(100)]
 
         with worker_client() as lc:
+            assert default_client() is lc
             futures = lc.compute(sub_tasks)
             for f in as_completed(futures):
                 result += f.result()
@@ -169,18 +174,23 @@ def test_client_executor(c, s, a, b):
     assert result == 30 * 29
 
 
-def test_dont_override_default_get(loop):
+@pytest.mark.parametrize('processes', [
+    True,
+    pytest.mark.xfail(reason='dask._globals is not per thread')(False)
+])
+def test_dont_override_default_get(loop, processes):
     import dask.bag as db
     def f(x):
         with worker_client() as c:
+            assert default_client() is c
             return True
 
     b = db.from_sequence([1, 2])
     b2 = b.map(f)
 
-    with Client(loop=loop, processes=False, set_as_default=True) as c:
+    with Client(loop=loop, processes=processes) as c:
         assert dask.context._globals['get'] == c.get
         for i in range(2):
             b2.compute()
-
-        assert dask.context._globals['get'] == c.get
+            assert dask.context._globals['get'] == c.get
+            assert default_client() is c

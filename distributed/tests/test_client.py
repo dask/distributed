@@ -844,7 +844,8 @@ def test_global_clients(loop):
                 assert default_client(c) is c
                 assert default_client(f) is f
 
-    assert _get_global_client() is None
+            assert _get_global_client() is c
+        assert _get_global_client() is None
 
 
 @gen_cluster(client=True)
