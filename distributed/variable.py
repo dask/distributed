@@ -7,7 +7,7 @@ import uuid
 from tornado import gen
 import tornado.locks
 
-from .client import Future, _get_global_client
+from .client import Future, _get_global_client, Client
 from .metrics import time
 from .utils import tokey, sync, log_errors
 
@@ -154,3 +154,13 @@ class Variable(object):
         if self.client.status == 'running':  # TODO: can leave zombie futures
             self.client._send_to_scheduler({'op': 'variable_delete',
                                             'name': self.name})
+
+    def __getstate__(self):
+        return (self.name, self.client.scheduler.address)
+
+    def __setstate__(self, state):
+        name, address = state
+        client = _get_global_client()
+        if client is None or client.scheduler.address != address:
+            client = Client(address, set_as_default=False)
+        self.__init__(name=name, client=client)

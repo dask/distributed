@@ -112,3 +112,15 @@ def test_cleanup(c, s, a, b):
     assert future.key == x_key
     result = yield future
     assert result == 11
+
+
+def test_pickleable(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address']) as c:
+            v = Variable('v')
+
+            def f(x):
+                v.set(x + 1)
+
+            c.submit(f, 10).result()
+            assert v.get() == 11
