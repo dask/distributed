@@ -105,6 +105,11 @@ class Variable(object):
     with a single mutable variable.  All metadata is sequentialized through the
     scheduler.  Race conditions can occur.
 
+    Values must be either Futures or msgpack-encodable data (ints, lists,
+    strings, etc..)  All data will be kept and sent through the scheduler, so
+    it is wise not to send too much.  If you want to share a large amount of
+    data then ``scatter`` it and share the future instead.
+
     Examples
     --------
     >>> from dask.distributed import Client, Variable # doctest: +SKIP
@@ -130,6 +135,13 @@ class Variable(object):
                                                      name=self.name)
 
     def set(self, value, timeout=None):
+        """ Set the value of this variable
+
+        Parameters
+        ----------
+        value: Future or object
+            Must be either a Future or a msgpack-encodable value
+        """
         return sync(self.client.loop, self._set, value)
 
     @gen.coroutine
@@ -148,9 +160,14 @@ class Variable(object):
         raise gen.Return(value)
 
     def get(self, timeout=None):
+        """ Get the value of this variable """
         return sync(self.client.loop, self._get, timeout=timeout)
 
     def delete(self):
+        """ Delete this variable
+
+        Caution, this affects all clients currently pointing to this variable.
+        """
         if self.client.status == 'running':  # TODO: can leave zombie futures
             self.client._send_to_scheduler({'op': 'variable_delete',
                                             'name': self.name})
