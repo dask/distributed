@@ -29,7 +29,7 @@ def test_variable(c, s, a, b):
     yield gen.sleep(0.1)
     assert s.task_state  # future still present
 
-    yield x.delete()
+    x.delete()
 
     start = time()
     while s.task_state:
