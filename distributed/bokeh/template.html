@@ -3,8 +3,6 @@
   <head>
     <meta charset="utf-8">
     <title>Dask - Status dashboard</title>
-    <link href="https://fonts.googleapis.com/css?family=Julius+Sans+One" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css?family=Libre+Baskerville" rel="stylesheet">
     {{ bokeh_css }}
     {{ bokeh_js }}
     <style>
@@ -15,6 +13,7 @@
         background: #FAFAFA;
       }
       body {
+        min-height: 100%;
         margin: 0 4%;
         padding: 20px;
         border-left:  1px solid #F0F0F0;
@@ -24,17 +23,26 @@
       @media only screen and (min-width: 90.063em) and (max-width: 120em) {
         /* min-width 1441px and max-width 1920px */
         body {
-          margin: 0 12%;
+          margin: 0 20%;
         }
       }
       @media only screen and (min-width: 120.063em) {
         /* min-width 1921px */
         body {
-          margin: 0 20%;
+          margin: 0 30%;
         }
       }
       .dashboard {
         clear: both;
+      }
+      .bk-plot-layout:after {
+        clear: both;
+        display: block;
+        height: 0;
+        overflow: hidden;
+        visibility: hidden;
+        content: ".";
+        font-size: 0;
       }
       .header {
         width: 100;
