@@ -38,7 +38,7 @@ class VariableExtension(object):
 
         self.scheduler.extensions['queues'] = self
 
-    def set(self, stream=None, name=None, key=None, data=None, client=None, timeout=None):
+    def set(self, stream=None, name=None, key=None, data=None, client=None):
         if key is not None:
             record = {'type': 'Future', 'value': key}
             self.scheduler.client_desires_keys(keys=[key], client='variable-%s' % name)
@@ -134,7 +134,7 @@ class Variable(object):
             yield self.client.scheduler.variable_set(data=value,
                                                      name=self.name)
 
-    def set(self, value, timeout=None):
+    def set(self, value):
         """ Set the value of this variable
 
         Parameters
