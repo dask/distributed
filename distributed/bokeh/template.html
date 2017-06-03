@@ -3,17 +3,35 @@
   <head>
     <meta charset="utf-8">
     <title>Dask - Status dashboard</title>
+    <link href="https://fonts.googleapis.com/css?family=Julius+Sans+One" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css?family=Libre+Baskerville" rel="stylesheet">
     {{ bokeh_css }}
     {{ bokeh_js }}
     <style>
+      @import url("https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,700");
       html {
         width: 100%;
         height: 100%;
+        background: #FAFAFA;
       }
       body {
-        width: 90%;
-        height: 100%;
-        margin: auto;
+        margin: 0 4%;
+        padding: 20px;
+        border-left:  1px solid #F0F0F0;
+        border-right: 1px solid #F0F0F0;
+        background: #FFF;
+      }
+      @media only screen and (min-width: 90.063em) and (max-width: 120em) {
+        /* min-width 1441px and max-width 1920px */
+        body {
+          margin: 0 12%;
+        }
+      }
+      @media only screen and (min-width: 120.063em) {
+        /* min-width 1921px */
+        body {
+          margin: 0 20%;
+        }
       }
       .dashboard {
         width: 100%;
@@ -25,7 +43,7 @@
         position: relative;
       }
       .header h1 {
-        font-family: 'Julius Sans One', sans-serif;
+        font-family: 'Source Sans Pro', sans-serif;
         font-size: 18px;
         text-transform: uppercase;
         color: #2e484c;
@@ -33,7 +51,7 @@
         float: left;
       }
       .header p {
-        font: "Libre Baskerville", sans-serif;
+        font-family: 'Source Sans Pro', sans-serif;
         clear: both;
         float: left;
         max-width: 60%;
@@ -45,6 +63,20 @@
         right: 0;
         z-index: 1000;
       }
+      /*
+      a {
+        color: #1f5396;
+        text-decoration: none;
+      }
+      a:hover,
+      a:focus {
+        color: #123057;
+        text-decoration: underline;
+      }
+      a:focus {
+        outline: 5px auto -webkit-focus-ring-color;
+        outline-offset: -2px;
+      }*/
       .bk-root .bk-toolbar-box .bk-toolbar-right {
         top: 4px;
         right: 4px;
@@ -56,11 +88,11 @@
       <img src="https://dask.readthedocs.io/en/latest/_images/dask_horizontal.svg">
       <p>
         Dask
-        --
+        &mdash;
         <a href="https://dask.pydata.org/en/latest/">Algorithm Docs</a>
-        --
+        &mdash;
         <a href="https://distributed.readthedocs.io/en/latest/">Scheduler Docs</a>
-        --
+        &mdash;
         <a href="/">Diagnostic Pages</a>
       </p>
     </div>
