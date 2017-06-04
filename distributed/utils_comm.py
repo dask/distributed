@@ -11,7 +11,7 @@ from tornado.gen import Return
 from dask.base import tokenize
 from toolz import merge, concat, groupby, drop
 
-from .core import coerce_to_address
+from .core import coerce_to_address, rpc
 from .utils import All, tokey
 from .protocol.pickle import dumps
 
@@ -100,7 +100,7 @@ _round_robin_counter = [0]
 
 
 @gen.coroutine
-def scatter_to_workers(ncores, data, rpc, report=True, serialize=True):
+def scatter_to_workers(ncores, data, rpc=rpc, report=True, serialize=True):
     """ Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on

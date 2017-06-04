@@ -35,7 +35,8 @@ from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.queues import Queue
 
 from .batched import BatchedSend
-from .utils_comm import WrappedKey, unpack_remotedata, pack_data
+from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
+                         scatter_to_workers)
 from .cfexecutor import ClientExecutor
 from .compatibility import Queue as pyQueue, Empty, isqueue, get_thread_identity
 from .core import connect, rpc, clean_exception, CommClosedError
@@ -1139,7 +1140,7 @@ class Client(Node):
             return sync(self.loop, self._gather, futures, errors=errors)
 
     @gen.coroutine
-    def _scatter(self, data, workers=None, broadcast=False):
+    def _scatter(self, data, workers=None, broadcast=False, direct=False):
         if isinstance(workers, six.string_types):
             workers = [workers]
         if isinstance(data, dict) and not all(isinstance(k, (bytes, unicode))
@@ -1165,13 +1166,27 @@ class Client(Node):
 
         data2 = valmap(to_serialize, data)
         types = valmap(type, data)
+        if direct:
+            ncores = yield self.scheduler.ncores(workers=workers)
+            if not ncores:
+                raise ValueError("No valid workers")
 
-        keys = yield self.scheduler.scatter(data=data2, workers=workers,
+            _, who_has, nbytes = yield scatter_to_workers(ncores, data,
+                                                          report=False,
+                                                          serialize=False)
+
+            yield self.scheduler.update_data(who_has=who_has, nbytes=nbytes)
+        else:
+            yield self.scheduler.scatter(data=data2, workers=workers,
                                             client=self.id,
                                             broadcast=broadcast)
-        out = {k: self._Future(k, self) for k in keys}
+
+        out = {k: self._Future(k, self) for k in data2}
         for key, typ in types.items():
             self.futures[key].finish(type=typ)
+
+        if direct and broadcast:
+            yield self._replicate(list(out.values()), workers=workers)
 
         if issubclass(input_type, (list, tuple, set, frozenset)):
             out = input_type(out[k] for k in names)
@@ -1179,7 +1194,6 @@ class Client(Node):
         if unpack:
             assert len(out) == 1
             out = list(out.values())[0]
-
         raise gen.Return(out)
 
     def _threaded_scatter(self, q_or_i, qout, **kwargs):

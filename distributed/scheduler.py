@@ -1403,7 +1403,7 @@ class Scheduler(ServerNode):
 
     @gen.coroutine
     def scatter(self, comm=None, data=None, workers=None, client=None,
-            broadcast=False, timeout=2):
+                broadcast=False, timeout=2):
         """ Send data out to workers
 
         See also
