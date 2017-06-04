@@ -1,19 +1,16 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import Iterable, defaultdict
+from collections import defaultdict
 from itertools import cycle
 import random
-import uuid
 
 from tornado import gen
 from tornado.gen import Return
 
-from dask.base import tokenize
 from toolz import merge, concat, groupby, drop
 
-from .core import coerce_to_address, rpc
+from .core import rpc
 from .utils import All, tokey
-from .protocol.pickle import dumps
 
 
 no_default = '__no_default__'
