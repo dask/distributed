@@ -843,6 +843,16 @@ def test_scatter_tokenize_local(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test_scatter_singletons(c, s, a, b):
+    np = pytest.importorskip('numpy')
+    pd = pytest.importorskip('pandas')
+    for x in [1, np.ones(5), pd.DataFrame({'x': [1, 2, 3]})]:
+        future = yield c._scatter(x)
+        result = yield future
+        assert str(result) == str(x)
+
+
+@gen_cluster(client=True)
 def test_get_releases_data(c, s, a, b):
     [x] = yield c.get({'x': (inc, 1)}, ['x'], sync=False)
     import gc; gc.collect()

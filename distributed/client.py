@@ -1153,12 +1153,14 @@ class Client(Node):
         input_type = type(data)
         names = False
         unpack = False
-        if not isinstance(data, dict) and  isinstance(data, (Iterable, Iterator)):
+        if isinstance(data, Iterator):
+            data = list(data)
+        if isinstance(data, (set, frozenset)):
             data = list(data)
         if not isinstance(data, (dict, list, tuple, set, frozenset)):
             unpack = True
             data = [data]
-        if isinstance(data, list):
+        if isinstance(data, (list, tuple)):
             names = list(map(tokenize, data))
             data = dict(zip(names, data))
 
