@@ -1108,6 +1108,15 @@ def test_scatter_direct(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test_scatter_direct_numpy(c, s, a, b):
+    np = pytest.importorskip('numpy')
+    x = np.ones(5)
+    future = yield c._scatter(x, direct=True)
+    result = yield future
+    assert np.allclose(x, result)
+
+
+@gen_cluster(client=True)
 def test_scatter_direct_broadcast(c, s, a, b):
     future2 = yield c._scatter(456, direct=True, broadcast=True)
     assert future2.key in a.data

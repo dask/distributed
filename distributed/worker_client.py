@@ -79,7 +79,7 @@ class WorkerClient(Client):
         sync(loop, apply, Client.__init__, (self,) + args, kwargs)
 
     @gen.coroutine
-    def _scatter(self, data, workers=None, broadcast=False):
+    def _scatter(self, data, workers=None, broadcast=False, direct=None):
         """ Scatter data to local data dictionary
 
         Rather than send data out to the cluster we keep data local.  However

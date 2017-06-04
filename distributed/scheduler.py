@@ -1426,8 +1426,7 @@ class Scheduler(ServerNode):
 
         keys, who_has, nbytes = yield scatter_to_workers(ncores, data,
                                                          rpc=self.rpc,
-                                                         report=False,
-                                                         serialize=False)
+                                                         report=False)
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
