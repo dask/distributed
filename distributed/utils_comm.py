@@ -109,20 +109,11 @@ def scatter_to_workers(ncores, data, rpc, report=True, serialize=True):
 
     See scatter for parameter docstring
     """
-    if isinstance(ncores, Iterable) and not isinstance(ncores, dict):
-        k = len(data) // len(ncores)
-        ncores = {coerce_to_address(worker): k for worker in ncores}
+    assert isinstance(ncores, dict)
+    assert isinstance(data, dict)
 
     workers = list(concat([w] * nc for w, nc in ncores.items()))
-    if isinstance(data, dict):
-        names, data = list(zip(*data.items()))
-    else:
-        names = []
-        for x in data:
-            try:
-                names.append(tokenize(x))
-            except:
-                names.append(str(uuid.uuid1()))
+    names, data = list(zip(*data.items()))
 
     worker_iter = drop(_round_robin_counter[0] % len(workers), cycle(workers))
     _round_robin_counter[0] += len(data)
@@ -130,7 +121,7 @@ def scatter_to_workers(ncores, data, rpc, report=True, serialize=True):
     L = list(zip(worker_iter, names, data))
     d = groupby(0, L)
     d = {worker: {key: dumps(value) if serialize else value
-                   for _, key, value in v}
+                  for _, key, value in v}
           for worker, v in d.items()}
 
     rpcs = {addr: rpc(addr) for addr in d}
