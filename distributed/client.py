@@ -1219,7 +1219,7 @@ class Client(Node):
             for future in futures:
                 qout.put(future)
 
-    def scatter(self, data, workers=None, broadcast=False, maxsize=0):
+    def scatter(self, data, workers=None, broadcast=False, direct=False, maxsize=0):
         """ Scatter data into distributed memory
 
         This moves data from the local client process into the workers of the
@@ -1237,6 +1237,10 @@ class Client(Node):
         broadcast: bool (defaults to False)
             Whether to send each data element to all workers.
             By default we round-robin based on number of cores.
+        direct: bool (defaults to False)
+            Send data directly to workers, bypassing the central scheduler
+            This avoids burdening the scheduler but assumes that the client is
+            able to talk directly with the workers.
         maxsize: int (optional)
             Maximum size of queue if using queues, 0 implies infinite
 
@@ -1294,7 +1298,7 @@ class Client(Node):
                 return queue_to_iterator(qout)
         else:
             return sync(self.loop, self._scatter, data, workers=workers,
-                        broadcast=broadcast)
+                        broadcast=broadcast, direct=direct)
 
     @gen.coroutine
     def _cancel(self, futures):

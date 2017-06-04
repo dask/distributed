@@ -1150,6 +1150,14 @@ def test_scatter_direct_spread_evenly(c, s, a, b):
     assert a.data and b.data
 
 
+@pytest.mark.parametrize('direct', [True, False])
+@pytest.mark.parametrize('broadcast', [True, False])
+def test_scatter_sync(loop, direct, broadcast):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            futures = c.scatter([1, 2, 3], direct=direct, broadcast=broadcast)
+
+
 @gen_cluster(client=True)
 def test_many_submits_spread_evenly(c, s, a, b):
     L = [c.submit(inc, i) for i in range(10)]
