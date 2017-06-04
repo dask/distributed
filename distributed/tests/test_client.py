@@ -1152,11 +1152,14 @@ def test_scatter_direct_empty(c, s):
         yield c._scatter(123, direct=True)
 
 
-@gen_cluster(client=True)
-def test_scatter_direct_spread_evenly(c, s, a, b):
-    x = yield c._scatter(123, direct=True)
-    y = yield c._scatter(456, direct=True)
-    assert a.data and b.data
+@gen_cluster(client=True, timeout=None, ncores=[('127.0.0.1', 1)] * 5)
+def test_scatter_direct_spread_evenly(c, s, *workers):
+    futures = []
+    for i in range(10):
+        future = yield c._scatter(i, direct=True)
+        futures.append(future)
+
+    assert all(w.data for w in workers)
 
 
 @pytest.mark.parametrize('direct', [True, False])
