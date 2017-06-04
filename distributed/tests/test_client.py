@@ -824,6 +824,25 @@ def test_scatter_hash(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test_scatter_tokenize_local(c, s, a, b):
+    from dask.base import normalize_token
+    class MyObj(object):
+        pass
+
+    L = []
+
+    @normalize_token.register(MyObj)
+    def f(x):
+        L.append(x)
+        return 'x'
+
+    obj = MyObj()
+
+    future = yield c._scatter(obj)
+    assert L and L[0] is obj
+
+
+@gen_cluster(client=True)
 def test_get_releases_data(c, s, a, b):
     [x] = yield c.get({'x': (inc, 1)}, ['x'], sync=False)
     import gc; gc.collect()

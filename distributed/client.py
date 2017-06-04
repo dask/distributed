@@ -1147,44 +1147,38 @@ class Client(Node):
             d = yield self._scatter(keymap(tokey, data), workers, broadcast)
             raise gen.Return({k: d[tokey(k)] for k in data})
 
+        if isinstance(data, type(range(0))):
+            data = list(data)
+        input_type = type(data)
+        names = False
         unpack = False
-        if isinstance(data, dict):
-            data2 = valmap(to_serialize, data)
-            types = valmap(type, data)
-        elif isinstance(data, (list, tuple, set, frozenset)):
-            data2 = list(map(to_serialize, data))
-            types = list(map(type, data))
-        elif isinstance(data, (Iterable, Iterator)):
-            data2 = list(map(to_serialize, data))
-            types = list(map(type, data))
-        else:
-            data2 = [to_serialize(data)]
-            types = [type(data)]
+        if not isinstance(data, dict) and  isinstance(data, (Iterable, Iterator)):
+            data = list(data)
+        if not isinstance(data, (dict, list, tuple, set, frozenset)):
             unpack = True
+            data = [data]
+        if isinstance(data, list):
+            names = list(map(tokenize, data))
+            data = dict(zip(names, data))
+
+        assert isinstance(data, dict)
+
+        data2 = valmap(to_serialize, data)
+        types = valmap(type, data)
+
         keys = yield self.scheduler.scatter(data=data2, workers=workers,
                                             client=self.id,
                                             broadcast=broadcast)
-        if isinstance(data, dict):
-            out = {k: self._Future(k, self) for k in keys}
-        elif isinstance(data, (tuple, list, set, frozenset)):
-            out = type(data)([self._Future(k, self) for k in keys])
-        elif isinstance(data, (Iterable, Iterator)):
-            out = [self._Future(k, self) for k in keys]
-        else:
-            out = [self._Future(k, self) for k in keys]
+        out = {k: self._Future(k, self) for k in keys}
+        for key, typ in types.items():
+            self.futures[key].finish(type=typ)
 
-        for key in keys:
-            self.futures[key].finish(type=None)
-
-        if isinstance(types, list):
-            for key, typ in zip(keys, types):
-                self.futures[key].type = typ
-        elif isinstance(types, dict):
-            for key in keys:
-                self.futures[key].type = types[key]
+        if issubclass(input_type, (list, tuple, set, frozenset)):
+            out = input_type(out[k] for k in names)
 
         if unpack:
-            out = out[0]
+            assert len(out) == 1
+            out = list(out.values())[0]
 
         raise gen.Return(out)
 

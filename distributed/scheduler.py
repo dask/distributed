@@ -1422,6 +1422,8 @@ class Scheduler(ServerNode):
             workers = [self.coerce_address(w) for w in workers]
             ncores = {w: self.ncores[w] for w in workers}
 
+        assert isinstance(data, dict)
+
         keys, who_has, nbytes = yield scatter_to_workers(ncores, data,
                                                          rpc=self.rpc,
                                                          report=False,
