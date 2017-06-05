@@ -136,7 +136,7 @@ class WorkerClient(Client):
             raise gen.Return(out)
 
     @gen.coroutine
-    def _gather(self, futures, errors='raise'):
+    def _gather(self, futures, errors='raise', direct=False):
         """
 
         Exactly like Client._gather, but get data directly from the local
@@ -167,5 +167,6 @@ class WorkerClient(Client):
         if not futures3:
             raise gen.Return(futures4)
 
-        result = yield Client._gather(self, futures4, errors=errors)
+        result = yield Client._gather(self, futures4, errors=errors,
+                                      direct=True)
         raise gen.Return(result)

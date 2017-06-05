@@ -36,7 +36,7 @@ from tornado.queues import Queue
 
 from .batched import BatchedSend
 from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
-                         scatter_to_workers)
+                         scatter_to_workers, gather_from_workers)
 from .cfexecutor import ClientExecutor
 from .compatibility import Queue as pyQueue, Empty, isqueue, get_thread_identity
 from .core import connect, rpc, clean_exception, CommClosedError
@@ -1007,7 +1007,7 @@ class Client(Node):
         return [futures[tokey(k)] for k in keys]
 
     @gen.coroutine
-    def _gather(self, futures, errors='raise'):
+    def _gather(self, futures, errors='raise', direct=False):
         futures2, keys = unpack_remotedata(futures, byte_keys=True)
         keys = [tokey(key) for key in keys]
         bad_data = dict()
@@ -1054,7 +1054,19 @@ class Client(Node):
                         raise ValueError("Bad value, `errors=%s`" % errors)
             keys = [k for k in keys if k not in bad_keys]
 
-            response = yield self.scheduler.gather(keys=keys)
+            if direct:
+                who_has = yield self.scheduler.who_has(keys=keys)
+                data, missing_keys, missing_workers = yield gather_from_workers(
+                    who_has, rpc=self.rpc, close=False)
+                response = {'status': 'OK', 'data': data}
+                if missing_keys:
+                    keys2 = [key for key in keys if key not in data]
+                    response = yield self.scheduler.gather(keys=keys2)
+                    if response['status'] == 'OK':
+                        response['data'].update(data)
+
+            else:
+                response = yield self.scheduler.gather(keys=keys)
 
             if response['status'] == 'error':
                 logger.warning("Couldn't gather keys %s", response['keys'])
@@ -1086,7 +1098,7 @@ class Client(Node):
             for item in results:
                 qout.put(item)
 
-    def gather(self, futures, errors='raise', maxsize=0):
+    def gather(self, futures, errors='raise', maxsize=0, direct=False):
         """ Gather futures from distributed memory
 
         Accepts a future, nested container of futures, iterator, or queue.
@@ -1130,14 +1142,16 @@ class Client(Node):
         if isqueue(futures):
             qout = pyQueue(maxsize=maxsize)
             t = Thread(target=self._threaded_gather, args=(futures, qout),
-                        kwargs={'errors': errors})
+                       kwargs={'errors': errors, 'direct': direct})
             t.daemon = True
             t.start()
             return qout
         elif isinstance(futures, Iterator):
-            return (self.gather(f, errors=errors) for f in futures)
+            return (self.gather(f, errors=errors, direct=direct)
+                    for f in futures)
         else:
-            return sync(self.loop, self._gather, futures, errors=errors)
+            return sync(self.loop, self._gather, futures, errors=errors,
+                        direct=direct)
 
     @gen.coroutine
     def _scatter(self, data, workers=None, broadcast=False, direct=False):

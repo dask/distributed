@@ -1164,10 +1164,20 @@ def test_scatter_direct_spread_evenly(c, s, *workers):
 
 @pytest.mark.parametrize('direct', [True, False])
 @pytest.mark.parametrize('broadcast', [True, False])
-def test_scatter_sync(loop, direct, broadcast):
+def test_scatter_gather_sync(loop, direct, broadcast):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             futures = c.scatter([1, 2, 3], direct=direct, broadcast=broadcast)
+            results = c.gather(futures, direct=direct)
+            assert results == [1, 2, 3]
+
+
+@gen_cluster(client=True)
+def test_gather_direct(c, s, a, b):
+    futures = yield c._scatter([1, 2, 3])
+
+    data = yield c._gather(futures, direct=True)
+    assert data == [1, 2, 3]
 
 
 @gen_cluster(client=True)
