@@ -37,7 +37,8 @@ from tornado.queues import Queue
 from .batched import BatchedSend
 from .utils_comm import WrappedKey, unpack_remotedata, pack_data
 from .cfexecutor import ClientExecutor
-from .compatibility import Queue as pyQueue, Empty, isqueue, get_thread_identity
+from .compatibility import (Queue as pyQueue, Empty, isqueue,
+        get_thread_identity, html_escape)
 from .core import connect, rpc, clean_exception, CommClosedError
 from .node import Node
 from .protocol import to_serialize
@@ -45,7 +46,7 @@ from .protocol.pickle import dumps, loads
 from .security import Security
 from .worker import dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
-        tokey, log_errors, str_graph)
+        tokey, log_errors, str_graph, key_split)
 from .versions import get_versions
 
 
@@ -278,6 +279,21 @@ class Future(WrappedKey):
             return '<Future: status: %s, key: %s>' % (self.status, self.key)
 
     __repr__ = __str__
+
+    def _repr_html_(self):
+        text = '<b>Future: %s</b> ' % html_escape(key_split(self.key))
+        text += ('<font color="gray">status: </font>'
+                 '<font color="%(color)s">%(status)s</font>, ') % {
+                        'status': self.status,
+                        'color': 'red' if self.status == 'error' else 'black'}
+        if self.type:
+            try:
+                typ = self.type.__name__
+            except AttributeError:
+                typ = str(self.type)
+            text += '<font color="gray">type: </font>%s, ' % typ
+        text += '<font color="gray">key: </font>%s' % html_escape(self.key)
+        return text
 
     def __await__(self):
         return self._result().__await__()

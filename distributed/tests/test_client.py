@@ -131,11 +131,12 @@ def test_map_keynames(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_future(c, s, a, b):
-    x = c.submit(inc, 10)
-    assert str(x.key) in repr(x)
-    assert str(x.status) in repr(x)
-    assert str(x.status) in repr(c.futures[x.key])
+def test_future_repr(c, s, a, b):
+    for func in [repr, lambda x: x._repr_html_()]:
+        x = c.submit(inc, 10)
+        assert str(x.key) in func(x)
+        assert str(x.status) in func(x)
+        assert str(x.status) in repr(c.futures[x.key])
 
 
 @gen_cluster(client=True)
