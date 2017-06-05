@@ -1174,7 +1174,8 @@ class Client(Node):
                 raise ValueError("No valid workers")
 
             _, who_has, nbytes = yield scatter_to_workers(ncores, data2,
-                                                          report=False)
+                                                          report=False,
+                                                          rpc=self.rpc)
 
             yield self.scheduler.update_data(who_has=who_has, nbytes=nbytes)
         else:
