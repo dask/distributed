@@ -46,7 +46,7 @@ from .protocol.pickle import dumps, loads
 from .security import Security
 from .worker import dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
-        tokey, log_errors, str_graph, key_split)
+        tokey, log_errors, str_graph, key_split, format_bytes)
 from .versions import get_versions
 
 
@@ -469,6 +469,44 @@ class Client(Node):
             return '<%s: not connected>' % (self.__class__.__name__,)
 
     __repr__ = __str__
+
+    def _repr_html_(self):
+        if hasattr(self, '_loop_thread'):
+            info = sync(self.loop, self.scheduler.identity)
+        else:
+            info = False
+
+        text = ("<h3>Client</h3>\n"
+                "<ul>\n"
+                "  <li><b>Scheduler: </b>%s\n") % self.scheduler.address
+        if info and 'bokeh' in info['services']:
+            protocol, rest = self.scheduler.address.split('://')
+            port = info['services']['bokeh']
+            if protocol == 'inproc':
+                address = 'http://localhost:%d' % port
+            else:
+                host = rest.split(':')[0]
+                address = 'http://%s:%d' % (host, port)
+            text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
+
+        text += "</ul>\n\n"
+
+        if info:
+            workers = len(info['workers'])
+            cores = sum(w['ncores'] for w in info['workers'].values())
+            memory = sum(w['memory_limit'] for w in info['workers'].values())
+            memory = format_bytes(memory)
+            text2 = ("<h3>Cluster</h3>\n"
+                     "<ul>\n"
+                     "  <li><b>Workers: </b>%d</li>\n"
+                     "  <li><b>Cores: </b>%d</li>\n"
+                     "  <li><b>Memory: </b>%s</li>\n") % (
+                             workers, cores, memory)
+
+        # return ('<table border="0">\n'
+        #         "<tr><td>%s</td><td>%s</td></tr></table>") % (text, text2)
+
+        return text + text2
 
     def start(self, asynchronous=None, **kwargs):
         """ Start scheduler running in separate thread """

@@ -1480,10 +1480,13 @@ def test_badly_serialized_input_stderr(capsys, loop):
             assert future.status == 'error'
 
 
-@gen_cluster(client=True)
-def test_repr(c, s, a, b):
-    assert s.ip in str(c)
-    assert str(s.port) in repr(c)
+def test_repr(loop):
+    with cluster(nworkers=3) as (s, [a, b, c]):
+        with Client(s['address'], loop=loop) as c:
+            for func in [str, repr, lambda x: x._repr_html_()]:
+                text = func(c)
+                assert c.scheduler.address in text
+                assert '2' in text
 
 
 @gen_cluster(client=True)
