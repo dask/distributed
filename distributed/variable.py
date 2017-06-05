@@ -26,9 +26,8 @@ class VariableExtension(object):
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.variables = dict()
-        self.lingering = defaultdict(set)
-        self.pre_released = set()
-        self.conditions = defaultdict(tornado.locks.Condition)
+        self.waiting = defaultdict(set)
+        self.waiting_conditions = defaultdict(tornado.locks.Condition)
         self.started = tornado.locks.Condition()
 
         self.scheduler.handlers.update({'variable_set': self.set,
@@ -37,7 +36,7 @@ class VariableExtension(object):
         self.scheduler.client_handlers['variable-future-release'] = self.future_release
         self.scheduler.client_handlers['variable_delete'] = self.delete
 
-        self.scheduler.extensions['queues'] = self
+        self.scheduler.extensions['variables'] = self
 
     def set(self, stream=None, name=None, key=None, data=None, client=None):
         if key is not None:
@@ -50,7 +49,7 @@ class VariableExtension(object):
         except KeyError:
             pass
         else:
-            if old['type'] == 'Future':
+            if old['type'] == 'Future' and old['value'] != key:
                 self.release(old['value'], name)
         if name not in self.variables:
             self.started.notify_all()
@@ -58,37 +57,34 @@ class VariableExtension(object):
 
     @gen.coroutine
     def release(self, key, name):
-        while self.lingering[key, name]:
-            yield self.conditions[name].wait()
+        while self.waiting[key, name]:
+            yield self.waiting_conditions[name].wait()
 
         self.scheduler.client_releases_keys(keys=[key],
                                             client='variable-%s' % name)
-        del self.lingering[key, name]
+        del self.waiting[key, name]
 
-    def future_release(self, name=None, key=None, client=None):
-        try:
-            self.lingering[key, name].remove(client)
-        except KeyError:
-            self.pre_released.add((key, name, client))
-        self.conditions[name].notify_all()
+    def future_release(self, name=None, key=None, token=None, client=None):
+        self.waiting[key, name].remove(token)
+        if not self.waiting[key, name]:
+            self.waiting_conditions[name].notify_all()
 
     @gen.coroutine
     def get(self, stream=None, name=None, client=None, timeout=None):
         start = time()
         while name not in self.variables:
             if timeout is not None:
-                timeout2 = timeout - (time() - start)
+                left = timeout - (time() - start)
             else:
-                timeout2 = None
-            if timeout2 and timeout2 < 0:
+                left = None
+            if left and left < 0:
                 raise gen.TimeoutError()
-            yield self.started.wait(timeout=timeout2)
+            yield self.started.wait(timeout=left)
         record = self.variables[name]
         if record['type'] == 'Future':
-            if (record['value'], name, client) in self.pre_released:
-                self.pre_released.remove((record['value'], name, client))
-            else:
-                self.lingering[record['value'], name].add(client)
+            token = uuid.uuid4().hex
+            record['token'] = token
+            self.waiting[record['value'], name].add(token)
         raise gen.Return(record)
 
     @gen.coroutine
@@ -101,7 +97,7 @@ class VariableExtension(object):
             else:
                 if old['type'] == 'Future':
                     yield self.release(old['value'], name)
-            del self.conditions[name]
+            del self.waiting_conditions[name]
             del self.variables[name]
 
 
@@ -161,7 +157,7 @@ class Variable(object):
             self.client._send_to_scheduler({'op': 'variable-future-release',
                                             'name': self.name,
                                             'key': d['value'],
-                                            'client': self.client.id})
+                                            'token': d['token']})
         else:
             value = d['value']
         raise gen.Return(value)
