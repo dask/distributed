@@ -27,7 +27,8 @@ class VariableExtension(object):
         self.scheduler = scheduler
         self.variables = dict()
         self.lingering = defaultdict(set)
-        self.events = defaultdict(tornado.locks.Event)
+        self.pre_released = set()
+        self.conditions = defaultdict(tornado.locks.Condition)
         self.started = tornado.locks.Condition()
 
         self.scheduler.handlers.update({'variable_set': self.set,
@@ -58,15 +59,18 @@ class VariableExtension(object):
     @gen.coroutine
     def release(self, key, name):
         while self.lingering[key, name]:
-            yield self.events[name].wait()
+            yield self.conditions[name].wait()
 
         self.scheduler.client_releases_keys(keys=[key],
                                             client='variable-%s' % name)
         del self.lingering[key, name]
 
     def future_release(self, name=None, key=None, client=None):
-        self.lingering[key, name].remove(client)
-        self.events[name].set()
+        try:
+            self.lingering[key, name].remove(client)
+        except KeyError:
+            self.pre_released.add((key, name, client))
+        self.conditions[name].notify_all()
 
     @gen.coroutine
     def get(self, stream=None, name=None, client=None, timeout=None):
@@ -81,7 +85,10 @@ class VariableExtension(object):
             yield self.started.wait(timeout=timeout2)
         record = self.variables[name]
         if record['type'] == 'Future':
-            self.lingering[record['value'], name].add(client)
+            if (record['value'], name, client) in self.pre_released:
+                self.pre_released.remove((record['value'], name, client))
+            else:
+                self.lingering[record['value'], name].add(client)
         raise gen.Return(record)
 
     @gen.coroutine
@@ -94,7 +101,7 @@ class VariableExtension(object):
             else:
                 if old['type'] == 'Future':
                     yield self.release(old['value'], name)
-            del self.events[name]
+            del self.conditions[name]
             del self.variables[name]
 
 
