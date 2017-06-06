@@ -41,8 +41,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="HTTP port for JSON API diagnostics")
 @click.option('--bokeh-port', type=int, default=8787,
               help="Bokeh port for visual diagnostics")
-@click.option('--bokeh-external-port', type=int, default=None,
-              help="Optional port for the external (old) Bokeh server")
 @click.option('--bokeh-internal-port', type=int, default=None,
               help="Deprecated. Use --bokeh-port instead")
 @click.option('--bokeh/--no-bokeh', '_bokeh', default=True, show_default=True,
