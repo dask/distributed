@@ -888,6 +888,7 @@ def systemmonitor_doc(scheduler, doc):
                             sizing_mode='scale_width'))
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'system'
 
 
 def stealing_doc(scheduler, doc):
@@ -909,6 +910,7 @@ def stealing_doc(scheduler, doc):
 
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'stealing'
 
 
 def events_doc(scheduler, doc):
@@ -920,6 +922,7 @@ def events_doc(scheduler, doc):
         doc.add_root(column(events.root, sizing_mode='scale_width'))
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'events'
 
 
 def workers_doc(scheduler, doc):
@@ -931,6 +934,7 @@ def workers_doc(scheduler, doc):
         doc.add_root(table.root)
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'workers'
 
 
 def tasks_doc(scheduler, doc):
@@ -943,6 +947,7 @@ def tasks_doc(scheduler, doc):
         doc.add_root(ts.root)
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'tasks'
 
 
 def status_doc(scheduler, doc):
@@ -978,6 +983,7 @@ def status_doc(scheduler, doc):
                             sizing_mode='scale_width'))
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'status'
 
 
 class BokehScheduler(BokehServer):

@@ -556,6 +556,7 @@ def main_doc(worker, doc):
                             sizing_mode='scale_width'))
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'main'
 
 
 def crossfilter_doc(worker, doc):
@@ -570,6 +571,7 @@ def crossfilter_doc(worker, doc):
         doc.add_root(column(statetable.root, crossfilter.root))
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'crossfilter'
 
 
 def systemmonitor_doc(worker, doc):
@@ -581,6 +583,7 @@ def systemmonitor_doc(worker, doc):
         doc.add_root(sysmon.root)
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'system'
 
 
 def counters_doc(server, doc):
@@ -592,6 +595,7 @@ def counters_doc(server, doc):
         doc.add_root(counter.root)
         doc.template = template
         doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'counters'
 
 
 class BokehWorker(BokehServer):
