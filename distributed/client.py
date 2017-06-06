@@ -489,7 +489,7 @@ class Client(Node):
                 address = 'http://%s:%d' % (host, port)
             text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
 
-        text += "</ul>\n\n"
+        text += "</ul>\n"
 
         if info:
             workers = len(info['workers'])
@@ -500,13 +500,17 @@ class Client(Node):
                      "<ul>\n"
                      "  <li><b>Workers: </b>%d</li>\n"
                      "  <li><b>Cores: </b>%d</li>\n"
-                     "  <li><b>Memory: </b>%s</li>\n") % (
-                             workers, cores, memory)
+                     "  <li><b>Memory: </b>%s</li>\n"
+                     "</ul>\n") % (workers, cores, memory)
 
-        # return ('<table border="0">\n'
-        #         "<tr><td>%s</td><td>%s</td></tr></table>") % (text, text2)
+            return ('<table style="border: 2px solid white;">\n'
+                    '<tr>\n'
+                    '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
+                    '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
+                    '</tr>\n</table>') % (text, text2)
 
-        return text + text2
+        else:
+            return text
 
     def start(self, asynchronous=None, **kwargs):
         """ Start scheduler running in separate thread """
