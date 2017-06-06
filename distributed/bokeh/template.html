@@ -98,9 +98,9 @@
     <div class="navbar">
       <ul>
           <li><a href="https://dask.pydata.org/en/latest/" style="padding:0px 0px;"><img src="https://dask.readthedocs.io/en/latest/_images/dask_horizontal.svg"></a></li>
-          <li><a href="/workers">Workers</a></li>
-          <li><a href="/status">Status</a></li>
-          <li><a href="/system">System</a></li>
+          {% for page in pages %}
+          <li><a href="/{{ page }}">{{ page|title }}</a></li>
+          {% endfor %}
       </ul>
     </div>
     <div class="dashboard">

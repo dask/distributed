@@ -32,6 +32,7 @@ with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
     template_source = f.read()
 
 template = jinja2.Template(template_source)
+template_variables = {'pages': ['main', 'system', 'crossfilter', 'counters']}
 
 
 class StateTable(DashboardComponent):
@@ -554,6 +555,7 @@ def main_doc(worker, doc):
                             communicating_stream.root,
                             sizing_mode='scale_width'))
         doc.template = template
+        doc.template_variables.update(template_variables)
 
 
 def crossfilter_doc(worker, doc):
@@ -567,6 +569,7 @@ def crossfilter_doc(worker, doc):
 
         doc.add_root(column(statetable.root, crossfilter.root))
         doc.template = template
+        doc.template_variables.update(template_variables)
 
 
 def systemmonitor_doc(worker, doc):
@@ -577,6 +580,7 @@ def systemmonitor_doc(worker, doc):
 
         doc.add_root(sysmon.root)
         doc.template = template
+        doc.template_variables.update(template_variables)
 
 
 def counters_doc(server, doc):
@@ -587,6 +591,7 @@ def counters_doc(server, doc):
 
         doc.add_root(counter.root)
         doc.template = template
+        doc.template_variables.update(template_variables)
 
 
 class BokehWorker(BokehServer):
