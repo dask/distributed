@@ -1,8 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
+import atexit
 from datetime import timedelta
+import logging
 import sys
 import threading
+import weakref
 
 from multiprocessing.queues import Empty
 
@@ -12,6 +15,9 @@ from .utils import mp_context
 from tornado import gen
 from tornado.concurrent import Future
 from tornado.ioloop import IOLoop, TimeoutError
+
+
+logger = logging.getLogger(__name__)
 
 
 def _call_and_set_future(future, func, *args, **kwargs):
@@ -40,19 +46,22 @@ class AsyncProcess(object):
             raise TypeError("`target` needs to be callable, not %r"
                             % (type(target),))
         self._state = _ProcessState()
+        self._loop = loop or IOLoop.current(instance=False)
 
         self._process = mp_context.Process(target=target, name=name,
                                            args=args, kwargs=kwargs)
-        self._process.daemon = True
+        _dangling.add(self._process)
         self._watch_q = PyQueue()
         self._exit_future = Future()
+        self._exit_callback = None
 
         self._start_thread()
 
     def _start_thread(self):
         self._thread = threading.Thread(
             target=self._watch,
-            args=(self._process, self._state, self._watch_q, self._exit_future))
+            args=(weakref.ref(self), self._process, self._state,
+                  self._watch_q, self._exit_future,))
         self._thread.daemon = True
         self._thread.start()
 
@@ -63,8 +72,16 @@ class AsyncProcess(object):
         self._finalizer = finalize(self, stop_thread, q=self._watch_q, t=self._thread)
         self._finalizer.atexit = False
 
+    def _do_start(self):
+        self._process.start()
+        self._state.is_alive = True
+        self._state.pid = self._process.pid
+
+    def _do_terminate(self):
+        self._process.terminate()
+
     @classmethod
-    def _watch(cls, process, state, q, exit_future):
+    def _watch(cls, selfref, process, state, q, exit_future):
         # As multiprocessing.Process is not thread-safe, we run all
         # blocking operations from this single loop and ship results
         # back to the caller when needed.
@@ -89,6 +106,14 @@ class AsyncProcess(object):
                 else:
                     assert 0, msg
 
+        def _maybe_call_exit_callback():
+            self = selfref()  # only keep self alive when required
+            try:
+                if self is not None and self._exit_callback is not None:
+                    self._loop.add_callback(self._exit_callback, self)
+            finally:
+                self = None  # lose reference
+
         while True:
             # Periodic poll as there's no simple way to poll a threading Queue
             # and a mp Process at the same time.
@@ -101,10 +126,12 @@ class AsyncProcess(object):
             if r is not None:
                 state.is_alive = False
                 state.exitcode = r
-                exit_future.set_result(r)
                 # Make sure the process is removed from the global list
                 # (see _children in multiprocessing/process.py)
                 process.join(timeout=0)
+                # User hooks
+                exit_future.set_result(r)
+                _maybe_call_exit_callback()
                 # No need to examine process result again
                 break
 
@@ -135,6 +162,18 @@ class AsyncProcess(object):
         except gen.TimeoutError:
             pass
 
+    def set_exit_callback(self, func):
+        """
+        Set a function to be called by the event loop when the process exits.
+        The function is called with the AsyncProcess as sole argument.
+
+        The function may be a coroutine function.
+        """
+        # XXX should this be a property instead?
+        assert callable(func), "exit callback should be callable"
+        assert self._state.pid is None, "cannot set exit callback when process already started"
+        self._exit_callback = func
+
     def is_alive(self):
         return self._state.is_alive
 
@@ -154,3 +193,19 @@ class AsyncProcess(object):
     def daemon(self):
         return self._process.daemon
 
+    @daemon.setter
+    def daemon(self, value):
+        self._process.daemon = value
+
+
+_dangling = weakref.WeakSet()
+
+@atexit.register
+def _cleanup_dangling():
+    for proc in list(_dangling):
+        if proc.daemon and proc.is_alive():
+            try:
+                logger.warning("reaping stray process %s" % (proc,))
+                proc.terminate()
+            except OSError:
+                pass

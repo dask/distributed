@@ -1,6 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
-from datetime import datetime
+from datetime import timedelta
 import gc
 import os
 import signal
@@ -10,11 +10,7 @@ import weakref
 
 import pytest
 from tornado import gen
-
-try:
-    import psutil
-except ImportError:
-    psutil = None
+from tornado.locks import Event
 
 from distributed.metrics import time
 from distributed.process import AsyncProcess
@@ -49,8 +45,11 @@ def test_simple():
     assert not proc.is_alive()
     assert proc.pid is None
     assert proc.exitcode is None
+    assert not proc.daemon
+    proc.daemon = True
     assert proc.daemon
 
+    # join() before start()
     with pytest.raises(AssertionError):
         yield proc.join()
 
@@ -58,9 +57,6 @@ def test_simple():
     assert proc.is_alive()
     assert proc.pid is not None
     assert proc.exitcode is None
-    if psutil is not None:
-        p = psutil.Process(proc.pid)
-        assert p.is_running()
 
     t1 = time()
     yield proc.join(timeout=0.02)
@@ -70,18 +66,21 @@ def test_simple():
     assert proc.pid is not None
     assert proc.exitcode is None
 
+    # setting daemon attribute after start()
+    with pytest.raises(AssertionError):
+        proc.daemon = False
+
     to_child.put(5)
     assert from_child.get() == 5
 
+    # child should be stopping now
     t1 = time()
     yield proc.join(timeout=10)
     dt = time() - t1
     assert dt <= 1.0
     assert not proc.is_alive()
     assert proc.pid is not None
-    assert proc.exitcode is 0
-    if psutil is not None:
-        assert not p.is_running()
+    assert proc.exitcode == 0
 
     # join() again
     t1 = time()
@@ -106,6 +105,7 @@ def test_exitcode():
     q = mp_context.Queue()
 
     proc = AsyncProcess(target=exit, kwargs={'q': q})
+    proc.daemon = True
     assert not proc.is_alive()
     assert proc.exitcode is None
 
@@ -123,6 +123,7 @@ def test_exitcode():
 @gen_test()
 def test_signal():
     proc = AsyncProcess(target=exit_with_signal, args=(signal.SIGINT,))
+    proc.daemon = True
     assert not proc.is_alive()
     assert proc.exitcode is None
 
@@ -145,9 +146,54 @@ def test_signal():
 @gen_test()
 def test_terminate():
     proc = AsyncProcess(target=wait)
+    proc.daemon = True
     yield proc.start()
     yield proc.terminate()
 
     yield proc.join(timeout=3.0)
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
+
+
+@gen_test()
+def test_exit_callback():
+    to_child = mp_context.Queue()
+    from_child = mp_context.Queue()
+    evt = Event()
+
+    @gen.coroutine
+    def on_stop(_proc):
+        assert _proc is proc
+        yield gen.moment
+        evt.set()
+
+    # Normal process exit
+    proc = AsyncProcess(target=feed, args=(to_child, from_child))
+    evt.clear()
+    proc.set_exit_callback(on_stop)
+    proc.daemon = True
+
+    yield proc.start()
+    yield gen.sleep(0.05)
+    assert proc.is_alive()
+    assert not evt.is_set()
+
+    to_child.put(None)
+    yield evt.wait(timedelta(seconds=3))
+    assert evt.is_set()
+    assert not proc.is_alive()
+
+    # Process terminated
+    proc = AsyncProcess(target=wait)
+    evt.clear()
+    proc.set_exit_callback(on_stop)
+    proc.daemon = True
+
+    yield proc.start()
+    yield gen.sleep(0.05)
+    assert proc.is_alive()
+    assert not evt.is_set()
+
+    yield proc.terminate()
+    yield evt.wait(timedelta(seconds=3))
+    assert evt.is_set()
