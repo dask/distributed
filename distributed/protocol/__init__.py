@@ -16,6 +16,10 @@ from ..utils  import ignoring
 def _register_numpy():
     from . import numpy
 
+@partial(register_serialization_lazy, "pandas")
+def _register_pandas():
+    from . import pandas
+
 @partial(register_serialization_lazy, "h5py")
 def _register_h5py():
     from . import h5py
