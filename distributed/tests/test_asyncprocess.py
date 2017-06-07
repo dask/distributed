@@ -96,8 +96,9 @@ def test_simple():
     assert wr1() is None
     while wr2() is not None:
         yield gen.sleep(0.01)
+        gc.collect()
         dt = time() - t1
-        assert dt < 1.0
+        assert dt < 2.0
 
 
 @gen_test()

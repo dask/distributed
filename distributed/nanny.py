@@ -159,7 +159,7 @@ class Nanny(ServerNode):
             raise gen.Return('OK')
 
         deadline = self.loop.time() + timeout
-        yield self.process.kill(grace_delay=timeout)
+        yield self.process.kill(grace_delay=deadline - self.loop.time())
         yield self._unregister(deadline - self.loop.time())
 
     @gen.coroutine
@@ -289,10 +289,11 @@ class WorkerProcess(object):
         self.worker_dir = None
         self.worker_address = None
 
-    # XXX allow setting worker death callback
-
     @gen.coroutine
     def start(self):
+        """
+        Ensure the worker process is started.
+        """
         if self.status == 'running':
             return
         if self.status == 'starting':
@@ -316,7 +317,8 @@ class WorkerProcess(object):
         self.stopped = Event()
         self.status = 'starting'
         yield self.process.start()
-        yield self._wait_until_running()
+        if self.status == 'starting':
+            yield self._wait_until_running()
 
     def _on_exit(self, proc):
         if proc is not self.process:
@@ -360,18 +362,18 @@ class WorkerProcess(object):
     @gen.coroutine
     def kill(self, grace_delay=10):
         """
+        Ensure the worker process is stopped, waiting at most
+        *grace_delay* seconds before terminating it abruptly.
         """
         loop = IOLoop.current()
         deadline = loop.time() + grace_delay
 
-        if self.status == 'starting':
-            yield self.running.wait()
         if self.status == 'stopped':
             return
         if self.status == 'stopping':
             yield self.stopped.wait()
             return
-        assert self.status == 'running'
+        assert self.status in ('starting', 'running')
         self.status = 'stopping'
 
         process = self.process
@@ -442,6 +444,10 @@ class WorkerProcess(object):
                 loop.stop()
 
         def watch_stop_q():
+            """
+            Wait for an incoming stop message and then stop the
+            worker cleanly.
+            """
             while True:
                 try:
                     msg = child_stop_q.get(timeout=1000)
