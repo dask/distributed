@@ -30,23 +30,17 @@ def test_nanny(s):
         assert s.ncores[n.worker_address] == 2
         assert s.worker_info[n.worker_address]['services']['nanny'] > 1024
 
-        print("A")
         yield nn.kill()
-        print("B")
         assert not n.is_alive()
         assert n.worker_address not in s.ncores
         assert n.worker_address not in s.worker_info
 
-        print("C")
         yield nn.kill()
-        print("D")
         assert not n.is_alive()
         assert n.worker_address not in s.ncores
         assert n.worker_address not in s.worker_info
 
-        print("E")
         yield nn.instantiate()
-        print("F")
         assert n.is_alive()
         assert s.ncores[n.worker_address] == 2
         assert s.worker_info[n.worker_address]['services']['nanny'] > 1024
@@ -73,14 +67,16 @@ def test_nanny_process_failure(c, s):
 
     assert os.path.exists(first_dir)
 
-    original_process = n.process
+    original_address = n.worker_address
     ww = rpc(n.worker_address)
     yield ww.update_data(data=valmap(dumps, {'x': 1, 'y': 2}))
+    pid = n.pid
+    assert pid is not None
     with ignoring(CommClosedError):
-        yield c._run(sys.exit, 0, workers=[n.worker_address])
+        yield c._run(os._exit, 0, workers=[n.worker_address])
 
     start = time()
-    while n.is_alive():  # wait while process dies
+    while n.pid == pid:  # wait while process dies and comes back
         yield gen.sleep(0.01)
         assert time() - start < 5
 
@@ -88,6 +84,8 @@ def test_nanny_process_failure(c, s):
     while not n.is_alive():  # wait while process comes back
         yield gen.sleep(0.01)
         assert time() - start < 5
+
+    assert n.worker_address != original_address  # most likely
 
     start = time()
     while n.worker_address not in s.ncores or n.worker_dir is None:
@@ -147,7 +145,7 @@ def test_run(s):
     yield n._close()
 
 
-
+@slow
 @gen_cluster(Worker=Nanny,
              ncores=[('127.0.0.1', 1)],
              worker_kwargs={'reconnect': False})
@@ -156,7 +154,7 @@ def test_close_on_disconnect(s, w):
 
     start = time()
     while w.status != 'closed':
-        yield gen.sleep(0.01)
+        yield gen.sleep(0.05)
         assert time() < start + 9
 
 
