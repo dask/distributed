@@ -74,10 +74,10 @@ class Nanny(ServerNode):
             silence_logging(level=silence_logs)
         self.silence_logs = silence_logs
 
-        # XXX rename methods
         handlers = {'instantiate': self.instantiate,
-                    'kill': self._kill,
+                    'kill': self.kill,
                     'restart': self.restart,
+                    # cannot call it 'close' on the rpc side for naming conflict
                     'terminate': self._close,
                     #'monitor_resources': self.monitor_resources,
                     'run': self.run}
@@ -148,7 +148,7 @@ class Nanny(ServerNode):
         self.loop.add_callback(self._start, addr_or_port)
 
     @gen.coroutine
-    def _kill(self, comm=None, timeout=10):
+    def kill(self, comm=None, timeout=10):
         """ Kill the local worker process
 
         Blocks until both the process is down and the scheduler is properly
@@ -204,7 +204,7 @@ class Nanny(ServerNode):
     @gen.coroutine
     def restart(self, comm=None):
         if self.process is not None:
-            yield self._kill()
+            yield self.kill()
         yield self.instantiate()
         raise gen.Return('OK')
 
@@ -235,15 +235,15 @@ class Nanny(ServerNode):
     @gen.coroutine
     def _close(self, comm=None, timeout=5, report=None):
         """
-        Close the nanny process, stop listening.
+        Close the worker process, stop all comms.
         """
-        if self.status in ('closed', 'closed'):
+        if self.status in ('closing', 'closed'):
             raise gen.Return('OK')
         self.status = 'closing'
         logger.info("Closing Nanny at %r", self.address)
         try:
             if self.process is not None:
-                yield self._kill(timeout=timeout)
+                yield self.kill(timeout=timeout)
         finally:
             self.rpc.close()
             self.scheduler.close_rpc()

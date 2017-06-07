@@ -51,6 +51,16 @@ def test_nanny(s):
     yield n._close()
 
 
+@gen_cluster(ncores=[])
+def test_many_kills(s):
+    n = Nanny(s.address, ncores=2, loop=s.loop)
+    yield n._start(0)
+    assert n.is_alive()
+    yield [n.kill() for i in range(5)]
+    yield [n.kill() for i in range(5)]
+    yield n._close()
+
+
 @gen_cluster(Worker=Nanny)
 def test_str(s, a, b):
     assert a.worker_address in str(a)
