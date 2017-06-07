@@ -61,7 +61,6 @@ def test_simple():
     if psutil is not None:
         p = psutil.Process(proc.pid)
         assert p.is_running()
-        assert os.path.realpath(p.exe()) == os.path.realpath(sys.executable)
 
     t1 = time()
     yield proc.join(timeout=0.02)
@@ -81,6 +80,8 @@ def test_simple():
     assert not proc.is_alive()
     assert proc.pid is not None
     assert proc.exitcode is 0
+    if psutil is not None:
+        assert not p.is_running()
 
     # join() again
     t1 = time()
@@ -113,7 +114,7 @@ def test_exitcode():
     assert proc.exitcode is None
 
     q.put(5)
-    yield proc.join(timeout=1.0)
+    yield proc.join(timeout=3.0)
     assert not proc.is_alive()
     assert proc.exitcode == 5
 
@@ -126,7 +127,7 @@ def test_signal():
     assert proc.exitcode is None
 
     yield proc.start()
-    yield proc.join(timeout=2.0)
+    yield proc.join(timeout=3.0)
 
     assert not proc.is_alive()
     # Can be 255 with forkserver, see https://bugs.python.org/issue30589
@@ -135,7 +136,7 @@ def test_signal():
     proc = AsyncProcess(target=wait)
     yield proc.start()
     os.kill(proc.pid, signal.SIGTERM)
-    yield proc.join(timeout=2.0)
+    yield proc.join(timeout=3.0)
 
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)
@@ -147,6 +148,6 @@ def test_terminate():
     yield proc.start()
     yield proc.terminate()
 
-    yield proc.join(timeout=2.0)
+    yield proc.join(timeout=3.0)
     assert not proc.is_alive()
     assert proc.exitcode in (-signal.SIGTERM, 255)

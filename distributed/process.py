@@ -30,6 +30,10 @@ class _ProcessState(object):
 
 
 class AsyncProcess(object):
+    """
+    A coroutine-compatible multiprocessing.Process-alike.
+    All normally blocking methods are wrapped in Tornado coroutines.
+    """
 
     def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
         if not callable(target):
@@ -61,6 +65,9 @@ class AsyncProcess(object):
 
     @classmethod
     def _watch(cls, process, state, q, exit_future):
+        # As multiprocessing.Process is not thread-safe, we run all
+        # blocking operations from this single loop and ship results
+        # back to the caller when needed.
         def _start():
             process.start()
             state.is_alive = True
