@@ -14,7 +14,7 @@ from .utils import mp_context
 
 from tornado import gen
 from tornado.concurrent import Future
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import IOLoop
 
 
 logger = logging.getLogger(__name__)
@@ -199,6 +199,7 @@ class AsyncProcess(object):
 
 
 _dangling = weakref.WeakSet()
+
 
 @atexit.register
 def _cleanup_dangling():

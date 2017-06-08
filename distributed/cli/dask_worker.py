@@ -200,7 +200,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         if loop._running:
             loop.add_callback_from_signal(loop.stop)
         else:
-            exit(1)
+            exit(0)
 
     # NOTE: We can't use the generic install_signal_handlers() function from
     # distributed.cli.utils because we're handling the signal differently.

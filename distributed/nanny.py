@@ -1,16 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
-import atexit
-from datetime import datetime, timedelta
-from functools import partial
+from datetime import timedelta
 import logging
 from multiprocessing.queues import Empty
 import os
 import shutil
 import threading
-from time import sleep
-import sys
-import weakref
 
 from tornado import gen
 from tornado.ioloop import IOLoop, TimeoutError
@@ -18,11 +13,10 @@ from tornado.locks import Event
 
 from .comm import get_address_host, get_local_address_for
 from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
-from .metrics import disk_io_counters, net_io_counters, time
 from .node import ServerNode
 from .process import AsyncProcess
 from .security import Security
-from .utils import get_ip, ignoring, mp_context, log_errors, silence_logging
+from .utils import get_ip, mp_context, silence_logging
 from .worker import _ncores, run
 
 
@@ -79,7 +73,6 @@ class Nanny(ServerNode):
                     'restart': self.restart,
                     # cannot call it 'close' on the rpc side for naming conflict
                     'terminate': self._close,
-                    #'monitor_resources': self.monitor_resources,
                     'run': self.run}
 
         super(Nanny, self).__init__(handlers, io_loop=self.loop,
@@ -187,7 +180,7 @@ class Nanny(ServerNode):
                 worker_start_args=(self._given_worker_port,),
                 silence_logs=self.silence_logs,
                 on_exit=self._on_exit,
-                )
+            )
 
         self.auto_restart = True
         if self.death_timeout:
@@ -251,27 +244,6 @@ class Nanny(ServerNode):
             self.status = 'closed'
         raise gen.Return('OK')
 
-    #def resource_collect(self):
-        #try:
-            #import psutil
-        #except ImportError:
-            #return {}
-        #p = psutil.Process(self.process.pid)
-        #return {'timestamp': datetime.now().isoformat(),
-                #'cpu_percent': psutil.cpu_percent(),
-                #'status': p.status(),
-                #'memory_percent': p.memory_percent(),
-                #'memory_info': p.memory_info()._asdict(),
-                #'disk_io_counters': disk_io_counters()._asdict(),
-                #'net_io_counters': net_io_counters()._asdict()}
-
-    #@gen.coroutine
-    #def monitor_resources(self, comm, interval=1):
-        #while not comm.closed():
-            #if self.process:
-                #yield comm.write(self.resource_collect())
-            #yield gen.sleep(interval)
-
 
 class WorkerProcess(object):
 
@@ -310,7 +282,7 @@ class WorkerProcess(object):
                         silence_logs=self.silence_logs,
                         init_result_q=self.init_result_q,
                         child_stop_q=self.child_stop_q),
-            )
+        )
         self.process.daemon = True   # do we want this?
         self.process.set_exit_callback(self._on_exit)
         self.running = Event()
@@ -340,7 +312,9 @@ class WorkerProcess(object):
 
     @property
     def pid(self):
-        return self.process and self.process.pid
+        return (self.process.pid
+                if self.process and self.process.is_alive()
+                else None)
 
     def mark_stopped(self):
         if self.status != 'stopped':
@@ -481,10 +455,10 @@ class WorkerProcess(object):
 
         try:
             loop.run_sync(run)
-        except KeyboardInterrupt:
-            sys.exit(1)
         except TimeoutError:
             # Loop was stopped before wait_until_closed() returned, ignore
+            pass
+        except KeyboardInterrupt:
             pass
         finally:
             loop.stop()

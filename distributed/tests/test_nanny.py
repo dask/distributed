@@ -116,31 +116,6 @@ def test_nanny_no_port():
     _ = str(Nanny('127.0.0.1', 8786))
 
 
-#@gen_cluster(ncores=[])
-#def test_monitor_resources(s):
-    #pytest.importorskip('psutil')
-    #n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
-
-    #yield n._start()
-    #assert n.process.is_alive()
-    #d = n.resource_collect()
-    #assert {'cpu_percent', 'memory_percent'}.issubset(d)
-
-    #assert 'timestamp' in d
-
-    #comm = yield connect(n.address)
-    #yield comm.write({'op': 'monitor_resources', 'interval': 0.01})
-
-    #for i in range(3):
-        #msg = yield comm.read()
-        #assert isinstance(msg, dict)
-        #assert {'cpu_percent', 'memory_percent'}.issubset(msg)
-
-    #yield comm.close()
-    #yield n._close()
-    #s.stop()
-
-
 @gen_cluster(ncores=[])
 def test_run(s):
     pytest.importorskip('psutil')
