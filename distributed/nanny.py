@@ -152,7 +152,7 @@ class Nanny(ServerNode):
             raise gen.Return('OK')
 
         deadline = self.loop.time() + timeout
-        yield self.process.kill(grace_delay=deadline - self.loop.time())
+        yield self.process.kill(grace_delay=0.8 * (deadline - self.loop.time()))
         yield self._unregister(deadline - self.loop.time())
 
     @gen.coroutine
@@ -217,9 +217,10 @@ class Nanny(ServerNode):
                     yield self._close()
                     return
 
-            if self.auto_restart:
-                logger.warning("Restarting worker")
-                yield self.instantiate()
+            if self.status not in ('closing', 'closed'):
+                if self.auto_restart:
+                    logger.warning("Restarting worker")
+                    yield self.instantiate()
 
     @property
     def pid(self):
@@ -234,14 +235,16 @@ class Nanny(ServerNode):
             raise gen.Return('OK')
         self.status = 'closing'
         logger.info("Closing Nanny at %r", self.address)
+        self.stop()
         try:
             if self.process is not None:
                 yield self.kill(timeout=timeout)
-        finally:
-            self.rpc.close()
-            self.scheduler.close_rpc()
-            self.stop()
-            self.status = 'closed'
+        except Exception:
+            pass
+        self.process = None
+        self.rpc.close()
+        self.scheduler.close_rpc()
+        self.status = 'closed'
         raise gen.Return('OK')
 
 
@@ -283,7 +286,7 @@ class WorkerProcess(object):
                         init_result_q=self.init_result_q,
                         child_stop_q=self.child_stop_q),
         )
-        self.process.daemon = True   # do we want this?
+        self.process.daemon = True
         self.process.set_exit_callback(self._on_exit)
         self.running = Event()
         self.stopped = Event()
@@ -450,7 +453,7 @@ class WorkerProcess(object):
                 logger.exception(e)
                 init_result_q.put(e)
             else:
-                assert worker.port
+                assert worker.address
                 init_result_q.put({'address': worker.address,
                                    'dir': worker.local_dir})
                 yield worker.wait_until_closed()
@@ -463,6 +466,3 @@ class WorkerProcess(object):
             pass
         except KeyboardInterrupt:
             pass
-        finally:
-            loop.stop()
-            loop.close()

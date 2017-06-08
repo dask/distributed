@@ -260,17 +260,9 @@ def test_silent_startup():
             sleep(1.5)
         """
 
-    for i in range(5):
-        out = subprocess.check_output([sys.executable, "-Wi", "-c", code],
-                                      stderr=subprocess.STDOUT)
-        out = out.decode()
-        if ('Exception in callback None' in out
-            and 'KeyError' in out):
-            # Try again because of https://github.com/tornadoweb/tornado/issues/2069
-            continue
-        else:
-            break
-
+    out = subprocess.check_output([sys.executable, "-Wi", "-c", code],
+                                  stderr=subprocess.STDOUT)
+    out = out.decode()
     try:
         assert not out
     except AssertionError:

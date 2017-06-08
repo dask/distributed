@@ -10,6 +10,7 @@ import sys
 
 import tornado
 from tornado import gen, netutil
+from tornado.ioloop import IOLoop
 from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
@@ -120,6 +121,7 @@ class TCP(Comm):
         self._finalizer = finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._extra = {}
+        self._loop = IOLoop.current(instance=False)
 
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
@@ -214,7 +216,12 @@ class TCP(Comm):
                 pass
             finally:
                 self._finalizer.detach()
-                stream.close()
+                # Delay closing the socket until the next IO loop tick.
+                # Otherwise race conditions can appear if an event handler
+                # for call is already scheduled by the IO loop,
+                # raising KeyError.
+                # See https://github.com/tornadoweb/tornado/issues/2079
+                stream.io_loop.add_callback(stream.close)
 
     def abort(self):
         stream, self.stream = self.stream, None
