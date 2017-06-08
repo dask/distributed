@@ -99,7 +99,8 @@ environment by passing the ``asynchronous=True`` keyword
    future = client.submit(func, *args)  # immediate, no blocking/async difference
    result = await client.gather(future)  # non-blocking/asynchronous
 
-The asynchronous variants must be run within a Tornado coroutine.
+The asynchronous variants must be run within a Tornado coroutine.  See the
+:doc:`Asynchronous <asynchronous>` documentation for more information.
 
 
 Client

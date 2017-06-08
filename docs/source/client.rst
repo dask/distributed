@@ -166,6 +166,8 @@ functions.
        result = yield future
        return result
 
+See the :doc:`Asynchronous <asynchronous>` documentation for more information.
+
 
 Additional Links
 ----------------
