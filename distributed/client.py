@@ -17,7 +17,7 @@ import os
 import sys
 from time import sleep
 import uuid
-from threading import Thread, Lock
+from threading import Thread, Lock, local
 import six
 import socket
 import weakref
@@ -53,15 +53,24 @@ from .versions import get_versions
 
 logger = logging.getLogger(__name__)
 
-_global_client = [None]
+thread_state = local()
 
 
 def _get_global_client():
-    wr = _global_client[0]
+    try:
+        wr = thread_state.client
+    except AttributeError:
+        wr = None
     return wr and wr()
 
+
 def _set_global_client(c):
-    _global_client[0] = weakref.ref(c) if c is not None else None
+    try:
+        last = thread_state.client
+    except AttributeError:
+        last = None
+    thread_state.client = weakref.ref(c) if c is not None else None
+    return last and last()
 
 
 class Future(WrappedKey):
@@ -415,6 +424,7 @@ class Client(Node):
         self.connection_args = self.security.get_connection_args('client')
         self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
+        self._set_as_default = set_as_default
 
         if loop is None:
             self._should_close_loop = None
@@ -437,6 +447,9 @@ class Client(Node):
             dask.set_options(get=self.get)
             self._previous_shuffle = _globals.get('shuffle')
             dask.set_options(shuffle='tasks')
+            self._last_global_client = _set_global_client(self)
+        else:
+            self._previous_get = None
 
         self._handlers = {
             'key-in-memory': self._handle_key_in_memory,
@@ -528,7 +541,6 @@ class Client(Node):
                 sleep(0.001)
         pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
         self.loop.add_callback(pc.start)
-        _set_global_client(self)
         if asynchronous:
             self._started = self._start(**kwargs)
         else:
@@ -647,7 +659,6 @@ class Client(Node):
         bcomm.start(comm)
         self.scheduler_comm = bcomm
 
-        _set_global_client(self)
         self.status = 'running'
 
         for msg in self._pending_msg_buffer:
@@ -838,11 +849,12 @@ class Client(Node):
             self.loop.close()
             self._loop_thread.join(timeout=timeout)
         with ignoring(AttributeError):
-            dask.set_options(get=self._previous_get)
+            if self.get == _globals.get('get'):
+                dask.set_options(get=self._previous_get)
         with ignoring(AttributeError):
             dask.set_options(shuffle=self._previous_shuffle)
-        if self.get == _globals.get('get'):
-            del _globals['get']
+        with ignoring(AttributeError):
+            _set_global_client(self._last_global_client)
 
     def get_executor(self, **kwargs):
         """ Return a concurrent.futures Executor for submitting tasks
@@ -2850,13 +2862,13 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return an client if exactly one has started """
+    """ Return a client if exactly one has started """
     c = c or _get_global_client()
     if c:
         return c
     else:
         raise ValueError("No clients found\n"
-                "Start an client and point it to the scheduler address\n"
+                "Start a client and point it to the scheduler address\n"
                 "  from distributed import Client\n"
                 "  client = Client('ip-addr-of-scheduler:8786')\n")
 
@@ -2909,12 +2921,15 @@ def temp_default_client(c):
     c : Client
         This is what default_client() will return within the with-block.
     """
-    old_exec = default_client()
+    try:
+        old = default_client()
+    except ValueError:
+        old = None
     _set_global_client(c)
     try:
         yield
     finally:
-        _set_global_client(old_exec)
+        _set_global_client(old)
 
 
 def _shutdown_global_client():

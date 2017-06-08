@@ -874,7 +874,8 @@ def test_global_clients(loop):
                 assert default_client(c) is c
                 assert default_client(f) is f
 
-    assert _get_global_client() is None
+            assert _get_global_client() is c
+        assert _get_global_client() is None
 
 
 @gen_cluster(client=True)
@@ -3574,6 +3575,24 @@ def test_temp_client(s, a, b):
 
     yield c._shutdown()
     yield f._shutdown()
+
+
+@gen_cluster(client=False)
+def test_temp_client_no_default(s, a, b):
+    c = yield Client((s.ip, s.port), asynchronous=True, set_as_default=False)
+
+    with temp_default_client(c):
+        assert default_client() is c
+
+    yield c._shutdown()
+
+
+@gen_cluster(client=False)
+def test_no_default_client(s, a, b):
+    assert not _get_global_client()
+    c = yield Client((s.ip, s.port), asynchronous=True, set_as_default=False)
+    assert not _get_global_client()
+    yield c._shutdown()
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 3, client=True)

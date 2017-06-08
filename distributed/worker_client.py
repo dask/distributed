@@ -1,22 +1,20 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
-from datetime import timedelta
 from toolz import keymap, valmap, merge
 
 from dask.base import tokenize
 from tornado import gen
 
 from .client import AllExit, Client, Future, pack_data, unpack_remotedata
-from dask.compatibility import apply
 from .sizeof import sizeof
 from .threadpoolexecutor import secede
-from .utils import All, log_errors, sync, tokey, ignoring
+from .utils import All, log_errors, tokey, ignoring
 from .worker import thread_state, get_worker
 
 
 @contextmanager
-def worker_client(timeout=3, separate_thread=True):
+def worker_client(timeout=3, separate_thread=True, **kwargs):
     """ Get client for this thread
 
     This context manager is intended to be called within functions that we run
@@ -53,9 +51,7 @@ def worker_client(timeout=3, separate_thread=True):
         worker.loop.add_callback(worker.transition, thread_state.key, 'long-running')
 
     with WorkerClient(address, loop=worker.loop, security=worker.security,
-                      asynchronous=True) as wc:
-        # Make sure connection errors are bubbled to the caller
-        sync(wc.loop, gen.with_timeout, timedelta(seconds=timeout), wc._started)
+                      **kwargs) as wc:
         assert wc.status == 'running'
         yield wc
 
@@ -71,11 +67,9 @@ class WorkerClient(Client):
     look to the local data dictionary rather than sending data over the network
     """
     def __init__(self, *args, **kwargs):
-        loop = kwargs.get('loop')
         self.worker = get_worker()
-        kwargs['start'] = False
-        kwargs['set_as_default'] = False
-        sync(loop, apply, Client.__init__, (self,) + args, kwargs)
+        kwargs['loop'] = self.worker.loop
+        super(WorkerClient, self).__init__(*args, **kwargs)
 
     @gen.coroutine
     def _scatter(self, data, workers=None, broadcast=False, direct=None):
