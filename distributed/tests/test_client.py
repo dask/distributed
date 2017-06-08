@@ -3339,6 +3339,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
     start = time()
     while proc.num_fds() > before:
+        print("fds:", before, proc.num_fds())
         sleep(0.1)
         assert time() < start + 10
 

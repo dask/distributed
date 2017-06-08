@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from datetime import datetime
+import gc
 import os
 import random
 import sys
@@ -167,3 +168,32 @@ def test_random_seed(c, s, a, b):
 
     yield check_func(lambda a, b: random.randint(a, b))
     yield check_func(lambda a, b: np.random.randint(a, b))
+
+
+@pytest.mark.skipif(sys.platform.startswith('win'),
+                    reason="num_fds not supported on windows")
+@gen_cluster(client=False, ncores=[])
+def test_num_fds(s):
+    psutil = pytest.importorskip('psutil')
+    proc = psutil.Process()
+
+    # Warm up
+    w = Nanny(s.address)
+    yield w._start()
+    yield w._close()
+    del w
+    gc.collect()
+
+    before = proc.num_fds()
+
+    for i in range(3):
+        w = Nanny(s.address)
+        yield w._start()
+        yield gen.sleep(0.1)
+        yield w._close()
+
+    start = time()
+    while proc.num_fds() > before:
+        print("fds:", before, proc.num_fds())
+        yield gen.sleep(0.1)
+        assert time() < start + 10

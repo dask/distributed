@@ -25,6 +25,9 @@ def feed(in_q, out_q):
 def exit(q):
     sys.exit(q.get())
 
+def exit_now(rc=0):
+    sys.exit(rc)
+
 def exit_with_signal(signum):
     signal.signal(signal.SIGINT, signal.SIG_DFL)
     while True:
@@ -48,6 +51,9 @@ def test_simple():
     assert not proc.daemon
     proc.daemon = True
     assert proc.daemon
+
+    wr1 = weakref.ref(proc)
+    wr2 = weakref.ref(proc._process)
 
     # join() before start()
     with pytest.raises(AssertionError):
@@ -88,11 +94,9 @@ def test_simple():
     dt = time() - t1
     assert dt <= 0.2
 
-    wr1 = weakref.ref(proc)
-    wr2 = weakref.ref(proc._process)
     del proc
-    gc.collect()
     t1 = time()
+    gc.collect()
     assert wr1() is None
     while wr2() is not None:
         yield gen.sleep(0.01)
@@ -198,3 +202,32 @@ def test_exit_callback():
     yield proc.terminate()
     yield evt.wait(timedelta(seconds=3))
     assert evt.is_set()
+
+
+@pytest.mark.skipif(sys.platform.startswith('win'),
+                    reason="num_fds not supported on windows")
+@gen_test()
+def test_num_fds():
+    psutil = pytest.importorskip('psutil')
+
+    # Warm up
+    proc = AsyncProcess(target=exit_now)
+    proc.daemon = True
+    yield proc.start()
+    yield proc.join()
+
+    p = psutil.Process()
+    before = p.num_fds()
+
+    proc = AsyncProcess(target=exit_now)
+    proc.daemon = True
+    yield proc.start()
+    yield proc.join()
+    assert not proc.is_alive()
+    assert proc.exitcode == 0
+
+    start = time()
+    while p.num_fds() > before:
+        yield gen.sleep(0.1)
+        print("fds:", before, p.num_fds())
+        assert time() < start + 10

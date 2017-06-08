@@ -80,6 +80,11 @@ class AsyncProcess(object):
     def _do_terminate(self):
         self._process.terminate()
 
+    def _on_exit(self):
+        self._process = None
+        if self._exit_callback is not None:
+            self._exit_callback(self)
+
     @classmethod
     def _watch(cls, selfref, process, state, q, exit_future):
         # As multiprocessing.Process is not thread-safe, we run all
@@ -109,8 +114,8 @@ class AsyncProcess(object):
         def _maybe_call_exit_callback():
             self = selfref()  # only keep self alive when required
             try:
-                if self is not None and self._exit_callback is not None:
-                    self._loop.add_callback(self._exit_callback, self)
+                if self is not None:
+                    self._loop.add_callback(self._on_exit)
             finally:
                 self = None  # lose reference
 
@@ -157,10 +162,13 @@ class AsyncProcess(object):
         assert self._state.pid is not None, 'can only join a started process'
         if self._state.exitcode is not None:
             return
-        try:
-            yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
-        except gen.TimeoutError:
-            pass
+        if timeout is None:
+            yield self._exit_future
+        else:
+            try:
+                yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
+            except gen.TimeoutError:
+                pass
 
     def set_exit_callback(self, func):
         """

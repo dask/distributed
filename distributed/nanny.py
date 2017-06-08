@@ -325,6 +325,10 @@ class WorkerProcess(object):
                 logger.warning(msg)
             self.status = 'stopped'
             self.stopped.set()
+            # Release resources
+            self.init_result_q = None
+            self.child_stop_q = None
+            self.process = None
             # Best effort to clean up worker directory
             if self.worker_dir and os.path.exists(self.worker_dir):
                 shutil.rmtree(self.worker_dir, ignore_errors=True)
@@ -368,11 +372,10 @@ class WorkerProcess(object):
 
     @gen.coroutine
     def _wait_until_running(self):
-        if self.status != 'starting':
-            raise ValueError("Worker not started")
-
         delay = 0.05
         while True:
+            if self.status != 'starting':
+                raise ValueError("Worker not started")
             try:
                 msg = self.init_result_q.get_nowait()
             except Empty:
