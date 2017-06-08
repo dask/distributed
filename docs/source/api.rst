@@ -133,12 +133,6 @@ Other
 .. autofunction:: distributed.get_worker
 
 
-Tornado Client
---------------
-
-.. currentmodule:: distributed.tornado_client
-.. autoclass:: TornadoClient
-
 Asyncio Client
 --------------
 
