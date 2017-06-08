@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-from datetime import timedelta
 import errno
 import logging
 import socket
@@ -10,8 +9,7 @@ import sys
 
 import tornado
 from tornado import gen, netutil
-from tornado.ioloop import IOLoop
-from tornado.iostream import IOStream, StreamClosedError
+from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
@@ -121,7 +119,6 @@ class TCP(Comm):
         self._finalizer = finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._extra = {}
-        self._loop = IOLoop.current(instance=False)
 
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
