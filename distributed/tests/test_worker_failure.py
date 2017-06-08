@@ -312,10 +312,10 @@ def test_broken_worker_during_computation(c, s, a, b):
 
     from random import random
     yield gen.sleep(random() / 2)
-    with ignoring(CommClosedError):
+    with ignoring(CommClosedError):  # comm will be closed abrupty
         yield c._run(os._exit, 1, workers=[n.worker_address])
     yield gen.sleep(random() / 2)
-    with ignoring(CommClosedError):
+    with ignoring(CommClosedError, OSError):  # perhaps new worker can't be contacted yet
         yield c._run(os._exit, 1, workers=[n.worker_address])
 
     result = yield c._gather(L)
