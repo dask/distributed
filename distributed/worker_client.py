@@ -56,6 +56,7 @@ def worker_client(timeout=3, separate_thread=True):
                       asynchronous=True) as wc:
         # Make sure connection errors are bubbled to the caller
         sync(wc.loop, gen.with_timeout, timedelta(seconds=timeout), wc._started)
+        wc.asynchronous = False
         assert wc.status == 'running'
         yield wc
 
