@@ -843,6 +843,11 @@ class Client(Node):
         --------
         Client.restart
         """
+        if self.asynchronous:
+            future = self._shutdown()
+            if timeout:
+                future = gen.with_timeout(timedelta(seconds=timeout), future)
+            return future
         # XXX handling of self.status here is not thread-safe
         if self.status == 'closed':
             return

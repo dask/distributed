@@ -211,7 +211,7 @@ def test_gc(s, a, b):
 
     x.__del__()
 
-    yield c._shutdown()
+    yield c.shutdown()
 
     assert x.key not in s.who_has
 
@@ -510,7 +510,7 @@ def test_missing_worker(s, a, b):
     assert result == 3
     assert bad not in s.ncores
 
-    yield c._shutdown()
+    yield c.shutdown()
 
 
 @pytest.mark.skip
@@ -727,8 +727,8 @@ def test_two_consecutive_clients_share_results(s, a, b):
 
     assert xx == yy
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(client=True)
@@ -1770,7 +1770,7 @@ def test_multi_client(s, a, b):
     assert s.wants_what == {c.id: {x.key, y.key}, f.id: {y.key}}
     assert s.who_wants == {x.key: {c.id}, y.key: {c.id, f.id}}
 
-    yield c._shutdown()
+    yield c.shutdown()
 
     start = time()
     while c.id in s.wants_what:
@@ -1781,7 +1781,7 @@ def test_multi_client(s, a, b):
     assert c.id not in s.who_wants[y.key]
     assert x.key not in s.who_wants
 
-    yield f._shutdown()
+    yield f.shutdown()
 
     assert not s.tasks
 
@@ -1858,8 +1858,8 @@ def test_multi_garbage_collection(s, a, b):
     assert not any(v for v in s.wants_what.values())
     assert not s.who_wants
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(client=True)
@@ -1960,8 +1960,8 @@ def test__cancel_multi_client(s, a, b):
     with pytest.raises(CancelledError):
         yield x
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(client=True)
@@ -2489,7 +2489,7 @@ def test_worker_aliases():
     assert len(a.data) == 10
     assert len(b.data) == 0
 
-    yield c._shutdown()
+    yield c.shutdown()
     yield [a._close(), b._close()]
     yield s.close()
 
@@ -2551,10 +2551,10 @@ def test_client_num_fds(loop):
 @gen_cluster()
 def test_startup_shutdown_startup(s, a, b):
     c = yield Client((s.ip, s.port), asynchronous=True)
-    yield c._shutdown()
+    yield c.shutdown()
 
     c = yield Client((s.ip, s.port), asynchronous=True)
-    yield c._shutdown()
+    yield c.shutdown()
 
 
 def test_startup_shutdown_startup_sync(loop):
@@ -3209,7 +3209,7 @@ def test_status():
     assert c.status == 'running'
     x = c.submit(inc, 1)
 
-    yield c._shutdown()
+    yield c.shutdown()
     assert c.status == 'closed'
 
     yield s.close()
@@ -3388,8 +3388,8 @@ def test_idempotence(s, a, b):
 
     assert len(s.transition_log) == len_single_submit
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 def test_scheduler_info(loop):
@@ -3560,8 +3560,8 @@ def test_serialize_future(s, a, b):
         result2 = yield future2
         assert result == result2
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(client=False)
@@ -3577,8 +3577,8 @@ def test_temp_client(s, a, b):
         assert default_client() is f
         assert default_client(c) is c
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 3, client=True)
@@ -3923,7 +3923,7 @@ def test_client_timeout():
         yield gen.sleep(0.1)
         assert time() < start + 2
 
-    yield c._shutdown()
+    yield c.shutdown()
     yield s.close()
 
 
