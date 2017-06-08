@@ -9,7 +9,7 @@ import tornado.locks
 
 from .client import Future, _get_global_client, Client
 from .metrics import time
-from .utils import tokey, sync, log_errors
+from .utils import tokey, log_errors
 
 logger = logging.getLogger(__name__)
 
