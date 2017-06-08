@@ -38,7 +38,8 @@ from .batched import BatchedSend
 from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
                          scatter_to_workers, gather_from_workers)
 from .cfexecutor import ClientExecutor
-from .compatibility import Queue as pyQueue, Empty, isqueue, get_thread_identity
+from .compatibility import (Queue as pyQueue, Empty, isqueue,
+        get_thread_identity, html_escape)
 from .core import connect, rpc, clean_exception, CommClosedError
 from .node import Node
 from .protocol import to_serialize
@@ -46,7 +47,7 @@ from .protocol.pickle import dumps, loads
 from .security import Security
 from .worker import dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
-        tokey, log_errors, str_graph)
+        tokey, log_errors, str_graph, key_split, format_bytes)
 from .versions import get_versions
 
 
@@ -280,6 +281,21 @@ class Future(WrappedKey):
 
     __repr__ = __str__
 
+    def _repr_html_(self):
+        text = '<b>Future: %s</b> ' % html_escape(key_split(self.key))
+        text += ('<font color="gray">status: </font>'
+                 '<font color="%(color)s">%(status)s</font>, ') % {
+                        'status': self.status,
+                        'color': 'red' if self.status == 'error' else 'black'}
+        if self.type:
+            try:
+                typ = self.type.__name__
+            except AttributeError:
+                typ = str(self.type)
+            text += '<font color="gray">type: </font>%s, ' % typ
+        text += '<font color="gray">key: </font>%s' % html_escape(self.key)
+        return text
+
     def __await__(self):
         return self._result().__await__()
 
@@ -454,6 +470,48 @@ class Client(Node):
             return '<%s: not connected>' % (self.__class__.__name__,)
 
     __repr__ = __str__
+
+    def _repr_html_(self):
+        if hasattr(self, '_loop_thread'):
+            info = sync(self.loop, self.scheduler.identity)
+        else:
+            info = False
+
+        text = ("<h3>Client</h3>\n"
+                "<ul>\n"
+                "  <li><b>Scheduler: </b>%s\n") % self.scheduler.address
+        if info and 'bokeh' in info['services']:
+            protocol, rest = self.scheduler.address.split('://')
+            port = info['services']['bokeh']
+            if protocol == 'inproc':
+                address = 'http://localhost:%d' % port
+            else:
+                host = rest.split(':')[0]
+                address = 'http://%s:%d' % (host, port)
+            text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
+
+        text += "</ul>\n"
+
+        if info:
+            workers = len(info['workers'])
+            cores = sum(w['ncores'] for w in info['workers'].values())
+            memory = sum(w['memory_limit'] for w in info['workers'].values())
+            memory = format_bytes(memory)
+            text2 = ("<h3>Cluster</h3>\n"
+                     "<ul>\n"
+                     "  <li><b>Workers: </b>%d</li>\n"
+                     "  <li><b>Cores: </b>%d</li>\n"
+                     "  <li><b>Memory: </b>%s</li>\n"
+                     "</ul>\n") % (workers, cores, memory)
+
+            return ('<table style="border: 2px solid white;">\n'
+                    '<tr>\n'
+                    '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
+                    '<td style="vertical-align: top; border: 0px solid white">\n%s</td>\n'
+                    '</tr>\n</table>') % (text, text2)
+
+        else:
+            return text
 
     def start(self, asynchronous=None, **kwargs):
         """ Start scheduler running in separate thread """
@@ -707,7 +765,10 @@ class Client(Node):
             except TypeError:
                 exception = Exception("Undeserializable exception", exception)
             if traceback:
-                traceback = loads(traceback)
+                try:
+                    traceback = loads(traceback)
+                except AttributeError:
+                    traceback = None
             else:
                 traceback = None
             state.set_error(exception, traceback)
@@ -1768,6 +1829,12 @@ class Client(Node):
             collections = [collections]
             singleton = True
 
+        traverse = kwargs.pop('traverse', True)
+        if traverse:
+            collections = tuple(dask.delayed(a)
+                         if isinstance(a, (list, set, tuple, dict, Iterator))
+                         else a for a in collections)
+
         variables = [a for a in collections if isinstance(a, Base)]
 
         dsk = self.collections_to_dsk(variables, optimize_graph, **kwargs)
@@ -2605,7 +2672,7 @@ def _first_completed(futures):
     raise gen.Return(result)
 
 
-class AsCompleted(object):
+class as_completed(object):
     """
     Return futures in the order in which they complete
 
@@ -2778,7 +2845,8 @@ class AsCompleted(object):
                 return
 
 
-as_completed = AsCompleted
+def AsCompleted(*args, **kwargs):
+    raise Exception("This has moved to as_completed")
 
 
 def default_client(c=None):

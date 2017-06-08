@@ -16,12 +16,12 @@ from bokeh.palettes import RdBu
 from toolz import merge, partition_all
 
 from .components import DashboardComponent
-from .core import BokehServer, format_bytes, format_time
+from .core import BokehServer, format_time
 from .utils import transpose
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..metrics import time
-from ..utils import log_errors, key_split
+from ..utils import log_errors, key_split, format_bytes
 
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
     template_source = f.read()
 
 template = jinja2.Template(template_source)
+template_variables = {'pages': ['main', 'system', 'crossfilter', 'counters']}
 
 
 class StateTable(DashboardComponent):
@@ -351,7 +352,9 @@ class SystemMonitor(DashboardComponent):
         self.worker = worker
 
         names = worker.monitor.quantities
+        self.last = 0
         self.source = ColumnDataSource({name: [] for name in names})
+        self.source.data.update(self.get_data())
 
         x_range = DataRange1d(follow='end', follow_interval=20000,
                               range_padding=0)
@@ -400,16 +403,18 @@ class SystemMonitor(DashboardComponent):
         self.cpu.y_range.start = 0
         self.bandwidth.y_range.start = 0
 
-        self.last = 0
         self.root = column(*plots, **kw)
         self.worker.monitor.update()
 
+    def get_data(self):
+        d = self.worker.monitor.range_query(start=self.last)
+        d['time'] = [x * 1000 for x in d['time']]
+        self.last = self.worker.monitor.count
+        return d
+
     def update(self):
         with log_errors():
-            d = self.worker.monitor.range_query(start=self.last)
-            d['time'] = [x * 1000 for x in d['time']]
-            self.source.stream(d, 1000)
-            self.last = self.worker.monitor.count
+            self.source.stream(self.get_data(), 1000)
 
 
 class Counters(DashboardComponent):
@@ -554,6 +559,8 @@ def main_doc(worker, doc):
                             communicating_stream.root,
                             sizing_mode='scale_width'))
         doc.template = template
+        doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'main'
 
 
 def crossfilter_doc(worker, doc):
@@ -567,6 +574,8 @@ def crossfilter_doc(worker, doc):
 
         doc.add_root(column(statetable.root, crossfilter.root))
         doc.template = template
+        doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'crossfilter'
 
 
 def systemmonitor_doc(worker, doc):
@@ -577,6 +586,8 @@ def systemmonitor_doc(worker, doc):
 
         doc.add_root(sysmon.root)
         doc.template = template
+        doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'system'
 
 
 def counters_doc(server, doc):
@@ -587,6 +598,8 @@ def counters_doc(server, doc):
 
         doc.add_root(counter.root)
         doc.template = template
+        doc.template_variables.update(template_variables)
+        doc.template_variables['active_page'] = 'counters'
 
 
 class BokehWorker(BokehServer):
