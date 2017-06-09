@@ -60,13 +60,28 @@ with ignoring(ImportError):
         lz4_compress = lz4.LZ4_compress
         lz4_decompress = lz4.LZ4_uncompress
 
-    def _fixed_lz4_decompress(data):
-        # helper to bypass missing memoryview support in lz4
-        if isinstance(data, memoryview):
-            data = data.tobytes()
-        return lz4_decompress(data)
+    # helper to bypass missing memoryview support in current lz4
+    # (fixed in later versions)
 
-    compressions['lz4'] = {'compress': lz4_compress,
+    def _fixed_lz4_compress(data):
+        try:
+            return lz4_compress(data)
+        except TypeError:
+            if isinstance(data, memoryview):
+                return lz4_compress(data.tobytes())
+            else:
+                raise
+
+    def _fixed_lz4_decompress(data):
+        try:
+            return lz4_decompress(data)
+        except TypeError:
+            if isinstance(data, memoryview):
+                return lz4_decompress(data.tobytes())
+            else:
+                raise
+
+    compressions['lz4'] = {'compress': _fixed_lz4_compress,
                            'decompress': _fixed_lz4_decompress}
     default_compression = 'lz4'
 
