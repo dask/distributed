@@ -372,6 +372,16 @@ class Client(Node):
     address: string, or Cluster
         This can be the address of a ``Scheduler`` server like a string
         ``'127.0.0.1:8786'`` or a cluster object like ``LocalCluster()``
+    timeout: int
+        Timeout duration for initial connection to the scheduler
+    set_as_default: bool (True)
+        Claim this scheduler as the global dask scheduler
+    scheduler_file: string (optional)
+        Path to a file with scheduler information if available
+    security: (optional)
+        Optional security information
+    asynchronous: bool (False by default)
+        Set to True if this client will be used within a Tornado event loop
 
     Examples
     --------
@@ -390,7 +400,7 @@ class Client(Node):
 
     Gather results with the ``gather`` method.
 
-    >>> client.gather([c])  # doctest: +SKIP
+    >>> client.gather(c)  # doctest: +SKIP
     33
 
     See Also
@@ -403,6 +413,11 @@ class Client(Node):
                  set_as_default=True, scheduler_file=None,
                  security=None, start=None, asynchronous=False,
                  **kwargs):
+        if start is not None:
+            raise ValueError("The start= keyword has been deprecated. "
+                             "Starting happens automatically. "
+                             "For asynchronous= use use the keyword instead")
+
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self.coroutines = []
