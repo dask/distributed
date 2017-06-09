@@ -158,7 +158,8 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
     else:
         nbytes = len(payload)
 
-    if blosc and type(payload) is memoryview:
+    if blosc and type(payload) is memoryview and payload.itemsize > 1:
+        # Blosc does itemsize-aware shuffling, resulting in better compression
         compressed = blosc.compress(payload, typesize=payload.itemsize,
                                     cname='lz4', clevel=5)
         compression = 'blosc'
