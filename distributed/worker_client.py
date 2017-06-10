@@ -74,7 +74,6 @@ class WorkerClient(Client):
     def __init__(self, *args, **kwargs):
         loop = kwargs.get('loop')
         self.worker = get_worker()
-        kwargs['start'] = False
         kwargs['set_as_default'] = False
         sync(loop, apply, Client.__init__, (self,) + args, kwargs)
 
