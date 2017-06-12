@@ -90,7 +90,7 @@ def test_map(c, s, a, b):
     assert result == inc(1) + inc(inc(1))
 
     L4 = c.map(add, range(3), range(4))
-    results = yield c._gather(L4)
+    results = yield c.gather(L4)
     if sys.version_info[0] >= 3:
         assert results == list(map(add, range(3), range(4)))
 
@@ -98,12 +98,12 @@ def test_map(c, s, a, b):
         return x + y
 
     L5 = c.map(f, range(5), y=5)
-    results = yield c._gather(L5)
+    results = yield c.gather(L5)
     assert results == list(range(5, 10))
 
     y = c.submit(f, 10)
     L6 = c.map(f, range(5), y=y)
-    results = yield c._gather(L6)
+    results = yield c.gather(L6)
     assert results == list(range(20, 25))
     s.validate_state()
 
@@ -113,7 +113,7 @@ def test_map(c, s, a, b):
 def test_map_empty(c, s, a, b):
     L1 = c.map(inc, [], pure=False)
     assert len(L1) == 0
-    results = yield c._gather(L1)
+    results = yield c.gather(L1)
     assert results == []
 
 
@@ -143,11 +143,11 @@ def test_future_repr(c, s, a, b):
 @gen_cluster(client=True)
 def test_Future_exception(c, s, a, b):
     x = c.submit(div, 1, 0)
-    result = yield x._exception()
+    result = yield x.exception()
     assert isinstance(result, ZeroDivisionError)
 
     x = c.submit(div, 1, 1)
-    result = yield x._exception()
+    result = yield x.exception()
     assert result is None
 
 
@@ -212,7 +212,7 @@ def test_gc(s, a, b):
 
     x.__del__()
 
-    yield c._shutdown()
+    yield c.shutdown()
 
     assert x.key not in s.who_has
 
@@ -254,23 +254,23 @@ def test_gather(c, s, a, b):
     x = c.submit(inc, 10)
     y = c.submit(inc, x)
 
-    result = yield c._gather(x)
+    result = yield c.gather(x)
     assert result == 11
-    result = yield c._gather([x])
+    result = yield c.gather([x])
     assert result == [11]
-    result = yield c._gather({'x': x, 'y': [y]})
+    result = yield c.gather({'x': x, 'y': [y]})
     assert result == {'x': 11, 'y': [12]}
 
 
 @gen_cluster(client=True)
 def test_gather_lost(c, s, a, b):
-    [x] = yield c._scatter([1], workers=a.address)
+    [x] = yield c.scatter([1], workers=a.address)
     y = c.submit(inc, 1, workers=b.address)
 
     yield a._close()
 
     with pytest.raises(Exception):
-        yield c._gather([x, y])
+        yield c.gather([x, y])
 
 
 def test_gather_sync(loop):
@@ -294,9 +294,9 @@ def test_gather_strict(c, s, a, b):
     y = c.submit(div, 1, 0)
 
     with pytest.raises(ZeroDivisionError):
-        yield c._gather([x, y])
+        yield c.gather([x, y])
 
-    [xx] = yield c._gather([x, y], errors='skip')
+    [xx] = yield c.gather([x, y], errors='skip')
     assert xx == 2
 
 
@@ -345,9 +345,9 @@ def test_gather_errors(c, s, a, b):
     future_f = c.submit(f, 1, 2)
     future_g = c.submit(g, 1, 2)
     with pytest.raises(TypeError):
-        yield c._gather(future_f)
+        yield c.gather(future_f)
     with pytest.raises(AttributeError):
-        yield c._gather(future_g)
+        yield c.gather(future_g)
 
     yield a._close()
 
@@ -358,7 +358,7 @@ def test_wait(c, s, a, b):
     y = c.submit(inc, 1)
     z = c.submit(inc, 2)
 
-    done, not_done = yield _wait([x, y, z])
+    done, not_done = yield wait([x, y, z])
 
     assert done == {x, y, z}
     assert not_done == set()
@@ -369,7 +369,7 @@ def test_wait(c, s, a, b):
 def test_wait_timeout(c, s, a, b):
     future = c.submit(sleep, 0.3)
     with pytest.raises(gen.TimeoutError):
-        yield _wait(future, timeout=0.01)
+        yield wait(future, timeout=0.01)
 
 
 def test_wait_sync(loop):
@@ -423,7 +423,7 @@ def test_garbage_collection(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_garbage_collection_with_scatter(c, s, a, b):
-    [a] = yield c._scatter([1])
+    [a] = yield c.scatter([1])
     assert a.key in c.futures
     assert a.status == 'finished'
     assert a.event.is_set()
@@ -478,7 +478,7 @@ def test_missing_data_heals(c, s, a, b):
     y = c.submit(inc, x)
     z = c.submit(inc, y)
 
-    yield _wait([x, y, z])
+    yield wait([x, y, z])
 
     # Secretly delete y's key
     if y.key in a.data:
@@ -511,7 +511,7 @@ def test_missing_worker(s, a, b):
     assert result == 3
     assert bad not in s.ncores
 
-    yield c._shutdown()
+    yield c.shutdown()
 
 
 @pytest.mark.skip
@@ -520,7 +520,7 @@ def test_gather_robust_to_missing_data(c, s, a, b):
     a.validate = False
     b.validate = False
     x, y, z = c.map(inc, range(3))
-    yield _wait([x, y, z])  # everything computed
+    yield wait([x, y, z])  # everything computed
 
     for f in [x, y]:
         for w in [a, b]:
@@ -528,7 +528,7 @@ def test_gather_robust_to_missing_data(c, s, a, b):
                 del w.data[f.key]
                 w.release_key(f.key)
 
-    xx, yy, zz = yield c._gather([x, y, z])
+    xx, yy, zz = yield c.gather([x, y, z])
     assert (xx, yy, zz) == (1, 2, 3)
 
 
@@ -542,7 +542,7 @@ def test_gather_robust_to_nested_missing_data(c, s, a, b):
     y = c.submit(inc, x)
     z = c.submit(inc, y)
 
-    yield _wait([z])
+    yield wait([z])
 
     for worker in [a, b]:
         for datum in [y, z]:
@@ -550,7 +550,7 @@ def test_gather_robust_to_nested_missing_data(c, s, a, b):
                 del worker.data[datum.key]
                 worker.release_key(datum.key)
 
-    result = yield c._gather([z])
+    result = yield c.gather([z])
 
     assert result == [inc(inc(inc(inc(1))))]
 
@@ -574,7 +574,7 @@ def test_tokenize_on_futures(c, s, a, b):
 def test_restrictions_submit(c, s, a, b):
     x = c.submit(inc, 1, workers={a.ip})
     y = c.submit(inc, x, workers={b.ip})
-    yield _wait([x, y])
+    yield wait([x, y])
 
     assert s.host_restrictions[x.key] == {a.ip}
     assert x.key in a.data
@@ -587,7 +587,7 @@ def test_restrictions_submit(c, s, a, b):
 def test_restrictions_ip_port(c, s, a, b):
     x = c.submit(inc, 1, workers={a.address})
     y = c.submit(inc, x, workers={b.address})
-    yield _wait([x, y])
+    yield wait([x, y])
 
     assert s.worker_restrictions[x.key] == {a.address}
     assert x.key in a.data
@@ -601,7 +601,7 @@ def test_restrictions_ip_port(c, s, a, b):
 @gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], client=True)
 def test_restrictions_map(c, s, a, b):
     L = c.map(inc, range(5), workers={a.ip})
-    yield _wait(L)
+    yield wait(L)
 
     assert set(a.data) == {x.key for x in L}
     assert not b.data
@@ -611,7 +611,7 @@ def test_restrictions_map(c, s, a, b):
     L = c.map(inc, [10, 11, 12], workers=[{a.ip},
                                           {a.ip, b.ip},
                                           {b.ip}])
-    yield _wait(L)
+    yield wait(L)
 
     assert s.host_restrictions[L[0].key] == {a.ip}
     assert s.host_restrictions[L[1].key] == {a.ip, b.ip}
@@ -649,13 +649,13 @@ def dont_test_bad_restrictions_raise_exception(c, s, a, b):
 @gen_cluster(client=True, timeout=None)
 def test_remove_worker(c, s, a, b):
     L = c.map(inc, range(20))
-    yield _wait(L)
+    yield wait(L)
 
     yield b._close()
 
     assert b.address not in s.worker_info
 
-    result = yield c._gather(L)
+    result = yield c.gather(L)
     assert result == list(map(inc, range(20)))
 
 
@@ -671,7 +671,7 @@ def test_errors_dont_block(c, s, w):
         assert time() < start + 5
         yield gen.sleep(0.01)
 
-    result = yield c._gather([L[0], L[2]])
+    result = yield c.gather([L[0], L[2]])
     assert result == [2, 3]
 
 
@@ -701,15 +701,15 @@ def test_map_quotes(c, s, a, b):
         return isinstance(x, list) and isinstance(z, list)
 
     L = c.map(assert_list, [[1, 2, 3], [4]])
-    result = yield c._gather(L)
+    result = yield c.gather(L)
     assert all(result)
 
     L = c.map(assert_list, [[1, 2, 3], [4]], z=[10])
-    result = yield c._gather(L)
+    result = yield c.gather(L)
     assert all(result)
 
     L = c.map(assert_list, [[1, 2, 3], [4]], [[]] * 3)
-    result = yield c._gather(L)
+    result = yield c.gather(L)
     assert all(result)
 
 
@@ -728,8 +728,8 @@ def test_two_consecutive_clients_share_results(s, a, b):
 
     assert xx == yy
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(client=True)
@@ -763,20 +763,20 @@ def test_aliases_2(c, s, a, b):
 
 @gen_cluster(client=True)
 def test__scatter(c, s, a, b):
-    d = yield c._scatter({'y': 20})
+    d = yield c.scatter({'y': 20})
     assert isinstance(d['y'], Future)
     assert a.data.get('y') == 20 or b.data.get('y') == 20
     assert (a.address in s.who_has['y'] or
             b.address in s.who_has['y'])
     assert s.who_has['y']
     assert s.nbytes == {'y': sizeof(20)}
-    yy = yield c._gather([d['y']])
+    yy = yield c.gather([d['y']])
     assert yy == [20]
 
-    [x] = yield c._scatter([10])
+    [x] = yield c.scatter([10])
     assert isinstance(x, Future)
     assert a.data.get(x.key) == 10 or b.data.get(x.key) == 10
-    xx = yield c._gather([x])
+    xx = yield c.gather([x])
     assert s.who_has[x.key]
     assert (a.address in s.who_has[x.key] or
             b.address in s.who_has[x.key])
@@ -786,23 +786,23 @@ def test__scatter(c, s, a, b):
     z = c.submit(add, x, d['y'])  # submit works on Future
     result = yield z
     assert result == 10 + 20
-    result = yield c._gather([z, x])
+    result = yield c.gather([z, x])
     assert result == [30, 10]
 
 
 @gen_cluster(client=True)
 def test__scatter_types(c, s, a, b):
-    d = yield c._scatter({'x': 1})
+    d = yield c.scatter({'x': 1})
     assert isinstance(d, dict)
     assert list(d) == ['x']
 
     for seq in [[1], (1,), {1}, frozenset([1])]:
-        L = yield c._scatter(seq)
+        L = yield c.scatter(seq)
         assert isinstance(L, type(seq))
         assert len(L) == 1
         s.validate_state()
 
-    seq = yield c._scatter(range(5))
+    seq = yield c.scatter(range(5))
     assert isinstance(seq, list)
     assert len(seq) == 5
     s.validate_state()
@@ -810,7 +810,7 @@ def test__scatter_types(c, s, a, b):
 
 @gen_cluster(client=True)
 def test__scatter_non_list(c, s, a, b):
-    x = yield c._scatter(1)
+    x = yield c.scatter(1)
     assert isinstance(x, Future)
     result = yield x
     assert result == 1
@@ -818,8 +818,8 @@ def test__scatter_non_list(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_scatter_hash(c, s, a, b):
-    [a] = yield c._scatter([1])
-    [b] = yield c._scatter([1])
+    [a] = yield c.scatter([1])
+    [b] = yield c.scatter([1])
 
     assert a.key == b.key
     s.validate_state()
@@ -840,7 +840,7 @@ def test_scatter_tokenize_local(c, s, a, b):
 
     obj = MyObj()
 
-    future = yield c._scatter(obj)
+    future = yield c.scatter(obj)
     assert L and L[0] is obj
 
 
@@ -849,7 +849,7 @@ def test_scatter_singletons(c, s, a, b):
     np = pytest.importorskip('numpy')
     pd = pytest.importorskip('pandas')
     for x in [1, np.ones(5), pd.DataFrame({'x': [1, 2, 3]})]:
-        future = yield c._scatter(x)
+        future = yield c.scatter(x)
         result = yield future
         assert str(result) == str(x)
 
@@ -894,7 +894,7 @@ def test_exception_on_exception(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_nbytes(c, s, a, b):
-    [x] = yield c._scatter([1])
+    [x] = yield c.scatter([1])
     assert s.nbytes == {x.key: sizeof(1)}
 
     y = c.submit(inc, x)
@@ -910,7 +910,7 @@ def test_nbytes(c, s, a, b):
 def test_nbytes_determines_worker(c, s, a, b):
     x = c.submit(identity, 1, workers=[a.ip])
     y = c.submit(identity, tuple(range(100)), workers=[b.ip])
-    yield c._gather([x, y])
+    yield c.gather([x, y])
 
     z = c.submit(lambda x, y: None, x, y)
     yield z
@@ -941,9 +941,9 @@ def test_pragmatic_move_small_data_to_large_data(c, s, a, b):
     s.task_duration['f'] = 0.001
     results = c.map(f, lists, [total] * 10)
 
-    yield _wait([total])
+    yield wait([total])
 
-    yield _wait(results)
+    yield wait(results)
 
     assert sum(s.who_has[r.key].issubset(s.who_has[l.key])
                for l, r in zip(lists, results)) >= 9
@@ -976,11 +976,11 @@ def test_get_with_error_sync(loop):
 
 @gen_cluster(client=True)
 def test_directed_scatter(c, s, a, b):
-    yield c._scatter([1, 2, 3], workers=[a.address])
+    yield c.scatter([1, 2, 3], workers=[a.address])
     assert len(a.data) == 3
     assert not b.data
 
-    yield c._scatter([4, 5], workers=[b.name])
+    yield c.scatter([4, 5], workers=[b.name])
     assert len(b.data) == 2
 
 
@@ -1101,7 +1101,7 @@ def test_iterator_gather(loop):
 
 @gen_cluster(client=True)
 def test_scatter_direct(c, s, a, b):
-    future = yield c._scatter(123, direct=True)
+    future = yield c.scatter(123, direct=True)
     assert future.key in a.data or future.key in b.data
     assert s.who_has[future.key]
     assert future.status == 'finished'
@@ -1113,14 +1113,14 @@ def test_scatter_direct(c, s, a, b):
 def test_scatter_direct_numpy(c, s, a, b):
     np = pytest.importorskip('numpy')
     x = np.ones(5)
-    future = yield c._scatter(x, direct=True)
+    future = yield c.scatter(x, direct=True)
     result = yield future
     assert np.allclose(x, result)
 
 
 @gen_cluster(client=True)
 def test_scatter_direct_broadcast(c, s, a, b):
-    future2 = yield c._scatter(456, direct=True, broadcast=True)
+    future2 = yield c.scatter(456, direct=True, broadcast=True)
     assert future2.key in a.data
     assert future2.key in b.data
     assert s.who_has[future2.key] == {a.address, b.address}
@@ -1130,18 +1130,18 @@ def test_scatter_direct_broadcast(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test_scatter_direct_balanced(c, s, *workers):
-    futures = yield c._scatter([1, 2, 3], direct=True)
+    futures = yield c.scatter([1, 2, 3], direct=True)
     assert sorted([len(w.data) for w in workers]) == [0, 1, 1, 1]
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test_scatter_direct_broadcast_target(c, s, *workers):
-    futures = yield c._scatter([123, 456], direct=True,
+    futures = yield c.scatter([123, 456], direct=True,
                                 workers=workers[0].address)
     assert futures[0].key in workers[0].data
     assert futures[1].key in workers[0].data
 
-    futures = yield c._scatter([123, 456], direct=True, broadcast=True,
+    futures = yield c.scatter([123, 456], direct=True, broadcast=True,
                                 workers=[w.address for w in workers[:3]])
     assert (f.key in w.data and w.address in s.who_has[f.key]
             for f in futures
@@ -1151,14 +1151,14 @@ def test_scatter_direct_broadcast_target(c, s, *workers):
 @gen_cluster(client=True, ncores=[])
 def test_scatter_direct_empty(c, s):
     with pytest.raises(ValueError):
-        yield c._scatter(123, direct=True)
+        yield c.scatter(123, direct=True)
 
 
 @gen_cluster(client=True, timeout=None, ncores=[('127.0.0.1', 1)] * 5)
 def test_scatter_direct_spread_evenly(c, s, *workers):
     futures = []
     for i in range(10):
-        future = yield c._scatter(i, direct=True)
+        future = yield c.scatter(i, direct=True)
         futures.append(future)
 
     assert all(w.data for w in workers)
@@ -1176,16 +1176,16 @@ def test_scatter_gather_sync(loop, direct, broadcast):
 
 @gen_cluster(client=True)
 def test_gather_direct(c, s, a, b):
-    futures = yield c._scatter([1, 2, 3])
+    futures = yield c.scatter([1, 2, 3])
 
-    data = yield c._gather(futures, direct=True)
+    data = yield c.gather(futures, direct=True)
     assert data == [1, 2, 3]
 
 
 @gen_cluster(client=True)
 def test_many_submits_spread_evenly(c, s, a, b):
     L = [c.submit(inc, i) for i in range(10)]
-    yield _wait(L)
+    yield wait(L)
 
     assert a.data and b.data
 
@@ -1193,7 +1193,7 @@ def test_many_submits_spread_evenly(c, s, a, b):
 @gen_cluster(client=True)
 def test_traceback(c, s, a, b):
     x = c.submit(div, 1, 0)
-    tb = yield x._traceback()
+    tb = yield x.traceback()
 
     if sys.version_info[0] >= 3:
         assert any('x / y' in line
@@ -1213,7 +1213,7 @@ def test_get_traceback(c, s, a, b):
 def test_gather_traceback(c, s, a, b):
     x = c.submit(div, 1, 0)
     try:
-        yield c._gather(x)
+        yield c.gather(x)
     except ZeroDivisionError:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         L = traceback.format_tb(exc_traceback)
@@ -1250,7 +1250,7 @@ def test_upload_file(c, s, a, b):
     try:
         for value in [123, 456]:
             with tmp_text('myfile.py', 'def f():\n    return {}'.format(value)) as fn:
-                yield c._upload_file(fn)
+                yield c.upload_file(fn)
 
             x = c.submit(g, pure=False)
             result = yield x
@@ -1271,7 +1271,7 @@ def test_upload_file_zip(c, s, a, b):
             with tmp_text('myfile.py', 'def f():\n    return {}'.format(value)) as fn_my_file:
                 with zipfile.ZipFile('myfile.zip', 'w') as z:
                     z.write(fn_my_file, arcname=os.path.basename(fn_my_file))
-                yield c._upload_file('myfile.zip')
+                yield c.upload_file('myfile.zip')
 
                 x = c.submit(g, pure=False)
                 result = yield x
@@ -1322,7 +1322,7 @@ def test_upload_file_sync(loop):
 def test_upload_file_exception(c, s, a, b):
     with tmp_text('myfile.py', 'syntax-error!') as fn:
         with pytest.raises(SyntaxError):
-            yield c._upload_file(fn)
+            yield c.upload_file(fn)
 
 
 def test_upload_file_exception_sync(loop):
@@ -1352,8 +1352,8 @@ def test_multiple_clients(s, a, b):
     zz = yield z
     assert zz == 5
 
-    yield a._shutdown()
-    yield b._shutdown()
+    yield a.shutdown()
+    yield b.shutdown()
 
 
 @gen_cluster(client=True)
@@ -1368,7 +1368,7 @@ def test_async_compute(c, s, a, b):
     assert isinstance(zz, Future)
     assert aa == 3
 
-    result = yield c._gather([yy, zz])
+    result = yield c.gather([yy, zz])
     assert result == [2, 0]
 
     assert isinstance(c.compute(y), Future)
@@ -1377,14 +1377,14 @@ def test_async_compute(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_async_compute_with_scatter(c, s, a, b):
-    d = yield c._scatter({('x', 1): 1, ('y', 1): 2})
+    d = yield c.scatter({('x', 1): 1, ('y', 1): 2})
     x, y = d[('x', 1)], d[('y', 1)]
 
     from dask.delayed import delayed
     z = delayed(add)(delayed(inc)(x), delayed(inc)(y))
     zz = c.compute(z)
 
-    [result] = yield c._gather([zz])
+    [result] = yield c.gather([zz])
     assert result == 2 + 3
 
 
@@ -1401,13 +1401,13 @@ def test_sync_compute(loop):
 
 @gen_cluster(client=True)
 def test_remote_scatter_gather(c, s, a, b):
-    x, y, z = yield c._scatter([1, 2, 3])
+    x, y, z = yield c.scatter([1, 2, 3])
 
     assert x.key in a.data or x.key in b.data
     assert y.key in a.data or y.key in b.data
     assert z.key in a.data or z.key in b.data
 
-    xx, yy, zz = yield c._gather([x, y, z])
+    xx, yy, zz = yield c.gather([x, y, z])
     assert (xx, yy, zz) == (1, 2, 3)
 
 
@@ -1442,8 +1442,8 @@ def test_client_with_scheduler(c, s, a, b):
     result = yield z
     assert result == 1 + 1 + 1 + 2
 
-    A, B, C = yield c._scatter([1, 2, 3])
-    AA, BB, xx = yield c._gather([A, B, x])
+    A, B, C = yield c.scatter([1, 2, 3])
+    AA, BB, xx = yield c.gather([A, B, x])
     assert (AA, BB, xx) == (1, 2, 2)
 
     result = yield c.get({'x': (inc, 1), 'y': (add, 'x', 10)}, 'y', sync=False)
@@ -1465,7 +1465,7 @@ def test_allow_restrictions(c, s, a, b):
     assert x.key in s.loose_restrictions
 
     L = c.map(inc, range(3, 13), workers=a.ip, allow_other_workers=True)
-    yield _wait(L)
+    yield wait(L)
     assert all(s.who_has[f.key] == {a.address} for f in L)
     assert {f.key for f in L}.issubset(s.loose_restrictions)
 
@@ -1485,7 +1485,7 @@ def test_allow_restrictions(c, s, a, b):
     assert x.key in s.loose_restrictions
 
     L = c.map(inc, range(15, 25), workers='127.0.0.3', allow_other_workers=True)
-    yield _wait(L)
+    yield wait(L)
     assert all(s.who_has[f.key] for f in L)
     assert {f.key for f in L}.issubset(s.loose_restrictions)
 
@@ -1527,7 +1527,7 @@ def test_long_error(c, s, a, b):
     except ValueError as e:
         assert len(str(e)) < 100000
 
-    tb = yield x._traceback()
+    tb = yield x.traceback()
     assert all(len(line) < 100000
                for line in concat(traceback.extract_tb(tb))
                if isinstance(line, str))
@@ -1540,7 +1540,7 @@ def test_map_on_futures_with_kwargs(c, s, a, b):
 
     futures = c.map(inc, range(10))
     futures2 = c.map(f, futures, y=20)
-    results = yield c._gather(futures2)
+    results = yield c.gather(futures2)
     assert results == [i + 1 + 20 for i in range(10)]
 
     future = c.submit(inc, 100)
@@ -1572,7 +1572,7 @@ def test_badly_serialized_input(c, s, a, b):
     future = c.submit(inc, o)
     futures = c.map(inc, range(10))
 
-    L = yield c._gather(futures)
+    L = yield c.gather(futures)
     assert list(L) == list(map(inc, range(10)))
     assert future.status == 'error'
 
@@ -1595,12 +1595,17 @@ def test_badly_serialized_input_stderr(capsys, loop):
 
 
 def test_repr(loop):
+    funcs = [str, repr, lambda x: x._repr_html_()]
     with cluster(nworkers=3) as (s, [a, b, c]):
         with Client(s['address'], loop=loop) as c:
-            for func in [str, repr, lambda x: x._repr_html_()]:
+            for func in funcs:
                 text = func(c)
                 assert c.scheduler.address in text
                 assert '2' in text
+
+        for func in funcs:
+            text = func(c)
+            assert 'not connected' in text
 
 
 @gen_cluster(client=True)
@@ -1609,7 +1614,7 @@ def test_forget_simple(c, s, a, b):
     y = c.submit(inc, 2)
     z = c.submit(add, x, y, workers=[a.ip], allow_other_workers=True)
 
-    yield _wait([x, y, z])
+    yield wait([x, y, z])
     assert not s.waiting_data[x.key]
     assert not s.waiting_data[y.key]
 
@@ -1634,13 +1639,13 @@ def test_forget_simple(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_forget_complex(e, s, A, B):
-    a, b, c, d = yield e._scatter(list(range(4)))
+    a, b, c, d = yield e.scatter(list(range(4)))
     ab = e.submit(add, a, b)
     cd = e.submit(add, c, d)
     ac = e.submit(add, a, c)
     acab = e.submit(add, ac, ab)
 
-    yield _wait([a,b,c,d,ab,ac,cd,acab])
+    yield wait([a,b,c,d,ab,ac,cd,acab])
 
     assert set(s.tasks) == {f.key for f in [ab,ac,cd,acab]}
 
@@ -1693,7 +1698,7 @@ def test_forget_errors(c, s, a, b):
     x = c.submit(div, 1, 0)
     y = c.submit(inc, x)
     z = c.submit(inc, y)
-    yield _wait([y])
+    yield wait([y])
 
     assert x.key in s.exceptions
     assert x.key in s.exceptions_blame
@@ -1739,7 +1744,7 @@ def test_waiting_data(c, s, a, b):
     y = c.submit(inc, 2)
     z = c.submit(add, x, y, workers=[a.ip], allow_other_workers=True)
 
-    yield _wait([x, y, z])
+    yield wait([x, y, z])
 
     assert x.key not in s.waiting_data[x.key]
     assert y.key not in s.waiting_data[y.key]
@@ -1761,12 +1766,12 @@ def test_multi_client(s, a, b):
 
     assert y.key == y2.key
 
-    yield _wait([x, y])
+    yield wait([x, y])
 
     assert s.wants_what == {c.id: {x.key, y.key}, f.id: {y.key}}
     assert s.who_wants == {x.key: {c.id}, y.key: {c.id, f.id}}
 
-    yield c._shutdown()
+    yield c.shutdown()
 
     start = time()
     while c.id in s.wants_what:
@@ -1777,7 +1782,7 @@ def test_multi_client(s, a, b):
     assert c.id not in s.who_wants[y.key]
     assert x.key not in s.who_wants
 
-    yield f._shutdown()
+    yield f.shutdown()
 
     assert not s.tasks
 
@@ -1823,7 +1828,7 @@ def test_multi_garbage_collection(s, a, b):
 
     assert y.key == y2.key
 
-    yield _wait([x, y])
+    yield wait([x, y])
 
     x.__del__()
     start = time()
@@ -1854,26 +1859,26 @@ def test_multi_garbage_collection(s, a, b):
     assert not any(v for v in s.wants_what.values())
     assert not s.who_wants
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(client=True)
 def test__broadcast(c, s, a, b):
-    x, y = yield c._scatter([1, 2], broadcast=True)
+    x, y = yield c.scatter([1, 2], broadcast=True)
     assert a.data == b.data == {x.key: 1, y.key: 2}
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test__broadcast_integer(c, s, *workers):
-    x, y = yield c._scatter([1, 2], broadcast=2)
+    x, y = yield c.scatter([1, 2], broadcast=2)
     assert len(s.who_has[x.key]) == 2
     assert len(s.who_has[y.key]) == 2
 
 
 @gen_cluster(client=True)
 def test__broadcast_dict(c, s, a, b):
-    d = yield c._scatter({'x': 1}, broadcast=True)
+    d = yield c.scatter({'x': 1}, broadcast=True)
     assert a.data == b.data == {'x': 1}
 
 
@@ -1904,7 +1909,7 @@ def test__cancel(c, s, a, b):
     while y.key not in s.tasks:
         yield gen.sleep(0.01)
 
-    yield c._cancel([x])
+    yield c.cancel([x])
 
     assert x.cancelled()
     assert 'cancel' in str(x)
@@ -1925,7 +1930,7 @@ def test__cancel_tuple_key(c, s, a, b):
     x = c.submit(inc, 1, key=('x', 0, 1))
 
     result = yield x
-    yield c._cancel(x)
+    yield c.cancel(x)
     with pytest.raises(CancelledError):
         yield x
 
@@ -1940,7 +1945,7 @@ def test__cancel_multi_client(s, a, b):
 
     assert x.key == y.key
 
-    yield c._cancel([x])
+    yield c.cancel([x])
 
     assert x.cancelled()
     assert not y.cancelled()
@@ -1956,8 +1961,8 @@ def test__cancel_multi_client(s, a, b):
     with pytest.raises(CancelledError):
         yield x
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(client=True)
@@ -1967,8 +1972,8 @@ def test__cancel_collection(c, s, a, b):
     L = c.map(double, [[1], [2], [3]])
     x = db.Bag({('b', i): f for i, f in enumerate(L)}, 'b', 3)
 
-    yield c._cancel(x)
-    yield c._cancel([x])
+    yield c.cancel(x)
+    yield c.cancel([x])
     assert all(f.cancelled() for f in L)
     assert not s.tasks
     assert not s.who_has
@@ -1997,7 +2002,7 @@ def test_cancel(loop):
 @gen_cluster(client=True)
 def test_future_type(c, s, a, b):
     x = c.submit(inc, 1)
-    yield _wait([x])
+    yield wait([x])
     assert x.type == int
     assert 'int' in str(x)
 
@@ -2160,7 +2165,7 @@ def test_async_persist(c, s, a, b):
     assert s.who_wants[w.key] == {c.id}
 
     yyf, wwf = c.compute([yy, ww])
-    yyy, www = yield c._gather([yyf, wwf])
+    yyy, www = yield c.gather([yyf, wwf])
     assert yyy == inc(1)
     assert www == add(inc(1), dec(1))
 
@@ -2185,7 +2190,7 @@ def test__persist(c, s, a, b):
 
     g, h = c.compute([y, yy])
 
-    gg, hh = yield c._gather([g, h])
+    gg, hh = yield c.gather([g, h])
     assert (gg == hh).all()
 
 
@@ -2217,7 +2222,7 @@ def test_long_traceback(c, s, a, b):
 
     try:
         x = c.submit(deep, 1000)
-        yield _wait([x])
+        yield wait([x])
         assert len(dumps(c.futures[x.key].traceback)) < 10000
         assert isinstance(c.futures[x.key].exception, RuntimeError)
     finally:
@@ -2231,7 +2236,7 @@ def test_wait_on_collections(c, s, a, b):
     L = c.map(double, [[1], [2], [3]])
     x = db.Bag({('b', i): f for i, f in enumerate(L)}, 'b', 3)
 
-    yield _wait(x)
+    yield wait(x)
     assert all(f.key in a.data or f.key in b.data for f in L)
 
 
@@ -2253,7 +2258,7 @@ def test_futures_of(c, s, a, b):
 @gen_cluster(client=True)
 def test_futures_of_cancelled_raises(c, s, a, b):
     x = c.submit(inc, 1)
-    yield c._cancel([x])
+    yield c.cancel([x])
 
     with pytest.raises(CancelledError):
         yield x
@@ -2277,7 +2282,7 @@ def test_futures_of_cancelled_raises(c, s, a, b):
 @gen_cluster(ncores=[('127.0.0.1', 1)], client=True)
 def test_dont_delete_recomputed_results(c, s, w):
     x = c.submit(inc, 1)                        # compute first time
-    yield _wait([x])
+    yield wait([x])
     x.__del__()                                 # trigger garbage collection
     xx = c.submit(inc, 1)                       # compute second time
 
@@ -2305,38 +2310,38 @@ def test_fatally_serialized_input(c, s):
 @gen_cluster(client=True)
 def test_balance_tasks_by_stacks(c, s, a, b):
     x = c.submit(inc, 1)
-    yield _wait(x)
+    yield wait(x)
 
     y = c.submit(inc, 2)
-    yield _wait(y)
+    yield wait(y)
 
     assert len(a.data) == len(b.data) == 1
 
 
 @gen_cluster(client=True)
 def test_run(c, s, a, b):
-    results = yield c._run(inc, 1)
+    results = yield c.run(inc, 1)
     assert results == {a.address: 2, b.address: 2}
 
-    results = yield c._run(inc, 1, workers=[a.address])
+    results = yield c.run(inc, 1, workers=[a.address])
     assert results == {a.address: 2}
 
-    results = yield c._run(inc, 1, workers=[])
+    results = yield c.run(inc, 1, workers=[])
     assert results == {}
 
 
 @gen_cluster(client=True)
 def test_run_handles_picklable_data(c, s, a, b):
     futures = c.map(inc, range(10))
-    yield _wait(futures)
+    yield wait(futures)
 
     def func():
         return {}, set(), [], (), 1, 'hello', b'100'
 
-    results = yield c._run_on_scheduler(func)
+    results = yield c.run_on_scheduler(func)
     assert results == func()
 
-    results = yield c._run(func)
+    results = yield c.run(func)
     assert results == {w.address: func() for w in [a, b]}
 
 
@@ -2356,21 +2361,21 @@ def test_run_sync(loop):
 
 @gen_cluster(client=True)
 def test_run_coroutine(c, s, a, b):
-    results = yield c._run_coroutine(geninc, 1, delay=0.05)
+    results = yield c.run_coroutine(geninc, 1, delay=0.05)
     assert results == {a.address: 2, b.address: 2}
 
-    results = yield c._run_coroutine(geninc, 1, delay=0.05, workers=[a.address])
+    results = yield c.run_coroutine(geninc, 1, delay=0.05, workers=[a.address])
     assert results == {a.address: 2}
 
-    results = yield c._run_coroutine(geninc, 1, workers=[])
+    results = yield c.run_coroutine(geninc, 1, workers=[])
     assert results == {}
 
     with pytest.raises(RuntimeError) as exc_info:
-        yield c._run_coroutine(throws, 1)
+        yield c.run_coroutine(throws, 1)
     exc_info.match("hello")
 
     if sys.version_info >= (3, 5):
-        results = yield c._run_coroutine(asyncinc, 2, delay=0.01)
+        results = yield c.run_coroutine(asyncinc, 2, delay=0.01)
         assert results == {a.address: 3, b.address: 3}
 
 
@@ -2462,7 +2467,7 @@ def test_diagnostic_nbytes_sync(loop):
 def test_diagnostic_nbytes(c, s, a, b):
     incs = c.map(inc, [1, 2, 3])
     doubles = c.map(double, [1, 2, 3])
-    yield _wait(incs + doubles)
+    yield wait(incs + doubles)
 
     assert s.get_nbytes(summary=False) == {k.key: sizeof(1)
                                            for k in incs + doubles}
@@ -2481,11 +2486,11 @@ def test_worker_aliases():
     c = yield Client((s.ip, s.port), asynchronous=True)
 
     L = c.map(inc, range(10), workers='alice')
-    yield _wait(L)
+    yield wait(L)
     assert len(a.data) == 10
     assert len(b.data) == 0
 
-    yield c._shutdown()
+    yield c.shutdown()
     yield [a._close(), b._close()]
     yield s.close()
 
@@ -2547,10 +2552,10 @@ def test_client_num_fds(loop):
 @gen_cluster()
 def test_startup_shutdown_startup(s, a, b):
     c = yield Client((s.ip, s.port), asynchronous=True)
-    yield c._shutdown()
+    yield c.shutdown()
 
     c = yield Client((s.ip, s.port), asynchronous=True)
-    yield c._shutdown()
+    yield c.shutdown()
 
 
 def test_startup_shutdown_startup_sync(loop):
@@ -2586,12 +2591,12 @@ def test_badly_serialized_exceptions(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_rebalance(c, s, a, b):
-    x, y = yield c._scatter([1, 2], workers=[a.address])
+    x, y = yield c.scatter([1, 2], workers=[a.address])
     assert len(a.data) == 2
     assert len(b.data) == 0
 
     s.validate_state()
-    yield c._rebalance()
+    yield c.rebalance()
     s.validate_state()
 
     assert len(b.data) == 1
@@ -2606,20 +2611,20 @@ def test_rebalance(c, s, a, b):
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 4, client=True)
 def test_rebalance_workers(e, s, a, b, c, d):
-    w, x, y, z = yield e._scatter([1, 2, 3, 4], workers=[a.address])
+    w, x, y, z = yield e.scatter([1, 2, 3, 4], workers=[a.address])
     assert len(a.data) == 4
     assert len(b.data) == 0
     assert len(c.data) == 0
     assert len(d.data) == 0
 
-    yield e._rebalance([x, y], workers=[a.address, c.address])
+    yield e.rebalance([x, y], workers=[a.address, c.address])
     assert len(a.data) == 3
     assert len(b.data) == 0
     assert len(c.data) == 1
     assert len(d.data) == 0
     assert c.data == {x.key: 2} or c.data == {y.key: 3}
 
-    yield e._rebalance()
+    yield e.rebalance()
     assert len(a.data) == 1
     assert len(b.data) == 1
     assert len(c.data) == 1
@@ -2630,7 +2635,7 @@ def test_rebalance_workers(e, s, a, b, c, d):
 @gen_cluster(client=True)
 def test_rebalance_execution(c, s, a, b):
     futures = c.map(inc, range(10), workers=a.address)
-    yield c._rebalance(futures)
+    yield c.rebalance(futures)
     assert len(a.data) == len(b.data) == 5
     s.validate_state()
 
@@ -2650,7 +2655,7 @@ def test_rebalance_sync(loop):
 def test_rebalance_unprepared(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
     yield gen.sleep(0.1)
-    yield c._rebalance(futures)
+    yield c.rebalance(futures)
     s.validate_state()
 
 
@@ -2703,7 +2708,7 @@ def test_add_worker_after_tasks(c, s):
     n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
     n.start(0)
 
-    result = yield c._gather(futures)
+    result = yield c.gather(futures)
 
     yield n._close()
 
@@ -2712,7 +2717,7 @@ def test_add_worker_after_tasks(c, s):
                     reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], client=True)
 def test_workers_register_indirect_data(c, s, a, b):
-    [x] = yield c._scatter([1], workers=a.address)
+    [x] = yield c.scatter([1], workers=a.address)
     y = c.submit(inc, x, workers=b.ip)
     yield y
     assert b.data[x.key] == 1
@@ -2726,7 +2731,7 @@ def test_submit_on_cancelled_future(c, s, a, b):
     x = c.submit(inc, 1)
     yield x
 
-    yield c._cancel(x)
+    yield c.cancel(x)
 
     with pytest.raises(CancelledError):
         y = c.submit(inc, x)
@@ -2734,7 +2739,7 @@ def test_submit_on_cancelled_future(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
 def test_replicate(c, s, *workers):
-    [a, b] = yield c._scatter([1, 2])
+    [a, b] = yield c.scatter([1, 2])
     yield s.replicate(keys=[a.key, b.key], n=5)
     s.validate_state()
 
@@ -2749,17 +2754,17 @@ def test_replicate(c, s, *workers):
 def test_replicate_tuple_keys(c, s, a, b):
     x = delayed(inc)(1, dask_key_name=('x', 1))
     f = c.persist(x)
-    yield c._replicate(f, n=5)
+    yield c.replicate(f, n=5)
     s.validate_state()
     assert a.data and b.data
 
-    yield c._rebalance(f)
+    yield c.rebalance(f)
     s.validate_state()
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
 def test_replicate_workers(c, s, *workers):
 
-    [a, b] = yield c._scatter([1, 2], workers=[workers[0].address])
+    [a, b] = yield c.scatter([1, 2], workers=[workers[0].address])
     yield s.replicate(keys=[a.key, b.key], n=5,
                       workers=[w.address for w in workers[:5]])
 
@@ -2808,7 +2813,7 @@ class CountSerialization(object):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
 def test_replicate_tree_branching(c, s, *workers):
     obj = CountSerialization()
-    [future] = yield c._scatter([obj])
+    [future] = yield c.scatter([obj])
     yield s.replicate(keys=[future.key], n=10)
 
     max_count = max(w.data[future.key].n for w in workers)
@@ -2819,17 +2824,17 @@ def test_replicate_tree_branching(c, s, *workers):
 def test_client_replicate(c, s, *workers):
     x = c.submit(inc, 1)
     y = c.submit(inc, 2)
-    yield c._replicate([x, y], n=5)
+    yield c.replicate([x, y], n=5)
 
     assert len(s.who_has[x.key]) == 5
     assert len(s.who_has[y.key]) == 5
 
-    yield c._replicate([x, y], n=3)
+    yield c.replicate([x, y], n=3)
 
     assert len(s.who_has[x.key]) == 3
     assert len(s.who_has[y.key]) == 3
 
-    yield c._replicate([x, y])
+    yield c.replicate([x, y])
     s.validate_state()
 
     assert len(s.who_has[x.key]) == 10
@@ -2843,14 +2848,14 @@ def test_client_replicate(c, s, *workers):
                                   ('127.0.0.2', 1)], timeout=None)
 def test_client_replicate_host(e, s, a, b, c):
     x = e.submit(inc, 1, workers='127.0.0.2')
-    yield _wait([x])
+    yield wait([x])
     assert (s.who_has[x.key] == {b.address} or
             s.who_has[x.key] == {c.address})
 
-    yield e._replicate([x], workers=['127.0.0.2'])
+    yield e.replicate([x], workers=['127.0.0.2'])
     assert s.who_has[x.key] == {b.address, c.address}
 
-    yield e._replicate([x], workers=['127.0.0.1'])
+    yield e.replicate([x], workers=['127.0.0.1'])
     assert s.who_has[x.key] == {a.address, b.address, c.address}
 
 
@@ -2875,11 +2880,11 @@ def test_client_replicate_sync(loop):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 4)] * 1)
 def test_task_load_adapts_quickly(c, s, a):
     future = c.submit(slowinc, 1, delay=0.2)  # slow
-    yield _wait(future)
+    yield wait(future)
     assert 0.15 < s.task_duration['slowinc'] < 0.4
 
     futures = c.map(slowinc, range(10), delay=0)  # very fast
-    yield _wait(futures)
+    yield wait(futures)
 
     assert 0 < s.task_duration['slowinc'] < 0.1
 
@@ -2888,10 +2893,10 @@ def test_task_load_adapts_quickly(c, s, a):
 def test_even_load_after_fast_functions(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)  # very fast
     y = c.submit(inc, 2, workers=b.address)  # very fast
-    yield _wait([x, y])
+    yield wait([x, y])
 
     futures = c.map(inc, range(2, 11))
-    yield _wait(futures)
+    yield wait(futures)
     assert any(f.key in a.data for f in futures)
     assert any(f.key in b.data for f in futures)
 
@@ -2901,7 +2906,7 @@ def test_even_load_after_fast_functions(c, s, a, b):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
 def test_even_load_on_startup(c, s, a, b):
     x, y = c.map(inc, [1, 2])
-    yield _wait([x, y])
+    yield wait([x, y])
     assert len(a.data) == len(b.data) == 1
 
 
@@ -2909,7 +2914,7 @@ def test_even_load_on_startup(c, s, a, b):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 2)] * 2)
 def test_contiguous_load(c, s, a, b):
     w, x, y, z = c.map(inc, [1, 2, 3, 4])
-    yield _wait([w, x, y, z])
+    yield wait([w, x, y, z])
 
     groups = [set(a.data), set(b.data)]
     assert {w.key, x.key} in groups
@@ -2919,16 +2924,16 @@ def test_contiguous_load(c, s, a, b):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test_balanced_with_submit(c, s, *workers):
     L = [c.submit(slowinc, i) for i in range(4)]
-    yield _wait(L)
+    yield wait(L)
     for w in workers:
         assert len(w.data) == 1
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test_balanced_with_submit_and_resident_data(c, s, *workers):
-    [x] = yield c._scatter([10], broadcast=True)
+    [x] = yield c.scatter([10], broadcast=True)
     L = [c.submit(slowinc, x, pure=False) for i in range(4)]
-    yield _wait(L)
+    yield wait(L)
     for w in workers:
         assert len(w.data) == 2
 
@@ -2961,7 +2966,7 @@ def test_cancel_clears_processing(c, s, *workers):
     while not s.tasks:
         yield gen.sleep(0.01)
 
-    yield c._cancel(x)
+    yield c.cancel(x)
 
     start = time()
     while any(v for v in s.processing.values()):
@@ -3022,7 +3027,7 @@ def test_get_processing(c, s, a, b):
 @gen_cluster(client=True)
 def test_get_foo(c, s, a, b):
     futures = c.map(inc, range(10))
-    yield _wait(futures)
+    yield wait(futures)
 
     x = yield c.scheduler.ncores()
     assert x == s.ncores
@@ -3129,7 +3134,7 @@ def test_Client_clears_references_after_restart(c, s, a, b):
     x = c.submit(inc, 1)
     assert x.key in c.refcount
 
-    yield c._restart()
+    yield c.restart()
     assert x.key not in c.refcount
 
     key = x.key
@@ -3205,7 +3210,7 @@ def test_status():
     assert c.status == 'running'
     x = c.submit(inc, 1)
 
-    yield c._shutdown()
+    yield c.shutdown()
     assert c.status == 'closed'
 
     yield s.close()
@@ -3221,7 +3226,7 @@ def test_persist_optimize_graph(c, s, a, b):
         b3 = b2.map(inc)
 
         b4 = method(b3, optimize_graph=False)
-        yield _wait(b4)
+        yield wait(b4)
 
         assert set(map(tokey, b3._keys())).issubset(s.tasks)
 
@@ -3230,7 +3235,7 @@ def test_persist_optimize_graph(c, s, a, b):
         b3 = b2.map(inc)
 
         b4 = method(b3, optimize_graph=True)
-        yield _wait(b4)
+        yield wait(b4)
 
         assert not any(tokey(k) in s.tasks for k in b2._keys())
 
@@ -3238,7 +3243,7 @@ def test_persist_optimize_graph(c, s, a, b):
 @gen_cluster(client=True, ncores=[])
 def test_scatter_raises_if_no_workers(c, s):
     with pytest.raises(gen.TimeoutError):
-        yield c._scatter([1])
+        yield c.scatter([1])
 
 
 @slow
@@ -3379,13 +3384,13 @@ def test_idempotence(s, a, b):
 
     # Error
     a = c.submit(div, 1, 0)
-    yield _wait(a)
+    yield wait(a)
     assert a.status == 'error'
     log = list(s.transition_log)
 
     b = f.submit(div, 1, 0)
     assert a.key == b.key
-    yield _wait(b)
+    yield wait(b)
     yield gen.sleep(0.1)
     log2 = list(s.transition_log)
     assert log == log2
@@ -3394,12 +3399,12 @@ def test_idempotence(s, a, b):
     # Simultaneous Submit
     d = c.submit(inc, 2)
     e = c.submit(inc, 2)
-    yield _wait([d, e])
+    yield wait([d, e])
 
     assert len(s.transition_log) == len_single_submit
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 def test_scheduler_info(loop):
@@ -3441,7 +3446,7 @@ def test_threaded_get_within_distributed(loop):
 
 @gen_cluster(client=True)
 def test_lose_scattered_data(c, s, a, b):
-    [x] = yield c._scatter([1], workers=a.address)
+    [x] = yield c.scatter([1], workers=a.address)
 
     yield a._close()
     yield gen.sleep(0.1)
@@ -3453,8 +3458,8 @@ def test_lose_scattered_data(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
 def test_partially_lose_scattered_data(e, s, a, b, c):
-    [x] = yield e._scatter([1], workers=a.address)
-    yield e._replicate(x, n=2)
+    [x] = yield e.scatter([1], workers=a.address)
+    yield e.replicate(x, n=2)
 
     yield a._close()
     yield gen.sleep(0.1)
@@ -3465,7 +3470,7 @@ def test_partially_lose_scattered_data(e, s, a, b, c):
 
 @gen_cluster(client=True)
 def test_scatter_compute_lose(c, s, a, b):
-    [x] = yield c._scatter([[1, 2, 3, 4]], workers=a.address)
+    [x] = yield c.scatter([[1, 2, 3, 4]], workers=a.address)
     y = c.submit(inc, 1, workers=b.address)
 
     z = c.submit(slowadd, x, y, delay=0.2)
@@ -3478,7 +3483,7 @@ def test_scatter_compute_lose(c, s, a, b):
     assert z.status == 'cancelled'
 
     with pytest.raises(CancelledError):
-        yield _wait(z)
+        yield wait(z)
 
 
 @gen_cluster(client=True)
@@ -3490,12 +3495,12 @@ def test_scatter_compute_store_lose(c, s, a, b):
     Kill the machine with the irreplaceable data.  What happens to the complete
     result?  How about after it GCs and tries to come back?
     """
-    [x] = yield c._scatter([1], workers=a.address)
+    [x] = yield c.scatter([1], workers=a.address)
     xx = c.submit(inc, x, workers=a.address)
     y = c.submit(inc, 1)
 
     z = c.submit(slowadd, xx, y, delay=0.2, workers=b.address)
-    yield _wait(z)
+    yield wait(z)
 
     yield a._close()
 
@@ -3509,7 +3514,7 @@ def test_scatter_compute_store_lose(c, s, a, b):
     assert z.status == 'finished'
 
     zz = c.submit(inc, z)
-    yield _wait(zz)
+    yield wait(zz)
 
     zkey = z.key
     del z
@@ -3539,7 +3544,7 @@ def test_scatter_compute_store_lose_processing(c, s, a, b):
     Kill the machine with the irreplaceable data.  What happens to the complete
     result?  How about after it GCs and tries to come back?
     """
-    [x] = yield c._scatter([1], workers=a.address)
+    [x] = yield c.scatter([1], workers=a.address)
 
     y = c.submit(slowinc, x, delay=0.2)
     z = c.submit(inc, y)
@@ -3570,8 +3575,8 @@ def test_serialize_future(s, a, b):
         result2 = yield future2
         assert result == result2
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(client=False)
@@ -3587,8 +3592,8 @@ def test_temp_client(s, a, b):
         assert default_client() is f
         assert default_client(c) is c
 
-    yield c._shutdown()
-    yield f._shutdown()
+    yield c.shutdown()
+    yield f.shutdown()
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 3, client=True)
@@ -3603,7 +3608,7 @@ def test_persist_workers(e, s, a, b, c):
                              tuple(L2): [c.address]},
                     allow_other_workers=L1 + [total])
 
-    yield _wait(out)
+    yield wait(out)
     assert all(v.key in a.data for v in L1)
     assert total.key in b.data
     assert all(v.key in c.data for v in L2)
@@ -3623,7 +3628,7 @@ def test_compute_workers(e, s, a, b, c):
                              tuple(L2): [c.address]},
                     allow_other_workers=L1 + [total])
 
-    yield _wait(out)
+    yield wait(out)
     for v in L1:
         assert s.worker_restrictions[v.key] == {a.address}
     for v in L2:
@@ -3671,16 +3676,16 @@ def test_get_restrictions():
 
 @gen_cluster(client=True)
 def test_scatter_type(c, s, a, b):
-    [future] = yield c._scatter([1])
+    [future] = yield c.scatter([1])
     assert future.type == int
 
-    d = yield c._scatter({'x': 1.0})
+    d = yield c.scatter({'x': 1.0})
     assert d['x'].type == float
 
 
 @gen_cluster(client=True)
 def test_retire_workers(c, s, a, b):
-    [x] = yield c._scatter([1], workers=a.address)
+    [x] = yield c.scatter([1], workers=a.address)
 
     yield s.retire_workers(workers=[a.address])
     assert b.data == {x.key: 1}
@@ -3692,11 +3697,11 @@ def test_retire_workers(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
 def test_retire_many_workers(c, s, *workers):
-    futures = yield c._scatter(list(range(100)))
+    futures = yield c.scatter(list(range(100)))
 
     yield s.retire_workers(workers=[w.address for w in workers[:7]])
 
-    results = yield c._gather(futures)
+    results = yield c.gather(futures)
     assert results == list(range(100))
 
     assert len(s.has_what) == len(s.ncores) == 3
@@ -3713,12 +3718,12 @@ def test_weight_occupancy_against_data_movement(c, s, a, b):
         sleep(0.01)
         return x
 
-    y = yield c._scatter([[1, 2, 3, 4]], workers=[a.address])
-    z = yield c._scatter([1], workers=[b.address])
+    y = yield c.scatter([[1, 2, 3, 4]], workers=[a.address])
+    z = yield c.scatter([1], workers=[b.address])
 
     futures = c.map(f, [1, 2, 3, 4], y=y, z=z)
 
-    yield _wait(futures)
+    yield wait(futures)
 
     assert sum(f.key in a.data for f in futures) >= 2
     assert sum(f.key in b.data for f in futures) >= 1
@@ -3733,11 +3738,11 @@ def test_distribute_tasks_by_ncores(c, s, a, b):
         sleep(0.01)
         return x
 
-    y = yield c._scatter([1], broadcast=True)
+    y = yield c.scatter([1], broadcast=True)
 
     futures = c.map(f, range(20), y=y)
 
-    yield _wait(futures)
+    yield wait(futures)
 
     assert len(b.data) > 2 * len(a.data)
 
@@ -3760,7 +3765,7 @@ def test_add_done_callback(c, s, a, b):
     v.add_done_callback(f)
     w.add_done_callback(f)
 
-    yield _wait((u, v, w, x))
+    yield wait((u, v, w, x))
 
     x.add_done_callback(f)
 
@@ -3820,7 +3825,7 @@ def test_auto_normalize_collection(c, s, a, b):
         y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
         yy = c.persist(y)
 
-        yield _wait(yy)
+        yield wait(yy)
 
         start = time()
         future = c.compute(y.sum())
@@ -3830,7 +3835,7 @@ def test_auto_normalize_collection(c, s, a, b):
 
         start = time()
         z = c.persist(y + 1)
-        yield _wait(z)
+        yield wait(z)
         end = time()
         assert end - start < 1
 
@@ -3911,7 +3916,7 @@ def test_interleave_computations_map(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_scatter_dict_workers(c, s, a, b):
-    yield c._scatter({'a': 10}, workers=[a.address, b.address])
+    yield c.scatter({'a': 10}, workers=[a.address, b.address])
     assert 'a' in a.data or 'a' in b.data
 
 
@@ -3933,13 +3938,13 @@ def test_client_timeout():
         yield gen.sleep(0.1)
         assert time() < start + 2
 
-    yield c._shutdown()
+    yield c.shutdown()
     yield s.close()
 
 
 @gen_cluster(client=True)
 def test_submit_list_kwargs(c, s, a, b):
-    futures = yield c._scatter([1, 2, 3])
+    futures = yield c.scatter([1, 2, 3])
     def f(L=None):
         return sum(L)
 
@@ -3950,22 +3955,22 @@ def test_submit_list_kwargs(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_map_list_kwargs(c, s, a, b):
-    futures = yield c._scatter([1, 2, 3])
+    futures = yield c.scatter([1, 2, 3])
     def f(i, L=None):
         return i + sum(L)
 
     futures = c.map(f, range(10), L=futures)
-    results = yield c._gather(futures)
+    results = yield c.gather(futures)
     assert results == [i + 6 for i in range(10)]
 
 
 @gen_cluster(client=True)
 def test_dont_clear_waiting_data(c, s, a, b):
-    [x] = yield c._scatter([1])
+    [x] = yield c.scatter([1])
     y = c.submit(slowinc, x, delay=0.2)
     while y.key not in s.task_state:
         yield gen.sleep(0.01)
-    [x] = yield c._scatter([1])
+    [x] = yield c.scatter([1])
     for i in range(5):
         assert s.waiting_data[x.key]
         yield gen.moment
@@ -3973,7 +3978,7 @@ def test_dont_clear_waiting_data(c, s, a, b):
 @gen_cluster(client=True)
 def test_get_future_error_simple(c, s, a, b):
     f = c.submit(div, 1, 0)
-    yield _wait(f)
+    yield wait(f)
     assert f.status == 'error'
 
     function, args, kwargs, deps = yield c._get_futures_error(f)
@@ -3992,7 +3997,7 @@ def test_get_futures_error(c, s, a, b):
     tot = delayed(sum)(x, y)
 
     f = c.compute(tot)
-    yield _wait(f)
+    yield wait(f)
     assert f.status == 'error'
 
     function, args, kwargs, deps = yield c._get_futures_error(f)
@@ -4118,7 +4123,7 @@ def test_robust_unserializable(c, s, a, b):
         future = c.submit(identity, Foo())
 
     futures = c.map(inc, range(10))
-    results = yield c._gather(futures)
+    results = yield c.gather(futures)
 
     assert results == list(map(inc, range(10)))
     assert a.data and b.data
@@ -4137,7 +4142,7 @@ def test_robust_undeserializable(c, s, a, b):
         yield future
 
     futures = c.map(inc, range(10))
-    results = yield c._gather(futures)
+    results = yield c.gather(futures)
 
     assert results == list(map(inc, range(10)))
     assert a.data and b.data
@@ -4158,7 +4163,7 @@ def test_robust_undeserializable_function(c, s, a, b):
         yield future
 
     futures = c.map(inc, range(10))
-    results = yield c._gather(futures)
+    results = yield c.gather(futures)
 
     assert results == list(map(inc, range(10)))
     assert a.data and b.data

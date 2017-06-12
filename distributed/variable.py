@@ -9,7 +9,7 @@ import tornado.locks
 
 from .client import Future, _get_global_client, Client
 from .metrics import time
-from .utils import tokey, sync, log_errors
+from .utils import tokey, log_errors
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +123,10 @@ class Variable(object):
     123
     >>> future = client.submit(f, x)  # doctest: +SKIP
     >>> x.set(future)  # doctest: +SKIP
+
+    See Also
+    --------
+    Queue:
     """
     def __init__(self, name=None, client=None, maxsize=0):
         self.client = client or _get_global_client()
@@ -145,7 +149,7 @@ class Variable(object):
         value: Future or object
             Must be either a Future or a msgpack-encodable value
         """
-        return sync(self.client.loop, self._set, value)
+        return self.client.sync(self._set, value)
 
     @gen.coroutine
     def _get(self, timeout=None):
@@ -164,7 +168,7 @@ class Variable(object):
 
     def get(self, timeout=None):
         """ Get the value of this variable """
-        return sync(self.client.loop, self._get, timeout=timeout)
+        return self.client.sync(self._get, timeout=timeout)
 
     def delete(self):
         """ Delete this variable
