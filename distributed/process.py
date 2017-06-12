@@ -60,6 +60,7 @@ class AsyncProcess(object):
     def _start_thread(self):
         self._thread = threading.Thread(
             target=self._watch,
+            name="AsyncProcess %s watch" % self._process.name,
             args=(weakref.ref(self), self._process, self._state,
                   self._watch_q, self._exit_future,))
         self._thread.daemon = True

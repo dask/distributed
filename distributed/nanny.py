@@ -435,10 +435,10 @@ class WorkerProcess(object):
                     pass
                 else:
                     assert msg['op'] == 'stop'
-                    do_stop(msg['timeout'])
+                    loop.add_callback(do_stop, msg['timeout'])
                     break
 
-        t = threading.Thread(target=watch_stop_q)
+        t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")
         t.daemon = True
         t.start()
 

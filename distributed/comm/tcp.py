@@ -213,12 +213,7 @@ class TCP(Comm):
                 pass
             finally:
                 self._finalizer.detach()
-                # Delay closing the socket until the next IO loop tick.
-                # Otherwise race conditions can appear if an event handler
-                # for call is already scheduled by the IO loop,
-                # raising KeyError.
-                # See https://github.com/tornadoweb/tornado/issues/2079
-                stream.io_loop.add_callback(stream.close)
+                stream.close()
 
     def abort(self):
         stream, self.stream = self.stream, None
