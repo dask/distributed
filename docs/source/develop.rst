@@ -93,7 +93,7 @@ using the ``@gen_cluster`` style of test
        assert future.key in c.futures
 
        # result = future.result()  # This synchronous API call would block
-       result = yield future._result()
+       result = yield future
        assert result == 2
 
        assert future.key in s.tasks
@@ -106,7 +106,6 @@ the normal synchronous API (doing so will cause the test to wait forever) and
 instead you need to use the coroutine API, where all blocking functions are
 prepended with an underscore (``_``).  Beware, it is a common mistake to use
 the blocking interface within these tests.
-
 
 If you want to test the normal synchronous API you can use a ``with cluster``
 style test, which sets up a scheduler and workers for you in different forked

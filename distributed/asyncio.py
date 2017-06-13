@@ -5,38 +5,24 @@
 import asyncio
 from functools import wraps
 
-from tornado import gen
-from tornado.platform.asyncio import BaseAsyncIOLoop
-from tornado.platform.asyncio import to_asyncio_future, to_tornado_future
+from toolz import merge
 
-from .client import Client, Future, AsCompleted, _wait
+from tornado.platform.asyncio import BaseAsyncIOLoop
+from tornado.platform.asyncio import to_asyncio_future
+
+from . import client
+from .client import Client, Future
 from .utils import ignoring
 
-from tornado.ioloop import IOLoop
 
-
-def to_asyncio(fn):
+def to_asyncio(fn, **default_kwargs):
     """Converts Tornado gen.coroutines and futures to asyncio ones"""
     @wraps(fn)
     def convert(*args, **kwargs):
+        if default_kwargs:
+            kwargs = merge(default_kwargs, kwargs)
         return to_asyncio_future(fn(*args, **kwargs))
     return convert
-
-
-def to_tornado(fn):
-    """Turns Asyncio futures to tornado ones"""
-    @wraps(method)
-    def convert(*args, **kwargs):
-        return to_tornado_future(fn(*args, **kwargs))
-    return convert
-
-
-class AioLoop(BaseAsyncIOLoop):
-
-    @property
-    def _running(self):
-        """Distributed checks IOLoop's _running property extensively"""
-        return self.asyncio_loop.is_running()
 
 
 class AioFuture(Future):
@@ -72,43 +58,44 @@ class AioClient(Client):
 
     Examples
     --------
-    Provide cluster's scheduler address on initialization.
+    Provide cluster's scheduler address on initialization::
 
-    >>> client = AioClient('127.0.0.1:8786')  # doctest: +SKIP
+        client = AioClient('127.0.0.1:8786')
 
-    The AioClient can receive an asyncio loop explicitly:
+    Start the client::
 
-    >>> loop = asyncio.get_event_loop()  # doctest: +SKIP
-    >>> client = AioClient('127.0.0.1:8786', loop=loop)  # doctest: +SKIP
+        async def start_the_client():
+            client = await AioClient()
 
-    Start the client:
+            # Use the client....
 
-    >>> await client.start()  # doctest: +SKIP
+            await client.shutdown()
 
-    Use ``submit`` method to send individual computations to the cluster
+    An ``async with`` statement is a more convenient way to start and shut down
+    the client::
 
-    >>> a = client.submit(add, 1, 2)  # doctest: +SKIP
-    >>> b = client.submit(add, 10, 20)  # doctest: +SKIP
+        async def start_the_client():
+            async with AioClient() as client:
+                # Use the client within this block.
+                pass
 
-    Await on the returned future to retrieve the result
+    Use the ``submit`` method to send individual computations to the cluster,
+    and await the returned future to retrieve the result::
 
-    >>> await a  # doctest: +SKIP
-    3
+        async def add_two_numbers():
+            async with AioClient() as client:
+                a = client.submit(add, 1, 2)
+                result = await a
 
-    Continue using submit or map on results to build up larger computations
+    Continue using submit or map on results to build up larger computations,
+    and gather results with the ``gather`` method::
 
-    >>> c = client.submit(add, a, b)  # doctest: +SKIP
-
-    Gather results with the ``gather`` method.
-
-    >>> await client.gather([c])  # doctest: +SKIP
-    [33]
-
-    Alternatively async context manager makes it more convenient to use:
-
-    >>> async with AioClient() as client:  # doctest: +SKIP
-    ...     await client.submit(lambda x: x**2, 3)
-    9
+        async def gather_some_results():
+            async with AioClient() as client:
+                a = client.submit(add, 1, 2)
+                b = client.submit(add, 10, 20)
+                c = client.submit(add, a, b)
+                result = await client.gather([c])
 
     See Also
     --------
@@ -117,62 +104,42 @@ class AioClient(Client):
     """
     _Future = AioFuture
 
-    def __init__(self, *args, loop=None, start=True, set_as_default=False,
-                 **kwargs):
-        if set_as_default:
-            raise Exception("AioClient instance can't be sat as default")
-        if loop is None:
-            loop = asyncio.get_event_loop()
-        # required to handle IOLoop.current() calls
-        # ioloop is not injected in nanny and comm protocols
-        self._make_current = start
+    def __init__(self, *args, **kwargs):
+        if kwargs.get('set_as_default'):
+            raise Exception("AioClient instance can't be set as default")
 
-        ioloop = AioLoop(loop, make_current=False)
-        super().__init__(*args, loop=ioloop, start=False, set_as_default=False,
-                         **kwargs)
+        loop = asyncio.get_event_loop()
+        ioloop = BaseAsyncIOLoop(loop)
+        super().__init__(*args, loop=ioloop, set_as_default=False, asynchronous=True, **kwargs)
 
     async def __aenter__(self):
-        await self.start()
+        await to_asyncio_future(self._started)
         return self
 
     async def __aexit__(self, type, value, traceback):
         await self.shutdown()
 
-    def __del__(self):
-        if self.status == 'running':
-            self.loop.asyncio_loop.run_until_complete(self.shutdown(fast=True))
-
-    async def start(self, timeout=5, **kwargs):
-        if self.status == 'running':
-            return
-
-        if self._make_current:
-            self.loop.make_current()
-        future = self._start(timeout=timeout, **kwargs)
-        result = await to_asyncio_future(future)
-        self.status = 'running'
-
-        return result
+    def __await__(self):
+        return to_asyncio_future(self._started).__await__()
 
     async def shutdown(self, fast=False):
         if self.status == 'closed':
             return
 
-        future = self._shutdown(fast=fast)
-        await to_asyncio_future(future)
-
-        with ignoring(AttributeError):
-            future = self.cluster._close()
+        try:
+            future = self._shutdown(fast=fast)
             await to_asyncio_future(future)
-            self.cluster.status = 'closed'
 
-        if self._make_current:
-            IOLoop.clear_current()
+            with ignoring(AttributeError):
+                future = self.cluster._close()
+                await to_asyncio_future(future)
+                self.cluster.status = 'closed'
+        finally:
+            BaseAsyncIOLoop.clear_current()
 
-    async def run_coroutine(self, function, *args, **kwargs):
-        tornfn = to_tornado(function)
-        future = self._run_coroutine(tornfn, *args, **kwargs)
-        return await to_asyncio_future(future)
+    def __del__(self):
+        # Override Client.__del__ to avoid running self.shutdown()
+        assert self.status != 'running'
 
     gather = to_asyncio(Client._gather)
     scatter = to_asyncio(Client._scatter)
@@ -182,7 +149,7 @@ class AioClient(Client):
     run_on_scheduler = to_asyncio(Client._run_on_scheduler)
     run = to_asyncio(Client._run)
     run_coroutine = to_asyncio(Client._run_coroutine)
-    get = to_asyncio(Client._get)
+    get = to_asyncio(Client.get, sync=False)
     upload_environment = to_asyncio(Client._upload_environment)
     restart = to_asyncio(Client._restart)
     upload_file = to_asyncio(Client._upload_file)
@@ -191,11 +158,12 @@ class AioClient(Client):
     replicate = to_asyncio(Client._replicate)
     start_ipython_workers = to_asyncio(Client._start_ipython_workers)
 
-
-class AioAsCompleted(AsCompleted):
-
-    __anext__ = to_asyncio(AsCompleted.__anext__)
+    def __enter__(self):
+        raise RuntimeError("Use AioClient in an 'async with' block, not 'with'")
 
 
-wait = to_asyncio(_wait)
-as_completed = AioAsCompleted
+class as_completed(client.as_completed):
+    __anext__ = to_asyncio(client.as_completed.__anext__)
+
+
+wait = to_asyncio(client._wait)

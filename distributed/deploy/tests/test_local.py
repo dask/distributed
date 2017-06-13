@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from functools import partial
+import subprocess
 import sys
 from time import sleep
 from threading import Lock
@@ -218,7 +219,7 @@ def test_bokeh(loop):
             assert time() < start + 20
             sleep(0.01)
 
-    with pytest.raises(requests.ReadTimeout):
+    with pytest.raises(requests.RequestException):
         requests.get(url, timeout=0.2)
 
 
@@ -232,8 +233,7 @@ def test_scale_up_and_down():
     loop = IOLoop.current()
     cluster = LocalCluster(0, scheduler_port=0, processes=False, silence_logs=False,
                            diagnostics_port=None, loop=loop, start=False)
-    c = Client(cluster, start=False, loop=loop)
-    yield c._start()
+    c = yield Client(cluster, loop=loop, asynchronous=True)
 
     assert not cluster.workers
 
@@ -251,14 +251,24 @@ def test_scale_up_and_down():
     yield cluster._close()
 
 
-def test_silent_startup(capsys, loop):
-    with LocalCluster(diagnostics_port=None, loop=loop, scheduler_port=0):
-        sleep(0.5)
+def test_silent_startup():
+    code = """if 1:
+        from time import sleep
+        from distributed import LocalCluster
 
-    out, err = capsys.readouterr()
-    assert not out
-    for line in err.split('\n'):
-        assert 'worker' not in line or 'Exception ignored' in line
+        with LocalCluster(1, diagnostics_port=None, scheduler_port=0):
+            sleep(1.5)
+        """
+
+    out = subprocess.check_output([sys.executable, "-Wi", "-c", code],
+                                  stderr=subprocess.STDOUT)
+    out = out.decode()
+    try:
+        assert not out
+    except AssertionError:
+        print("=== Cluster stdout / stderr ===")
+        print(out)
+        raise
 
 
 def test_only_local_access(loop):

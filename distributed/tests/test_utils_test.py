@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
 import socket
+import sys
 import threading
 from time import sleep
 
@@ -24,12 +25,13 @@ def test_cluster(loop):
 
 
 @gen_cluster(client=True)
-def test_gen_cluster(e, s, a, b):
-    assert isinstance(e, Client)
+def test_gen_cluster(c, s, a, b):
+    assert isinstance(c, Client)
     assert isinstance(s, Scheduler)
     for w in [a, b]:
         assert isinstance(w, Worker)
     assert s.ncores == {w.address: w.ncores for w in [a, b]}
+
 
 @gen_cluster(client=False)
 def test_gen_cluster_without_client(s, a, b):
@@ -37,6 +39,7 @@ def test_gen_cluster_without_client(s, a, b):
     for w in [a, b]:
         assert isinstance(w, Worker)
     assert s.ncores == {w.address: w.ncores for w in [a, b]}
+
 
 @gen_cluster(client=True, scheduler='tls://127.0.0.1',
              ncores=[('tls://127.0.0.1', 1), ('tls://127.0.0.1', 2)],
@@ -110,3 +113,7 @@ def test_new_config():
 
     assert config == c
     assert 'xyzzy' not in config
+
+
+if sys.version_info >= (3, 5):
+    from distributed.tests.py3_test_utils_tst import *

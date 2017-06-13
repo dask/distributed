@@ -7,15 +7,12 @@ from .diagnostics import progress
 from .client import (Client, Executor, CompatibleExecutor,
                      wait, as_completed, default_client)
 from .nanny import Nanny
+from .queues import Queue
 from .scheduler import Scheduler
 from .utils import sync
+from .variable import Variable
 from .worker import Worker, get_worker
 from .worker_client import local_client, worker_client
-
-try:
-    from .collections import futures_to_collection
-except:
-    pass
 
 from ._version import get_versions
 versions = get_versions()

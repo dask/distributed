@@ -48,8 +48,9 @@ def determine_config_file():
     try:
         ensure_config_file(default_path, path)
     except EnvironmentError as e:
-        logger.warn("Could not write default config file to '%s'. Received error %s",
-                    path, e)
+        warnings.warn("Could not write default config file to '%s'. "
+                      "Received error %s" % (path, e),
+                      UserWarning)
 
     return path if os.path.exists(path) else default_path
 
@@ -70,7 +71,7 @@ def load_env_vars(config):
 def initialize_logging(config):
     loggers = config.get('logging', {})
     loggers.setdefault('distributed', 'info')
-    # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
+    # We could remove those lines and let the default config.yaml handle it
     loggers.setdefault('tornado', 'critical')
     loggers.setdefault('tornado.application', 'error')
 
@@ -79,9 +80,10 @@ def initialize_logging(config):
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(fmt))
     for name, level in loggers.items():
-        LEVEL = logging_names[level.upper()]
+        if isinstance(level, str):
+            level = logging_names[level.upper()]
         logger = logging.getLogger(name)
-        logger.setLevel(LEVEL)
+        logger.setLevel(level)
         logger.addHandler(handler)
         logger.propagate = False
 

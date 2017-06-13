@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import timedelta
 import gc
 from glob import glob
+import inspect
 import logging
 import os
 import shutil
@@ -497,6 +498,12 @@ def end_cluster(s, workers):
     s.stop()
 
 
+def iscoroutinefunction(f):
+    if sys.version_info >= (3, 5) and inspect.iscoroutinefunction(f):
+        return True
+    return False
+
+
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
@@ -513,7 +520,9 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         end
     """
     def _(func):
-        cor = gen.coroutine(func)
+        cor = func
+        if not iscoroutinefunction(func):
+            cor = gen.coroutine(func)
 
         def test_func():
             with pristine_loop() as loop:
@@ -526,15 +535,19 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                     args = [s] + workers
 
                     if client:
-                        e = Client(s.address, loop=loop, security=security,
-                                   start=False)
-                        loop.run_sync(e._start)
-                        args = [e] + args
+                        c = []
+                        @gen.coroutine
+                        def f():
+                            c2 = yield Client(s.address, loop=loop, security=security,
+                                              asynchronous=True)
+                            c.append(c2)
+                        loop.run_sync(f)
+                        args = c + args
                     try:
                         return loop.run_sync(lambda: cor(*args), timeout=timeout)
                     finally:
                         if client:
-                            loop.run_sync(e._shutdown)
+                            loop.run_sync(c[0]._shutdown)
                         loop.run_sync(lambda: end_cluster(s, workers))
 
                     for w in workers:
@@ -608,16 +621,13 @@ def popen(*args, **kwargs):
             terminate_process(proc)
         finally:
             # XXX Also dump stdout if return code != 0 ?
+            out, err = proc.communicate()
             if dump_stdout:
-                line = '\n\nPrint from stderr\n=================\n'
-                while line:
-                    print(line, end='')
-                    line = proc.stderr.readline()
+                print('\n\nPrint from stderr\n=================\n')
+                print(err)
 
-                line = '\n\nPrint from stdout\n=================\n'
-                while line:
-                    print(line, end='')
-                    line = proc.stdout.readline()
+                print('\n\nPrint from stdout\n=================\n')
+                print(out)
 
 
 def wait_for_port(address, timeout=5):

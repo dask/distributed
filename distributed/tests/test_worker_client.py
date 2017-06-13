@@ -1,10 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
 import random
+from time import sleep
 
 import dask
 from dask import delayed
-from time import sleep
+import pytest
 from tornado import gen
 
 from distributed import worker_client, Client, as_completed
@@ -47,7 +48,7 @@ def test_scatter_from_worker(c, s, a, b):
             return total.result()
 
     future = c.submit(func)
-    result = yield future._result()
+    result = yield future
     assert result == sum([1, 2, 3, 4, 5])
 
     def func():
@@ -63,13 +64,25 @@ def test_scatter_from_worker(c, s, a, b):
             return correct
 
     future = c.submit(func)
-    result = yield future._result()
+    result = yield future
     assert result is True
 
     start = time()
     while not all(v == 1 for v in s.ncores.values()):
         yield gen.sleep(0.1)
         assert time() < start + 5
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
+def test_scatter_singleton(c, s, a, b):
+    np = pytest.importorskip('numpy')
+    def func():
+        with worker_client() as c:
+            x = np.ones(5)
+            future = c.scatter(x)
+            assert future.type == np.ndarray
+
+    yield c.submit(func)
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
@@ -87,7 +100,7 @@ def test_gather_multi_machine(c, s, a, b):
         return xx, yy
 
     future = c.submit(func)
-    result = yield future._result()
+    result = yield future
 
     assert result == (2, 3)
 
@@ -99,7 +112,7 @@ def test_same_loop(c, s, a, b):
             return lc.loop is lc.worker.loop
 
     future = c.submit(f)
-    result = yield future._result()
+    result = yield future
     assert result
 
 
@@ -132,7 +145,7 @@ def test_async(c, s, a, b):
         return result
 
     future = c.compute(delayed(mysum)())
-    yield future._result()
+    yield future
 
     start = time()
     while len(a.data) + len(b.data) > 1:
@@ -165,7 +178,7 @@ def test_client_executor(c, s, a, b):
                 return sum(e.map(double, range(30)))
 
     future = c.submit(mysum)
-    result = yield future._result()
+    result = yield future
     assert result == 30 * 29
 
 

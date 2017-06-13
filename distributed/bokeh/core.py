@@ -53,29 +53,9 @@ class BokehServer(object):
         if self.server._tornado._ping_job is not None:
             self.server._tornado._ping_job.stop()
 
-        # self.server.stop()
         # https://github.com/bokeh/bokeh/issues/5494
-
-
-def format_bytes(n):
-    """ Format bytes as text
-
-    >>> format_bytes(1)
-    '1 B'
-    >>> format_bytes(1234)
-    '1.23 kB'
-    >>> format_bytes(12345678)
-    '12.35 MB'
-    >>> format_bytes(1234567890)
-    '1.23 GB'
-    """
-    if n > 1e9:
-        return '%0.2f GB' % (n / 1e9)
-    if n > 1e6:
-        return '%0.2f MB' % (n / 1e6)
-    if n > 1e3:
-        return '%0.2f kB' % (n / 1000)
-    return '%d B' % n
+        if bokeh.__version__ >= '0.12.4':
+            self.server.stop()
 
 
 def format_time(n):

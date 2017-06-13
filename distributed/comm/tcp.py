@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-from datetime import timedelta
 import errno
 import logging
 import socket
@@ -8,14 +7,15 @@ import ssl
 import struct
 import sys
 
-from tornado import gen
-from tornado.iostream import IOStream, StreamClosedError
+import tornado
+from tornado import gen, netutil
+from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 from .. import config
 from ..compatibility import finalize
-from ..utils import ensure_bytes, ensure_ip, get_ip, get_ipv6
+from ..utils import ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
@@ -91,7 +91,7 @@ def set_tcp_timeout(stream):
             TCP_USER_TIMEOUT = 18  # since Linux 2.6.37
             sock.setsockopt(socket.SOL_TCP, TCP_USER_TIMEOUT, timeout * 1000)
     except EnvironmentError as e:
-        logger.warn("Could not set timeout on TCP stream: %s", e)
+        logger.warning("Could not set timeout on TCP stream: %s", e)
 
 
 def convert_stream_closed_error(exc):
@@ -110,6 +110,7 @@ class TCP(Comm):
     """
     An established communication based on an underlying Tornado IOStream.
     """
+    _iostream_allows_memoryview = tornado.version_info >= (4, 5)
 
     def __init__(self, stream, peer_addr, deserialize=True):
         self._peer_addr = peer_addr
@@ -129,7 +130,7 @@ class TCP(Comm):
     def _get_finalizer(self):
         def finalize(stream=self.stream, r=repr(self)):
             if not stream.closed():
-                logger.warn("Closing dangling stream in %s" % (r,))
+                logger.warning("Closing dangling stream in %s" % (r,))
                 stream.close()
 
         return finalize
@@ -164,7 +165,12 @@ class TCP(Comm):
             self.stream = None
             convert_stream_closed_error(e)
 
-        msg = from_frames(frames, deserialize=self.deserialize)
+        try:
+            msg = from_frames(frames, deserialize=self.deserialize)
+        except EOFError:
+            # Frames possibly garbled or truncated by communication error
+            self.abort()
+            raise CommClosedError("aborted stream on truncated data")
         raise gen.Return(msg)
 
     @gen.coroutine
@@ -173,12 +179,14 @@ class TCP(Comm):
         if stream is None:
             raise CommClosedError
 
-        # IOStream.write() only takes bytes objects, not memoryviews
-        frames = [ensure_bytes(f) for f in to_frames(msg)]
+        if self._iostream_allows_memoryview:
+            frames = to_frames(msg)
+        else:
+            frames = [ensure_bytes(f) for f in to_frames(msg)]
 
         try:
             lengths = ([struct.pack('Q', len(frames))] +
-                       [struct.pack('Q', len(frame)) for frame in frames])
+                       [struct.pack('Q', nbytes(frame)) for frame in frames])
             stream.write(b''.join(lengths))
 
             for frame in frames:
@@ -315,7 +323,12 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         self.tcp_server.handle_stream = self.handle_stream
         for i in range(5):
             try:
-                self.tcp_server.listen(self.port, self.ip)
+                # When shuffling data between workers, there can
+                # really be O(cluster size) connection requests
+                # on a single worker socket, make sure the backlog
+                # is large enough not to lose any.
+                sockets = netutil.bind_sockets(self.port, address=self.ip,
+                                               backlog=2048)
             except EnvironmentError as e:
                 # EADDRINUSE can happen sporadically when trying to bind
                 # to an ephemeral port
@@ -323,6 +336,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
                     raise
                 exc = e
             else:
+                self.tcp_server.add_sockets(sockets)
                 break
         else:
             raise exc
@@ -392,9 +406,9 @@ class TLSListener(BaseTCPListener):
             yield stream.wait_for_handshake()
         except EnvironmentError as e:
             # The handshake went wrong, log and ignore
-            logger.warn("listener on %r: TLS handshake failed with remote %r: %s",
-                        self.listen_address, address,
-                        getattr(e, "real_error", None) or e)
+            logger.warning("listener on %r: TLS handshake failed with remote %r: %s",
+                           self.listen_address, address,
+                           getattr(e, "real_error", None) or e)
         else:
             comm = TLS(stream, address, self.deserialize)
             self.comm_handler(comm)

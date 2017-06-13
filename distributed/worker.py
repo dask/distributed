@@ -35,10 +35,11 @@ from .preloading import preload_modules
 from .protocol import (pickle, to_serialize, deserialize_bytes,
                        serialize_bytelist)
 from .security import Security
-from .sizeof import sizeof
+from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
-                    ignoring, validate_key, mp_context, import_file)
+                    ignoring, validate_key, mp_context, import_file,
+                    silence_logging)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
@@ -55,7 +56,7 @@ try:
     import psutil
     TOTAL_MEMORY = psutil.virtual_memory().total
 except ImportError:
-    logger.warn("Please install psutil to estimate worker memory use")
+    logger.warning("Please install psutil to estimate worker memory use")
     TOTAL_MEMORY = 8e9
     psutil = None
 
@@ -84,7 +85,7 @@ class WorkerBase(ServerNode):
         self.death_timeout = death_timeout
         self.preload = preload
         if silence_logs:
-            logger.setLevel(silence_logs)
+            silence_logging(level=silence_logs)
 
         if local_dir:
             local_dir = os.path.abspath(local_dir)
@@ -419,8 +420,9 @@ class WorkerBase(ServerNode):
             logger.debug("Deleted %d keys", len(keys))
             if report:
                 logger.debug("Reporting loss of keys to scheduler")
+                # TODO: this route seems to not exist?
                 yield self.scheduler.remove_keys(address=self.address,
-                                              keys=list(keys))
+                                                 keys=list(keys))
         raise Return('OK')
 
     @gen.coroutine
@@ -551,8 +553,8 @@ class WorkerBase(ServerNode):
         result, missing_keys, missing_workers = yield gather_from_workers(
                 who_has, rpc=self.rpc)
         if missing_keys:
-            logger.warn("Could not find data: %s on workers: %s (who_has: %s)",
-                        missing_keys, missing_workers, who_has)
+            logger.warning("Could not find data: %s on workers: %s (who_has: %s)",
+                           missing_keys, missing_workers, who_has)
             raise Return({'status': 'missing-data',
                           'keys': missing_keys})
         else:
@@ -753,7 +755,7 @@ def run(server, comm, function, args=(), kwargs={}, is_coro=False, wait=True):
         if is_coro:
             result = (yield result) if wait else None
     except Exception as e:
-        logger.warn(" Run Failed\n"
+        logger.warning(" Run Failed\n"
             "Function: %s\n"
             "args:     %s\n"
             "kwargs:   %s\n",
@@ -979,7 +981,8 @@ class Worker(WorkerBase):
 
         self._transitions = {
                 ('waiting', 'ready'): self.transition_waiting_ready,
-                ('waiting', 'memory'): self.transition_waiting_memory,
+                ('waiting', 'memory'): self.transition_waiting_done,
+                ('waiting', 'error'): self.transition_waiting_done,
                 ('ready', 'executing'): self.transition_ready_executing,
                 ('ready', 'memory'): self.transition_ready_memory,
                 ('constrained', 'executing'): self.transition_constrained_executing,
@@ -994,7 +997,7 @@ class Worker(WorkerBase):
                 ('waiting', 'flight'): self.transition_dep_waiting_flight,
                 ('waiting', 'memory'): self.transition_dep_waiting_memory,
                 ('flight', 'waiting'): self.transition_dep_flight_waiting,
-                ('flight', 'memory'): self.transition_dep_flight_memory
+                ('flight', 'memory'): self.transition_dep_flight_memory,
         }
 
         self.incoming_transfer_log = deque(maxlen=(100000))
@@ -1056,7 +1059,7 @@ class Worker(WorkerBase):
                         self.add_task(**msg)
                     elif op == 'release-task':
                         self.log.append((msg['key'], 'release-task'))
-                        self.release_key(**msg)
+                        self.release_key(report=False, **msg)
                     elif op == 'delete-data':
                         self.delete_data(**msg)
                     else:
@@ -1113,7 +1116,7 @@ class Worker(WorkerBase):
                 if stop - start > 0.010:
                     self.startstops[key].append(('deserialize', start, stop))
             except Exception as e:
-                logger.warn("Could not deserialize task", exc_info=True)
+                logger.warning("Could not deserialize task", exc_info=True)
                 emsg = error_message(e)
                 emsg['key'] = key
                 emsg['op'] = 'task-erred'
@@ -1223,7 +1226,7 @@ class Worker(WorkerBase):
             except KeyError:
                 pass
 
-            if not self.who_has[dep]:
+            if not self.who_has.get(dep):
                 if dep not in self._missing_dep_flight:
                     self._missing_dep_flight.add(dep)
                     self.loop.add_callback(self.handle_missing_dep, dep)
@@ -1303,7 +1306,7 @@ class Worker(WorkerBase):
                 import pdb; pdb.set_trace()
             raise
 
-    def transition_waiting_memory(self, key, value=None):
+    def transition_waiting_done(self, key, value=None):
         try:
             if self.validate:
                 assert self.task_state[key] == 'waiting'
@@ -1354,6 +1357,7 @@ class Worker(WorkerBase):
                 assert key not in self.waiting_for_data
                 assert key not in self.ready
 
+            out = None
             if key in self.resource_restrictions:
                 for resource, quantity in self.resource_restrictions[key].items():
                     self.available_resources[resource] += quantity
@@ -1365,8 +1369,17 @@ class Worker(WorkerBase):
                 self.long_running.remove(key)
 
             if value is not no_value:
-                self.task_state[key] = 'memory'
-                self.put_key_in_memory(key, value)
+                try:
+                    self.task_state[key] = 'memory'
+                    self.put_key_in_memory(key, value, transition=False)
+                except Exception as e:
+                    logger.info("Failed to put key in memory", exc_info=True)
+                    msg = error_message(e)
+                    self.exceptions[key] = msg['exception']
+                    self.tracebacks[key] = msg['traceback']
+                    self.task_state[key] = 'error'
+                    out = 'error'
+
                 if key in self.dep_state:
                     self.transition_dep(key, 'memory')
 
@@ -1374,6 +1387,8 @@ class Worker(WorkerBase):
                 self.send_task_state_to_scheduler(key)
             else:
                 raise CommClosedError
+
+            return out
 
         except EnvironmentError:
             logger.info("Comm closed")
@@ -1510,7 +1525,7 @@ class Worker(WorkerBase):
             d['startstops'] = self.startstops[key]
         self.batched_stream.send(d)
 
-    def put_key_in_memory(self, key, value):
+    def put_key_in_memory(self, key, value, transition=True):
         if key in self.data:
             return
 
@@ -1535,7 +1550,7 @@ class Worker(WorkerBase):
                 if not self.waiting_for_data[dep]:
                     self.transition(dep, 'ready')
 
-        if key in self.task_state:
+        if transition and key in self.task_state:
             self.transition(key, 'memory')
 
         self.log.append((key, 'put-in-memory'))
@@ -1601,9 +1616,14 @@ class Worker(WorkerBase):
                     self.batched_stream.send({'op': 'add-keys',
                                               'keys': list(response)})
             except EnvironmentError as e:
-                logger.error("Worker stream died during communication: %s",
-                             worker)
+                logger.exception("Worker stream died during communication: %s",
+                                 worker)
                 self.log.append(('receive-dep-failed', worker))
+                for d in self.has_what.pop(worker):
+                    self.who_has[d].remove(worker)
+                    if not self.who_has[d]:
+                        del self.who_has[d]
+
             except Exception as e:
                 logger.exception(e)
                 if self.batched_stream and LOG_PDB:
@@ -1627,6 +1647,15 @@ class Worker(WorkerBase):
                 self.ensure_computing()
                 self.ensure_communicating()
 
+    def bad_dep(self, dep):
+        exc = ValueError("Could not find dependent %s.  Check worker logs" % str(dep))
+        for key in self.dependents[dep]:
+            msg = error_message(exc)
+            self.exceptions[key] = msg['exception']
+            self.tracebacks[key] = msg['traceback']
+            self.transition(key, 'error')
+        self.release_dep(dep)
+
     @gen.coroutine
     def handle_missing_dep(self, *deps):
         original_deps = list(deps)
@@ -1640,7 +1669,7 @@ class Worker(WorkerBase):
                 suspicious = self.suspicious_deps[dep]
                 if suspicious > 5:
                     deps.remove(dep)
-                    self.release_dep(dep)
+                    self.bad_dep(dep)
             if not deps:
                 return
 
@@ -1649,11 +1678,12 @@ class Worker(WorkerBase):
                             dep, self.suspicious_deps[dep])
 
             who_has = yield self.scheduler.who_has(keys=list(deps))
+            who_has = {k: v for k, v in who_has.items() if v}
             self.update_who_has(who_has)
             for dep in deps:
                 self.suspicious_deps[dep] += 1
 
-                if dep not in who_has:
+                if not who_has.get(dep):
                     self.log.append((dep, 'no workers found',
                                      self.dependents.get(dep)))
                     self.release_dep(dep)
@@ -1681,6 +1711,8 @@ class Worker(WorkerBase):
     def update_who_has(self, who_has):
         try:
             for dep, workers in who_has.items():
+                if not workers:
+                    continue
                 if dep in self.who_has:
                     self.who_has[dep].update(workers)
                 else:
@@ -1694,7 +1726,7 @@ class Worker(WorkerBase):
                 import pdb; pdb.set_trace()
             raise
 
-    def release_key(self, key, cause=None, reason=None):
+    def release_key(self, key, cause=None, reason=None, report=True):
         try:
             if key not in self.task_state:
                 return
@@ -1739,7 +1771,7 @@ class Worker(WorkerBase):
             if key in self.resource_restrictions:
                 del self.resource_restrictions[key]
 
-            if state in PROCESSING:  # not finished
+            if report and state in PROCESSING:  # not finished
                 self.batched_stream.send({'op': 'release',
                                           'key': key,
                                           'cause': cause})
@@ -1751,15 +1783,19 @@ class Worker(WorkerBase):
                 import pdb; pdb.set_trace()
             raise
 
-    def release_dep(self, dep):
+    def release_dep(self, dep, report=False):
         try:
             if dep not in self.dep_state:
                 return
             self.log.append((dep, 'release-dep'))
-            self.dep_state.pop(dep)
+            state = self.dep_state.pop(dep)
 
             if dep in self.suspicious_deps:
                 del self.suspicious_deps[dep]
+
+            if dep in self.who_has:
+                for worker in self.who_has.pop(dep):
+                    self.has_what[worker].remove(dep)
 
             if dep not in self.task_state:
                 if dep in self.data:
@@ -1774,6 +1810,10 @@ class Worker(WorkerBase):
                 self.dependencies[key].remove(dep)
                 if self.task_state[key] != 'memory':
                     self.release_key(key, cause=dep)
+
+            if report and state == 'memory':
+                self.batched_stream.send({'op': 'release-worker-data',
+                                          'keys': [dep]})
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1891,7 +1931,7 @@ class Worker(WorkerBase):
             else:
                 self.exceptions[key] = result['exception']
                 self.tracebacks[key] = result['traceback']
-                logger.warn(" Compute Failed\n"
+                logger.warning(" Compute Failed\n"
                     "Function:  %s\n"
                     "args:      %s\n"
                     "kwargs:    %s\n"

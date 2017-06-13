@@ -32,15 +32,18 @@ from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
 from .metrics import time
 from .node import ServerNode
-from .publish import PublishExtension
-from .channels import ChannelScheduler
-from .stealing import WorkStealing
-from .recreate_exceptions import ReplayExceptionScheduler
 from .security import Security
 from .utils import (All, ignoring, get_ip, get_fileno_limit, log_errors,
         key_split, validate_key)
 from .utils_comm import (scatter_to_workers, gather_from_workers)
 from .versions import get_versions
+
+from .channels import ChannelScheduler
+from .publish import PublishExtension
+from .queues import QueueExtension
+from .recreate_exceptions import ReplayExceptionScheduler
+from .stealing import WorkStealing
+from .variable import VariableExtension
 
 
 logger = logging.getLogger(__name__)
@@ -189,7 +192,8 @@ class Scheduler(ServerNode):
                  delete_interval=500, synchronize_worker_interval=60000,
                  services=None, allowed_failures=ALLOWED_FAILURES,
                  extensions=[ChannelScheduler, PublishExtension, WorkStealing,
-                             ReplayExceptionScheduler],
+                             ReplayExceptionScheduler, QueueExtension,
+                             VariableExtension],
                  validate=False, scheduler_file=None, security=None,
                  **kwargs):
 
@@ -292,6 +296,7 @@ class Scheduler(ServerNode):
         self.worker_handlers = {'task-finished': self.handle_task_finished,
                                 'task-erred': self.handle_task_erred,
                                 'release': self.handle_missing_data,
+                                'release-worker-data': self.release_worker_data,
                                 'add-keys': self.add_keys}
 
         self.client_handlers = {'update-graph': self.update_graph,
@@ -1212,7 +1217,7 @@ class Scheduler(ServerNode):
                             logger.exception(e)
                             raise
                     else:
-                        logger.warn("Bad message: op=%s, %s", op, msg, exc_info=True)
+                        logger.warning("Bad message: op=%s, %s", op, msg, exc_info=True)
 
                     if op == 'close':
                         breakout = True
@@ -1229,7 +1234,7 @@ class Scheduler(ServerNode):
             msg = {'op': 'compute-task',
                    'key': key,
                    'priority': self.priority[key],
-                   'duration': self.task_duration.get(key_split(key), 0.5)}
+                   'duration': self.get_task_duration(key)}
             if key in self.resource_restrictions:
                 msg['resource_restrictions'] = self.resource_restrictions[key]
 
@@ -1277,6 +1282,18 @@ class Scheduler(ServerNode):
         if self.validate:
             assert all(self.who_has.values())
 
+    def release_worker_data(self, stream=None, keys=None, worker=None):
+        hw = self.has_what[worker]
+        recommendations = dict()
+        for key in set(keys) & hw:
+            hw.remove(key)
+            wh = self.who_has[key]
+            wh.remove(worker)
+            if not wh:
+                recommendations[key] = 'released'
+        if recommendations:
+            self.transitions(recommendations)
+
     @gen.coroutine
     def handle_worker(self, worker):
         """
@@ -1296,7 +1313,8 @@ class Scheduler(ServerNode):
             self.remove_worker(address=worker)
             return
         yield comm.write({'op': 'compute-stream', 'reply': False})
-        self.worker_comms[worker].start(comm)
+        worker_comm = self.worker_comms[worker]
+        worker_comm.start(comm)
         logger.info("Starting worker compute stream, %s", worker)
 
         io_error = None
@@ -1341,10 +1359,11 @@ class Scheduler(ServerNode):
                 if io_error:
                     logger.info("Worker %r failed from closed comm: %s",
                                 worker, io_error)
-                yield comm.close()
+                worker_comm.abort()
                 self.remove_worker(address=worker)
             else:
                 assert comm.closed()
+                worker_comm.abort()
 
     def correct_time_delay(self, worker, msg):
         """
@@ -1384,7 +1403,7 @@ class Scheduler(ServerNode):
 
     @gen.coroutine
     def scatter(self, comm=None, data=None, workers=None, client=None,
-            broadcast=False, timeout=2):
+                broadcast=False, timeout=2):
         """ Send data out to workers
 
         See also
@@ -1403,10 +1422,11 @@ class Scheduler(ServerNode):
             workers = [self.coerce_address(w) for w in workers]
             ncores = {w: self.ncores[w] for w in workers}
 
+        assert isinstance(data, dict)
+
         keys, who_has, nbytes = yield scatter_to_workers(ncores, data,
                                                          rpc=self.rpc,
-                                                         report=False,
-                                                         serialize=False)
+                                                         report=False)
 
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
@@ -1727,8 +1747,8 @@ class Scheduler(ServerNode):
                 if v['status'] == 'OK':
                     self.add_keys(worker=w, keys=list(gathers[w]))
                 else:
-                    logger.warn("Communication failed during replication: %s",
-                                v)
+                    logger.warning("Communication failed during replication: %s",
+                                   v)
 
                 self.log_event(w, {'action': 'replicate-add',
                                    'keys': gathers[w]})
@@ -1789,8 +1809,8 @@ class Scheduler(ServerNode):
     def retire_workers(self, comm=None, workers=None, remove=True, close=False,
                        close_workers=False):
         if close:
-            logger.warn("The keyword close= has been deprecated. "
-                        "Use close_workers= instead")
+            logger.warning("The keyword close= has been deprecated. "
+                           "Use close_workers= instead")
         close_workers = close_workers or close
         with log_errors():
             if workers is None:
@@ -1980,6 +2000,27 @@ class Scheduler(ServerNode):
 
             return result
 
+    def get_comm_cost(self, key, worker):
+        """
+        Get the estimated communication cost (in s.) to compute key
+        on the given worker.
+        """
+        return (sum(self.nbytes[d] for d in
+                    self.dependencies[key] - self.has_what[worker])
+                / BANDWIDTH)
+
+    def get_task_duration(self, key, default=0.5):
+        """
+        Get the estimated computation cost of the given key
+        (not including any communication cost).
+        """
+        ks = key_split(key)
+        try:
+            return self.task_duration[ks]
+        except KeyError:
+            self.unknown_durations[ks].add(key)
+            return default
+
     def run_function(self, stream, function, args=(), kwargs={}):
         """ Run a function within this process
 
@@ -2143,14 +2184,8 @@ class Scheduler(ServerNode):
 
             ks = key_split(key)
 
-            duration = self.task_duration.get(ks)
-            if duration is None:
-                self.unknown_durations[ks].add(key)
-                duration = 0.5
-
-            comm = (sum(self.nbytes[dep]
-                       for dep in self.dependencies[key] - self.has_what[worker])
-                    / BANDWIDTH)
+            duration = self.get_task_duration(ks)
+            comm = self.get_comm_cost(key, worker)
 
             self.processing[worker][key] = duration + comm
             self.rprocessing[key] = worker
@@ -2291,9 +2326,7 @@ class Scheduler(ServerNode):
                         if k in self.rprocessing:
                             w = self.rprocessing[k]
                             old = self.processing[w][k]
-                            comm = (sum(self.nbytes[d] for d in
-                                         self.dependencies[k] - self.has_what[w])
-                                    / BANDWIDTH)
+                            comm = self.get_comm_cost(k, w)
                             self.processing[w][k] = avg_duration + comm
                             self.occupancy[w] += avg_duration + comm - old
                             self.total_occupancy += avg_duration + comm - old
@@ -3076,19 +3109,21 @@ class Scheduler(ServerNode):
         lets us avoid this fringe optimization when we have better things to
         think about.
         """
+        DELAY = 0.1
         with log_errors():
             import psutil
             proc = psutil.Process()
             last = time()
+
             while self.status != 'closed':
-                yield gen.sleep(0.100)
+                yield gen.sleep(DELAY)
                 while not self.rprocessing:
-                    yield gen.sleep(0.100)
-                    last = time()
+                    yield gen.sleep(DELAY)
+                last = time()
 
                 for w, processing in list(self.processing.items()):
                     while proc.cpu_percent() > 50:
-                        yield gen.sleep(0.100)
+                        yield gen.sleep(DELAY)
                         last = time()
 
                     if w not in self.workers or not processing:
@@ -3112,15 +3147,12 @@ class Scheduler(ServerNode):
         new = 0
         nbytes = 0
         for key in processing:
-            duration = self.task_duration.get(key_split(key), 0.5)
-            processing[key] = duration
-            new += duration
-            for dep in self.dependencies[key]:
-                if dep not in self.has_what[w]:
-                    nbytes += self.nbytes.get(key, 0)
+            duration = self.get_task_duration(key)
+            comm = self.get_comm_cost(key, worker)
+            processing[key] = duration + comm
+            new += duration + comm
 
-        comm = nbytes / BANDWIDTH
-        self.occupancy[w] = max(new, comm)  # These overlap. Take maximum
+        self.occupancy[w] = new
         self.total_occupancy += new - old
         self.check_idle_saturated(w)
 

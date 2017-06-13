@@ -12,10 +12,10 @@ from tornado import gen
 
 from dask import delayed
 from distributed import Client, Nanny, wait
+from distributed.comm import CommClosedError
 from distributed.compatibility import PY3
 from distributed.client import _wait
 from distributed.metrics import time
-from distributed.nanny import isalive
 from distributed.utils import sync, ignoring
 from distributed.utils_test import (gen_cluster, cluster, inc, loop, slow, div,
         slowinc, slowadd)
@@ -42,9 +42,9 @@ def test_submit_after_failed_worker_async(c, s, a, b):
     L = c.map(inc, range(10))
     yield _wait(L)
 
-    s.loop.add_callback(n._kill)
+    s.loop.add_callback(n.kill)
     total = c.submit(sum, L)
-    result = yield total._result()
+    result = yield total
     assert result == sum(map(inc, range(10)))
 
     yield n._close()
@@ -57,7 +57,7 @@ def test_submit_after_failed_worker(c, s, a, b):
     yield a._close()
 
     total = c.submit(sum, L)
-    result = yield total._result()
+    result = yield total
     assert result == sum(map(inc, range(10)))
 
 
@@ -98,10 +98,11 @@ def test_failed_worker_without_warning(c, s, a, b):
     L = c.map(inc, range(10))
     yield _wait(L)
 
-    original_process = a.process
-    a.process.terminate()
+    original_pid = a.pid
+    with ignoring(CommClosedError):
+        yield c._run(os._exit, 1, workers=[a.worker_address])
     start = time()
-    while a.process is original_process and not isalive(a.process):
+    while a.pid == original_pid:
         yield gen.sleep(0.01)
         assert time() - start < 10
 
@@ -135,7 +136,7 @@ def test_restart(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(inc, x)
     z = c.submit(div, 1, 0)
-    yield y._result()
+    yield y
 
     assert set(s.who_has) == {x.key, y.key}
 
@@ -216,7 +217,7 @@ def test_restart_fast(c, s, a, b):
     assert all(x.status == 'cancelled' for x in L)
 
     x = c.submit(inc, 1)
-    result = yield x._result()
+    result = yield x
     assert result == 2
 
 
@@ -247,21 +248,19 @@ def test_fast_kill(c, s, a, b):
     assert all(x.status == 'cancelled' for x in L)
 
     x = c.submit(inc, 1)
-    result = yield x._result()
+    result = yield x
     assert result == 2
 
 
 @gen_cluster(Worker=Nanny)
 def test_multiple_clients_restart(s, a, b):
-    e1 = Client((s.ip, s.port), start=False)
-    yield e1._start()
-    e2 = Client((s.ip, s.port), start=False)
-    yield e2._start()
+    e1 = yield Client((s.ip, s.port), asynchronous=True)
+    e2 = yield Client((s.ip, s.port), asynchronous=True)
 
     x = e1.submit(inc, 1)
     y = e2.submit(inc, 2)
-    xx = yield x._result()
-    yy = yield y._result()
+    xx = yield x
+    yy = yield y
     assert xx == 2
     assert yy == 3
 
@@ -293,7 +292,7 @@ def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     del x
     import gc; gc.collect()
     yield gen.sleep(0.1)
-    yield y._result()
+    yield y
 
 
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
@@ -313,11 +312,11 @@ def test_broken_worker_during_computation(c, s, a, b):
 
     from random import random
     yield gen.sleep(random() / 2)
-    with ignoring(OSError):
-        n.process.terminate()
+    with ignoring(CommClosedError):  # comm will be closed abrupty
+        yield c._run(os._exit, 1, workers=[n.worker_address])
     yield gen.sleep(random() / 2)
-    with ignoring(OSError):
-        n.process.terminate()
+    with ignoring(CommClosedError, EnvironmentError):  # perhaps new worker can't be contacted yet
+        yield c._run(os._exit, 1, workers=[n.worker_address])
 
     result = yield c._gather(L)
     assert isinstance(result[0], int)
@@ -340,3 +339,36 @@ def test_restart_during_computation(c, s, a, b):
 
     assert len(s.ncores) == 2
     assert not s.task_state
+
+
+@gen_cluster(client=True, timeout=None)
+def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
+    n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
+    n.start(0)
+
+    start = time()
+    while len(s.ncores) < 3:
+        yield gen.sleep(0.01)
+        assert time() < start + 5
+
+    futures = c.map(slowinc, range(20), delay=0.01)
+    yield _wait(futures)
+
+    result = yield c.submit(sum, futures, workers=a.address)
+    for dep in set(a.dep_state) - set(a.task_state):
+        a.release_dep(dep, report=True)
+
+    n_worker_address = n.worker_address
+    with ignoring(CommClosedError):
+        yield c._run(os._exit, 1, workers=[n_worker_address])
+
+    while len(s.workers) > 2:
+        yield gen.sleep(0.01)
+
+    total = c.submit(sum, futures, workers=a.address)
+    yield total
+
+    assert not a.has_what.get(n_worker_address)
+    assert not any(n_worker_address in s for s in a.who_has.values())
+
+    yield n._close()

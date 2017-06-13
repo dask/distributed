@@ -77,7 +77,7 @@ def test_recompute_released_results(c, s, a, b):
 
     z = delayed(dec)(x)
     zz = c.compute(z)
-    result = yield zz._result()
+    result = yield zz
     assert result == 1
 
 
@@ -131,7 +131,7 @@ def test_no_valid_workers(client, s, a, b, c):
     assert x.key in s.unrunnable
 
     with pytest.raises(gen.TimeoutError):
-        yield gen.with_timeout(timedelta(milliseconds=50), x._result())
+        yield gen.with_timeout(timedelta(milliseconds=50), x)
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
@@ -139,7 +139,7 @@ def test_no_valid_workers_loose_restrictions(client, s, a, b, c):
     x = client.submit(inc, 1, workers='127.0.0.5:9999',
                       allow_other_workers=True)
 
-    result = yield x._result()
+    result = yield x
     assert result == 2
 
 
@@ -152,7 +152,7 @@ def test_no_workers(client, s):
     assert x.key in s.unrunnable
 
     with pytest.raises(gen.TimeoutError):
-        yield gen.with_timeout(timedelta(milliseconds=50), x._result())
+        yield gen.with_timeout(timedelta(milliseconds=50), x)
 
 
 @gen_cluster(ncores=[])
@@ -431,7 +431,7 @@ def test_delete_data(c, s, a, b):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
 def test_delete(c, s, a):
     x = c.submit(inc, 1)
-    yield x._result()
+    yield x
     assert x.key in a.data
 
     yield c._cancel(x)
@@ -878,7 +878,14 @@ def test_include_communication_in_occupancy(c, s, a, b):
     while z.key not in s.rprocessing:
         yield gen.sleep(0.01)
 
-    assert s.processing[b.address][z.key] > 1
+    try:
+        assert s.processing[b.address][z.key] > 1
+    except Exception:
+        print("processing:", s.processing)
+        print("rprocessing:", s.rprocessing)
+        print("task_duration:", s.task_duration)
+        print("nbytes:", s.nbytes)
+        raise
 
 
 @gen_cluster(client=True)
@@ -1024,21 +1031,26 @@ def test_close_worker(c, s, a, b):
 @gen_cluster(client=True, Worker=Nanny, timeout=20)
 def test_close_nanny(c, s, a, b):
     assert len(s.workers) == 2
-    old_process = a.process
 
-    assert old_process.is_alive()
-    yield s.close_worker(worker=a.worker_address)
+    assert a.process.is_alive()
+    a_worker_address = a.worker_address
+    start = time()
+    yield s.close_worker(worker=a_worker_address)
 
     assert len(s.workers) == 1
-    assert a.worker_address not in s.workers
-    assert not old_process.is_alive()
+    assert a_worker_address not in s.workers
+    assert not a.is_alive()
+    assert a.pid is None
 
     for i in range(10):
         yield gen.sleep(0.1)
         assert len(s.workers) == 1
+        assert not a.is_alive()
+        assert a.pid is None
 
-        assert not old_process.is_alive()
-        assert not a.process
+    while a.status != 'closed':
+        yield gen.sleep(0.05)
+        assert time() < start + 10
 
 
 @gen_cluster(client=True, timeout=20)
@@ -1049,21 +1061,18 @@ def test_retire_workers_close(c, s, a, b):
 
 @gen_cluster(client=True, timeout=20, Worker=Nanny)
 def test_retire_nannies_close(c, s, a, b):
-    processes = [a.process, b.process]
+    nannies = [a, b]
     yield s.retire_workers(close=True, remove=True)
     assert not s.workers
 
     start = time()
-    while True:
-        if not any(proc.is_alive() for proc in processes):
-            break
-        else:
-            yield gen.sleep(0.1)
-        assert time() < start + 5
 
-    yield gen.sleep(1)
-    assert not any(proc.is_alive() for proc in processes)
-    assert not a.process and not b.process
+    while any(n.status != 'closed' for n in nannies):
+        yield gen.sleep(0.05)
+        assert time() < start + 10
+
+    assert not any(n.is_alive() for n in nannies)
+    assert not s.workers
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 2)])
@@ -1086,8 +1095,7 @@ def test_scheduler_file():
             data = json.load(f)
         assert data['address'] == s.address
 
-        c = Client(scheduler_file=fn, loop=s.loop, start=False)
-        yield c._start()
+        c = yield Client(scheduler_file=fn, loop=s.loop, asynchronous=True)
     yield s.close()
 
 

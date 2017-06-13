@@ -122,7 +122,14 @@ class Server(object):
         if not self.__stopped:
             self.__stopped = True
             if self.listener is not None:
-                self.listener.stop()
+                # Delay closing the server socket until the next IO loop tick.
+                # Otherwise race conditions can appear if an event handler
+                # for an accept() call is already scheduled by the IO loop,
+                # raising EBADF.
+                # The demonstrator for this is Worker.terminate(), which
+                # closes the server socket in response to an incoming message.
+                # See https://github.com/tornadoweb/tornado/issues/2069
+                self.io_loop.add_callback(self.listener.stop)
 
     def _measure_tick(self):
         now = time()
@@ -204,6 +211,9 @@ class Server(object):
 
         Coroutines should expect a single Comm object.
         """
+        if self.__stopped:
+            comm.abort()
+            return
         address = comm.peer_address
         op = None
 
@@ -241,7 +251,7 @@ class Server(object):
                     handler = self.handlers[op]
                 except KeyError:
                     result = "No handler found: %s" % op
-                    logger.warn(result, exc_info=True)
+                    logger.warning(result, exc_info=True)
                 else:
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
@@ -249,7 +259,7 @@ class Server(object):
                         if type(result) is gen.Future:
                             result = yield result
                     except CommClosedError as e:
-                        logger.warn("Lost connection to %r: %s", address, e)
+                        logger.warning("Lost connection to %r: %s", address, e)
                         break
                     except Exception as e:
                         logger.exception(e)
@@ -258,8 +268,8 @@ class Server(object):
                     try:
                         yield comm.write(result)
                     except EnvironmentError as e:
-                        logger.warn("Lost connection to %r while sending result for op %r: %s",
-                                    address, op, e)
+                        logger.warning("Lost connection to %r while sending result for op %r: %s",
+                                       address, op, e)
                         break
                 msg = result = None
                 if close_desired:
@@ -438,8 +448,8 @@ class rpc(object):
             self.status = 'closed'
             still_open = [comm for comm in self.comms if not comm.closed()]
             if still_open:
-                logger.warn("rpc object %s deleted with %d open comms",
-                            self, len(still_open))
+                logger.warning("rpc object %s deleted with %d open comms",
+                               self, len(still_open))
                 for comm in still_open:
                     comm.abort()
 
