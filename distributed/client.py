@@ -255,9 +255,10 @@ class Future(WrappedKey):
         return self._state.type
 
     def release(self):
-        if not self._cleared and self.client.generation == self._generation:
-            self._cleared = True
-            self.client._dec_ref(tokey(self.key))
+        with self.client._lock:
+            if not self._cleared and self.client.generation == self._generation:
+                self._cleared = True
+                self.client._dec_ref(tokey(self.key))
 
     def __getstate__(self):
         return self.key
@@ -579,8 +580,7 @@ class Client(Node):
         if self.status is 'running':
             self.loop.add_callback(self.scheduler_comm.send, msg)
         elif self.status is 'connecting':
-            with self._lock:
-                self._pending_msg_buffer.append(msg)
+            self.loop.add_callback(self._pending_msg_buffer.append, msg)
         else:
             raise Exception("Client not running.  Status: %s" % self.status)
 
@@ -718,11 +718,10 @@ class Client(Node):
         self.refcount[key] += 1
 
     def _dec_ref(self, key):
-        with self._lock:
-            self.refcount[key] -= 1
-            if self.refcount[key] == 0:
-                del self.refcount[key]
-                self._release_key(key)
+        self.refcount[key] -= 1
+        if self.refcount[key] == 0:
+            del self.refcount[key]
+            self._release_key(key)
 
     def _release_key(self, key):
         """ Release key from distributed memory """
