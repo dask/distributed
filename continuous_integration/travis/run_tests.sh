@@ -3,6 +3,12 @@ if [[ $RUNSLOW != false ]]; then
     export PYTEST_OPTIONS="$PYTEST_OPTIONS --runslow"
 fi
 
+echo "-- Soft limits"
+ulimit -a -S
+
+echo "-- Hard limits"
+ulimit -a -H
+
 if [[ $HDFS == true ]]; then
     py.test distributed/tests/test_hdfs.py $PYTEST_OPTIONS
     if [ $? -ne 0 ]; then
