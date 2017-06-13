@@ -718,10 +718,11 @@ class Client(Node):
         self.refcount[key] += 1
 
     def _dec_ref(self, key):
-        self.refcount[key] -= 1
-        if self.refcount[key] == 0:
-            del self.refcount[key]
-            self._release_key(key)
+        with self._lock:
+            self.refcount[key] -= 1
+            if self.refcount[key] == 0:
+                del self.refcount[key]
+                self._release_key(key)
 
     def _release_key(self, key):
         """ Release key from distributed memory """
