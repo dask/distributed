@@ -255,10 +255,9 @@ class Future(WrappedKey):
         return self._state.type
 
     def release(self):
-        with self.client._lock:
-            if not self._cleared and self.client.generation == self._generation:
-                self._cleared = True
-                self.client._dec_ref(tokey(self.key))
+        if not self._cleared and self.client.generation == self._generation:
+            self._cleared = True
+            self.client._dec_ref(tokey(self.key))
 
     def __getstate__(self):
         return self.key
