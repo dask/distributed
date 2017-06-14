@@ -112,8 +112,9 @@ class Server(object):
         self.io_loop.add_callback(pc.start)
         if self.digests is not None:
             self._last_tick = time()
-            self._tick_pc = PeriodicCallback(self._measure_tick, 20)
-            self.io_loop.add_callback(self._tick_pc.start, io_loop=self.io_loop)
+            self._tick_pc = PeriodicCallback(self._measure_tick, 20,
+                                             io_loop=self.io_loop)
+            self.io_loop.add_callback(self._tick_pc.start)
 
         self.__stopped = False
 
