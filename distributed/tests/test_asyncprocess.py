@@ -94,11 +94,10 @@ def test_simple():
     dt = time() - t1
     assert dt <= 0.6
 
-    #yield gen.sleep(0.1)
-    #sys.exc_clear()
     del proc
     gc.collect()
     if wr1() is not None:
+        # Help diagnosing
         from types import FrameType
         p = wr1()
         if p is not None:
