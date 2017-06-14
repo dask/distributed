@@ -98,7 +98,7 @@ class Server(object):
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
 
-        # XXX?
+        # Statistics counters for various events
         with ignoring(ImportError):
             from .counter import Digest
             self.digests = defaultdict(partial(Digest, loop=self.io_loop))
