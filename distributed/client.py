@@ -31,7 +31,7 @@ from toolz import first, groupby, merge, valmap, keymap
 from tornado import gen
 from tornado.gen import TimeoutError
 from tornado.locks import Event, Condition
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 from tornado.queues import Queue
 
 from .batched import BatchedSend
@@ -47,7 +47,8 @@ from .protocol.pickle import dumps, loads
 from .security import Security
 from .worker import dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
-        tokey, log_errors, str_graph, key_split, format_bytes)
+                    tokey, log_errors, str_graph, key_split, format_bytes,
+                    PeriodicCallback)
 from .versions import get_versions
 
 
@@ -563,7 +564,7 @@ class Client(Node):
                 self._should_close_loop = True
             while not self.loop._running:
                 sleep(0.001)
-        pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
+        pc = PeriodicCallback(lambda: None, 1000)
         self.loop.add_callback(pc.start)
         _set_global_client(self)
         if asynchronous:

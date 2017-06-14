@@ -12,7 +12,7 @@ from six import string_types
 from toolz import assoc
 
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 from .comm import (connect, listen, CommClosedError,
@@ -20,7 +20,8 @@ from .comm import (connect, listen, CommClosedError,
                    unparse_host_port, get_address_host_port)
 from .metrics import time
 from .system_monitor import SystemMonitor
-from .utils import get_traceback, truncate_exception, ignoring, shutting_down
+from .utils import (get_traceback, truncate_exception, ignoring, shutting_down,
+                    PeriodicCallback)
 from . import protocol
 
 
@@ -109,11 +110,11 @@ class Server(object):
             self.events = defaultdict(lambda: deque(maxlen=10000))
             self.event_counts = defaultdict(lambda: 0)
 
-            pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.loop)
+            pc = PeriodicCallback(self.monitor.update, 500)
             self.loop.add_callback(pc.start)
             if self.digests is not None:
                 self._last_tick = time()
-                self._tick_pc = PeriodicCallback(self._measure_tick, 20, io_loop=self.loop)
+                self._tick_pc = PeriodicCallback(self._measure_tick, 20)
                 self.loop.add_callback(self._tick_pc.start)
 
         self.__stopped = False

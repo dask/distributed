@@ -20,7 +20,7 @@ except ImportError:
     from toolz import pluck
 from tornado.gen import Return
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 from .batched import BatchedSend
@@ -39,7 +39,7 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, validate_key, mp_context, import_file,
-                    silence_logging)
+                    silence_logging, PeriodicCallback)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
@@ -160,8 +160,7 @@ class WorkerBase(ServerNode):
                                          **kwargs)
 
         self.heartbeat_callback = PeriodicCallback(self.heartbeat,
-                                                   self.heartbeat_interval,
-                                                   io_loop=self.loop)
+                                                   self.heartbeat_interval)
 
     @property
     def worker_address(self):
@@ -363,8 +362,10 @@ class WorkerBase(ServerNode):
         job_counter[0] += 1
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         future = self.executor.submit(function, *args, **kwargs)
-        pc = PeriodicCallback(lambda: logger.debug("future state: %s - %s",
-            key, future._state), 1000, io_loop=self.loop); pc.start()
+        pc = PeriodicCallback(
+            lambda: logger.debug("future state: %s - %s", key, future._state),
+            1000)
+        pc.start()
         try:
             yield future
         finally:

@@ -9,7 +9,6 @@ from timeit import default_timer
 
 import dask
 from toolz import valmap, groupby, concat
-from tornado.ioloop import PeriodicCallback, IOLoop
 from tornado import gen
 
 from .plugin import SchedulerPlugin
