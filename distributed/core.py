@@ -99,23 +99,22 @@ class Server(object):
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
 
-        if hasattr(self, 'loop'):
-            # XXX?
-            with ignoring(ImportError):
-                from .counter import Digest
-                self.digests = defaultdict(partial(Digest, loop=self.loop))
+        # Statistics counters for various events
+        with ignoring(ImportError):
+            from .counter import Digest
+            self.digests = defaultdict(partial(Digest, loop=self.io_loop))
 
-            from .counter import Counter
-            self.counters = defaultdict(partial(Counter, loop=self.loop))
-            self.events = defaultdict(lambda: deque(maxlen=10000))
-            self.event_counts = defaultdict(lambda: 0)
+        from .counter import Counter
+        self.counters = defaultdict(partial(Counter, loop=self.io_loop))
+        self.events = defaultdict(lambda: deque(maxlen=10000))
+        self.event_counts = defaultdict(lambda: 0)
 
-            pc = PeriodicCallback(self.monitor.update, 500)
-            self.loop.add_callback(pc.start)
-            if self.digests is not None:
-                self._last_tick = time()
-                self._tick_pc = PeriodicCallback(self._measure_tick, 20)
-                self.loop.add_callback(self._tick_pc.start)
+        pc = PeriodicCallback(self.monitor.update, 500)
+        self.io_loop.add_callback(pc.start)
+        if self.digests is not None:
+            self._last_tick = time()
+            self._tick_pc = PeriodicCallback(self._measure_tick, 20)
+            self.io_loop.add_callback(self._tick_pc.start)
 
         self.__stopped = False
 
