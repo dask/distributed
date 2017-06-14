@@ -108,12 +108,12 @@ class Server(object):
         self.events = defaultdict(lambda: deque(maxlen=10000))
         self.event_counts = defaultdict(lambda: 0)
 
-        pc = PeriodicCallback(self.monitor.update, 500)
+        pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.io_loop)
         self.io_loop.add_callback(pc.start)
         if self.digests is not None:
             self._last_tick = time()
             self._tick_pc = PeriodicCallback(self._measure_tick, 20)
-            self.io_loop.add_callback(self._tick_pc.start)
+            self.io_loop.add_callback(self._tick_pc.start, io_loop=self.io_loop)
 
         self.__stopped = False
 
