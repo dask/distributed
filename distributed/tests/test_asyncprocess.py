@@ -95,9 +95,9 @@ def test_simple():
     assert dt <= 0.2
 
     del proc
-    t1 = time()
     gc.collect()
     assert wr1() is None
+    t1 = time()
     while wr2() is not None:
         yield gen.sleep(0.01)
         gc.collect()

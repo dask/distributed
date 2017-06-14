@@ -136,8 +136,8 @@ class AsyncProcess(object):
                 # (see _children in multiprocessing/process.py)
                 process.join(timeout=0)
                 # User hooks
-                exit_future.set_result(r)
                 _maybe_call_exit_callback()
+                exit_future.set_result(r)
                 # No need to examine process result again
                 break
 
