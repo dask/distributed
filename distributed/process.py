@@ -82,6 +82,7 @@ class AsyncProcess(object):
         self._process.terminate()
 
     def _on_exit(self):
+        print("_on_exit")
         self._process = None
         if self._exit_callback is not None:
             self._exit_callback(self)
@@ -138,6 +139,7 @@ class AsyncProcess(object):
                 # User hooks
                 _maybe_call_exit_callback()
                 exit_future.set_result(r)
+                print("_watch: done joining")
                 # No need to examine process result again
                 break
 
@@ -163,6 +165,7 @@ class AsyncProcess(object):
         assert self._state.pid is not None, 'can only join a started process'
         if self._state.exitcode is not None:
             return
+        print("join...")
         if timeout is None:
             yield self._exit_future
         else:
@@ -170,6 +173,7 @@ class AsyncProcess(object):
                 yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
             except gen.TimeoutError:
                 pass
+        print("/join...")
 
     def set_exit_callback(self, func):
         """
