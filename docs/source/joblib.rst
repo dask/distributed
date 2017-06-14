@@ -52,6 +52,15 @@ validated parameter search as follows.
    with parallel_backend('dask.distributed', scheduler_host='localhost:8786'):
        search.fit(digits.data, digits.target)
 
+## Nested Parallelism
+
+Note that this code will not work if you distribute it via dask in order to implement nested parallelism. The reason is that each worker will have a fresh copy of sklearn and `from sklearn.externals.joblib import parallel_backend` will not apply to them, resulting in a "KeyError" when trying to distribute, but no problem when running the inner loop locally. The solution is 
+
+.. code-block:: python
+
+    from distributed.joblib import DistributedBackend 
+    register_parallel_backend('distributed', DistributedBackend, make_default=True)
+    
 
 For large arguments that are used by multiple tasks, it may be more efficient
 to pre-scatter the data to every worker, rather than serializing it once for
@@ -67,3 +76,5 @@ takes an iterable of objects to send to each worker.
 
 
 .. _Joblib: https://pythonhosted.org/joblib/
+
+
