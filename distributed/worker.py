@@ -1693,7 +1693,7 @@ class Worker(WorkerBase):
                         if key in self.waiting_for_data:
                             self.data_needed.append(key)
 
-        except Exception as e:
+        except Exception:
             logger.error("Handle missing dep failed, retrying", exc_info=True)
             retries = kwargs.get('retries', 5)
             self.log.append(('handle-missing-failed', retries, deps))
