@@ -14,7 +14,8 @@ from distributed.utils_test import slowinc
 from tornado.ioloop import IOLoop
 from tornado.platform.asyncio import BaseAsyncIOLoop
 
-from distributed.asyncio import AioClient, AioFuture, as_completed, wait
+from distributed.asyncio import AioClient, AioFuture, AioVariable
+from distributed.asyncio import as_completed, wait
 from distributed.utils_test import inc, div
 
 
@@ -368,3 +369,30 @@ async def test_asyncio_restart():
 async def test_asyncio_nanny_workers():
     async with AioClient(n_workers=2) as c:
         assert await c.submit(inc, 1) == 2
+
+
+@coro_test
+async def test_variable():
+    c = await AioClient(processes=False)
+    x = AioVariable('x')
+    xx = AioVariable('x')
+    assert x.client is c
+
+    future = c.submit(inc, 1)
+
+    await x.set(future)
+    future2 = await xx.get()
+    assert future.key == future2.key
+
+    del future, future2
+
+    await asyncio.sleep(0.1)
+    print(c.scheduler.task_state)
+    assert c.scheduler.task_state  # future still present
+
+    x.delete()
+
+    start = time()
+    while c.scheduler.task_state:
+        await asyncio.sleep(0.01)
+        assert time() < start + 5

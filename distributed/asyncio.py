@@ -12,6 +12,7 @@ from tornado.platform.asyncio import to_asyncio_future
 
 from . import client
 from .client import Client, Future
+from .variable import Variable
 from .utils import ignoring
 
 
@@ -105,12 +106,9 @@ class AioClient(Client):
     _Future = AioFuture
 
     def __init__(self, *args, **kwargs):
-        if kwargs.get('set_as_default'):
-            raise Exception("AioClient instance can't be set as default")
-
         loop = asyncio.get_event_loop()
         ioloop = BaseAsyncIOLoop(loop)
-        super().__init__(*args, loop=ioloop, set_as_default=False, asynchronous=True, **kwargs)
+        super().__init__(*args, loop=ioloop, asynchronous=True, **kwargs)
 
     async def __aenter__(self):
         await to_asyncio_future(self._started)
@@ -160,6 +158,15 @@ class AioClient(Client):
 
     def __enter__(self):
         raise RuntimeError("Use AioClient in an 'async with' block, not 'with'")
+
+
+class AioVariable(Variable):
+
+    _Client = AioClient
+    _Future = AioFuture
+
+    get = to_asyncio(Variable._get)
+    set = to_asyncio(Variable._set)
 
 
 class as_completed(client.as_completed):
