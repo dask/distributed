@@ -20,13 +20,15 @@ from tornado.ioloop import IOLoop
 logger = logging.getLogger(__name__)
 
 
-def _call_and_set_future(future, func, *args, **kwargs):
+def _call_and_set_future(loop, future, func, *args, **kwargs):
     try:
         res = func(*args, **kwargs)
     except:
-        future.set_exc_info(sys.exc_info())
+        # Tornado futures are not thread-safe, need to
+        # set_result() / set_exc_info() from the loop's thread
+        loop.add_callback(future.set_exc_info, sys.exc_info())
     else:
-        future.set_result(res)
+        loop.add_callback(future.set_result, res)
 
 
 class _ProcessState(object):
@@ -61,8 +63,8 @@ class AsyncProcess(object):
         self._thread = threading.Thread(
             target=self._watch,
             name="AsyncProcess %s watch" % self._process.name,
-            args=(weakref.ref(self), self._process, self._state,
-                  self._watch_q, self._exit_future,))
+            args=(weakref.ref(self), self._process, self._loop,
+                  self._state, self._watch_q, self._exit_future,))
         self._thread.daemon = True
         self._thread.start()
 
@@ -89,7 +91,7 @@ class AsyncProcess(object):
         self._exit_future.set_result(exitcode)
 
     @classmethod
-    def _watch(cls, selfref, process, state, q, exit_future):
+    def _watch(cls, selfref, process, loop, state, q, exit_future):
         # As multiprocessing.Process is not thread-safe, we run all
         # blocking operations from this single loop and ship results
         # back to the caller when needed.
@@ -106,9 +108,9 @@ class AsyncProcess(object):
             else:
                 op = msg['op']
                 if op == 'start':
-                    _call_and_set_future(msg['future'], _start)
+                    _call_and_set_future(loop, msg['future'], _start)
                 elif op == 'terminate':
-                    _call_and_set_future(msg['future'], process.terminate)
+                    _call_and_set_future(loop, msg['future'], process.terminate)
                 elif op == 'stop':
                     raise SystemExit
                 else:
