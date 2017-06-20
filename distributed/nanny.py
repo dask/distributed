@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from datetime import timedelta
+import itertools
 import logging
 from multiprocessing.queues import Empty
 import os
@@ -254,6 +255,8 @@ class Nanny(ServerNode):
 
 class WorkerProcess(object):
 
+    _count = itertools.count(1)
+
     def __init__(self, worker_args, worker_kwargs, worker_start_args,
                  silence_logs, on_exit):
         self.status = 'init'
@@ -289,6 +292,7 @@ class WorkerProcess(object):
                         silence_logs=self.silence_logs,
                         init_result_q=self.init_result_q,
                         child_stop_q=self.child_stop_q),
+            name="Worker %d" % (next(self._count),),
         )
         self.process.daemon = True
         self.process.set_exit_callback(self._on_exit)
