@@ -923,3 +923,15 @@ def tls_only_security():
         sec = Security()
     assert sec.require_encryption
     return sec
+
+
+def bump_rlimit(limit, desired):
+    resource = pytest.importorskip('resource')
+    try:
+        soft, hard = resource.getrlimit(limit)
+        if soft < desired:
+            resource.setrlimit(limit,
+                               (desired, max(hard, desired)))
+    except Exception as e:
+        pytest.skip("rlimit too low (%s) and can't be increased: %s"
+                    % (soft, e))
