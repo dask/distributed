@@ -99,6 +99,11 @@ def test_simple():
     dt = time() - t1
     assert dt <= 0.6
 
+    with pytest.raises(AssertionError):
+        yield proc.terminate()
+    with pytest.raises(AssertionError):
+        yield proc.start()
+
     del proc
     gc.collect()
     if wr1() is not None:

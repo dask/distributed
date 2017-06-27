@@ -168,11 +168,13 @@ class AsyncProcess(object):
                 return
 
     def start(self):
+        assert self._finalizer.alive, "cannot start a joined process"
         fut = Future()
         self._watch_q.put_nowait({'op': 'start', 'future': fut})
         return fut
 
     def terminate(self):
+        assert self._finalizer.alive, "cannot terminate a joined process"
         fut = Future()
         self._watch_q.put_nowait({'op': 'terminate', 'future': fut})
         return fut
@@ -180,15 +182,17 @@ class AsyncProcess(object):
     @gen.coroutine
     def join(self, timeout=None):
         assert self._state.pid is not None, 'can only join a started process'
+        if self._state.exitcode is None:
+            if timeout is None:
+                yield self._exit_future
+            else:
+                try:
+                    yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
+                except gen.TimeoutError:
+                    pass
+        # join() ends the helper thread if successful
         if self._state.exitcode is not None:
-            return
-        if timeout is None:
-            yield self._exit_future
-        else:
-            try:
-                yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
-            except gen.TimeoutError:
-                pass
+            self._finalizer()
 
     def set_exit_callback(self, func):
         """
