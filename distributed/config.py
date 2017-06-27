@@ -117,6 +117,7 @@ def initialize_logging(config):
     else:
         _initialize_logging_old_style(config)
 
+
 try:
     import yaml
 except ImportError:
