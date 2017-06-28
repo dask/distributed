@@ -15,7 +15,8 @@ from distributed.core import pingpong
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
-                                    requires_ipv6, has_ipv6, get_cert)
+                                    requires_ipv6, has_ipv6, get_cert,
+                                    get_server_ssl_context, get_client_ssl_context)
 
 from distributed.protocol import (loads, dumps,
                                   to_serialize, Serialized, serialize, deserialize)
@@ -50,22 +51,6 @@ def check_tls_extra(info):
     assert 'AES' in cipher_name
     assert 'TLS' in proto_name
     assert secret_bits >= 128
-
-
-def get_server_ssl_context(certfile='tls-cert.pem', keyfile='tls-key.pem'):
-    ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH, cafile=ca_file)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
-    return ctx
-
-def get_client_ssl_context(certfile='tls-cert.pem', keyfile='tls-key.pem'):
-    ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=ca_file)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_REQUIRED
-    ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
-    return ctx
-
 
 
 @gen.coroutine
