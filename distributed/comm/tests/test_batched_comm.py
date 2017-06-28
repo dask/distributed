@@ -43,7 +43,7 @@ def check_write(addr, **kwargs):
     loop = IOLoop.current(instance=False)
 
     a, b = yield get_comm_pair(addr, **kwargs)
-    b = BatchedComm(b, interval=0.2)
+    b = BatchedComm(0.2, b)
 
     t1 = loop.time()
     for i in range(3):
@@ -84,10 +84,25 @@ def test_write_tls():
 
 
 @gen_test()
+def test_late_start():
+    a, b = yield get_comm_pair('tcp://')
+    batched = BatchedComm(1e-6)
+    for i in range(3):
+        batched.write(i)
+
+    batched.start(b)
+    msg = yield a.read()
+    assert msg == list(range(3))
+
+    a.abort()
+    batched.abort()
+
+
+@gen_test()
 def test_read():
     a, b = yield get_comm_pair('tcp://')
-    a = BatchedComm(a, interval=0.2)
-    b = BatchedComm(b, interval=0.2)
+    a = BatchedComm(0.2, a)
+    b = BatchedComm(0.2, b)
 
     for i in range(3):
         b.write(i)
@@ -101,7 +116,7 @@ def test_read():
 @gen_test()
 def test_close():
     a, b = yield get_comm_pair('tcp://')
-    b = BatchedComm(b, interval=0.2)
+    b = BatchedComm(0.2, b)
 
     assert not b.closed()
     assert not b.comm.closed()
@@ -114,7 +129,7 @@ def test_close():
 @gen_test()
 def test_abort():
     a, b = yield get_comm_pair('tcp://')
-    b = BatchedComm(b, interval=0.2)
+    b = BatchedComm(0.2, b)
 
     assert not b.closed()
     assert not b.comm.closed()
@@ -125,18 +140,19 @@ def test_abort():
 
 
 @gen.coroutine
-def check_extra_info(addr, **kwargs):
+def check_properties(addr, **kwargs):
     a, b = yield get_comm_pair(addr, **kwargs)
-    b = BatchedComm(b, interval=0.2)
+    b = BatchedComm(0.2, b)
+    assert b.peer_address == b.comm.peer_address
     assert b.extra_info == b.comm.extra_info
 
     a.abort()
     b.abort()
 
 @gen_test()
-def test_extra_info_tcp():
-    yield check_extra_info('tcp://')
+def test_properties_tcp():
+    yield check_properties('tcp://')
 
 @gen_test()
-def test_extra_info_tls():
-    yield check_extra_info('tls://', **tls_kwargs)
+def test_properties_tls():
+    yield check_properties('tls://', **tls_kwargs)

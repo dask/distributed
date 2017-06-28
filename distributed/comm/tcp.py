@@ -94,16 +94,16 @@ def set_tcp_timeout(stream):
         logger.warning("Could not set timeout on TCP stream: %s", e)
 
 
-def convert_stream_closed_error(exc):
+def convert_stream_closed_error(obj, exc):
     """
     Re-raise StreamClosedError as CommClosedError.
     """
     if exc.real_error is not None:
         # The stream was closed because of an underlying OS error
         exc = exc.real_error
-        raise CommClosedError("%s: %s" % (exc.__class__.__name__, exc))
+        raise CommClosedError("in %s: %s: %s" % (obj, exc.__class__.__name__, exc))
     else:
-        raise CommClosedError(str(exc))
+        raise CommClosedError("in %s: %s" % (obj, exc))
 
 
 class TCP(Comm):
@@ -163,7 +163,7 @@ class TCP(Comm):
                 frames.append(frame)
         except StreamClosedError as e:
             self.stream = None
-            convert_stream_closed_error(e)
+            convert_stream_closed_error(self, e)
 
         try:
             msg = from_frames(frames, deserialize=self.deserialize)
@@ -196,7 +196,7 @@ class TCP(Comm):
                 stream.write(frame)
         except StreamClosedError as e:
             stream = None
-            convert_stream_closed_error(e)
+            convert_stream_closed_error(self, e)
 
         raise gen.Return(sum(map(len, frames)))
 
@@ -278,7 +278,7 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
                                           **kwargs)
         except StreamClosedError as e:
             # The socket connect() call failed
-            convert_stream_closed_error(e)
+            convert_stream_closed_error(self, e)
 
         # XXX
         raise gen.Return(self.comm_class(stream,
@@ -387,6 +387,8 @@ class TCPListener(BaseTCPListener):
 
     def handle_stream(self, stream, address):
         address = self.prefix + unparse_host_port(*address[:2])
+        logger.debug("Incoming connection from %r to %r",
+                     address, self.contact_address)
         comm = TCP(stream, address, self.deserialize)
         self.comm_handler(comm)
 
@@ -406,10 +408,12 @@ class TLSListener(BaseTCPListener):
             yield stream.wait_for_handshake()
         except EnvironmentError as e:
             # The handshake went wrong, log and ignore
-            logger.warning("listener on %r: TLS handshake failed with remote %r: %s",
+            logger.warning("Listener on %r: TLS handshake failed with remote %r: %s",
                            self.listen_address, address,
                            getattr(e, "real_error", None) or e)
         else:
+            logger.debug("Incoming connection from %r to %r",
+                         address, self.contact_address)
             comm = TLS(stream, address, self.deserialize)
             self.comm_handler(comm)
 

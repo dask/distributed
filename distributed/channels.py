@@ -49,14 +49,14 @@ class ChannelScheduler(object):
 
         comm = self.scheduler.comms[client]
         for type, value in self.deques[channel]:
-            comm.send({'op': 'channel-append',
-                       'type': type,
-                       'value': value,
-                       'channel': channel})
+            comm.write({'op': 'channel-append',
+                        'type': type,
+                        'value': value,
+                        'channel': channel})
 
         if self.stopped[channel]:
-            comm.send({'op': 'channel-stop',
-                       'channel': channel})
+            comm.write({'op': 'channel-stop',
+                        'channel': channel})
 
     def unsubscribe(self, channel=None, client=None):
         logger.info("Remove client from channel, %s, %s", client, channel)
@@ -92,8 +92,8 @@ class ChannelScheduler(object):
         for client in list(self.clients[channel]):
             try:
                 comm = self.scheduler.comms[client]
-                comm.send({'op': 'channel-stop',
-                           'channel': channel})
+                comm.write({'op': 'channel-stop',
+                            'channel': channel})
             except (KeyError, CommClosedError):
                 self.unsubscribe(channel, client)
 
@@ -101,10 +101,10 @@ class ChannelScheduler(object):
         for client in list(self.clients[channel]):
             try:
                 comm = self.scheduler.comms[client]
-                comm.send({'op': 'channel-append',
-                           'type': type,
-                           'value': value,
-                           'channel': channel})
+                comm.write({'op': 'channel-append',
+                            'type': type,
+                            'value': value,
+                            'channel': channel})
             except (KeyError, CommClosedError):
                 self.unsubscribe(channel, client)
 

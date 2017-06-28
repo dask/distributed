@@ -7,6 +7,7 @@ from .addressing import (parse_address, unparse_address,
                          get_local_address_for,
                          )
 from .core import connect, listen, Comm, CommClosedError
+from .batched import BatchedComm
 
 
 def _register_transports():

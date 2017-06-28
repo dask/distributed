@@ -172,9 +172,9 @@ class WorkStealing(SchedulerPlugin):
             self.scheduler.total_occupancy += duration
             self.put_key_in_stealable(key)
 
-            self.scheduler.worker_comms[victim].send({'op': 'release-task',
-                                                      'reason': 'stolen',
-                                                      'key': key})
+            self.scheduler.worker_comms[victim].write({'op': 'release-task',
+                                                       'reason': 'stolen',
+                                                       'key': key})
 
             try:
                 self.scheduler.send_task_to_worker(thief, key)

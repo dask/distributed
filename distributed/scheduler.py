@@ -23,9 +23,9 @@ from tornado.ioloop import IOLoop
 from dask.core import reverse_dict
 from dask.order import order
 
-from .batched import BatchedSend
+#from .batched import BatchedSend
 from .comm import (normalize_address, resolve_address,
-                   get_address_host, unparse_host_port)
+                   get_address_host, unparse_host_port, BatchedComm)
 from .compatibility import finalize
 from .config import config
 from .core import (rpc, connect, Server, send_recv,
@@ -178,8 +178,8 @@ class Scheduler(ServerNode):
         Other services running on this scheduler, like HTTP
     * **loop:** ``IOLoop``:
         The running Tornado IOLoop
-    * **comms:** ``[Comm]``:
-        A list of Comms from which we both accept stimuli and
+    * **comms:** ``{str: Comm}``:
+        Client Comms from which we both accept stimuli and
         report results
     * **task_duration:** ``{key-prefix: time}``
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
@@ -606,7 +606,7 @@ class Scheduler(ServerNode):
             # for key in keys:  # TODO
             #     self.mark_key_in_memory(key, [address])
 
-            self.worker_comms[address] = BatchedSend(interval=5, loop=self.loop)
+            self.worker_comms[address] = BatchedComm(interval=5e-3)
             self._worker_coroutines.append(self.handle_worker(address))
 
             if self.ncores[address] > len(self.processing[address]):
@@ -785,7 +785,7 @@ class Scheduler(ServerNode):
                          worker, self.task_state.get(key), key,
                          self.who_has.get(key))
             if worker not in self.who_has.get(key, ()):
-                self.worker_comms[worker].send({'op': 'release-task', 'key': key})
+                self.worker_comms[worker].write({'op': 'release-task', 'key': key})
             recommendations = {}
 
         return recommendations
@@ -856,8 +856,8 @@ class Scheduler(ServerNode):
                                               'worker': address})
             logger.info("Remove worker %s", address)
             if close:
-                with ignoring(AttributeError, CommClosedError):
-                    self.worker_comms[address].send({'op': 'close'})
+                with ignoring(CommClosedError):
+                    self.worker_comms[address].write({'op': 'close'})
 
             self.host_info[host]['cores'] -= self.ncores[address]
             self.host_info[host]['addresses'].remove(address)
@@ -1104,7 +1104,7 @@ class Scheduler(ServerNode):
         if client is not None:
             try:
                 comm = self.comms[client]
-                comm.send(msg)
+                comm.write(msg)
             except CommClosedError:
                 if self.status == 'running':
                     logger.critical("Tried writing to closed comm: %s", msg)
@@ -1121,7 +1121,7 @@ class Scheduler(ServerNode):
             comms = self.comms.values()
         for c in comms:
             try:
-                c.send(msg)
+                c.write(msg)
                 # logger.debug("Scheduler sends message to client %s", msg)
             except CommClosedError:
                 if self.status == 'running':
@@ -1136,12 +1136,15 @@ class Scheduler(ServerNode):
         logger.info("Receive client connection: %s", client)
         self.log_event(['all', client], {'action': 'add-client',
                                          'client': client})
+
+        comm = BatchedComm(interval=2e-3, comm=comm)
+        self.comms[client] = comm
         try:
             yield self.handle_client(comm, client=client)
         finally:
             if not comm.closed():
-                self.comms[client].send({'op': 'stream-closed'})
-            yield self.comms[client].close()
+                comm.write({'op': 'stream-closed'})
+            yield comm.close()
             del self.comms[client]
             logger.info("Close client connection: %s", client)
 
@@ -1165,12 +1168,9 @@ class Scheduler(ServerNode):
         --------
         Scheduler.worker_stream: The equivalent function for workers
         """
-        bcomm = BatchedSend(interval=2, loop=self.loop)
-        bcomm.start(comm)
-        self.comms[client] = bcomm
 
         with log_errors(pdb=LOG_PDB):
-            bcomm.send({'op': 'stream-start'})
+            comm.write({'op': 'stream-start'})
 
             breakout = False
 
@@ -1181,7 +1181,7 @@ class Scheduler(ServerNode):
                     break
                 except Exception as e:
                     logger.exception(e)
-                    bcomm.send(error_message(e, status='scheduler-error'))
+                    comm.write(error_message(e, status='scheduler-error'))
                     continue
 
                 if self.status == 'closed':
@@ -1196,7 +1196,7 @@ class Scheduler(ServerNode):
                         op = msg.pop('op')
                     except Exception as e:
                         logger.exception(e)
-                        bcomm.end(error_message(e, status='scheduler-error'))
+                        comm.write(error_message(e, status='scheduler-error'))
 
                     if op == 'close-stream':
                         breakout = True
@@ -1252,7 +1252,7 @@ class Scheduler(ServerNode):
             else:
                 msg['task'] = task
 
-            self.worker_comms[worker].send(msg)
+            self.worker_comms[worker].write(msg)
         except CommClosedError:
             logger.info("Tried to send task %r to closed worker %r", key, worker)
             # Worker will be removed by handle_worker()
@@ -1320,13 +1320,13 @@ class Scheduler(ServerNode):
         io_error = None
         try:
             while True:
-                msgs = yield comm.read()
+                msgs = yield worker_comm.read()
                 start = time()
 
                 if not isinstance(msgs, list):
                     msgs = [msgs]
 
-                if worker in self.worker_info and not comm.closed():
+                if worker in self.worker_info and not worker_comm.closed():
                     self.counters['worker-message-length'].add(len(msgs))
                     for msg in msgs:
                         if msg == 'OK':  # from close
@@ -1361,9 +1361,6 @@ class Scheduler(ServerNode):
                                 worker, io_error)
                 worker_comm.abort()
                 self.remove_worker(address=worker)
-            else:
-                assert comm.closed()
-                worker_comm.abort()
 
     def correct_time_delay(self, worker, msg):
         """
@@ -2365,7 +2362,7 @@ class Scheduler(ServerNode):
                             w, worker, key)
                 msg = {'op': 'release-task', 'key': key, 'reason': 'stolen'}
                 try:
-                    self.worker_comms[w].send(msg)
+                    self.worker_comms[w].write(msg)
                 except CommClosedError:
                     # Don't try to resolve this now.  Proceed normally and
                     # let normal resiliency mechanisms handle it later
@@ -2444,7 +2441,7 @@ class Scheduler(ServerNode):
                     self.worker_bytes[w] -= self.nbytes.get(key,
                                                             DEFAULT_DATA_SIZE)
                     try:
-                        self.worker_comms[w].send({'op': 'delete-data',
+                        self.worker_comms[w].write({'op': 'delete-data',
                                                    'keys': [key],
                                                    'report': False})
                     except EnvironmentError:
@@ -2568,7 +2565,7 @@ class Scheduler(ServerNode):
                 self.total_occupancy -= duration
                 self.check_idle_saturated(w)
                 self.release_resources(key, w)
-                self.worker_comms[w].send({'op': 'release-task', 'key': key})
+                self.worker_comms[w].write({'op': 'release-task', 'key': key})
 
             self.released.add(key)
             self.task_state[key] = 'released'
@@ -2727,7 +2724,7 @@ class Scheduler(ServerNode):
                     self.worker_bytes[w] -= self.nbytes.get(key,
                                                             DEFAULT_DATA_SIZE)
                     try:
-                        self.worker_comms[w].send({'op': 'delete-data',
+                        self.worker_comms[w].write({'op': 'delete-data',
                                                      'keys': [key], 'report': False})
                     except EnvironmentError:
                         self.loop.add_callback(self.remove_worker, address=w)
