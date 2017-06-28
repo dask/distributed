@@ -109,6 +109,9 @@ def _initialize_logging_new_style(config):
 
 
 def initialize_logging(config):
+    if 'logging-file-config' in config and 'logging' in config:
+        raise RuntimeError("Config options 'logging-file-config' and 'logging' are mutually exclusive.")
+
     log_config = config.get('logging', {})
     if 'version' in log_config:
         # logging module mandates version to be an int

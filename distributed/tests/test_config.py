@@ -8,6 +8,7 @@ import pytest
 
 from distributed.utils_test import (captured_handler, captured_logger,
                                     new_config, new_config_file)
+from distributed.config import initialize_logging
 
 
 def dump_logger_list():
@@ -204,3 +205,12 @@ def test_logging_extended():
             """
 
         subprocess.check_call([sys.executable, "-c", code])
+
+
+def test_logging_mutual_exclusive():
+    """
+    Ensure that 'logging-file-config' and 'logging' have to be mutual exclusive.
+    """
+    config = {'logging': {'dask': 'warning'}, 'logging-file-config': '/path/to/config'}
+    with pytest.raises(RuntimeError):
+        initialize_logging(config)
