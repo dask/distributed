@@ -255,8 +255,8 @@ handlers=console
 qualname=foo.bar
 """
     with tempfile.NamedTemporaryFile() as logging_config:
-        logging_config.write(logging_config_contents)
-        logging_config.seek(0)
+        logging_config.file.write(logging_config_contents)
+        logging_config.file.seek(0)
         dask_config = {'logging-file-config': logging_config.name}
         with new_config(dask_config):
             foo = logging.getLogger('foo')
