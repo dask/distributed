@@ -543,11 +543,11 @@ def test_broadcast(s, a, b):
     result = yield s.broadcast(msg={'op': 'ping'})
     assert result == {a.address: b'pong', b.address: b'pong'}
 
-    #result = yield s.broadcast(msg={'op': 'ping'}, workers=[a.address])
-    #assert result == {a.address: b'pong'}
+    result = yield s.broadcast(msg={'op': 'ping'}, workers=[a.address])
+    assert result == {a.address: b'pong'}
 
-    #result = yield s.broadcast(msg={'op': 'ping'}, hosts=[a.ip])
-    #assert result == {a.address: b'pong', b.address: b'pong'}
+    result = yield s.broadcast(msg={'op': 'ping'}, hosts=[a.ip])
+    assert result == {a.address: b'pong', b.address: b'pong'}
 
 
 @gen_cluster(Worker=Nanny)
