@@ -254,12 +254,18 @@ level=ERROR
 handlers=console
 qualname=foo.bar
 """
-    with tempfile.NamedTemporaryFile() as logging_config:
+    with tempfile.NamedTemporaryFile(mode='w') as logging_config:
         logging_config.file.write(logging_config_contents)
-        logging_config.file.seek(0)
-        dask_config = {'logging-file-config': logging_config.name}
-        with new_config(dask_config):
-            foo = logging.getLogger('foo')
-            bar = logging.getLogger('foo.bar')
-            assert logging.INFO == foo.getEffectiveLevel()
-            assert logging.ERROR == bar.getEffectiveLevel()
+        logging_config.file.flush()
+        code = """if 1:
+                import logging
+                from distributed.config import initialize_logging
+                dask_config = {{'logging-file-config': '{}'}}
+                initialize_logging(dask_config)
+                foo = logging.getLogger('foo')
+                bar = logging.getLogger('foo.bar')
+                assert logging.INFO == foo.getEffectiveLevel()
+                assert logging.ERROR == bar.getEffectiveLevel()
+                """.format(logging_config.name)
+        subprocess.check_call([sys.executable, "-c", code])
+
