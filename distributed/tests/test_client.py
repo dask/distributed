@@ -4193,6 +4193,11 @@ def test_fire_and_forget(c, s, a, b):
     finally:
         del distributed.foo
 
+    start = time()
+    while len(s.task_state) > 1:
+        yield gen.sleep(0.01)
+        assert time() < start + 2
+
     assert set(s.who_wants) == {future.key}
     assert set(s.task_state) == {future.key}
 
@@ -4201,7 +4206,12 @@ def test_fire_and_forget(c, s, a, b):
 def test_fire_and_forget_err(c, s, a, b):
     fire_and_forget(c.submit(div, 1, 0))
     yield gen.sleep(0.1)
-    assert not s.task_state
+
+    # erred task should clear out quickly
+    start = time()
+    while s.task_state:
+        yield gen.sleep(0.01)
+        assert time() < start + 1
 
 
 def test_quiet_client_shutdown(loop):
