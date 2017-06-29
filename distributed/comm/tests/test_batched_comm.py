@@ -35,7 +35,7 @@ def get_comm_pair(listen_addr, listen_args=None, connect_args=None):
     comm = yield connect(listener.contact_address,
                          connection_args=connect_args)
     serv_comm = yield q.get()
-    return comm, serv_comm
+    raise gen.Return((comm, serv_comm))
 
 
 @gen.coroutine

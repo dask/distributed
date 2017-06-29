@@ -1,9 +1,8 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import deque
 import logging
 
-from tornado import gen, locks
+from tornado import gen
 from tornado.ioloop import IOLoop
 
 from .core import Comm, CommClosedError
