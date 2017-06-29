@@ -34,9 +34,7 @@ from tornado.locks import Event, Condition
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.queues import Queue
 
-from .batched import BatchedSend
-from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
-                         scatter_to_workers, gather_from_workers)
+from .comm import BatchedComm
 from .cfexecutor import ClientExecutor
 from .compatibility import (Queue as pyQueue, Empty, isqueue,
         get_thread_identity, html_escape)
@@ -48,6 +46,8 @@ from .security import Security
 from .worker import dumps_task
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph, key_split, format_bytes)
+from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
+                         scatter_to_workers, gather_from_workers)
 from .versions import get_versions
 
 
@@ -592,7 +592,7 @@ class Client(Node):
 
     def _send_to_scheduler(self, msg):
         if self.status is 'running':
-            self.loop.add_callback(self.scheduler_comm.send, msg)
+            self.loop.add_callback(self.scheduler_comm.write, msg)
         elif self.status is 'connecting':
             self.loop.add_callback(self._pending_msg_buffer.append, msg)
         else:
@@ -657,7 +657,7 @@ class Client(Node):
     @gen.coroutine
     def _reconnect(self, timeout=0.1):
         with log_errors():
-            assert self.scheduler_comm.comm.closed()
+            assert self.scheduler_comm.closed()
             self.status = 'connecting'
             self.scheduler_comm = None
 
@@ -695,9 +695,8 @@ class Client(Node):
         assert len(msg) == 1
         assert msg[0]['op'] == 'stream-start'
 
-        bcomm = BatchedSend(interval=10, loop=self.loop)
-        bcomm.start(comm)
-        self.scheduler_comm = bcomm
+        comm = BatchedComm(interval=10e-3, comm=comm)
+        self.scheduler_comm = comm
 
         _set_global_client(self)
         self.status = 'running'
@@ -754,7 +753,7 @@ class Client(Node):
         with log_errors():
             while True:
                 try:
-                    msgs = yield self.scheduler_comm.comm.read()
+                    msgs = yield self.scheduler_comm.read()
                 except CommClosedError:
                     if self.status == 'running':
                         logger.warning("Client report stream closed to scheduler")
