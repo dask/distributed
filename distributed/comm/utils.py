@@ -9,31 +9,23 @@ from tornado import gen
 from .. import protocol
 from ..compatibility import finalize
 from ..sizeof import sizeof
-from ..utils import get_ip, get_ipv6, nbytes
+from ..utils import get_ip, get_ipv6, mp_context, nbytes
 
 
 logger = logging.getLogger(__name__)
 
 
-# Offload (de)serializing large frames to improve event loop responsiveness
+# Offload (de)serializing large frames to improve event loop responsiveness.
+# We use at most 4 threads to allow for parallel processing of large messages.
+
 FRAME_OFFLOAD_THRESHOLD = 10 * 1024 ** 2   # 10 MB
 
-
-class Offloader(object):
-
-    def __init__(self):
-        self.executor = ThreadPoolExecutor(max_workers=1)
-        self._finalizer = finalize(self, self.executor.shutdown)
-
-    def submit(self, fn, *args, **kwargs):
-        return self.executor.submit(fn, *args, **kwargs)
-
-
-_offloader = Offloader()
+_offload_executor = ThreadPoolExecutor(max_workers=min(4, mp_context.cpu_count()))
+finalize(_offload_executor, _offload_executor.shutdown)
 
 
 def offload(fn, *args, **kwargs):
-    return _offloader.submit(fn, *args, **kwargs)
+    return _offload_executor.submit(fn, *args, **kwargs)
 
 
 @gen.coroutine
