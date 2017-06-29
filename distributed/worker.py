@@ -23,8 +23,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
-from .batched import BatchedSend
-from .comm import get_address_host, get_local_address_for
+from .comm import get_address_host, get_local_address_for, BatchedComm
 from .config import config
 from .compatibility import unicode
 from .core import (error_message, CommClosedError,
@@ -401,8 +400,8 @@ class WorkerBase(ServerNode):
             self.log.append((key, 'receive-from-scatter'))
 
         if report:
-            self.batched_stream.send({'op': 'add-keys',
-                                      'keys': list(data)})
+            self.batched_comm.write({'op': 'add-keys',
+                                     'keys': list(data)})
         info = {'nbytes': {k: sizeof(v) for k, v in data.items()},
                 'status': 'OK'}
         return info
@@ -817,8 +816,8 @@ class Worker(WorkerBase):
     * **total_connections**: ``int``
         The maximum number of concurrent connections we want to see
     * **total_comm_nbytes**: ``int``
-    * **batched_stream**: ``BatchedSend``
-        A batched stream along which we communicate to the scheduler
+    * **batched_comm**: ``BatchedComm``
+        A batched comm along which we communicate to the scheduler
     * **log**: ``[(message)]``
         A structured and queryable log.  See ``Worker.story``
 
@@ -973,7 +972,7 @@ class Worker(WorkerBase):
         self.executed_count = 0
         self.long_running = set()
 
-        self.batched_stream = None
+        self.batched_comm = None
         self.recent_messages_log = deque(maxlen=10000)
         self.target_message_size = 50e6  # 50 MB
 
@@ -1024,8 +1023,7 @@ class Worker(WorkerBase):
     @gen.coroutine
     def compute_stream(self, comm):
         try:
-            self.batched_stream = BatchedSend(interval=2, loop=self.loop)
-            self.batched_stream.start(comm)
+            self.batched_comm = comm = BatchedComm(interval=2e-3, comm=comm)
 
             def on_closed():
                 if self.reconnect and self.status not in ('closed', 'closing'):
@@ -1075,7 +1073,7 @@ class Worker(WorkerBase):
                 if self.digests is not None:
                     self.digests['handle-messages-duration'].add(end - start)
 
-            yield self.batched_stream.close()
+            yield comm.close()
             logger.info('Close compute stream')
         except Exception as e:
             logger.exception(e)
@@ -1121,7 +1119,7 @@ class Worker(WorkerBase):
                 emsg = error_message(e)
                 emsg['key'] = key
                 emsg['op'] = 'task-erred'
-                self.batched_stream.send(emsg)
+                self.batched_comm.write(emsg)
                 self.log.append((key, 'deserialize-error'))
                 return
 
@@ -1384,7 +1382,7 @@ class Worker(WorkerBase):
                 if key in self.dep_state:
                     self.transition_dep(key, 'memory')
 
-            if self.batched_stream:
+            if self.batched_comm:
                 self.send_task_state_to_scheduler(key)
             else:
                 raise CommClosedError
@@ -1406,7 +1404,7 @@ class Worker(WorkerBase):
 
             self.executing.remove(key)
             self.long_running.add(key)
-            self.batched_stream.send({'op': 'long-running', 'key': key})
+            self.batched_comm.write({'op': 'long-running', 'key': key})
 
             self.ensure_computing()
         except Exception as e:
@@ -1524,7 +1522,7 @@ class Worker(WorkerBase):
 
         if key in self.startstops:
             d['startstops'] = self.startstops[key]
-        self.batched_stream.send(d)
+        self.batched_comm.write(d)
 
     def put_key_in_memory(self, key, value, transition=True):
         if key in self.data:
@@ -1614,8 +1612,8 @@ class Worker(WorkerBase):
                 self.log.append(('receive-dep', worker, list(response)))
 
                 if response:
-                    self.batched_stream.send({'op': 'add-keys',
-                                              'keys': list(response)})
+                    self.batched_comm.write({'op': 'add-keys',
+                                             'keys': list(response)})
             except EnvironmentError as e:
                 logger.exception("Worker stream died during communication: %s",
                                  worker)
@@ -1627,7 +1625,7 @@ class Worker(WorkerBase):
 
             except Exception as e:
                 logger.exception(e)
-                if self.batched_stream and LOG_PDB:
+                if self.batched_comm and LOG_PDB:
                     import pdb; pdb.set_trace()
                 raise
             finally:
@@ -1779,9 +1777,9 @@ class Worker(WorkerBase):
                 del self.resource_restrictions[key]
 
             if report and state in PROCESSING:  # not finished
-                self.batched_stream.send({'op': 'release',
-                                          'key': key,
-                                          'cause': cause})
+                self.batched_comm.write({'op': 'release',
+                                         'key': key,
+                                         'cause': cause})
         except CommClosedError:
             pass
         except Exception as e:
@@ -1819,8 +1817,8 @@ class Worker(WorkerBase):
                     self.release_key(key, cause=dep)
 
             if report and state == 'memory':
-                self.batched_stream.send({'op': 'release-worker-data',
-                                          'keys': [dep]})
+                self.batched_comm.write({'op': 'release-worker-data',
+                                         'keys': [dep]})
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:

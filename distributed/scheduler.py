@@ -23,7 +23,6 @@ from tornado.ioloop import IOLoop
 from dask.core import reverse_dict
 from dask.order import order
 
-#from .batched import BatchedSend
 from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port, BatchedComm)
 from .compatibility import finalize

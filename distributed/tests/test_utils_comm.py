@@ -17,7 +17,7 @@ def test_pack_data():
 
 @gen_cluster()
 def test_gather_from_workers_permissive(s, a, b):
-    while not a.batched_stream:
+    while a.batched_comm is None:
         yield gen.sleep(0.01)
     a.update_data(data={'x': 1})
 
