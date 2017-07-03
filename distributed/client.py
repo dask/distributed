@@ -101,6 +101,7 @@ class Future(WrappedKey):
         self.client = client or _get_global_client()
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
+        self._lock = threading.Lock()
 
         if tkey in client.futures:
             self._state = client.futures[tkey]
@@ -263,7 +264,7 @@ class Future(WrappedKey):
         return self._state.type
 
     def release(self):
-        with self.client._lock:
+        with self._lock:
             if not self._cleared and self.client.generation == self._generation:
                 self._cleared = True
                 self.client._dec_ref(tokey(self.key))
@@ -445,6 +446,7 @@ class Client(Node):
         self._loop_thread = None
         self.scheduler = None
         self._lock = threading.Lock()
+        self._refcount_lock = threading.Lock()
 
         if loop is None:
             self._should_close_loop = None
@@ -729,13 +731,15 @@ class Client(Node):
         self.shutdown()
 
     def _inc_ref(self, key):
-        self.refcount[key] += 1
+        with self._refcount_lock:
+            self.refcount[key] += 1
 
     def _dec_ref(self, key):
-        self.refcount[key] -= 1
-        if self.refcount[key] == 0:
-            del self.refcount[key]
-            self._release_key(key)
+        with self._refcount_lock:
+            self.refcount[key] -= 1
+            if self.refcount[key] == 0:
+                del self.refcount[key]
+                self._release_key(key)
 
     def _release_key(self, key):
         """ Release key from distributed memory """
@@ -2042,7 +2046,8 @@ class Client(Node):
         self._restart_event = Event()
         yield self._restart_event.wait()
         self.generation += 1
-        self.refcount.clear()
+        with self._refcount_lock:
+            self.refcount.clear()
 
         raise gen.Return(self)
 
