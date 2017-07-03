@@ -4,6 +4,7 @@ import logging
 import subprocess
 import sys
 import tempfile
+import os
 
 import pytest
 
@@ -254,17 +255,19 @@ level=ERROR
 handlers=console
 qualname=foo.bar
 """
-    with tempfile.NamedTemporaryFile(mode='w') as logging_config:
-        logging_config.file.write(logging_config_contents)
-        logging_config.file.flush()
-        dask_config = {'logging-file-config': logging_config.name}
-        with new_config_file(dask_config):
-            code = """if 1:
-                import logging
-                from distributed import config
-                foo = logging.getLogger('foo')
-                bar = logging.getLogger('foo.bar')
-                assert logging.INFO == foo.getEffectiveLevel()
-                assert logging.ERROR == bar.getEffectiveLevel()
-                """
-            subprocess.check_call([sys.executable, "-c", code])
+    logging_config = tempfile.NamedTemporaryFile(mode='w', delete=False)
+    logging_config.file.write(logging_config_contents)
+    logging_config.file.flush()
+    logging_config.close()
+    dask_config = {'logging-file-config': logging_config.name}
+    with new_config_file(dask_config):
+        code = """if 1:
+            import logging
+            from distributed import config
+            foo = logging.getLogger('foo')
+            bar = logging.getLogger('foo.bar')
+            assert logging.INFO == foo.getEffectiveLevel()
+            assert logging.ERROR == bar.getEffectiveLevel()
+            """
+        subprocess.check_call([sys.executable, "-c", code])
+    os.remove(logging_config.name)
