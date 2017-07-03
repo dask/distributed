@@ -255,10 +255,8 @@ level=ERROR
 handlers=console
 qualname=foo.bar
 """
-    logging_config = tempfile.NamedTemporaryFile(mode='w', delete=False)
-    logging_config.file.write(logging_config_contents)
-    logging_config.file.flush()
-    logging_config.close()
+    with tempfile.NamedTemporaryFile(mode='w', delete=False) as logging_config:
+        logging_config.write(logging_config_contents)
     dask_config = {'logging-file-config': logging_config.name}
     with new_config_file(dask_config):
         code = """if 1:
