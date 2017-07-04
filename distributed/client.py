@@ -279,7 +279,9 @@ class Future(WrappedKey):
                               'keys': [tokey(self.key)], 'client': c.id})
 
     def __del__(self):
-        self.release()
+        if not self._cleared and self.client.generation == self._generation:
+            self._cleared = True
+            self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
 
     def __str__(self):
         if self.type:
