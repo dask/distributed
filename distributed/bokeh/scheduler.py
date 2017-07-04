@@ -990,7 +990,12 @@ class BokehScheduler(BokehServer):
     def __init__(self, scheduler, io_loop=None, prefix='', **kwargs):
         self.scheduler = scheduler
         self.server_kwargs = kwargs
-        extra = {}
+        prefix = prefix or ''
+        prefix = prefix.rstrip('/')
+        if prefix and not prefix.startswith('/'):
+            prefix = '/' + prefix
+
+        extra = {'prefix': prefix}
         extra.update(template_variables)
 
         systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc, scheduler, extra)))

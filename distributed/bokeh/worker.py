@@ -606,8 +606,13 @@ class BokehWorker(BokehServer):
     def __init__(self, worker, io_loop=None, prefix='', **kwargs):
         self.worker = worker
         self.server_kwargs = kwargs
+        prefix = prefix or ''
+        prefix = prefix.rstrip('/')
+        if prefix and not prefix.startswith('/'):
+            prefix = '/' + prefix
 
-        extra = {}
+        extra = {'prefix': prefix}
+
         extra.update(template_variables)
 
         main = Application(FunctionHandler(partial(main_doc, worker, extra)))
