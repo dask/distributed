@@ -606,6 +606,7 @@ class BokehWorker(BokehServer):
     def __init__(self, worker, io_loop=None, prefix='', **kwargs):
         self.worker = worker
         self.server_kwargs = kwargs
+        self.server_kwargs['prefix'] = prefix or None
         prefix = prefix or ''
         prefix = prefix.rstrip('/')
         if prefix and not prefix.startswith('/'):
