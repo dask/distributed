@@ -94,7 +94,7 @@ class Future(WrappedKey):
     _cb_executor = None
     _cb_executor_pid = None
 
-    def __init__(self, key, client, inform=False):
+    def __init__(self, key, client, inform=False, state=None):
         self.key = key
         self._cleared = False
         tkey = tokey(key)
@@ -111,6 +111,14 @@ class Future(WrappedKey):
             self.client._send_to_scheduler({'op': 'client-desires-keys',
                                             'keys': [tokey(key)],
                                             'client': self.client.id})
+
+        if state is not None:
+            try:
+                handler = self.client._state_handlers[state]
+            except KeyError:
+                pass
+            else:
+                handler(key=key)
 
     @property
     def executor(self):
@@ -422,7 +430,7 @@ class Client(Node):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self.coroutines = []
-        self.id = str(uuid.uuid1())
+        self.id = type(self).__name__ + '-' + str(uuid.uuid1())
         self.generation = 0
         self.status = None
         self._pending_msg_buffer = []
@@ -467,6 +475,12 @@ class Client(Node):
             'task-erred': self._handle_task_erred,
             'restart': self._handle_restart,
             'error': self._handle_error
+        }
+
+        self._state_handlers = {
+            'memory': self._handle_key_in_memory,
+            'lost': self._handle_lost_data,
+            'erred': self._handle_task_erred
         }
 
         super(Client, self).__init__(connection_args=self.connection_args,
@@ -2951,6 +2965,36 @@ def futures_of(o, client=None):
             raise CancelledError(bad)
 
     return list(futures)
+
+
+def fire_and_forget(obj):
+    """ Run tasks at least once, even if we release the futures
+
+    Under normal operation Dask will not run any tasks for which there is not
+    an active future (this avoids unnecessary work in many situations).
+    However sometimes you want to just fire off a task, not track its future,
+    and expect it to finish eventually.  You can use this function on a future
+    or collection of futures to ask Dask to complete the task even if no active
+    client is tracking it.
+
+    The results will not be kept in memory after the task completes (unless
+    there is an active future) so this is only useful for tasks that depend on
+    side effects.
+
+    Parameters
+    ----------
+    obj: Future, list, dict, dask collection
+        The futures that you want to run at least once
+
+    Examples
+    --------
+    >>> fire_and_forget(client.submit(func, *args))  # doctest: +SKIP
+    """
+    futures = futures_of(obj)
+    for future in futures:
+        future.client._send_to_scheduler({'op': 'client-desires-keys',
+                                          'keys': [tokey(future.key)],
+                                          'client': 'fire-and-forget'})
 
 
 @contextmanager

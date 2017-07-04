@@ -333,6 +333,7 @@ class WorkerProcess(object):
             self.status = 'stopped'
             self.stopped.set()
             # Release resources
+            self.process.close()
             self.init_result_q = None
             self.child_stop_q = None
             self.process = None
@@ -454,7 +455,7 @@ class WorkerProcess(object):
             try:
                 yield worker._start(*worker_start_args)
             except Exception as e:
-                logger.exception(e)
+                logger.exception("Failed to start worker")
                 init_result_q.put(e)
             else:
                 assert worker.address

@@ -6,10 +6,12 @@ import gc
 from glob import glob
 import inspect
 import logging
+import logging.config
 import os
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -24,7 +26,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .config import config
+from .config import config, initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
 from .nanny import Nanny
@@ -830,10 +832,12 @@ def new_config(new_config):
     try:
         config.clear()
         config.update(new_config)
+        initialize_logging(config)
         yield
     finally:
         config.clear()
         config.update(orig_config)
+        initialize_logging(config)
 
 
 @contextmanager
@@ -923,6 +927,26 @@ def tls_only_security():
         sec = Security()
     assert sec.require_encryption
     return sec
+
+
+def get_server_ssl_context(certfile='tls-cert.pem', keyfile='tls-key.pem',
+                           ca_file='tls-ca-cert.pem'):
+    ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH,
+                                     cafile=get_cert(ca_file))
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
+    return ctx
+
+
+def get_client_ssl_context(certfile='tls-cert.pem', keyfile='tls-key.pem',
+                           ca_file='tls-ca-cert.pem'):
+    ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH,
+                                     cafile=get_cert(ca_file))
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
+    return ctx
 
 
 def bump_rlimit(limit, desired):

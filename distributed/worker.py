@@ -221,7 +221,8 @@ class WorkerBase(ServerNode):
                         services=self.service_ports,
                         memory_limit=self.memory_limit,
                         local_directory=self.local_dir,
-                        resources=self.total_resources)
+                        resources=self.total_resources,
+                        pid=os.getpid())
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
                     future = gen.with_timeout(timedelta(seconds=diff), future,
@@ -236,7 +237,7 @@ class WorkerBase(ServerNode):
             except gen.TimeoutError:
                 pass
         if resp != 'OK':
-            raise ValueError(resp)
+            raise ValueError("Unexpected response from register: %r" % (resp,))
         self.heartbeat_callback.start()
 
     def start_services(self, listen_ip=''):
