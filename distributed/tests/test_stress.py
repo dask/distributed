@@ -4,11 +4,8 @@ from concurrent.futures import CancelledError
 from datetime import timedelta
 from operator import add
 import random
-import re
 import sys
 from time import sleep
-import threading
-import traceback
 
 from dask import delayed
 import pytest
@@ -19,7 +16,7 @@ from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import All
 from distributed.utils_test import (gen_cluster, cluster, inc, slowinc, loop,
-        slowadd, slow, slowsum, new_config, bump_rlimit)
+        slowadd, slow, slowsum, bump_rlimit)
 from distributed.client import _wait
 from tornado import gen
 
@@ -184,70 +181,6 @@ def test_stress_communication(c, s, *workers):
 
     result = yield future
     assert isinstance(result, float)
-
-
-monopolize_gil_evt = threading.Event()
-
-def monopolize_gil():
-    """
-    Start a background thread that will periodically monopolize the GIL
-    for multiple seconds.
-    """
-    def run():
-        try:
-            while not monopolize_gil_evt.is_set():
-                sleep(2.0 + random.random())
-                print("monopolizing GIL...")
-                t1 = time()
-                # GIL-holding time waster
-                # (see https://bugs.python.org/issue1662581)
-                re.compile(r'(\w+)*=.*').match("a" * 27)
-                dt = time() - t1
-                print("done monopolizing GIL for %.1f s." % (dt,))
-        except Exception:
-            traceback.print_exc()
-
-    t = threading.Thread(target=run)
-    t.daemon = True
-    t.start()
-
-
-def build_highly_connected_delayed(depth, fanout):
-    r = random.Random(42)
-    nodes = [delayed(1) for i in range(fanout)]
-    for d in range(depth - 1):
-        nodes = [delayed(sum)
-                 ([nodes[r.randrange(0, fanout)] for i in range(fanout)])
-                 for j in range(fanout)]
-    return delayed(sum)(nodes)
-
-
-@slow
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 60, timeout=100)
-def test_stress_communication_failure(c, s, *workers):
-    monopolize_gil_evt.clear()
-
-    da = pytest.importorskip('dask.array')
-    resource = pytest.importorskip('resource')
-    # Test may consume many file descriptors
-    bump_rlimit(resource.RLIMIT_NOFILE, 8192)
-
-    try:
-        with new_config({'socket-backlog': 1}):
-            c.run(monopolize_gil, workers=[workers[0].address])
-
-            depth = 2
-            fanout = 70
-            x = build_highly_connected_delayed(depth, fanout)
-            d = dict(x.dask)
-            print("compute ...", len(x.dask))
-            fut = yield c.compute(x)
-            result, = yield c.gather([fut])
-            print("result =", result)
-            assert result == fanout ** depth
-
-    finally:
-        monopolize_gil_evt.set()
 
 
 @pytest.mark.skip
