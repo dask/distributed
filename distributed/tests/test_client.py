@@ -767,6 +767,7 @@ def test_aliases_2(c, s, a, b):
     for dsk, keys in dsk_keys:
         result = yield c.get(dsk, keys, sync=False)
         assert list(result) == list(dask.get(dsk, keys))
+        yield gen.moment
 
 
 @gen_cluster(client=True)
@@ -866,6 +867,7 @@ def test_scatter_singletons(c, s, a, b):
 def test_get_releases_data(c, s, a, b):
     [x] = yield c.get({'x': (inc, 1)}, ['x'], sync=False)
     import gc; gc.collect()
+    yield gen.moment
     assert c.refcount['x'] == 0
 
 
