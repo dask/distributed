@@ -1119,6 +1119,13 @@ def test_scatter_direct(c, s, a, b):
     assert future.status == 'finished'
     result = yield future
     assert result == 123
+    assert not s.counters['op'].components[0]['scatter']
+
+    result = yield future
+    assert not s.counters['op'].components[0]['gather']
+
+    result = yield c.gather(future)
+    assert not s.counters['op'].components[0]['gather']
 
 
 @gen_cluster(client=True)
@@ -1128,6 +1135,7 @@ def test_scatter_direct_numpy(c, s, a, b):
     future = yield c.scatter(x, direct=True)
     result = yield future
     assert np.allclose(x, result)
+    assert not s.counters['op'].components[0]['scatter']
 
 
 @gen_cluster(client=True)
@@ -1138,6 +1146,7 @@ def test_scatter_direct_broadcast(c, s, a, b):
     assert s.who_has[future2.key] == {a.address, b.address}
     result = yield future2
     assert result == 456
+    assert not s.counters['op'].components[0]['scatter']
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)

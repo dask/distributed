@@ -46,7 +46,7 @@ from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .security import Security
 from .sizeof import sizeof
-from .worker import dumps_task, thread_state, get_client
+from .worker import dumps_task, thread_state, get_client, get_worker
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
         tokey, log_errors, str_graph, key_split, format_bytes)
 from .versions import get_versions
@@ -1183,10 +1183,19 @@ class Client(Node):
         return [futures[tokey(k)] for k in keys]
 
     @gen.coroutine
-    def _gather(self, futures, errors='raise', direct=False, local_worker=None):
+    def _gather(self, futures, errors='raise', direct=None, local_worker=None):
         futures2, keys = unpack_remotedata(futures, byte_keys=True)
         keys = [tokey(key) for key in keys]
         bad_data = dict()
+
+        if direct is None:
+            try:
+                w = get_worker()
+            except:
+                direct = False
+            else:
+                if w.scheduler.address == self.scheduler.address:
+                    direct = True
 
         @gen.coroutine
         def wait(k):
@@ -1283,7 +1292,7 @@ class Client(Node):
             for item in results:
                 qout.put(item)
 
-    def gather(self, futures, errors='raise', maxsize=0, direct=False):
+    def gather(self, futures, errors='raise', maxsize=0, direct=None):
         """ Gather futures from distributed memory
 
         Accepts a future, nested container of futures, iterator, or queue.
@@ -1345,7 +1354,7 @@ class Client(Node):
                              direct=direct, local_worker=local_worker)
 
     @gen.coroutine
-    def _scatter(self, data, workers=None, broadcast=False, direct=False,
+    def _scatter(self, data, workers=None, broadcast=False, direct=None,
                  local_worker=None):
         if isinstance(workers, six.string_types):
             workers = [workers]
@@ -1373,6 +1382,15 @@ class Client(Node):
         assert isinstance(data, dict)
 
         types = valmap(type, data)
+
+        if direct is None:
+            try:
+                w = get_worker()
+            except:
+                direct = False
+            else:
+                if w.address.address == self.scheduler.address:
+                    direct = True
 
         if local_worker:  # running within task
             local_worker.update_data(data=data, report=False)
@@ -1435,7 +1453,7 @@ class Client(Node):
             for future in futures:
                 qout.put(future)
 
-    def scatter(self, data, workers=None, broadcast=False, direct=False, maxsize=0):
+    def scatter(self, data, workers=None, broadcast=False, direct=None, maxsize=0):
         """ Scatter data into distributed memory
 
         This moves data from the local client process into the workers of the
@@ -1453,7 +1471,7 @@ class Client(Node):
         broadcast: bool (defaults to False)
             Whether to send each data element to all workers.
             By default we round-robin based on number of cores.
-        direct: bool (defaults to False)
+        direct: bool (defaults to automatically check)
             Send data directly to workers, bypassing the central scheduler
             This avoids burdening the scheduler but assumes that the client is
             able to talk directly with the workers.
@@ -1515,7 +1533,7 @@ class Client(Node):
             else:
                 return queue_to_iterator(qout)
         else:
-            if hasattr(thread_state, 'execution_state'): # inside worker task
+            if hasattr(thread_state, 'execution_state'):  # within worker task
                 local_worker = thread_state.execution_state['worker']
             else:
                 local_worker = None
