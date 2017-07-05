@@ -101,7 +101,6 @@ class Future(WrappedKey):
         self.client = client or _get_global_client()
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
-        self._lock = threading.Lock()
 
         if tkey in client.futures:
             self._state = client.futures[tkey]
@@ -264,10 +263,9 @@ class Future(WrappedKey):
         return self._state.type
 
     def release(self):
-        with self._lock:
-            if not self._cleared and self.client.generation == self._generation:
-                self._cleared = True
-                self.client._dec_ref(tokey(self.key))
+        if not self._cleared and self.client.generation == self._generation:
+            self._cleared = True
+            self.client._dec_ref(tokey(self.key))
 
     def __getstate__(self):
         return self.key
