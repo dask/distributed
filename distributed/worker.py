@@ -2001,7 +2001,8 @@ class Worker(WorkerBase):
             count += 1
             yield gen.moment
         if count:
-            logger.info("Moved %d data and %e bytes", count, total)
+            logger.debug("Moved %d pieces of data data and %e bytes to disk",
+                         count, total)
         return total
 
     def validate_key_memory(self, key):

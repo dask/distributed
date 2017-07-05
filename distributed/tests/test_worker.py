@@ -397,6 +397,7 @@ def test_Executor(c, s):
         yield w._close()
 
 
+@slow
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)], timeout=30)
 def test_spill_by_default(c, s, w):
     da = pytest.importorskip('dask.array')
@@ -523,7 +524,6 @@ def test_restrictions(c, s, a, b):
     assert a.resource_restrictions == {}
 
 
-@pytest.mark.xfail
 @gen_cluster(client=True)
 def test_clean_nbytes(c, s, a, b):
     L = [delayed(inc)(i) for i in range(10)]
@@ -534,8 +534,10 @@ def test_clean_nbytes(c, s, a, b):
     future = c.compute(total)
     yield wait(future)
 
-    yield gen.sleep(1)
-    assert len(a.nbytes) + len(b.nbytes) == 1
+    start = time()
+    while len(a.nbytes) + len(b.nbytes) != 1:
+        yield gen.sleep(0.01)
+        assert time() < start + 2
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 20)
@@ -829,7 +831,6 @@ def test_robust_to_bad_sizeof_estimates(c, s, a, b):
     yield wait(futures)
 
     assert a.data.slow or b.data.slow
-    assert a.data.fast or b.data.fast
 
     start = time()
     while psutil.Process().memory_info().vms > 900e6:
