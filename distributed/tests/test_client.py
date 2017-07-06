@@ -1171,8 +1171,8 @@ def test_scatter_direct_broadcast_target(c, s, *workers):
 
 @gen_cluster(client=True, ncores=[])
 def test_scatter_direct_empty(c, s):
-    with pytest.raises(ValueError):
-        yield c.scatter(123, direct=True)
+    with pytest.raises((ValueError, gen.TimeoutError)):
+        yield c.scatter(123, direct=True, timeout=0.1)
 
 
 @gen_cluster(client=True, timeout=None, ncores=[('127.0.0.1', 1)] * 5)

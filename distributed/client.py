@@ -41,6 +41,7 @@ from .cfexecutor import ClientExecutor
 from .compatibility import (Queue as pyQueue, Empty, isqueue,
         get_thread_identity, html_escape)
 from .core import connect, rpc, clean_exception, CommClosedError
+from .metrics import time
 from .node import Node
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
@@ -1355,7 +1356,7 @@ class Client(Node):
 
     @gen.coroutine
     def _scatter(self, data, workers=None, broadcast=False, direct=None,
-                 local_worker=None):
+                 local_worker=None, timeout=3):
         if isinstance(workers, six.string_types):
             workers = [workers]
         if isinstance(data, dict) and not all(isinstance(k, (bytes, unicode))
@@ -1403,7 +1404,14 @@ class Client(Node):
         else:
             data2 = valmap(to_serialize, data)
             if direct:
-                ncores = yield self.scheduler.ncores(workers=workers)
+                ncores = None
+                start = time()
+                while not ncores:
+                    if ncores is not None:
+                        yield gen.sleep(0.1)
+                    if time() > start + timeout:
+                        raise gen.TimeoutError("No valid workers found")
+                    ncores = yield self.scheduler.ncores(workers=workers)
                 if not ncores:
                     raise ValueError("No valid workers")
 
@@ -1456,7 +1464,8 @@ class Client(Node):
             for future in futures:
                 qout.put(future)
 
-    def scatter(self, data, workers=None, broadcast=False, direct=None, maxsize=0):
+    def scatter(self, data, workers=None, broadcast=False, direct=None,
+                maxsize=0, timeout=3):
         """ Scatter data into distributed memory
 
         This moves data from the local client process into the workers of the
@@ -1542,7 +1551,7 @@ class Client(Node):
                 local_worker = None
             return self.sync(self._scatter, data, workers=workers,
                              broadcast=broadcast, direct=direct,
-                             local_worker=local_worker)
+                             local_worker=local_worker, timeout=timeout)
 
     @gen.coroutine
     def _cancel(self, futures):
