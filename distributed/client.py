@@ -1389,7 +1389,7 @@ class Client(Node):
             except:
                 direct = False
             else:
-                if w.address.address == self.scheduler.address:
+                if w.scheduler.address == self.scheduler.address:
                     direct = True
 
         if local_worker:  # running within task
@@ -1411,7 +1411,9 @@ class Client(Node):
                                                               report=False,
                                                               rpc=self.rpc)
 
-                yield self.scheduler.update_data(who_has=who_has, nbytes=nbytes)
+                yield self.scheduler.update_data(who_has=who_has,
+                                                 nbytes=nbytes,
+                                                 client=self.id)
             else:
                 yield self.scheduler.scatter(data=data2, workers=workers,
                                                 client=self.id,
@@ -1422,7 +1424,8 @@ class Client(Node):
             self.futures[key].finish(type=typ)
 
         if direct and broadcast:
-            yield self._replicate(list(out.values()), workers=workers)
+            n = None if broadcast is True else broadcast
+            yield self._replicate(list(out.values()), workers=workers, n=n)
 
         if issubclass(input_type, (list, tuple, set, frozenset)):
             out = input_type(out[k] for k in names)

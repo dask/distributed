@@ -429,20 +429,20 @@ def test_garbage_collection(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_garbage_collection_with_scatter(c, s, a, b):
-    [a] = yield c.scatter([1])
-    assert a.key in c.futures
-    assert a.status == 'finished'
-    assert a.event.is_set()
-    assert s.who_wants[a.key] == {c.id}
+    [future] = yield c.scatter([1])
+    assert future.key in c.futures
+    assert future.status == 'finished'
+    assert future.event.is_set()
+    assert s.who_wants[future.key] == {c.id}
 
-    assert c.refcount[a.key] == 1
-    a.__del__()
+    assert c.refcount[future.key] == 1
+    future.__del__()
     yield gen.moment
-    assert c.refcount[a.key] == 0
+    assert c.refcount[future.key] == 0
 
     start = time()
     while True:
-        if a.key not in s.who_has:
+        if future.key not in s.who_has:
             break
         else:
             assert time() < start + 3
