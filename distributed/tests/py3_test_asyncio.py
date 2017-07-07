@@ -39,6 +39,11 @@ def coro_test(fn):
 
 
 @coro_test
+async def test_coro_test():
+    assert asyncio.get_event_loop().is_running()
+
+
+@coro_test
 async def test_asyncio_start_shutdown():
     c = await AioClient(processes=False)
 
