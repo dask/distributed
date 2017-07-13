@@ -858,7 +858,7 @@ class ThrottledGC(object):
         self.last_collect = time.time()
         gc.collect()
 
-    def collect(self, force_gc):
+    def collect(self, force_gc=False):
         new_time = time.time()
         if force_gc or new_time - self.last_collect > self.min_interval_in_sec:
             gc.collect()
