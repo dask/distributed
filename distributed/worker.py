@@ -40,7 +40,7 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, validate_key, mp_context, import_file,
-                    silence_logging)
+                    silence_logging, ThrottledGC)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
@@ -134,6 +134,7 @@ class WorkerBase(ServerNode):
         self._last_disk_io = None
         self._last_net_io = None
         self._ipython_kernel = None
+        self._throttledGC = ThrottledGC()
 
         if self.local_dir not in sys.path:
             sys.path.insert(0, self.local_dir)
@@ -576,6 +577,8 @@ class WorkerBase(ServerNode):
                           'keys': missing_keys})
         else:
             self.update_data(data=result, report=False)
+            del result
+            self._throttledGC.collect()
             raise Return({'status': 'OK'})
 
 
@@ -1563,12 +1566,7 @@ class Worker(WorkerBase):
         if stop - start > 0.020:
             self.startstops[key].append(('disk-write', start, stop))
 
-        if key not in self.nbytes:
-            self.nbytes[key] = sizeof(value)
-
-        if key not in self.types:
-            self.types[key] = type(value)
-
+        self.nbytes[key] = sizeof(value)
         self.types[key] = type(value)
 
         for dep in self.dependents.get(key, ()):
@@ -1762,6 +1760,8 @@ class Worker(WorkerBase):
 
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
+            nbytes_to_free = self.nbytes.get(key)
+
             if key not in self.task_state:
                 return
             state = self.task_state.pop(key)
@@ -1809,6 +1809,10 @@ class Worker(WorkerBase):
                 self.batched_stream.send({'op': 'release',
                                           'key': key,
                                           'cause': cause})
+            self._throttledGC.collect(
+                force_gc=True if nbytes_to_free > 10 * 2**20 else False
+            )
+
         except CommClosedError:
             pass
         except Exception as e:
@@ -1985,6 +1989,9 @@ class Worker(WorkerBase):
 
             self.ensure_computing()
             self.ensure_communicating()
+
+            del value
+            self._throttledGC.collect()
         except Exception as e:
             if executor_error is e:
                 logger.error("Thread Pool Executor error: %s", e)
