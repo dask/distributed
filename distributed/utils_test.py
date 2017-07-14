@@ -423,8 +423,7 @@ try:
                 not pytest.config.getoption("--runslow"),
                 reason="need --runslow option to run")
 except (AttributeError, ValueError):
-    def slow(*args):
-        pass
+    slow = pytest.mark.slow
 
 
 from tornado import gen
