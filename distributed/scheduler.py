@@ -53,6 +53,14 @@ ALLOWED_FAILURES = config.get('allowed-failures', 3)
 LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
 DEFAULT_DATA_SIZE = config.get('default-data-size', 1000)
 
+DEFAULT_EXTENSIONS = [
+    PublishExtension,
+    WorkStealing,
+    ReplayExceptionScheduler,
+    QueueExtension,
+    VariableExtension,
+]
+
 
 class Scheduler(ServerNode):
     """ Dynamic distributed task scheduler
@@ -187,14 +195,19 @@ class Scheduler(ServerNode):
     """
     default_port = 8786
 
-    def __init__(self, center=None, loop=None,
-                 delete_interval=500, synchronize_worker_interval=60000,
-                 services=None, allowed_failures=ALLOWED_FAILURES,
-                 extensions=[PublishExtension, WorkStealing,
-                             ReplayExceptionScheduler, QueueExtension,
-                             VariableExtension],
-                 validate=False, scheduler_file=None, security=None,
-                 **kwargs):
+    def __init__(
+            self,
+            center=None,
+            loop=None,
+            delete_interval=500,
+            synchronize_worker_interval=60000,
+            services=None,
+            allowed_failures=ALLOWED_FAILURES,
+            extensions=None,
+            validate=False,
+            scheduler_file=None,
+            security=None,
+            **kwargs):
 
         # Attributes
         self.allowed_failures = allowed_failures
@@ -355,6 +368,8 @@ class Scheduler(ServerNode):
             connection_args=self.connection_args,
             **kwargs)
 
+        if extensions is None:
+            extensions = DEFAULT_EXTENSIONS
         for ext in extensions:
             ext(self)
 
