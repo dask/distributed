@@ -866,6 +866,22 @@ def test_scatter_singletons(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test_scatter_typename(c, s, a, b):
+    future = yield c.scatter(123)
+    assert future.key.startswith('int')
+
+
+@gen_cluster(client=True)
+def test_scatter_hash(c, s, a, b):
+    x = yield c.scatter(123)
+    y = yield c.scatter(123)
+    assert x.key == y.key
+
+    z = yield c.scatter(123, hash=False)
+    assert z.key != y.key
+
+
+@gen_cluster(client=True)
 def test_get_releases_data(c, s, a, b):
     [x] = yield c.get({'x': (inc, 1)}, ['x'], sync=False)
     import gc; gc.collect()
