@@ -17,7 +17,6 @@ from .. import config
 from ..compatibility import finalize
 from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes)
 
-from ..metrics import time
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
@@ -219,6 +218,11 @@ class TCP(Comm):
         except StreamClosedError as e:
             stream = None
             convert_stream_closed_error(self, e)
+        except TypeError as e:
+            if stream._write_buffer is None:
+                logger.info("tried to write message %s on closed stream", msg)
+            else:
+                raise
 
         raise gen.Return(sum(map(nbytes, frames)))
 

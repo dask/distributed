@@ -28,6 +28,9 @@ def offload(fn, *args, **kwargs):
     return _offload_executor.submit(fn, *args, **kwargs)
 
 
+_offload_executor.map(lambda x: x, range(10))  # warm up the threads
+
+
 @gen.coroutine
 def to_frames(msg):
     """
