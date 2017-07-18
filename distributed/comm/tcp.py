@@ -199,8 +199,6 @@ class TCP(Comm):
             raise CommClosedError
 
         frames = yield to_frames(msg)
-        if not self._iostream_allows_memoryview:
-            frames = [ensure_bytes(f) for f in frames]
 
         try:
             lengths = ([struct.pack('Q', len(frames))] +
@@ -211,6 +209,8 @@ class TCP(Comm):
                 # Can't wait for the write() Future as it may be lost
                 # ("If write is called again before that Future has resolved,
                 #   the previous future will be orphaned and will never resolve")
+                if not self._iostream_allows_memoryview:
+                    frame = ensure_bytes(frame)
                 stream.write(frame)
                 if len(frame) > 1000000:  # brief pause between large writes
                     yield gen.moment
