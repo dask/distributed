@@ -250,6 +250,7 @@ def test_no_delay_during_large_transfer(c, s, w):
 
     with ResourceProfiler(dt=0.01) as rprof:
         future = yield c.scatter(x, direct=True, hash=False)
+        yield gen.sleep(0.5)
 
     for server in [s, w]:
         assert server.digests['tick-duration'].components[0].max() < 0.5
@@ -257,3 +258,4 @@ def test_no_delay_during_large_transfer(c, s, w):
     nbytes = np.array([t.mem for t in rprof.results])
     nbytes -= nbytes[0]
     assert nbytes.max() < (x.nbytes * 2) / 1e6
+    assert nbytes[-1] < (x.nbytes * 1.2) / 1e6

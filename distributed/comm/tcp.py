@@ -214,8 +214,8 @@ class TCP(Comm):
                 stream.write(frame)
                 if len(frame) > 1000000:  # brief pause between large writes
                     yield gen.moment
-                if len(frame) > 5000000:  # benchmarks show a second pause helps
-                    yield gen.moment
+                while len(stream._write_buffer) > 1e7:  # let write buffer clear
+                    yield gen.sleep(0.002)  # 5GB/s cap
         except StreamClosedError as e:
             stream = None
             convert_stream_closed_error(self, e)
