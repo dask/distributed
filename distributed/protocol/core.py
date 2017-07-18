@@ -16,7 +16,7 @@ from .compression import compressions, maybe_compress, decompress
 from .serialize import (serialize, deserialize, Serialize, Serialized,
         extract_serialize)
 from .utils import frame_split_size, merge_frames
-from ..utils import nbytes
+from ..utils import nbytes, time_warn
 
 _deserialize = deserialize
 

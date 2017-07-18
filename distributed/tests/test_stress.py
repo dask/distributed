@@ -230,3 +230,24 @@ def test_close_connections(c, s, *workers):
         #     print(w)
 
     yield _wait(future)
+
+
+@gen_cluster(client=True, timeout=20, ncores=[('127.0.0.1', 1)])
+def test_no_delay_during_large_transfer(c, s, w):
+    pytest.importorskip('crick')
+    np = pytest.importorskip('numpy')
+    x = np.random.random(100000000)
+
+    # Reset digests
+    from distributed.counter import Digest
+    from collections import defaultdict
+    from functools import partial
+
+    for server in [s, w]:
+        server.digests = defaultdict(partial(Digest, loop=server.io_loop))
+        server._last_tick = time()
+
+    future = yield c.scatter(x, direct=True, hash=False)
+
+    for server in [s, w]:
+        assert server.digests['tick-duration'].components[0].max() < 0.5

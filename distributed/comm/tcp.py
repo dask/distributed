@@ -15,8 +15,9 @@ from tornado.tcpserver import TCPServer
 
 from .. import config
 from ..compatibility import finalize
-from ..utils import ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes
+from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes)
 
+from ..metrics import time
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
@@ -211,6 +212,10 @@ class TCP(Comm):
                 # ("If write is called again before that Future has resolved,
                 #   the previous future will be orphaned and will never resolve")
                 stream.write(frame)
+                if len(frame) > 1000000:  # brief pause between large writes
+                    yield gen.moment
+                if len(frame) > 5000000:  # benchmarks show a second pause helps
+                    yield gen.moment
         except StreamClosedError as e:
             stream = None
             convert_stream_closed_error(self, e)
