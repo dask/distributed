@@ -3384,7 +3384,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 running[w] = addr
                 yield gen.sleep(duration)
                 yield w._close()
-                running[w] = None
+                del running[w]
                 del w
                 yield gen.moment
             done.release()
@@ -3401,6 +3401,8 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 gc.collect()
                 print("still running:", dict(running))
                 print("ncores:", c.ncores())
+                if not running:
+                    break
 
             start = time()
             while c.ncores():
