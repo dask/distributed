@@ -1566,7 +1566,8 @@ class Worker(WorkerBase):
         if stop - start > 0.020:
             self.startstops[key].append(('disk-write', start, stop))
 
-        self.nbytes[key] = sizeof(value)
+        if key not in self.nbytes:
+            self.nbytes[key] = sizeof(value)
         self.types[key] = type(value)
 
         for dep in self.dependents.get(key, ()):
@@ -1809,9 +1810,9 @@ class Worker(WorkerBase):
                 self.batched_stream.send({'op': 'release',
                                           'key': key,
                                           'cause': cause})
-            self._throttledGC.collect(
-                force_gc=True if nbytes_to_free > 10 * 2**20 else False
-            )
+
+            force_gc = nbytes_to_free > 10 * 2**20
+            self._throttledGC.collect(force_gc)
 
         except CommClosedError:
             pass

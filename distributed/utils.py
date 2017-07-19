@@ -14,7 +14,6 @@ import os
 import re
 import shutil
 import socket
-import time
 from importlib import import_module
 
 import six
@@ -37,6 +36,7 @@ from tornado import gen
 
 from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
 from .config import config
+from .metrics import time
 
 
 logger = logging.getLogger(__name__)
@@ -855,11 +855,11 @@ class ThrottledGC(object):
     """
     def __init__(self, min_interval_in_sec=1.0):
         self.min_interval_in_sec = min_interval_in_sec
-        self.last_collect = time.time()
+        self.last_collect = time()
         gc.collect()
 
     def collect(self, force_gc=False):
-        new_time = time.time()
+        new_time = time()
         if force_gc or new_time - self.last_collect > self.min_interval_in_sec:
             gc.collect()
             self.last_collect = new_time
