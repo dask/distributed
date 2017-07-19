@@ -3399,8 +3399,6 @@ def test_open_close_many_workers(loop, worker, count, repeat):
             for i in range(count):
                 done.acquire()
                 gc.collect()
-                print("still running:", dict(running))
-                print("ncores:", c.ncores())
                 if not running:
                     break
 
