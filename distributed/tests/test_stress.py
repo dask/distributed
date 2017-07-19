@@ -232,6 +232,8 @@ def test_close_connections(c, s, *workers):
     yield _wait(future)
 
 
+@pytest.mark.xfail(reason="IOStream._handle_write blocks on large write_buffer"
+                          " https://github.com/tornadoweb/tornado/issues/2110")
 @gen_cluster(client=True, timeout=20, ncores=[('127.0.0.1', 1)])
 def test_no_delay_during_large_transfer(c, s, w):
     pytest.importorskip('crick')
