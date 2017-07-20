@@ -157,6 +157,7 @@ class AioClient(Client):
     rebalance = to_asyncio(Client._rebalance)
     replicate = to_asyncio(Client._replicate)
     start_ipython_workers = to_asyncio(Client._start_ipython_workers)
+    shutdown = close
 
     def __enter__(self):
         raise RuntimeError("Use AioClient in an 'async with' block, not 'with'")

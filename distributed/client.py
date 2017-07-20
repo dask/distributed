@@ -886,7 +886,8 @@ class Client(Node):
                 self._release_key(key=key)
             if self.status == 'running':
                 self._send_to_scheduler({'op': 'close-stream'})
-            yield self.scheduler_comm.close()
+            if self.scheduler_comm:
+                yield self.scheduler_comm.close()
             if self._start_arg is None:
                 with ignoring(AttributeError):
                     yield self.cluster._close()
