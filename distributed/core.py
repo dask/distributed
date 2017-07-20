@@ -142,7 +142,8 @@ class Server(object):
         if diff > 1:
             logger.warn("Event loop was unresponsive for %.1fs.  "
                         "This is often caused by long-running GIL-holding "
-                        "functions.  This can cause timeouts and instability.",
+                        "functions or moving large chunks of data. "
+                        "This can cause timeouts and instability.",
                         diff)
         if self.digests is not None:
             self.digests['tick-duration'].add(diff)
