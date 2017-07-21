@@ -2538,16 +2538,7 @@ class Client(Node):
         except KeyError:
             scheduler = None
 
-        def f(worker=None):
-
-            # use our local version
-            try:
-                from distributed.versions import get_versions
-                return get_versions()
-            except ImportError:
-                return None
-
-        workers = sync(self.loop, self._run, f)
+        workers = sync(self.loop, self._run, get_versions)
         result = {'scheduler': scheduler, 'workers': workers, 'client': client}
 
         if check:
