@@ -163,9 +163,10 @@ class WorkerBase(ServerNode):
                                          connection_args=self.connection_args,
                                          **kwargs)
 
-        self.heartbeat_callback = PeriodicCallback(self.heartbeat,
-                                                   self.heartbeat_interval,
-                                                   io_loop=self.loop)
+        pc = PeriodicCallback(self.heartbeat,
+                              self.heartbeat_interval,
+                              io_loop=self.loop)
+        self.periodic_callbacks['heartbeat'] = pc
 
     @property
     def worker_address(self):
@@ -206,7 +207,7 @@ class WorkerBase(ServerNode):
 
     @gen.coroutine
     def _register_with_scheduler(self):
-        self.heartbeat_callback.stop()
+        self.periodic_callbacks['heartbeat'].stop()
         start = time()
         while True:
             if self.death_timeout and time() > start + self.death_timeout:
@@ -242,7 +243,7 @@ class WorkerBase(ServerNode):
                 pass
         if resp != 'OK':
             raise ValueError("Unexpected response from register: %r" % (resp,))
-        self.heartbeat_callback.start()
+        self.periodic_callbacks['heartbeat'].start()
 
     def start_services(self, listen_ip=''):
         for k, v in self.service_specs.items():
@@ -321,11 +322,10 @@ class WorkerBase(ServerNode):
         if self.status in ('closed', 'closing'):
             return
         logger.info("Stopping worker at %s", self.address)
-        if self._client:
-            yield self._client._close()
         self.status = 'closing'
         self.stop()
-        self.heartbeat_callback.stop()
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
         with ignoring(EnvironmentError, gen.TimeoutError):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
@@ -1068,6 +1068,11 @@ class Worker(WorkerBase):
                     break
                 except EnvironmentError as e:
                     break
+                except Exception as e:
+                    logger.error("Worker failed to read message. "
+                                 "This will likely cause the cluster to fail.",
+                                 exc_info=True)
+                    raise
 
                 start = time()
 

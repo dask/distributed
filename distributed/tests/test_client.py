@@ -215,7 +215,7 @@ def test_gc(s, a, b):
     x.__del__()
     yield gen.moment
 
-    yield c.shutdown()
+    yield c.close()
 
     assert x.key not in s.who_has
 
@@ -249,7 +249,7 @@ def test_sync_exceptions(loop):
         z = c.submit(div, 10, 5)
         assert z.result() == 2
 
-        c.shutdown()
+        c.close()
 
 
 @gen_cluster(client=True)
@@ -520,7 +520,7 @@ def test_missing_worker(s, a, b):
     assert result == 3
     assert bad not in s.ncores
 
-    yield c.shutdown()
+    yield c.close()
 
 
 @pytest.mark.skip
@@ -738,8 +738,8 @@ def test_two_consecutive_clients_share_results(s, a, b):
 
     assert xx == yy
 
-    yield c.shutdown()
-    yield f.shutdown()
+    yield c.close()
+    yield f.close()
 
 
 @gen_cluster(client=True)
@@ -863,6 +863,22 @@ def test_scatter_singletons(c, s, a, b):
         future = yield c.scatter(x)
         result = yield future
         assert str(result) == str(x)
+
+
+@gen_cluster(client=True)
+def test_scatter_typename(c, s, a, b):
+    future = yield c.scatter(123)
+    assert future.key.startswith('int')
+
+
+@gen_cluster(client=True)
+def test_scatter_hash(c, s, a, b):
+    x = yield c.scatter(123)
+    y = yield c.scatter(123)
+    assert x.key == y.key
+
+    z = yield c.scatter(123, hash=False)
+    assert z.key != y.key
 
 
 @gen_cluster(client=True)
@@ -1373,8 +1389,8 @@ def test_multiple_clients(s, a, b):
     zz = yield z
     assert zz == 5
 
-    yield a.shutdown()
-    yield b.shutdown()
+    yield a.close()
+    yield b.close()
 
 
 @gen_cluster(client=True)
@@ -1794,7 +1810,7 @@ def test_multi_client(s, a, b):
                             'fire-and-forget': set()}
     assert s.who_wants == {x.key: {c.id}, y.key: {c.id, f.id}}
 
-    yield c.shutdown()
+    yield c.close()
 
     start = time()
     while c.id in s.wants_what:
@@ -1805,7 +1821,7 @@ def test_multi_client(s, a, b):
     assert c.id not in s.who_wants[y.key]
     assert x.key not in s.who_wants
 
-    yield f.shutdown()
+    yield f.close()
 
     assert not s.tasks
 
@@ -1886,8 +1902,8 @@ def test_multi_garbage_collection(s, a, b):
     assert not any(v for v in s.wants_what.values())
     assert not s.who_wants
 
-    yield c.shutdown()
-    yield f.shutdown()
+    yield c.close()
+    yield f.close()
 
 
 @gen_cluster(client=True)
@@ -1988,8 +2004,8 @@ def test__cancel_multi_client(s, a, b):
     with pytest.raises(CancelledError):
         yield x
 
-    yield c.shutdown()
-    yield f.shutdown()
+    yield c.close()
+    yield f.close()
 
 
 @gen_cluster(client=True)
@@ -2282,6 +2298,11 @@ def test_futures_of(c, s, a, b):
     assert set(futures_of(b)) == {x, y, z}
 
 
+def test_futures_of_class():
+    da = pytest.importorskip('dask.array')
+    assert futures_of([da.Array]) == []
+
+
 @gen_cluster(client=True)
 def test_futures_of_cancelled_raises(c, s, a, b):
     x = c.submit(inc, 1)
@@ -2518,7 +2539,7 @@ def test_worker_aliases():
     assert len(a.data) == 10
     assert len(b.data) == 0
 
-    yield c.shutdown()
+    yield c.close()
     yield [a._close(), b._close()]
     yield s.close()
 
@@ -2578,15 +2599,15 @@ def test_client_num_fds(loop):
 
 
 @gen_cluster()
-def test_startup_shutdown_startup(s, a, b):
+def test_startup_close_startup(s, a, b):
     c = yield Client((s.ip, s.port), asynchronous=True)
-    yield c.shutdown()
+    yield c.close()
 
     c = yield Client((s.ip, s.port), asynchronous=True)
-    yield c.shutdown()
+    yield c.close()
 
 
-def test_startup_shutdown_startup_sync(loop):
+def test_startup_close_startup_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             sleep(0.1)
@@ -3017,12 +3038,12 @@ def test_default_get(loop):
         c = Client(s['address'], loop=loop, set_as_default=False)
         assert _globals['get'] is pre_get
         assert _globals['shuffle'] == pre_shuffle
-        c.shutdown()
+        c.close()
 
         c = Client(s['address'], loop=loop, set_as_default=True)
         assert _globals['shuffle'] == 'tasks'
         assert _globals['get'] == c.get
-        c.shutdown()
+        c.close()
         assert _globals['get'] is pre_get
         assert _globals['shuffle'] == pre_shuffle
 
@@ -3126,12 +3147,12 @@ def dont_test_scheduler_falldown(loop):
             s2.close()
 
 
-def test_shutdown_idempotent(loop):
+def test_close_idempotent(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            c.shutdown()
-            c.shutdown()
-            c.shutdown()
+            c.close()
+            c.close()
+            c.close()
 
 
 def test_get_returns_early(loop):
@@ -3239,7 +3260,7 @@ def test_status():
     assert c.status == 'running'
     x = c.submit(inc, 1)
 
-    yield c.shutdown()
+    yield c.close()
     assert c.status == 'closed'
 
     yield s.close()
@@ -3329,7 +3350,7 @@ def test_reconnect(loop):
         assert time() < start + 5
         sleep(0.1)
 
-    c.shutdown()
+    c.close()
     sync(loop, w._close)
 
 
@@ -3363,7 +3384,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 running[w] = addr
                 yield gen.sleep(duration)
                 yield w._close()
-                running[w] = None
+                del running[w]
                 del w
                 yield gen.moment
             done.release()
@@ -3378,8 +3399,8 @@ def test_open_close_many_workers(loop, worker, count, repeat):
             for i in range(count):
                 done.acquire()
                 gc.collect()
-                print("still running:", dict(running))
-                print("ncores:", c.ncores())
+                if not running:
+                    break
 
             start = time()
             while c.ncores():
@@ -3433,8 +3454,8 @@ def test_idempotence(s, a, b):
 
     assert len(s.transition_log) == len_single_submit
 
-    yield c.shutdown()
-    yield f.shutdown()
+    yield c.close()
+    yield f.close()
 
 
 def test_scheduler_info(loop):
@@ -3605,8 +3626,8 @@ def test_serialize_future(s, a, b):
         result2 = yield future2
         assert result == result2
 
-    yield c.shutdown()
-    yield f.shutdown()
+    yield c.close()
+    yield f.close()
 
 
 @gen_cluster(client=False)
@@ -3622,8 +3643,8 @@ def test_temp_client(s, a, b):
         assert default_client() is f
         assert default_client(c) is c
 
-    yield c.shutdown()
-    yield f.shutdown()
+    yield c.close()
+    yield f.close()
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 3, client=True)
@@ -3968,7 +3989,7 @@ def test_client_timeout():
         yield gen.sleep(0.1)
         assert time() < start + 2
 
-    yield c.shutdown()
+    yield c.close()
     yield s.close()
 
 
@@ -4099,6 +4120,13 @@ def test_recreate_error_collection(c, s, a, b):
     function, args, kwargs = yield c._recreate_error_locally(f)
     with pytest.raises(ValueError):
         function(*args, **kwargs)
+
+    # with persist
+    df3 = c.persist(df2)
+    function, args, kwargs = yield c._recreate_error_locally(df3)
+    with pytest.raises(ValueError):
+        function(*args, **kwargs)
+
 
 
 def test_recreate_error_sync(loop):
@@ -4239,7 +4267,7 @@ def test_fire_and_forget_err(c, s, a, b):
         assert time() < start + 1
 
 
-def test_quiet_client_shutdown(loop):
+def test_quiet_client_close(loop):
     import logging
     with captured_logger(logging.getLogger('distributed')) as logger:
         with Client(loop=loop, processes=False, threads_per_worker=4) as c:
@@ -4493,6 +4521,20 @@ def test_bytes_keys(c, s, a, b):
     assert list(s.task_state)[0] == key
     assert key in a.data or key in b.data
     assert result == 2
+
+
+def test_use_synchronous_scheduler_in_async_context(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            @gen.coroutine
+            def f():
+                x = yield c.scatter(123, asynchronous=True)
+                y = c.submit(inc, x)
+                z = yield c.gather(y, asynchronous=True)
+                raise gen.Return(z)
+
+            z = sync(loop, f)
+            assert z == 124
 
 
 if sys.version_info >= (3, 5):

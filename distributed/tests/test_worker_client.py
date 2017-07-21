@@ -9,7 +9,8 @@ from dask import delayed
 import pytest
 from tornado import gen
 
-from distributed import worker_client, Client, as_completed, get_worker
+from distributed import (worker_client, Client, as_completed, get_worker, wait,
+        get_client)
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, double, cluster, loop
 from distributed.worker import thread_state
@@ -217,3 +218,42 @@ def test_local_client_warning(c, s, a, b):
     future = c.submit(func, 10)
     result = yield future
     assert result == 11
+
+
+@gen_cluster(client=True)
+def test_closing_worker_doesnt_close_client(c, s, a, b):
+    def func(x):
+        get_client()
+        return
+
+    yield wait(c.map(func, range(10)))
+    yield a._close()
+    assert c.status == 'running'
+
+
+def test_secede_without_stealing_issue_1262():
+    """
+    Tests that seceding works with the Stealing extension disabled
+    https://github.com/dask/distributed/issues/1262
+    """
+
+    # turn off all extensions
+    extensions = []
+
+    # run the loop as an inner function so all workers are closed
+    # and exceptions can be examined
+    @gen_cluster(client=True, scheduler_kwargs={'extensions': extensions})
+    def secede_test(c, s, a, b):
+        def func(x):
+            with worker_client() as wc:
+                y = wc.submit(lambda: 1 + x)
+                return wc.gather(y)
+        f = yield c._gather(c.submit(func, 1))
+
+        raise gen.Return((c, s, a, b, f))
+
+    c, s, a, b, f = secede_test()
+
+    assert f == 2
+    # ensure no workers had errors
+    assert all([f.exception() is None for f in s._worker_coroutines])

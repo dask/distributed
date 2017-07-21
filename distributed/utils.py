@@ -864,3 +864,10 @@ class ThrottledGC(object):
             gc.collect()
             self.last_collect = new_time
 
+@contextmanager
+def time_warn(duration, text):
+    start = time()
+    yield
+    end = time()
+    if end - start > duration:
+        print('TIME WARNING', text, end - start)

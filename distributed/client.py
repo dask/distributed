@@ -1,7 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from collections import defaultdict, Iterator, Iterable
+from collections import defaultdict, Iterator, Iterable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
 from contextlib import contextmanager
@@ -186,7 +186,7 @@ class Future(WrappedKey):
         else:
             raise gen.Return(None)
 
-    def exception(self, timeout=None):
+    def exception(self, timeout=None, **kwargs):
         """ Return the exception of a failed task
 
         If *timeout* seconds are elapsed before returning, a TimeoutError
@@ -196,7 +196,8 @@ class Future(WrappedKey):
         --------
         Future.traceback
         """
-        return self.client.sync(self._exception, callback_timeout=timeout)
+        return self.client.sync(self._exception, callback_timeout=timeout,
+                                **kwargs)
 
     def add_done_callback(self, fn):
         """ Call callback on future when callback has finished
@@ -237,7 +238,7 @@ class Future(WrappedKey):
         else:
             raise gen.Return(None)
 
-    def traceback(self, timeout=None):
+    def traceback(self, timeout=None, **kwargs):
         """ Return the traceback of a failed task
 
         This returns a traceback object.  You can inspect this object using the
@@ -258,7 +259,8 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
-        return self.client.sync(self._traceback, callback_timeout=timeout)
+        return self.client.sync(self._traceback, callback_timeout=timeout,
+                                **kwargs)
 
     @property
     def type(self):
@@ -520,7 +522,8 @@ class Client(Node):
         return result
 
     def sync(self, func, *args, **kwargs):
-        if self.asynchronous:
+        asynchronous = kwargs.pop('asynchronous', None)
+        if asynchronous or self.asynchronous:
             callback_timeout = kwargs.pop('callback_timeout', None)
             future = func(*args, **kwargs)
             if callback_timeout is not None:
@@ -620,12 +623,13 @@ class Client(Node):
         return self._started.__await__()
 
     def _send_to_scheduler(self, msg):
-        if self.status is 'running':
+        if self.status in ('running', 'closing'):
             self.loop.add_callback(self.scheduler_comm.send, msg)
         elif self.status is 'connecting':
             self.loop.add_callback(self._pending_msg_buffer.append, msg)
         else:
-            raise Exception("Client not running.  Status: %s" % self.status)
+            raise Exception("Tried sending message after closing.  Status: %s\n"
+                            "Message: %s" % (self.status, msg))
 
     @gen.coroutine
     def _start(self, timeout=5, **kwargs):
@@ -749,13 +753,13 @@ class Client(Node):
 
     @gen.coroutine
     def __aexit__(self, typ, value, traceback):
-        yield self._shutdown()
+        yield self._close()
 
     def __exit__(self, type, value, traceback):
-        self.shutdown()
+        self.close()
 
     def __del__(self):
-        self.shutdown()
+        self.close()
 
     def _inc_ref(self, key):
         with self._refcount_lock:
@@ -868,31 +872,22 @@ class Client(Node):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
-    @gen.coroutine
-    def _close(self):
-        with log_errors():
-            if self.status == 'closed':
-                raise gen.Return()
-            if self.status == 'running':
-                self._send_to_scheduler({'op': 'close-stream'})
-            with ignoring(AttributeError):
-                yield self.scheduler_comm.close()
-            with ignoring(AttributeError):
-                self.scheduler.close_rpc()
-            self.status = 'closed'
-
-    def close(self):
+    def close(self, **kwargs):
         """ Close this client and its connection to the scheduler """
-        return self.sync(self._close)
+        return self.sync(self._close, **kwargs)
 
     @gen.coroutine
-    def _shutdown(self, fast=False):
-        """ Send shutdown signal and wait until scheduler completes """
+    def _close(self, fast=False):
+        """ Send close signal and wait until scheduler completes """
         with log_errors():
             if self.status == 'closed':
                 raise gen.Return()
+            for key in list(self.futures):
+                self._release_key(key=key)
             if self.status == 'running':
                 self._send_to_scheduler({'op': 'close-stream'})
+            if self.scheduler_comm:
+                yield self.scheduler_comm.close()
             if self._start_arg is None:
                 with ignoring(AttributeError):
                     yield self.cluster._close()
@@ -904,13 +899,13 @@ class Client(Node):
                     yield [gen.with_timeout(timedelta(seconds=2), f)
                             for f in self.coroutines]
             with ignoring(AttributeError):
-                yield self.scheduler_comm.close()
-            with ignoring(AttributeError):
                 self.scheduler.close_rpc()
             self.scheduler = None
 
-    def shutdown(self, timeout=10):
-        """ Send shutdown signal and wait until scheduler terminates
+    _shutdown = _close
+
+    def close(self, timeout=10):
+        """ Send close signal and wait until scheduler terminates
 
         This cancels all currently running tasks, clears the state of the
         scheduler, and shuts down all workers and scheduler.
@@ -923,7 +918,7 @@ class Client(Node):
         Client.restart
         """
         if self.asynchronous:
-            future = self._shutdown()
+            future = self._close()
             if timeout:
                 future = gen.with_timeout(timedelta(seconds=timeout), future)
             return future
@@ -936,7 +931,7 @@ class Client(Node):
             with ignoring(AttributeError):
                 self.cluster.close()
 
-        sync(self.loop, self._shutdown, fast=True)
+        sync(self.loop, self._close, fast=True)
         assert self.status == 'closed'
 
         if self._should_close_loop:
@@ -950,6 +945,8 @@ class Client(Node):
             dask.set_options(shuffle=self._previous_shuffle)
         if self.get == _globals.get('get'):
             del _globals['get']
+
+    shutdown = close
 
     def get_executor(self, **kwargs):
         """ Return a concurrent.futures Executor for submitting tasks
@@ -1293,7 +1290,8 @@ class Client(Node):
             for item in results:
                 qout.put(item)
 
-    def gather(self, futures, errors='raise', maxsize=0, direct=None):
+    def gather(self, futures, errors='raise', maxsize=0, direct=None,
+               asynchronous=None):
         """ Gather futures from distributed memory
 
         Accepts a future, nested container of futures, iterator, or queue.
@@ -1352,11 +1350,12 @@ class Client(Node):
             else:
                 local_worker = None
             return self.sync(self._gather, futures, errors=errors,
-                             direct=direct, local_worker=local_worker)
+                             direct=direct, local_worker=local_worker,
+                             asynchronous=asynchronous)
 
     @gen.coroutine
     def _scatter(self, data, workers=None, broadcast=False, direct=None,
-                 local_worker=None, timeout=3):
+                 local_worker=None, timeout=3, hash=True):
         if isinstance(workers, six.string_types):
             workers = [workers]
         if isinstance(data, dict) and not all(isinstance(k, (bytes, unicode))
@@ -1377,7 +1376,10 @@ class Client(Node):
             unpack = True
             data = [data]
         if isinstance(data, (list, tuple)):
-            names = list(map(tokenize, data))
+            if hash:
+                names = [type(x).__name__ + '-' + tokenize(x) for x in data]
+            else:
+                names = [type(x).__name__ + '-' + uuid.uuid1().hex for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)
@@ -1465,7 +1467,7 @@ class Client(Node):
                 qout.put(future)
 
     def scatter(self, data, workers=None, broadcast=False, direct=None,
-                maxsize=0, timeout=3):
+                hash=True, maxsize=0, timeout=3, asynchronous=None):
         """ Scatter data into distributed memory
 
         This moves data from the local client process into the workers of the
@@ -1489,6 +1491,9 @@ class Client(Node):
             able to talk directly with the workers.
         maxsize: int (optional)
             Maximum size of queue if using queues, 0 implies infinite
+        hash: bool (optional)
+            Whether or not to hash data to determine key.
+            If False then this uses a random key
 
         Returns
         -------
@@ -1551,7 +1556,8 @@ class Client(Node):
                 local_worker = None
             return self.sync(self._scatter, data, workers=workers,
                              broadcast=broadcast, direct=direct,
-                             local_worker=local_worker, timeout=timeout)
+                             local_worker=local_worker, timeout=timeout,
+                             asynchronous=asynchronous, hash=hash)
 
     @gen.coroutine
     def _cancel(self, futures):
@@ -1562,7 +1568,7 @@ class Client(Node):
             if st is not None:
                 st.cancel()
 
-    def cancel(self, futures):
+    def cancel(self, futures, asynchronous=None):
         """
         Cancel running futures
 
@@ -1574,7 +1580,7 @@ class Client(Node):
         ----------
         futures: list of Futures
         """
-        return self.sync(self._cancel, futures)
+        return self.sync(self._cancel, futures, asynchronous=asynchronous)
 
     @gen.coroutine
     def _publish_dataset(self, **kwargs):
@@ -1630,7 +1636,7 @@ class Client(Node):
         """
         return self.sync(self._publish_dataset, **kwargs)
 
-    def unpublish_dataset(self, name):
+    def unpublish_dataset(self, name, **kwargs):
         """
         Remove named datasets from scheduler
 
@@ -1646,9 +1652,9 @@ class Client(Node):
         --------
         Client.publish_dataset
         """
-        return self.sync(self.scheduler.publish_delete, name=name)
+        return self.sync(self.scheduler.publish_delete, name=name, **kwargs)
 
-    def list_datasets(self):
+    def list_datasets(self, **kwargs):
         """
         List named datasets available on the scheduler
 
@@ -1657,7 +1663,7 @@ class Client(Node):
         Client.publish_dataset
         Client.get_dataset
         """
-        return self.sync(self.scheduler.publish_list)
+        return self.sync(self.scheduler.publish_list, **kwargs)
 
     @gen.coroutine
     def _get_dataset(self, name):
@@ -1667,7 +1673,7 @@ class Client(Node):
             data = loads(out['data'])
         raise gen.Return(data)
 
-    def get_dataset(self, name):
+    def get_dataset(self, name, **kwargs):
         """
         Get named dataset from the scheduler
 
@@ -1676,7 +1682,7 @@ class Client(Node):
         Client.publish_dataset
         Client.list_datasets
         """
-        return self.sync(self._get_dataset, tokey(name))
+        return self.sync(self._get_dataset, tokey(name), **kwargs)
 
     @gen.coroutine
     def _run_on_scheduler(self, function, *args, **kwargs):
@@ -1710,7 +1716,7 @@ class Client(Node):
         Client.start_ipython_scheduler: Start an IPython session on scheduler
         """
         return self.sync(self._run_on_scheduler, function, *args,
-                **kwargs)
+                         **kwargs)
 
     @gen.coroutine
     def _run(self, function, *args, **kwargs):
@@ -1860,7 +1866,7 @@ class Client(Node):
             return futures
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-            resources=None, sync=True, **kwargs):
+            resources=None, sync=True, asynchronous=None, **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -1890,7 +1896,7 @@ class Client(Node):
         packed = pack_data(keys, futures)
         if sync:
             try:
-                results = self.gather(packed)
+                results = self.gather(packed, asynchronous=asynchronous)
             finally:
                 for f in futures.values():
                     f.release()
@@ -2159,13 +2165,13 @@ class Client(Node):
 
         raise gen.Return(self)
 
-    def restart(self):
+    def restart(self, **kwargs):
         """ Restart the distributed network
 
         This kills all active work, deletes all data on the network, and
         restarts the worker processes.
         """
-        return self.sync(self._restart)
+        return self.sync(self._restart, **kwargs)
 
     @gen.coroutine
     def _upload_file(self, filename, raise_on_error=True):
@@ -2212,7 +2218,7 @@ class Client(Node):
 
         assert all(len(data) == v for v in response.values())
 
-    def upload_file(self, filename):
+    def upload_file(self, filename, **kwargs):
         """ Upload local package to workers
 
         This sends a local file up to all worker nodes.  This file is placed
@@ -2231,7 +2237,7 @@ class Client(Node):
         >>> L = c.map(myfunc, seq)  # doctest: +SKIP
         """
         result = self.sync(self._upload_file, filename,
-                           raise_on_error=self.asynchronous)
+                           raise_on_error=self.asynchronous, **kwargs)
         if isinstance(result, Exception):
             raise result
         else:
@@ -2244,7 +2250,7 @@ class Client(Node):
         result = yield self.scheduler.rebalance(keys=keys, workers=workers)
         assert result['status'] == 'OK'
 
-    def rebalance(self, futures=None, workers=None):
+    def rebalance(self, futures=None, workers=None, **kwargs):
         """ Rebalance data within network
 
         Move data between workers to roughly balance memory burden.  This
@@ -2262,7 +2268,7 @@ class Client(Node):
         workers: list, optional
             A list of workers on which to balance, defaults to all workers
         """
-        return self.sync(self._rebalance, futures, workers)
+        return self.sync(self._rebalance, futures, workers, **kwargs)
 
     @gen.coroutine
     def _replicate(self, futures, n=None, workers=None, branching_factor=2):
@@ -2272,7 +2278,8 @@ class Client(Node):
         yield self.scheduler.replicate(keys=list(keys), n=n, workers=workers,
                 branching_factor=branching_factor)
 
-    def replicate(self, futures, n=None, workers=None, branching_factor=2):
+    def replicate(self, futures, n=None, workers=None, branching_factor=2,
+                  **kwargs):
         """ Set replication of futures within network
 
         Copy data onto many workers.  This helps to broadcast frequently
@@ -2309,9 +2316,9 @@ class Client(Node):
         Client.rebalance
         """
         return self.sync(self._replicate, futures, n=n, workers=workers,
-                         branching_factor=branching_factor)
+                         branching_factor=branching_factor, **kwargs)
 
-    def ncores(self, workers=None):
+    def ncores(self, workers=None, **kwargs):
         """ The number of threads/cores available on each worker node
 
         Parameters
@@ -2338,9 +2345,9 @@ class Client(Node):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
-        return self.sync(self.scheduler.ncores, workers=workers)
+        return self.sync(self.scheduler.ncores, workers=workers, **kwargs)
 
-    def who_has(self, futures=None):
+    def who_has(self, futures=None, **kwargs):
         """ The workers storing each future's data
 
         Parameters
@@ -2371,9 +2378,9 @@ class Client(Node):
             keys = list({f.key for f in futures})
         else:
             keys = None
-        return self.sync(self.scheduler.who_has, keys=keys)
+        return self.sync(self.scheduler.who_has, keys=keys, **kwargs)
 
-    def has_what(self, workers=None):
+    def has_what(self, workers=None, **kwargs):
         """ Which keys are held by which workers
 
         Parameters
@@ -2400,7 +2407,7 @@ class Client(Node):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
-        return self.sync(self.scheduler.has_what, workers=workers)
+        return self.sync(self.scheduler.has_what, workers=workers, **kwargs)
 
     def stacks(self, workers=None):
         """ The task queues on each worker
@@ -2463,7 +2470,7 @@ class Client(Node):
         return valmap(set, sync(self.loop, self.scheduler.processing,
                                 workers=workers))
 
-    def nbytes(self, keys=None, summary=True):
+    def nbytes(self, keys=None, summary=True, **kwargs):
         """ The bytes taken up by each key on the cluster
 
         This is as measured by ``sys.getsizeof`` which may not accurately
@@ -2492,9 +2499,9 @@ class Client(Node):
         Client.who_has
         """
         return self.sync(self.scheduler.nbytes, keys=keys,
-                    summary=summary)
+                         summary=summary, **kwargs)
 
-    def scheduler_info(self):
+    def scheduler_info(self, **kwargs):
         """ Basic information about the workers in the cluster
 
         Examples
@@ -2510,7 +2517,7 @@ class Client(Node):
                                          'stored': 0,
                                          'time-delay': 0.0061032772064208984}}}
         """
-        return self.sync(self.scheduler.identity)
+        return self.sync(self.scheduler.identity, **kwargs)
 
     def get_versions(self, check=False):
         """ Return version info for the scheduler, all workers and myself
@@ -3069,7 +3076,7 @@ def futures_of(o, client=None):
             stack.extend(x.values())
         if isinstance(x, Future):
             futures.add(x)
-        if hasattr(x, 'dask'):
+        if hasattr(x, 'dask') and isinstance(x.dask, Mapping):
             stack.extend(x.dask.values())
 
     if client is not None:
@@ -3127,14 +3134,14 @@ def temp_default_client(c):
         _set_global_client(old_exec)
 
 
-def _shutdown_global_client():
+def _close_global_client():
     """
-    Force shutdown of global client.  This cleans up when a client
-    wasn't shutdown explicitly, e.g. interactive sessions.
+    Force close of global client.  This cleans up when a client
+    wasn't close explicitly, e.g. interactive sessions.
     """
     c = _get_global_client()
     if c is not None:
-        c.shutdown(timeout=2)
+        c.close(timeout=2)
 
 
-atexit.register(_shutdown_global_client)
+atexit.register(_close_global_client)
