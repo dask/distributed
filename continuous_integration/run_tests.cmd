@@ -6,4 +6,4 @@ set PYTHONFAULTHANDLER=1
 
 set PYTEST=py.test --tb=native --timeout=120 -r s
 
-%PYTEST% -v -m "not avoid_travis" --junit-xml="%JUNIT_OUT%" distributed
+%PYTEST% -s -v -m "not avoid_travis" --junit-xml="%JUNIT_OUT%" distributed
