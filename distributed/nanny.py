@@ -36,7 +36,7 @@ class Nanny(ServerNode):
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
-                 death_timeout=None, preload=(), security=None, **kwargs):
+                 death_timeout=None, preload=(), security=None, contact_addr=None, **kwargs):
         if scheduler_port is None:
             self.scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -48,6 +48,7 @@ class Nanny(ServerNode):
         self.resources = resources
         self.death_timeout = death_timeout
         self.preload = preload
+        self.contact_addr = contact_addr
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -176,7 +177,9 @@ class Nanny(ServerNode):
                                    silence_logs=self.silence_logs,
                                    death_timeout=self.death_timeout,
                                    preload=self.preload,
-                                   security=self.security),
+                                   security=self.security,
+                                   contact_addr=self.contact_addr),
+                # worker_start_args=(self._given_worker_port,),
                 worker_start_args=(self._given_worker_port,),
                 silence_logs=self.silence_logs,
                 on_exit=self._on_exit,
