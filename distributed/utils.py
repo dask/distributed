@@ -38,6 +38,8 @@ from .config import config
 from .metrics import time
 
 
+thread_state = threading.local()
+
 logger = logging.getLogger(__name__)
 
 
@@ -221,11 +223,13 @@ def sync(loop, func, *args, **kwargs):
             if main_tid == get_thread_identity():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
+            thread_state.in_sync = True
             result[0] = yield make_coro()
         except Exception as exc:
             logger.exception(exc)
             error[0] = sys.exc_info()
         finally:
+            thread_state.in_sync = False
             e.set()
 
     loop.add_callback(f)
