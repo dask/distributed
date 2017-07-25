@@ -524,7 +524,7 @@ class Client(Node):
 
     def sync(self, func, *args, **kwargs):
         asynchronous = kwargs.pop('asynchronous', None)
-        if asynchronous or self.asynchronous or getattr(thread_state, 'in_sync', False):
+        if asynchronous or self.asynchronous or getattr(thread_state, 'asynchronous', False):
             callback_timeout = kwargs.pop('callback_timeout', None)
             future = func(*args, **kwargs)
             if callback_timeout is not None:
