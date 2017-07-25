@@ -219,17 +219,17 @@ def sync(loop, func, *args, **kwargs):
 
     @gen.coroutine
     def f():
-        with set_thread_state(asynchronous=True):
-            try:
-                if main_tid == get_thread_identity():
-                    raise RuntimeError("sync() called from thread of running loop")
-                yield gen.moment
+        try:
+            if main_tid == get_thread_identity():
+                raise RuntimeError("sync() called from thread of running loop")
+            yield gen.moment
+            with set_thread_state(asynchronous=True):
                 result[0] = yield make_coro()
-            except Exception as exc:
-                logger.exception(exc)
-                error[0] = sys.exc_info()
-            finally:
-                e.set()
+        except Exception as exc:
+            logger.exception(exc)
+            error[0] = sys.exc_info()
+        finally:
+            e.set()
 
     loop.add_callback(f)
     while not e.is_set():
