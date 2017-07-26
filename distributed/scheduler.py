@@ -1201,6 +1201,7 @@ class Scheduler(ServerNode):
                 try:
                     msgs = yield comm.read()
                 except (CommClosedError, AssertionError, GeneratorExit):
+                    logger.info("Connection to client %s broken", str(client))
                     break
                 except Exception as e:
                     logger.exception(e)
