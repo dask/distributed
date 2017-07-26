@@ -3377,14 +3377,13 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         def start_worker(sleep, duration, repeat=1):
             for i in range(repeat):
                 yield gen.sleep(sleep)
-                w = worker(s['address'], loop=loop, death_timeout=5)
+                w = worker(s['address'], loop=loop)
                 running[w] = None
                 yield w._start()
                 addr = w.worker_address
                 running[w] = addr
                 yield gen.sleep(duration)
                 yield w._close()
-                del running[w]
                 del w
                 yield gen.moment
             done.release()
