@@ -935,7 +935,7 @@ class Client(Node):
         assert self.status == 'closed'
 
         if self._should_close_loop:
-            sync(self.loop, self.loop.stop)
+            self.loop.add_callback(self.loop.stop)
             try:
                 self._loop_thread.join(timeout=timeout)
             finally:
