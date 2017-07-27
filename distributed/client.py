@@ -497,6 +497,8 @@ class Client(Node):
 
         from distributed.recreate_exceptions import ReplayExceptionClient
         ReplayExceptionClient(self)
+        from distributed.diagnostics.tracer import TraceLoggerClient
+        TraceLoggerClient(self)
 
     @property
     def asynchronous(self):

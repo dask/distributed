@@ -30,6 +30,7 @@ from .compatibility import finalize
 from .config import config
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
+from .diagnostics.tracer import TraceLoggerPlugin
 from .metrics import time
 from .node import ServerNode
 from .security import Security
@@ -59,6 +60,7 @@ DEFAULT_EXTENSIONS = [
     ReplayExceptionScheduler,
     QueueExtension,
     VariableExtension,
+    TraceLoggerPlugin
 ]
 
 
