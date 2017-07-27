@@ -65,9 +65,11 @@ class BatchedSend(object):
     @gen.coroutine
     def _background_send(self):
         while not self.please_stop:
-            with ignoring(gen.TimeoutError):
+            try:
                 yield self.waker.wait(self.next_deadline)
                 self.waker.clear()
+            except gen.TimeoutError:
+                pass
             if not self.buffer:
                 # Nothing to send
                 self.next_deadline = None

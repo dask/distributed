@@ -883,7 +883,7 @@ class Client(Node):
         with log_errors():
             if self.status == 'closed':
                 raise gen.Return()
-            if not self.scheduler_comm.comm.closed():
+            if self.scheduler_comm and self.scheduler_comm.comm and not self.scheduler_comm.comm.closed():
                 for key in list(self.futures):
                     self._release_key(key=key)
                 if self.status == 'running':
