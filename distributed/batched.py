@@ -7,7 +7,6 @@ from tornado import gen, locks
 from tornado.ioloop import IOLoop
 
 from .core import CommClosedError
-from .utils import ignoring
 
 
 logger = logging.getLogger(__name__)
