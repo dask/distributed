@@ -23,25 +23,21 @@ class TraceLoggerPlugin(SchedulerPlugin):
     def start_trace(self, *args, **kwargs):
         log_file = kwargs.pop('log_file', 'trace.log')
         logger.debug('Start trace to file: ' + log_file)
-        log = logging.getLogger('scheduler_trace')
-        json_handler = logging.handlers.RotatingFileHandler(filename=log_file)
-        json_handler.setFormatter(JSONFormatter())
-        log.addHandler(json_handler)
-        log.setLevel(logging.DEBUG)
-        self.log = log
-        self.log.debug({'log': 'start'})
+        self.log_file = open(log_file, 'a')
+        self.write({'log': 'start'})
         self.scheduler.add_plugin(self)
 
     def stop_trace(self, *args, **kwargs):
         logger.debug('Stop trace')
-        self.log.debug({'log': 'stop'})
+        self.write({'log': 'stop'})
         self.scheduler.extensions.pop('trace', None)
+        self.log_file.close()
         self.log = None
 
     def transition(self, key, start, finish, *args, **kwargs):
         if self.log:
             kwargs.pop('type', None)
-            self.log.debug({'key': key, 'start': start, 'finish': finish,
+            self.write({'key': key, 'start': start, 'finish': finish,
                            'args': args, 'kwargs': kwargs, 'log': 'transition'})
 
     def update_graph(self, scheduler, dsk=None, keys=None,
@@ -50,20 +46,25 @@ class TraceLoggerPlugin(SchedulerPlugin):
             kwargs2 = kwargs.copy()
             kwargs2.pop('tasks', None)
             keys = list(keys or [])
-            self.log.debug({'log': 'update_graph', 'dsk': dsk, 'keys': keys,
-                            'restrictions': restrictions, 'kwargs': kwargs2})
+            self.write({'log': 'update_graph', 'dsk': dsk, 'keys': keys,
+                       'restrictions': restrictions, 'kwargs': kwargs2})
 
     def restart(self, scheduler, **kwargs):
         if self.log:
-            self.log.debug({'log': 'restart'})
+            self.write({'log': 'restart'})
 
     def add_worker(self, scheduler=None, worker=None, **kwargs):
         if self.log:
-            self.log.debug({'log': 'add_worker', 'worker': str(worker)})
+            self.write({'log': 'add_worker', 'worker': str(worker)})
 
     def remove_worker(self, scheduler=None, worker=None, **kwargs):
         if self.log:
-            self.log.debug({'log': 'remove_worker', 'worker': str(worker)})
+            self.write({'log': 'remove_worker', 'worker': str(worker)})
+
+    def write(self, data):
+        data['time'] = time.time()
+        json.dump(data, self.log_file, ensure_ascii=False)
+        self.log_file.write('\n')
 
 
 class TraceLoggerClient(object):
@@ -94,22 +95,3 @@ class TraceLoggerClient(object):
     @gen.coroutine
     def stop_trace(self):
         yield self.scheduler.stop_trace()
-
-
-class JSONFormatter(logging.Formatter):
-    """JSON log formatter.
-
-    https://github.com/marselester/json-log-formatter/
-    """
-
-    def format(self, record):
-        dic = self.record_to_dict(record)
-        return json.dumps(dic)
-
-    @staticmethod
-    def record_to_dict(record):
-        """Prepares a JSON payload which will be logged.
-        """
-        out = record.msg
-        out['time'] = time.time()
-        return out
