@@ -1196,7 +1196,7 @@ class Client(Node):
         if direct is None:
             try:
                 w = get_worker()
-            except:
+            except Exception:
                 direct = False
             else:
                 if w.scheduler.address == self.scheduler.address:
@@ -1396,7 +1396,7 @@ class Client(Node):
         if direct is None:
             try:
                 w = get_worker()
-            except:
+            except Exception:
                 direct = False
             else:
                 if w.scheduler.address == self.scheduler.address:
