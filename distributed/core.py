@@ -77,6 +77,7 @@ class Server(object):
 
     *  ``{'op': 'ping'}``
     *  ``{'op': 'add': 'x': 10, 'y': 20}``
+
     """
     default_ip = ''
     default_port = 0
