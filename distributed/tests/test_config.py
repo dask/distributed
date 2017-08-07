@@ -10,7 +10,7 @@ import pytest
 
 from distributed.utils_test import (captured_handler, captured_logger,
                                     new_config, new_config_file)
-from distributed.config import initialize_logging
+from distributed.config import initialize_logging, set_config, config
 
 
 def dump_logger_list():
@@ -60,7 +60,7 @@ def test_logging_default():
         fb = logging.getLogger('foo.bar')
 
         with captured_handler(d.handlers[0]) as distributed_log:
-            with captured_logger(root) as foreign_log:
+            with captured_logger(root, level=logging.ERROR) as foreign_log:
                 h = logging.StreamHandler(foreign_log)
                 fmt = '[%(levelname)s in %(name)s] - %(message)s'
                 h.setFormatter(logging.Formatter(fmt))
@@ -269,3 +269,10 @@ qualname=foo.bar
             """
         subprocess.check_call([sys.executable, "-c", code])
     os.remove(logging_config.name)
+
+
+def test_set_config():
+    assert 'foo' not in config
+    with set_config(foo=1):
+        assert config['foo'] == 1
+    assert 'foo' not in config

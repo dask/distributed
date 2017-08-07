@@ -3384,7 +3384,6 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 running[w] = addr
                 yield gen.sleep(duration)
                 yield w._close()
-                del running[w]
                 del w
                 yield gen.moment
             done.release()
@@ -4523,18 +4522,45 @@ def test_bytes_keys(c, s, a, b):
     assert result == 2
 
 
-def test_use_synchronous_scheduler_in_async_context(loop):
+def test_use_synchronous_client_in_async_context(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             @gen.coroutine
             def f():
-                x = yield c.scatter(123, asynchronous=True)
+                x = yield c.scatter(123)
                 y = c.submit(inc, x)
-                z = yield c.gather(y, asynchronous=True)
+                z = yield c.gather(y)
                 raise gen.Return(z)
 
             z = sync(loop, f)
             assert z == 124
+
+
+def test_quiet_quit_when_cluster_leaves(loop):
+    from distributed import LocalCluster
+    import logging
+    thread = Thread(target=loop.start,
+                    name="LocalCluster loop")
+    thread.daemon = True
+    thread.start()
+    while not loop._running:
+        sleep(0.001)
+
+    cluster = LocalCluster(loop=loop, scheduler_port=0, diagnostics_port=None,
+                           silence_logs=False)
+    with captured_logger('distributed.comm') as sio:
+        client = Client(cluster, loop=loop)
+        futures = client.map(lambda x: x + 1, range(10))
+        sleep(0.05)
+        cluster.close()
+        sleep(0.05)
+        client.close()
+
+    text = sio.getvalue()
+    assert not text
+
+    loop.add_callback(loop.stop)
+    thread.join(timeout=1)
 
 
 if sys.version_info >= (3, 5):

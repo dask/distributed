@@ -47,9 +47,10 @@ from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .security import Security
 from .sizeof import sizeof
-from .worker import dumps_task, thread_state, get_client, get_worker
+from .worker import dumps_task, get_client, get_worker
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
-        tokey, log_errors, str_graph, key_split, format_bytes)
+        tokey, log_errors, str_graph, key_split, format_bytes, asciitable,
+        thread_state)
 from .versions import get_versions
 
 
@@ -523,7 +524,7 @@ class Client(Node):
 
     def sync(self, func, *args, **kwargs):
         asynchronous = kwargs.pop('asynchronous', None)
-        if asynchronous or self.asynchronous:
+        if asynchronous or self.asynchronous or getattr(thread_state, 'asynchronous', False):
             callback_timeout = kwargs.pop('callback_timeout', None)
             future = func(*args, **kwargs)
             if callback_timeout is not None:
@@ -882,10 +883,11 @@ class Client(Node):
         with log_errors():
             if self.status == 'closed':
                 raise gen.Return()
-            for key in list(self.futures):
-                self._release_key(key=key)
-            if self.status == 'running':
-                self._send_to_scheduler({'op': 'close-stream'})
+            if self.scheduler_comm and self.scheduler_comm.comm and not self.scheduler_comm.comm.closed():
+                for key in list(self.futures):
+                    self._release_key(key=key)
+                if self.status == 'running':
+                    self._send_to_scheduler({'op': 'close-stream'})
             if self.scheduler_comm:
                 yield self.scheduler_comm.close()
             if self._start_arg is None:
@@ -935,9 +937,11 @@ class Client(Node):
         assert self.status == 'closed'
 
         if self._should_close_loop:
-            sync(self.loop, self.loop.stop)
-            self.loop.close()
-            self._loop_thread.join(timeout=timeout)
+            self.loop.add_callback(self.loop.stop)
+            try:
+                self._loop_thread.join(timeout=timeout)
+            finally:
+                self.loop.close()
         self._loop_thread = None
         with ignoring(AttributeError):
             dask.set_options(get=self._previous_get)
@@ -2538,44 +2542,34 @@ class Client(Node):
         except KeyError:
             scheduler = None
 
-        def f(worker=None):
-
-            # use our local version
-            try:
-                from distributed.versions import get_versions
-                return get_versions()
-            except ImportError:
-                return None
-
-        workers = sync(self.loop, self._run, f)
+        workers = sync(self.loop, self._run, get_versions)
         result = {'scheduler': scheduler, 'workers': workers, 'client': client}
 
         if check:
             # we care about the required & optional packages matching
-            extract = lambda x: merge(result[x]['packages'].values())
-            client_versions = extract('client')
-            scheduler_versions = extract('scheduler')
+            to_packages = lambda d: merge(d['packages'].values())
+            client_versions = to_packages(result['client'])
+            versions = [('scheduler', to_packages(result['scheduler']))]
+            versions.extend((w, to_packages(d))
+                            for w, d in sorted(workers.items()))
 
-            for pkg, cv in client_versions.items():
-                sv = scheduler_versions[pkg]
-                if sv != cv:
-                    raise ValueError("package [{package}] is version [{client}] "
-                                     "on client and [{scheduler}] on scheduler!".format(
-                                         package=pkg,
-                                         client=cv,
-                                         scheduler=sv))
-
-            for w, d in workers.items():
-                worker_versions = merge(d['packages'].values())
+            mismatched = defaultdict(list)
+            for name, vers in versions:
                 for pkg, cv in client_versions.items():
-                    wv = worker_versions[pkg]
-                    if wv != cv:
-                        raise ValueError("package [{package}] is version [{client}] "
-                                         "on client and [{worker}] on worker [{w}]!".format(
-                                             package=pkg,
-                                             client=cv,
-                                             worker=wv,
-                                             w=w))
+                    v = vers.get(pkg, 'MISSING')
+                    if cv != v:
+                        mismatched[pkg].append((name, v))
+
+            if mismatched:
+                errs = []
+                for pkg, versions in sorted(mismatched.items()):
+                    rows = [('client', client_versions[pkg])]
+                    rows.extend(versions)
+                    errs.append("%s\n%s" % (pkg, asciitable(['', 'version'], rows)))
+
+                raise ValueError("Mismatched versions found\n"
+                                 "\n"
+                                 "%s" % ('\n\n'.join(errs)))
 
         return result
 

@@ -940,7 +940,7 @@ class Scheduler(ServerNode):
             if not self.processing:
                 logger.info("Lost all workers")
 
-            logger.info("Removed worker %s", address)
+            logger.debug("Removed worker %s", address)
         return 'OK'
 
     def stimulus_cancel(self, comm, keys=None, client=None):
@@ -1164,8 +1164,9 @@ class Scheduler(ServerNode):
         finally:
             if not comm.closed():
                 self.comms[client].send({'op': 'stream-closed'})
-            yield self.comms[client].close()
-            del self.comms[client]
+            if self.comms[client] is not None:
+                yield self.comms[client].close()
+                del self.comms[client]
             logger.info("Close client connection: %s", client)
 
     def remove_client(self, client=None):
@@ -1201,6 +1202,7 @@ class Scheduler(ServerNode):
                 try:
                     msgs = yield comm.read()
                 except (CommClosedError, AssertionError, GeneratorExit):
+                    logger.info("Connection to client %s broken", str(client))
                     break
                 except Exception as e:
                     logger.exception(e)
@@ -1572,7 +1574,8 @@ class Scheduler(ServerNode):
                        if nanny_address is not None]
 
             try:
-                resps = All([nanny.restart(close=True) for nanny in nannies])
+                resps = All([nanny.restart(close=True, timeout=timeout * 0.8)
+                             for nanny in nannies])
                 resps = yield gen.with_timeout(timedelta(seconds=timeout), resps)
                 assert all(resp == 'OK' for resp in resps)
             except gen.TimeoutError:
