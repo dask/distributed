@@ -445,7 +445,8 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                 for proc in [w['proc'] for w in workers]:
                     proc.join(timeout=2)
 
-                del worker, w, proc
+                with ignoring(UnboundLocalError):
+                    del worker, w, proc
                 del workers[:]
 
                 states.append(process_state())
@@ -528,7 +529,7 @@ initial_state = process_state()
 
 def check_state(before, after):
     start = time()
-    while after['num-fds'] > before['num-fds'] + 2:
+    while after['num-fds'] > before['num-fds'] + 3:
         sleep(0.1)
         assert time() < start + 2
 
