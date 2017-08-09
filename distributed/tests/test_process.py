@@ -1,9 +1,13 @@
 from distributed.process import AsyncProcess
+from distributed.utils import mp_context
 from distributed.utils_test import gen_test, process_state
 from distributed.metrics import time
 from time import sleep
 
 from tornado import gen
+
+proc = mp_context.Process(target=sleep, args=(0,))
+proc.start()  # fire off process to spin up file descriptors
 
 @gen_test()
 def test_basic():
@@ -28,6 +32,5 @@ def test_basic():
     e = process_state()
 
     assert end - start < 2
-    import pdb; pdb.set_trace()
 
     assert L[0] is True

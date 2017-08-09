@@ -65,6 +65,7 @@ PENDING = ('waiting', 'ready', 'constrained')
 PROCESSING = ('waiting', 'ready', 'constrained', 'executing', 'long-running')
 READY = ('ready', 'constrained')
 
+
 _global_workers = []
 
 
@@ -345,6 +346,7 @@ class WorkerBase(ServerNode):
         self.rpc.close()
         self._closed.set()
         self._remove_from_global_workers()
+        super(WorkerBase, self).close()
 
     def __del__(self):
         self._remove_from_global_workers()

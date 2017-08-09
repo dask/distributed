@@ -510,6 +510,7 @@ class Scheduler(ServerNode):
         self.close_comms()
         self.status = 'closed'
         self.stop()
+        super(Scheduler, self).close()
 
     @gen.coroutine
     def close_worker(self, stream=None, worker=None):

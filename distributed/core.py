@@ -6,6 +6,7 @@ import logging
 import six
 import traceback
 import uuid
+import psutil
 
 from six import string_types
 
@@ -85,7 +86,7 @@ class Server(object):
     def __init__(self, handlers, connection_limit=512, deserialize=True,
                  io_loop=None):
         self.handlers = assoc(handlers, 'identity', self.identity)
-        self.id = type(self).__name__ + '-' + str(uuid.uuid1())
+        self.id = type(self).__name__ + '-' + str(uuid.uuid4())
         self._address = None
         self._listen_address = None
         self._port = None
@@ -299,6 +300,9 @@ class Server(object):
                 except Exception as e:
                     logger.error("Failed while closing connection to %r: %s",
                                  address, e)
+
+    def close(self):
+        self.listener.stop()
 
 
 def pingpong(comm):

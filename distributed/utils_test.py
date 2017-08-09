@@ -102,7 +102,10 @@ def pristine_loop():
     try:
         yield loop
     finally:
-        loop.close(all_fds=True)
+        try:
+            loop.close(all_fds=True)
+        except ValueError:
+            pass
         IOLoop.clear_instance()
         IOLoop.clear_current()
 
@@ -275,7 +278,11 @@ def run_worker(q, scheduler_q, **kwargs):
             loop.run_sync(lambda: worker._start(0))
             q.put(worker.address)
             try:
-                loop.start()
+                @gen.coroutine
+                def wait_until_closed():
+                    yield worker._closed.wait()
+
+                loop.run_sync(wait_until_closed)
             finally:
                 loop.close(all_fds=True)
 
@@ -326,44 +333,76 @@ def check_active_rpc(loop, active_rpc_timeout=0):
     assert rpc.active == rpc_active
 
 
+from weakref import WeakSet
+
+
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
             scheduler_kwargs={}):
     before = process_state()
+    states = []
+    states.append(process_state())
+    ws = WeakSet()
     with pristine_loop() as loop:
+        states.append('inside pristine loop')
+        states.append(process_state())
         with check_active_rpc(loop, active_rpc_timeout):
+            states.append('inside check active rpc')
+            states.append(process_state())
             if nanny:
                 _run_worker = run_nanny
             else:
                 _run_worker = run_worker
 
+            states.append(process_state())
+
+            states.append('create scheduler queue')
             # The scheduler queue will receive the scheduler's address
             scheduler_q = mp_context.Queue()
+            states.append(process_state())
 
+            states.append('create scheduler process')
             # Launch scheduler
             scheduler = mp_context.Process(target=run_scheduler,
                                            args=(scheduler_q, nworkers + 1),
                                            kwargs=scheduler_kwargs)
+            ws.add(scheduler)
             scheduler.daemon = True
+            states.append(process_state())
+            states.append('start scheduler process')
             scheduler.start()
+            states.append(process_state())
+
+            sleep(0.5)
+            states.append('sleep')
+            states.append(process_state())
 
             # Launch workers
+            states.append('create %d workers' % nworkers)
             workers = []
             for i in range(nworkers):
                 q = mp_context.Queue()
-                fn = '_test_worker-%s' % uuid.uuid1()
+                fn = '_test_worker-%s' % uuid.uuid4()
                 kwargs = merge({'ncores': 1, 'local_dir': fn}, worker_kwargs)
                 proc = mp_context.Process(target=_run_worker,
                                           args=(q, scheduler_q),
                                           kwargs=kwargs)
+                ws.add(proc)
                 workers.append({'proc': proc, 'queue': q, 'dir': fn})
+            states.append(process_state())
 
+            states.append('start %d workers' % nworkers)
             for worker in workers:
                 worker['proc'].start()
+            states.append(process_state())
+            states.append('get address from worker queue')
             for worker in workers:
                 worker['address'] = worker['queue'].get()
+            states.append(process_state())
 
+            states.append('get address from scheduler queue')
             saddr = scheduler_q.get()
+            states.append(process_state())
 
             start = time()
             try:
@@ -375,27 +414,50 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                         if time() - start > 5:
                             raise Exception("Timeout on cluster creation")
 
-                yield {'proc': scheduler, 'address': saddr}, workers
+                yield {'address': saddr}, [{'address': w['address']} for w in workers]
             finally:
                 logger.debug("Closing out test cluster")
 
+                states.append('send disconnect signal')
                 loop.run_sync(lambda: disconnect_all([w['address'] for w in workers],
                                                      timeout=0.5))
                 loop.run_sync(lambda: disconnect(saddr, timeout=0.5))
+                states.append(process_state())
 
+                states.append('scheduler terminate')
                 scheduler.terminate()
-                for proc in [w['proc'] for w in workers]:
-                    with ignoring(EnvironmentError):
-                        proc.terminate()
+                scheduler_q.close()
+                scheduler_q._reader.close()
+                scheduler_q._writer.close()
+                scheduler.join()
+                states.append(process_state())
+                del scheduler
 
-                scheduler.join(timeout=2)
+                states.append('pre-worker close')
+                for w in workers:
+                    w['proc'].terminate()
+                    w['queue'].close()
+                    w['queue']._reader.close()
+                    w['queue']._writer.close()
+                states.append(process_state())
+
+                states.append('joins')
                 for proc in [w['proc'] for w in workers]:
                     proc.join(timeout=2)
 
-                for q in [w['queue'] for w in workers]:
-                    q.close()
+
+                del worker, w, proc
+                del workers
+
+                states.append(process_state())
                 for fn in glob('_test_worker-*'):
                     shutil.rmtree(fn)
+                states.append(process_state())
+        states.append(process_state())
+    states.append('close loop')
+    states.append(process_state())
+    states.append(process_state())
+    assert not ws
     after = process_state()
     check_state(before, after)
 
@@ -405,12 +467,8 @@ def disconnect(addr, timeout=3):
     @gen.coroutine
     def do_disconnect():
         with ignoring(EnvironmentError, CommClosedError):
-            comm = yield connect(addr)
-            try:
-                yield comm.write({'op': 'terminate', 'close': True})
-                response = yield comm.read()
-            finally:
-                yield comm.close()
+            with rpc(addr) as w:
+                yield w.terminate(close=True)
 
     with ignoring(TimeoutError):
         yield gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
@@ -471,7 +529,7 @@ initial_state = process_state()
 
 def check_state(before, after):
     start = time()
-    while before['num-fds'] < after['num-fds']:
+    while after['num-fds'] > before['num-fds'] + 2:
         sleep(0.1)
         assert time() < start + 2
 

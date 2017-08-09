@@ -3133,20 +3133,6 @@ def test_get_processing_sync(loop):
             c.cancel(futures)
 
 
-def dont_test_scheduler_falldown(loop):
-    with cluster(worker_kwargs={'heartbeat_interval': 10}) as (s, [a, b]):
-        s['proc'].terminate()
-        s['proc'].join(timeout=2)
-        try:
-            s2 = Scheduler(loop=loop, validate=True)
-            loop.add_callback(s2.start, s['port'])
-            sleep(0.1)
-            with Client(s['address'], loop=loop) as ee:
-                assert len(ee.ncores()) == 2
-        finally:
-            s2.close()
-
-
 def test_close_idempotent(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:

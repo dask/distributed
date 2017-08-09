@@ -4,6 +4,7 @@ import atexit
 from datetime import timedelta
 import logging
 import sys
+from time import sleep
 import threading
 import weakref
 
@@ -59,7 +60,7 @@ class AsyncProcess(object):
         self._exit_callback = None
         self._closed = False
 
-        self._start_thread()
+        self._start_threads()
 
     def __repr__(self):
         return "<%s %s>" % (self.__class__.__name__, self._name)
@@ -68,14 +69,21 @@ class AsyncProcess(object):
         if self._closed:
             raise ValueError("invalid operation on closed AsyncProcess")
 
-    def _start_thread(self):
-        self._thread = threading.Thread(
-            target=self._watch,
+    def _start_threads(self):
+        self._watch_message_thread = threading.Thread(
+            target=self._watch_message_queue,
             name="AsyncProcess %s watch" % self.name,
             args=(weakref.ref(self), self._process, self._loop,
                   self._state, self._watch_q, self._exit_future,))
-        self._thread.daemon = True
-        self._thread.start()
+        self._watch_message_thread.daemon = True
+        self._watch_message_thread.start()
+
+        self._watch_process_thread = threading.Thread(
+            target=self._watch_process,
+            name="AsyncProcess %s watch" % self.name,
+            args=(weakref.ref(self), self._process, self._state, self._watch_q))
+        self._watch_process_thread.daemon = True
+        self._watch_process_thread.start()
 
         def stop_thread(q):
             q.put_nowait({'op': 'stop'})
@@ -107,7 +115,7 @@ class AsyncProcess(object):
         target(*args, **kwargs)
 
     @classmethod
-    def _watch(cls, selfref, process, loop, state, q, exit_future):
+    def _watch_message_queue(cls, selfref, process, loop, state, q, exit_future):
         # As multiprocessing.Process is not thread-safe, we run all
         # blocking operations from this single loop and ship results
         # back to the caller when needed.
@@ -119,39 +127,26 @@ class AsyncProcess(object):
             state.pid = process.pid
             logger.debug("[%s] created process with pid %r" % (r, state.pid))
 
-        def _process_one_message(timeout):
-            try:
-                msg = q.get(timeout=timeout)
-            except Empty:
-                pass
-            else:
-                logger.debug("[%s] got message %r" % (r, msg))
-                op = msg['op']
-                if op == 'start':
-                    _call_and_set_future(loop, msg['future'], _start)
-                elif op == 'terminate':
-                    _call_and_set_future(loop, msg['future'], process.terminate)
-                elif op == 'stop':
-                    raise SystemExit
-                else:
-                    assert 0, msg
-
-        def _maybe_notify_exit(exitcode):
-            self = selfref()  # only keep self alive when required
-            try:
-                if self is not None:
-                    self._loop.add_callback(self._on_exit, exitcode)
-            finally:
-                self = None  # lose reference
-
         while True:
             # Periodic poll as there's no simple way to poll a threading Queue
             # and a mp Process at the same time.
-            try:
-                _process_one_message(timeout=0.02)
-            except SystemExit:
-                return
-            # Did process end?
+            msg = q.get()
+            logger.debug("[%s] got message %r" % (r, msg))
+            op = msg['op']
+            if op == 'start':
+                _call_and_set_future(loop, msg['future'], _start)
+            elif op == 'terminate':
+                _call_and_set_future(loop, msg['future'], process.terminate)
+            elif op == 'stop':
+                break
+            else:
+                assert 0, msg
+
+    @classmethod
+    def _watch_process(cls, selfref, process, state, q):
+        r = repr(selfref())
+        while True:
+            sleep(0.05)
             exitcode = process.exitcode
             if exitcode is not None:
                 logger.debug("[%s] process %r exited with code %r",
@@ -162,15 +157,14 @@ class AsyncProcess(object):
                 # (see _children in multiprocessing/process.py)
                 process.join(timeout=0)
                 # Then notify the Process object
-                _maybe_notify_exit(exitcode)
+                self = selfref()  # only keep self alive when required
+                try:
+                    if self is not None:
+                        self._loop.add_callback(self._on_exit, exitcode)
+                finally:
+                    self = None  # lose reference
+                    q.put({'op': 'stop'})
                 break
-
-        while True:
-            # Idle poll
-            try:
-                _process_one_message(timeout=1e6)
-            except SystemExit:
-                return
 
     def start(self):
         """

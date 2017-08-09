@@ -1139,7 +1139,7 @@ class Client(Node):
                 keys = [key + '-' + tokenize(func, kwargs, *args)
                         for args in zip(*iterables)]
             else:
-                uid = str(uuid.uuid1())
+                uid = str(uuid.uuid4())
                 keys = [key + '-' + uid + '-' + str(i)
                         for i in range(min(map(len, iterables)))] if iterables else []
 
@@ -1383,7 +1383,7 @@ class Client(Node):
             if hash:
                 names = [type(x).__name__ + '-' + tokenize(x) for x in data]
             else:
-                names = [type(x).__name__ + '-' + uuid.uuid1().hex for x in data]
+                names = [type(x).__name__ + '-' + uuid.uuid4().hex for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)
