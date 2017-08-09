@@ -338,7 +338,7 @@ from weakref import WeakSet
 
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
-            scheduler_kwargs={}):
+            scheduler_kwargs={}, should_check_state=True):
     before = process_state()
     states = []
     states.append(process_state())
@@ -459,7 +459,8 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
     states.append(process_state())
     assert not ws
     after = process_state()
-    check_state(before, after)
+    if should_check_state:
+        check_state(before, after)
 
 
 @gen.coroutine
@@ -529,7 +530,7 @@ initial_state = process_state()
 
 def check_state(before, after):
     start = time()
-    while after['num-fds'] > before['num-fds'] + 3:
+    while after['num-fds'] > before['num-fds'] + 2:
         sleep(0.1)
         assert time() < start + 2
 
