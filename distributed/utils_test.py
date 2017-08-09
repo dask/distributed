@@ -328,6 +328,8 @@ def check_active_rpc(loop, active_rpc_timeout=0):
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
             scheduler_kwargs={}):
+    import psutil
+    print(psutil.virtual_memory())
     with pristine_loop() as loop:
         with check_active_rpc(loop, active_rpc_timeout):
             if nanny:
@@ -458,6 +460,8 @@ from .client import Client
 @gen.coroutine
 def start_cluster(ncores, scheduler_addr, loop, security=None,
                   Worker=Worker, scheduler_kwargs={}, worker_kwargs={}):
+    import psutil
+    print(psutil.virtual_memory())
     s = Scheduler(loop=loop, validate=True, security=security,
                   **scheduler_kwargs)
     done = s.start(scheduler_addr)
