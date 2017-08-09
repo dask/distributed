@@ -34,6 +34,7 @@ from .security import Security
 from .utils import ignoring, log_errors, sync, mp_context, get_ip, get_ipv6
 from .worker import Worker
 import pytest
+import psutil
 
 
 logger = logging.getLogger(__name__)
@@ -328,8 +329,7 @@ def check_active_rpc(loop, active_rpc_timeout=0):
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
             scheduler_kwargs={}):
-    import psutil
-    print(psutil.virtual_memory())
+    before = process_state()
     with pristine_loop() as loop:
         with check_active_rpc(loop, active_rpc_timeout):
             if nanny:
@@ -396,6 +396,8 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                     q.close()
                 for fn in glob('_test_worker-*'):
                     shutil.rmtree(fn)
+    after = process_state()
+    check_state(before, after)
 
 
 @gen.coroutine
@@ -442,12 +444,15 @@ def gen_test(timeout=10):
     """
     def _(func):
         def test_func():
+            before = process_state()
             with pristine_loop() as loop:
                 cor = gen.coroutine(func)
                 try:
                     loop.run_sync(cor, timeout=timeout)
                 finally:
                     loop.stop()
+            after = process_state()
+            check_state(before, after)
         return test_func
     return _
 
@@ -457,11 +462,34 @@ from .worker import Worker
 from .client import Client
 
 
+def process_state():
+    return {'num-fds': psutil.Process().num_fds(),
+            'used-memory': psutil.virtual_memory().used}
+
+
+initial_state = process_state()
+
+def check_state(before, after):
+    start = time()
+    while before['num-fds'] < after['num-fds']:
+        sleep(0.1)
+        assert time() < start + 2
+
+    start = time()
+    while after['used-memory'] > before['used-memory'] + 1e8:
+        gc.collect()
+        sleep(0.10)
+        assert time() < start + 2
+
+    assert after['used-memory'] < initial_state['used-memory'] + 1e9
+
+    print("memory", (after['used-memory'] - before['used-memory']) // 1e6,
+          "fds", after['num-fds'])
+
+
 @gen.coroutine
 def start_cluster(ncores, scheduler_addr, loop, security=None,
                   Worker=Worker, scheduler_kwargs={}, worker_kwargs={}):
-    import psutil
-    print(psutil.virtual_memory())
     s = Scheduler(loop=loop, validate=True, security=security,
                   **scheduler_kwargs)
     done = s.start(scheduler_addr)
@@ -531,6 +559,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
             cor = gen.coroutine(func)
 
         def test_func():
+            before = process_state()
             with pristine_loop() as loop:
                 with check_active_rpc(loop, active_rpc_timeout):
                     s, workers = loop.run_sync(lambda: start_cluster(ncores,
@@ -558,6 +587,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
 
                     for w in workers:
                         assert not w._comms
+            after = process_state()
+            check_state(before, after)
 
         return test_func
     return _
