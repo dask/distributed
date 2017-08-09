@@ -445,9 +445,8 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                 for proc in [w['proc'] for w in workers]:
                     proc.join(timeout=2)
 
-
                 del worker, w, proc
-                del workers
+                del workers[:]
 
                 states.append(process_state())
                 for fn in glob('_test_worker-*'):
