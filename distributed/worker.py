@@ -346,7 +346,7 @@ class WorkerBase(ServerNode):
         self.rpc.close()
         self._closed.set()
         self._remove_from_global_workers()
-        yield  super(WorkerBase, self).close()
+        yield super(WorkerBase, self).close()
 
     def __del__(self):
         self._remove_from_global_workers()

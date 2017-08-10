@@ -515,12 +515,14 @@ def check_state(before, after):
         gc.collect()
         sleep(0.10)
         after = process_state()
-        diff = (after['used-memory'] - before['used-memory']) / 1e6
-        assert time() < start + 2, diff
+        diff = (after['used-memory'] - before['used-memory']) // 1e6
+        if time() > start + 2:
+            logger.warn("This test leaked %d MB of memory", diff)
+            break
 
-    print("memory", (after['used-memory'] - before['used-memory']) / 1e6,
-          "total",  (after['used-memory'] - initial_state['used-memory']) / 1e6,
-          "fds", after['num-fds'], end=' ')
+    print("leaked memory", (after['used-memory'] - before['used-memory']) / 1e6,
+          "total leaked total",  (after['used-memory'] - initial_state['used-memory']) / 1e6,
+          "total fds", after['num-fds'])  # , end=' ')
 
     total_diff = after['used-memory'] - initial_state['used-memory']
     assert total_diff < 3e9, total_diff

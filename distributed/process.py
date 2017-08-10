@@ -8,8 +8,6 @@ from time import sleep
 import threading
 import weakref
 
-from multiprocessing.queues import Empty
-
 from .compatibility import finalize, Queue as PyQueue
 from .utils import mp_context
 

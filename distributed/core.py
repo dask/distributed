@@ -6,7 +6,6 @@ import logging
 import six
 import traceback
 import uuid
-import psutil
 import weakref
 
 from six import string_types
