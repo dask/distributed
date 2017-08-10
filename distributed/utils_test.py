@@ -18,6 +18,7 @@ import tempfile
 import textwrap
 from time import sleep
 import uuid
+import weakref
 
 import six
 
@@ -333,13 +334,12 @@ def check_active_rpc(loop, active_rpc_timeout=0):
     assert rpc.active == rpc_active
 
 
-from weakref import WeakSet
 
 
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
             scheduler_kwargs={}, should_check_state=True):
-    ws = WeakSet()
+    ws = weakref.WeakSet()
     before = process_state()
     with pristine_loop() as loop:
         with check_active_rpc(loop, active_rpc_timeout):
@@ -389,7 +389,9 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                             raise Exception("Timeout on cluster creation")
 
                 # avoid sending processes down to function
-                yield {'address': saddr}, [{'address': w['address']} for w in workers]
+                yield {'address': saddr}, [{'address': w['address'],
+                                            'proc': weakref.ref(w['proc'])}
+                                            for w in workers]
             finally:
                 logger.debug("Closing out test cluster")
 
@@ -491,6 +493,17 @@ def process_state():
 initial_state = process_state()
 
 def check_state(before, after):
+    """ Checks to ensure that process state is relatively clean
+
+    We run process_state before and after each test that creates a local
+    cluster.  This function includes the following checks to ensure that the
+    process hasn't changed too much
+
+    1.  Ensure that the number of file descriptors has not risen much
+    2.  Ensure that the amount of used memory has not risen much
+
+    This isn't yet perfect, we do leak FDs and memory.
+    """
     start = time()
     while after['num-fds'] > before['num-fds'] + 2:
         sleep(0.1)
@@ -585,6 +598,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
 
         def test_func():
             before = process_state()
+            result = None
             with pristine_loop() as loop:
                 with check_active_rpc(loop, active_rpc_timeout):
                     s, workers = loop.run_sync(lambda: start_cluster(ncores,
@@ -604,7 +618,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                         loop.run_sync(f)
                         args = c + args
                     try:
-                        loop.run_sync(lambda: cor(*args), timeout=timeout)
+                        result = loop.run_sync(lambda: cor(*args), timeout=timeout)
                     finally:
                         if client:
                             loop.run_sync(c[0]._close)
@@ -618,6 +632,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
             import gc; gc.collect()
             after = process_state()
             check_state(before, after)
+            return result
 
         return test_func
     return _

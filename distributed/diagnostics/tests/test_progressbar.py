@@ -81,7 +81,7 @@ def check_bar_completed(capsys, width=40):
 
 
 def test_progress_function(loop, capsys):
-    with cluster() as (s, [a, b]):
+    with cluster(should_check_state=False) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             f = c.submit(lambda: 1)
             g = c.submit(lambda: 2)
