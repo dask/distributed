@@ -4311,8 +4311,6 @@ def test_threadsafe(loop):
                 results = list(e.map(f, range(20)))
                 assert results and all(results)
                 del results
-            import gc; gc.collect()
-            sleep(0.4)
 
 
 @slow

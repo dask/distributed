@@ -624,7 +624,7 @@ def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     if func not in cache:
         b = pickle.dumps(func)
-        if len(b) < 10000:
+        if len(b) < 100000:
             cache[func] = b
         else:
             return b
