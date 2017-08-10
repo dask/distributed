@@ -22,7 +22,7 @@ from distributed.utils_test import (gen_cluster, cluster, inc, loop, slow, div,
 
 
 def test_submit_after_failed_worker_sync(loop):
-    with cluster() as (s, [a, b]):
+    with cluster(active_rpc_timeout=10) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -62,7 +62,7 @@ def test_submit_after_failed_worker(c, s, a, b):
 
 
 def test_gather_after_failed_worker(loop):
-    with cluster() as (s, [a, b]):
+    with cluster(active_rpc_timeout=10) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
@@ -73,7 +73,7 @@ def test_gather_after_failed_worker(loop):
 
 @slow
 def test_gather_then_submit_after_failed_workers(loop):
-    with cluster(nworkers=4) as (s, [w, x, y, z]):
+    with cluster(nworkers=4, active_rpc_timeout=10) as (s, [w, x, y, z]):
         with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(20))
             wait(L)

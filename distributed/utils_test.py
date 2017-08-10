@@ -458,7 +458,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 
-def gen_test(timeout=10):
+def gen_test(timeout=10, should_check_state=True):
     """ Coroutine test
 
     @gen_test(timeout=5)
@@ -475,7 +475,8 @@ def gen_test(timeout=10):
                 finally:
                     loop.stop()
             after = process_state()
-            check_state(before, after)
+            if should_check_state:
+                check_state(before, after)
         return test_func
     return _
 
