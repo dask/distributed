@@ -510,7 +510,7 @@ class Scheduler(ServerNode):
         self.close_comms()
         self.status = 'closed'
         self.stop()
-        super(Scheduler, self).close()
+        yield super(Scheduler, self).close()
 
     @gen.coroutine
     def close_worker(self, stream=None, worker=None):
@@ -2007,7 +2007,7 @@ class Scheduler(ServerNode):
             if isinstance(state, gen.Future):
                 state = yield state
             try:
-                while True:
+                while self.status == 'running':
                     if state is None:
                         response = function(self)
                     else:
@@ -2015,6 +2015,8 @@ class Scheduler(ServerNode):
                     yield comm.write(response)
                     yield gen.sleep(interval)
             except (EnvironmentError, CommClosedError):
+                pass
+            finally:
                 if teardown:
                     teardown(self, state)
 

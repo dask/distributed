@@ -346,7 +346,7 @@ class WorkerBase(ServerNode):
         self.rpc.close()
         self._closed.set()
         self._remove_from_global_workers()
-        super(WorkerBase, self).close()
+        yield  super(WorkerBase, self).close()
 
     def __del__(self):
         self._remove_from_global_workers()
@@ -624,7 +624,10 @@ def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     if func not in cache:
         b = pickle.dumps(func)
-        cache[func] = b
+        if len(b) < 10000:
+            cache[func] = b
+        else:
+            return b
     return cache[func]
 
 
@@ -1570,9 +1573,6 @@ class Worker(WorkerBase):
 
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
-
-        if key not in self.types:
-            self.types[key] = type(value)
 
         self.types[key] = type(value)
 

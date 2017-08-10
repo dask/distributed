@@ -285,7 +285,10 @@ class Future(WrappedKey):
     def __del__(self):
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
-            self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+            try:
+                self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+            except RuntimeError:  # closed event loop
+                pass
 
     def __str__(self):
         if self.type:

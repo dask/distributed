@@ -329,6 +329,21 @@ def test_get_sync(loop):
             assert c.get({'x': (inc, 1)}, 'x') == 2
 
 
+def test_no_future_referneces(loop):
+    from weakref import WeakSet
+    ws = WeakSet()
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            futures = c.map(inc, range(10))
+            ws.update(futures)
+            del futures
+            import gc; gc.collect()
+            start = time()
+            while list(ws):
+                sleep(0.01)
+                assert time() < start + 2
+
+
 def test_get_sync_optimize_graph_passes_through(loop):
     import dask.bag as db
     import dask
@@ -3470,7 +3485,7 @@ def test_threaded_get_within_distributed(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             import dask.multiprocessing
-            for get in [dask.async.get_sync,
+            for get in [dask.local.get_sync,
                         dask.multiprocessing.get,
                         dask.threaded.get]:
                 def f():
@@ -4292,9 +4307,12 @@ def test_threadsafe(loop):
                 return total.result()
 
             from concurrent.futures import ThreadPoolExecutor
-            e = ThreadPoolExecutor(20)
-            results = list(e.map(f, range(20)))
-            assert results and all(results)
+            with ThreadPoolExecutor(20) as e:
+                results = list(e.map(f, range(20)))
+                assert results and all(results)
+                del results
+            import gc; gc.collect()
+            sleep(0.4)
 
 
 @slow

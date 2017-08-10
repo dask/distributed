@@ -339,46 +339,27 @@ from weakref import WeakSet
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
             scheduler_kwargs={}, should_check_state=True):
-    before = process_state()
-    states = []
-    states.append(process_state())
     ws = WeakSet()
+    before = process_state()
     with pristine_loop() as loop:
-        states.append('inside pristine loop')
-        states.append(process_state())
         with check_active_rpc(loop, active_rpc_timeout):
-            states.append('inside check active rpc')
-            states.append(process_state())
             if nanny:
                 _run_worker = run_nanny
             else:
                 _run_worker = run_worker
 
-            states.append(process_state())
-
-            states.append('create scheduler queue')
             # The scheduler queue will receive the scheduler's address
             scheduler_q = mp_context.Queue()
-            states.append(process_state())
 
-            states.append('create scheduler process')
             # Launch scheduler
             scheduler = mp_context.Process(target=run_scheduler,
                                            args=(scheduler_q, nworkers + 1),
                                            kwargs=scheduler_kwargs)
             ws.add(scheduler)
             scheduler.daemon = True
-            states.append(process_state())
-            states.append('start scheduler process')
             scheduler.start()
-            states.append(process_state())
-
-            sleep(0.5)
-            states.append('sleep')
-            states.append(process_state())
 
             # Launch workers
-            states.append('create %d workers' % nworkers)
             workers = []
             for i in range(nworkers):
                 q = mp_context.Queue()
@@ -389,20 +370,13 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                                           kwargs=kwargs)
                 ws.add(proc)
                 workers.append({'proc': proc, 'queue': q, 'dir': fn})
-            states.append(process_state())
 
-            states.append('start %d workers' % nworkers)
             for worker in workers:
                 worker['proc'].start()
-            states.append(process_state())
-            states.append('get address from worker queue')
             for worker in workers:
                 worker['address'] = worker['queue'].get()
-            states.append(process_state())
 
-            states.append('get address from scheduler queue')
             saddr = scheduler_q.get()
-            states.append(process_state())
 
             start = time()
             try:
@@ -414,34 +388,28 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                         if time() - start > 5:
                             raise Exception("Timeout on cluster creation")
 
+                # avoid sending processes down to function
                 yield {'address': saddr}, [{'address': w['address']} for w in workers]
             finally:
                 logger.debug("Closing out test cluster")
 
-                states.append('send disconnect signal')
                 loop.run_sync(lambda: disconnect_all([w['address'] for w in workers],
                                                      timeout=0.5))
                 loop.run_sync(lambda: disconnect(saddr, timeout=0.5))
-                states.append(process_state())
 
-                states.append('scheduler terminate')
                 scheduler.terminate()
                 scheduler_q.close()
                 scheduler_q._reader.close()
                 scheduler_q._writer.close()
-                scheduler.join()
-                states.append(process_state())
-                del scheduler
 
-                states.append('pre-worker close')
                 for w in workers:
                     w['proc'].terminate()
                     w['queue'].close()
                     w['queue']._reader.close()
                     w['queue']._writer.close()
-                states.append(process_state())
 
-                states.append('joins')
+                scheduler.join(2)
+                del scheduler
                 for proc in [w['proc'] for w in workers]:
                     proc.join(timeout=2)
 
@@ -449,14 +417,8 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                     del worker, w, proc
                 del workers[:]
 
-                states.append(process_state())
                 for fn in glob('_test_worker-*'):
                     shutil.rmtree(fn)
-                states.append(process_state())
-        states.append(process_state())
-    states.append('close loop')
-    states.append(process_state())
-    states.append(process_state())
     assert not ws
     after = process_state()
     if should_check_state:
@@ -538,12 +500,16 @@ def check_state(before, after):
     while after['used-memory'] > before['used-memory'] + 1e8:
         gc.collect()
         sleep(0.10)
-        assert time() < start + 2
+        after = process_state()
+        diff = (after['used-memory'] - before['used-memory']) / 1e6
+        assert time() < start + 2, diff
 
-    assert after['used-memory'] < initial_state['used-memory'] + 1e9
+    print("memory", (after['used-memory'] - before['used-memory']) / 1e6,
+          "total",  (after['used-memory'] - initial_state['used-memory']) / 1e6,
+          "fds", after['num-fds'], end=' ')
 
-    print("memory", (after['used-memory'] - before['used-memory']) // 1e6,
-          "fds", after['num-fds'])
+    total_diff = after['used-memory'] - initial_state['used-memory']
+    assert total_diff < 2e9, total_diff
 
 
 @gen.coroutine
@@ -638,14 +604,18 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                         loop.run_sync(f)
                         args = c + args
                     try:
-                        return loop.run_sync(lambda: cor(*args), timeout=timeout)
+                        loop.run_sync(lambda: cor(*args), timeout=timeout)
                     finally:
                         if client:
                             loop.run_sync(c[0]._close)
                         loop.run_sync(lambda: end_cluster(s, workers))
 
-                    for w in workers:
-                        assert not w._comms
+                    # for w in workers:
+                    #     assert not w._comms
+            for w in workers:
+                if hasattr(w, 'data'):
+                    w.data.clear()
+            import gc; gc.collect()
             after = process_state()
             check_state(before, after)
 

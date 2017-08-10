@@ -7,6 +7,7 @@ import six
 import traceback
 import uuid
 import psutil
+import weakref
 
 from six import string_types
 
@@ -97,6 +98,7 @@ class Server(object):
         self.digests = None
         self.events = None
         self.event_counts = None
+        self._ongoing_coroutines = weakref.WeakSet()
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
@@ -272,6 +274,7 @@ class Server(object):
                     try:
                         result = handler(comm, **msg)
                         if type(result) is gen.Future:
+                            self._ongoing_coroutines.add(result)
                             result = yield result
                     except CommClosedError as e:
                         logger.warning("Lost connection to %r: %s", address, e)
@@ -301,8 +304,18 @@ class Server(object):
                     logger.error("Failed while closing connection to %r: %s",
                                  address, e)
 
+    @gen.coroutine
     def close(self):
         self.listener.stop()
+        for comm in self._comms:
+            comm.close()
+        for cb in self._ongoing_coroutines:
+            cb.cancel()
+        for i in range(10):
+            if all(cb.cancelled() for c in self._ongoing_coroutines):
+                break
+            else:
+                yield gen.sleep(0.01)
 
 
 def pingpong(comm):
