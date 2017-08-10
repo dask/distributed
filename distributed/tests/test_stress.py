@@ -47,7 +47,8 @@ def test_stress_gc(loop, func, n):
 
 @pytest.mark.skipif(sys.platform.startswith('win'),
                     reason="test can leave dangling RPC objects")
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4, timeout=None)
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4, timeout=None,
+             should_check_state=False)
 def test_cancel_stress(c, s, *workers):
     da = pytest.importorskip('dask.array')
     x = da.random.random((40, 40), chunks=(1, 1))

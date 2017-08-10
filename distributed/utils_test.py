@@ -492,6 +492,7 @@ def process_state():
 
 initial_state = process_state()
 
+
 def check_state(before, after):
     """ Checks to ensure that process state is relatively clean
 
@@ -522,7 +523,7 @@ def check_state(before, after):
           "fds", after['num-fds'], end=' ')
 
     total_diff = after['used-memory'] - initial_state['used-memory']
-    assert total_diff < 2e9, total_diff
+    assert total_diff < 3e9, total_diff
 
 
 @gen.coroutine
@@ -579,7 +580,7 @@ def iscoroutinefunction(f):
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
-                worker_kwargs={}, active_rpc_timeout=0):
+                worker_kwargs={}, active_rpc_timeout=0, should_check_state=True):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -631,7 +632,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                     w.data.clear()
             import gc; gc.collect()
             after = process_state()
-            check_state(before, after)
+            if should_check_state:
+                check_state(before, after)
             return result
 
         return test_func
