@@ -19,6 +19,7 @@ from tornado.ioloop import TimeoutError
 
 import distributed
 from distributed import Nanny, Client, get_client, wait, default_client
+from distributed.compatibility import WINDOWS
 from distributed.core import rpc, connect
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
@@ -886,6 +887,7 @@ def test_global_workers(s, a, b):
     assert len(_global_workers) == n - 2
 
 
+@pytest.mark.skipif(WINDOWS, reason="file descriptors")
 @gen_cluster(ncores=[])
 def test_worker_fds(s):
     psutil = pytest.importorskip('psutil')

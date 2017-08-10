@@ -123,7 +123,7 @@ def test_simple():
         assert dt < 2.0
 
 
-@gen_test()
+@gen_test(should_check_state=False)
 def test_exitcode():
     q = mp_context.Queue()
 
