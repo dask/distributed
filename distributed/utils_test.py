@@ -27,6 +27,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
+from .compatibility import WINDOWS
 from .config import config, initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
@@ -487,8 +488,12 @@ from .client import Client
 
 
 def process_state():
-    return {'num-fds': psutil.Process().num_fds(),
-            'used-memory': psutil.virtual_memory().used}
+    d = {}
+    if not WINDOWS:
+        d['num-fds'] = psutil.Process().num_fds()
+
+    d['used-memory'] = psutil.virtual_memory().used
+    return d
 
 
 initial_state = process_state()
@@ -506,10 +511,11 @@ def check_state(before, after):
 
     This isn't yet perfect, we do leak FDs and memory.
     """
-    start = time()
-    while after['num-fds'] > before['num-fds'] + 2:
-        sleep(0.1)
-        assert time() < start + 2
+    if not WINDOWS:
+        start = time()
+        while after['num-fds'] > before['num-fds'] + 2:
+            sleep(0.1)
+            assert time() < start + 2
 
     start = time()
     while after['used-memory'] > before['used-memory'] + 1e8:
