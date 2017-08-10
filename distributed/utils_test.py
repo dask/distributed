@@ -528,8 +528,7 @@ def check_state(before, after):
             break
 
     print("leaked memory", (after['used-memory'] - before['used-memory']) / 1e6,
-          "total leaked total",  (after['used-memory'] - initial_state['used-memory']) / 1e6,
-          "total fds", after['num-fds'])  # , end=' ')
+          "total leaked total",  (after['used-memory'] - initial_state['used-memory']) / 1e6)  # , end=' ')
 
     total_diff = after['used-memory'] - initial_state['used-memory']
     assert total_diff < 3e9, total_diff
