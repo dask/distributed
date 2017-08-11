@@ -156,6 +156,8 @@ class WorkerBase(ServerNode):
             'upload_file': self.upload_file,
             'start_ipython': self.start_ipython,
             'keys': self.keys,
+            'register_worker_environments': self.register_worker_environments,
+            'deregister_worker_environments': self.deregister_worker_environments,
         }
 
         super(WorkerBase, self).__init__(handlers, io_loop=self.loop,
@@ -861,6 +863,8 @@ class Worker(WorkerBase):
         A batched stream along which we communicate to the scheduler
     * **log**: ``[(message)]``
         A structured and queryable log.  See ``Worker.story``
+    * **environments** ``{str: WorkerEnvironment}``:
+        A mapping of environment names to instances of environments
 
     **Volatile State**
 
@@ -1002,6 +1006,7 @@ class Worker(WorkerBase):
         self.threads = dict()
         self.exceptions = dict()
         self.tracebacks = dict()
+        self.environments = dict()
 
         self.priorities = dict()
         self.priority_counter = 0
@@ -2233,6 +2238,47 @@ class Worker(WorkerBase):
                 assert self._client.status == 'running'
         return self._client
 
+    @gen.coroutine
+    def register_worker_environments(self, stream=None, environments=None):
+        result = {}
+        for name, env in environments.items():
+            if name not in self.environments:
+                try:
+                    env = pickle.loads(env)
+                    meets_condition = yield self.executor_submit('condition', env.condition)
+                    # TODO: Should this be in some kind of "while running" loop with
+                    # a timeout?
+                    if gen.is_future(meets_condition):
+                        meets_condition = meets_condition.result()
+                    if meets_condition:
+                        # TODO: This currently blocks. I expect that that is
+                        # not desirable, as a long setup task may look like a
+                        # worker that's become unresponsive.
+                        yield self.executor_submit('setup', env.setup)
+                        self.environments[name] = env
+                        result[name] = True
+                        logger.info("Added worker %s to environment %s",
+                                    self.address, name)
+                    else:
+                        result[name] = False
+                except Exception as e:
+                    logger.warning("Exception in register_worker_environments", e)
+                    result[name] = error_message(e)
+        raise gen.Return(result)
+
+    @gen.coroutine
+    def deregister_worker_environments(self, stream=None, environments=None):
+        result = {}
+        for name in environments:
+            env = self.environments.get(name)
+            if env:
+                try:
+                    yield env.teardown()
+                except Exception as e:
+                    logger.warning("Exception in deregister_worker_environments", e)
+                    result[name] = error_message(e)
+        raise gen.Return(result)
+
 
 def get_worker():
     """ Get the worker currently running this task
@@ -2260,6 +2306,21 @@ def get_worker():
             if worker:
                 return worker
         raise ValueError("No workers found")
+
+
+def get_worker_environments():
+    """Get the ``WorkerEnvironment``s attached to this worker
+
+    Examples
+    --------
+    From a client
+
+    >>> client.run(get_worker_environments)
+    {'tcp://127.0.0.1:65494': {'myenv': <__main__.WorkerEnvironment at 0x10c558160>}}
+
+    """
+    worker = get_worker()
+    return worker.environments
 
 
 def get_client(address=None, timeout=3):

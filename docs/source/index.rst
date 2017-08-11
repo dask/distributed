@@ -105,6 +105,7 @@ Contents
    adaptive
    asynchronous
    configuration
+   worker-environments
    ec2
    local-cluster
    ipython

@@ -14,6 +14,7 @@ from .utils import sync
 from .variable import Variable
 from .worker import Worker, get_worker, get_client, secede
 from .worker_client import local_client, worker_client
+from .environments import WorkerEnvironment
 
 from ._version import get_versions
 versions = get_versions()

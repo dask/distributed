@@ -178,6 +178,10 @@ class Scheduler(ServerNode):
         Information about each worker
     * **host_info:** ``{hostname: dict}``:
         Information about each worker host
+    * **worker_environments:** ``{environment_name: environment}``
+       A dictionary
+    * **environment_workers** ``{environment_name: {workers}}``
+       Which environments apply to which workers
     * **worker_bytes:** ``{worker: int}``:
         Number of bytes in memory on each worker
     * **occupancy:** ``{worker: time}``
@@ -293,6 +297,10 @@ class Scheduler(ServerNode):
         self.aliases = dict()
         self.occupancy = dict()
 
+        # Environment state
+        self.worker_environments = {}
+        self.environment_workers = {}
+
         self._worker_collections = [self.ncores, self.workers,
                                     self.worker_info, self.host_info, self.worker_resources,
                                     self.worker_restrictions, self.host_restrictions,
@@ -344,7 +352,10 @@ class Scheduler(ServerNode):
                          'run_function': self.run_function,
                          'update_data': self.update_data,
                          'set_resources': self.add_resources,
-                         'retire_workers': self.retire_workers}
+                         'retire_workers': self.retire_workers,
+                         'register_worker_environments': self.register_worker_environments,
+                         'deregister_worker_environments': self.deregister_worker_environments,
+                         }
 
         self._transitions = {
             ('released', 'waiting'): self.transition_released_waiting,
@@ -486,6 +497,80 @@ class Scheduler(ServerNode):
         self.loop.add_callback(self.reevaluate_occupancy)
 
         return self.finished()
+
+    @gen.coroutine
+    def register_worker_environments(self, stream=None, environments=None, workers=None):
+        """Register worker environments.
+
+        Parameters
+        ----------
+        environments : dict
+            Keys should be environment names, and values should be
+            instances of :class:`Environment`
+        workers : iterable or str, default None
+            Limit candidate workers to ``workers``. Considers all
+            workers by default
+
+        Notes
+        -----
+        Adding workers to the environment will update the state variables
+
+        - ``self.workers_environments``
+        - ``self.environments_workers``
+        """
+        for name, env in environments.items():
+            if name in self.worker_environments and self.worker_environments[name] != env:
+                raise ValueError("{} has already been registered.".format(name))
+            # TODO: Should this deserialize the environment here? Currently
+            # scheduler.worker_environments.values() is a bunch of binary, the
+            # pickled version of the `env`, which isn't the most user-friendly.
+            # However, we don't want to encourage touching the instance of `env`
+            # scheduler, since it's detached from the real one on the worker.
+            # Also, is it possible for a `Client` and `Worker` to have access to
+            # some variables that the `Scheduler` doesn't, causing a failure here?
+            self.worker_environments[name] = env
+            self.environment_workers[name] = set()
+
+        if workers is None:
+            workers = list(self.worker_info)
+        elif isinstance(workers, six.string_types):
+            workers = [workers]
+
+        results = yield [self.rpc(addr=worker).register_worker_environments(
+            environments=environments) for worker in workers]
+        exceptions = defaultdict(list)
+        # results is a List[Dict[env, result]], one dict per worker
+        # we want {'env-name': [exceptions]}
+
+        for worker, result in zip(workers, results):
+            for name, val in result.items():
+                if val is True:
+                    self.environment_workers[name].add(worker)
+                elif val is False:
+                    # condition ran, but didn't pass
+                    pass
+                else:
+                    exceptions[name].append(val)
+
+        raise gen.Return(exceptions)
+
+    @gen.coroutine
+    def deregister_worker_environments(self, stream=None, environments=None, workers=None):
+        for name in environments:
+            if name not in self.environment_workers:
+                continue
+            if workers is None:
+                worker_set = set(self.worker_info)
+            elif isinstance(workers, six.string_types):
+                worker_set = {workers}
+            else:
+                worker_set = set(workers)
+
+            worker_set = worker_set & self.environment_workers[name]
+            results = yield [self.rpc(addr=worker).deregister_worker_environments(
+                environments=environments) for worker in worker_set]
+            self.environment_workers[name] -= worker_set
+
 
     @gen.coroutine
     def finished(self):
@@ -639,6 +724,10 @@ class Scheduler(ServerNode):
             if self.ncores[address] > len(self.processing[address]):
                 self.idle.add(address)
 
+            if self.worker_environments:
+                self.loop.add_callback(self.register_worker_environments,
+                                       environments=self.worker_environments,
+                                       workers=[address])
             for plugin in self.plugins[:]:
                 try:
                     plugin.add_worker(scheduler=self, worker=address)
@@ -910,6 +999,8 @@ class Scheduler(ServerNode):
                 self.idle.remove(address)
             if address in self.saturated:
                 self.saturated.remove(address)
+            for worker_sets in self.environment_workers.values():
+                worker_sets.discard(address)
 
             recommendations = OrderedDict()
 

@@ -42,6 +42,7 @@ from .cfexecutor import ClientExecutor
 from .compatibility import (Queue as pyQueue, Empty, isqueue,
                             get_thread_identity, html_escape)
 from .core import connect, rpc, clean_exception, CommClosedError
+from .environments import WorkerEnvironment
 from .metrics import time
 from .node import Node
 from .protocol import to_serialize
@@ -1793,6 +1794,85 @@ class Client(Node):
          '192.168.0.101:9000': 'running}
         """
         return self.sync(self._run, function, *args, **kwargs)
+
+    @gen.coroutine
+    def _register_worker_environment(self, name, environment=None, condition=None,
+                                     setup=None, teardown=None):
+        if environment is None:
+            environment = WorkerEnvironment(condition=condition, setup=setup,
+                                            teardown=teardown)
+        elif not isinstance(environment, WorkerEnvironment):
+            raise TypeError("Expected an instance of `WorkerEnvironment` for "
+                            "the `environment` argument, but got {} instead. "
+                            "Did you mean to specify the `condition=` keyword?"
+                            .format(type(environment)))
+
+        environment._name = name
+        env = {name: dumps(environment)}
+        responses = yield self.scheduler.register_worker_environments(environments=env)
+        # TODO: A better way of raising all the exceptions, rather than just the first?
+        # perhaps log_errors?
+        if responses is not None:
+            for key, exc_list in responses.items():
+                for exc in exc_list:
+                    six.reraise(*clean_exception(**exc))
+
+    def register_worker_environment(self, name, environment=None, condition=None,
+                                    setup=None, teardown=None, asynchronous=None,
+                                    callback_timeout=None):
+        """Register a new ``WorkerEnvironment``
+
+        The ``WorkerEnvironment.condition`` method is executed on each worker
+        in the cluster. For those workers where the condition is true, the
+        ``setup`` method is run.
+
+        Parameters
+        ----------
+        name : str
+            A unique identifier for a worker environment
+        environment : WorkerEnvironment, optional
+        condition, setup, teardown : callable
+            Used to create a new WorkerEnvironment when `environment` is None
+
+        Notes
+        -----
+        When the ``condition`` (and possibly ``setup``) methods run cleanly
+        on the workers, there is no return value. If an exception is raised
+        on the worker, it is reraised on the client.
+
+        See Also
+        --------
+        WorkerEnvironment
+        Scheduler.register_worker_environments
+        """
+        return self.sync(self._register_worker_environment, name=name,
+                         environment=environment, condition=condition, setup=setup,
+                         teardown=teardown, asynchronous=asynchronous,
+                         callback_timeout=callback_timeout)
+
+    @gen.coroutine
+    def _deregister_worker_environment(self, name, workers=None):
+        responses = yield self.scheduler.deregister_worker_environments(environments=[name])
+        if responses is not None:
+            pass
+
+    def deregister_worker_environment(self, name, workers=None, asynchronous=None,
+                                      callback_timeout=None):
+        """
+        Deregister an environment from the scheduler, running the ``teardown``
+        method on the workers if applicable.
+
+        Parameters
+        ----------
+        name : str
+            Name of the environment to deregister.
+        workers : iterable
+            Set of worker addresses to limit the deregistration to. Other
+            workers in the environment will be untouched.
+        """
+        return self.sync(self._deregister_worker_environment, name=name,
+                         workers=workers, asynchronous=asynchronous,
+                         callback_timeout=callback_timeout)
 
     @gen.coroutine
     def _run_coroutine(self, function, *args, **kwargs):
