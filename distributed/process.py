@@ -120,8 +120,6 @@ class AsyncProcess(object):
             logger.debug("[%s] created process with pid %r" % (r, state.pid))
 
         while True:
-            # Periodic poll as there's no simple way to poll a threading Queue
-            # and a mp Process at the same time.
             msg = q.get()
             logger.debug("[%s] got message %r" % (r, msg))
             op = msg['op']
