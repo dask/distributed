@@ -285,7 +285,10 @@ class Future(WrappedKey):
     def __del__(self):
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
-            self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+            try:
+                self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+            except RuntimeError:  # closed event loop
+                pass
 
     def __str__(self):
         if self.type:
@@ -873,10 +876,6 @@ class Client(Node):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
-    def close(self, **kwargs):
-        """ Close this client and its connection to the scheduler """
-        return self.sync(self._close, **kwargs)
-
     @gen.coroutine
     def _close(self, fast=False):
         """ Send close signal and wait until scheduler completes """
@@ -907,13 +906,12 @@ class Client(Node):
     _shutdown = _close
 
     def close(self, timeout=10):
-        """ Send close signal and wait until scheduler terminates
+        """ Close this client
 
-        This cancels all currently running tasks, clears the state of the
-        scheduler, and shuts down all workers and scheduler.
+        Clients will also close automatically when your Python session ends
 
-        You do not need to call this when you finish your session.  You only
-        need to call this if you want to take down the distributed cluster.
+        If you started a client without arguments like ``Client()`` then this
+        will also close the local cluster that was started at the same time.
 
         See Also
         --------
@@ -1139,7 +1137,7 @@ class Client(Node):
                 keys = [key + '-' + tokenize(func, kwargs, *args)
                         for args in zip(*iterables)]
             else:
-                uid = str(uuid.uuid1())
+                uid = str(uuid.uuid4())
                 keys = [key + '-' + uid + '-' + str(i)
                         for i in range(min(map(len, iterables)))] if iterables else []
 
@@ -1193,7 +1191,7 @@ class Client(Node):
         if direct is None:
             try:
                 w = get_worker()
-            except:
+            except Exception:
                 direct = False
             else:
                 if w.scheduler.address == self.scheduler.address:
@@ -1383,7 +1381,7 @@ class Client(Node):
             if hash:
                 names = [type(x).__name__ + '-' + tokenize(x) for x in data]
             else:
-                names = [type(x).__name__ + '-' + uuid.uuid1().hex for x in data]
+                names = [type(x).__name__ + '-' + uuid.uuid4().hex for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)
@@ -1393,7 +1391,7 @@ class Client(Node):
         if direct is None:
             try:
                 w = get_worker()
-            except:
+            except Exception:
                 direct = False
             else:
                 if w.scheduler.address == self.scheduler.address:

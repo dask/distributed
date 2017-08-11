@@ -68,7 +68,7 @@ def funcname(func):
         func = func.func
     try:
         return func.__name__
-    except:
+    except AttributeError:
         return str(func)
 
 
@@ -346,7 +346,7 @@ def key_split(s):
             if result[0] == '<':
                 result = result.strip('<>').split()[0].split('.')[-1]
             return result
-    except:
+    except Exception:
         return 'Other'
 
 
@@ -410,7 +410,10 @@ def log_errors(pdb=False):
     except (CommClosedError, gen.Return):
         raise
     except Exception as e:
-        logger.exception(e)
+        try:
+            logger.exception(e)
+        except TypeError:  # logger becomes None during process cleanup
+            pass
         if pdb:
             import pdb; pdb.set_trace()
         raise
@@ -478,7 +481,7 @@ def truncate_exception(e, n=10000):
         try:
             return type(e)("Long error message",
                            str(e)[:n])
-        except:
+        except Exception:
             return Exception("Long error message",
                               type(e),
                               str(e)[:n])

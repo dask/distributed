@@ -65,6 +65,7 @@ PENDING = ('waiting', 'ready', 'constrained')
 PROCESSING = ('waiting', 'ready', 'constrained', 'executing', 'long-running')
 READY = ('ready', 'constrained')
 
+
 _global_workers = []
 
 
@@ -346,6 +347,7 @@ class WorkerBase(ServerNode):
         self.rpc.close()
         self._closed.set()
         self._remove_from_global_workers()
+        yield super(WorkerBase, self).close()
 
     def __del__(self):
         self._remove_from_global_workers()
@@ -625,7 +627,10 @@ def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     if func not in cache:
         b = pickle.dumps(func)
-        cache[func] = b
+        if len(b) < 100000:
+            cache[func] = b
+        else:
+            return b
     return cache[func]
 
 
@@ -722,7 +727,7 @@ def convert_args_to_str(args, max_len=None):
     for i, arg in enumerate(args):
         try:
             sarg = repr(arg)
-        except:
+        except Exception:
             sarg = "< could not convert arg to str >"
         strs[i] = sarg
         length += len(sarg) + 2
@@ -741,7 +746,7 @@ def convert_kwargs_to_str(kwargs, max_len=None):
     for i, (argname, arg) in enumerate(kwargs.items()):
         try:
             sarg = repr(arg)
-        except:
+        except Exception:
             sarg = "< could not convert arg to str >"
         skwarg = repr(argname) + ": " + sarg
         strs[i] = skwarg
@@ -1571,6 +1576,7 @@ class Worker(WorkerBase):
 
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
+
         self.types[key] = type(value)
 
         for dep in self.dependents.get(key, ()):
