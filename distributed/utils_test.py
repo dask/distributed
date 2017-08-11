@@ -18,6 +18,7 @@ import tempfile
 import textwrap
 from time import sleep
 import uuid
+import warnings
 import weakref
 
 import six
@@ -524,7 +525,7 @@ def check_state(before, after):
         after = process_state()
         diff = (after['used-memory'] - before['used-memory']) // 1e6
         if time() > start + 2:
-            logger.warn("This test leaked %d MB of memory", diff)
+            warnings.warn("This test leaked %d MB of memory" % diff)
             break
 
     print("leaked memory", (after['used-memory'] - before['used-memory']) / 1e6,
