@@ -4,7 +4,6 @@ import atexit
 from datetime import timedelta
 import logging
 import sys
-from time import sleep
 import threading
 import weakref
 
