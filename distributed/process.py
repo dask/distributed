@@ -143,26 +143,27 @@ class AsyncProcess(object):
     @classmethod
     def _watch_process(cls, selfref, process, state, q):
         r = repr(selfref())
-        while True:
+        while process.pid is None:
             sleep(0.05)
-            exitcode = process.exitcode
-            if exitcode is not None:
-                logger.debug("[%s] process %r exited with code %r",
-                             r, state.pid, exitcode)
-                state.is_alive = False
-                state.exitcode = exitcode
-                # Make sure the process is removed from the global list
-                # (see _children in multiprocessing/process.py)
-                process.join(timeout=0)
-                # Then notify the Process object
-                self = selfref()  # only keep self alive when required
-                try:
-                    if self is not None:
-                        self._loop.add_callback(self._on_exit, exitcode)
-                finally:
-                    self = None  # lose reference
-                    q.put({'op': 'stop'})
-                break
+
+        process.join()
+        exitcode = process.exitcode
+        if exitcode is not None:
+            logger.debug("[%s] process %r exited with code %r",
+                         r, state.pid, exitcode)
+            state.is_alive = False
+            state.exitcode = exitcode
+            # Make sure the process is removed from the global list
+            # (see _children in multiprocessing/process.py)
+            process.join(timeout=0)
+            # Then notify the Process object
+            self = selfref()  # only keep self alive when required
+            try:
+                if self is not None:
+                    self._loop.add_callback(self._on_exit, exitcode)
+            finally:
+                self = None  # lose reference
+                q.put({'op': 'stop'})
 
     def start(self):
         """

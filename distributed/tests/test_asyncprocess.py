@@ -44,7 +44,7 @@ def threads_info(q):
     q.put(threading.current_thread().name)
 
 
-@gen_test()
+@gen_test(should_check_state=False)
 def test_simple():
     to_child = mp_context.Queue()
     from_child = mp_context.Queue()
