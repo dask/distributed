@@ -514,9 +514,12 @@ def check_state(before, after):
     """
     if not WINDOWS:
         start = time()
-        while after['num-fds'] > before['num-fds'] + 2:
+        while after['num-fds'] > before['num-fds']:
             sleep(0.1)
-            assert time() < start + 2
+            if time() > start + 2:
+                diff = after['num-fds'] - before['num-fds']
+                warnings.warn("This test leaked %d file descriptors" % diff)
+                break
 
     start = time()
     while after['used-memory'] > before['used-memory'] + 1e8:
