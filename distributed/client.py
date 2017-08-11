@@ -2777,10 +2777,11 @@ class Client(Node):
         return collections_to_dsk(collections, *args, **kwargs)
 
 
-def Executor(*args, **kwargs):
+class Executor(Client):
     """ Deprecated: see Client """
-    warnings.warn("Executor has been renamed to Client")
-    return Client(*args, **kwargs)
+    def __init__(self, *args, **kwargs):
+        warnings.warn("Executor has been renamed to Client")
+        super(Executor, self).__init__(*args, **kwargs)
 
 
 def CompatibleExecutor(*args, **kwargs):
