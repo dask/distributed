@@ -386,7 +386,7 @@ def key_split_group(x):
     typ = type(x)
     if typ is tuple:
         return x[0]
-    elif typ is str:
+    elif typ is str or typ is six.text_type:
         if x[0] == '(':
             return x.split(',', 1)[0].strip('()"\'')
         elif len(x) == 32 and re.match(r'[a-f0-9]{32}', x):
@@ -535,8 +535,8 @@ def tokey(o):
     >>> tokey(1)
     '1'
     """
-    t = type(o)
-    if t is str or t is bytes:
+    typ = type(o)
+    if typ is six.binary_type or typ is six.text_type:
         return o
     else:
         return str(o)
@@ -546,9 +546,9 @@ def validate_key(k):
     """Validate a key as received on a stream.
     """
     typ = type(k)
-    if typ is not str and typ is not bytes:
+    if typ is not six.text_type and typ is not six.binary_type:
         raise TypeError("Unexpected key type %s (value: %r)"
-                        % (type(k), k))
+                        % (typ, k))
 
 
 def _maybe_complex(task):
