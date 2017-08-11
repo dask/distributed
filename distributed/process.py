@@ -76,13 +76,6 @@ class AsyncProcess(object):
         self._watch_message_thread.daemon = True
         self._watch_message_thread.start()
 
-        self._watch_process_thread = threading.Thread(
-            target=self._watch_process,
-            name="AsyncProcess %s watch" % self.name,
-            args=(weakref.ref(self), self._process, self._state, self._watch_q))
-        self._watch_process_thread.daemon = True
-        self._watch_process_thread.start()
-
         def stop_thread(q):
             q.put_nowait({'op': 'stop'})
             # We don't join the thread here as a finalizer can be called
@@ -90,14 +83,6 @@ class AsyncProcess(object):
 
         self._finalizer = finalize(self, stop_thread, q=self._watch_q)
         self._finalizer.atexit = False
-
-    def _do_start(self):
-        self._process.start()
-        self._state.is_alive = True
-        self._state.pid = self._process.pid
-
-    def _do_terminate(self):
-        self._process.terminate()
 
     def _on_exit(self, exitcode):
         # Called from the event loop when the child process exited
@@ -118,9 +103,18 @@ class AsyncProcess(object):
         # blocking operations from this single loop and ship results
         # back to the caller when needed.
         r = repr(selfref())
+        name = selfref().name
 
         def _start():
             process.start()
+
+            thread = threading.Thread(
+                target=AsyncProcess._watch_process,
+                name="AsyncProcess %s watch" % name,
+                args=(selfref, process, state, q))
+            thread.daemon = True
+            thread.start()
+
             state.is_alive = True
             state.pid = process.pid
             logger.debug("[%s] created process with pid %r" % (r, state.pid))
@@ -143,9 +137,6 @@ class AsyncProcess(object):
     @classmethod
     def _watch_process(cls, selfref, process, state, q):
         r = repr(selfref())
-        while process.pid is None:
-            sleep(0.05)
-
         process.join()
         exitcode = process.exitcode
         if exitcode is not None:
