@@ -577,8 +577,8 @@ class WorkerBase(ServerNode):
                           'keys': missing_keys})
         else:
             self.update_data(data=result, report=False)
-            del result
-            self._throttledGC.collect()
+            #del result
+            #self._throttledGC.collect()
             raise Return({'status': 'OK'})
 
 
