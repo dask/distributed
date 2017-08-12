@@ -1770,7 +1770,7 @@ class Worker(WorkerBase):
 
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
-            nbytes_to_free = self.nbytes.get(key)
+            #nbytes_to_free = self.nbytes.get(key)
 
             if key not in self.task_state:
                 return
