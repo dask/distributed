@@ -2002,8 +2002,8 @@ class Worker(WorkerBase):
             self.ensure_computing()
             self.ensure_communicating()
 
-            del value
-            self._throttledGC.collect()
+            #del value
+            #self._throttledGC.collect()
         except Exception as e:
             if executor_error is e:
                 logger.error("Thread Pool Executor error: %s", e)
