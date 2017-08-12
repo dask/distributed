@@ -1823,7 +1823,7 @@ class Worker(WorkerBase):
             force_gc = None
             if nbytes_to_free is not None:
                 force_gc = nbytes_to_free > 10 * 2**20
-            self._throttledGC.collect(force_gc)
+            #self._throttledGC.collect(force_gc)
 
         except CommClosedError:
             pass
