@@ -747,10 +747,9 @@ class Client(Node):
         _set_global_client(self)
         self.status = 'running'
 
-        with self._lock:
-            for msg in self._pending_msg_buffer:
-                self._send_to_scheduler(msg)
-            del self._pending_msg_buffer[:]
+        for msg in self._pending_msg_buffer:
+            self._send_to_scheduler(msg)
+        del self._pending_msg_buffer[:]
 
         logger.debug("Started scheduling coroutines. Synchronized")
 
