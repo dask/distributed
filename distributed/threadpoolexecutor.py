@@ -22,7 +22,7 @@ which is included as a comment at the end of this file:
 """
 from __future__ import print_function, division, absolute_import
 
-from concurrent.futures import thread
+from . import _concurrent_futures_thread as thread
 import logging
 import threading
 
