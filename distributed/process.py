@@ -150,7 +150,6 @@ class AsyncProcess(object):
                 self._loop.add_callback(self._on_exit, exitcode)
         finally:
             self = None  # lose reference
-            q.put({'op': 'stop'})
 
     def start(self):
         """
