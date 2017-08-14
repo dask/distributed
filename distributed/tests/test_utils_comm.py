@@ -17,7 +17,7 @@ def test_pack_data():
 
 @gen_cluster(client=True)
 def test_gather_from_workers_permissive(c, s, a, b):
-    x = yield c.scatter({'x': 1})
+    x = yield c.scatter({'x': 1}, workers=a.address)
 
     data, missing, bad_workers = yield gather_from_workers(
             {'x': [a.address], 'y': [b.address]}, rpc=rpc)
