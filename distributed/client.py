@@ -627,11 +627,18 @@ class Client(Node):
     def __await__(self):
         return self._started.__await__()
 
-    def _send_to_scheduler(self, msg):
+    def _send_to_scheduler_safe(self, msg):
         if self.status in ('running', 'closing'):
-            self.loop.add_callback(self.scheduler_comm.send, msg)
+            self.scheduler_comm.send(msg)
         elif self.status is 'connecting':
-            self.loop.add_callback(self._pending_msg_buffer.append, msg)
+            self._pending_msg_buffer.append(msg)
+        else:
+            raise Exception("Tried sending message after closing.  Status: %s\n"
+                            "Message: %s" % (self.status, msg))
+
+    def _send_to_scheduler(self, msg):
+        if self.status in ('running', 'closing', 'connecting'):
+            self.loop.add_callback(self._send_to_scheduler_safe, msg)
         else:
             raise Exception("Tried sending message after closing.  Status: %s\n"
                             "Message: %s" % (self.status, msg))
@@ -1748,6 +1755,9 @@ class Client(Node):
         if generally used for side effects, such and collecting diagnostic
         information or installing libraries.
 
+        If your function takes an input argument named ``dask_worker`` then
+        that variable will be populated with the worker itself.
+
         Parameters
         ----------
         function: callable
@@ -1770,6 +1780,13 @@ class Client(Node):
         ...                           '192.168.0.101:9000'])  # doctest: +SKIP
         {'192.168.0.100:9000': 1234,
          '192.168.0.101:9000': 4321}
+
+        >>> def get_status(dask_worker):
+        ...     return dask_worker.status
+
+        >>> c.run(get_hostname)  # doctest: +SKIP
+        {'192.168.0.100:9000': 'running',
+         '192.168.0.101:9000': 'running}
         """
         return self.sync(self._run, function, *args, **kwargs)
 
@@ -1939,13 +1956,13 @@ class Client(Node):
 
         Examples
         --------
-        >>> len(x.dask)  # x is a dask collection with 100 tasks
+        >>> len(x.dask)  # x is a dask collection with 100 tasks  # doctest: +SKIP
         100
-        >>> set(client.futures).intersection(x.dask)  # some overlap exists
+        >>> set(client.futures).intersection(x.dask)  # some overlap exists  # doctest: +SKIP
         10
 
-        >>> x = client.normalize_collection(x)
-        >>> len(x.dask)  # smaller computational graph
+        >>> x = client.normalize_collection(x)  # doctest: +SKIP
+        >>> len(x.dask)  # smaller computational graph  # doctest: +SKIP
         20
 
         See Also

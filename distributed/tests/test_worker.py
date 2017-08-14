@@ -397,13 +397,15 @@ def test_Executor(c, s):
         yield w._close()
 
 
+@pytest.mark.skip(reason="Leaks a large amount of memory")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)], timeout=30)
 def test_spill_by_default(c, s, w):
     da = pytest.importorskip('dask.array')
     x = da.ones(int(TOTAL_MEMORY * 0.7), chunks=10000000, dtype='u1')
     y = c.persist(x)
-    yield _wait(y)
+    yield wait(y)
     assert len(w.data.slow)  # something is on disk
+    del x, y
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)],
