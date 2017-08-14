@@ -49,14 +49,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--bokeh/--no-bokeh', 'bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
 @click.option('--listen-address', type=str, default=None,
-        help="The <protocol>://<address>:<port> on which the worker binds to. "
-                   "The options --worker-port and --host are not compatible "
-                   "with this option. Cannot be used with --nprocs>1")
+        help="The address to which the worker binds. "
+             "Example: tcp://0.0.0.0:9000")
 @click.option('--contact-address', type=str, default=None,
-        help="The <protocol>://<address>:<port> the worker advertises to the scheduler "
-                   "for communication with it and other workers. If specified "
-                   "must also specify --listen-address. "
-                   "If not specified uses the --listen-address")
+        help="The address the worker advertises to the scheduler for "
+             "communication with it and other workers. "
+             "Example: tcp://127.0.0.1:9000")
 @click.option('--host', type=str, default=None,
               help="Serving host. Should be an ip address that is"
                    " visible to the scheduler and other workers. "
@@ -96,7 +94,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process '
                    'like "foo.bar" or "/path/to/foo.py"')
-
 def main(scheduler, host, worker_port, listen_address, contact_address,
          http_port, nanny_port, nthreads, nprocs, nanny, name,
          memory_limit, pid_file, reconnect, resources, bokeh,
@@ -190,7 +187,7 @@ def main(scheduler, host, worker_port, listen_address, contact_address,
     loop = IOLoop.current()
 
     if nanny:
-        kwargs = {'worker_port': worker_port}
+        kwargs = {'worker_port': worker_port, 'listen_address': listen_address}
         t = Nanny
     else:
         kwargs = {}
@@ -230,7 +227,7 @@ def main(scheduler, host, worker_port, listen_address, contact_address,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
                  local_dir=local_directory, death_timeout=death_timeout,
-                 preload=preload, security=sec, contact_addr = contact_address,
+                 preload=preload, security=sec, contact_address=contact_address,
                  **kwargs)
                for i in range(nprocs)]
 
