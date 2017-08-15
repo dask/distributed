@@ -410,16 +410,19 @@ class Scheduler(ServerNode):
         """ Basic information about ourselves and our cluster """
         return get_versions()
 
-    def start_services(self, listen_ip=''):
+    def start_services(self, host):
         for k, v in self.service_specs.items():
             if isinstance(k, tuple):
                 k, port = k
             else:
                 port = 0
 
+            if host == '0.0.0.0':
+                host = ''  # for IPv6
+
             try:
                 service = v(self, io_loop=self.loop)
-                service.listen((listen_ip, port))
+                service.listen((host, port))
                 self.services[k] = service
             except Exception as e:
                 logger.info("Could not launch service: %r", (k, port),
@@ -450,12 +453,17 @@ class Scheduler(ServerNode):
                 # as it would prevent connecting via 127.0.0.1.
                 self.listen(('', addr_or_port), listen_args=self.listen_args)
                 self.ip = get_ip()
+                listen_host = ''
             else:
                 self.listen(addr_or_port, listen_args=self.listen_args)
                 self.ip = get_address_host(self.listen_address)
+                listen_host = self.ip
+
+            if self.ip == '0.0.0.0':
+                self.ip = ''
 
             # Services listen on all addresses
-            self.start_services()
+            self.start_services(listen_host)
 
             self.status = 'running'
             logger.info("  Scheduler at: %25s", self.address)

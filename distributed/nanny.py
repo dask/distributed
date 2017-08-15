@@ -11,7 +11,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado.locks import Event
 
-from .comm import get_address_host, get_local_address_for
+from .comm import get_address_host, get_local_address_for, unparse_host_port
 from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .node import ServerNode
 from .process import AsyncProcess
@@ -164,6 +164,13 @@ class Nanny(ServerNode):
 
         Blocks until the process is up and the scheduler is properly informed
         """
+        if self._listen_address:
+            start_arg = self._listen_address
+        else:
+            host = self.listener.bound_address[0]
+            start_arg = self.listener.prefix + unparse_host_port(host,
+                    self._given_worker_port)
+
         if self.process is None:
             self.process = WorkerProcess(
                 worker_args=(self.scheduler_addr,),
@@ -181,8 +188,7 @@ class Nanny(ServerNode):
                                    preload=self.preload,
                                    security=self.security,
                                    contact_address=self.contact_address),
-                # worker_start_args=(self._given_worker_port,),
-                worker_start_args=(self._listen_address or self._given_worker_port,),
+                worker_start_args=(start_arg,),
                 silence_logs=self.silence_logs,
                 on_exit=self._on_exit,
             )

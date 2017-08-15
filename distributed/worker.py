@@ -248,7 +248,7 @@ class WorkerBase(ServerNode):
             raise ValueError("Unexpected response from register: %r" % (resp,))
         self.periodic_callbacks['heartbeat'].start()
 
-    def start_services(self, listen_ip=''):
+    def start_services(self, host):
         for k, v in self.service_specs.items():
             if isinstance(k, tuple):
                 k, port = k
@@ -260,7 +260,7 @@ class WorkerBase(ServerNode):
             else:
                 v, kwargs = v, {}
             self.services[k] = v(self, io_loop=self.loop, **kwargs)
-            self.services[k].listen((listen_ip, port))
+            self.services[k].listen((host, port))
             self.service_ports[k] = self.services[k].port
 
     @gen.coroutine
@@ -270,7 +270,8 @@ class WorkerBase(ServerNode):
         # XXX Factor this out
         if not addr_or_port:
             # Default address is the required one to reach the scheduler
-            self.listen(get_local_address_for(self.scheduler.address),
+            listen_host = get_local_address_for(self.scheduler.address)
+            self.listen(listen_host,
                         listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
         elif isinstance(addr_or_port, int):
@@ -278,24 +279,39 @@ class WorkerBase(ServerNode):
             self.ip = get_ip(
                 get_address_host(self.scheduler.address)
             )
-            self.listen((self.ip, addr_or_port),
+            self.listen((listen_host, addr_or_port),
                         listen_args=self.listen_args)
+            listen_host = self.ip
         else:
             self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
+            try:
+                listen_host = get_address_host(addr_or_port)
+            except ValueError:
+                listen_host = addr_or_port
+
+        if '://' in listen_host:
+            protocol, listen_host = listen_host.split('://')
+            if protocol == 'inproc':
+                listen_host = 'localhost'
 
         self.name = self.name or self.address
         preload_modules(self.preload, parameter=self, file_dir=self.local_dir)
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
-        self.start_services()
+        self.start_services(listen_host)
+
+        try:
+            listening_address = '%s%s:%d' % (self.listener.prefix, listen_host, self.port)
+        except Exception:
+            listening_address = '%s%s' % (self.listener.prefix, listen_host)
 
         logger.info('      Start worker at: %26s', self.address)
+        logger.info('         Listening to: %26s', listening_address)
         for k, v in self.service_ports.items():
-            logger.info('  %16s at: %20s:%d' % (k, self.ip, v))
-        logger.info('Waiting to connect to: %26s',
-                    self.scheduler.address)
+            logger.info('  %16s at: %26s' % (k, listen_host + ':' + str(v)))
+        logger.info('Waiting to connect to: %26s', self.scheduler.address)
         logger.info('-' * 49)
         logger.info('              Threads: %26d', self.ncores)
         if self.memory_limit:
@@ -306,7 +322,7 @@ class WorkerBase(ServerNode):
         yield self._register_with_scheduler()
 
         if self.status == 'running':
-            logger.info('        Registered to: %32s', self.scheduler.address)
+            logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
 
     def start(self, port=0):
