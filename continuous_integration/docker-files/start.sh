@@ -12,6 +12,7 @@ rm /opt/hadoop/etc/hadoop/hadoop-env.sh
 mv temp /opt/hadoop/etc/hadoop/hadoop-env.sh
 chmod 0600 ~/.ssh/authorized_keys
 start-dfs.sh
-
+hdfs dfs -mkdir /tmp
+hdfs dfs -chmod 777 /tmp
 touch /host/hdfs-initialized
 sleep infinity
