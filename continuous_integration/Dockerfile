@@ -1,8 +1,7 @@
 FROM mdurant/docker_images:hadoop
 
-Add docker-files/start.sh /tmp/start.sh
+ADD docker-files/start.sh /opt/hadoop/run.sh
 
-CMD ["bash", "/tmp/start.sh"]
 
 # Build:
 #
