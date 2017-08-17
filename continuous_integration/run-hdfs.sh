@@ -19,7 +19,7 @@ echo "Started HDFS container: $CONTAINER_ID"
 CHECK_RUNNING="docker top $CONTAINER_ID | grep datanode"
 
 # Wait for initialization
-while [[ $($CHECK_RUNNING) ]]
+while [[ $($CHECK_RUNNING) ]]  && [[ ! -f $INIT_MARKER ]]
 do
     sleep 1
 done
