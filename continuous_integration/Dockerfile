@@ -1,15 +1,6 @@
-FROM sequenceiq/hadoop-docker:2.7.1
+FROM mdurant/docker_images:hadoop
 
-ENV HADOOP_PREFIX=/usr/local/hadoop
-ENV HADOOP_CONF_DIR=$HADOOP_PREFIX/etc/hadoop
-
-ADD docker-files/start.sh /tmp/start.sh
-ADD docker-files/*.xml $HADOOP_CONF_DIR/
-
-VOLUME /host
-
-EXPOSE 8020
-EXPOSE 50070
+Add docker-files/start.sh /tmp/start.sh
 
 CMD ["bash", "/tmp/start.sh"]
 

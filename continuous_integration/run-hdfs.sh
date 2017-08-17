@@ -6,7 +6,8 @@ INIT_MARKER=$HOSTDIR/hdfs-initialized
 # Remove initialization marker
 rm -f $INIT_MARKER
 
-CONTAINER_ID=$(docker run -d -v$HOSTDIR:/host -p8020:8020 -p 50070:50070 mdurant/docker_images:hadoop)
+docker build -t test .
+CONTAINER_ID=$(docker run -d -v$HOSTDIR:/host -p8020:8020 -p 50070:50070 test)
 
 if [ $? -ne 0 ]; then
     echo "Failed starting HDFS container"

@@ -2,21 +2,16 @@
 
 set -e
 
-export HADOOP_PREFIX=/usr/local/hadoop
-$HADOOP_PREFIX/etc/hadoop/hadoop-env.sh
+service ssh restart
+ssh-keygen -t dsa -P '' -f ~/.ssh/id_dsa
+cat ~/.ssh/id_dsa.pub >> ~/.ssh/authorized_keys
+ssh-keyscan -H localhost >> ~/.ssh/known_hosts
+ssh-keyscan -H 0.0.0.0 >> ~/.ssh/known_hosts
+echo 'export JAVA_HOME='$JAVA_HOME | cat - /opt/hadoop/etc/hadoop/hadoop-env.sh > temp
+rm /opt/hadoop/etc/hadoop/hadoop-env.sh
+mv temp /opt/hadoop/etc/hadoop/hadoop-env.sh
+chmod 0600 ~/.ssh/authorized_keys
+start-dfs.sh
 
-service sshd start
-
-rm -f /tmp/*.pid
-$HADOOP_PREFIX/sbin/start-dfs.sh
-
-echo "--"
-echo "-- HDFS started!"
-echo "--"
-
-# Wait for nodes to be fully initialized
-sleep 5
 touch /host/hdfs-initialized
-
-# Stay alive
 sleep infinity
