@@ -22,8 +22,10 @@ def parse_address(addr, strict=False):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
     scheme, sep, loc = addr.rpartition('://')
     if strict and not sep:
-        raise ValueError("Invalid url scheme. Must be of the form <protocol>://<host>:<port>. "
-                        "Got %s" % addr)
+        msg = ("Invalid url scheme. "
+               "Must include protocol like tcp://localhost:8000. "
+               "Got %s" % addr)
+        raise ValueError(msg)
     if not sep:
         scheme = DEFAULT_SCHEME
     return scheme, loc

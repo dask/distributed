@@ -248,7 +248,7 @@ class WorkerBase(ServerNode):
             raise ValueError("Unexpected response from register: %r" % (resp,))
         self.periodic_callbacks['heartbeat'].start()
 
-    def start_services(self, host):
+    def start_services(self, listen_ip=''):
         for k, v in self.service_specs.items():
             if isinstance(k, tuple):
                 k, port = k
@@ -260,7 +260,7 @@ class WorkerBase(ServerNode):
             else:
                 v, kwargs = v, {}
             self.services[k] = v(self, io_loop=self.loop, **kwargs)
-            self.services[k].listen((host, port))
+            self.services[k].listen((listen_ip, port))
             self.service_ports[k] = self.services[k].port
 
     @gen.coroutine
@@ -270,18 +270,17 @@ class WorkerBase(ServerNode):
         # XXX Factor this out
         if not addr_or_port:
             # Default address is the required one to reach the scheduler
-            listen_host = get_local_address_for(self.scheduler.address)
-            self.listen(listen_host,
+            listen_host = get_address_host(self.scheduler.address)
+            self.listen(get_local_address_for(self.scheduler.address),
                         listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
         elif isinstance(addr_or_port, int):
             # addr_or_port is an integer => assume TCP
-            self.ip = get_ip(
+            listen_host = self.ip = get_ip(
                 get_address_host(self.scheduler.address)
             )
             self.listen((listen_host, addr_or_port),
                         listen_args=self.listen_args)
-            listen_host = self.ip
         else:
             self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
@@ -292,8 +291,6 @@ class WorkerBase(ServerNode):
 
         if '://' in listen_host:
             protocol, listen_host = listen_host.split('://')
-            if protocol == 'inproc':
-                listen_host = 'localhost'
 
         self.name = self.name or self.address
         preload_modules(self.preload, parameter=self, file_dir=self.local_dir)
