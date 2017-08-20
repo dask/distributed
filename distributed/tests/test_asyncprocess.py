@@ -255,7 +255,7 @@ def test_child_main_thread():
     yield proc.join()
     n_threads = q.get()
     main_name = q.get()
-    assert n_threads == 1
+    assert n_threads == 2
     assert main_name == "MainThread"
     q.close()
     q._reader.close()
