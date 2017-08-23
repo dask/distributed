@@ -1624,10 +1624,12 @@ class Worker(WorkerBase):
                 if self.validate:
                     self.validate_state()
 
+                deps = tuple(deps)
+
                 self.log.append(('request-dep', dep, worker, deps))
                 logger.debug("Request %d keys", len(deps))
                 start = time()
-                response = yield self.rpc(worker).get_data(keys=list(deps),
+                response = yield self.rpc(worker).get_data(keys=deps,
                                                            who=self.address)
                 stop = time()
 
