@@ -17,12 +17,13 @@ from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (
-    slow, loop, gen_test, gen_cluster, has_ipv6,
+    slow, gen_test, gen_cluster, has_ipv6,
     assert_can_connect, assert_cannot_connect,
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6, assert_can_connect_from_everywhere_6,
     assert_can_connect_locally_4, assert_can_connect_locally_6,
     tls_security, captured_logger)
+from distributed.utils_test import loop # flake8: noqa
 
 
 EXTERNAL_IP4 = get_ip()

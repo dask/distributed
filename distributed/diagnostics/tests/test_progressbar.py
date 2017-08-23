@@ -7,7 +7,8 @@ from tornado import gen
 from distributed import Client, Scheduler, Worker
 from distributed.diagnostics.progressbar import TextProgressBar, progress
 from distributed.metrics import time
-from distributed.utils_test import (cluster, loop, inc, div, gen_cluster)
+from distributed.utils_test import (cluster, inc, div, gen_cluster)
+from distributed.utils_test import loop  # flake8: noqa
 
 
 def test_text_progressbar(capsys, loop):

@@ -3,7 +3,7 @@ from __future__ import print_function, division, absolute_import
 import pytest
 
 from distributed.counter import Counter
-from distributed.utils_test import loop
+from distributed.utils_test import loop  # flake8: noqa
 
 try:
     from distributed.counter import Digest

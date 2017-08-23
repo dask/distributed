@@ -21,7 +21,8 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, dec, gen_cluster, gen_test,
-                                    loop, readone, slowinc, slowadd, cluster, div)
+                                    readone, slowinc, slowadd, cluster, div)
+from distributed.utils_test import loop # flake8: noqa
 from distributed.utils import tmpfile
 from distributed.utils_test import slow
 from dask.compatibility import apply

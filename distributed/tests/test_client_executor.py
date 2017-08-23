@@ -12,7 +12,8 @@ from toolz import take
 
 from distributed.client import Client
 from distributed.utils_test import (slowinc, slowadd, slowdec,
-                                    loop, inc, throws, cluster)
+                                    inc, throws, cluster)
+from distributed.utils_test import loop # flake8: noqa
 
 
 def number_of_processing_tasks(client):

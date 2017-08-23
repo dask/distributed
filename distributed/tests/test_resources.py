@@ -9,7 +9,8 @@ from tornado import gen
 from distributed import Worker
 from distributed.client import _wait
 from distributed.utils_test import (inc, gen_cluster,
-                                    loop, slowinc, slowadd)
+                                    slowinc, slowadd)
+from distributed.utils_test import loop # flake8: noqa
 
 
 @gen_cluster(client=True, ncores=[])

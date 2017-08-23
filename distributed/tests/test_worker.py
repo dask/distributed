@@ -24,8 +24,9 @@ from distributed.scheduler import Scheduler
 from distributed.metrics import time
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
 from distributed.utils import tmpfile
-from distributed.utils_test import (loop, inc, mul, gen_cluster, div, dec,
+from distributed.utils_test import (inc, mul, gen_cluster, div, dec,
                                     slow, slowinc, gen_test, cluster)
+from distributed.utils_test import loop # flake8: noqa
 
 
 def test_worker_ncores():

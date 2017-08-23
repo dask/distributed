@@ -40,8 +40,10 @@ from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
-                                    randominc, loop, inc, dec, div, throws, geninc, asyncinc,
-                                    gen_cluster, gen_test, double, deep, popen, captured_logger)
+                                    randominc, inc, dec, div, throws, geninc, asyncinc,
+                                    gen_cluster, gen_test, double, deep, popen,
+                                    captured_logger)
+from distributed.utils_test import loop # flake8: noqa
 
 
 @gen_cluster(client=True, timeout=None)

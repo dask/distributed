@@ -15,8 +15,9 @@ from distributed.comm import CommClosedError
 from distributed.client import _wait
 from distributed.metrics import time
 from distributed.utils import sync, ignoring
-from distributed.utils_test import (gen_cluster, cluster, inc, loop, slow, div,
+from distributed.utils_test import (gen_cluster, cluster, inc, slow, div,
                                     slowinc, slowadd, captured_logger)
+from distributed.utils_test import loop # flake8: noqa
 
 
 def test_submit_after_failed_worker_sync(loop):

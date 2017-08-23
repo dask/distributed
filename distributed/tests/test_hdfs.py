@@ -15,6 +15,7 @@ from dask.bytes.core import read_bytes, write_bytes
 
 from distributed.compatibility import unicode
 from distributed.utils_test import cluster, gen_cluster, make_hdfs
+from distributed.utils_test import loop # flake8: noqa
 from distributed.utils import get_ip
 from distributed import Client
 from distributed.client import _wait, Future

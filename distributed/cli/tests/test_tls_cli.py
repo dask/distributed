@@ -4,8 +4,9 @@ from time import sleep
 
 
 from distributed import Client
-from distributed.utils_test import (loop, popen, get_cert, new_config_file,
+from distributed.utils_test import (popen, get_cert, new_config_file,
                                     tls_security, tls_only_config)
+from distributed.utils_test import loop  # flake8: noqa
 from distributed.metrics import time
 
 

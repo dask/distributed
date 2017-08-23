@@ -9,8 +9,9 @@ from toolz import first
 from distributed import Client
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
-from distributed.utils_test import (loop, popen, slow, terminate_process,
+from distributed.utils_test import (popen, slow, terminate_process,
                                     wait_for_port)
+from distributed.utils_test import loop  # flake8: noqa
 
 
 def test_nanny_worker_ports(loop):

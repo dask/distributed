@@ -12,9 +12,10 @@ from tornado import gen
 from distributed import Scheduler, Worker, Client, config
 from distributed.core import rpc
 from distributed.metrics import time
-from distributed.utils_test import (cluster, loop, gen_cluster,
+from distributed.utils_test import (cluster, gen_cluster,
                                     gen_test, wait_for_port, new_config,
                                     tls_only_security)
+from distributed.utils_test import loop # flake8: noqa
 from distributed.utils import get_ip
 
 

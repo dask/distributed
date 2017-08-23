@@ -15,8 +15,9 @@ from distributed import Client, wait, Nanny
 from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import All
-from distributed.utils_test import (gen_cluster, cluster, inc, slowinc, loop,
+from distributed.utils_test import (gen_cluster, cluster, inc, slowinc,
                                     slowadd, slow, slowsum, bump_rlimit)
+from distributed.utils_test import loop # flake8: noqa
 from distributed.client import _wait
 from tornado import gen
 
