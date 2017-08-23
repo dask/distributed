@@ -7,8 +7,9 @@ pytest.importorskip('bokeh')
 from dask import delayed
 from distributed.client import _wait
 from distributed.diagnostics.progress_stream import (progress_quads,
-        nbytes_bar, progress_stream, _incrementing_index_cache)
+                                                     nbytes_bar, progress_stream, _incrementing_index_cache)
 from distributed.utils_test import div, gen_cluster, inc
+
 
 def test_progress_quads():
     msg = {'all': {'inc': 5, 'dec': 1, 'add': 4},

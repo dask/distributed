@@ -32,7 +32,7 @@ def test_defaults(loop):
             yield [
                 assert_can_connect_from_everywhere_4_6(8786, 2.0),  # main port
                 assert_can_connect_from_everywhere_4_6(9786, 2.0),  # HTTP port
-                ]
+            ]
 
         loop.run_sync(f)
 
@@ -57,7 +57,7 @@ def test_hostport(loop):
                 assert_can_connect_locally_4(8978, 2.0),
                 # ... but its HTTP port can
                 assert_can_connect_from_everywhere_4_6(8979, 2.0),
-                ]
+            ]
 
         loop.run_sync(f)
 
@@ -273,7 +273,7 @@ def test_preload_file(loop):
                         '--preload', path]):
                 with Client(scheduler_file=fn, loop=loop) as c:
                     assert c.run_on_scheduler(check_scheduler) == \
-                           c.scheduler.address
+                        c.scheduler.address
     finally:
         shutil.rmtree(tmpdir)
 
@@ -300,6 +300,6 @@ def test_preload_module(loop):
                        env=env):
                 with Client(scheduler_file=fn, loop=loop) as c:
                     assert c.run_on_scheduler(check_scheduler) == \
-                           c.scheduler.address
+                        c.scheduler.address
     finally:
         shutil.rmtree(tmpdir)

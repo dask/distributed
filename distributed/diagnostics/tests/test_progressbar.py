@@ -8,7 +8,7 @@ from distributed import Client, Scheduler, Worker
 from distributed.diagnostics.progressbar import TextProgressBar, progress
 from distributed.metrics import time
 from distributed.utils_test import (cluster, loop, inc,
-        div, dec, gen_cluster)
+                                    div, dec, gen_cluster)
 
 
 def test_text_progressbar(capsys, loop):
@@ -74,7 +74,7 @@ def test_TextProgressBar_empty(loop, capsys):
 def check_bar_completed(capsys, width=40):
     out, err = capsys.readouterr()
     bar, percent, time = [i.strip() for i in out.split('\r')[-1].split('|')]
-    assert bar == '[' + '#'*width + ']'
+    assert bar == '[' + '#' * width + ']'
     assert percent == '100% Completed'
 
 

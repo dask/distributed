@@ -169,7 +169,8 @@ def test_race(c, s, *workers):
     while len(s.wants_what['variable-x']) != 1:
         yield gen.sleep(0.01)
         if not time() - start < 2:
-            import pdb; pdb.set_trace()
+            import pdb
+            pdb.set_trace()
 
 
 @gen_cluster(client=True)

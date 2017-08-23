@@ -16,7 +16,7 @@ from distributed.client import _wait
 from distributed.metrics import time
 from distributed.utils import sync, ignoring
 from distributed.utils_test import (gen_cluster, cluster, inc, loop, slow, div,
-        slowinc, slowadd, captured_logger)
+                                    slowinc, slowadd, captured_logger)
 
 
 def test_submit_after_failed_worker_sync(loop):
@@ -27,7 +27,6 @@ def test_submit_after_failed_worker_sync(loop):
             a['proc']().terminate()
             total = c.submit(sum, L)
             assert total.result() == sum(map(inc, range(10)))
-
 
 
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
@@ -166,10 +165,10 @@ def test_restart_cleared(c, s, a, b):
     yield c._restart()
 
     for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
-            s.waiting_data, s.who_has, s.host_restrictions,
-            s.worker_restrictions, s.loose_restrictions,
-            s.released, s.priority, s.exceptions, s.who_wants,
-            s.exceptions_blame]:
+                 s.waiting_data, s.who_has, s.host_restrictions,
+                 s.worker_restrictions, s.loose_restrictions,
+                 s.released, s.priority, s.exceptions, s.who_wants,
+                 s.exceptions_blame]:
         assert not coll
 
 
@@ -273,7 +272,8 @@ def test_multiple_clients_restart(s, a, b):
 
 @gen_cluster(Worker=Nanny)
 def test_restart_scheduler(s, a, b):
-    import gc; gc.collect()
+    import gc
+    gc.collect()
     addrs = (a.worker_address, b.worker_address)
     yield s.restart()
     assert len(s.ncores) == 2
@@ -288,7 +288,8 @@ def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     yield c._restart()
     y = c.submit(inc, 1)
     del x
-    import gc; gc.collect()
+    import gc
+    gc.collect()
     yield gen.sleep(0.1)
     yield y
 

@@ -52,14 +52,14 @@ def test_from_config():
             'scheduler': {
                 'key': 'skey.pem',
                 'cert': 'scert.pem',
-                },
+            },
             'worker': {
                 'cert': 'wcert.pem',
-                },
-            'ciphers': FORCED_CIPHER,
             },
+            'ciphers': FORCED_CIPHER,
+        },
         'require-encryption': True,
-        }
+    }
     with new_config(c):
         sec = Security()
     assert sec.require_encryption == True
@@ -80,9 +80,9 @@ def test_kwargs():
             'scheduler': {
                 'key': 'skey.pem',
                 'cert': 'scert.pem',
-                },
             },
-        }
+        },
+    }
     with new_config(c):
         sec = Security(tls_scheduler_cert='newcert.pem',
                        require_encryption=True,
@@ -112,13 +112,13 @@ def test_tls_config_for_role():
             'scheduler': {
                 'key': 'skey.pem',
                 'cert': 'scert.pem',
-                },
+            },
             'worker': {
                 'cert': 'wcert.pem',
-                },
-            'ciphers': FORCED_CIPHER,
             },
-        }
+            'ciphers': FORCED_CIPHER,
+        },
+    }
     with new_config(c):
         sec = Security()
     t = sec.get_tls_config_for_role('scheduler')
@@ -127,21 +127,21 @@ def test_tls_config_for_role():
         'key': 'skey.pem',
         'cert': 'scert.pem',
         'ciphers': FORCED_CIPHER,
-        }
+    }
     t = sec.get_tls_config_for_role('worker')
     assert t == {
         'ca_file': 'ca.pem',
         'key': None,
         'cert': 'wcert.pem',
         'ciphers': FORCED_CIPHER,
-        }
+    }
     t = sec.get_tls_config_for_role('client')
     assert t == {
         'ca_file': 'ca.pem',
         'key': None,
         'cert': None,
         'ciphers': FORCED_CIPHER,
-        }
+    }
     with pytest.raises(ValueError):
         sec.get_tls_config_for_role('supervisor')
 
@@ -161,12 +161,12 @@ def test_connection_args():
             'scheduler': {
                 'key': key1,
                 'cert': cert1,
-                },
+            },
             'worker': {
                 'cert': keycert1,
-                },
             },
-        }
+        },
+    }
     with new_config(c):
         sec = Security()
 
@@ -215,12 +215,12 @@ def test_listen_args():
             'scheduler': {
                 'key': key1,
                 'cert': cert1,
-                },
+            },
             'worker': {
                 'cert': keycert1,
-                },
             },
-        }
+        },
+    }
     with new_config(c):
         sec = Security()
 
@@ -272,12 +272,12 @@ def test_tls_listen_connect():
             'scheduler': {
                 'key': key1,
                 'cert': cert1,
-                },
+            },
             'worker': {
                 'cert': keycert1,
-                },
             },
-        }
+        },
+    }
     with new_config(c):
         sec = Security()
 
@@ -321,12 +321,12 @@ def test_require_encryption():
             'scheduler': {
                 'key': key1,
                 'cert': cert1,
-                },
+            },
             'worker': {
                 'cert': keycert1,
-                },
             },
-        }
+        },
+    }
     with new_config(c):
         sec = Security()
     c['require-encryption'] = True

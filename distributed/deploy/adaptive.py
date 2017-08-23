@@ -29,6 +29,7 @@ class Adaptive(object):
     ...     def scale_down(self, workers):
     ...        """ Remove worker addresses from cluster """
     '''
+
     def __init__(self, scheduler, cluster, interval=1000, startup_cost=1):
         self.scheduler = scheduler
         self.cluster = cluster
@@ -50,7 +51,7 @@ class Adaptive(object):
                 return True
 
             limit_bytes = {w: self.scheduler.worker_info[w]['memory_limit']
-                            for w in self.scheduler.worker_info}
+                           for w in self.scheduler.worker_info}
             worker_bytes = self.scheduler.worker_bytes
 
             limit = sum(limit_bytes.values())
@@ -65,7 +66,7 @@ class Adaptive(object):
     def _retire_workers(self):
         with log_errors():
             workers = yield self.scheduler.retire_workers(remove=True,
-                    close_workers=True)
+                                                          close_workers=True)
 
             logger.info("Retiring workers %s", workers)
             f = self.cluster.scale_down(workers)

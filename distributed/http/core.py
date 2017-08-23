@@ -48,6 +48,7 @@ def resource_collect(pid=None):
 
 class Resources(RequestHandler):
     """Served details about this process and machine"""
+
     def get(self):
         self.write(resource_collect())
 

@@ -21,7 +21,7 @@ from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
-        loop, readone, slowinc, slowadd, cluster, div)
+                                    loop, readone, slowinc, slowadd, cluster, div)
 from distributed.utils import tmpfile
 from distributed.utils_test import slow
 from dask.compatibility import apply
@@ -227,11 +227,11 @@ def test_server(s, a, b):
     comm = yield connect(s.address)
     yield comm.write({'op': 'register-client', 'client': 'ident'})
     yield comm.write({'op': 'update-graph',
-                     'tasks': {'x': dumps_task((inc, 1)),
-                               'y': dumps_task((inc, 'x'))},
-                     'dependencies': {'x': [], 'y': ['x']},
-                     'keys': ['y'],
-                     'client': 'ident'})
+                      'tasks': {'x': dumps_task((inc, 1)),
+                                'y': dumps_task((inc, 'x'))},
+                      'dependencies': {'x': [], 'y': ['x']},
+                      'keys': ['y'],
+                      'client': 'ident'})
 
     while True:
         msg = yield readone(comm)
@@ -505,14 +505,14 @@ def test_ready_remove_worker(s, a, b):
                    dependencies={'x-%d' % i: [] for i in range(20)})
 
     assert all(len(s.processing[w]) >= s.ncores[w]
-                for w in s.ncores)
+               for w in s.ncores)
 
     s.remove_worker(address=a.address)
 
     for collection in [s.ncores, s.processing]:
         assert set(collection) == {b.address}
     assert all(len(s.processing[w]) >= s.ncores[w]
-                for w in s.ncores)
+               for w in s.ncores)
     assert set(s.processing) == {b.address}
 
 
@@ -551,8 +551,8 @@ def test_broadcast_nanny(s, a, b):
     assert all(d['type'] == 'Nanny' for d in result1.values())
 
     result2 = yield s.broadcast(msg={'op': 'identity'},
-                               workers=[a.worker_address],
-                               nanny=True)
+                                workers=[a.worker_address],
+                                nanny=True)
     assert len(result2) == 1
     assert first(result2.values())['id'] == a.id
 

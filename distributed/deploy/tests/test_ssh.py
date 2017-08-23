@@ -9,11 +9,12 @@ from distributed import Client
 from distributed.deploy.ssh import SSHCluster
 from distributed.metrics import time
 
+
 @pytest.mark.avoid_travis
 def test_cluster(loop):
-    with SSHCluster(scheduler_addr = '127.0.0.1',
-                    scheduler_port = 7437,
-                    worker_addrs = ['127.0.0.1', '127.0.0.1']) as c:
+    with SSHCluster(scheduler_addr='127.0.0.1',
+                    scheduler_port=7437,
+                    worker_addrs=['127.0.0.1', '127.0.0.1']) as c:
         with Client(c, loop=loop) as e:
             start = time()
             while len(e.ncores()) != 2:

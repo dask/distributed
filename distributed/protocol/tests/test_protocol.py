@@ -6,7 +6,7 @@ import dask
 import pytest
 
 from distributed.protocol import (loads, dumps, msgpack, maybe_compress,
-        to_serialize)
+                                  to_serialize)
 from distributed.protocol.compression import compressions
 from distributed.protocol.serialize import (Serialize, Serialized,
                                             serialize, deserialize)
@@ -111,6 +111,7 @@ def test_large_bytes():
 
     assert loads(frames, deserialize=False) == msg
 
+
 @slow
 def test_large_messages():
     np = pytest.importorskip('numpy')
@@ -169,7 +170,7 @@ def test_loads_without_deserialization_avoids_compression():
 def eq_frames(a, b):
     if b'headers' in a:
         return (msgpack.loads(a, use_list=False)
-             == msgpack.loads(b, use_list=False))
+                == msgpack.loads(b, use_list=False))
     else:
         return a == b
 

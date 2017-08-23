@@ -25,6 +25,7 @@ logger = logging.getLogger('distributed.dask_worker')
 
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
+
 @click.command()
 @click.argument('scheduler', type=str, required=False)
 @click.option('--tls-ca-file', type=pem_file_option_type, default=None,
@@ -227,6 +228,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 def go():
     check_python_3()
     main()
+
 
 if __name__ == '__main__':
     go()

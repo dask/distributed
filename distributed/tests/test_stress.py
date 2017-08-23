@@ -16,7 +16,7 @@ from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import All
 from distributed.utils_test import (gen_cluster, cluster, inc, slowinc, loop,
-        slowadd, slow, slowsum, bump_rlimit)
+                                    slowadd, slow, slowsum, bump_rlimit)
 from distributed.client import _wait
 from tornado import gen
 
@@ -29,7 +29,7 @@ def test_stress_1(c, s, a, b):
     while len(seq) > 1:
         yield gen.sleep(0.1)
         seq = [c.submit(add, seq[i], seq[i + 1])
-                for i in range(0, len(seq), 2)]
+               for i in range(0, len(seq), 2)]
     result = yield seq[0]
     assert result == sum(map(inc, range(n)))
 
@@ -100,8 +100,8 @@ def test_stress_creation_and_deletion(c, s):
             print("Killed nanny")
 
     yield gen.with_timeout(timedelta(minutes=1),
-                          All([create_and_destroy_worker(0.1 * i) for i in
-                              range(10)]))
+                           All([create_and_destroy_worker(0.1 * i) for i in
+                                range(10)]))
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 10, client=True, timeout=60)
@@ -133,7 +133,8 @@ def test_stress_scatter_death(c, s, *workers):
         except Exception as c:
             logger.exception(c)
             if config.get('log-on-err'):
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             else:
                 raise
         w = random.choice(alive)
@@ -152,7 +153,8 @@ def test_stress_scatter_death(c, s, *workers):
         except Exception:
             pass
         if config.get('log-on-err'):
-            import pdb; pdb.set_trace()
+            import pdb
+            pdb.set_trace()
         else:
             raise
     except CancelledError:
@@ -167,7 +169,7 @@ def vsum(*args):
 @slow
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 80, timeout=1000)
 def test_stress_communication(c, s, *workers):
-    s.validate = False # very slow otherwise
+    s.validate = False  # very slow otherwise
     da = pytest.importorskip('dask.array')
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip('resource')

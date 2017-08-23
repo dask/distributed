@@ -12,7 +12,7 @@ from toolz import take
 
 from distributed.client import Client
 from distributed.utils_test import (slow, slowinc, slowadd, slowdec,
-        loop, inc, dec, div, throws, gen_cluster, cluster)
+                                    loop, inc, dec, div, throws, gen_cluster, cluster)
 
 
 def number_of_processing_tasks(client):

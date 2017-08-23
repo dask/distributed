@@ -6,7 +6,7 @@ import click
 from distributed.cli.utils import check_python_3
 
 
-@click.command(help = """Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the
+@click.command(help="""Launch a distributed cluster over SSH. A 'dask-scheduler' process will run on the
                          first host specified in [HOSTNAMES] or in the hostfile (unless --scheduler is specified
                          explicitly). One or more 'dask-worker' processes will be run each host in [HOSTNAMES] or
                          in the hostfile. Use command line flags to adjust how many dask-worker process are run on
@@ -34,7 +34,7 @@ from distributed.cli.utils import check_python_3
               help="Directory to use on all cluster nodes for the output of dask-scheduler and dask-worker commands.")
 @click.pass_context
 def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
-          ssh_username, ssh_port, ssh_private_key, nohost, log_directory):
+         ssh_username, ssh_port, ssh_private_key, nohost, log_directory):
     try:
         hostnames = list(hostnames)
         if hostfile:
@@ -50,14 +50,14 @@ def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
         exit(1)
 
     c = SSHCluster(scheduler, scheduler_port, hostnames, nthreads, nprocs,
-                ssh_username, ssh_port, ssh_private_key, nohost, log_directory)
+                   ssh_username, ssh_port, ssh_private_key, nohost, log_directory)
 
     import distributed
     print('\n---------------------------------------------------------------')
     print('                 Dask.distributed v{version}\n'.format(version=distributed.__version__))
     print('Worker nodes:'.format(n=len(hostnames)))
     for i, host in enumerate(hostnames):
-        print('  {num}: {host}'.format(num = i, host = host))
+        print('  {num}: {host}'.format(num=i, host=host))
     print('\nscheduler node: {addr}:{port}'.format(addr=scheduler, port=scheduler_port))
     print('---------------------------------------------------------------\n\n')
 
@@ -73,6 +73,7 @@ def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
 def go():
     check_python_3()
     main()
+
 
 if __name__ == '__main__':
     start()

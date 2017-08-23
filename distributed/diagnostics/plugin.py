@@ -40,7 +40,7 @@ class SchedulerPlugin(object):
     """
 
     def update_graph(self, scheduler, dsk=None, keys=None,
-            restrictions=None, **kwargs):
+                     restrictions=None, **kwargs):
         """ Run when a new graph / tasks enter the scheduler """
 
     def restart(self, scheduler, **kwargs):

@@ -68,6 +68,7 @@ req_template = """
 
 here = os.path.abspath(os.path.dirname(__file__))
 
+
 def make_cert_key(hostname, sign=False):
     print("creating cert for " + hostname)
     tempnames = []
@@ -86,17 +87,16 @@ def make_cert_key(hostname, sign=False):
             with tempfile.NamedTemporaryFile(delete=False) as f:
                 tempnames.append(f.name)
                 reqfile = f.name
-            args += ['-out', reqfile ]
+            args += ['-out', reqfile]
 
         else:
-            args += ['-x509', '-out', cert_file ]
+            args += ['-x509', '-out', cert_file]
         check_call(['openssl'] + args)
 
         if sign:
             args = ['ca', '-config', req_file, '-out', cert_file, '-outdir', 'cadir',
-                    '-policy', 'policy_anything', '-batch', '-infiles', reqfile ]
+                    '-policy', 'policy_anything', '-batch', '-infiles', reqfile]
             check_call(['openssl'] + args)
-
 
         with open(cert_file, 'r') as f:
             cert = f.read()
@@ -107,18 +107,21 @@ def make_cert_key(hostname, sign=False):
         for name in tempnames:
             os.remove(name)
 
+
 TMP_CADIR = 'cadir'
+
 
 def unmake_ca():
     shutil.rmtree(TMP_CADIR)
 
+
 def make_ca():
     os.mkdir(TMP_CADIR)
-    with open(os.path.join('cadir','index.txt'),'a+') as f:
-        pass # empty file
-    #with open(os.path.join('cadir','crl.txt'),'a+') as f:
-        #f.write("00")
-    with open(os.path.join('cadir','index.txt.attr'),'w+') as f:
+    with open(os.path.join('cadir', 'index.txt'), 'a+') as f:
+        pass  # empty file
+    # with open(os.path.join('cadir','crl.txt'),'a+') as f:
+        # f.write("00")
+    with open(os.path.join('cadir', 'index.txt.attr'), 'w+') as f:
         f.write('unique_subject = no')
 
     with tempfile.NamedTemporaryFile("w") as t:
@@ -133,7 +136,7 @@ def make_ca():
             args = ['ca', '-config', t.name, '-create_serial',
                     '-out', 'tls-ca-cert.pem', '-batch', '-outdir', TMP_CADIR,
                     '-keyfile', 'tls-ca-key.pem', '-days', '3650',
-                    '-selfsign', '-extensions', 'v3_ca', '-infiles', f.name ]
+                    '-selfsign', '-extensions', 'v3_ca', '-infiles', f.name]
             check_call(['openssl'] + args)
             #args = ['ca', '-config', t.name, '-gencrl', '-out', 'revocation.crl']
             #check_call(['openssl'] + args)

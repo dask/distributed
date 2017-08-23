@@ -6,6 +6,7 @@ from distributed.utils_test import gen_cluster, div
 from distributed.diagnostics.scheduler import tasks, workers
 from distributed.client import _wait
 
+
 @gen_cluster(client=True)
 def test_tasks(c, s, a, b):
     d = tasks(s)

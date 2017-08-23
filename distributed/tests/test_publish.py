@@ -8,6 +8,7 @@ from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc
 from distributed.utils_test import cluster
 
+
 @gen_cluster(client=False)
 def test_publish_simple(s, a, b):
     c = yield Client((s.ip, s.port), asynchronous=True)
@@ -80,6 +81,7 @@ def test_unpublish(c, s, a, b):
 
     assert "not found" in str(exc_info.value)
     assert "data" in str(exc_info.value)
+
 
 def test_unpublish_sync(loop):
     with cluster() as (s, [a, b]):

@@ -27,7 +27,7 @@ from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
 from distributed.utils import tmpfile
 from distributed.utils_test import (loop, inc, mul, gen_cluster, div, dec,
-        slow, slowinc, throws, gen_test, readone, cluster)
+                                    slow, slowinc, throws, gen_test, readone, cluster)
 
 
 def test_worker_ncores():
@@ -82,8 +82,10 @@ def test_health():
 def test_worker_bad_args(c, s, a, b):
     class NoReprObj(object):
         """ This object cannot be properly represented as a string. """
+
         def __str__(self):
             raise ValueError("I have no str representation.")
+
         def __repr__(self):
             raise ValueError("I have no repr representation.")
 
@@ -131,8 +133,8 @@ def test_worker_bad_args(c, s, a, b):
     if sys.version_info[0] >= 3:
         tb = yield y._traceback()
         assert any('1 / 0' in line
-                  for line in pluck(3, traceback.extract_tb(tb))
-                  if line)
+                   for line in pluck(3, traceback.extract_tb(tb))
+                   if line)
     assert "Compute Failed" in hdlr.messages['warning'][0]
     logger.setLevel(old_level)
 
@@ -291,6 +293,7 @@ def test_error_message():
     class MyException(Exception):
         def __init__(self, a, b):
             self.args = (a + b,)
+
         def __str__(self):
             return "MyException(%s)" % self.args
 
@@ -506,7 +509,6 @@ def test_system_monitor(s, a, b):
     b.monitor.update()
 
 
-
 @gen_cluster(client=True, ncores=[('127.0.0.1', 2, {'resources': {'A': 1}}),
                                   ('127.0.0.1', 1)])
 def test_restrictions(c, s, a, b):
@@ -708,9 +710,9 @@ def test_priorities_2(c, s, w):
     yield _wait(futures)
 
     log = [t[0] for t in w.log
-                if t[1] == 'executing'
-                and t[2] == 'memory'
-                and not t[0].startswith('finalize')]
+           if t[1] == 'executing'
+           and t[2] == 'memory'
+           and not t[0].startswith('finalize')]
 
     assert any(key.startswith('b1') for key in log[:len(log) // 2])
 
@@ -777,6 +779,7 @@ def test_fail_write_to_disk(c, s, a, b):
 def test_fail_write_many_to_disk(c, s, a, b):
     a.validate = False
     b.validate = False
+
     class Bad(object):
         def __init__(self, x):
             pass

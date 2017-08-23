@@ -16,7 +16,7 @@ def test_dask_submit_cli_writes_result_to_stdout(loop, tmpdir,
         yield remote_client._start()
 
         out, err = yield _submit('127.0.0.1:{0}'.format(remote_client.port),
-                      str(valid_python_script))
+                                 str(valid_python_script))
         assert b'hello world!' in out
         yield remote_client._close()
 

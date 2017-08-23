@@ -59,6 +59,7 @@ def test_async_with(loop):
     result = None
     client = None
     cluster = None
+
     async def f():
         async with Client(processes=False, asynchronous=True) as c:
             nonlocal result, client, cluster

@@ -235,16 +235,19 @@ def test_rpc_default():
     yield check_rpc(8883, '127.0.0.1:8883')
     yield check_rpc(8883)
 
+
 @gen_test()
 def test_rpc_tcp():
     yield check_rpc('tcp://:8883', 'tcp://127.0.0.1:8883')
     yield check_rpc('tcp://')
+
 
 @gen_test()
 def test_rpc_tls():
     sec = tls_security()
     yield check_rpc('tcp://', None, sec.get_listen_args('scheduler'),
                     sec.get_connection_args('worker'))
+
 
 @gen_test()
 def test_rpc_inproc():
@@ -292,13 +295,16 @@ def check_rpc_message_lifetime(*listen_args):
         # If additional instances were created, they were deleted as well
         assert CountedObject.n_instances == 0
 
+
 @gen_test()
 def test_rpc_message_lifetime_default():
     yield check_rpc_message_lifetime()
 
+
 @gen_test()
 def test_rpc_message_lifetime_tcp():
     yield check_rpc_message_lifetime('tcp://')
+
 
 @gen_test()
 def test_rpc_message_lifetime_inproc():
@@ -323,9 +329,11 @@ def check_rpc_with_many_connections(listen_arg):
     remote.close_comms()
     assert all(comm.closed() for comm in remote.comms)
 
+
 @gen_test()
 def test_rpc_with_many_connections_tcp():
     yield check_rpc_with_many_connections('tcp://')
+
 
 @gen_test()
 def test_rpc_with_many_connections_inproc():
@@ -356,6 +364,7 @@ def check_large_packets(listen_arg):
 def test_large_packets_tcp():
     yield check_large_packets('tcp://')
 
+
 @gen_test()
 def test_large_packets_inproc():
     yield check_large_packets('inproc://')
@@ -374,9 +383,11 @@ def check_identity(listen_arg):
 
     server.stop()
 
+
 @gen_test()
 def test_identity_tcp():
     yield check_identity('tcp://')
+
 
 @gen_test()
 def test_identity_inproc():
@@ -407,6 +418,7 @@ def test_ports(loop):
 
 def stream_div(stream=None, x=None, y=None):
     return x / y
+
 
 @gen_test()
 def test_errors():

@@ -10,9 +10,9 @@ from distributed import Nanny
 from distributed.client import _wait
 from distributed.metrics import time
 from distributed.utils_test import (gen_cluster, cluster, inc, dec, gen_test,
-        div)
+                                    div)
 from distributed.diagnostics.progress import (Progress, SchedulerPlugin,
-        AllProgress, GroupProgress, MultiProgress, dependent_keys)
+                                              AllProgress, GroupProgress, MultiProgress, dependent_keys)
 
 
 def test_dependent_keys():
@@ -24,17 +24,19 @@ def test_dependent_keys():
     dependencies, dependents = get_deps(dsk)
 
     assert dependent_keys(f, who_has, processing, dependencies,
-            exceptions, complete=False)[0] == {f, e, c, d}
+                          exceptions, complete=False)[0] == {f, e, c, d}
 
     assert dependent_keys(f, who_has, processing, dependencies,
-            exceptions, complete=True)[0] == {a, b, c, d, e, f}
+                          exceptions, complete=True)[0] == {a, b, c, d, e, f}
 
 
 def f(*args):
     pass
 
+
 def g(*args):
     pass
+
 
 def h(*args):
     pass
@@ -101,7 +103,7 @@ def test_robust_to_bad_plugin(c, s, a, b):
 def check_bar_completed(capsys, width=40):
     out, err = capsys.readouterr()
     bar, percent, time = [i.strip() for i in out.split('\r')[-1].split('|')]
-    assert bar == '[' + '#'*width + ']'
+    assert bar == '[' + '#' * width + ']'
     assert percent == '100% Completed'
 
 
@@ -132,7 +134,8 @@ def test_AllProgress(c, s, a, b):
 
     keys = {x.key, y.key, z.key}
     del x, y, z
-    import gc; gc.collect()
+    import gc
+    gc.collect()
 
     while any(k in s.who_has for k in keys):
         yield gen.sleep(0.01)
@@ -149,7 +152,8 @@ def test_AllProgress(c, s, a, b):
 
     tkey = t.key
     del xx, yy, zz, t
-    import gc; gc.collect()
+    import gc
+    gc.collect()
 
     while tkey in s.task_state:
         yield gen.sleep(0.01)
@@ -163,7 +167,8 @@ def test_AllProgress(c, s, a, b):
 
     for i in range(4):
         future = c.submit(f, i)
-    import gc; gc.collect()
+    import gc
+    gc.collect()
 
     yield gen.sleep(1)
 

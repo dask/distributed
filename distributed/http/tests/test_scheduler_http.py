@@ -141,7 +141,7 @@ def test_with_data(e, s, a, b):
     assert all(isinstance(v, int) for d in out.values() for v in d.values())
 
     assert sum(v for d in out.values() for v in d.values()) == \
-            sum(map(getsizeof, [1, 2, 3, 'Hello', 'world!']))
+        sum(map(getsizeof, [1, 2, 3, 'Hello', 'world!']))
 
     ss.stop()
 
@@ -174,7 +174,6 @@ def test_with_status(e, s, a, b):
     assert out['waiting'] == 0
 
     ss.stop()
-
 
 
 @gen_cluster(client=True)

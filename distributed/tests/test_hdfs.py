@@ -181,8 +181,8 @@ def test_get_block_locations_nested_2(e, s, a, b):
                 with hdfs.open(fn, 'wb', replication=1) as f:
                     f.write(data)
 
-        L =  list(concat(hdfs.get_block_locations(fn)
-                         for fn in hdfs.glob('%s/data-*/*.csv' % basedir)))
+        L = list(concat(hdfs.get_block_locations(fn)
+                        for fn in hdfs.glob('%s/data-*/*.csv' % basedir)))
         assert len(L) == 6
 
         sample, values = read_bytes('hdfs://%s/*/*.csv' % basedir)
@@ -226,7 +226,7 @@ def test_write_bytes(c, s, a, b):
         remote_data = yield c._scatter(data)
 
         futures = c.compute(write_bytes(remote_data,
-            'hdfs://%s/data/file.*.dat' % basedir))
+                                        'hdfs://%s/data/file.*.dat' % basedir))
         yield _wait(futures)
 
         yield futures[0]
@@ -237,7 +237,7 @@ def test_write_bytes(c, s, a, b):
 
         hdfs.mkdir('%s/data2/' % basedir)
         futures = c.compute(write_bytes(remote_data,
-            'hdfs://%s/data2/' % basedir))
+                                        'hdfs://%s/data2/' % basedir))
         yield _wait(futures)
 
         assert len(hdfs.ls('%s/data2/' % basedir)) == 3
@@ -373,7 +373,6 @@ def test__read_text_json_endline(e, s, a):
         result = yield e.compute(b)
 
         assert result == [{"x": 1}, {"x": 2}]
-
 
 
 @gen_cluster([(ip, 1), (ip, 1)], timeout=60, client=True)

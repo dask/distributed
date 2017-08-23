@@ -14,9 +14,9 @@ from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec, slowinc
 from distributed.bokeh.worker import Counters, BokehWorker
 from distributed.bokeh.scheduler import (BokehScheduler, StateTable,
-        SystemMonitor, Occupancy, StealingTimeSeries, StealingEvents, Events,
-        TaskStream, TaskProgress, MemoryUse, CurrentLoad, ProcessingHistogram,
-        NBytesHistogram, WorkerTable)
+                                         SystemMonitor, Occupancy, StealingTimeSeries, StealingEvents, Events,
+                                         TaskStream, TaskProgress, MemoryUse, CurrentLoad, ProcessingHistogram,
+                                         NBytesHistogram, WorkerTable)
 
 from distributed.bokeh import scheduler
 
@@ -146,7 +146,6 @@ def test_task_stream_second_plugin(c, s, a, b):
 
     ts2 = TaskStream(s, n_rectangles=5, clear_interval=10)
     ts2.update()
-
 
 
 @gen_cluster(client=True)

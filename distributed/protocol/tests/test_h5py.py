@@ -90,6 +90,7 @@ from distributed.utils_test import gen_cluster
 
 import dask.array as da
 
+
 @silence_h5py_issue775
 @gen_cluster(client=True)
 def test_h5py_serialize(c, s, a, b):

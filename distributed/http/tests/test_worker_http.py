@@ -23,7 +23,7 @@ def test_simple(c, s, a, b):
     assert response['status'] == a.status
 
     response = yield client.fetch('http://localhost:%d/resources.json' %
-            server.port)
+                                  server.port)
     response = json.loads(response.body.decode())
 
     futures = yield c._scatter(list(range(10)))
@@ -79,9 +79,9 @@ def test_services_port(s, a, b):
     yield c._start()
     assert isinstance(c.services['http'], HTTPServer)
     assert (c.service_ports['http']
-         == c.services['http'].port
-         == s.worker_info[c.address]['services']['http']
-         == 9898)
+            == c.services['http'].port
+            == s.worker_info[c.address]['services']['http']
+            == 9898)
 
     c.services['http'].stop()
     yield c._close()

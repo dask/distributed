@@ -33,6 +33,7 @@ class EchoServer(object):
         self.address = listener.contact_address
         self.stop = listener.stop
 
+
 @contextmanager
 def echo_server():
     server = EchoServer()
@@ -63,8 +64,10 @@ def test_BatchedSend():
         b.send('HELLO')
         b.send('HELLO')
 
-        result = yield comm.read(); assert result == ['hello', 'hello', 'world']
-        result = yield comm.read(); assert result == ['HELLO', 'HELLO']
+        result = yield comm.read()
+        assert result == ['hello', 'hello', 'world']
+        result = yield comm.read()
+        assert result == ['HELLO', 'HELLO']
 
         assert b.byte_count > 1
 
@@ -80,7 +83,8 @@ def test_send_before_start():
         b.send('world')
 
         b.start(comm)
-        result = yield comm.read(); assert result == ['hello', 'world']
+        result = yield comm.read()
+        assert result == ['hello', 'world']
 
 
 @gen_test()

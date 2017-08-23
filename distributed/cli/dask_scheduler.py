@@ -24,6 +24,7 @@ logger = logging.getLogger('distributed.scheduler')
 
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
+
 @click.command()
 @click.option('--host', type=str, default='',
               help="URI, IP or hostname of this server")
