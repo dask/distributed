@@ -6,7 +6,8 @@ INIT_MARKER=$HOSTDIR/hdfs-initialized
 # Remove initialization marker
 rm -f $INIT_MARKER
 
-CONTAINER_ID=$(docker run -d -h hdfs-container -v$HOSTDIR:/host -p8020:8020 -p 50070:50070 distributed-hdfs-test)
+docker build -t test .
+CONTAINER_ID=$(docker run -d -v$HOSTDIR:/host -p8020:8020 -p 50070:50070 test)
 
 if [ $? -ne 0 ]; then
     echo "Failed starting HDFS container"
@@ -18,7 +19,7 @@ echo "Started HDFS container: $CONTAINER_ID"
 CHECK_RUNNING="docker top $CONTAINER_ID"
 
 # Wait for initialization
-while [[ $($CHECK_RUNNING) ]] && [[ ! -f $INIT_MARKER ]]
+while [[ $($CHECK_RUNNING) ]]  && [[ ! -f $INIT_MARKER ]]
 do
     sleep 1
 done

@@ -25,7 +25,7 @@ if [[ $HDFS == true ]]; then
         echo "--"
         echo "-- HDFS namenode log follows"
         echo "--"
-        docker exec -it $(docker ps -q) bash -c "tail -n50 /usr/local/hadoop/logs/hadoop-root-namenode-hdfs-container.log"
+        docker exec -it $(docker ps -q) bash -c "tail -n50 /opt/hadoop/logs/hadoop-root-namenode-*.log"
         (exit 1)
     fi
 elif [[ $COVERAGE == true ]]; then
