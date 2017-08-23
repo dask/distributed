@@ -12,8 +12,7 @@ from tornado import gen
 from distributed import (worker_client, Client, as_completed, get_worker, wait,
         get_client)
 from distributed.metrics import time
-from distributed.utils_test import gen_cluster, inc, double, cluster, loop
-from distributed.worker import thread_state
+from distributed.utils_test import cluster, double, gen_cluster, inc
 
 
 @gen_cluster(client=True)
@@ -39,7 +38,6 @@ def test_submit_from_worker(c, s, a, b):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
 def test_scatter_from_worker(c, s, a, b):
     def func():
-        from distributed.worker import thread_state
         with worker_client() as c:
             futures = c.scatter([1, 2, 3, 4, 5])
             assert isinstance(futures, (list, tuple))

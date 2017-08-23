@@ -4,11 +4,10 @@ from collections import defaultdict
 import logging
 import os
 
-from toolz import keymap, valmap, pluck
+from toolz import pluck
 from tornado import web
 
 from .core import RequestHandler, MyApp, Resources
-from ..sizeof import sizeof
 from ..utils import key_split
 
 

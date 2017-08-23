@@ -10,11 +10,11 @@ import pytest
 from dask.delayed import Delayed
 import dask.bag as db
 import dask.dataframe as dd
-from dask import compute, delayed
+from dask import delayed
 from dask.bytes.core import read_bytes, write_bytes
 
 from distributed.compatibility import unicode
-from distributed.utils_test import gen_cluster, cluster, make_hdfs, loop
+from distributed.utils_test import cluster, gen_cluster, make_hdfs
 from distributed.utils import get_ip
 from distributed import Client
 from distributed.client import _wait, Future

@@ -8,7 +8,6 @@ pytest.importorskip('paramiko')
 from distributed import Client
 from distributed.deploy.ssh import SSHCluster
 from distributed.metrics import time
-from distributed.utils_test import slow, loop
 
 @pytest.mark.avoid_travis
 def test_cluster(loop):

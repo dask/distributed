@@ -44,7 +44,6 @@ class DashboardComponent(object):
 
     def update(self, messages):
         """ Reads from bokeh.distributed.messages and updates self.source """
-        pass
 
 
 class TaskStream(DashboardComponent):

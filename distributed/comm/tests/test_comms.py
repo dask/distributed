@@ -2,7 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 from functools import partial
 import os
-import ssl
 import sys
 import threading
 
@@ -11,7 +10,6 @@ import pytest
 from tornado import gen, ioloop, queues
 from tornado.concurrent import Future
 
-from distributed.core import pingpong
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (slow, loop, gen_test, gen_cluster,

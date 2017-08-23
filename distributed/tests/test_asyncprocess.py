@@ -15,7 +15,7 @@ from tornado.locks import Event
 
 from distributed.metrics import time
 from distributed.process import AsyncProcess
-from distributed.utils import ignoring, mp_context
+from distributed.utils import mp_context
 from distributed.utils_test import gen_test
 
 

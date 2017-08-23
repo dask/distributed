@@ -1,11 +1,9 @@
 from __future__ import print_function, division, absolute_import
 
-from operator import add
 from time import sleep
 import sys
 
 import pytest
-from toolz import take
 from tornado import gen
 
 from distributed import Client, Variable, worker_client, Nanny, wait

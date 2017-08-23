@@ -2,10 +2,9 @@ from __future__ import print_function, division, absolute_import
 
 from concurrent.futures import ThreadPoolExecutor
 import logging
-from numbers import Integral, Number
+from numbers import Number
 from operator import add
 import os
-import re
 import shutil
 import sys
 import traceback
@@ -17,18 +16,16 @@ import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
 
-import distributed
 from distributed import Nanny, Client, get_client, wait, default_client
 from distributed.compatibility import WINDOWS
-from distributed.core import rpc, connect
+from distributed.core import rpc
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.protocol import to_serialize
-from distributed.protocol.pickle import dumps, loads
+from distributed.protocol.pickle import dumps
 from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
-from distributed.utils import ignoring, tmpfile
+from distributed.utils import tmpfile
 from distributed.utils_test import (loop, inc, mul, gen_cluster, div, dec,
         slow, slowinc, throws, gen_test, readone, cluster)
 

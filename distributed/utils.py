@@ -4,7 +4,6 @@ import atexit
 from collections import Iterable
 from contextlib import contextmanager
 from datetime import timedelta
-import inspect
 import functools
 import logging
 import multiprocessing

@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-import pytest
 
 from distributed.core import rpc
 from distributed.utils_test import gen_cluster

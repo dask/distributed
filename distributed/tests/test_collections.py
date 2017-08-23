@@ -1,7 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-from datetime import timedelta
-import sys
 
 import pytest
 pytest.importorskip('numpy')
@@ -11,15 +9,12 @@ import dask
 import dask.dataframe as dd
 import dask.bag as db
 from distributed import Client
-from distributed.client import _wait, wait
-from distributed.utils_test import cluster, loop, gen_cluster
+from distributed.client import wait
+from distributed.utils_test import cluster, gen_cluster
 import numpy as np
 import pandas as pd
 import pandas.util.testing as tm
-from toolz import identity
 
-from tornado import gen
-from tornado.ioloop import IOLoop
 
 
 dfs = [pd.DataFrame({'x': [1, 2, 3]}, index=[0, 10, 20]),

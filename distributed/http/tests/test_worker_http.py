@@ -1,17 +1,14 @@
 from __future__ import print_function, division, absolute_import
 
 import json
-import tornado
 
-from tornado.ioloop import IOLoop
-from tornado import web, gen
+from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 from tornado.httpserver import HTTPServer
 
-from distributed.utils_test import gen_cluster, gen_test, slowinc
+from distributed.utils_test import gen_cluster, slowinc
 from distributed import Worker
 from distributed.http.worker import HTTPWorker
-from distributed.sizeof import sizeof
 
 
 @gen_cluster(client=True)

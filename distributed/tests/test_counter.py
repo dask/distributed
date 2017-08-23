@@ -9,7 +9,6 @@ try:
 except ImportError:
     Digest = None
 
-from distributed.utils_test import loop
 
 
 @pytest.mark.parametrize('CD,size', [(Counter, lambda d: sum(d.values())),

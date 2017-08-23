@@ -56,7 +56,6 @@ def test_basic(c, s, a, b):
 
         def slowall(*args):
             sleep(1)
-            pass
 
         x = c.submit(slowall, xs, ys, 1, workers=a.address)
         y = c.submit(slowall, xs, ys, 2, workers=b.address)

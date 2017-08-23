@@ -4,7 +4,7 @@ import sys
 import tempfile
 
 from distributed import Client
-from distributed.utils_test import cluster, loop
+from distributed.utils_test import cluster
 
 
 PRELOAD_TEXT = """

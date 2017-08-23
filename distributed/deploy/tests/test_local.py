@@ -17,8 +17,8 @@ from distributed.metrics import time
 from distributed.utils_test import (inc, loop, raises, gen_test, pristine_loop,
         assert_can_connect_locally_4, assert_can_connect_from_everywhere_4_6,
         captured_logger)
-from distributed.utils import ignoring, sync
-from distributed.worker import TOTAL_MEMORY, _ncores
+from distributed.utils import sync
+from distributed.worker import TOTAL_MEMORY
 
 from distributed.deploy.utils_test import ClusterTest
 

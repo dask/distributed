@@ -5,7 +5,6 @@ from zlib import crc32
 
 import numpy as np
 import pytest
-import six
 
 from distributed.protocol import (serialize, deserialize, decompress, dumps,
         loads, to_serialize, msgpack)

@@ -6,7 +6,7 @@ from distributed import Client
 from distributed.client import futures_of
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc
-from distributed.utils_test import cluster, loop
+from distributed.utils_test import cluster
 
 @gen_cluster(client=False)
 def test_publish_simple(s, a, b):

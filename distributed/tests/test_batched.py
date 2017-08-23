@@ -4,14 +4,14 @@ from datetime import timedelta
 import random
 
 import pytest
-from toolz import first, assoc
+from toolz import assoc
 from tornado import gen
 
 from distributed.batched import BatchedSend
 from distributed.core import listen, connect, CommClosedError
 from distributed.metrics import time
-from distributed.utils import sync, All
-from distributed.utils_test import gen_test, slow, gen_cluster
+from distributed.utils import All
+from distributed.utils_test import gen_test, slow
 
 
 class EchoServer(object):

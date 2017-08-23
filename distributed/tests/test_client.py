@@ -4,7 +4,6 @@ from operator import add
 
 from collections import Iterator, deque
 from concurrent.futures import CancelledError
-from datetime import timedelta
 import gc
 import itertools
 import os
@@ -19,7 +18,6 @@ import warnings
 import weakref
 import zipfile
 
-import mock
 import pytest
 from toolz import (identity, isdistinct, first, concat, pluck, valmap,
         partition_all, partial, sliding_window)
@@ -32,7 +30,6 @@ from dask.context import _globals
 from distributed import (Worker, Nanny, recreate_exceptions, fire_and_forget,
         get_client, secede, get_worker, Executor)
 from distributed.comm import CommClosedError
-from distributed.utils_comm import WrappedKey
 from distributed.client import (Client, Future, _wait,
         wait, _as_completed, as_completed, tokenize, _get_global_client,
         default_client, _first_completed, ensure_default_get, futures_of,
@@ -40,7 +37,7 @@ from distributed.client import (Client, Future, _wait,
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
-from distributed.utils import sync, tmp_text, ignoring, tokey, All, mp_context
+from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
         randominc, loop, inc, dec, div, throws, geninc, asyncinc,
         gen_cluster, gen_test, double, deep, popen, captured_logger)
@@ -4567,7 +4564,6 @@ def test_use_synchronous_client_in_async_context(loop):
 
 def test_quiet_quit_when_cluster_leaves(loop):
     from distributed import LocalCluster
-    import logging
     thread = Thread(target=loop.start,
                     name="LocalCluster loop")
     thread.daemon = True

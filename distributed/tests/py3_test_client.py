@@ -1,6 +1,6 @@
 import pytest
 
-from distributed.utils_test import gen_cluster, inc, div, loop
+from distributed.utils_test import div, gen_cluster, inc
 from distributed import as_completed, Client
 
 

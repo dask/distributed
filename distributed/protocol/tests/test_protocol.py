@@ -64,7 +64,7 @@ def test_small_and_big():
 
 
 def test_maybe_compress():
-    import zlib
+    pass
 
     try_converters = [bytes, memoryview]
     try_compressions = ['zlib', 'lz4']

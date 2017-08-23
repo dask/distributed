@@ -1,22 +1,18 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from datetime import timedelta
-from functools import partial
 import json
 import logging
 import os
-import shutil
 import signal
 from sys import exit
 from time import sleep
 
 import click
-from distributed import Nanny, Worker, rpc
-from distributed.utils import All, get_ip_interface
+from distributed import Nanny, Worker
+from distributed.utils import get_ip_interface
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
-from distributed.metrics import time
 from distributed.security import Security
 from distributed.cli.utils import check_python_3, uri_from_host_port
 

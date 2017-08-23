@@ -3,7 +3,6 @@ from __future__ import print_function, division, absolute_import
 from collections import Iterator
 from functools import partial
 import io
-import logging
 import socket
 import sys
 from time import sleep
@@ -14,7 +13,6 @@ import traceback
 import numpy as np
 import pytest
 from tornado import gen
-from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 import dask
@@ -25,7 +23,7 @@ from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
         iterator_to_queue, _maybe_complex, read_block, seek_delimiter,
         funcname, ensure_bytes, open_port, get_ip_interface, nbytes,
         set_thread_state, thread_state)
-from distributed.utils_test import loop, inc, throws, div, has_ipv6
+from distributed.utils_test import div, has_ipv6, inc, throws
 
 
 def test_All(loop):

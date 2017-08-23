@@ -2,18 +2,13 @@ from __future__ import print_function, division, absolute_import
 
 from collections import defaultdict
 import logging
-import sys
-import threading
-import time
 from timeit import default_timer
 
-import dask
-from toolz import valmap, groupby, concat
-from tornado.ioloop import PeriodicCallback, IOLoop
+from toolz import groupby, valmap
 from tornado import gen
 
 from .plugin import SchedulerPlugin
-from ..utils import sync, key_split, tokey, log_errors, key_split_group
+from ..utils import key_split, key_split_group, log_errors, tokey
 
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 import itertools
-from functools import partial
 from operator import mul
 import random
 import sys
@@ -12,9 +11,7 @@ import pytest
 from toolz import sliding_window, concat
 from tornado import gen
 
-import dask
-from dask import delayed
-from distributed import Worker, Nanny, worker_client, Client, wait
+from distributed import Nanny, Worker, wait, worker_client
 from distributed.config import config
 from distributed.metrics import time
 from distributed.scheduler import BANDWIDTH, key_split
@@ -353,7 +350,6 @@ def test_steal_more_attractive_tasks(c, s, a, *rest):
 
 def func(x):
     sleep(1)
-    pass
 
 
 def assert_balanced(inp, expected, c, s, *workers):

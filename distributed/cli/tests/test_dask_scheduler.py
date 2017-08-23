@@ -14,8 +14,7 @@ from time import sleep
 from tornado import gen
 
 from distributed import Scheduler, Client
-from distributed.compatibility import WINDOWS
-from distributed.utils import get_ip, get_ip_interface, ignoring, tmpfile
+from distributed.utils import get_ip, get_ip_interface, tmpfile
 from distributed.utils_test import (loop, popen,
                                     assert_can_connect_from_everywhere_4,
                                     assert_can_connect_from_everywhere_4_6,

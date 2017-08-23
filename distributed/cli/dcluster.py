@@ -1,4 +1,3 @@
-from warnings import warn
 
 def go():
     print("The `dcluster` command has been deprecated.")

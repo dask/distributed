@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-from operator import add
 import random
 import time
 
@@ -10,11 +9,8 @@ from concurrent.futures import (
 
 import pytest
 from toolz import take
-from tornado import gen
 
 from distributed.client import Client
-from distributed.scheduler import Scheduler, KilledWorker
-from distributed.sizeof import sizeof
 from distributed.utils_test import (slow, slowinc, slowadd, slowdec,
         loop, inc, dec, div, throws, gen_cluster, cluster)
 

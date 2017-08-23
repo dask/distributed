@@ -2,7 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 from time import sleep
 
-from tornado import gen
 
 from distributed import Client
 from distributed.utils_test import (loop, popen, get_cert, new_config_file,

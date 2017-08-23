@@ -6,7 +6,7 @@ import pytest
 from toolz import first
 
 from distributed import Client
-from distributed.utils_test import zmq_ctx, mock_ipython, cluster, loop
+from distributed.utils_test import cluster, mock_ipython
 
 
 @pytest.mark.ipython

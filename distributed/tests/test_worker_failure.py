@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 from concurrent.futures import CancelledError
-from datetime import timedelta
 from operator import add
 import os
 from time import sleep
@@ -13,7 +12,6 @@ from tornado import gen
 from dask import delayed
 from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
-from distributed.compatibility import PY3
 from distributed.client import _wait
 from distributed.metrics import time
 from distributed.utils import sync, ignoring

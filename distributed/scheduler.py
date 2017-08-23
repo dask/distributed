@@ -12,9 +12,9 @@ import six
 
 from sortedcontainers import SortedSet
 try:
-    from cytoolz import frequencies, merge, pluck
+    from cytoolz import frequencies, merge
 except ImportError:
-    from toolz import frequencies, merge, pluck
+    from toolz import frequencies, merge
 from toolz import memoize, valmap, first, second, concat
 from tornado import gen
 from tornado.gen import Return

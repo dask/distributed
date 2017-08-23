@@ -2,19 +2,13 @@ from __future__ import print_function, division, absolute_import
 
 import cloudpickle
 from collections import defaultdict, deque
-from copy import deepcopy
 from datetime import timedelta
 import json
 from operator import add, mul
 import sys
-from time import sleep
 
-import dask
 from dask import delayed
-from dask.core import get_deps
 from toolz import merge, concat, valmap, first, frequencies
-from tornado.queues import Queue
-from tornado.gen import TimeoutError
 from tornado import gen
 
 import pytest
@@ -22,13 +16,13 @@ import pytest
 from distributed import Nanny, Worker, Client, wait
 from distributed.core import connect, rpc, CommClosedError
 from distributed.scheduler import validate_state, Scheduler, BANDWIDTH
-from distributed.client import _wait, _first_completed
+from distributed.client import _wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
         loop, readone, slowinc, slowadd, cluster, div)
-from distributed.utils import All, tmpfile
+from distributed.utils import tmpfile
 from distributed.utils_test import slow
 from dask.compatibility import apply
 

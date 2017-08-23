@@ -4,7 +4,7 @@ import pytest
 from random import random
 from time import sleep
 
-from distributed.utils_test import inc, cluster, loop
+from distributed.utils_test import cluster, inc
 
 distributed_joblib = pytest.importorskip('distributed.joblib')
 joblibs = [distributed_joblib.joblib, distributed_joblib.sk_joblib]

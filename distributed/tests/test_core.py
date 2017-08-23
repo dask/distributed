@@ -1,12 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
-from functools import partial
 import os
 import socket
 import weakref
 
-from tornado import gen, ioloop
+from tornado import gen
 import pytest
 
 from distributed.compatibility import finalize
