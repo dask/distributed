@@ -19,21 +19,22 @@ import weakref
 import zipfile
 
 import pytest
-from toolz import (identity, isdistinct, first, concat, pluck, valmap,
-                   partition_all, partial, sliding_window)
+from toolz import (identity, isdistinct, concat, pluck, valmap,
+                   partial)
 from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
 from dask.context import _globals
-from distributed import (Worker, Nanny, recreate_exceptions, fire_and_forget,
+from distributed import (Worker, Nanny, fire_and_forget,
                          get_client, secede, get_worker, Executor)
 from distributed.comm import CommClosedError
-from distributed.client import (Client, Future, _wait,
-                                wait, _as_completed, as_completed, tokenize, _get_global_client,
-                                default_client, _first_completed, ensure_default_get, futures_of,
+from distributed.client import (Client, Future, wait, as_completed, tokenize,
+                                _get_global_client, default_client,
+                                ensure_default_get, futures_of,
                                 temp_default_client)
+
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
@@ -4620,4 +4621,4 @@ def test_warn_executor(loop):
 
 
 if sys.version_info >= (3, 5):
-    from distributed.tests.py3_test_client import *
+    from distributed.tests.py3_test_client import *  # flake8: noqa

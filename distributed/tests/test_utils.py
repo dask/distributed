@@ -315,7 +315,7 @@ def test_funcname():
 def test_ensure_bytes():
     data = [b'1', '1', memoryview(b'1'), bytearray(b'1')]
     if PY2:
-        data.append(buffer(b'1'))
+        data.append(buffer(b'1'))  # flake8: noqa
     for d in data:
         result = ensure_bytes(d)
         assert isinstance(result, bytes)

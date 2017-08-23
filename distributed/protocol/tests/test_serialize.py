@@ -8,9 +8,9 @@ import pytest
 from toolz import identity
 
 from distributed.protocol import (register_serialization, serialize,
-                                  deserialize, nested_deserialize, Serialize, Serialized,
-                                  to_serialize, serialize_bytes, deserialize_bytes, serialize_bytelist,
-                                  decompress)
+                                  deserialize, nested_deserialize, Serialize,
+                                  Serialized, to_serialize, serialize_bytes,
+                                  deserialize_bytes, serialize_bytelist,)
 from distributed.utils import nbytes
 
 

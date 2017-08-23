@@ -326,7 +326,8 @@ class CrossFilter(DashboardComponent):
 
     def process_msg(self, msg):
         try:
-            def func(k): return msg['keys'].get(k, 0)
+            def func(k):
+                return msg['keys'].get(k, 0)
             main_key = max(msg['keys'], key=func)
             typ = self.worker.types.get(main_key, object).__name__
             keyname = key_split(main_key)

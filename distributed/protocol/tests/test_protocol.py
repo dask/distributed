@@ -98,7 +98,7 @@ def test_maybe_compress_sample():
     lz4 = pytest.importorskip('lz4')
     payload = np.random.randint(0, 255, size=10000).astype('u1').tobytes()
     fmt, compressed = maybe_compress(payload)
-    assert fmt == None
+    assert fmt is None
     assert compressed == payload
 
 
@@ -223,7 +223,7 @@ def test_maybe_compress_memoryviews():
     x = np.arange(1000000, dtype='int64')
     compression, payload = maybe_compress(x.data)
     try:
-        import blosc
+        import blosc  # flake8: noqa
     except ImportError:
         assert compression == 'lz4'
         assert len(payload) < x.nbytes * 0.75

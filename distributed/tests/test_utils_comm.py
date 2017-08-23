@@ -3,8 +3,7 @@ from __future__ import print_function, division, absolute_import
 
 from distributed.core import rpc
 from distributed.utils_test import gen_cluster
-from distributed.utils_comm import (scatter_to_workers, pack_data,
-                                    gather_from_workers)
+from distributed.utils_comm import (pack_data, gather_from_workers)
 
 
 def test_pack_data():

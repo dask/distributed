@@ -12,12 +12,12 @@ from tornado.concurrent import Future
 
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
-from distributed.utils_test import (slow, loop, gen_test, gen_cluster,
+from distributed.utils_test import (loop, gen_test,
                                     requires_ipv6, has_ipv6, get_cert,
                                     get_server_ssl_context, get_client_ssl_context)
 
-from distributed.protocol import (loads, dumps,
-                                  to_serialize, Serialized, serialize, deserialize)
+from distributed.protocol import (to_serialize, Serialized, serialize,
+                                  deserialize)
 
 from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
                               parse_address, parse_host_port,

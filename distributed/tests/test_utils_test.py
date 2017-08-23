@@ -13,7 +13,8 @@ from distributed import Scheduler, Worker, Client, config
 from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils_test import (cluster, loop, gen_cluster,
-                                    gen_test, wait_for_port, slow, new_config, tls_only_security)
+                                    gen_test, wait_for_port, new_config,
+                                    tls_only_security)
 from distributed.utils import get_ip
 
 
@@ -122,4 +123,4 @@ def test_new_config():
 
 
 if sys.version_info >= (3, 5):
-    from distributed.tests.py3_test_utils_tst import *
+    from distributed.tests.py3_test_utils_tst import *  # flake8: noqa

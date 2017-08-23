@@ -22,12 +22,10 @@ from distributed.core import rpc
 from distributed.client import _wait
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.protocol.pickle import dumps
-from distributed.sizeof import sizeof
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
 from distributed.utils import tmpfile
 from distributed.utils_test import (loop, inc, mul, gen_cluster, div, dec,
-                                    slow, slowinc, throws, gen_test, readone, cluster)
+                                    slow, slowinc, gen_test, cluster)
 
 
 def test_worker_ncores():
@@ -146,26 +144,6 @@ def test_worker_bad_args(c, s, a, b):
     results = yield c._gather([xx, yy])
 
     assert tuple(results) == (3, 7)
-
-
-@gen_cluster()
-def dont_test_workers_update_center(s, a, b):
-    aa = rpc(ip=a.ip, port=a.port)
-
-    response = yield aa.update_data(data={'x': dumps(1), 'y': dumps(2)})
-    assert response['status'] == 'OK'
-    assert response['nbytes'] == {'x': sizeof(1), 'y': sizeof(2)}
-
-    assert a.data == {'x': 1, 'y': 2}
-    assert s.who_has == {'x': {a.address},
-                         'y': {a.address}}
-    assert s.has_what[a.address] == {'x', 'y'}
-
-    yield aa.delete_data(keys=['x'], close=True)
-    assert not s.who_has['x']
-    assert all('x' not in s for s in c.has_what.values())
-
-    aa.close_rpc()
 
 
 @slow

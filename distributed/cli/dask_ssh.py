@@ -16,7 +16,9 @@ from distributed.cli.utils import check_python_3
 @click.option('--scheduler-port', default=8786, type=int,
               help="Specify scheduler port number.  Defaults to port 8786.")
 @click.option('--nthreads', default=0, type=int,
-              help="Number of threads per worker process. Defaults to number of cores divided by the number of processes per host.")
+              help=("Number of threads per worker process. "
+                    "Defaults to number of cores divided by the number of "
+                    "processes per host."))
 @click.option('--nprocs', default=1, type=int,
               help="Number of worker processes per host.  Defaults to one.")
 @click.argument('hostnames', nargs=-1, type=str)
@@ -31,7 +33,8 @@ from distributed.cli.utils import check_python_3
 @click.option('--nohost', is_flag=True,
               help="Do not pass the hostname to the worker.")
 @click.option('--log-directory', default=None, type=click.Path(exists=True),
-              help="Directory to use on all cluster nodes for the output of dask-scheduler and dask-worker commands.")
+              help=("Directory to use on all cluster nodes for the output of "
+                    "dask-scheduler and dask-worker commands."))
 @click.pass_context
 def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
          ssh_username, ssh_port, ssh_private_key, nohost, log_directory):
@@ -76,4 +79,4 @@ def go():
 
 
 if __name__ == '__main__':
-    start()
+    go()

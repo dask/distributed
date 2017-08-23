@@ -8,8 +8,8 @@ from tornado import gen
 
 from distributed import Worker
 from distributed.client import _wait
-from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
-                                    loop, readone, slowinc, slowadd)
+from distributed.utils_test import (inc, gen_cluster,
+                                    loop, slowinc, slowadd)
 
 
 @gen_cluster(client=True, ncores=[])

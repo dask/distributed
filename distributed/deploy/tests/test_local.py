@@ -14,8 +14,9 @@ import pytest
 from distributed import Client, Worker, Nanny
 from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
-from distributed.utils_test import (inc, loop, raises, gen_test, pristine_loop,
-                                    assert_can_connect_locally_4, assert_can_connect_from_everywhere_4_6,
+from distributed.utils_test import (inc, loop, gen_test,
+                                    assert_can_connect_locally_4,
+                                    assert_can_connect_from_everywhere_4_6,
                                     captured_logger)
 from distributed.utils import sync
 from distributed.worker import TOTAL_MEMORY

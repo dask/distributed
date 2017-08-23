@@ -6,7 +6,7 @@ Code heavily borrowed from Lib/tests/make_ssl_certs.py in CPython.
 import os
 import shutil
 import tempfile
-from subprocess import *
+import subprocess
 
 req_template = """
     [req]
@@ -91,12 +91,12 @@ def make_cert_key(hostname, sign=False):
 
         else:
             args += ['-x509', '-out', cert_file]
-        check_call(['openssl'] + args)
+        subprocess.check_call(['openssl'] + args)
 
         if sign:
             args = ['ca', '-config', req_file, '-out', cert_file, '-outdir', 'cadir',
                     '-policy', 'policy_anything', '-batch', '-infiles', reqfile]
-            check_call(['openssl'] + args)
+            subprocess.check_call(['openssl'] + args)
 
         with open(cert_file, 'r') as f:
             cert = f.read()
@@ -132,14 +132,14 @@ def make_ca():
                     '-newkey', 'rsa:2048', '-keyout', 'tls-ca-key.pem',
                     '-out', f.name,
                     '-subj', '/C=XY/L=Dask-distributed/O=Dask CA/CN=our-ca-server']
-            check_call(['openssl'] + args)
+            subprocess.check_call(['openssl'] + args)
             args = ['ca', '-config', t.name, '-create_serial',
                     '-out', 'tls-ca-cert.pem', '-batch', '-outdir', TMP_CADIR,
                     '-keyfile', 'tls-ca-key.pem', '-days', '3650',
                     '-selfsign', '-extensions', 'v3_ca', '-infiles', f.name]
-            check_call(['openssl'] + args)
+            subprocess.check_call(['openssl'] + args)
             #args = ['ca', '-config', t.name, '-gencrl', '-out', 'revocation.crl']
-            #check_call(['openssl'] + args)
+            #subprocess.check_call(['openssl'] + args)
 
 
 if __name__ == '__main__':

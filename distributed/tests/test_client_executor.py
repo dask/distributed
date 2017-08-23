@@ -5,14 +5,14 @@ import time
 
 from concurrent.futures import (
     CancelledError, TimeoutError, Future, wait, as_completed,
-    FIRST_COMPLETED, FIRST_EXCEPTION, ALL_COMPLETED)
+    FIRST_COMPLETED, FIRST_EXCEPTION)
 
 import pytest
 from toolz import take
 
 from distributed.client import Client
-from distributed.utils_test import (slow, slowinc, slowadd, slowdec,
-                                    loop, inc, dec, div, throws, gen_cluster, cluster)
+from distributed.utils_test import (slowinc, slowadd, slowdec,
+                                    loop, inc, throws, cluster)
 
 
 def number_of_processing_tasks(client):

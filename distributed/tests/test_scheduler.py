@@ -20,7 +20,7 @@ from distributed.client import _wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
-from distributed.utils_test import (inc, ignoring, dec, gen_cluster, gen_test,
+from distributed.utils_test import (inc, dec, gen_cluster, gen_test,
                                     loop, readone, slowinc, slowadd, cluster, div)
 from distributed.utils import tmpfile
 from distributed.utils_test import slow
@@ -53,7 +53,7 @@ def test_respect_data_in_memory(c, s, a):
 
     z = delayed(add)(x, y)
     f2 = c.persist(z)
-    while not f2.key in s.who_has:
+    while f2.key not in s.who_has:
         assert y.key in s.who_has
         yield gen.sleep(0.0001)
 
@@ -370,7 +370,7 @@ def test_feed_large_bytestring(s, a, b):
 
     for i in range(5):
         response = yield comm.read()
-        assert response == True
+        assert response is True
 
     yield comm.close()
 
@@ -393,7 +393,7 @@ def test_scheduler_as_center():
                    keys=['a'],
                    dependencies={'a': []})
     start = time()
-    while not 'a' in s.who_has:
+    while 'a' not in s.who_has:
         assert time() - start < 5
         yield gen.sleep(0.01)
     assert 'a' in a.data or 'a' in b.data or 'a' in c.data

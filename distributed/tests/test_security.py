@@ -62,7 +62,7 @@ def test_from_config():
     }
     with new_config(c):
         sec = Security()
-    assert sec.require_encryption == True
+    assert sec.require_encryption is True
     assert sec.tls_ca_file == 'ca.pem'
     assert sec.tls_ciphers == FORCED_CIPHER
     assert sec.tls_client_key is None
@@ -87,7 +87,7 @@ def test_kwargs():
         sec = Security(tls_scheduler_cert='newcert.pem',
                        require_encryption=True,
                        tls_ca_file=None)
-    assert sec.require_encryption == True
+    assert sec.require_encryption is True
     # None value didn't override default
     assert sec.tls_ca_file == 'ca.pem'
     assert sec.tls_ciphers is None
@@ -149,7 +149,7 @@ def test_tls_config_for_role():
 def test_connection_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
-        assert ctx.check_hostname == False
+        assert ctx.check_hostname is False
 
     def many_ciphers(ctx):
         if sys.version_info >= (3, 6):
@@ -203,7 +203,7 @@ def test_connection_args():
 def test_listen_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
-        assert ctx.check_hostname == False
+        assert ctx.check_hostname is False
 
     def many_ciphers(ctx):
         if sys.version_info >= (3, 6):

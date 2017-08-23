@@ -7,6 +7,7 @@ from distributed.client import futures_of
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, loop
 from distributed.utils_test import cluster
+from tornado import gen
 
 
 @gen_cluster(client=False)

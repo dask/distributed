@@ -9,8 +9,7 @@ from tornado import gen
 
 from distributed import Client, Queue, Nanny, worker_client, wait
 from distributed.metrics import time
-from distributed.utils_test import (gen_cluster, inc, loop, cluster, slowinc,
-                                    slow, div)
+from distributed.utils_test import (gen_cluster, inc, loop, cluster, slow, div)
 
 
 @gen_cluster(client=True)

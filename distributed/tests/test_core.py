@@ -10,9 +10,9 @@ import pytest
 
 from distributed.compatibility import finalize
 from distributed.config import set_config
-from distributed.core import (
-    pingpong, Server, rpc, connect, send_recv,
-    coerce_to_address, ConnectionPool, CommClosedError)
+from distributed.core import (pingpong, Server, rpc, connect, send_recv,
+                               coerce_to_address, ConnectionPool)
+
 from distributed.metrics import time
 from distributed.protocol import to_serialize
 from distributed.utils import get_ip, get_ipv6
@@ -446,7 +446,7 @@ def test_send_recv_args():
     assert result == b'1'
     assert not comm.closed()
     result = yield send_recv(comm, op='echo', x=b'2', reply=False)
-    assert result == None
+    assert result is None
     assert not comm.closed()
     result = yield send_recv(comm, op='echo', x=b'3', close=True)
     assert result == b'3'

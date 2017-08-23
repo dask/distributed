@@ -29,7 +29,7 @@ def test_simple(c, s, a, b):
     futures = yield c._scatter(list(range(10)))
 
     try:
-        import psutil
+        import psutil  # flake8: noqa
         assert 0 < response['memory_percent'] < 100
     except ImportError:
         assert response == {}

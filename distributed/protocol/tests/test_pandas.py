@@ -7,8 +7,8 @@ import pytest
 
 from dask.dataframe.utils import assert_eq
 
-from distributed.protocol import (serialize, deserialize, decompress, dumps,
-                                  loads, to_serialize)
+from distributed.protocol import (serialize, deserialize, decompress)
+
 
 dfs = [
     pd.DataFrame({}),
