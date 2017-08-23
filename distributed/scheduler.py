@@ -1101,8 +1101,10 @@ class Scheduler(ServerNode):
                 set(self.worker_comms)):
             raise ValueError("Workers not the same in all collections")
 
-        assert self.worker_bytes == {w: sum(self.nbytes[k] for k in keys)
-                                     for w, keys in self.has_what.items()}
+        a = self.worker_bytes
+        b = {w: sum(self.nbytes[k] for k in keys)
+             for w, keys in self.has_what.items()}
+        assert a == b, (a, b)
 
         for key, workers in self.who_has.items():
             for worker in workers:
@@ -1326,8 +1328,12 @@ class Scheduler(ServerNode):
         if errant_worker in self.who_has[key]:
             self.who_has[key].remove(errant_worker)
             self.has_what[errant_worker].remove(key)
+            self.worker_bytes[errant_worker] -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
         if not self.who_has[key]:
-            self.transition(key, 'released')
+            if key in self.tasks:
+                self.transitions({key: 'released'})
+            else:
+                self.transitions({key: 'forgotten'})
 
     def release_worker_data(self, stream=None, keys=None, worker=None):
         hw = self.has_what[worker]
@@ -2134,7 +2140,7 @@ class Scheduler(ServerNode):
                 #            for dep in self.dependencies[key])
 
             if not all(dep in self.task_state for dep in
-                    self.dependencies[key]):
+                       self.dependencies[key]):
                 return {key: 'forgotten'}
 
             self.waiting[key] = set()

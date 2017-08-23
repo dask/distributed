@@ -1749,8 +1749,11 @@ class Worker(WorkerBase):
             else:
                 raise
         finally:
-            for dep in original_deps:
-                self._missing_dep_flight.remove(dep)
+            try:
+                for dep in original_deps:
+                    self._missing_dep_flight.remove(dep)
+            except KeyError:
+                pass
 
             self.ensure_communicating()
 
