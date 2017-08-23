@@ -12,7 +12,7 @@ from tornado import gen
 from distributed import (worker_client, Client, as_completed, get_worker, wait,
                          get_client)
 from distributed.metrics import time
-from distributed.utils_test import cluster, double, gen_cluster, inc
+from distributed.utils_test import cluster, double, gen_cluster, inc, loop
 
 
 @gen_cluster(client=True)

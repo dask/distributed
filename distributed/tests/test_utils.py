@@ -22,7 +22,7 @@ from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
                                truncate_exception, get_traceback, queue_to_iterator,
                                iterator_to_queue, _maybe_complex, read_block, seek_delimiter,
                                funcname, ensure_bytes, open_port, get_ip_interface, nbytes,
-                               set_thread_state, thread_state)
+                               set_thread_state, thread_state, loop)
 from distributed.utils_test import div, has_ipv6, inc, throws
 
 
@@ -197,7 +197,7 @@ def test_get_traceback():
         return b(x)
 
     try:
-        c(x)
+        c(1)
     except Exception as e:
         tb = get_traceback()
         assert type(tb).__name__ == 'traceback'

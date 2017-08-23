@@ -237,7 +237,13 @@ class MultiProgressWidget(MultiProgressBar):
                                         height='10px')
                      for key in all}
         self.bar_texts = {key: HTML('', width="140px") for key in all}
-        self.bar_labels = {key: HTML('<div style=\"padding: 0px 10px 0px 10px; text-align:left; word-wrap: break-word;\">' + html_escape(key.decode() if isinstance(key, bytes) else key) + '</div>')
+        self.bar_labels = {key: HTML('<div style=\"padding: 0px 10px 0px 10px;'
+                                     ' text-align:left; word-wrap: '
+                                     'break-word;\">' +
+                                     html_escape(key.decode()
+                                                 if isinstance(key, bytes)
+                                                 else key) +
+                                     '</div>')
                            for key in all}
 
         def key(kv):

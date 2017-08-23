@@ -10,7 +10,7 @@ import dask.dataframe as dd
 import dask.bag as db
 from distributed import Client
 from distributed.client import wait
-from distributed.utils_test import cluster, gen_cluster
+from distributed.utils_test import cluster, gen_cluster, loop
 import numpy as np
 import pandas as pd
 import pandas.util.testing as tm

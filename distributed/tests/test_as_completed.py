@@ -6,7 +6,7 @@ import pytest
 
 from distributed import Client
 from distributed.client import _as_completed, as_completed, _first_completed
-from distributed.utils_test import cluster, gen_cluster, inc
+from distributed.utils_test import cluster, gen_cluster, inc, loop
 from distributed.compatibility import Queue
 
 

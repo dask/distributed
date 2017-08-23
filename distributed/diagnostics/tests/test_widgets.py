@@ -79,7 +79,7 @@ from toolz import valmap
 from distributed.client import Client, wait
 from distributed.worker import dumps_task
 from distributed.utils_test import (cluster, loop, inc,
-                                    div, dec, throws, gen_cluster)
+                                    dec, throws, gen_cluster)
 from distributed.utils import sync
 from distributed.diagnostics.progressbar import (ProgressWidget,
                                                  MultiProgressWidget, progress)

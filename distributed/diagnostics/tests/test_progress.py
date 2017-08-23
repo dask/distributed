@@ -9,8 +9,7 @@ from dask.core import get_deps
 from distributed import Nanny
 from distributed.client import _wait
 from distributed.metrics import time
-from distributed.utils_test import (gen_cluster, cluster, inc, dec, gen_test,
-                                    div)
+from distributed.utils_test import gen_cluster, inc, dec, div
 from distributed.diagnostics.progress import (Progress, SchedulerPlugin,
                                               AllProgress, GroupProgress, MultiProgress, dependent_keys)
 
