@@ -8,6 +8,7 @@ pytest.importorskip('paramiko')
 from distributed import Client
 from distributed.deploy.ssh import SSHCluster
 from distributed.metrics import time
+from distributed.utils_test import loop  # flake8: noqa
 
 
 @pytest.mark.avoid_travis
