@@ -1715,6 +1715,9 @@ class Worker(WorkerBase):
 
                     if d not in response and d in self.dependents:
                         self.log.append(('missing-dep', d))
+                        self.batched_stream.send({'op': 'missing-data',
+                                                  'errant_worker': worker,
+                                                  'key': d})
 
                 if self.validate:
                     self.validate_state()
@@ -1777,8 +1780,11 @@ class Worker(WorkerBase):
             else:
                 raise
         finally:
-            for dep in original_deps:
-                self._missing_dep_flight.remove(dep)
+            try:
+                for dep in original_deps:
+                    self._missing_dep_flight.remove(dep)
+            except KeyError:
+                pass
 
             self.ensure_communicating()
 
@@ -1817,7 +1823,7 @@ class Worker(WorkerBase):
                 self.task_state[key] = state
                 return
             if cause:
-                self.log.append((key, 'release-key', cause))
+                self.log.append((key, 'release-key', {'cause': cause}))
             else:
                 self.log.append((key, 'release-key'))
             del self.tasks[key]
@@ -1887,7 +1893,8 @@ class Worker(WorkerBase):
                 del self.nbytes[dep]
 
             if dep in self.in_flight_tasks:
-                del self.in_flight_tasks[dep]
+                worker = self.in_flight_tasks.pop(dep)
+                self.in_flight_workers[worker].remove(dep)
 
             for key in self.dependents.pop(dep, ()):
                 self.dependencies[key].remove(dep)
