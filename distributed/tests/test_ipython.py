@@ -7,7 +7,7 @@ from toolz import first
 
 from distributed import Client
 from distributed.utils_test import cluster, mock_ipython
-from distributed.utils_test import loop # flake8: noqa
+from distributed.utils_test import loop, zmq_ctx  # flake8: noqa
 
 
 @pytest.mark.ipython
