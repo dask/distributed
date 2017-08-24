@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 import pytest
 pytest.importorskip('requests')
 
+import sys
 from time import sleep
 from toolz import first
 
