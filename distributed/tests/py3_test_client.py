@@ -8,7 +8,7 @@ from distributed import as_completed, Client
 def test_await_future(c, s, a, b):
     future = c.submit(inc, 1)
 
-    async def f():
+    async def f():  # flake8: noqa
         result = await future
         assert result == 2
 

@@ -48,7 +48,7 @@ def test_many_Progress(c, s, a, b):
     z = c.submit(h, y)
 
     bars = [Progress(keys=[z], scheduler=s) for i in range(10)]
-    yield [b.setup() for b in bars]
+    yield [bar.setup() for bar in bars]
 
     yield z
 

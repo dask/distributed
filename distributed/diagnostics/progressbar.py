@@ -246,11 +246,11 @@ class MultiProgressWidget(MultiProgressBar):
                                      '</div>')
                            for key in all}
 
-        def key(kv):
+        def keyfunc(kv):
             """ Order keys by most numerous, then by string name """
             return kv[::-1]
 
-        key_order = [k for k, v in sorted(all.items(), key=key, reverse=True)]
+        key_order = [k for k, v in sorted(all.items(), key=keyfunc, reverse=True)]
 
         self.bar_widgets = VBox([HBox([self.bar_texts[key],
                                        self.bars[key],
