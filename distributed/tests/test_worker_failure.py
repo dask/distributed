@@ -374,12 +374,13 @@ def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     yield n._close()
 
 
-@gen_cluster(client=True, timeout=None, Worker=Nanny, ncores=[('127.0.0.1', 1)])
+@slow
+@gen_cluster(client=True, timeout=60, Worker=Nanny, ncores=[('127.0.0.1', 1)])
 def test_restart_timeout_on_long_running_task(c, s, a):
     with captured_logger('distributed.scheduler') as sio:
         future = c.submit(sleep, 3600)
         yield gen.sleep(0.1)
-        yield c.restart()
+        yield c.restart(timeout=20)
 
     text = sio.getvalue()
     assert 'timeout' not in text.lower()
