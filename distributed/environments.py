@@ -36,7 +36,7 @@ class WorkerEnvironment(object):
         in the environment.
         """
         if self._condition:
-            return self._condition()
+            yield gen.maybe_future(self._condition())
         return True
 
     @gen.coroutine

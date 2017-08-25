@@ -5,7 +5,25 @@ from distributed import WorkerEnvironment, Worker, Client
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, cluster, loop  # noqa
 
-class MyEnv(WorkerEnvironment):
+
+class MyEnvCoro(WorkerEnvironment):
+    """Test worker environment"""
+    data = 0
+
+    @gen.coroutine
+    def condition(self):
+        return True
+
+    @gen.coroutine
+    def setup(self):
+        self.data = 1
+
+    @gen.coroutine
+    def teardown(self):
+        self.data = -1
+
+
+class MyEnvRegular(WorkerEnvironment):
     """Test worker environment"""
     data = 0
 
@@ -22,7 +40,7 @@ class MyEnv(WorkerEnvironment):
 @gen_cluster(client=True)
 def test_environment_register(c, s, a, b):
     # Register environment
-    yield c._environment_register('myenv', MyEnv())
+    yield c.environment_register('myenv', MyEnvCoro())
     assert len(s.worker_environments) == 1 and 'myenv' in s.worker_environments
     assert len(s.environment_workers['myenv']) == 2
     assert 'myenv' in a.environments
@@ -31,7 +49,7 @@ def test_environment_register(c, s, a, b):
     assert b.environments['myenv'].data == 1
 
     # Register another
-    yield c._environment_register('never_passes', condition=lambda: False)
+    yield c.environment_register('never_passes', condition=lambda: False)
     assert len(s.worker_environments) == 2 and 'never_passes' in s.worker_environments
     assert len(s.environment_workers['never_passes']) == 0
 
@@ -58,7 +76,7 @@ def test_environment_register(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_register_condition_for_worker_raises(c, s, a, b):
-    r = c._environment_register('myenv', lambda: True)
+    r = c.environment_register('myenv', lambda: True)
     with pytest.raises(TypeError) as m:
         r.result()
 
@@ -67,7 +85,7 @@ def test_register_condition_for_worker_raises(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_register_functional(c, s, a, b):
-    yield c._environment_register('myenv', condition=lambda: True)
+    yield c.environment_register('myenv', condition=lambda: True)
     assert len(s.worker_environments) == 1 and 'myenv' in s.worker_environments
     assert len(s.environment_workers['myenv']) == 2
     assert 'myenv' in a.environments
@@ -83,8 +101,8 @@ def test_register_raises(loop):
                                        condition=lambda: 1 / 0)
 
 def test_register_twice_raises(loop):
-    e1 = MyEnv()
-    e2 = MyEnv()
+    e1 = MyEnvCoro()
+    e2 = MyEnvCoro()
     e2.data = 10  # make the two unequal
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
@@ -99,11 +117,11 @@ def test_register_twice_raises(loop):
 
 @gen_cluster(client=True)
 def test_deregister_environment(c, s, a, b):
-    yield c._environment_register('myenv', MyEnv())
+    yield c.environment_register('myenv', MyEnvCoro())
     # sanity check before real test
     assert len(s.worker_environments) == 1 and 'myenv' in s.worker_environments
 
-    yield c._environment_deregister('myenv')
+    yield c.environment_deregister('myenv')
     assert len(s.environment_workers['myenv']) == 0
     # TODO: what all should we clean up when the number of workers drops to zero?
     assert a.environments['myenv'].data == -1

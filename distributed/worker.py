@@ -2262,8 +2262,10 @@ class Worker(WorkerBase):
         if name not in self.environments:
             env = pickle.loads(environment)
             is_member = yield offload(env.condition)
+            print('#' * 40, name, is_member)
             if gen.is_future(is_member):
                 is_member = yield is_member
+            print('*' * 40, name, is_member)
             if is_member:
                 yield self.executor_submit('setup', env.setup)
                 self.environments[name] = env
