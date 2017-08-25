@@ -1796,8 +1796,8 @@ class Client(Node):
         return self.sync(self._run, function, *args, **kwargs)
 
     @gen.coroutine
-    def _register_worker_environment(self, name, environment=None, condition=None,
-                                     setup=None, teardown=None):
+    def _environment_register(self, name, environment=None, condition=None,
+                              setup=None, teardown=None):
         if environment is None:
             environment = WorkerEnvironment(condition=condition, setup=setup,
                                             teardown=teardown)
@@ -1809,7 +1809,7 @@ class Client(Node):
 
         environment._name = name
         env = {name: dumps(environment)}
-        responses = yield self.scheduler.register_worker_environments(environments=env)
+        responses = yield self.scheduler.environments_register(environments=env)
         # TODO: A better way of raising all the exceptions, rather than just the first?
         # perhaps log_errors?
         if responses is not None:
@@ -1817,9 +1817,9 @@ class Client(Node):
                 for exc in exc_list:
                     six.reraise(*clean_exception(**exc))
 
-    def register_worker_environment(self, name, environment=None, condition=None,
-                                    setup=None, teardown=None, asynchronous=None,
-                                    callback_timeout=None):
+    def environment_register(self, name, environment=None, condition=None,
+                             setup=None, teardown=None, asynchronous=None,
+                             callback_timeout=None):
         """Register a new ``WorkerEnvironment``
 
         The ``WorkerEnvironment.condition`` method is executed on each worker
@@ -1843,21 +1843,21 @@ class Client(Node):
         See Also
         --------
         WorkerEnvironment
-        Scheduler.register_worker_environments
+        Scheduler.environments_register
         """
-        return self.sync(self._register_worker_environment, name=name,
+        return self.sync(self._environment_register, name=name,
                          environment=environment, condition=condition, setup=setup,
                          teardown=teardown, asynchronous=asynchronous,
                          callback_timeout=callback_timeout)
 
     @gen.coroutine
-    def _deregister_worker_environment(self, name, workers=None):
-        responses = yield self.scheduler.deregister_worker_environments(environments=[name])
+    def _environnment_deregister(self, name, workers=None):
+        responses = yield self.scheduler.environments_deregister(environments=[name])
         if responses is not None:
             pass
 
-    def deregister_worker_environment(self, name, workers=None, asynchronous=None,
-                                      callback_timeout=None):
+    def environment_deregister(self, name, workers=None, asynchronous=None,
+                               callback_timeout=None):
         """
         Deregister an environment from the scheduler, running the ``teardown``
         method on the workers if applicable.
@@ -1870,7 +1870,7 @@ class Client(Node):
             Set of worker addresses to limit the deregistration to. Other
             workers in the environment will be untouched.
         """
-        return self.sync(self._deregister_worker_environment, name=name,
+        return self.sync(self._environment_deregister, name=name,
                          workers=workers, asynchronous=asynchronous,
                          callback_timeout=callback_timeout)
 

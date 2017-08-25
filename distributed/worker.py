@@ -26,6 +26,7 @@ from tornado.locks import Event
 
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for
+from .comm.utils import offload
 from .config import config
 from .compatibility import unicode, get_thread_identity
 from .core import (error_message, CommClosedError,
@@ -156,8 +157,8 @@ class WorkerBase(ServerNode):
             'upload_file': self.upload_file,
             'start_ipython': self.start_ipython,
             'keys': self.keys,
-            'register_worker_environments': self.register_worker_environments,
-            'deregister_worker_environments': self.deregister_worker_environments,
+            'environmnets_register': self.environments_register,
+            'environments_deregister': self.environments_deregister,
         }
 
         super(WorkerBase, self).__init__(handlers, io_loop=self.loop,
@@ -2239,17 +2240,17 @@ class Worker(WorkerBase):
         return self._client
 
     @gen.coroutine
-    def register_worker_environments(self, stream=None, environments=None):
+    def environments_register(self, stream=None, environments=None):
         result = {}
         for name, env in environments.items():
             if name not in self.environments:
                 try:
                     env = pickle.loads(env)
-                    meets_condition = yield self.executor_submit('condition', env.condition)
+                    meets_condition = yield offload(env.condition)
                     # TODO: Should this be in some kind of "while running" loop with
                     # a timeout?
                     if gen.is_future(meets_condition):
-                        meets_condition = meets_condition.result()
+                        meets_condition = yield meets_condition
                     if meets_condition:
                         # TODO: This currently blocks. I expect that that is
                         # not desirable, as a long setup task may look like a
@@ -2262,12 +2263,12 @@ class Worker(WorkerBase):
                     else:
                         result[name] = False
                 except Exception as e:
-                    logger.warning("Exception in register_worker_environments", e)
+                    logger.warning("Exception in environmnets_register", e)
                     result[name] = error_message(e)
         raise gen.Return(result)
 
     @gen.coroutine
-    def deregister_worker_environments(self, stream=None, environments=None):
+    def environments_deregister(self, stream=None, environments=None):
         result = {}
         for name in environments:
             env = self.environments.get(name)
@@ -2275,7 +2276,7 @@ class Worker(WorkerBase):
                 try:
                     yield env.teardown()
                 except Exception as e:
-                    logger.warning("Exception in deregister_worker_environments", e)
+                    logger.warning("Exception in environments_deregister", e)
                     result[name] = error_message(e)
         raise gen.Return(result)
 

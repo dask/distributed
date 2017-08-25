@@ -31,7 +31,7 @@ Only the name is required.
 Registering Environments
 ------------------------
 
-Environments can be registered using :meth:`Client.register_worker_environment`.
+Environments can be registered using :meth:`Client.environments_register`.
 You can use either a functional style:
 
 .. code-block:: python
@@ -40,21 +40,21 @@ You can use either a functional style:
        import psutil
        return psutil.virtual_memory.total > 30e9
 
-   client.register_worker_environment(name='high-memory',
-                                      condition=has_high_memory)
+   client.environments_register(name='high-memory',
+                                condition=has_high_memory)
 
 
 Or class-based style by passing an instance of :class:`WorkerEnvironment`:
 
 .. code-block:: python
 
-   client.register_worker_environment(name='high-memory',
-                                      environment=HighMemory)
+   client.environments_register(name='high-memory',
+                                environment=HighMemory)
 
 
 If using the functional style, an instance of ``WorkerEnvironment`` is created
 with the ``condition``, ``setup``, and ``teardown`` functions passed to
-``client.register_worker_environment`` attached as methods.
+``client.environments_register`` attached as methods.
 
 The ``condition`` function will be scheduled to be run on each worker. Workers
 that pass the condition are added to the environment, and any setup functions
@@ -79,6 +79,6 @@ and overriding the ``condition``, ``setup``, and ``teardown`` methods.
            return psutil.virtual_memory.total > 30e9
 
 
-Using Environmnets
+Using Environments
 ------------------
 

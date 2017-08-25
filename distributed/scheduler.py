@@ -353,8 +353,8 @@ class Scheduler(ServerNode):
                          'update_data': self.update_data,
                          'set_resources': self.add_resources,
                          'retire_workers': self.retire_workers,
-                         'register_worker_environments': self.register_worker_environments,
-                         'deregister_worker_environments': self.deregister_worker_environments,
+                         'environments_register': self.environments_register,
+                         'environments_deregister': self.environments_deregister,
                          }
 
         self._transitions = {
@@ -499,7 +499,7 @@ class Scheduler(ServerNode):
         return self.finished()
 
     @gen.coroutine
-    def register_worker_environments(self, stream=None, environments=None, workers=None):
+    def environmnets_register(self, stream=None, environments=None, workers=None):
         """Register worker environments.
 
         Parameters
@@ -536,7 +536,7 @@ class Scheduler(ServerNode):
         elif isinstance(workers, six.string_types):
             workers = [workers]
 
-        results = yield [self.rpc(addr=worker).register_worker_environments(
+        results = yield [self.rpc(addr=worker).environmnets_register(
             environments=environments) for worker in workers]
         exceptions = defaultdict(list)
         # results is a List[Dict[env, result]], one dict per worker
@@ -555,7 +555,7 @@ class Scheduler(ServerNode):
         raise gen.Return(exceptions)
 
     @gen.coroutine
-    def deregister_worker_environments(self, stream=None, environments=None, workers=None):
+    def environmnets_deregister(self, stream=None, environments=None, workers=None):
         for name in environments:
             if name not in self.environment_workers:
                 continue
@@ -567,7 +567,7 @@ class Scheduler(ServerNode):
                 worker_set = set(workers)
 
             worker_set = worker_set & self.environment_workers[name]
-            results = yield [self.rpc(addr=worker).deregister_worker_environments(
+            results = yield [self.rpc(addr=worker).environmnets_deregister(
                 environments=environments) for worker in worker_set]
             self.environment_workers[name] -= worker_set
 
@@ -725,7 +725,7 @@ class Scheduler(ServerNode):
                 self.idle.add(address)
 
             if self.worker_environments:
-                self.loop.add_callback(self.register_worker_environments,
+                self.loop.add_callback(self.environments_register,
                                        environments=self.worker_environments,
                                        workers=[address])
             for plugin in self.plugins[:]:
