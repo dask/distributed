@@ -1808,14 +1808,9 @@ class Client(Node):
                             .format(type(environment)))
 
         environment._name = name
-        env = {name: dumps(environment)}
-        responses = yield self.scheduler.environments_register(environments=env)
-        # TODO: A better way of raising all the exceptions, rather than just the first?
-        # perhaps log_errors?
-        if responses is not None:
-            for key, exc_list in responses.items():
-                for exc in exc_list:
-                    six.reraise(*clean_exception(**exc))
+        env = dumps(environment)
+        responses = yield self.scheduler.environment_register(name=name, environment=env)
+        raise gen.Return(responses)
 
     def environment_register(self, name, environment=None, condition=None,
                              setup=None, teardown=None, asynchronous=None,
@@ -1843,7 +1838,7 @@ class Client(Node):
         See Also
         --------
         WorkerEnvironment
-        Scheduler.environments_register
+        Scheduler.environment_register
         """
         return self.sync(self._environment_register, name=name,
                          environment=environment, condition=condition, setup=setup,
@@ -1851,8 +1846,8 @@ class Client(Node):
                          callback_timeout=callback_timeout)
 
     @gen.coroutine
-    def _environnment_deregister(self, name, workers=None):
-        responses = yield self.scheduler.environments_deregister(environments=[name])
+    def _environment_deregister(self, name, workers=None):
+        responses = yield self.scheduler.environment_deregister(name=name)
         if responses is not None:
             pass
 

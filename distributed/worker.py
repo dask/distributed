@@ -157,8 +157,8 @@ class WorkerBase(ServerNode):
             'upload_file': self.upload_file,
             'start_ipython': self.start_ipython,
             'keys': self.keys,
-            'environmnets_register': self.environments_register,
-            'environments_deregister': self.environments_deregister,
+            'environment_register': self.environment_register,
+            'environment_deregister': self.environment_deregister,
         }
 
         super(WorkerBase, self).__init__(handlers, io_loop=self.loop,
@@ -2240,44 +2240,49 @@ class Worker(WorkerBase):
         return self._client
 
     @gen.coroutine
-    def environments_register(self, stream=None, environments=None):
+    def environment_register(self, stream, name, environment):
+        """
+        Possibly register this worker in an environment.
+
+        Parameters
+        ----------
+        stream : object, unused
+        name : str
+        environment : bytes
+            Serialized instance of a ``WorkerEnvironment``
+
+        Returns
+        -------
+        name : str
+        is_member : bool
+            Indicatior for whether this worker meets the environments'
+            condition
+        """
         result = {}
-        for name, env in environments.items():
-            if name not in self.environments:
-                try:
-                    env = pickle.loads(env)
-                    meets_condition = yield offload(env.condition)
-                    # TODO: Should this be in some kind of "while running" loop with
-                    # a timeout?
-                    if gen.is_future(meets_condition):
-                        meets_condition = yield meets_condition
-                    if meets_condition:
-                        # TODO: This currently blocks. I expect that that is
-                        # not desirable, as a long setup task may look like a
-                        # worker that's become unresponsive.
-                        yield self.executor_submit('setup', env.setup)
-                        self.environments[name] = env
-                        result[name] = True
-                        logger.info("Added worker %s to environment %s",
-                                    self.address, name)
-                    else:
-                        result[name] = False
-                except Exception as e:
-                    logger.warning("Exception in environmnets_register", e)
-                    result[name] = error_message(e)
-        raise gen.Return(result)
+        if name not in self.environments:
+            env = pickle.loads(environment)
+            is_member = yield offload(env.condition)
+            if gen.is_future(is_member):
+                is_member = yield is_member
+            if is_member:
+                yield self.executor_submit('setup', env.setup)
+                self.environments[name] = env
+                logger.info("Added worker %s to environment %s",
+                            self.address, name)
+        else:
+            is_member = True
+        raise gen.Return((name, is_member))
 
     @gen.coroutine
-    def environments_deregister(self, stream=None, environments=None):
+    def environment_deregister(self, stream, name):
         result = {}
-        for name in environments:
-            env = self.environments.get(name)
-            if env:
-                try:
-                    yield env.teardown()
-                except Exception as e:
-                    logger.warning("Exception in environments_deregister", e)
-                    result[name] = error_message(e)
+        env = self.environments.get(name)
+        if env:
+            try:
+                yield env.teardown()
+            except Exception as e:
+                logger.warning("Exception in environment_deregister", e)
+                result[name] = error_message(e)
         raise gen.Return(result)
 
 
