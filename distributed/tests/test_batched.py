@@ -246,6 +246,8 @@ def test_dont_hold_on_to_large_messages(c, s, a, b):
     d = d.persist()
     del x
 
+    c.submit(lambda: 1)  # push one more message down the comm
+
     start = time()
     while xr() is not None:
         yield gen.sleep(0.05)
