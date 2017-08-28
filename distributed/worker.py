@@ -26,7 +26,6 @@ from tornado.locks import Event
 
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for
-from .comm.utils import offload
 from .config import config
 from .compatibility import unicode, get_thread_identity
 from .core import (error_message, CommClosedError,
@@ -2255,19 +2254,19 @@ class Worker(WorkerBase):
         -------
         name : str
         is_member : bool
-            Indicatior for whether this worker meets the environments'
+            Indicatior for whether this worker meets the environment's
             condition
         """
         result = {}
         if name not in self.environments:
             env = pickle.loads(environment)
-            is_member = yield offload(env.condition)
-            print('#' * 40, name, is_member)
+            is_member = env.condition()
             if gen.is_future(is_member):
                 is_member = yield is_member
-            print('*' * 40, name, is_member)
             if is_member:
-                yield self.executor_submit('setup', env.setup)
+                setup = env.setup()
+                if gen.is_future(setup):
+                    yield setup
                 self.environments[name] = env
                 logger.info("Added worker %s to environment %s",
                             self.address, name)
@@ -2281,7 +2280,9 @@ class Worker(WorkerBase):
         env = self.environments.get(name)
         if env:
             try:
-                yield env.teardown()
+                teardown = env.teardown()
+                if gen.is_future(teardown):
+                    yield teardown
             except Exception as e:
                 logger.warning("Exception in environment_deregister", e)
                 result[name] = error_message(e)

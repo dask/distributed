@@ -56,22 +56,40 @@ def test_environment_register(c, s, a, b):
     # Add a worker
     w = Worker(s.ip, s.port, loop=s.loop, ncores=1)
     yield w._start(0)
-    start = time()
     while 'myenv' not in w.environments:
         yield gen.sleep(0.01)
-        assert time() - start < 5
 
     assert w.address in s.environment_workers['myenv']
     assert len(s.environment_workers['never_passes']) == 0
 
     # Remove worker
     yield w._close()
-    start = time()
     while not w.status == 'closed':
         yield gen.sleep(0.01)
-        assert time() - start < 5
 
     assert w.address not in s.environment_workers['myenv']
+
+
+@gen_cluster(client=True)
+def test_environment_register_regular(c, s, a, b):
+    yield c.environment_register("myenv", MyEnvRegular())
+    assert len(s.worker_environments) == 1 and 'myenv' in s.worker_environments
+    assert len(s.environment_workers['myenv']) == 2
+
+    class MyEnvRegularFalse(MyEnvRegular):
+        @gen.coroutine
+        def condition(self):
+            return False
+
+    yield c.environment_register("myenv-false", MyEnvRegularFalse())
+    assert len(s.worker_environments) == 2 and 'myenv-false' in s.worker_environments
+    assert len(s.environment_workers['myenv-false']) == 0
+
+
+@gen_cluster(client=True)
+def test_register_limit_workers(c, s, a, b):
+    yield c.environment_register("my-env", workers=[a.address])
+    assert s.environment_workers['my-env'] == {a.address}
 
 
 @gen_cluster(client=True)
@@ -96,9 +114,9 @@ def test_register_raises(loop):
     with pytest.raises(ZeroDivisionError):
         with cluster() as (s, [a, b]):
             with Client(s['address'], loop=loop) as c:
-
                 c.environment_register("zero-division",
                                        condition=lambda: 1 / 0)
+
 
 def test_register_twice_raises(loop):
     e1 = MyEnvCoro()

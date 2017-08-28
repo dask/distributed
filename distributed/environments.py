@@ -1,6 +1,3 @@
-from tornado import gen
-
-
 class WorkerEnvironment(object):
     """A worker environment.
 
@@ -21,7 +18,6 @@ class WorkerEnvironment(object):
     def __repr__(self):
         return "<WorkerEnvironment({})>".format(self._name or '')
 
-    @gen.coroutine
     def condition(self):
         """A function be run on a worker determining whether
         it qualifies for this environment.
@@ -36,16 +32,15 @@ class WorkerEnvironment(object):
         in the environment.
         """
         if self._condition:
-            yield gen.maybe_future(self._condition())
+            result = self._condition()
+            return result
         return True
 
-    @gen.coroutine
     def setup(self):
         """Run on the worker when it's added to the environment"""
         if self._setup:
             return self._setup()
 
-    @gen.coroutine
     def teardown(self):
         """Run on the worker when it's removed from the environment"""
         if self._teardown:

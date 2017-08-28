@@ -1797,7 +1797,8 @@ class Client(Node):
 
     @gen.coroutine
     def _environment_register(self, name, environment=None, condition=None,
-                              setup=None, teardown=None):
+                              setup=None, teardown=None,
+                              workers=None):
         if environment is None:
             environment = WorkerEnvironment(condition=condition, setup=setup,
                                             teardown=teardown)
@@ -1809,11 +1810,14 @@ class Client(Node):
 
         environment._name = name
         env = dumps(environment)
-        responses = yield self.scheduler.environment_register(name=name, environment=env)
+        responses = yield self.scheduler.environment_register(name=name,
+                                                              environment=env,
+                                                              workers=workers)
         raise gen.Return(responses)
 
     def environment_register(self, name, environment=None, condition=None,
-                             setup=None, teardown=None, asynchronous=None,
+                             setup=None, teardown=None, workers=None,
+                             asynchronous=None,
                              callback_timeout=None):
         """Register a new ``WorkerEnvironment``
 
@@ -1828,12 +1832,9 @@ class Client(Node):
         environment : WorkerEnvironment, optional
         condition, setup, teardown : callable
             Used to create a new WorkerEnvironment when `environment` is None
-
-        Notes
-        -----
-        When the ``condition`` (and possibly ``setup``) methods run cleanly
-        on the workers, there is no return value. If an exception is raised
-        on the worker, it is reraised on the client.
+        workers : str or list of str, optional
+            Candidate workers to limit registration to. All workers are
+            candidates by default.
 
         See Also
         --------
@@ -1842,7 +1843,8 @@ class Client(Node):
         """
         return self.sync(self._environment_register, name=name,
                          environment=environment, condition=condition, setup=setup,
-                         teardown=teardown, asynchronous=asynchronous,
+                         teardown=teardown, workers=workers,
+                         asynchronous=asynchronous,
                          callback_timeout=callback_timeout)
 
     @gen.coroutine

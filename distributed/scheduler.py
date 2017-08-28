@@ -504,10 +504,11 @@ class Scheduler(ServerNode):
     def _environments_register(self, environments, workers):
         # When new workers join, we want to go through the environment
         # registration process
-        for name, env in environments.items():
-            yield self.environment_register(None, name=name,
-                                            environment=env,
-                                            workers=workers)
+        results = yield [self.environment_register(None, name=name,
+                                                   environment=env,
+                                                   workers=workers)
+                         for name, env in environments.items()]
+        raise gen.Return(results)
 
     @gen.coroutine
     def environment_register(self, stream, name, environment, workers=None):
@@ -532,6 +533,7 @@ class Scheduler(ServerNode):
         if (name in self.worker_environments and
                 self.worker_environments[name] != environment):
             raise ValueError("{} has already been registered.".format(name))
+        # TODO: clarify behavior around re-registering environmnets
         self.worker_environments[name] = environment
         self.environment_workers[name] = set()
 
