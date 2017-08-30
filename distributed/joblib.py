@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from tornado import gen
 
-from .client import Client, wait
+from .client import Client, _wait
 from .utils import ignoring, funcname, itemgetter
 
 # A user could have installed joblib, sklearn, both, or neither. Further, only
