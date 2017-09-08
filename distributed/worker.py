@@ -26,6 +26,7 @@ from tornado.locks import Event
 
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for
+from .comm.utils import offload
 from .config import config
 from .compatibility import unicode, get_thread_identity
 from .core import (error_message, CommClosedError,
@@ -530,13 +531,22 @@ class WorkerBase(ServerNode):
             )
         return self._ipython_kernel.get_connection_info()
 
+    @gen.coroutine
     def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_dir, filename)
-        if isinstance(data, unicode):
-            data = data.encode()
-        with open(out_filename, 'wb') as f:
-            f.write(data)
-            f.flush()
+
+        def func(data):
+            if isinstance(data, unicode):
+                data = data.encode()
+            with open(out_filename, 'wb') as f:
+                f.write(data)
+                f.flush()
+            return data
+
+        if len(data) < 10000:
+            data = func(data)
+        else:
+            data = yield offload(func, data)
 
         if load:
             try:
@@ -544,6 +554,7 @@ class WorkerBase(ServerNode):
             except Exception as e:
                 logger.exception(e)
                 return {'status': 'error', 'exception': pickle.dumps(e)}
+
         return {'status': 'OK', 'nbytes': len(data)}
 
     def host_health(self, comm=None):
