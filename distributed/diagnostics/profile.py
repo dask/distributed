@@ -93,3 +93,15 @@ def merge(*args):
     return {'description': args[0]['description'],
             'children': dict(children),
             'count': count}
+
+
+def create():
+    return {'description': 'root', 'count': 0, 'children': {}}
+
+
+def call_stack(frame):
+    L = []
+    while frame:
+        L.append(repr_frame(frame))
+        frame = frame.f_back
+    return L[::-1]

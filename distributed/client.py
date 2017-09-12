@@ -2399,7 +2399,7 @@ class Client(Node):
         """
         if futures is not None:
             futures = self.futures_of(futures)
-            keys = list({f.key for f in futures})
+            keys = list(map(tokey, {f.key for f in futures}))
         else:
             keys = None
         return self.sync(self.scheduler.who_has, keys=keys, **kwargs)

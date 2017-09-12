@@ -3,7 +3,8 @@ import time
 from toolz import first
 from threading import Thread
 
-from distributed.diagnostics.profile import process, merge
+from distributed.diagnostics.profile import process, merge, create, call_stack
+from distributed.compatibility import get_thread_identity
 
 
 def test_basic():
@@ -22,7 +23,7 @@ def test_basic():
     thread.daemon = True
     thread.start()
 
-    state = {'count': 0, 'children': {}, 'description': 'root'}
+    state = create()
 
     for i in range(100):
         time.sleep(0.02)
