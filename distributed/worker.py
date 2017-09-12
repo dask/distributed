@@ -160,6 +160,7 @@ class WorkerBase(ServerNode):
             'health': self.host_health,
             'upload_file': self.upload_file,
             'start_ipython': self.start_ipython,
+            'call_stack': self.get_call_stack,
             'keys': self.keys,
         }
 
@@ -2111,6 +2112,18 @@ class Worker(WorkerBase):
         stop = time()
         if self.digests is not None:
             self.digests['profile-duration'].add(stop - start)
+
+    def get_call_stack(self, stream=None, keys=None):
+        with self.active_threads_lock:
+            frames = sys._current_frames()
+            active_threads = self.active_threads.copy()
+            frames = {k: frames[ident]
+                      for ident, k in active_threads.items()}
+        if keys is not None:
+            frames = {k: frame for k, frame in frames.items() if k in keys}
+
+        result = {k: profile.call_stack(frame) for k, frame in frames.items()}
+        return result
 
     def validate_key_memory(self, key):
         assert key in self.data

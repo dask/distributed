@@ -83,3 +83,11 @@ def test_merge():
                    'children': {}}}}
 
     assert merge(a1, a2) == expected
+
+
+def test_call_stack():
+    frame = sys._current_frames()[get_thread_identity()]
+    L = call_stack(frame)
+    assert isinstance(L, list)
+    assert all(isinstance(s, str) for s in L)
+    assert 'test_call_stack' in str(L[-1])

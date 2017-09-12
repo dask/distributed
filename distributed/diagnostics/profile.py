@@ -42,7 +42,7 @@ def repr_frame(frame):
     return text + '\n\t' + line
 
 
-def process(frame, child, state):
+def process(frame, child, state, stop=None):
     """ Add counts from a frame stack onto existing state
 
     This recursively adds counts to the existing state dictionary and creates
@@ -61,8 +61,8 @@ def process(frame, child, state):
      'children': {'...'}}
     """
     ident = identifier(frame)
-    if frame.f_back is not None:
-        state = process(frame.f_back, frame, state)
+    if frame.f_back is not None and (stop is None or stop != frame.f_back.f_code.co_name):
+        state = process(frame.f_back, frame, state, stop=stop)
 
     try:
         d = state['children'][ident]

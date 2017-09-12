@@ -2525,6 +2525,28 @@ class Client(Node):
         return self.sync(self.scheduler.nbytes, keys=keys,
                          summary=summary, **kwargs)
 
+    def call_stack(self, futures=None):
+        """ The actively running call stack of all relevant keys
+
+        Parameters
+        ----------
+        futures: list (optional)
+            A list of futures, defaults to all data
+
+        Examples
+        --------
+        >>> df = dd.read_parquet(...).persist()  # doctest: +SKIP
+        >>> client.call_stack(df)  # call on collections
+
+        >>> client.call_stack()  # Or call with no arguments for all activity  # doctest: +SKIP
+        """
+        if futures is not None:
+            futures = self.futures_of(futures)
+            keys = list(map(tokey, {f.key for f in futures}))
+        else:
+            keys = None
+        return self.sync(self.scheduler.call_stack, keys=keys)
+
     def scheduler_info(self, **kwargs):
         """ Basic information about the workers in the cluster
 

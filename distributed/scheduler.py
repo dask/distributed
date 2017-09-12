@@ -335,6 +335,7 @@ class Scheduler(ServerNode):
                          'has_what': self.get_has_what,
                          'who_has': self.get_who_has,
                          'processing': self.get_processing,
+                         'call_stack': self.get_call_stack,
                          'nbytes': self.get_nbytes,
                          'versions': self.get_versions,
                          'add_keys': self.add_keys,
@@ -2086,6 +2087,25 @@ class Scheduler(ServerNode):
             return {w: self.ncores.get(w, None) for w in workers}
         else:
             return self.ncores
+
+    @gen.coroutine
+    def get_call_stack(self, comm=None, keys=None):
+        if keys is not None:
+            workers = defaultdict(list)
+            for key in keys:
+                if key in self.rprocessing:
+                    workers[self.rprocessing[key]].append(key)
+        else:
+            workers = {w: None for w in self.workers}
+
+        if not workers:
+            return {}
+
+        else:
+            response = yield {w: self.rpc(w).call_stack(keys=v)
+                              for w, v in workers.items()}
+            response = {k: v for k, v in response.items() if v}
+            return response
 
     def get_nbytes(self, comm=None, keys=None, summary=True):
         with log_errors():
