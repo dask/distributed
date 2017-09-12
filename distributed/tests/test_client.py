@@ -4637,7 +4637,7 @@ def test_warn_executor(loop):
         assert any('Client' in str(r.message) for r in record)
 
 
-@gen_cluster(client=True)
+@gen_cluster([('127.0.0.1', 4)] * 2, client=True)
 def test_call_stack_future(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.5)
     yield gen.sleep(0.1)
@@ -4648,7 +4648,7 @@ def test_call_stack_future(c, s, a, b):
     assert 'slowinc' in str(result)
 
 
-@gen_cluster(client=True)
+@gen_cluster([('127.0.0.1', 4)] * 2, client=True)
 def test_call_stack_all(c, s, a, b):
     future = c.submit(slowinc, 1, delay=0.5)
     yield gen.sleep(0.1)
@@ -4659,7 +4659,7 @@ def test_call_stack_all(c, s, a, b):
     assert 'slowinc' in str(result)
 
 
-@gen_cluster(client=True)
+@gen_cluster([('127.0.0.1', 4)] * 2, client=True)
 def test_call_stack_collections(c, s, a, b):
     da = pytest.importorskip('dask.array')
     x = da.random.random(1000, chunks=(10,)).map_blocks(slowinc).persist()
@@ -4669,7 +4669,7 @@ def test_call_stack_collections(c, s, a, b):
     assert result
 
 
-@gen_cluster(client=True)
+@gen_cluster([('127.0.0.1', 4)] * 2, client=True)
 def test_call_stack_collections_all(c, s, a, b):
     da = pytest.importorskip('dask.array')
     x = da.random.random(1000, chunks=(10,)).map_blocks(slowinc).persist()

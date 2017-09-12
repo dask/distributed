@@ -2091,8 +2091,18 @@ class Scheduler(ServerNode):
     @gen.coroutine
     def get_call_stack(self, comm=None, keys=None):
         if keys is not None:
+            stack = list(keys)
+            processing = set()
+            while stack:
+                key = stack.pop()
+                state = self.task_state[key]
+                if state == 'waiting':
+                    stack.extend(self.dependencies[key])
+                elif state == 'processing':
+                    processing.add(key)
+
             workers = defaultdict(list)
-            for key in keys:
+            for key in processing:
                 if key in self.rprocessing:
                     workers[self.rprocessing[key]].append(key)
         else:
