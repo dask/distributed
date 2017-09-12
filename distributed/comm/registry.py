@@ -35,7 +35,7 @@ class Backend(with_metaclass(ABCMeta)):
         """
 
     @abstractmethod
-    def resolve_address(self, loc):
+    def resolve_address(self, loc, clear_cache=False):
         """
         Resolve the address into a canonical form.
         *loc* is a scheme-less address.

@@ -904,12 +904,13 @@ class Scheduler(ServerNode):
             del self.worker_comms[address]
             del self.ncores[address]
             self.workers.remove(address)
-            del self.aliases[self.worker_info[address]['name']]
+            _ = self.coerce_address(self.worker_info[address]['name'], clear_cache=True)
             del self.worker_info[address]
             if address in self.idle:
                 self.idle.remove(address)
             if address in self.saturated:
                 self.saturated.remove(address)
+
 
             recommendations = OrderedDict()
 
@@ -3135,7 +3136,7 @@ class Scheduler(ServerNode):
             for resource, quantity in self.worker_resources.pop(worker).items():
                 del self.resources[resource][worker]
 
-    def coerce_address(self, addr, resolve=True):
+    def coerce_address(self, addr, resolve=True, clear_cache=False):
         """
         Coerce possible input addresses to canonical form.
         *resolve* can be disabled for testing with fake hostnames.
@@ -3144,7 +3145,10 @@ class Scheduler(ServerNode):
         """
         # XXX how many address-parsing routines do we have?
         if addr in self.aliases:
-            addr = self.aliases[addr]
+            if clear_cache:
+                del self.aliases[addr]
+            else:
+                addr = self.aliases[addr]
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, six.string_types):
@@ -3152,7 +3156,7 @@ class Scheduler(ServerNode):
                             % (addr,))
 
         if resolve:
-            addr = resolve_address(addr)
+            addr = resolve_address(addr, clear_cache)
         else:
             addr = normalize_address(addr)
 

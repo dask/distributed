@@ -477,31 +477,49 @@ def silence_logging(level, root='distributed'):
             logger.setLevel(level)
 
 
-@memoize
-def ensure_ip(hostname):
-    """ Ensure that address is an IP address
 
-    Examples
-    --------
-    >>> ensure_ip('localhost')
-    '127.0.0.1'
-    >>> ensure_ip('123.123.123.123')  # pass through IP addresses
-    '123.123.123.123'
-    """
-    # Prefer IPv4 over IPv6, for compatibility
-    families = [socket.AF_INET, socket.AF_INET6]
-    for fam in families:
+class Ensure_ip(object):
+    def __init__(self):
+        self.ip_cache = {}
+
+    def __call__(self, hostname):
+        """ Ensure that address is an IP address
+
+        Examples
+        --------
+        >>> ensure_ip('localhost')
+        '127.0.0.1'
+        >>> ensure_ip('123.123.123.123')  # pass through IP addresses
+        '123.123.123.123'
+        """
+
         try:
-            results = socket.getaddrinfo(hostname,
-                                         1234,  # dummy port number
-                                         fam, socket.SOCK_STREAM)
-        except socket.gaierror as e:
-            exc = e
-        else:
-            return results[0][4][0]
+            return self.ip_cache[hostname]
+        except KeyError:
+            pass
 
-    raise exc
+        # Prefer IPv4 over IPv6, for compatibility
+        families = [socket.AF_INET, socket.AF_INET6]
+        for fam in families:
+            try:
+                results = socket.getaddrinfo(hostname,
+                                             1234,  # dummy port number
+                                             fam, socket.SOCK_STREAM)
+            except socket.gaierror as e:
+                exc = e
+            else:
+                self.ip_cache[hostname] = results[0][4][0]
+                return results[0][4][0]
 
+        raise exc
+
+    def clear_cache(self, hostname):
+        try:
+            del self.ip_cache[hostname]
+        except KeyError:
+            pass
+
+ensure_ip = Ensure_ip()
 
 tblib.pickling_support.install()
 

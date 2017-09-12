@@ -155,7 +155,7 @@ def get_local_address_for(addr):
     return unparse_address(scheme, backend.get_local_address_for(loc))
 
 
-def resolve_address(addr):
+def resolve_address(addr, clear_cache=False):
     """
     Apply scheme-specific address resolution to *addr*, replacing
     all symbolic references with concrete location specifiers.
@@ -167,4 +167,4 @@ def resolve_address(addr):
     """
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
-    return unparse_address(scheme, backend.resolve_address(loc))
+    return unparse_address(scheme, backend.resolve_address(loc, clear_cache))
