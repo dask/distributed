@@ -2109,13 +2109,13 @@ class Scheduler(ServerNode):
             workers = {w: None for w in self.workers}
 
         if not workers:
-            return {}
+            raise gen.Return({})
 
         else:
             response = yield {w: self.rpc(w).call_stack(keys=v)
                               for w, v in workers.items()}
             response = {k: v for k, v in response.items() if v}
-            return response
+            raise gen.Return(response)
 
     def get_nbytes(self, comm=None, keys=None, summary=True):
         with log_errors():
