@@ -327,8 +327,11 @@ class InProcBackend(Backend):
         self.manager.validate_address(loc)
         return self.manager.ip
 
-    def resolve_address(self, loc, clear_cache):
+    def resolve_address(self, loc):
         return loc
+
+    def clear_address_cache(self, loc):
+        pass
 
     def get_local_address_for(self, loc):
         self.manager.validate_address(loc)

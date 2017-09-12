@@ -473,13 +473,13 @@ class BaseTCPBackend(Backend):
     def get_address_host_port(self, loc):
         return parse_host_port(loc)
 
-    def resolve_address(self, loc, clear_cache=False):
+    def resolve_address(self, loc):
         host, port = parse_host_port(loc)
-        if clear_cache:
-            result = ensure_ip(host)
-            ensure_ip.clear_cache(host)
-            return unparse_host_port(result, port)
         return unparse_host_port(ensure_ip(host), port)
+
+    def clear_address_cache(self, loc):
+        host, port = parse_host_port(loc)
+        ensure_ip.clear_cache(host)
 
     def get_local_address_for(self, loc):
         host, port = parse_host_port(loc)

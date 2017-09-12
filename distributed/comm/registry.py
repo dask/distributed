@@ -35,12 +35,21 @@ class Backend(with_metaclass(ABCMeta)):
         """
 
     @abstractmethod
-    def resolve_address(self, loc, clear_cache=False):
+    def resolve_address(self, loc):
         """
         Resolve the address into a canonical form.
         *loc* is a scheme-less address.
 
         Simple implementations may return *loc* unchanged.
+        """
+
+    @abstractmethod
+    def clear_address_cache(self, loc):
+        """
+        Remove the address from any downstream cacheing.
+        *loc* is a scheme-less address.
+
+        Simple implementations may do nothing (pass).
         """
 
     def get_address_host_port(self, loc):

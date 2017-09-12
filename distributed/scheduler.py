@@ -24,7 +24,7 @@ from dask.core import reverse_dict
 from dask.order import order
 
 from .batched import BatchedSend
-from .comm import (normalize_address, resolve_address,
+from .comm import (normalize_address, resolve_address, clear_address_cache,
                    get_address_host, unparse_host_port)
 from .compatibility import finalize
 from .config import config
@@ -3163,7 +3163,7 @@ class Scheduler(ServerNode):
     def clear_ip_cache(self, addr):
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
-            _ = resolve_address(addr, clear_cache=True)
+            clear_address_cache(addr)
 
 
     def coerce_hostname(self, host):
