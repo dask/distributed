@@ -117,6 +117,7 @@ def plot_data(state):
     short_texts = []
     long_texts = []
     colors = []
+    states = []
 
     def traverse(state, start, stop, height, ident):
         starts.append(start)
@@ -124,8 +125,11 @@ def plot_data(state):
         heights.append(height)
         width = stop - start
         widths.append(width)
+        states.append(state)
         if width > 0.1:
             short_texts.append(ident.split(';')[0])
+        else:
+            short_texts.append('')
         try:
             colors.append(color_of(ident.split(';')[1]))
         except IndexError:
@@ -151,7 +155,9 @@ def plot_data(state):
             'top': [x + 1 for x in heights],
             'short_text': short_texts,
             'long_text': long_texts,
-            'color': colors}
+            'color': colors,
+            'states': states}
+
 
 try:
     from bokeh.palettes import viridis

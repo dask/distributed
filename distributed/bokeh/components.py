@@ -558,12 +558,31 @@ class ProfilePlot(DashboardComponent):
     """
 
     def __init__(self, **kwargs):
-        data = profile.plot_data(profile.create())
+        state = profile.create()
+        data = profile.plot_data(state)
+        self.states = data.pop('states')
         self.source = ColumnDataSource(data=data)
 
-        self.root = figure(tools='')
+        def cb(attr, old, new):
+            print(attr, old, new)
+            with log_errors():
+                try:
+                   ind = new['1d']['indices'][0]
+                except IndexError:
+                    return
+                data = profile.plot_data(self.states[ind])
+                del self.states[:]
+                self.states.extend(data.pop('states'))
+                self.source.data.update(data)
+                print('updated')
+                self.source.selected = old
+                print('deselected')
+
+        self.source.on_change('selected', cb)
+
+        self.root = figure(tools='tap')
         self.root.quad('left', 'right', 'top', 'bottom', color='color',
-                      line_color='black', line_width=5, source=self.source)
+                      line_color='black', line_width=2, source=self.source)
         self.root.text(x='left', y='bottom', text='short_text', y_offset=-5,
                       x_offset=10, source=self.source)
 
@@ -578,4 +597,7 @@ class ProfilePlot(DashboardComponent):
 
     def update(self, state):
         with log_errors():
-            self.source.data.update(profile.plot_data(state))
+            self.state = state
+            data = profile.plot_data(self.state)
+            self.states = data.pop('states')
+            self.source.data.update(data)
