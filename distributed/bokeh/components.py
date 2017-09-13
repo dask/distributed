@@ -17,9 +17,10 @@ from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from toolz import valmap
 
-from distributed.config import config
-from distributed.diagnostics.progress_stream import progress_quads, nbytes_bar
-from distributed.utils import log_errors
+from ..config import config
+from ..diagnostics.progress_stream import progress_quads, nbytes_bar
+from ..diagnostics import profile
+from ..utils import log_errors
 
 if config.get('bokeh-export-tool', False):
     from .export_tool import ExportTool
@@ -548,3 +549,33 @@ class Processing(DashboardComponent):
             d['alpha'] = [0.7] * n
 
             return d
+
+
+class ProfilePlot(DashboardComponent):
+    """ Time plots of the current resource usage on the cluster
+
+    This is two plots, one for CPU and Memory and another for Network I/O
+    """
+
+    def __init__(self, **kwargs):
+        data = profile.plot_data(profile.create())
+        self.source = ColumnDataSource(data=data)
+
+        self.root = figure(tools='')
+        self.root.quad('left', 'right', 'top', 'bottom', color='color',
+                      line_color='black', line_width=5, source=self.source)
+        self.root.text(x='left', y='bottom', text='short_text', y_offset=-5,
+                      x_offset=10, source=self.source)
+
+        hover = HoverTool()
+        hover.tooltips = "@long_text"
+        hover.point_policy = 'follow_mouse'
+        self.root.add_tools(hover)
+
+        self.root.xaxis.visible = False
+        self.root.yaxis.visible = False
+        self.root.grid.visible = False
+
+    def update(self, state):
+        with log_errors():
+            self.source.data.update(profile.plot_data(state))

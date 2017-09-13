@@ -25,6 +25,8 @@ We represent this tree as a nested dictionary with the following form:
 
 from collections import defaultdict
 import linecache
+import itertools
+import toolz
 
 
 def identifier(frame):
@@ -105,3 +107,62 @@ def call_stack(frame):
         L.append(repr_frame(frame))
         frame = frame.f_back
     return L[::-1]
+
+
+def plot_data(state):
+    starts = []
+    stops = []
+    heights = []
+    widths = []
+    short_texts = []
+    long_texts = []
+    colors = []
+
+    def traverse(state, start, stop, height, ident):
+        starts.append(start)
+        stops.append(stop)
+        heights.append(height)
+        width = stop - start
+        widths.append(width)
+        if width > 0.1:
+            short_texts.append(ident.split(';')[0])
+        try:
+            colors.append(color_of(ident.split(';')[1]))
+        except IndexError:
+            colors.append(palette[-1])
+
+        long_texts.append(state['description'].replace('\n', '</p><p>'))
+        if not state['count']:
+            return
+        delta = (stop - start) / state['count']
+
+        x = start
+
+        for name, child in state['children'].items():
+            width = child['count'] * delta
+            traverse(child, x, x + width, height + 1, name)
+            x += width
+
+    traverse(state, 0, 1, 0, '')
+    return {'left': starts,
+            'right': stops,
+            'bottom': heights,
+            'width': widths,
+            'top': [x + 1 for x in heights],
+            'short_text': short_texts,
+            'long_text': long_texts,
+            'color': colors}
+
+try:
+    from bokeh.palettes import viridis
+except ImportError:
+    palette = ['red', 'green', 'blue', 'yellow']
+else:
+    palette = viridis(10)
+
+counter = itertools.count()
+
+
+@toolz.memoize
+def color_of(x):
+    return palette[next(counter) % len(palette)]
