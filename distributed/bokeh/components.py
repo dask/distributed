@@ -580,14 +580,14 @@ class ProfilePlot(DashboardComponent):
 
         self.source.on_change('selected', cb)
 
-        self.root = figure(tools='tap')
+        self.root = figure(tools='tap', **kwargs)
         self.root.quad('left', 'right', 'top', 'bottom', color='color',
                       line_color='black', line_width=2, source=self.source)
         self.root.text(x='left', y='bottom', text='short_text', y_offset=-5,
                       x_offset=10, source=self.source)
 
         hover = HoverTool()
-        hover.tooltips = "@long_text"
+        hover.tooltips = "@long_text{safe}"  # this is unsafe
         hover.point_policy = 'follow_mouse'
         self.root.add_tools(hover)
 
