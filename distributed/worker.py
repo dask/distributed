@@ -553,9 +553,10 @@ class WorkerBase(ServerNode):
                 import_file(out_filename)
             except Exception as e:
                 logger.exception(e)
-                return {'status': 'error', 'exception': pickle.dumps(e)}
+                raise gen.Return({'status': 'error',
+                                  'exception': pickle.dumps(e)})
 
-        return {'status': 'OK', 'nbytes': len(data)}
+        raise gen.Return({'status': 'OK', 'nbytes': len(data)})
 
     def host_health(self, comm=None):
         """ Information about worker """
