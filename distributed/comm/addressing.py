@@ -5,7 +5,6 @@ import six
 from ..config import config
 from . import registry
 
-
 DEFAULT_SCHEME = config.get('default-scheme', 'tcp')
 
 
@@ -169,6 +168,7 @@ def resolve_address(addr):
     backend = registry.get_backend(scheme)
     return unparse_address(scheme, backend.resolve_address(loc))
 
+
 def clear_address_cache(addr):
     """
     Parse address and then remove it from caches downstream.
@@ -178,4 +178,4 @@ def clear_address_cache(addr):
     """
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
-    return backend.clear_address_cache(loc, clear_cache)
+    return backend.clear_address_cache(loc)
