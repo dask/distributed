@@ -48,41 +48,57 @@ def test_basic():
 def test_merge():
     a1 = {
          'count': 5,
+         'identifier': 'root',
          'description': 'a',
          'children': {
              'b': {'count': 3,
                    'description': 'b-func',
+                   'identifier': 'b',
                    'children': {}},
              'c': {'count': 2,
                    'description': 'c-func',
+                   'identifier': 'c',
                    'children': {}}}}
 
     a2 = {
          'count': 4,
          'description': 'a',
+         'identifier': 'root',
          'children': {
              'd': {'count': 2,
                    'description': 'd-func',
-                   'children': {}},
+                   'children': {},
+                   'identifier': 'd'},
              'c': {'count': 2,
                    'description': 'c-func',
-                   'children': {}}}}
+                   'children': {},
+                   'identifier': 'c'}}}
 
     expected = {
          'count': 9,
+         'identifier': 'root',
          'description': 'a',
          'children': {
              'b': {'count': 3,
                    'description': 'b-func',
+                   'identifier': 'b',
                    'children': {}},
              'd': {'count': 2,
                    'description': 'd-func',
+                   'identifier': 'd',
                    'children': {}},
              'c': {'count': 4,
                    'description': 'c-func',
+                   'identifier': 'c',
                    'children': {}}}}
 
     assert merge(a1, a2) == expected
+
+
+def test_merge_empty():
+    assert merge() == create()
+    assert merge(create()) == create()
+    assert merge(create(), create()) == create()
 
 
 def test_call_stack():

@@ -161,6 +161,8 @@ class WorkerBase(ServerNode):
             'upload_file': self.upload_file,
             'start_ipython': self.start_ipython,
             'call_stack': self.get_call_stack,
+            'profile': self.get_profile,
+            'get_profile_metadata': self.get_profile_metadata,
             'keys': self.keys,
         }
 
@@ -2112,6 +2114,20 @@ class Worker(WorkerBase):
         stop = time()
         if self.digests is not None:
             self.digests['profile-duration'].add(stop - start)
+
+    def get_profile(self, stream=None, keys=None, merge=False):
+        if keys is None:
+            return self.profile_recent
+        else:
+            print('other profile')
+            result = {k: self.profile_keys[k] for k in keys
+                    if k in self.profile_keys}
+            if merge:
+                result = profile.merge(*result.values())
+            return result
+
+    def get_profile_metadata(self, stream=None):
+        return {'keys': list(self.profile_keys)}
 
     def get_call_stack(self, stream=None, keys=None):
         with self.active_threads_lock:

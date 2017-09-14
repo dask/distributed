@@ -71,7 +71,8 @@ def process(frame, child, state, stop=None):
     except KeyError:
         d = {'count': 0,
              'description': repr_frame(frame),
-             'children': {}}
+             'children': {},
+             'identifier': ident}
         state['children'][ident] = d
 
     state['count'] += 1
@@ -84,7 +85,11 @@ def process(frame, child, state, stop=None):
 
 def merge(*args):
     """ Merge multiple frame states together """
-    assert len({arg['description'] for arg in args}) == 1
+    if not args:
+        return create()
+    s = {arg['identifier'] for arg in args}
+    if len(s) != 1:
+        raise ValueError("Expected identifiers, got %s" % str(s))
     children = defaultdict(list)
     for arg in args:
         for child in arg['children']:
@@ -94,11 +99,12 @@ def merge(*args):
     count = sum(arg['count'] for arg in args)
     return {'description': args[0]['description'],
             'children': dict(children),
-            'count': count}
+            'count': count,
+            'identifier': args[0]['identifier']}
 
 
 def create():
-    return {'description': 'root', 'count': 0, 'children': {}}
+    return {'description': 'root', 'count': 0, 'children': {}, 'identifier': 'root'}
 
 
 def call_stack(frame):

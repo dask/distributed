@@ -564,7 +564,6 @@ class ProfilePlot(DashboardComponent):
         self.source = ColumnDataSource(data=data)
 
         def cb(attr, old, new):
-            print(attr, old, new)
             with log_errors():
                 try:
                     ind = new['1d']['indices'][0]
@@ -574,9 +573,7 @@ class ProfilePlot(DashboardComponent):
                 del self.states[:]
                 self.states.extend(data.pop('states'))
                 self.source.data.update(data)
-                print('updated')
                 self.source.selected = old
-                print('deselected')
 
         self.source.on_change('selected', cb)
 

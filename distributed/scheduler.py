@@ -30,6 +30,7 @@ from .compatibility import finalize
 from .config import config
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
+from .diagnostics import profile
 from .metrics import time
 from .node import ServerNode
 from .security import Security
@@ -336,6 +337,7 @@ class Scheduler(ServerNode):
                          'who_has': self.get_who_has,
                          'processing': self.get_processing,
                          'call_stack': self.get_call_stack,
+                         'profile': self.get_profile,
                          'nbytes': self.get_nbytes,
                          'versions': self.get_versions,
                          'add_keys': self.add_keys,
@@ -3241,6 +3243,22 @@ class Scheduler(ServerNode):
         stack_time = self.occupancy[worker] / self.ncores[worker]
         start_time = comm_bytes / BANDWIDTH + stack_time
         return (start_time, self.worker_bytes[worker])
+
+    @gen.coroutine
+    def get_profile(self, comm=None, keys=None, workers=None, merge_keys=True,
+                    merge_workers=True):
+        if workers is None:
+            workers = self.workers
+        else:
+            workers = self.workers & workers
+        result = yield {w: self.rpc(w).profile(keys=keys, merge=merge_keys)
+                        for w in workers}
+        if merge_workers:
+            if merge_keys:
+                result = profile.merge(*result.values())
+            else:
+                raise NotImplementedError()
+        raise gen.Return(result)
 
     ###########
     # Cleanup #
