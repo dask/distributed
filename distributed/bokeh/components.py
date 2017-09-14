@@ -567,7 +567,7 @@ class ProfilePlot(DashboardComponent):
             print(attr, old, new)
             with log_errors():
                 try:
-                   ind = new['1d']['indices'][0]
+                    ind = new['1d']['indices'][0]
                 except IndexError:
                     return
                 data = profile.plot_data(self.states[ind])

@@ -641,8 +641,7 @@ class BokehWorker(BokehServer):
                      '/counters': counters,
                      '/crossfilter': crossfilter,
                      '/system': systemmonitor,
-                     '/profile': profile
-                    }
+                     '/profile': profile}
 
         self.loop = io_loop or worker.loop
         self.server = None
