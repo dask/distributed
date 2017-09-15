@@ -514,10 +514,10 @@ class EnsureIp(object):
         raise exc
 
     def clear_cache(self, hostname):
-        try:
-            del self.ip_cache[hostname]
-        except KeyError:
-            pass
+        # depending on how clear_cache has been called, hostname could be either a key or a value in the cache
+        for k, v in self.ip_cache.items():
+            if v == hostname or k == hostname:
+                del self.ip_cache[k]
 
 ensure_ip = EnsureIp()
 

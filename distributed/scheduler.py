@@ -3161,6 +3161,8 @@ class Scheduler(ServerNode):
         return addr
 
     def clear_ip_cache(self, addr):
+        if addr in self.aliases:
+            addr = self.aliases[addr]
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, six.string_types):
