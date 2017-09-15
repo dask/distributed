@@ -125,13 +125,14 @@ def plot_data(state):
     colors = []
     states = []
 
-    def traverse(state, start, stop, height, ident):
+    def traverse(state, start, stop, height):
         starts.append(start)
         stops.append(stop)
         heights.append(height)
         width = stop - start
         widths.append(width)
         states.append(state)
+        ident = state['identifier']
         if width > 0.1:
             short_texts.append(ident.split(';')[0])
         else:
@@ -150,10 +151,10 @@ def plot_data(state):
 
         for name, child in state['children'].items():
             width = child['count'] * delta
-            traverse(child, x, x + width, height + 1, name)
+            traverse(child, x, x + width, height + 1)
             x += width
 
-    traverse(state, 0, 1, 0, '')
+    traverse(state, 0, 1, 0)
     return {'left': starts,
             'right': stops,
             'bottom': heights,
