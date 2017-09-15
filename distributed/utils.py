@@ -478,7 +478,7 @@ def silence_logging(level, root='distributed'):
 
 
 
-class Ensure_ip(object):
+class EnsureIp(object):
     def __init__(self):
         self.ip_cache = {}
 
@@ -519,7 +519,7 @@ class Ensure_ip(object):
         except KeyError:
             pass
 
-ensure_ip = Ensure_ip()
+ensure_ip = EnsureIp()
 
 tblib.pickling_support.install()
 
