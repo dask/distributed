@@ -10,13 +10,16 @@ visualized by profiling tools.
 We represent this tree as a nested dictionary with the following form:
 
     {
+     'identifier': 'root',
      'description': 'A long description of the line of code being run.',
      'count': 10  # the number of times we have seen this line
      'children': {  # callers of this line. Recursive dicts
-         'ident': {'description': ...
+         'ident-b': {'description': ...
+                   'identifier': 'ident-a',
                    'count': ...
                    'children': {...}},
-         'ident': {'description': ...
+         'ident-b': {'description': ...
+                   'identifier': 'ident-b',
                    'count': ...
                    'children': {...}}}
     }
@@ -30,12 +33,17 @@ import toolz
 
 
 def identifier(frame):
+    """ A string identifier from a frame
+
+    Strings are cheaper to use as indexes into dicts than tuples or dicts
+    """
     return ';'.join((frame.f_code.co_name,
                      frame.f_code.co_filename,
                      str(frame.f_code.co_firstlineno)))
 
 
 def repr_frame(frame):
+    """ Render a frame as a line for inclusion into a text traceback """
     co = frame.f_code
     text = '  File "%s", line %s, in %s' % (co.co_filename,
                                             frame.f_lineno,
@@ -55,10 +63,12 @@ def process(frame, child, state, stop=None):
     >>> import sys, threading
     >>> ident = threading.get_ident()  # replace with your thread of interest
     >>> frame = sys._current_frames()[ident]
-    >>> state = {'children': {}, 'count': 0, 'description': 'root'}
+    >>> state = {'children': {}, 'count': 0, 'description': 'root',
+    ...          'identifier': 'root'}
     >>> process(frame, None, state)
     >>> state
     {'count': 1,
+     'identifier': 'root',
      'description': 'root',
      'children': {'...'}}
     """
@@ -108,6 +118,12 @@ def create():
 
 
 def call_stack(frame):
+    """ Create a call text stack from a frame
+
+    Returns
+    -------
+    list of strings
+    """
     L = []
     while frame:
         L.append(repr_frame(frame))
@@ -116,6 +132,12 @@ def call_stack(frame):
 
 
 def plot_data(state):
+    """ Convert a profile state into data useful by Bokeh
+
+    See Also
+    --------
+    distributed.bokeh.components.ProfilePlot
+    """
     starts = []
     stops = []
     heights = []
