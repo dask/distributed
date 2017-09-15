@@ -18,6 +18,7 @@ from distributed.scheduler import BANDWIDTH, key_split
 from distributed.utils_test import (slowinc, slowadd, inc, gen_cluster,
                                     slowidentity)
 from distributed.utils_test import loop # flake8: noqa
+from distributed.worker import TOTAL_MEMORY
 
 import pytest
 
@@ -157,7 +158,7 @@ def test_new_worker_steals(c, s, a):
     while len(a.task_state) < 10:
         yield gen.sleep(0.01)
 
-    b = Worker(s.ip, s.port, loop=s.loop, ncores=1)
+    b = Worker(s.ip, s.port, loop=s.loop, ncores=1, memory_limit=TOTAL_MEMORY)
     yield b._start()
 
     result = yield total

@@ -2160,7 +2160,7 @@ class Worker(WorkerBase):
                 logger.debug("Moved %d pieces of data data and %e bytes to disk",
                              count, total)
         self._memory_monitoring = False
-        return total
+        raise gen.Return(total)
 
     def trigger_profile(self):
         """

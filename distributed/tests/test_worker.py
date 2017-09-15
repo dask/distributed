@@ -783,9 +783,9 @@ def test_fail_write_many_to_disk(c, s, a):
             raise TypeError()
 
         def __sizeof__(self):
-            return int(5e9)
+            return int(2e9)
 
-    futures = c.map(Bad, range(10))
+    futures = c.map(Bad, range(11))
     future = c.submit(lambda *args: 123, *futures)
 
     yield wait(future)
@@ -957,6 +957,7 @@ def test_robust_to_bad_sizeof_estimates(c, s, a, b):
     memory = psutil.Process().memory_info().vms
     a.memory_limit = memory + 200e6
     b.memory_limit = memory + 200e6
+
     class BadAccounting(object):
         def __init__(self, data):
             self.data = data
