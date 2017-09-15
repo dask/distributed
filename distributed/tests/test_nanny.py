@@ -231,7 +231,7 @@ def test_nanny_timeout(c, s, a, b):
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)], client=True, Worker=Nanny,
-             worker_kwargs={'memory_limit': 1e9})
+             worker_kwargs={'memory_limit': 1e9}, timeout=20)
 def test_nanny_terminate(c, s, a):
     from time import sleep
 
@@ -247,7 +247,7 @@ def test_nanny_terminate(c, s, a):
         start = time()
         while a.process.pid == proc:
             yield gen.sleep(0.1)
-            assert time() < start + 7
+            assert time() < start + 10
         out = logger.getvalue()
         assert 'restart' in out.lower()
         assert 'memory' in out.lower()
