@@ -3163,7 +3163,10 @@ class Scheduler(ServerNode):
     def clear_ip_cache(self, addr):
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
-            clear_address_cache(addr)
+        if not isinstance(addr, six.string_types):
+            raise TypeError("addresses should be strings or tuples, got %r"
+                            % (addr,))
+        clear_address_cache(addr)
 
 
     def coerce_hostname(self, host):
