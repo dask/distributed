@@ -134,6 +134,7 @@ class WorkerBase(ServerNode):
         self.executor = executor or ThreadPoolExecutor(self.ncores)
         self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.name = name
+        self.pause_fraction = config.get('worker-pause-memory-fraction', 0.8)
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
         self.execution_state = {'scheduler': self.scheduler.address,
@@ -2131,14 +2132,16 @@ class Worker(WorkerBase):
         self._memory_monitoring = True
         total = 0
         proc = psutil.Process()
-        percent = proc.memory_info().vms / self.memory_limit * 100
+        percent = proc.memory_info().vms / self.memory_limit
 
-        if percent > 80:
+        if percent > self.pause_fraction:
             if not self.paused:
-                logger.warn("Worker is at 80% memory usage.  Stopping work.")
+                logger.warn("Worker is at %d percent memory usage.  Stopping work.",
+                            int(percent * 100))
                 self.paused = True
         elif self.paused:
-            logger.warn("Worker again below 80% memory usage. Restarting work.")
+            logger.warn("Worker at %d percent memory usage. Restarting work.",
+                        int(percent * 100))
             self.paused = False
             self.ensure_computing()
 

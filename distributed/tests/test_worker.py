@@ -950,13 +950,14 @@ def test_statistical_profiling(c, s, a, b):
     assert 'random' in str(profile)
 
 
-@gen_cluster(client=True, worker_kwargs={'memory_monitor_interval': 10})
-def test_robust_to_bad_sizeof_estimates(c, s, a, b):
+@gen_cluster(ncores=[('127.0.0.1', 1)], client=True, worker_kwargs={'memory_monitor_interval': 10})
+def test_robust_to_bad_sizeof_estimates(c, s, a):
     np = pytest.importorskip('numpy')
     yield gen.sleep(0.5)
     memory = psutil.Process().memory_info().vms
-    a.memory_limit = memory + 200e6
-    b.memory_limit = memory + 200e6
+    a.memory_limit = memory + 800e6
+    a.pause_fraction = 1000
+    a.paused = False
 
     class BadAccounting(object):
         def __init__(self, data):
@@ -972,7 +973,7 @@ def test_robust_to_bad_sizeof_estimates(c, s, a, b):
 
     futures = c.map(f, [20e6] * 30, pure=False)
 
-    while not a.data.slow and not b.data.slow:
+    while not a.data.slow:
         yield gen.sleep(0.1)
 
 
@@ -983,6 +984,12 @@ def test_pause_executor(c, s, a):
     memory = psutil.Process().memory_info().vms
     a.memory_limit = memory + 800e6
     np = pytest.importorskip('numpy')
+    yield gen.sleep(0.2)
+    while a.paused:
+        memory = psutil.Process().memory_info().vms
+        a.memory_limit = memory + 800e6
+        yield gen.sleep(0.2)
+
     def f():
         x = np.ones(int(100e6), dtype='f8')
         sleep(1)
@@ -996,7 +1003,8 @@ def test_pause_executor(c, s, a):
         out = logger.getvalue()
         assert 'memory' in out.lower()
         assert 'stop' in out.lower()
-    yield future
-    assert sum(f.status == 'finished' for f in futures) < 3
+
+    yield gen.sleep(1)
+    assert sum(f.status == 'finished' for f in futures) < 4
 
     yield wait(futures)
