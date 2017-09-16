@@ -195,7 +195,7 @@ def main(scheduler, host, worker_port, listen_address, contact_address,
             scheduler = ":".join((config['scheduler-ip'], config['scheduler-port']))
         except KeyError:
             raise ValueError("Need to provide scheduler address like\n"
-            "dask-worker SCHEDULER_ADDRESS:8786 or with environment variables")
+            "dask-worker SCHEDULER_ADDRESS:8786")
 
     if interface:
         if host:

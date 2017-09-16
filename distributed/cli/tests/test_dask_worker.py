@@ -174,7 +174,5 @@ def test_scheduler_with_env_vars(loop):
     port = envs['DASK_SCHEDULER_PORT'] = '8786'
     address = "tcp://{}:{}".format(ip, port).encode('utf-8')
     with popen(['dask-scheduler', '--no-bokeh']) as sched:
-        with popen(['dask-worker',
-                    '--no-bokeh'], env=envs) as worker:
-                    assert any(address in worker.stderr.readline()
-                       for i in range(15))
+        with popen(['dask-worker', '--no-bokeh'], env=envs) as worker:
+            assert any(address in worker.stderr.readline() for i in range(15))

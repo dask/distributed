@@ -64,11 +64,20 @@ def load_config_file(config, path):
 
 
 def load_env_vars(config):
-    """
-    Scan environment variables for `DASK_`.
-    Names of the vars become:
-    - DASK_NAME -> name
-    - DASK_NAME_NAME -> name-name
+    """ Scan environment variables for `DASK_*` and add those values to config.
+
+    Parameters
+    ----------
+    config: dict
+
+    Examples
+    --------
+    >>> import os
+    >>> config = {}
+    >>> os.environ['DASK_WORKER_IP'] = '127.0.0.1'
+    >>> load_env_vars(config)
+    >>> config['worker-ip']
+    '127.0.0.1'
     """
     for name, value in os.environ.items():
         if name.startswith('DASK_'):

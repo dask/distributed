@@ -11,7 +11,6 @@ import tempfile
 import click
 
 from distributed import Scheduler, config
-from distributed.compatibility import PY2
 from distributed.security import Security
 from distributed.utils import get_ip_interface, ignoring
 from distributed.http import HTTPScheduler
@@ -112,12 +111,9 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    # check if DASK_SCHEDULER_IP and DASK_SCHEDULER_PORT are defined
+    # check in env vars if DASK_SCHEDULER_IP and DASK_SCHEDULER_PORT are defined
     if not host:
-        dict_view = config.keys
-        if PY2:
-            dict_view = config.viewkeys
-        if {'scheduler-ip', 'scheduler-port'} <= dict_view():
+        if 'scheduler-ip' in config and 'scheduler-port' in config:
             host = config['scheduler-ip']
             port = int(config['scheduler-port'])
 
