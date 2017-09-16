@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 import pytest
 pytest.importorskip('requests')
 
+import os
 import sys
 from time import sleep
 from toolz import first
@@ -165,3 +166,15 @@ def test_respect_host_listen_address(loop, nanny, host):
 
                 listen_addresses = client.run(func)
                 assert all(host in v for v in listen_addresses.values())
+
+
+def test_scheduler_with_env_vars(loop):
+    envs = os.environ.copy()
+    ip = envs['DASK_SCHEDULER_IP'] = '127.0.0.1'
+    port = envs['DASK_SCHEDULER_PORT'] = '8786'
+    address = "tcp://{}:{}".format(ip, port).encode('utf-8')
+    with popen(['dask-scheduler', '--no-bokeh']) as sched:
+        with popen(['dask-worker',
+                    '--no-bokeh'], env=envs) as worker:
+                    assert any(address in worker.stderr.readline()
+                       for i in range(15))

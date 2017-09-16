@@ -7,7 +7,7 @@ import signal
 from sys import exit
 
 import click
-from distributed import Nanny, Worker
+from distributed import Nanny, Worker, config
 from distributed.utils import get_ip_interface
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
@@ -191,8 +191,11 @@ def main(scheduler, host, worker_port, listen_address, contact_address,
         t = Worker
 
     if not scheduler and not scheduler_file:
-        raise ValueError("Need to provide scheduler address like\n"
-                         "dask-worker SCHEDULER_ADDRESS:8786")
+        try:
+            scheduler = ":".join((config['scheduler-ip'], config['scheduler-port']))
+        except KeyError:
+            raise ValueError("Need to provide scheduler address like\n"
+            "dask-worker SCHEDULER_ADDRESS:8786 or with environment variables")
 
     if interface:
         if host:
