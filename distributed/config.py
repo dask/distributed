@@ -64,6 +64,12 @@ def load_config_file(config, path):
 
 
 def load_env_vars(config):
+    """
+    Scan environment variables for `DASK_`.
+    Names of the vars become:
+    - DASK_NAME -> name
+    - DASK_NAME_NAME -> name-name
+    """
     for name, value in os.environ.items():
         if name.startswith('DASK_'):
             varname = name[5:].lower().replace('_', '-')

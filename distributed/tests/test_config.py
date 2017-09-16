@@ -10,7 +10,7 @@ import pytest
 
 from distributed.utils_test import (captured_handler, captured_logger,
                                     new_config, new_config_file)
-from distributed.config import initialize_logging, set_config, config
+from distributed.config import initialize_logging, set_config, config, load_env_vars
 
 
 def dump_logger_list():
@@ -276,3 +276,15 @@ def test_set_config():
     with set_config(foo=1):
         assert config['foo'] == 1
     assert 'foo' not in config
+
+
+def test_load_env_vars():
+    os.environ['DASK_CONFIG_IP'] = '127.0.0.1'
+    load_env_vars(config)
+    assert 'config-ip' in config
+
+
+def test_fail_load_env_vars():
+    os.environ['DASK_CONFIG_IP'] = '127.0.0.1'
+    load_env_vars(config)
+    assert 'config_ip' not in config
