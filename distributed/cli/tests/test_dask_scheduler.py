@@ -304,3 +304,23 @@ def test_preload_module(loop):
                         c.scheduler.address
     finally:
         shutil.rmtree(tmpdir)
+
+def test_hostport_with_env_vars(loop):
+    envs = os.environ.copy()
+    ip = envs['DASK_SCHEDULER_IP'] = '127.0.0.1'
+    port = envs['DASK_SCHEDULER_PORT'] = '8786'
+    address = ":".join((ip, port))
+    with popen(['dask-scheduler', '--no-bokeh',
+                '--http-port', '8979'], env=envs):
+        @gen.coroutine
+        def f():
+            yield [
+                # The scheduler's main port can't be contacted from the outside
+                assert_can_connect_locally_4(int(port), 2.0),
+                assert_can_connect_locally_4(8979, 2.0),
+                ]
+
+        loop.run_sync(f)
+
+        with Client(address, loop=loop) as c:
+            assert len(c.ncores()) == 0
