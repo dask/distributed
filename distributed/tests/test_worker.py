@@ -774,9 +774,7 @@ def test_fail_write_to_disk(c, s, a, b):
              worker_kwargs={'memory_limit': 10e9})
 def test_fail_write_many_to_disk(c, s, a):
     a.validate = False
-    yield gen.sleep(0.5)
-    if a.paused:
-        import pdb; pdb.set_trace()
+    yield gen.sleep(0.1)
     assert not a.paused
 
     class Bad(object):
@@ -957,16 +955,8 @@ def test_statistical_profiling(c, s, a, b):
 @gen_cluster(ncores=[('127.0.0.1', 1)], client=True, worker_kwargs={'memory_monitor_interval': 10})
 def test_robust_to_bad_sizeof_estimates(c, s, a):
     np = pytest.importorskip('numpy')
-    yield gen.sleep(0.5)
     memory = psutil.Process().memory_info().vms
-    a.memory_limit = memory + 800e6
-    a.pause_fraction = 1000
-    a.paused = False
-    yield gen.sleep(0.5)
-    if a.paused:
-        import pdb; pdb.set_trace()
-    assert not a.paused
-    yield gen.sleep(0.5)
+    a.memory_limit = memory / 0.7 + 400e6
 
     class BadAccounting(object):
         def __init__(self, data):
@@ -980,13 +970,13 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
         result = BadAccounting(x)
         return result
 
-    futures = c.map(f, [20e6] * 30, pure=False)
+    futures = c.map(f, [100e6] * 8, pure=False)
 
-    yield gen.sleep(5)
-    import pdb; pdb.set_trace()
-
+    start = time()
     while not a.data.slow:
         yield gen.sleep(0.1)
+        if time() > start + 5:
+            import pdb; pdb.set_trace()
 
 
 @pytest.mark.slow
@@ -995,33 +985,23 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
              timeout=20)
 def test_pause_executor(c, s, a):
     memory = psutil.Process().memory_info().vms
-    a.memory_limit = memory + 800e6
+    a.memory_limit = memory / 0.8 + 200e6
     np = pytest.importorskip('numpy')
-    yield gen.sleep(0.2)
-    while a.paused:
-        memory = psutil.Process().memory_info().vms
-        a.memory_limit = memory + 800e6
-        yield gen.sleep(0.2)
 
     def f():
-        x = np.ones(int(100e6), dtype='f8')
+        x = np.empty(int(300e6), dtype='u1')
         sleep(1)
 
     with captured_logger(logging.getLogger('distributed.worker')) as logger:
         future = c.submit(f)
         futures = c.map(slowinc, range(10), delay=0.1)
 
-        yield gen.sleep(0.2)
+        yield gen.sleep(0.3)
         assert a.paused
         out = logger.getvalue()
         assert 'memory' in out.lower()
         assert 'stop' in out.lower()
 
-    yield gen.sleep(1)
     assert sum(f.status == 'finished' for f in futures) < 4
 
-    try:
-        yield gen.with_timeout(timedelta(seconds=5), wait(futures))
-    except gen.TimeoutError:
-        import pdb; pdb.set_trace()
-        1 + 1
+    yield wait(futures)

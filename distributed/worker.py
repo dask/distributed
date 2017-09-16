@@ -2132,31 +2132,28 @@ class Worker(WorkerBase):
         self._memory_monitoring = True
         total = 0
         proc = psutil.Process()
-        percent = proc.memory_info().vms / self.memory_limit
+        frac = proc.memory_info().vms / self.memory_limit
 
-        if percent > self.pause_fraction:
+        if frac > self.pause_fraction:
             if not self.paused:
                 logger.warn("Worker is at %d percent memory usage.  Stopping work.",
-                            int(percent * 100))
+                            int(frac * 100))
                 self.paused = True
         elif self.paused:
             logger.warn("Worker at %d percent memory usage. Restarting work.",
-                        int(percent * 100))
+                        int(frac * 100))
             self.paused = False
             self.ensure_computing()
 
-        if percent > 70:  # dump data to disk
+        if frac > 0.70:  # dump data to disk
             target = self.memory_limit * 0.60
             count = 0
 
             while proc.memory_info().vms > target:
-                try:
-                    total += self.data.fast.evict()
-                except (IndexError, KeyError):
+                if not self.data.fast:
                     break
+                total += self.data.fast.evict()
                 print(count)
-                if count > 100:
-                    import pdb; pdb.set_trace()
                 count += 1
                 yield gen.moment
             if count:
