@@ -167,7 +167,7 @@ class WorkerBase(ServerNode):
             'start_ipython': self.start_ipython,
             'call_stack': self.get_call_stack,
             'profile': self.get_profile,
-            'get_profile_metadata': self.get_profile_metadata,
+            'profile_metadata': self.get_profile_metadata,
             'keys': self.keys,
         }
 
@@ -2240,8 +2240,14 @@ class Worker(WorkerBase):
 
         return prof
 
-    def get_profile_metadata(self, stream=None):
-        return {'keys': list(self.profile_keys)}
+    def get_profile_metadata(self, stream=None, start=0, stop=None):
+        stop = stop or time() + self.scheduler_delay
+        start = start or 0
+        return {'counts': [(t, d['count']) for t, d in self.profile_history
+                           if start < t < stop],
+                'keys': [(t, {k: d['count'] for k, d in v.items()})
+                         for t, v in self.profile_keys_history
+                         if start < t < stop]}
 
     def get_call_stack(self, stream=None, keys=None):
         with self.active_threads_lock:

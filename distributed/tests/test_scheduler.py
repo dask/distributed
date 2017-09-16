@@ -1141,3 +1141,18 @@ def test_service_hosts_match_scheduler():
         sock = first(s.services['http']._sockets.values())
         assert sock.getsockname()[0] == '127.0.0.2'
         yield s.close()
+
+
+@gen_cluster(client=True, worker_kwargs={'profile_cycle_interval': 100})
+def test_profile_metadata(c, s, a, b):
+    start = time() - 1
+    futures = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    yield wait(futures)
+    yield gen.sleep(0.200)
+
+    meta = yield s.get_profile_metadata(dt=0.100)
+    now = time()
+    assert meta
+    assert all(start < t < now for t, count in meta['counts'])
+    assert all(0 < count < 11 for t, count in meta['counts'][:4])
+    assert not meta['counts'][-1][1]

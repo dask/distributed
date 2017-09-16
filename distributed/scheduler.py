@@ -12,9 +12,9 @@ import six
 
 from sortedcontainers import SortedSet
 try:
-    from cytoolz import frequencies, merge
+    from cytoolz import frequencies, merge, pluck, merge_sorted
 except ImportError:
-    from toolz import frequencies, merge
+    from toolz import frequencies, merge, pluck, merge_sorted
 from toolz import memoize, valmap, first, second, concat
 from tornado import gen
 from tornado.gen import Return
@@ -3238,6 +3238,23 @@ class Scheduler(ServerNode):
             result = profile.merge(*result.values())
         print(result)
         raise gen.Return(result)
+
+    @gen.coroutine
+    def get_profile_metadata(self, comm=None, workers=None, merge_workers=True,
+                             start=None, stop=None, dt=1):
+        import itertools
+        if workers is None:
+            workers = self.workers
+        else:
+            workers = self.workers & workers
+        result = yield {w: self.rpc(w).profile_metadata(start=start, stop=stop)
+                        for w in workers}
+
+        counts = [v['counts'] for v in result.values()]
+        counts = itertools.groupby(merge_sorted(*counts), lambda t: t[0] // dt * dt)
+        counts = [(time, sum(pluck(1, group))) for time, group in counts]
+        raise gen.Return({'counts': counts})
+
 
     ###########
     # Cleanup #
