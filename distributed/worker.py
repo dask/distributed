@@ -1055,7 +1055,9 @@ class Worker(WorkerBase):
         self.active_threads_lock = threading.Lock()
         self.active_threads = dict()
         self.profile_keys = defaultdict(profile.create)
+        self.profile_keys_history = deque(maxlen=3600)
         self.profile_recent = profile.create()
+        self.profile_history = deque(maxlen=3600)
 
         self.priorities = dict()
         self.priority_counter = 0
@@ -1111,6 +1113,10 @@ class Worker(WorkerBase):
                               kwargs.get('profile_interval', 10),
                               io_loop=self.loop)
         self.periodic_callbacks['profile'] = pc
+
+        pc = PeriodicCallback(self.cycle_profile, 1000, io_loop=self.loop)
+        pc.start()
+        self.periodic_callbacks['profile-cycle'] = pc
 
         _global_workers.append(weakref.ref(self))
 
@@ -2177,12 +2183,11 @@ class Worker(WorkerBase):
 
 
     def cycle_profile(self):
-        prof, self.profile_recent = self.profile_recent, profile.create()
         now = time() + self.scheduler_delay
-        self.profile_historic.append((now, prof))
-        for k, v in self.profile_keys():
-            self.profile_keys_historic[k].append(v)
+        prof, self.profile_recent = self.profile_recent, profile.create()
+        self.profile_history.append((now, prof))
 
+        self.profile_keys_history.append((now, dict(self.profile_keys)))
         self.profile_keys.clear()
 
     def trigger_profile(self):
@@ -2206,7 +2211,8 @@ class Worker(WorkerBase):
         if self.digests is not None:
             self.digests['profile-duration'].add(stop - start)
 
-    def get_profile(self, stream=None, keys=None, merge=False):
+    def get_profile(self, stream=None, start=None, stop=None):
+        if start
         if keys is None:
             return self.profile_recent
         else:
