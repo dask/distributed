@@ -2175,6 +2175,16 @@ class Worker(WorkerBase):
         self._memory_monitoring = False
         raise gen.Return(total)
 
+
+    def cycle_profile(self):
+        prof, self.profile_recent = self.profile_recent, profile.create()
+        now = time() + self.scheduler_delay
+        self.profile_historic.append((now, prof))
+        for k, v in self.profile_keys():
+            self.profile_keys_historic[k].append(v)
+
+        self.profile_keys.clear()
+
     def trigger_profile(self):
         """
         Get a frame from all actively computing threads
