@@ -609,7 +609,7 @@ def profile_doc(server, extra, doc):
         doc.title = "Dask Worker Profile"
         profile = ProfilePlot(sizing_mode='stretch_both')
         print(server.profile_recent['count'])
-        profile.update(server.profile_recent)
+        profile.update(server.get_profile())
 
         doc.add_root(profile.root)
         doc.template = template

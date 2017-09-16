@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import bisect
 from collections import defaultdict, deque
 from datetime import timedelta
 import heapq
@@ -1107,6 +1108,8 @@ class Worker(WorkerBase):
 
         self.scheduler_delay = 0
 
+        profile_cycle_interval = kwargs.pop('profile_cycle_interval', 1000)
+
         WorkerBase.__init__(self, *args, **kwargs)
 
         pc = PeriodicCallback(self.trigger_profile,
@@ -1114,7 +1117,9 @@ class Worker(WorkerBase):
                               io_loop=self.loop)
         self.periodic_callbacks['profile'] = pc
 
-        pc = PeriodicCallback(self.cycle_profile, 1000, io_loop=self.loop)
+        pc = PeriodicCallback(self.cycle_profile,
+                              profile_cycle_interval,
+                              io_loop=self.loop)
         pc.start()
         self.periodic_callbacks['profile-cycle'] = pc
 
@@ -2212,16 +2217,28 @@ class Worker(WorkerBase):
             self.digests['profile-duration'].add(stop - start)
 
     def get_profile(self, stream=None, start=None, stop=None):
-        if start
-        if keys is None:
-            return self.profile_recent
+        if start is None:
+            istart = 0
         else:
-            print('other profile')
-            result = {k: self.profile_keys[k] for k in keys
-                    if k in self.profile_keys}
-            if merge:
-                result = profile.merge(*result.values())
-            return result
+            istart = bisect.bisect_left(self.profile_history, (start,))
+
+        if stop is None:
+            istop = None
+        else:
+            istop = bisect.bisect_right(self.profile_history, (stop,))
+
+        at_end = istop is None or istop >= len(self.profile_history) - 1
+
+        if istart == 0 and at_end:
+            history = list(self.profile_history)
+        else:
+            history = [self.profile_history[i] for i in range(istart, istop)]
+
+        prof = profile.merge(*pluck(1, history))
+
+        # TODO: merge self.profile_recent into profile
+
+        return prof
 
     def get_profile_metadata(self, stream=None):
         return {'keys': list(self.profile_keys)}

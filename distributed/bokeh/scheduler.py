@@ -1008,6 +1008,7 @@ def profile_doc(scheduler, extra, doc):
         @gen.coroutine
         def _():
             profile = yield scheduler.get_profile()
+            print(profile)
             doc.add_next_tick_callback(lambda: prof.update(profile))
 
         from tornado.ioloop import IOLoop

@@ -3226,19 +3226,17 @@ class Scheduler(ServerNode):
         return (start_time, self.worker_bytes[worker])
 
     @gen.coroutine
-    def get_profile(self, comm=None, keys=None, workers=None, merge_keys=True,
-                    merge_workers=True):
+    def get_profile(self, comm=None, workers=None, merge_workers=True,
+                    start=None, stop=None):
         if workers is None:
             workers = self.workers
         else:
             workers = self.workers & workers
-        result = yield {w: self.rpc(w).profile(keys=keys, merge=merge_keys)
+        result = yield {w: self.rpc(w).profile(start=start, stop=stop)
                         for w in workers}
         if merge_workers:
-            if merge_keys:
-                result = profile.merge(*result.values())
-            else:
-                raise NotImplementedError()
+            result = profile.merge(*result.values())
+        print(result)
         raise gen.Return(result)
 
     ###########
