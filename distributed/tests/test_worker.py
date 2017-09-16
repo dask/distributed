@@ -774,6 +774,10 @@ def test_fail_write_to_disk(c, s, a, b):
              worker_kwargs={'memory_limit': 10e9})
 def test_fail_write_many_to_disk(c, s, a):
     a.validate = False
+    yield gen.sleep(0.5)
+    if a.paused:
+        import pdb; pdb.set_trace()
+    assert not a.paused
 
     class Bad(object):
         def __init__(self, x):
@@ -958,6 +962,11 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
     a.memory_limit = memory + 800e6
     a.pause_fraction = 1000
     a.paused = False
+    yield gen.sleep(0.5)
+    if a.paused:
+        import pdb; pdb.set_trace()
+    assert not a.paused
+    yield gen.sleep(0.5)
 
     class BadAccounting(object):
         def __init__(self, data):
@@ -973,13 +982,17 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
 
     futures = c.map(f, [20e6] * 30, pure=False)
 
+    yield gen.sleep(5)
+    import pdb; pdb.set_trace()
+
     while not a.data.slow:
         yield gen.sleep(0.1)
 
 
 @pytest.mark.slow
 @gen_cluster(ncores=[('127.0.0.1', 2)], client=True,
-             worker_kwargs={'memory_monitor_interval': 10})
+             worker_kwargs={'memory_monitor_interval': 10},
+             timeout=20)
 def test_pause_executor(c, s, a):
     memory = psutil.Process().memory_info().vms
     a.memory_limit = memory + 800e6
@@ -1007,4 +1020,8 @@ def test_pause_executor(c, s, a):
     yield gen.sleep(1)
     assert sum(f.status == 'finished' for f in futures) < 4
 
-    yield wait(futures)
+    try:
+        yield gen.with_timeout(timedelta(seconds=5), wait(futures))
+    except gen.TimeoutError:
+        import pdb; pdb.set_trace()
+        1 + 1
