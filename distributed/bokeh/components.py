@@ -16,6 +16,7 @@ from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from toolz import valmap
+from tornado import gen
 
 from ..config import config
 from ..diagnostics.progress_stream import progress_quads, nbytes_bar
@@ -599,3 +600,88 @@ class ProfilePlot(DashboardComponent):
             data = profile.plot_data(self.state)
             self.states = data.pop('states')
             self.source.data.update(data)
+
+
+class ProfileTimePlot(DashboardComponent):
+    """ Time plots of the current resource usage on the cluster
+
+    This is two plots, one for CPU and Memory and another for Network I/O
+    """
+
+    def __init__(self, **kwargs):
+        state = profile.create()
+        data = profile.plot_data(state)
+        self.states = data.pop('states')
+        self.source = ColumnDataSource(data=data)
+
+        def cb(attr, old, new):
+            with log_errors():
+                try:
+                    ind = new['1d']['indices'][0]
+                except IndexError:
+                    return
+                data = profile.plot_data(self.states[ind])
+                del self.states[:]
+                self.states.extend(data.pop('states'))
+                self.source.data.update(data)
+                self.source.selected = old
+
+        self.source.on_change('selected', cb)
+
+        self.profile_plot = figure(tools='tap', **kwargs)
+        self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
+                               line_color='black', line_width=2, source=self.source)
+        self.profile_plot.text(x='left', y='bottom', text='short_text',
+                               x_offset=5, text_font_size=value('10pt'),
+                               source=self.source)
+
+        hover = HoverTool()
+        hover.tooltips = "@long_text{safe}"  # this is unsafe
+        hover.point_policy = 'follow_mouse'
+        self.profile_plot.add_tools(hover)
+
+        self.profile_plot.xaxis.visible = False
+        self.profile_plot.yaxis.visible = False
+        self.profile_plot.grid.visible = False
+
+        self.ts_source = ColumnDataSource({'time': [], 'count': []})
+        self.ts_plot = figure(title='Acivity over time', plot_height=200,
+                              x_axis_type='datetime', active_drag='xbox_select',
+                              tools='pan,xwheel_zoom,xbox_select,reset',
+                              **kwargs)
+        self.ts_plot.line('time', 'count', source=self.ts_source)
+        self.ts_plot.line('time', 'count', source=self.ts_source, color=None,
+                          selection_color='orange')
+
+        def ts_change(attr, old, new):
+            with log_errors():
+                print('old', old)
+                print('new', new)
+                selected = self.ts_source.selected['1d']['indices']
+                print('selected', selected)
+                if selected:
+                    start = self.ts_source.data['time'][selected[0]]
+                    stop = self.ts_source.data['time'][selected[-1]]
+                    @gen.coroutine
+                    def cb():
+                        result = self.server.get_profile(start=start, stop=stop)
+                        if isinstance(result, gen.Future):
+                            result = yield result
+                        self.update(state)
+                    cb()
+
+        self.ts_source.on_change('selected', ts_change)
+
+        self.root = column(self.profile_plot, self.ts_plot, **kwargs)
+
+    def update(self, state, ts):
+        with log_errors():
+            self.state = state
+            data = profile.plot_data(self.state)
+            self.states = data.pop('states')
+            self.source.data.update(data)
+
+            times, counts = zip(*ts['counts'])
+            ts2 = {'count': counts, 'time': times}
+
+            self.ts_source.data.update(ts2)

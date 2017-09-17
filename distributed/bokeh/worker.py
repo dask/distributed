@@ -15,7 +15,7 @@ from bokeh.plotting import figure
 from bokeh.palettes import RdBu
 from toolz import merge, partition_all
 
-from .components import DashboardComponent, ProfilePlot
+from .components import DashboardComponent, ProfilePlot, ProfileTimePlot
 from .core import BokehServer, format_time
 from .utils import transpose
 from ..compatibility import WINDOWS
@@ -607,9 +607,11 @@ def counters_doc(server, extra, doc):
 def profile_doc(server, extra, doc):
     with log_errors():
         doc.title = "Dask Worker Profile"
-        profile = ProfilePlot(sizing_mode='stretch_both')
-        print(server.profile_recent['count'])
-        profile.update(server.get_profile())
+        profile = ProfileTimePlot(sizing_mode='stretch_both')
+        prof = server.get_profile()
+        print(prof['count'])
+        meta = server.get_profile_metadata()
+        profile.update(prof, meta)
 
         doc.add_root(profile.root)
         doc.template = template
