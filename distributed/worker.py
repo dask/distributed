@@ -2225,6 +2225,7 @@ class Worker(WorkerBase):
             istop = None
         else:
             istop = bisect.bisect_right(self.profile_history, (stop,)) + 1
+            istop = min(istop, len(self.profile_history) - 1)
 
         at_end = istop is None or istop >= len(self.profile_history) - 1
 

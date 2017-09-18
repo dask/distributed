@@ -85,7 +85,7 @@ def process(frame, child, state, stop=None):
      'children': {'...'}}
     """
     ident = identifier(frame)
-    if frame.f_back is not None and (stop is None or frame.f_back.f_code.co_filename.endswith(stop)):
+    if frame.f_back is not None and (stop is None or not frame.f_back.f_code.co_filename.endswith(stop)):
         state = process(frame.f_back, frame, state, stop=stop)
 
     try:
