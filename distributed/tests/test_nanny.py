@@ -238,7 +238,7 @@ def test_nanny_terminate(c, s, a):
     def leak():
         L = []
         while True:
-            L.append(b'0' * 1000000)
+            L.append(b'0' * 5000000)
             sleep(0.001)
 
     proc = a.process.pid
