@@ -582,13 +582,32 @@ class ProfilePlot(DashboardComponent):
         self.root = figure(tools='tap', **kwargs)
         self.root.quad('left', 'right', 'top', 'bottom', color='color',
                       line_color='black', line_width=2, source=self.source)
-        self.root.text(x='left', y='bottom', text='short_text',
-                       x_offset=5, text_font_size=value('10pt'),
-                       source=self.source)
 
-        hover = HoverTool()
-        hover.tooltips = "@long_text{safe}"  # this is unsafe
-        hover.point_policy = 'follow_mouse'
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
+                </div>
+                """
+        )
         self.root.add_tools(hover)
 
         self.root.xaxis.visible = False
@@ -635,13 +654,32 @@ class ProfileTimePlot(DashboardComponent):
         self.profile_plot = figure(tools='tap', height=400, **kwargs)
         self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
                                line_color='black', line_width=2, source=self.source)
-        self.profile_plot.text(x='left', y='bottom', text='short_text',
-                               x_offset=5, text_font_size=value('10pt'),
-                               source=self.source)
 
-        hover = HoverTool()
-        hover.tooltips = "@long_text{safe}"  # this is unsafe
-        hover.point_policy = 'follow_mouse'
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
+                </div>
+                """
+        )
         self.profile_plot.add_tools(hover)
 
         self.profile_plot.xaxis.visible = False

@@ -136,6 +136,7 @@ class WorkerBase(ServerNode):
         self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.name = name
         self.pause_fraction = config.get('worker-pause-memory-fraction', 0.8)
+        self.scheduler_delay = 0
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
         self.execution_state = {'scheduler': self.scheduler.address,
@@ -1105,8 +1106,6 @@ class Worker(WorkerBase):
         self.outgoing_transfer_log = deque(maxlen=(100000))
         self.outgoing_count = 0
         self._client = None
-
-        self.scheduler_delay = 0
 
         profile_cycle_interval = kwargs.pop('profile_cycle_interval', 1000)
 
