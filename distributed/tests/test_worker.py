@@ -940,7 +940,7 @@ def test_statistical_profiling(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_statistical_profiling(c, s, a, b):
+def test_statistical_profiling_2(c, s, a, b):
     da = pytest.importorskip('dask.array')
     for i in range(5):
         x = da.random.random(1000000, chunks=(10000,))
