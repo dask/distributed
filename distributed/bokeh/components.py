@@ -608,7 +608,8 @@ class ProfileTimePlot(DashboardComponent):
     This is two plots, one for CPU and Memory and another for Network I/O
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, server, **kwargs):
+        self.server = server
         state = profile.create()
         data = profile.plot_data(state)
         self.states = data.pop('states')
@@ -628,7 +629,7 @@ class ProfileTimePlot(DashboardComponent):
 
         self.source.on_change('selected', cb)
 
-        self.profile_plot = figure(tools='tap', **kwargs)
+        self.profile_plot = figure(tools='tap', height=400, **kwargs)
         self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
                                line_color='black', line_width=2, source=self.source)
         self.profile_plot.text(x='left', y='bottom', text='short_text',
@@ -645,43 +646,44 @@ class ProfileTimePlot(DashboardComponent):
         self.profile_plot.grid.visible = False
 
         self.ts_source = ColumnDataSource({'time': [], 'count': []})
-        self.ts_plot = figure(title='Acivity over time', plot_height=200,
+        self.ts_plot = figure(title='Acivity over time', height=100,
                               x_axis_type='datetime', active_drag='xbox_select',
                               tools='pan,xwheel_zoom,xbox_select,reset',
                               **kwargs)
         self.ts_plot.line('time', 'count', source=self.ts_source)
-        self.ts_plot.line('time', 'count', source=self.ts_source, color=None,
-                          selection_color='orange')
+        self.ts_plot.circle('time', 'count', source=self.ts_source, color=None,
+                            selection_color='orange')
+        self.ts_plot.yaxis.visible = False
+        self.ts_plot.grid.visible = False
 
         def ts_change(attr, old, new):
             with log_errors():
-                print('old', old)
-                print('new', new)
                 selected = self.ts_source.selected['1d']['indices']
-                print('selected', selected)
                 if selected:
-                    start = self.ts_source.data['time'][selected[0]]
-                    stop = self.ts_source.data['time'][selected[-1]]
+                    start = self.ts_source.data['time'][selected[0]] / 1000
+                    stop = self.ts_source.data['time'][selected[-1]] / 1000
+                    start, stop = min(start, stop), max(start, stop)
                     @gen.coroutine
                     def cb():
                         result = self.server.get_profile(start=start, stop=stop)
                         if isinstance(result, gen.Future):
                             result = yield result
-                        self.update(state)
+                        self.update(result)
                     cb()
 
         self.ts_source.on_change('selected', ts_change)
 
         self.root = column(self.profile_plot, self.ts_plot, **kwargs)
 
-    def update(self, state, ts):
+    def update(self, state, ts=None):
         with log_errors():
             self.state = state
             data = profile.plot_data(self.state)
             self.states = data.pop('states')
             self.source.data.update(data)
 
-            times, counts = zip(*ts['counts'])
-            ts2 = {'count': counts, 'time': times}
+            if ts is not None:
+                times, counts = zip(*ts['counts'])
+                ts2 = {'count': counts, 'time': [t * 1000 for t in times]}
 
-            self.ts_source.data.update(ts2)
+                self.ts_source.data.update(ts2)

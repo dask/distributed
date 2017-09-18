@@ -607,7 +607,7 @@ def counters_doc(server, extra, doc):
 def profile_doc(server, extra, doc):
     with log_errors():
         doc.title = "Dask Worker Profile"
-        profile = ProfileTimePlot(sizing_mode='stretch_both')
+        profile = ProfileTimePlot(server, sizing_mode='scale_width')
         prof = server.get_profile()
         print(prof['count'])
         meta = server.get_profile_metadata()

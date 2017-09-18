@@ -2216,7 +2216,7 @@ class Worker(WorkerBase):
         if self.digests is not None:
             self.digests['profile-duration'].add(stop - start)
 
-    def get_profile(self, stream=None, start=None, stop=None):
+    def get_profile(self, comm=None, start=None, stop=None):
         if start is None:
             istart = 0
         else:
@@ -2240,7 +2240,7 @@ class Worker(WorkerBase):
 
         return prof
 
-    def get_profile_metadata(self, stream=None, start=0, stop=None):
+    def get_profile_metadata(self, comm=None, start=0, stop=None):
         stop = stop or time() + self.scheduler_delay
         start = start or 0
         return {'counts': [(t, d['count']) for t, d in self.profile_history
@@ -2249,7 +2249,7 @@ class Worker(WorkerBase):
                          for t, v in self.profile_keys_history
                          if start < t < stop]}
 
-    def get_call_stack(self, stream=None, keys=None):
+    def get_call_stack(self, comm=None, keys=None):
         with self.active_threads_lock:
             frames = sys._current_frames()
             active_threads = self.active_threads.copy()
