@@ -314,7 +314,8 @@ def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
     assert not any(w.task_state for w in rest)
 
 
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10,
+             worker_kwargs={'memory_limit': TOTAL_MEMORY})
 def test_steal_when_more_tasks(c, s, a, *rest):
     s.extensions['stealing']._pc.callback_time = 20
     x = c.submit(mul, b'0', 100000000, workers=a.address)  # 100 MB

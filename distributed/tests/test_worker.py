@@ -770,6 +770,7 @@ def test_fail_write_to_disk(c, s, a, b):
     assert results == list(map(inc, range(10)))
 
 
+@pytest.mark.skip(reason="Our logic here is faulty")
 @gen_cluster(ncores=[('127.0.0.1', 2)], client=True,
              worker_kwargs={'memory_limit': 10e9})
 def test_fail_write_many_to_disk(c, s, a):
