@@ -1091,6 +1091,8 @@ class Worker(WorkerBase):
         self.outgoing_count = 0
         self._client = None
 
+        self.scheduler_delay = 0
+
         WorkerBase.__init__(self, *args, **kwargs)
 
         pc = PeriodicCallback(self.trigger_profile,
