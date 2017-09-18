@@ -2132,8 +2132,8 @@ class Worker(WorkerBase):
         frames = {ident: frames[ident] for ident in active_threads}
         for ident, frame in frames.items():
             key = key_split(active_threads[ident])
-            profile.process(frame, None, self.profile_recent, stop='apply_function')
-            profile.process(frame, None, self.profile_keys[key], stop='apply_function')
+            profile.process(frame, None, self.profile_recent, stop='_concurrent_futures_thread.py')
+            profile.process(frame, None, self.profile_keys[key], stop='_concurrent_futures_thread.py')
         stop = time()
         if self.digests is not None:
             self.digests['profile-duration'].add(stop - start)
