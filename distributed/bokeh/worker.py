@@ -15,7 +15,7 @@ from bokeh.plotting import figure
 from bokeh.palettes import RdBu
 from toolz import merge, partition_all
 
-from .components import DashboardComponent, ProfilePlot, ProfileTimePlot
+from .components import DashboardComponent, ProfileTimePlot
 from .core import BokehServer, format_time
 from .utils import transpose
 from ..compatibility import WINDOWS

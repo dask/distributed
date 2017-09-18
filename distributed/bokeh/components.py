@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from bisect import bisect
 from operator import add
 from time import time
+import weakref
 
 from bokeh.layouts import row, column
 from bokeh.models import (
@@ -608,7 +609,9 @@ class ProfileTimePlot(DashboardComponent):
     This is two plots, one for CPU and Memory and another for Network I/O
     """
 
-    def __init__(self, server, **kwargs):
+    def __init__(self, server, doc=None, **kwargs):
+        if doc is not None:
+            self.doc = weakref.ref(doc)
         self.server = server
         state = profile.create()
         data = profile.plot_data(state)
@@ -663,13 +666,17 @@ class ProfileTimePlot(DashboardComponent):
                     start = self.ts_source.data['time'][selected[0]] / 1000
                     stop = self.ts_source.data['time'][selected[-1]] / 1000
                     start, stop = min(start, stop), max(start, stop)
-                    @gen.coroutine
-                    def cb():
-                        result = self.server.get_profile(start=start, stop=stop)
-                        if isinstance(result, gen.Future):
-                            result = yield result
+
+                    result = self.server.get_profile(start=start, stop=stop)
+
+                    if isinstance(result, gen.Future):
+                        @gen.coroutine
+                        def _():
+                            out = yield result
+                            self.doc().add_next_tick_callback(lambda: self.update(out))
+                        _()
+                    else:
                         self.update(result)
-                    cb()
 
         self.ts_source.on_change('selected', ts_change)
 
@@ -682,7 +689,7 @@ class ProfileTimePlot(DashboardComponent):
             self.states = data.pop('states')
             self.source.data.update(data)
 
-            if ts is not None:
+            if ts is not None and ts['counts']:
                 times, counts = zip(*ts['counts'])
                 ts2 = {'count': counts, 'time': [t * 1000 for t in times]}
 

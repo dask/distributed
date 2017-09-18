@@ -2225,7 +2225,7 @@ class Worker(WorkerBase):
         if stop is None:
             istop = None
         else:
-            istop = bisect.bisect_right(self.profile_history, (stop,))
+            istop = bisect.bisect_right(self.profile_history, (stop,)) + 1
 
         at_end = istop is None or istop >= len(self.profile_history) - 1
 
