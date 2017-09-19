@@ -35,6 +35,7 @@ from ..utils import format_time
 
 dt = 0.010
 
+
 def identifier(frame):
     """ A string identifier from a frame
 

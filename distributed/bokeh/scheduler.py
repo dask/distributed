@@ -29,10 +29,10 @@ except ImportError:
 from . import components
 from .components import DashboardComponent, ProfileTimePlot
 from .core import BokehServer
-from .worker import SystemMonitor, format_time, counters_doc
+from .worker import SystemMonitor, counters_doc
 from .utils import transpose
 from ..metrics import time
-from ..utils import log_errors, format_bytes
+from ..utils import log_errors, format_bytes, format_time
 from ..diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
 from ..diagnostics.progress import AllProgress
 from .task_stream import TaskStreamPlugin

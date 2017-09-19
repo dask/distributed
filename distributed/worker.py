@@ -43,7 +43,8 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, validate_key, mp_context, import_file,
-                    silence_logging, thread_state, json_load_robust, key_split)
+                    silence_logging, thread_state, json_load_robust, key_split,
+                    format_bytes)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
@@ -2159,12 +2160,19 @@ class Worker(WorkerBase):
 
         if frac > self.pause_fraction:
             if not self.paused:
-                logger.warn("Worker is at %d percent memory usage.  Stopping work.",
-                            int(frac * 100))
+                logger.warn("Worker is at %d percent memory usage.  "
+                            "Stopping work. "
+                            "Process memory: %s -- Worker memory limit: %s",
+                            int(frac * 100),
+                            format_bytes(proc.memory_info().vms),
+                            format_bytes(self.memory_limit))
                 self.paused = True
         elif self.paused:
-            logger.warn("Worker at %d percent memory usage. Restarting work.",
-                        int(frac * 100))
+            logger.warn("Worker at %d percent memory usage. Restarting work. "
+                        "Process memory: %s -- Worker memory limit: %s",
+                        int(frac * 100),
+                        format_bytes(proc.memory_info().vms),
+                        format_bytes(self.memory_limit))
             self.paused = False
             self.ensure_computing()
 
@@ -2174,17 +2182,21 @@ class Worker(WorkerBase):
 
             while proc.memory_info().vms > target:
                 if not self.data.fast:
+                    logger.warn("Memory use is high but worker has no data "
+                                "to store to disk.  Perhaps some other process "
+                                "is leaking memory?  Process memory: %s -- "
+                                "Worker memory limit: %s",
+                                format_bytes(proc.memory_info().vms),
+                                format_bytes(self.memory_limit))
                     break
                 total += self.data.fast.evict()
-                print(count)
                 count += 1
                 yield gen.moment
             if count:
-                logger.debug("Moved %d pieces of data data and %e bytes to disk",
-                             count, total)
+                logger.debug("Moved %d pieces of data data and %s to disk",
+                             count, format_bytes(total))
         self._memory_monitoring = False
         raise gen.Return(total)
-
 
     def cycle_profile(self):
         now = time() + self.scheduler_delay

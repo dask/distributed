@@ -2,7 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 import bokeh
 from bokeh.server.server import Server
-from ..utils import format_time
 
 
 class BokehServer(object):

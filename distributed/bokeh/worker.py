@@ -16,12 +16,12 @@ from bokeh.palettes import RdBu
 from toolz import merge, partition_all
 
 from .components import DashboardComponent, ProfileTimePlot
-from .core import BokehServer, format_time
+from .core import BokehServer
 from .utils import transpose
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..metrics import time
-from ..utils import log_errors, key_split, format_bytes
+from ..utils import log_errors, key_split, format_bytes, format_time
 
 
 logger = logging.getLogger(__name__)
