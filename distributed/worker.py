@@ -342,7 +342,7 @@ class WorkerBase(ServerNode):
         logger.info('-' * 49)
         logger.info('              Threads: %26d', self.ncores)
         if self.memory_limit:
-            logger.info('               Memory: %s', format_bytes(self.memory_limit))
+            logger.info('               Memory: %26s', format_bytes(self.memory_limit))
         logger.info('      Local Directory: %26s', self.local_dir)
         logger.info('-' * 49)
 
