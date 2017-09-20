@@ -986,8 +986,6 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
     start = time()
     while not a.data.slow:
         yield gen.sleep(0.1)
-        if time() > start + 5:
-            import pdb; pdb.set_trace()
         assert time() < start + 5
 
 
