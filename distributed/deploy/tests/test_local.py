@@ -324,8 +324,9 @@ def test_death_timeout_raises(loop):
 
 
 @pytest.mark.parametrize('processes', [True, False])
-def test_diagnostics_processes_false(loop, processes):
+def test_diagnostics_available_at_localhost(loop, processes):
     import requests
     with LocalCluster(2, scheduler_port=0, processes=processes,
-                      silence_logs=False, loop=loop) as c:
-        requests.get('http://127.0.0.1:8787/status/')
+                      silence_logs=False, diagnostics_port=3948, loop=loop) as c:
+        requests.get('http://127.0.0.1:3948/status/', timeout=1)
+        requests.get('http://localhost:3948/status/', timeout=1)
