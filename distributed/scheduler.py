@@ -1432,7 +1432,7 @@ class Scheduler(ServerNode):
                                          worker, clean_exception(**msg)[1])
                             except ImportError:
                                 # clean_exception may try to unpickle an object that requires a package that does not
-                                # exist on the scheduler but does exist on the worker – this attempt would generate an
+                                # exist on the scheduler but does exist on the worker - this attempt would generate an
                                 # ImportError
                                 logger.error("error from worker %s",
                                          worker)
