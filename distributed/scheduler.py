@@ -1430,10 +1430,10 @@ class Scheduler(ServerNode):
                             try:
                                 logger.error("error from worker %s: %s",
                                          worker, clean_exception(**msg)[1])
-                            except ImportError:
-                                # clean_exception may try to unpickle an object that requires a package that does not
-                                # exist on the scheduler but does exist on the worker - this attempt would generate an
-                                # ImportError
+                            except Exception:
+                                # clean_exception may raise an Exception whilst trying to unpickle an object (e.g. if
+                                # it requires a package that does not exist on the scheduler but does exist on the
+                                # worker)
                                 logger.error("error from worker %s",
                                          worker)
                         op = msg.pop('op')
