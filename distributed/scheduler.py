@@ -1426,11 +1426,16 @@ class Scheduler(ServerNode):
                     for msg in msgs:
                         if msg == 'OK':  # from close
                             break
-
                         if 'status' in msg and 'error' in msg['status']:
-                            logger.error("error from worker %s: %s",
+                            try:
+                                logger.error("error from worker %s: %s",
                                          worker, clean_exception(**msg)[1])
-
+                            except ImportError:
+                                # clean_exception may try to unpickle an object that requires a package that does not
+                                # exist on the scheduler but does exist on the worker – this attempt would generate an
+                                # ImportError
+                                logger.error("error from worker %s",
+                                         worker)
                         op = msg.pop('op')
                         if op:
                             self.correct_time_delay(worker, msg)
