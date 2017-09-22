@@ -726,7 +726,11 @@ class ProfileTimePlot(DashboardComponent):
         self.reset_button = Button(label="Reset", button_type="success")
         self.reset_button.on_click(lambda: self.update(self.state) )
 
-        self.root = column(self.reset_button, self.profile_plot, self.ts_plot, **kwargs)
+        self.update_button = Button(label="Update", button_type="success")
+        self.update_button.on_click(self.trigger_update)
+
+        self.root = column(row(self.reset_button, self.update_button),
+                           self.profile_plot, self.ts_plot, **kwargs)
 
     def update(self, state, ts=None):
         with log_errors():
