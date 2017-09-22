@@ -4705,7 +4705,6 @@ def test_client_with_name(s, a, b):
         assert 'foo' in client.id
         yield client.close()
 
-
     text = sio.getvalue()
     assert 'foo' in text
 
