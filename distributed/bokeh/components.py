@@ -636,8 +636,9 @@ class ProfileTimePlot(DashboardComponent):
         if doc is not None:
             self.doc = weakref.ref(doc)
         self.server = server
-        state = profile.create()
-        data = profile.plot_data(state, profile_interval)
+        self.ts = {'count': [], 'time': []}
+        self.state = profile.create()
+        data = profile.plot_data(self.state, profile_interval)
         self.states = data.pop('states')
         self.source = ColumnDataSource(data=data)
 
@@ -730,12 +731,25 @@ class ProfileTimePlot(DashboardComponent):
     def update(self, state, ts=None):
         with log_errors():
             self.state = state
+            print(self.state)
             data = profile.plot_data(self.state, profile_interval)
             self.states = data.pop('states')
             self.source.data.update(data)
 
             if ts is not None and ts['counts']:
                 times, counts = zip(*ts['counts'])
-                ts2 = {'count': counts, 'time': [t * 1000 for t in times]}
+                self.ts = {'count': counts, 'time': [t * 1000 for t in times]}
 
-                self.ts_source.data.update(ts2)
+                self.ts_source.data.update(self.ts)
+
+    def trigger_update(self):
+        @gen.coroutine
+        def cb():
+            with log_errors():
+                prof = self.server.get_profile()
+                metadata = self.server.get_profile_metadata()
+                if isinstance(prof, gen.Future):
+                    prof, metadata = yield [prof, metadata]
+                self.doc().add_next_tick_callback(lambda: self.update(prof, metadata))
+
+        self.server.loop.add_callback(cb)

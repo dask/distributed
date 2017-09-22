@@ -4688,7 +4688,7 @@ def test_profile(c, s, a, b):
     assert not x['count']
 
     x = yield c.profile(start=0, stop=time())
-    assert x['count'] == sum(p['count'] for _, p in a.profile_history)
+    assert x['count'] == sum(p['count'] for _, p in a.profile_history) + a.profile_recent['count']
 
     y = yield c.profile(start=time() - 0.300, stop=time())
     assert 0 < y['count'] < x['count']

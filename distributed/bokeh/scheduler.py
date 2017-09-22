@@ -1005,14 +1005,7 @@ def profile_doc(scheduler, extra, doc):
         doc.template_variables['active_page'] = 'profile'
         doc.template_variables.update(extra)
 
-        @gen.coroutine
-        def _():
-            profile, metadata = yield [scheduler.get_profile(),
-                                       scheduler.get_profile_metadata()]
-            doc.add_next_tick_callback(lambda: prof.update(profile, metadata))
-
-        from tornado.ioloop import IOLoop
-        IOLoop.current().add_callback(_)
+        prof.trigger_update()
 
 
 class BokehScheduler(BokehServer):
