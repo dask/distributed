@@ -2556,20 +2556,17 @@ class Client(Node):
         return self.sync(self.scheduler.call_stack, keys=keys)
 
     def profile(self, key=None, start=None, stop=None, workers=None, merge_workers=True):
-        """ The actively running call stack of all relevant keys
+        """ Collect statistical profiling information about recent work
 
         Parameters
         ----------
         key: str
             Key prefix to select, this is typically a function name like 'inc'
-        futures: list (optional)
-            A list of futures, defaults to all data
-        workers: list
-            A list of workers to restrict the profile to
-        merge_workers: boolean
-            Whether or not to group the profiles or keep them separated by worker
+            Leave as None to collect all data
         start: time
         stop: time
+        workers: list
+            List of workers to restrict profile information
 
         Examples
         --------
