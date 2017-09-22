@@ -4637,5 +4637,17 @@ def test_warn_executor(loop):
         assert any('Client' in str(r.message) for r in record)
 
 
+@gen_cluster()
+def test_client_with_name(s, a, b):
+    with captured_logger('distributed.scheduler') as sio:
+        client = yield Client(s.address, asynchronous=True, name='foo')
+        assert 'foo' in client.id
+        yield client.close()
+
+
+    text = sio.getvalue()
+    assert 'foo' in text
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # flake8: noqa
