@@ -696,7 +696,7 @@ class ProfileTimePlot(DashboardComponent):
         self.profile_plot.grid.visible = False
 
         self.ts_source = ColumnDataSource({'time': [], 'count': []})
-        self.ts_plot = figure(title='Acivity over time', height=100,
+        self.ts_plot = figure(title='Activity over time', height=100,
                               x_axis_type='datetime', active_drag='xbox_select',
                               tools='pan,xwheel_zoom,xbox_select,reset',
                               **kwargs)
