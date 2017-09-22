@@ -10,8 +10,8 @@ from bokeh.models import (
     ColumnDataSource, Plot, DataRange1d, Rect, LinearAxis,
     DatetimeAxis, Grid, BasicTicker, HoverTool, BoxZoomTool, ResetTool,
     PanTool, WheelZoomTool, Title, Range1d, Quad, Text, value, Line,
-    NumeralTickFormatter, ToolbarBox, Legend, BoxSelectTool,
-    Circle
+    NumeralTickFormatter, ToolbarBox, Legend, BoxSelectTool, TapTool,
+    Circle, OpenURL,
 )
 from bokeh.models.widgets import (DataTable, TableColumn, NumberFormatter,
         Button, Select)
@@ -108,8 +108,10 @@ class TaskStream(DashboardComponent):
                 """
         )
 
+        tap = TapTool(callback=OpenURL(url='/profile?key=@name'))
+
         self.root.add_tools(
-            hover,
+            hover, tap,
             BoxZoomTool(),
             ResetTool(reset_size=False),
             PanTool(dimensions="width"),
@@ -635,9 +637,17 @@ class ProfileTimePlot(DashboardComponent):
     def __init__(self, server, doc=None, **kwargs):
         if doc is not None:
             self.doc = weakref.ref(doc)
+            self.key = doc.session_context.request.arguments.get('key', None)
+            if isinstance(self.key, list):
+                self.key = self.key[0]
+            if isinstance(self.key, bytes):
+                self.key = self.key.decode()
+            self.task_names = ['All', self.key]
+        else:
+            self.key = None
+            self.task_names = ['All']
+
         self.server = server
-        self.task_names = ['All']
-        self.key = None
         self.start = None
         self.stop = None
         self.ts = {'count': [], 'time': []}
@@ -725,7 +735,7 @@ class ProfileTimePlot(DashboardComponent):
         self.update_button = Button(label="Update", button_type="success")
         self.update_button.on_click(self.trigger_update)
 
-        self.select = Select(value='All', options=self.task_names)
+        self.select = Select(value=self.task_names[-1], options=self.task_names)
 
         def select_cb(attr, old, new):
             if new == 'All':
@@ -736,7 +746,7 @@ class ProfileTimePlot(DashboardComponent):
         self.select.on_change('value', select_cb)
 
         self.root = column(row(self.select, self.reset_button,
-            self.update_button, sizing_mode='scale_width'),
+                               self.update_button, sizing_mode='scale_width'),
                            self.profile_plot, self.ts_plot, **kwargs)
 
     def update(self, state, metadata=None):
