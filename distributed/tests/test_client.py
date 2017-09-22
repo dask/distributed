@@ -4698,6 +4698,17 @@ def test_profile(c, s, a, b):
     assert not result['count']
 
 
+@gen_cluster(client=True, worker_kwargs={'profile_cycle_interval': 100})
+def test_profile_keys(c, s, a, b):
+    x = c.map(slowinc, range(10), delay=0.05, workers=a.address)
+    y = c.map(slowdec, range(10), delay=0.05, workers=a.address)
+    yield wait(x + y)
+
+    xp = yield c.profile('slowinc')
+    yp = yield c.profile('slowdec')
+    p = yield c.profile()
+
+    assert p['count'] == xp['count'] + yp['count']
 
 
 if sys.version_info >= (3, 5):

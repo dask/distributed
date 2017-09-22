@@ -2230,27 +2230,35 @@ class Worker(WorkerBase):
         if self.digests is not None:
             self.digests['profile-duration'].add(stop - start)
 
-    def get_profile(self, comm=None, start=None, stop=None):
+    def get_profile(self, comm=None, start=None, stop=None, key=None):
         now = time() + self.scheduler_delay
+        if key is None:
+            history = self.profile_history
+        else:
+            history = [(t, d[key]) for t, d in self.profile_keys_history
+                       if key in d]
         if start is None:
             istart = 0
         else:
-            istart = bisect.bisect_left(self.profile_history, (start,))
+            istart = bisect.bisect_left(history, (start,))
 
         if stop is None:
             istop = None
         else:
-            istop = bisect.bisect_right(self.profile_history, (stop,)) + 1
-            if istop >= len(self.profile_history):
+            istop = bisect.bisect_right(history, (stop,)) + 1
+            if istop >= len(history):
                 istop = None  # include end
 
         if istart == 0 and istop == None:
-            history = list(self.profile_history)
+            history = list(history)
         else:
-            iistop = len(self.profile_history) if istop is None else istop
-            history = [self.profile_history[i] for i in range(istart, iistop)]
+            iistop = len(history) if istop is None else istop
+            history = [history[i] for i in range(istart, iistop)]
 
         prof = profile.merge(*pluck(1, history))
+
+        if not history:
+            return profile.create()
 
         if istop is None and (start is None or start < now):
             prof = profile.merge(prof, self.profile_recent)
@@ -2260,7 +2268,8 @@ class Worker(WorkerBase):
     def get_profile_metadata(self, comm=None, start=0, stop=None):
         if stop is None:
             add_recent = True
-        stop = stop or time() + self.scheduler_delay
+        now = time() + self.scheduler_delay
+        stop = stop or now
         start = start or 0
         result = {'counts': [(t, d['count']) for t, d in self.profile_history
                              if start < t < stop],
@@ -2268,8 +2277,8 @@ class Worker(WorkerBase):
                            for t, v in self.profile_keys_history
                            if start < t < stop]}
         if add_recent:
-            result['counts'].append((stop, self.profile_recent['count']))
-            result['keys'].append((stop, {k: v['count']
+            result['counts'].append((now, self.profile_recent['count']))
+            result['keys'].append((now, {k: v['count']
                                           for k, v in self.profile_keys.items()}))
         return result
 

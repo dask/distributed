@@ -14,7 +14,7 @@ from bokeh.models import (
     Circle
 )
 from bokeh.models.widgets import (DataTable, TableColumn, NumberFormatter,
-        Button)
+        Button, Select)
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from toolz import valmap
@@ -31,7 +31,7 @@ else:
     ExportTool = None
 
 
-profile_interval = config.get('profile-interval', 0.010)
+profile_interval = config.get('profile-interval', 10) / 1000
 
 
 class DashboardComponent(object):
@@ -636,6 +636,10 @@ class ProfileTimePlot(DashboardComponent):
         if doc is not None:
             self.doc = weakref.ref(doc)
         self.server = server
+        self.task_names = ['All']
+        self.key = None
+        self.start = None
+        self.stop = None
         self.ts = {'count': [], 'time': []}
         self.state = profile.create()
         data = profile.plot_data(self.state, profile_interval)
@@ -706,20 +710,12 @@ class ProfileTimePlot(DashboardComponent):
             with log_errors():
                 selected = self.ts_source.selected['1d']['indices']
                 if selected:
-                    start = self.ts_source.data['time'][selected[0]] / 1000
-                    stop = self.ts_source.data['time'][selected[-1]] / 1000
-                    start, stop = min(start, stop), max(start, stop)
-
-                    result = self.server.get_profile(start=start, stop=stop)
-
-                    if isinstance(result, gen.Future):
-                        @gen.coroutine
-                        def _():
-                            out = yield result
-                            self.doc().add_next_tick_callback(lambda: self.update(out))
-                        _()
-                    else:
-                        self.update(result)
+                    start = self.ts_source.data['time'][min(selected)] / 1000
+                    stop = self.ts_source.data['time'][max(selected)] / 1000
+                    self.start, self.stop = min(start, stop), max(start, stop)
+                else:
+                    self.start = self.stop = None
+                self.trigger_update()
 
         self.ts_source.on_change('selected', ts_change)
 
@@ -729,19 +725,35 @@ class ProfileTimePlot(DashboardComponent):
         self.update_button = Button(label="Update", button_type="success")
         self.update_button.on_click(self.trigger_update)
 
-        self.root = column(row(self.reset_button, self.update_button),
+        self.select = Select(value='All', options=self.task_names)
+
+        def select_cb(attr, old, new):
+            if new == 'All':
+                new = None
+            self.key = new
+            self.trigger_update()
+
+        self.select.on_change('value', select_cb)
+
+        self.root = column(row(self.select, self.reset_button,
+            self.update_button, sizing_mode='scale_width'),
                            self.profile_plot, self.ts_plot, **kwargs)
 
-    def update(self, state, ts=None):
+    def update(self, state, metadata=None):
         with log_errors():
             self.state = state
-            print(self.state)
             data = profile.plot_data(self.state, profile_interval)
             self.states = data.pop('states')
             self.source.data.update(data)
 
-            if ts is not None and ts['counts']:
-                times, counts = zip(*ts['counts'])
+            if metadata is not None and metadata['counts']:
+                self.task_names = ['All'] + sorted(metadata['keys'])
+                self.select.options = self.task_names
+                if self.key:
+                    ts = metadata['keys'][self.key]
+                else:
+                    ts = metadata['counts']
+                times, counts = zip(*ts)
                 self.ts = {'count': counts, 'time': [t * 1000 for t in times]}
 
                 self.ts_source.data.update(self.ts)
@@ -750,7 +762,7 @@ class ProfileTimePlot(DashboardComponent):
         @gen.coroutine
         def cb():
             with log_errors():
-                prof = self.server.get_profile()
+                prof = self.server.get_profile(key=self.key, start=self.start, stop=self.stop)
                 metadata = self.server.get_profile_metadata()
                 if isinstance(prof, gen.Future):
                     prof, metadata = yield [prof, metadata]

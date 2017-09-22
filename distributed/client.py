@@ -2555,11 +2555,13 @@ class Client(Node):
             keys = None
         return self.sync(self.scheduler.call_stack, keys=keys)
 
-    def profile(self, start=None, stop=None, workers=None, merge_workers=True):
+    def profile(self, key=None, start=None, stop=None, workers=None, merge_workers=True):
         """ The actively running call stack of all relevant keys
 
         Parameters
         ----------
+        key: str
+            Key prefix to select, this is typically a function name like 'inc'
         futures: list (optional)
             A list of futures, defaults to all data
         workers: list
@@ -2576,7 +2578,7 @@ class Client(Node):
         if isinstance(workers, six.string_types + (Number,)):
             workers = [workers]
 
-        return self.sync(self.scheduler.profile, workers=workers,
+        return self.sync(self.scheduler.profile, key=key, workers=workers,
                          merge_workers=merge_workers, start=start, stop=stop)
 
     def scheduler_info(self, **kwargs):
