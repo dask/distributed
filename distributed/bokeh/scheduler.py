@@ -20,7 +20,6 @@ from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from bokeh.io import curdoc
 from toolz import pipe
-from tornado import gen
 try:
     import numpy as np
 except ImportError:

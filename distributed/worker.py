@@ -2249,7 +2249,7 @@ class Worker(WorkerBase):
             if istop >= len(history):
                 istop = None  # include end
 
-        if istart == 0 and istop == None:
+        if istart == 0 and istop is None:
             history = list(history)
         else:
             iistop = len(history) if istop is None else istop

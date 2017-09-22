@@ -637,7 +637,10 @@ class ProfileTimePlot(DashboardComponent):
     def __init__(self, server, doc=None, **kwargs):
         if doc is not None:
             self.doc = weakref.ref(doc)
-            self.key = doc.session_context.request.arguments.get('key', None)
+            try:
+                self.key = doc.session_context.request.arguments.get('key', None)
+            except AttributeError:
+                self.key = None
             if isinstance(self.key, list):
                 self.key = self.key[0]
             if isinstance(self.key, bytes):
