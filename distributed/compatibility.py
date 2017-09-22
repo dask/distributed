@@ -16,6 +16,7 @@ if sys.version_info[0] == 2:
     PY3 = False
     ConnectionRefusedError = OSError
     FileExistsError = OSError
+    ProcessLookupError = OSError
 
     import gzip
 
@@ -65,6 +66,7 @@ if sys.version_info[0] == 3:
     from gzip import compress as gzip_compress
     ConnectionRefusedError = ConnectionRefusedError
     FileExistsError = FileExistsError
+    ProcessLookupError = ProcessLookupError
 
     def isqueue(o):
         return isinstance(o, Queue)
