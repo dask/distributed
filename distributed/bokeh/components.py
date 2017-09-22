@@ -13,7 +13,8 @@ from bokeh.models import (
     NumeralTickFormatter, ToolbarBox, Legend, BoxSelectTool,
     Circle
 )
-from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
+from bokeh.models.widgets import (DataTable, TableColumn, NumberFormatter,
+        Button)
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from toolz import valmap
@@ -721,7 +722,10 @@ class ProfileTimePlot(DashboardComponent):
 
         self.ts_source.on_change('selected', ts_change)
 
-        self.root = column(self.profile_plot, self.ts_plot, **kwargs)
+        self.reset_button = Button(label="Reset", button_type="success")
+        self.reset_button.on_click(lambda: self.update(self.state) )
+
+        self.root = column(self.reset_button, self.profile_plot, self.ts_plot, **kwargs)
 
     def update(self, state, ts=None):
         with log_errors():
