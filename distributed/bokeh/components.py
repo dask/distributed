@@ -7,8 +7,8 @@ import weakref
 
 from bokeh.layouts import row, column
 from bokeh.models import (
-    ColumnDataSource, Plot, DataRange1d, Rect, LinearAxis,
-    DatetimeAxis, Grid, BasicTicker, HoverTool, BoxZoomTool, ResetTool,
+    ColumnDataSource, Plot, DataRange1d, LinearAxis,
+    DatetimeAxis, HoverTool, BoxZoomTool, ResetTool,
     PanTool, WheelZoomTool, Title, Range1d, Quad, Text, value, Line,
     NumeralTickFormatter, ToolbarBox, Legend, BoxSelectTool, TapTool,
     Circle, OpenURL,
@@ -77,25 +77,21 @@ class TaskStream(DashboardComponent):
         x_range = DataRange1d(range_padding=0)
         y_range = DataRange1d(range_padding=0)
 
-        self.root = Plot(
-            title=Title(text="Task Stream"), id='bk-task-stream-plot',
+        self.root = figure(
+            title="Task Stream", id='bk-task-stream-plot',
             x_range=x_range, y_range=y_range, toolbar_location="above",
-            min_border_right=35, **kwargs
-        )
+            x_axis_type='datetime', min_border_right=35, **kwargs)
+        self.root.yaxis.axis_label = 'Worker Core'
 
-        self.root.add_glyph(
-            self.source,
-            Rect(x="start", y="y", width="duration", height=0.4, fill_color="color",
-                 line_color="color", line_alpha=0.6, fill_alpha="alpha", line_width=3)
-        )
-
-        self.root.add_layout(DatetimeAxis(axis_label="Time"), "below")
-
-        ticker = BasicTicker(num_minor_ticks=0)
-        self.root.add_layout(LinearAxis(axis_label="Worker Core", ticker=ticker), "left")
-        self.root.add_layout(Grid(dimension=1, grid_line_alpha=0.4, ticker=ticker))
+        rect = self.root.rect(source=self.source, x="start", y="y",
+            width="duration", height=0.4, fill_color="color",
+            line_color="color", line_alpha=0.6, fill_alpha="alpha",
+            line_width=3)
+        rect.nonselection_glyph = None
 
         self.root.yaxis.major_label_text_alpha = 0
+        self.root.yaxis.minor_tick_line_alpha = 0
+        self.root.xgrid.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
