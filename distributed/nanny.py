@@ -13,6 +13,7 @@ from tornado.ioloop import IOLoop, TimeoutError, PeriodicCallback
 from tornado.locks import Event
 
 from .comm import get_address_host, get_local_address_for, unparse_host_port
+from .compatibility import ProcessLookupError
 from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import time
 from .node import ServerNode
@@ -240,7 +241,11 @@ class Nanny(ServerNode):
         """ Track worker's memory.  Restart if it goes above 95% """
         if self.status != 'running':
             return
-        memory = psutil.Process(self.process.pid).memory_info().rss
+        try:
+            proc = psutil.Process(self.process.pid)
+        except ProcessLookupError:
+            return
+        memory = proc.memory_info().rss
         frac = memory / self.memory_limit
         if frac > 0.95:
             logger.warn("Worker exceeded 95% memory budget.  Restarting")
