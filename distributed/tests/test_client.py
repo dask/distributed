@@ -329,7 +329,7 @@ def test_get_sync(loop):
             assert c.get({'x': (inc, 1)}, 'x') == 2
 
 
-def test_no_future_referneces(loop):
+def test_no_future_references(loop):
     from weakref import WeakSet
     ws = WeakSet()
     with cluster() as (s, [a, b]):
@@ -4709,6 +4709,17 @@ def test_profile_keys(c, s, a, b):
     p = yield c.profile()
 
     assert p['count'] == xp['count'] + yp['count']
+
+    
+@gen_cluster()
+def test_client_with_name(s, a, b):
+    with captured_logger('distributed.scheduler') as sio:
+        client = yield Client(s.address, asynchronous=True, name='foo')
+        assert 'foo' in client.id
+        yield client.close()
+
+    text = sio.getvalue()
+    assert 'foo' in text
 
 
 if sys.version_info >= (3, 5):
