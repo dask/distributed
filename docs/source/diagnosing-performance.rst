@@ -73,9 +73,9 @@ any of the bars in the profile will zoom the user into just that section, as is
 typical with most profiling tools.  There is a timeline at the bottom of the
 page to allow users to select different periods in time.
 
-.. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/daskboard-profile.png
+.. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/daskboard-profile.gif
    :alt: Dask profiler
-   :width: 50%
+   :width: 70%
 
 Profiles are also grouped by the task that was being run at the time.  You can
 select a task name from the selection menu at the top of the page.  You can

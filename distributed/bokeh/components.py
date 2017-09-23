@@ -707,7 +707,7 @@ class ProfileTimePlot(DashboardComponent):
         self.ts_source = ColumnDataSource({'time': [], 'count': []})
         self.ts_plot = figure(title='Activity over time', height=100,
                               x_axis_type='datetime', active_drag='xbox_select',
-                              tools='pan,xwheel_zoom,xbox_select,reset',
+                              tools='xpan,xwheel_zoom,xbox_select,reset',
                               **kwargs)
         self.ts_plot.line('time', 'count', source=self.ts_source)
         self.ts_plot.circle('time', 'count', source=self.ts_source, color=None,
@@ -724,7 +724,7 @@ class ProfileTimePlot(DashboardComponent):
                     self.start, self.stop = min(start, stop), max(start, stop)
                 else:
                     self.start = self.stop = None
-                self.trigger_update()
+                self.trigger_update(update_metadata=False)
 
         self.ts_source.on_change('selected', ts_change)
 
@@ -740,7 +740,7 @@ class ProfileTimePlot(DashboardComponent):
             if new == 'All':
                 new = None
             self.key = new
-            self.trigger_update()
+            self.trigger_update(update_metadata=False)
 
         self.select.on_change('value', select_cb)
 
@@ -767,12 +767,15 @@ class ProfileTimePlot(DashboardComponent):
 
                 self.ts_source.data.update(self.ts)
 
-    def trigger_update(self):
+    def trigger_update(self, update_metadata=True):
         @gen.coroutine
         def cb():
             with log_errors():
                 prof = self.server.get_profile(key=self.key, start=self.start, stop=self.stop)
-                metadata = self.server.get_profile_metadata()
+                if update_metadata:
+                    metadata = self.server.get_profile_metadata()
+                else:
+                    metadata = None
                 if isinstance(prof, gen.Future):
                     prof, metadata = yield [prof, metadata]
                 self.doc().add_next_tick_callback(lambda: self.update(prof, metadata))
