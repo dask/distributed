@@ -2261,7 +2261,11 @@ class Worker(WorkerBase):
             return profile.create()
 
         if istop is None and (start is None or start < now):
-            prof = profile.merge(prof, self.profile_recent)
+            if key is None:
+                recent = self.profile_recent
+            else:
+                recent = self.profile_keys[key]
+            prof = profile.merge(prof, recent)
 
         return prof
 
