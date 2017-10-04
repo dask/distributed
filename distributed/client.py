@@ -2195,7 +2195,10 @@ class Client(Node):
     def _restart(self, timeout=5):
         self._send_to_scheduler({'op': 'restart', 'timeout': timeout})
         self._restart_event = Event()
-        yield self._restart_event.wait()
+        try:
+            yield self._restart_event.wait(timeout)
+        except gen.TimeoutError:
+            pass
         self.generation += 1
         with self._refcount_lock:
             self.refcount.clear()
