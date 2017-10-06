@@ -238,6 +238,7 @@ class Nanny(ServerNode):
         try:
             yield gen.with_timeout(timedelta(seconds=timeout), _())
         except gen.TimeoutError:
+            logger.error("Restart timed out, returning before finished")
             raise gen.Return('timed out')
         else:
             raise gen.Return('OK')

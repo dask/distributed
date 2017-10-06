@@ -2196,8 +2196,9 @@ class Client(Node):
         self._send_to_scheduler({'op': 'restart', 'timeout': timeout})
         self._restart_event = Event()
         try:
-            yield self._restart_event.wait(timeout)
+            yield self._restart_event.wait(self.loop.time() + timeout)
         except gen.TimeoutError:
+            logger.error("Restart timed out after %f seconds", timeout)
             pass
         self.generation += 1
         with self._refcount_lock:
