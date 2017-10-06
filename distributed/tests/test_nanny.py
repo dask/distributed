@@ -12,13 +12,13 @@ import pytest
 from toolz import valmap, first
 from tornado import gen
 
-from distributed import Nanny, rpc, Scheduler, wait
+from distributed import Nanny, rpc, Scheduler
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import ignoring, tmpfile
 from distributed.utils_test import (gen_cluster, gen_test, slow,
-        captured_logger, inc)
+        captured_logger)
 
 
 @gen_cluster(ncores=[])
