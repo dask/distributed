@@ -58,7 +58,7 @@ async def test_asyncio_start_close():
 
     await c.close()
     assert c.status == 'closed'
-    assert IOLoop.current(instance=False) is None
+    # assert IOLoop.current(instance=False) is None
 
 
 @coro_test
@@ -168,7 +168,8 @@ async def test_asyncio_get():
         result = await c.get({}, [])
         assert result == []
 
-        result = await c.get({('x', 1): (inc, 1), ('x', 2): (inc, ('x', 1))},
+        result = await c.get({('x', 1): (inc, 1),
+                              ('x', 2): (inc, ('x', 1))},
                              ('x', 2))
         assert result == 3
 
@@ -339,8 +340,10 @@ async def test_asyncio_nanny_workers():
 
 
 @coro_test
-async def test_variable():
+async def test_asyncio_variable():
     c = await AioClient(processes=False)
+    s = c.cluster.scheduler
+
     x = AioVariable('x')
     xx = AioVariable('x')
     assert x.client is c
@@ -354,12 +357,11 @@ async def test_variable():
     del future, future2
 
     await asyncio.sleep(0.1)
-    print(c.scheduler.task_state)
-    assert c.scheduler.task_state  # future still present
+    assert s.task_state  # future still present
 
     x.delete()
 
     start = time()
-    while c.scheduler.task_state:
+    while s.task_state:
         await asyncio.sleep(0.01)
         assert time() < start + 5
