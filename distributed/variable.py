@@ -142,8 +142,9 @@ class Variable(object):
 
     See Also
     --------
-    Queue:
+    Queue: shared multi-producer/multi-consumer queue between clients
     """
+
     def __init__(self, name=None, client=None, maxsize=0):
         self.client = client or _get_global_client()
         self.name = name or 'variable-' + uuid.uuid4().hex
