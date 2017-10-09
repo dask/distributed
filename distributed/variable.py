@@ -144,10 +144,6 @@ class Variable(object):
     --------
     Queue:
     """
-
-    _Client = Client
-    _Future = Future
-
     def __init__(self, name=None, client=None, maxsize=0):
         self.client = client or _get_global_client()
         self.name = name or 'variable-' + uuid.uuid4().hex
@@ -177,7 +173,7 @@ class Variable(object):
                                                      name=self.name,
                                                      client=self.client.id)
         if d['type'] == 'Future':
-            value = self._Future(d['value'], self.client, inform=True, state=d['state'])
+            value = Future(d['value'], self.client, inform=True, state=d['state'])
             self.client._send_to_scheduler({'op': 'variable-future-release',
                                             'name': self.name,
                                             'key': d['value'],
@@ -208,5 +204,5 @@ class Variable(object):
             client = get_client(address)
             assert client.address == address
         except (AttributeError, AssertionError):
-            client = self._Client(address, set_as_default=False)
+            client = Client(address, set_as_default=False)
         self.__init__(name=name, client=client)

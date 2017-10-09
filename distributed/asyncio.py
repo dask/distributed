@@ -26,17 +26,6 @@ def to_asyncio(fn, **default_kwargs):
     return convert
 
 
-class AioFuture(Future):
-    """Provides awaitable syntax for a distributed Future"""
-
-    def __await__(self):
-        return self.result().__await__()
-
-    result = to_asyncio(Future._result)
-    exception = to_asyncio(Future._exception)
-    traceback = to_asyncio(Future._traceback)
-
-
 class AioClient(Client):
     """ Connect to and drive computation on a distributed Dask cluster
 
@@ -103,12 +92,13 @@ class AioClient(Client):
     distributed.client.Client: Blocking Client
     distributed.scheduler.Scheduler: Internal scheduler
     """
-    _Future = AioFuture
-
     def __init__(self, *args, **kwargs):
         loop = asyncio.get_event_loop()
         ioloop = BaseAsyncIOLoop(loop)
         super().__init__(*args, loop=ioloop, asynchronous=True, **kwargs)
+
+    def __enter__(self):
+        raise RuntimeError("Use AioClient in an 'async with' block, not 'with'")
 
     async def __aenter__(self):
         await to_asyncio_future(self._started)
@@ -120,35 +110,10 @@ class AioClient(Client):
     def __await__(self):
         return to_asyncio_future(self._started).__await__()
 
-    gather = to_asyncio(Client.gather)
-    scatter = to_asyncio(Client.scatter)
-    cancel = to_asyncio(Client.cancel)
-    publish_dataset = to_asyncio(Client.publish_dataset)
-    get_dataset = to_asyncio(Client.get_dataset)
-    run_on_scheduler = to_asyncio(Client.run_on_scheduler)
-    run = to_asyncio(Client.run)
-    run_coroutine = to_asyncio(Client.run_coroutine)
     get = to_asyncio(Client.get, sync=False)
-    upload_environment = to_asyncio(Client.upload_environment)
-    restart = to_asyncio(Client.restart)
-    upload_file = to_asyncio(Client.upload_file)
-    rebalance = to_asyncio(Client.rebalance)
-    replicate = to_asyncio(Client.replicate)
-    start_ipython_workers = to_asyncio(Client.start_ipython_workers)
+    sync = to_asyncio(Client.sync)
     close = to_asyncio(Client.close)
     shutdown = to_asyncio(Client.shutdown)
-
-    def __enter__(self):
-        raise RuntimeError("Use AioClient in an 'async with' block, not 'with'")
-
-
-class AioVariable(Variable):
-
-    _Client = AioClient
-    _Future = AioFuture
-
-    get = to_asyncio(Variable.get)
-    set = to_asyncio(Variable.set)
 
 
 class as_completed(client.as_completed):
