@@ -1,7 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from collections import defaultdict, Iterator, Iterable
+from collections import Iterator, Mapping, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
 from contextlib import contextmanager
@@ -20,6 +20,7 @@ import uuid
 import threading
 import six
 import socket
+import warnings
 import weakref
 
 import dask
@@ -39,15 +40,18 @@ from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
                          scatter_to_workers, gather_from_workers)
 from .cfexecutor import ClientExecutor
 from .compatibility import (Queue as pyQueue, Empty, isqueue,
-        get_thread_identity, html_escape)
+                            get_thread_identity, html_escape)
 from .core import connect, rpc, clean_exception, CommClosedError
+from .metrics import time
 from .node import Node
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .security import Security
-from .worker import dumps_task
+from .sizeof import sizeof
+from .worker import dumps_task, get_client, get_worker
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
-        tokey, log_errors, str_graph, key_split, format_bytes)
+                    tokey, log_errors, str_graph, key_split, format_bytes, asciitable,
+                    thread_state)
 from .versions import get_versions
 
 
@@ -60,6 +64,7 @@ def _get_global_client():
     wr = _global_client[0]
     return wr and wr()
 
+
 def _set_global_client(c):
     _global_client[0] = weakref.ref(c) if c is not None else None
 
@@ -71,9 +76,17 @@ class Future(WrappedKey):
     manages future objects in the local Python process to determine what
     happens in the larger cluster.
 
+    Parameters
+    ----------
+    key: str, or tuple
+        Key of remote data to which this future refers
+    client: Client
+        Client that should own this future.  Defaults to _get_global_client()
+    inform: bool
+        Do we inform the scheduler that we need an update on this future
+
     Examples
     --------
-
     Futures typically emerge from Client computations
 
     >>> my_future = client.submit(add, 1, 2)  # doctest: +SKIP
@@ -94,7 +107,7 @@ class Future(WrappedKey):
     _cb_executor = None
     _cb_executor_pid = None
 
-    def __init__(self, key, client, inform=False):
+    def __init__(self, key, client=None, inform=True, state=None):
         self.key = key
         self._cleared = False
         tkey = tokey(key)
@@ -102,15 +115,23 @@ class Future(WrappedKey):
         self.client._inc_ref(tkey)
         self._generation = self.client.generation
 
-        if tkey in client.futures:
-            self._state = client.futures[tkey]
+        if tkey in self.client.futures:
+            self._state = self.client.futures[tkey]
         else:
-            self._state = client.futures[tkey] = FutureState(Event())
+            self._state = self.client.futures[tkey] = FutureState(Event())
 
         if inform:
             self.client._send_to_scheduler({'op': 'client-desires-keys',
                                             'keys': [tokey(key)],
                                             'client': self.client.id})
+
+        if state is not None:
+            try:
+                handler = self.client._state_handlers[state]
+            except KeyError:
+                pass
+            else:
+                handler(key=key)
 
     @property
     def executor(self):
@@ -129,7 +150,7 @@ class Future(WrappedKey):
         return self.event.is_set()
 
     def result(self, timeout=None):
-        """ Wait until computation completes. Gather result to local process.
+        """ Wait until computation completes, gather result to local process.
 
         If *timeout* seconds are elapsed before returning, a TimeoutError
         is raised.
@@ -176,7 +197,7 @@ class Future(WrappedKey):
         else:
             raise gen.Return(None)
 
-    def exception(self, timeout=None):
+    def exception(self, timeout=None, **kwargs):
         """ Return the exception of a failed task
 
         If *timeout* seconds are elapsed before returning, a TimeoutError
@@ -186,7 +207,8 @@ class Future(WrappedKey):
         --------
         Future.traceback
         """
-        return self.client.sync(self._exception, callback_timeout=timeout)
+        return self.client.sync(self._exception, callback_timeout=timeout,
+                                **kwargs)
 
     def add_done_callback(self, fn):
         """ Call callback on future when callback has finished
@@ -211,9 +233,14 @@ class Future(WrappedKey):
         self.client.loop.add_callback(done_callback, self,
                                       partial(cls._cb_executor.submit, execute_callback))
 
-    def cancel(self):
-        """ Returns True if the future has been cancelled """
-        return self.client.cancel([self])
+    def cancel(self, **kwargs):
+        """ Cancel request to run this future
+
+        See Also
+        --------
+        Client.cancel
+        """
+        return self.client.cancel([self], **kwargs)
 
     def cancelled(self):
         """ Returns True if the future has been cancelled """
@@ -227,7 +254,7 @@ class Future(WrappedKey):
         else:
             raise gen.Return(None)
 
-    def traceback(self, timeout=None):
+    def traceback(self, timeout=None, **kwargs):
         """ Return the traceback of a failed task
 
         This returns a traceback object.  You can inspect this object using the
@@ -248,29 +275,35 @@ class Future(WrappedKey):
         --------
         Future.exception
         """
-        return self.client.sync(self._traceback, callback_timeout=timeout)
+        return self.client.sync(self._traceback, callback_timeout=timeout,
+                                **kwargs)
 
     @property
     def type(self):
         return self._state.type
 
     def release(self):
-        with self.client._lock:
-            if not self._cleared and self.client.generation == self._generation:
-                self._cleared = True
-                self.client._dec_ref(tokey(self.key))
+        if not self._cleared and self.client.generation == self._generation:
+            self._cleared = True
+            self.client._dec_ref(tokey(self.key))
 
     def __getstate__(self):
-        return self.key
+        return (self.key, self.client.scheduler.address)
 
-    def __setstate__(self, key):
-        c = default_client()
+    def __setstate__(self, state):
+        key, address = state
+        c = get_client(address)
         Future.__init__(self, key, c)
         c._send_to_scheduler({'op': 'update-graph', 'tasks': {},
                               'keys': [tokey(self.key)], 'client': c.id})
 
     def __del__(self):
-        self.release()
+        if not self._cleared and self.client.generation == self._generation:
+            self._cleared = True
+            try:
+                self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+            except RuntimeError:  # closed event loop
+                pass
 
     def __str__(self):
         if self.type:
@@ -279,7 +312,7 @@ class Future(WrappedKey):
             except AttributeError:
                 typ = str(self.type)
             return '<Future: status: %s, type: %s, key: %s>' % (self.status,
-                    typ, self.key)
+                                                                typ, self.key)
         else:
             return '<Future: status: %s, key: %s>' % (self.status, self.key)
 
@@ -289,8 +322,8 @@ class Future(WrappedKey):
         text = '<b>Future: %s</b> ' % html_escape(key_split(self.key))
         text += ('<font color="gray">status: </font>'
                  '<font color="%(color)s">%(status)s</font>, ') % {
-                        'status': self.status,
-                        'color': 'red' if self.status == 'error' else 'black'}
+            'status': self.status,
+            'color': 'red' if self.status == 'error' else 'black'}
         if self.type:
             try:
                 typ = self.type.__name__
@@ -383,6 +416,9 @@ class Client(Node):
         Optional security information
     asynchronous: bool (False by default)
         Set to True if this client will be used within a Tornado event loop
+    name: string (optional)
+        Gives the client a name that will be included in logs generated on
+        the scheduler for matters relating to this client
 
     Examples
     --------
@@ -413,7 +449,7 @@ class Client(Node):
     def __init__(self, address=None, loop=None, timeout=5,
                  set_as_default=True, scheduler_file=None,
                  security=None, start=None, asynchronous=False,
-                 **kwargs):
+                 name=None, **kwargs):
         if start is not None:
             raise ValueError("The start= keyword has been deprecated. "
                              "Starting happens automatically. "
@@ -422,7 +458,7 @@ class Client(Node):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self.coroutines = []
-        self.id = str(uuid.uuid1())
+        self.id = type(self).__name__ + ('-' + name + '-' if name else '-') + str(uuid.uuid1(clock_seq=os.getpid()))
         self.generation = 0
         self.status = None
         self._pending_msg_buffer = []
@@ -433,10 +469,11 @@ class Client(Node):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args('client')
         self._connecting_to_scheduler = False
-        self.asynchronous = asynchronous
+        self._asynchronous = asynchronous
         self._loop_thread = None
         self.scheduler = None
         self._lock = threading.Lock()
+        self._refcount_lock = threading.Lock()
 
         if loop is None:
             self._should_close_loop = None
@@ -469,18 +506,51 @@ class Client(Node):
             'error': self._handle_error
         }
 
+        self._state_handlers = {
+            'memory': self._handle_key_in_memory,
+            'lost': self._handle_lost_data,
+            'erred': self._handle_task_erred
+        }
+
         super(Client, self).__init__(connection_args=self.connection_args,
                                      io_loop=self.loop)
 
-        self.start(timeout=timeout, asynchronous=asynchronous)
+        self.start(timeout=timeout)
 
-        from distributed.channels import ChannelClient
-        ChannelClient(self)  # registers itself on construction
         from distributed.recreate_exceptions import ReplayExceptionClient
         ReplayExceptionClient(self)
 
+    @classmethod
+    def current(cls):
+        """ Return global client if one exists, otherwise raise ValueError """
+        return default_client()
+
+    @property
+    def asynchronous(self):
+        """ Are we running in the event loop?
+
+        This is true if the user signaled that we might be when creating the
+        client as in the following::
+
+            client = Client(asynchronous=True)
+
+        However, we override this expectation if we can definitively tell that
+        we are running from a thread that is not the event loop.  This is
+        common when calling get_client() from within a worker task.  Even
+        though the client was originally created in asynchronous mode we may
+        find ourselves in contexts when it is better to operate synchronously.
+        """
+        result = self._asynchronous
+        try:
+            if self.loop._thread_ident and get_thread_identity() != self.loop._thread_ident:
+                result = False
+        except AttributeError:  # AsyncIOLoop doesn't have _thread_ident
+            pass
+        return result
+
     def sync(self, func, *args, **kwargs):
-        if self.asynchronous:
+        asynchronous = kwargs.pop('asynchronous', None)
+        if asynchronous or self.asynchronous or getattr(thread_state, 'asynchronous', False):
             callback_timeout = kwargs.pop('callback_timeout', None)
             future = func(*args, **kwargs)
             if callback_timeout is not None:
@@ -494,11 +564,11 @@ class Client(Node):
         if self._loop_thread is not None:
             n = sync(self.loop, self.scheduler.ncores)
             return '<%s: scheduler=%r processes=%d cores=%d>' % (
-                    self.__class__.__name__,
-                    self.scheduler.address, len(n), sum(n.values()))
+                self.__class__.__name__,
+                self.scheduler.address, len(n), sum(n.values()))
         elif self.scheduler is not None:
             return '<%s: scheduler=%r>' % (
-                    self.__class__.__name__, self.scheduler.address)
+                self.__class__.__name__, self.scheduler.address)
         else:
             return '<%s: not connected>' % (self.__class__.__name__,)
 
@@ -551,11 +621,12 @@ class Client(Node):
         else:
             return text
 
-    def start(self, asynchronous=None, **kwargs):
+    def start(self, **kwargs):
         """ Start scheduler running in separate thread """
         if self._loop_thread is not None:
             return
-        if not asynchronous and not self.loop._running:
+
+        if not self.asynchronous and not self.loop._running:
             self._loop_thread = threading.Thread(target=self.loop.start,
                                                  name="Client loop")
             self._loop_thread.daemon = True
@@ -564,25 +635,35 @@ class Client(Node):
                 self._should_close_loop = True
             while not self.loop._running:
                 sleep(0.001)
+
         pc = PeriodicCallback(lambda: None, 1000, io_loop=self.loop)
         self.loop.add_callback(pc.start)
         _set_global_client(self)
-        if asynchronous:
+        self.status = 'connecting'
+
+        if self.asynchronous:
             self._started = self._start(**kwargs)
         else:
             sync(self.loop, self._start, **kwargs)
-        self.status = 'running'
 
     def __await__(self):
         return self._started.__await__()
 
-    def _send_to_scheduler(self, msg):
-        if self.status is 'running':
-            self.loop.add_callback(self.scheduler_comm.send, msg)
+    def _send_to_scheduler_safe(self, msg):
+        if self.status in ('running', 'closing'):
+            self.scheduler_comm.send(msg)
         elif self.status is 'connecting':
-            self.loop.add_callback(self._pending_msg_buffer.append, msg)
+            self._pending_msg_buffer.append(msg)
         else:
-            raise Exception("Client not running.  Status: %s" % self.status)
+            raise Exception("Tried sending message after closing.  Status: %s\n"
+                            "Message: %s" % (self.status, msg))
+
+    def _send_to_scheduler(self, msg):
+        if self.status in ('running', 'closing', 'connecting'):
+            self.loop.add_callback(self._send_to_scheduler_safe, msg)
+        else:
+            raise Exception("Tried sending message after closing.  Status: %s\n"
+                            "Message: %s" % (self.status, msg))
 
     @gen.coroutine
     def _start(self, timeout=5, **kwargs):
@@ -659,9 +740,9 @@ class Client(Node):
                     yield gen.sleep(timeout)
 
     @gen.coroutine
-    def _ensure_connected(self, timeout=5):
+    def _ensure_connected(self, timeout=None):
         if (self.scheduler_comm and not self.scheduler_comm.closed() or
-            self._connecting_to_scheduler):
+                self._connecting_to_scheduler):
             return
 
         self._connecting_to_scheduler = True
@@ -706,22 +787,24 @@ class Client(Node):
 
     @gen.coroutine
     def __aexit__(self, typ, value, traceback):
-        yield self._shutdown()
+        yield self._close()
 
     def __exit__(self, type, value, traceback):
-        self.shutdown()
+        self.close()
 
     def __del__(self):
-        self.shutdown()
+        self.close()
 
     def _inc_ref(self, key):
-        self.refcount[key] += 1
+        with self._refcount_lock:
+            self.refcount[key] += 1
 
     def _dec_ref(self, key):
-        self.refcount[key] -= 1
-        if self.refcount[key] == 0:
-            del self.refcount[key]
-            self._release_key(key)
+        with self._refcount_lock:
+            self.refcount[key] -= 1
+            if self.refcount[key] == 0:
+                del self.refcount[key]
+                self._release_key(key)
 
     def _release_key(self, key):
         """ Release key from distributed memory """
@@ -778,7 +861,10 @@ class Client(Node):
         state = self.futures.get(key)
         if state is not None:
             if type and not state.type:  # Type exists and not yet set
-                type = loads(type)
+                try:
+                    type = loads(type)
+                except Exception:
+                    type = None
                 # Here, `type` may be a str if actual type failed
                 # serializing in Worker
             else:
@@ -824,13 +910,18 @@ class Client(Node):
         logger.exception(exception)
 
     @gen.coroutine
-    def _shutdown(self, fast=False):
-        """ Send shutdown signal and wait until scheduler completes """
+    def _close(self, fast=False):
+        """ Send close signal and wait until scheduler completes """
         with log_errors():
             if self.status == 'closed':
                 raise gen.Return()
-            if self.status == 'running':
-                self._send_to_scheduler({'op': 'close-stream'})
+            if self.scheduler_comm and self.scheduler_comm.comm and not self.scheduler_comm.comm.closed():
+                for key in list(self.futures):
+                    self._release_key(key=key)
+                if self.status == 'running':
+                    self._send_to_scheduler({'op': 'close-stream'})
+            if self.scheduler_comm:
+                yield self.scheduler_comm.close()
             if self._start_arg is None:
                 with ignoring(AttributeError):
                     yield self.cluster._close()
@@ -840,28 +931,27 @@ class Client(Node):
             if not fast:
                 with ignoring(TimeoutError):
                     yield [gen.with_timeout(timedelta(seconds=2), f)
-                            for f in self.coroutines]
-            with ignoring(AttributeError):
-                yield self.scheduler_comm.close()
+                           for f in self.coroutines]
             with ignoring(AttributeError):
                 self.scheduler.close_rpc()
             self.scheduler = None
 
-    def shutdown(self, timeout=10):
-        """ Send shutdown signal and wait until scheduler terminates
+    _shutdown = _close
 
-        This cancels all currently running tasks, clears the state of the
-        scheduler, and shuts down all workers and scheduler.
+    def close(self, timeout=10):
+        """ Close this client
 
-        You do not need to call this when you finish your session.  You only
-        need to call this if you want to take down the distributed cluster.
+        Clients will also close automatically when your Python session ends
+
+        If you started a client without arguments like ``Client()`` then this
+        will also close the local cluster that was started at the same time.
 
         See Also
         --------
         Client.restart
         """
         if self.asynchronous:
-            future = self._shutdown()
+            future = self._close()
             if timeout:
                 future = gen.with_timeout(timedelta(seconds=timeout), future)
             return future
@@ -874,13 +964,15 @@ class Client(Node):
             with ignoring(AttributeError):
                 self.cluster.close()
 
-        sync(self.loop, self._shutdown, fast=True)
+        sync(self.loop, self._close, fast=True)
         assert self.status == 'closed'
 
         if self._should_close_loop:
-            sync(self.loop, self.loop.stop)
-            self.loop.close()
-            self._loop_thread.join(timeout=timeout)
+            self.loop.add_callback(self.loop.stop)
+            try:
+                self._loop_thread.join(timeout=timeout)
+            finally:
+                self.loop.close()
         self._loop_thread = None
         with ignoring(AttributeError):
             dask.set_options(get=self._previous_get)
@@ -888,6 +980,8 @@ class Client(Node):
             dask.set_options(shuffle=self._previous_shuffle)
         if self.get == _globals.get('get'):
             del _globals['get']
+
+    shutdown = close
 
     def get_executor(self, **kwargs):
         """ Return a concurrent.futures Executor for submitting tasks
@@ -906,6 +1000,12 @@ class Client(Node):
         """
         return ClientExecutor(self, **kwargs)
 
+    def channel(self, *args, **kwargs):
+        """ Deprecated: see dask.distributed.Queue instead """
+        msg = ("Channels have been removed.  Consider using Queues instead. "
+               "http://distributed.readthedocs.io/en/latest/api.html#distributed.Queue")
+        raise NotImplementedError(msg)
+
     def submit(self, func, *args, **kwargs):
         """ Submit a function application to the scheduler
 
@@ -920,6 +1020,8 @@ class Client(Node):
         workers: set, iterable of sets
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
+        key: str
+            Unique identifier for the task.  Defaults to function-name and hash
         allow_other_workers: bool (defaults to False)
             Used with `workers`. Inidicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
@@ -958,12 +1060,12 @@ class Client(Node):
 
         with self._lock:
             if skey in self.futures:
-                return self._Future(key, self)
+                return self._Future(key, self, inform=False)
 
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
 
-        if isinstance(workers, six.string_types):
+        if isinstance(workers, six.string_types + (Number,)):
             workers = [workers]
         if workers is not None:
             restrictions = {skey: workers}
@@ -978,8 +1080,8 @@ class Client(Node):
             dsk = {skey: (func,) + tuple(args)}
 
         futures = self._graph_to_futures(dsk, [skey], restrictions,
-                loose_restrictions, priority={skey: 0},
-                resources={skey: resources} if resources else None)
+                                         loose_restrictions, priority={skey: 0},
+                                         resources={skey: resources} if resources else None)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -1038,7 +1140,7 @@ class Client(Node):
             raise TypeError("First input to map must be a callable function")
 
         if (all(map(isqueue, iterables)) or
-            all(isinstance(i, Iterator) for i in iterables)):
+                all(isinstance(i, Iterator) for i in iterables)):
             maxsize = kwargs.pop('maxsize', 0)
             q_out = pyQueue(maxsize=maxsize)
             t = threading.Thread(target=self._threaded_map,
@@ -1081,13 +1183,13 @@ class Client(Node):
             dsk = {key: (apply, func, (tuple, list(args)), kwargs)
                    for key, args in zip(keys, zip(*iterables))}
 
-        if isinstance(workers, six.string_types):
+        if isinstance(workers, six.string_types + (Number,)):
             workers = [workers]
         if isinstance(workers, (list, set)):
             if workers and isinstance(first(workers), (list, set)):
                 if len(workers) != len(keys):
                     raise ValueError("You only provided %d worker restrictions"
-                    " for a sequence of length %d" % (len(workers), len(keys)))
+                                     " for a sequence of length %d" % (len(workers), len(keys)))
                 restrictions = dict(zip(keys, workers))
             else:
                 restrictions = {k: workers for k in keys}
@@ -1110,16 +1212,25 @@ class Client(Node):
             resources = None
 
         futures = self._graph_to_futures(dsk, keys, restrictions,
-                loose_restrictions, priority=priority, resources=resources)
+                                         loose_restrictions, priority=priority, resources=resources)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(k)] for k in keys]
 
     @gen.coroutine
-    def _gather(self, futures, errors='raise', direct=False):
+    def _gather(self, futures, errors='raise', direct=None, local_worker=None):
         futures2, keys = unpack_remotedata(futures, byte_keys=True)
         keys = [tokey(key) for key in keys]
         bad_data = dict()
+
+        if direct is None:
+            try:
+                w = get_worker()
+            except Exception:
+                direct = False
+            else:
+                if w.scheduler.address == self.scheduler.address:
+                    direct = True
 
         @gen.coroutine
         def wait(k):
@@ -1161,20 +1272,29 @@ class Client(Node):
                         bad_data[key] = None
                     else:
                         raise ValueError("Bad value, `errors=%s`" % errors)
+
             keys = [k for k in keys if k not in bad_keys]
 
-            if direct:
+            data = {}
+
+            if local_worker:  # look inside local worker
+                data.update({k: local_worker.data[k]
+                             for k in keys
+                             if k in local_worker.data})
+                keys = [k for k in keys if k not in data]
+
+            if direct or local_worker:  # gather directly from workers
                 who_has = yield self.scheduler.who_has(keys=keys)
-                data, missing_keys, missing_workers = yield gather_from_workers(
+                data2, missing_keys, missing_workers = yield gather_from_workers(
                     who_has, rpc=self.rpc, close=False)
-                response = {'status': 'OK', 'data': data}
+                response = {'status': 'OK', 'data': data2}
                 if missing_keys:
-                    keys2 = [key for key in keys if key not in data]
+                    keys2 = [key for key in keys if key not in data2]
                     response = yield self.scheduler.gather(keys=keys2)
                     if response['status'] == 'OK':
-                        response['data'].update(data)
+                        response['data'].update(data2)
 
-            else:
+            else:  # ask scheduler to gather data for us
                 response = yield self.scheduler.gather(keys=keys)
 
             if response['status'] == 'error':
@@ -1190,7 +1310,7 @@ class Client(Node):
         if bad_data and errors == 'skip' and isinstance(futures2, list):
             futures2 = [f for f in futures2 if f not in bad_data]
 
-        data = response['data']
+        data.update(response['data'])
         result = pack_data(futures2, merge(data, bad_data))
         raise gen.Return(result)
 
@@ -1207,7 +1327,8 @@ class Client(Node):
             for item in results:
                 qout.put(item)
 
-    def gather(self, futures, errors='raise', maxsize=0, direct=False):
+    def gather(self, futures, errors='raise', maxsize=0, direct=None,
+               asynchronous=None):
         """ Gather futures from distributed memory
 
         Accepts a future, nested container of futures, iterator, or queue.
@@ -1261,12 +1382,18 @@ class Client(Node):
             return (self.gather(f, errors=errors, direct=direct)
                     for f in futures)
         else:
+            if hasattr(thread_state, 'execution_state'):  # within worker task
+                local_worker = thread_state.execution_state['worker']
+            else:
+                local_worker = None
             return self.sync(self._gather, futures, errors=errors,
-                             direct=direct)
+                             direct=direct, local_worker=local_worker,
+                             asynchronous=asynchronous)
 
     @gen.coroutine
-    def _scatter(self, data, workers=None, broadcast=False, direct=False):
-        if isinstance(workers, six.string_types):
+    def _scatter(self, data, workers=None, broadcast=False, direct=None,
+                 local_worker=None, timeout=3, hash=True):
+        if isinstance(workers, six.string_types + (Number,)):
             workers = [workers]
         if isinstance(data, dict) and not all(isinstance(k, (bytes, unicode))
                                               for k in data):
@@ -1286,34 +1413,66 @@ class Client(Node):
             unpack = True
             data = [data]
         if isinstance(data, (list, tuple)):
-            names = list(map(tokenize, data))
+            if hash:
+                names = [type(x).__name__ + '-' + tokenize(x) for x in data]
+            else:
+                names = [type(x).__name__ + '-' + uuid.uuid4().hex for x in data]
             data = dict(zip(names, data))
 
         assert isinstance(data, dict)
 
-        data2 = valmap(to_serialize, data)
         types = valmap(type, data)
-        if direct:
-            ncores = yield self.scheduler.ncores(workers=workers)
-            if not ncores:
-                raise ValueError("No valid workers")
 
-            _, who_has, nbytes = yield scatter_to_workers(ncores, data2,
-                                                          report=False,
-                                                          rpc=self.rpc)
+        if direct is None:
+            try:
+                w = get_worker()
+            except Exception:
+                direct = False
+            else:
+                if w.scheduler.address == self.scheduler.address:
+                    direct = True
 
-            yield self.scheduler.update_data(who_has=who_has, nbytes=nbytes)
+        if local_worker:  # running within task
+            local_worker.update_data(data=data, report=False)
+
+            yield self.scheduler.update_data(
+                who_has={key: [local_worker.address] for key in data},
+                nbytes=valmap(sizeof, data),
+                client=self.id)
+
         else:
-            yield self.scheduler.scatter(data=data2, workers=workers,
-                                            client=self.id,
-                                            broadcast=broadcast)
+            data2 = valmap(to_serialize, data)
+            if direct:
+                ncores = None
+                start = time()
+                while not ncores:
+                    if ncores is not None:
+                        yield gen.sleep(0.1)
+                    if time() > start + timeout:
+                        raise gen.TimeoutError("No valid workers found")
+                    ncores = yield self.scheduler.ncores(workers=workers)
+                if not ncores:
+                    raise ValueError("No valid workers")
 
-        out = {k: self._Future(k, self) for k in data2}
+                _, who_has, nbytes = yield scatter_to_workers(ncores, data2,
+                                                              report=False,
+                                                              rpc=self.rpc)
+
+                yield self.scheduler.update_data(who_has=who_has,
+                                                 nbytes=nbytes,
+                                                 client=self.id)
+            else:
+                yield self.scheduler.scatter(data=data2, workers=workers,
+                                             client=self.id,
+                                             broadcast=broadcast)
+
+        out = {k: self._Future(k, self, inform=False) for k in data}
         for key, typ in types.items():
             self.futures[key].finish(type=typ)
 
         if direct and broadcast:
-            yield self._replicate(list(out.values()), workers=workers)
+            n = None if broadcast is True else broadcast
+            yield self._replicate(list(out.values()), workers=workers, n=n)
 
         if issubclass(input_type, (list, tuple, set, frozenset)):
             out = input_type(out[k] for k in names)
@@ -1344,7 +1503,8 @@ class Client(Node):
             for future in futures:
                 qout.put(future)
 
-    def scatter(self, data, workers=None, broadcast=False, direct=False, maxsize=0):
+    def scatter(self, data, workers=None, broadcast=False, direct=None,
+                hash=True, maxsize=0, timeout=3, asynchronous=None):
         """ Scatter data into distributed memory
 
         This moves data from the local client process into the workers of the
@@ -1362,12 +1522,15 @@ class Client(Node):
         broadcast: bool (defaults to False)
             Whether to send each data element to all workers.
             By default we round-robin based on number of cores.
-        direct: bool (defaults to False)
+        direct: bool (defaults to automatically check)
             Send data directly to workers, bypassing the central scheduler
             This avoids burdening the scheduler but assumes that the client is
             able to talk directly with the workers.
         maxsize: int (optional)
             Maximum size of queue if using queues, 0 implies infinite
+        hash: bool (optional)
+            Whether or not to hash data to determine key.
+            If False then this uses a random key
 
         Returns
         -------
@@ -1424,19 +1587,25 @@ class Client(Node):
             else:
                 return queue_to_iterator(qout)
         else:
+            if hasattr(thread_state, 'execution_state'):  # within worker task
+                local_worker = thread_state.execution_state['worker']
+            else:
+                local_worker = None
             return self.sync(self._scatter, data, workers=workers,
-                             broadcast=broadcast, direct=direct)
+                             broadcast=broadcast, direct=direct,
+                             local_worker=local_worker, timeout=timeout,
+                             asynchronous=asynchronous, hash=hash)
 
     @gen.coroutine
-    def _cancel(self, futures):
-        keys = {tokey(f.key) for f in futures_of(futures)}
-        yield self.scheduler.cancel(keys=list(keys), client=self.id)
+    def _cancel(self, futures, force=False):
+        keys = list({tokey(f.key) for f in futures_of(futures)})
+        yield self.scheduler.cancel(keys=keys, client=self.id, force=force)
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
                 st.cancel()
 
-    def cancel(self, futures):
+    def cancel(self, futures, asynchronous=None, force=False):
         """
         Cancel running futures
 
@@ -1447,8 +1616,11 @@ class Client(Node):
         Parameters
         ----------
         futures: list of Futures
+        force: boolean (False)
+            Cancel this future even if other clients desire it
         """
-        return self.sync(self._cancel, futures)
+        return self.sync(self._cancel, futures, asynchronous=asynchronous,
+                         force=force)
 
     @gen.coroutine
     def _publish_dataset(self, **kwargs):
@@ -1457,7 +1629,7 @@ class Client(Node):
             for name, data in kwargs.items():
                 keys = [tokey(f.key) for f in futures_of(data)]
                 coroutines.append(self.scheduler.publish_put(keys=keys,
-                    name=tokey(name), data=dumps(data), client=self.id))
+                                                             name=tokey(name), data=dumps(data), client=self.id))
 
             yield coroutines
 
@@ -1504,7 +1676,7 @@ class Client(Node):
         """
         return self.sync(self._publish_dataset, **kwargs)
 
-    def unpublish_dataset(self, name):
+    def unpublish_dataset(self, name, **kwargs):
         """
         Remove named datasets from scheduler
 
@@ -1520,9 +1692,9 @@ class Client(Node):
         --------
         Client.publish_dataset
         """
-        return self.sync(self.scheduler.publish_delete, name=name)
+        return self.sync(self.scheduler.publish_delete, name=name, **kwargs)
 
-    def list_datasets(self):
+    def list_datasets(self, **kwargs):
         """
         List named datasets available on the scheduler
 
@@ -1531,7 +1703,7 @@ class Client(Node):
         Client.publish_dataset
         Client.get_dataset
         """
-        return self.sync(self.scheduler.publish_list)
+        return self.sync(self.scheduler.publish_list, **kwargs)
 
     @gen.coroutine
     def _get_dataset(self, name):
@@ -1541,7 +1713,7 @@ class Client(Node):
             data = loads(out['data'])
         raise gen.Return(data)
 
-    def get_dataset(self, name):
+    def get_dataset(self, name, **kwargs):
         """
         Get named dataset from the scheduler
 
@@ -1550,7 +1722,7 @@ class Client(Node):
         Client.publish_dataset
         Client.list_datasets
         """
-        return self.sync(self._get_dataset, tokey(name))
+        return self.sync(self._get_dataset, tokey(name), **kwargs)
 
     @gen.coroutine
     def _run_on_scheduler(self, function, *args, **kwargs):
@@ -1584,17 +1756,17 @@ class Client(Node):
         Client.start_ipython_scheduler: Start an IPython session on scheduler
         """
         return self.sync(self._run_on_scheduler, function, *args,
-                **kwargs)
+                         **kwargs)
 
     @gen.coroutine
     def _run(self, function, *args, **kwargs):
         nanny = kwargs.pop('nanny', False)
         workers = kwargs.pop('workers', None)
         responses = yield self.scheduler.broadcast(msg=dict(op='run',
-                                                function=dumps(function),
-                                                args=dumps(args),
-                                                kwargs=dumps(kwargs)),
-                                                workers=workers, nanny=nanny)
+                                                            function=dumps(function),
+                                                            args=dumps(args),
+                                                            kwargs=dumps(kwargs)),
+                                                   workers=workers, nanny=nanny)
         results = {}
         for key, resp in responses.items():
             if resp['status'] == 'OK':
@@ -1612,6 +1784,9 @@ class Client(Node):
         asynchronously as a dictionary keyed by worker address.  This method
         if generally used for side effects, such and collecting diagnostic
         information or installing libraries.
+
+        If your function takes an input argument named ``dask_worker`` then
+        that variable will be populated with the worker itself.
 
         Parameters
         ----------
@@ -1635,6 +1810,13 @@ class Client(Node):
         ...                           '192.168.0.101:9000'])  # doctest: +SKIP
         {'192.168.0.100:9000': 1234,
          '192.168.0.101:9000': 4321}
+
+        >>> def get_status(dask_worker):
+        ...     return dask_worker.status
+
+        >>> c.run(get_hostname)  # doctest: +SKIP
+        {'192.168.0.100:9000': 'running',
+         '192.168.0.101:9000': 'running}
         """
         return self.sync(self._run, function, *args, **kwargs)
 
@@ -1643,11 +1825,11 @@ class Client(Node):
         workers = kwargs.pop('workers', None)
         wait = kwargs.pop('wait', True)
         responses = yield self.scheduler.broadcast(msg=dict(op='run_coroutine',
-                                                function=dumps(function),
-                                                args=dumps(args),
-                                                kwargs=dumps(kwargs),
-                                                wait=wait),
-                                                workers=workers)
+                                                            function=dumps(function),
+                                                            args=dumps(args),
+                                                            kwargs=dumps(kwargs),
+                                                            wait=wait),
+                                                   workers=workers)
         if not wait:
             raise gen.Return(None)
         else:
@@ -1683,15 +1865,15 @@ class Client(Node):
         return self.sync(self._run_coroutine, function, *args, **kwargs)
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
-            loose_restrictions=None, allow_other_workers=True, priority=None,
-            resources=None):
+                          loose_restrictions=None, allow_other_workers=True, priority=None,
+                          resources=None):
         with self._lock:
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
-            futures = {key: self._Future(key, self) for key in keyset}
+            futures = {key: self._Future(key, self, inform=False) for key in keyset}
 
             values = {k for k, v in dsk.items() if isinstance(v, Future)
-                                                and k not in keyset}
+                      and k not in keyset}
             if values:
                 dsk = dask.optimize.inline(dsk, keys=values)
 
@@ -1729,12 +1911,12 @@ class Client(Node):
                                      'restrictions': restrictions or {},
                                      'loose_restrictions': loose_restrictions,
                                      'priority': priority,
-                                     'resources': resources})
-
+                                     'resources': resources,
+                                     'submitting_task': getattr(thread_state, 'key', None)})
             return futures
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-            resources=None, sync=True, **kwargs):
+            resources=None, sync=True, asynchronous=None, **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -1764,7 +1946,7 @@ class Client(Node):
         packed = pack_data(keys, futures)
         if sync:
             try:
-                results = self.gather(packed)
+                results = self.gather(packed, asynchronous=asynchronous)
             finally:
                 for f in futures.values():
                     f.release()
@@ -1787,7 +1969,7 @@ class Client(Node):
                 if not changed:
                     changed = True
                     dsk = dict(dsk)
-                dsk[key] = self._Future(key, self)
+                dsk[key] = self._Future(key, self, inform=False)
 
         if changed:
             dsk, _ = dask.optimize.cull(dsk, keys)
@@ -1804,13 +1986,13 @@ class Client(Node):
 
         Examples
         --------
-        >>> len(x.dask)  # x is a dask collection with 100 tasks
+        >>> len(x.dask)  # x is a dask collection with 100 tasks  # doctest: +SKIP
         100
-        >>> set(client.futures).intersection(x.dask)  # some overlap exists
+        >>> set(client.futures).intersection(x.dask)  # some overlap exists  # doctest: +SKIP
         10
 
-        >>> x = client.normalize_collection(x)
-        >>> len(x.dask)  # smaller computational graph
+        >>> x = client.normalize_collection(x)  # doctest: +SKIP
+        >>> len(x.dask)  # smaller computational graph  # doctest: +SKIP
         20
 
         See Also
@@ -1885,8 +2067,8 @@ class Client(Node):
         traverse = kwargs.pop('traverse', True)
         if traverse:
             collections = tuple(dask.delayed(a)
-                         if isinstance(a, (list, set, tuple, dict, Iterator))
-                         else a for a in collections)
+                                if isinstance(a, (list, set, tuple, dict, Iterator))
+                                else a for a in collections)
 
         variables = [a for a in collections if isinstance(a, Base)]
 
@@ -1895,7 +2077,7 @@ class Client(Node):
         dsk2 = {name: (v._finalize, v._keys()) for name, v in zip(names, variables)}
 
         restrictions, loose_restrictions = self.get_restrictions(collections,
-                workers, allow_other_workers)
+                                                                 workers, allow_other_workers)
 
         if resources:
             resources = self.expand_resources(resources)
@@ -1975,13 +2157,13 @@ class Client(Node):
         names = {k for c in collections for k in flatten(c._keys())}
 
         restrictions, loose_restrictions = self.get_restrictions(collections,
-                workers, allow_other_workers)
+                                                                 workers, allow_other_workers)
 
         if resources:
             resources = self.expand_resources(resources)
 
         futures = self._graph_to_futures(dsk, names, restrictions,
-                loose_restrictions, resources=resources)
+                                         loose_restrictions, resources=resources)
 
         result = [redict_collection(c, {k: futures[k]
                                         for k in flatten(c._keys())})
@@ -2023,22 +2205,27 @@ class Client(Node):
         return self.sync(self._upload_environment, name, zipfile)
 
     @gen.coroutine
-    def _restart(self):
-        self._send_to_scheduler({'op': 'restart'})
+    def _restart(self, timeout=5):
+        self._send_to_scheduler({'op': 'restart', 'timeout': timeout})
         self._restart_event = Event()
-        yield self._restart_event.wait()
+        try:
+            yield self._restart_event.wait(self.loop.time() + timeout)
+        except gen.TimeoutError:
+            logger.error("Restart timed out after %f seconds", timeout)
+            pass
         self.generation += 1
-        self.refcount.clear()
+        with self._refcount_lock:
+            self.refcount.clear()
 
         raise gen.Return(self)
 
-    def restart(self):
+    def restart(self, **kwargs):
         """ Restart the distributed network
 
         This kills all active work, deletes all data on the network, and
         restarts the worker processes.
         """
-        return self.sync(self._restart)
+        return self.sync(self._restart, **kwargs)
 
     @gen.coroutine
     def _upload_file(self, filename, raise_on_error=True):
@@ -2085,7 +2272,7 @@ class Client(Node):
 
         assert all(len(data) == v for v in response.values())
 
-    def upload_file(self, filename):
+    def upload_file(self, filename, **kwargs):
         """ Upload local package to workers
 
         This sends a local file up to all worker nodes.  This file is placed
@@ -2104,7 +2291,7 @@ class Client(Node):
         >>> L = c.map(myfunc, seq)  # doctest: +SKIP
         """
         result = self.sync(self._upload_file, filename,
-                           raise_on_error=self.asynchronous)
+                           raise_on_error=self.asynchronous, **kwargs)
         if isinstance(result, Exception):
             raise result
         else:
@@ -2117,7 +2304,7 @@ class Client(Node):
         result = yield self.scheduler.rebalance(keys=keys, workers=workers)
         assert result['status'] == 'OK'
 
-    def rebalance(self, futures=None, workers=None):
+    def rebalance(self, futures=None, workers=None, **kwargs):
         """ Rebalance data within network
 
         Move data between workers to roughly balance memory burden.  This
@@ -2135,7 +2322,7 @@ class Client(Node):
         workers: list, optional
             A list of workers on which to balance, defaults to all workers
         """
-        return self.sync(self._rebalance, futures, workers)
+        return self.sync(self._rebalance, futures, workers, **kwargs)
 
     @gen.coroutine
     def _replicate(self, futures, n=None, workers=None, branching_factor=2):
@@ -2143,9 +2330,10 @@ class Client(Node):
         yield _wait(futures)
         keys = {tokey(f.key) for f in futures}
         yield self.scheduler.replicate(keys=list(keys), n=n, workers=workers,
-                branching_factor=branching_factor)
+                                       branching_factor=branching_factor)
 
-    def replicate(self, futures, n=None, workers=None, branching_factor=2):
+    def replicate(self, futures, n=None, workers=None, branching_factor=2,
+                  **kwargs):
         """ Set replication of futures within network
 
         Copy data onto many workers.  This helps to broadcast frequently
@@ -2182,9 +2370,9 @@ class Client(Node):
         Client.rebalance
         """
         return self.sync(self._replicate, futures, n=n, workers=workers,
-                         branching_factor=branching_factor)
+                         branching_factor=branching_factor, **kwargs)
 
-    def ncores(self, workers=None):
+    def ncores(self, workers=None, **kwargs):
         """ The number of threads/cores available on each worker node
 
         Parameters
@@ -2207,13 +2395,13 @@ class Client(Node):
         Client.has_what
         """
         if (isinstance(workers, tuple)
-            and all(isinstance(i, (str, tuple)) for i in workers)):
+                and all(isinstance(i, (str, tuple)) for i in workers)):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
-        return self.sync(self.scheduler.ncores, workers=workers)
+        return self.sync(self.scheduler.ncores, workers=workers, **kwargs)
 
-    def who_has(self, futures=None):
+    def who_has(self, futures=None, **kwargs):
         """ The workers storing each future's data
 
         Parameters
@@ -2241,12 +2429,12 @@ class Client(Node):
         """
         if futures is not None:
             futures = self.futures_of(futures)
-            keys = list({f.key for f in futures})
+            keys = list(map(tokey, {f.key for f in futures}))
         else:
             keys = None
-        return self.sync(self.scheduler.who_has, keys=keys)
+        return self.sync(self.scheduler.who_has, keys=keys, **kwargs)
 
-    def has_what(self, workers=None):
+    def has_what(self, workers=None, **kwargs):
         """ Which keys are held by which workers
 
         Parameters
@@ -2269,11 +2457,11 @@ class Client(Node):
         Client.ncores
         """
         if (isinstance(workers, tuple)
-            and all(isinstance(i, (str, tuple)) for i in workers)):
+                and all(isinstance(i, (str, tuple)) for i in workers)):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
-        return self.sync(self.scheduler.has_what, workers=workers)
+        return self.sync(self.scheduler.has_what, workers=workers, **kwargs)
 
     def stacks(self, workers=None):
         """ The task queues on each worker
@@ -2299,7 +2487,7 @@ class Client(Node):
         Client.ncores
         """
         if (isinstance(workers, tuple)
-            and all(isinstance(i, (str, tuple)) for i in workers)):
+                and all(isinstance(i, (str, tuple)) for i in workers)):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
@@ -2329,14 +2517,14 @@ class Client(Node):
         Client.ncores
         """
         if (isinstance(workers, tuple)
-            and all(isinstance(i, (str, tuple)) for i in workers)):
+                and all(isinstance(i, (str, tuple)) for i in workers)):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
         return valmap(set, sync(self.loop, self.scheduler.processing,
                                 workers=workers))
 
-    def nbytes(self, keys=None, summary=True):
+    def nbytes(self, keys=None, summary=True, **kwargs):
         """ The bytes taken up by each key on the cluster
 
         This is as measured by ``sys.getsizeof`` which may not accurately
@@ -2365,9 +2553,60 @@ class Client(Node):
         Client.who_has
         """
         return self.sync(self.scheduler.nbytes, keys=keys,
-                    summary=summary)
+                         summary=summary, **kwargs)
 
-    def scheduler_info(self):
+    def call_stack(self, futures=None, keys=None):
+        """ The actively running call stack of all relevant keys
+
+        You can specify data of interest either by providing futures or
+        collections in the ``futures=`` keyword or a list of explicit keys in
+        the ``keys=`` keyword.  If neither are provided then all call stacks
+        will be returned.
+
+        Parameters
+        ----------
+        futures: list (optional)
+            List of futures, defaults to all data
+        keys: list (optional)
+            List of key names, defaults to all data
+
+        Examples
+        --------
+        >>> df = dd.read_parquet(...).persist()  # doctest: +SKIP
+        >>> client.call_stack(df)  # call on collections
+
+        >>> client.call_stack()  # Or call with no arguments for all activity  # doctest: +SKIP
+        """
+        keys = keys or []
+        if futures is not None:
+            futures = self.futures_of(futures)
+            keys += list(map(tokey, {f.key for f in futures}))
+        return self.sync(self.scheduler.call_stack, keys=keys or None)
+
+    def profile(self, key=None, start=None, stop=None, workers=None, merge_workers=True):
+        """ Collect statistical profiling information about recent work
+
+        Parameters
+        ----------
+        key: str
+            Key prefix to select, this is typically a function name like 'inc'
+            Leave as None to collect all data
+        start: time
+        stop: time
+        workers: list
+            List of workers to restrict profile information
+
+        Examples
+        --------
+        >>> client.profile()  # call on collections
+        """
+        if isinstance(workers, six.string_types + (Number,)):
+            workers = [workers]
+
+        return self.sync(self.scheduler.profile, key=key, workers=workers,
+                         merge_workers=merge_workers, start=start, stop=stop)
+
+    def scheduler_info(self, **kwargs):
         """ Basic information about the workers in the cluster
 
         Examples
@@ -2383,7 +2622,7 @@ class Client(Node):
                                          'stored': 0,
                                          'time-delay': 0.0061032772064208984}}}
         """
-        return self.sync(self.scheduler.identity)
+        return self.sync(self.scheduler.identity, **kwargs)
 
     def get_versions(self, check=False):
         """ Return version info for the scheduler, all workers and myself
@@ -2404,44 +2643,34 @@ class Client(Node):
         except KeyError:
             scheduler = None
 
-        def f(worker=None):
-
-            # use our local version
-            try:
-                from distributed.versions import get_versions
-                return get_versions()
-            except ImportError:
-                return None
-
-        workers = sync(self.loop, self._run, f)
+        workers = sync(self.loop, self._run, get_versions)
         result = {'scheduler': scheduler, 'workers': workers, 'client': client}
 
         if check:
             # we care about the required & optional packages matching
-            extract = lambda x: merge(result[x]['packages'].values())
-            client_versions = extract('client')
-            scheduler_versions = extract('scheduler')
+            def to_packages(d): return merge(d['packages'].values())
+            client_versions = to_packages(result['client'])
+            versions = [('scheduler', to_packages(result['scheduler']))]
+            versions.extend((w, to_packages(d))
+                            for w, d in sorted(workers.items()))
 
-            for pkg, cv in client_versions.items():
-                sv = scheduler_versions[pkg]
-                if sv != cv:
-                    raise ValueError("package [{package}] is version [{client}] "
-                                     "on client and [{scheduler}] on scheduler!".format(
-                                         package=pkg,
-                                         client=cv,
-                                         scheduler=sv))
-
-            for w, d in workers.items():
-                worker_versions = merge(d['packages'].values())
+            mismatched = defaultdict(list)
+            for name, vers in versions:
                 for pkg, cv in client_versions.items():
-                    wv = worker_versions[pkg]
-                    if wv != cv:
-                        raise ValueError("package [{package}] is version [{client}] "
-                                         "on client and [{worker}] on worker [{w}]!".format(
-                                             package=pkg,
-                                             client=cv,
-                                             worker=wv,
-                                             w=w))
+                    v = vers.get(pkg, 'MISSING')
+                    if cv != v:
+                        mismatched[pkg].append((name, v))
+
+            if mismatched:
+                errs = []
+                for pkg, versions in sorted(mismatched.items()):
+                    rows = [('client', client_versions[pkg])]
+                    rows.extend(versions)
+                    errs.append("%s\n%s" % (pkg, asciitable(['', 'version'], rows)))
+
+                raise ValueError("Mismatched versions found\n"
+                                 "\n"
+                                 "%s" % ('\n\n'.join(errs)))
 
         return result
 
@@ -2511,7 +2740,7 @@ class Client(Node):
         --------
         Client.start_ipython_scheduler: start ipython on the scheduler
         """
-        if isinstance(workers, six.string_types):
+        if isinstance(workers, six.string_types + (Number,)):
             workers = [workers]
 
         (workers, info_dict) = sync(self.loop, self._start_ipython_workers, workers)
@@ -2519,7 +2748,7 @@ class Client(Node):
         if magic_names and isinstance(magic_names, six.string_types):
             if '*' in magic_names:
                 magic_names = [magic_names.replace('*', str(i))
-                                for i in range(len(workers))]
+                               for i in range(len(workers))]
             else:
                 magic_names = [magic_names]
 
@@ -2625,7 +2854,7 @@ class Client(Node):
                     keys = flatten(colls._keys())
                 else:
                     keys = list({k for c in flatten(colls)
-                                    for k in flatten(c._keys())})
+                                 for k in flatten(c._keys())})
                 restrictions.update({k: ws for k in keys})
         else:
             restrictions = {}
@@ -2634,7 +2863,7 @@ class Client(Node):
             loose_restrictions = list(restrictions)
         elif allow_other_workers:
             loose_restrictions = list({k for c in flatten(allow_other_workers)
-                                         for k in c._keys()})
+                                       for k in c._keys()})
         else:
             loose_restrictions = []
 
@@ -2645,7 +2874,12 @@ class Client(Node):
         return collections_to_dsk(collections, *args, **kwargs)
 
 
-Executor = Client
+class Executor(Client):
+    """ Deprecated: see Client """
+
+    def __init__(self, *args, **kwargs):
+        warnings.warn("Executor has been renamed to Client")
+        super(Executor, self).__init__(*args, **kwargs)
 
 
 def CompatibleExecutor(*args, **kwargs):
@@ -2656,9 +2890,9 @@ def CompatibleExecutor(*args, **kwargs):
 def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
     if timeout is not None and not isinstance(timeout, Number):
         raise TypeError("timeout= keyword received a non-numeric value.\n"
-                "Beware that wait expects a list of values\n"
-                "  Bad:  wait(x, y, z)\n"
-                "  Good: wait([x, y, z])")
+                        "Beware that wait expects a list of values\n"
+                        "  Bad:  wait(x, y, z)\n"
+                        "  Good: wait([x, y, z])")
     fs = futures_of(fs)
     if return_when == 'ALL_COMPLETED':
         future = All({f.event.wait() for f in fs})
@@ -2763,13 +2997,14 @@ class as_completed(object):
 
     Optionally wait until the result has been gathered as well
 
-    >>> ac = as_completed([x, y, z], results=True)  # doctest: +SKIP
+    >>> ac = as_completed([x, y, z], with_results=True)  # doctest: +SKIP
     >>> for future, result in ac:  # doctest: +SKIP
     ...     print(result)  # doctest: +SKIP
     2
     4
     3
     """
+
     def __init__(self, futures=None, loop=None, with_results=False):
         if futures is None:
             futures = []
@@ -2778,14 +3013,26 @@ class as_completed(object):
         self.lock = threading.Lock()
         self.loop = loop or default_client().loop
         self.condition = Condition()
+        self.th_condition = threading.Condition()
         self.with_results = with_results
 
         if futures:
             self.update(futures)
 
+    def _notify(self):
+        self.condition.notify()
+        with self.th_condition:
+            self.th_condition.notify()
+
     @gen.coroutine
     def track_future(self, future):
-        yield _wait(future)
+        try:
+            yield _wait(future)
+        except CancelledError:
+            del self.futures[future]
+            if not self.futures:
+                self._notify()
+            return
         if self.with_results:
             result = yield future._result()
         with self.lock:
@@ -2796,7 +3043,7 @@ class as_completed(object):
                 self.queue.put_nowait((future, result))
             else:
                 self.queue.put_nowait(future)
-            self.condition.notify()
+            self._notify()
 
     def update(self, futures):
         """ Add multiple futures to the collection.
@@ -2828,8 +3075,11 @@ class as_completed(object):
         return self
 
     def __next__(self):
-        if self.is_empty():
-            raise StopIteration()
+        while self.queue.empty():
+            if not self.futures:
+                raise StopIteration()
+            with self.th_condition:
+                self.th_condition.wait()
         return self.queue.get()
 
     @gen.coroutine
@@ -2837,7 +3087,10 @@ class as_completed(object):
         if not self.futures and self.queue.empty():
             raise StopAsyncIteration  # flake8: noqa
         while self.queue.empty():
+            if not self.futures:
+                raise StopAsyncIteration  # flake8: noqa
             yield self.condition.wait()
+
         raise gen.Return(self.queue.get())
 
     next = __next__
@@ -2909,9 +3162,9 @@ def default_client(c=None):
         return c
     else:
         raise ValueError("No clients found\n"
-                "Start an client and point it to the scheduler address\n"
-                "  from distributed import Client\n"
-                "  client = Client('ip-addr-of-scheduler:8786')\n")
+                         "Start an client and point it to the scheduler address\n"
+                         "  from distributed import Client\n"
+                         "  client = Client('ip-addr-of-scheduler:8786')\n")
 
 
 def ensure_default_get(client):
@@ -2942,7 +3195,7 @@ def futures_of(o, client=None):
             stack.extend(x.values())
         if isinstance(x, Future):
             futures.add(x)
-        if hasattr(x, 'dask'):
+        if hasattr(x, 'dask') and isinstance(x.dask, Mapping):
             stack.extend(x.dask.values())
 
     if client is not None:
@@ -2951,6 +3204,36 @@ def futures_of(o, client=None):
             raise CancelledError(bad)
 
     return list(futures)
+
+
+def fire_and_forget(obj):
+    """ Run tasks at least once, even if we release the futures
+
+    Under normal operation Dask will not run any tasks for which there is not
+    an active future (this avoids unnecessary work in many situations).
+    However sometimes you want to just fire off a task, not track its future,
+    and expect it to finish eventually.  You can use this function on a future
+    or collection of futures to ask Dask to complete the task even if no active
+    client is tracking it.
+
+    The results will not be kept in memory after the task completes (unless
+    there is an active future) so this is only useful for tasks that depend on
+    side effects.
+
+    Parameters
+    ----------
+    obj: Future, list, dict, dask collection
+        The futures that you want to run at least once
+
+    Examples
+    --------
+    >>> fire_and_forget(client.submit(func, *args))  # doctest: +SKIP
+    """
+    futures = futures_of(obj)
+    for future in futures:
+        future.client._send_to_scheduler({'op': 'client-desires-keys',
+                                          'keys': [tokey(future.key)],
+                                          'client': 'fire-and-forget'})
 
 
 @contextmanager
@@ -2970,14 +3253,14 @@ def temp_default_client(c):
         _set_global_client(old_exec)
 
 
-def _shutdown_global_client():
+def _close_global_client():
     """
-    Force shutdown of global client.  This cleans up when a client
-    wasn't shutdown explicitly, e.g. interactive sessions.
+    Force close of global client.  This cleans up when a client
+    wasn't close explicitly, e.g. interactive sessions.
     """
     c = _get_global_client()
     if c is not None:
-        c.shutdown(timeout=2)
+        c.close(timeout=2)
 
 
-atexit.register(_shutdown_global_client)
+atexit.register(_close_global_client)

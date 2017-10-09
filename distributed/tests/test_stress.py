@@ -9,15 +9,16 @@ from time import sleep
 
 from dask import delayed
 import pytest
-from toolz import concat, sliding_window, first
+from toolz import concat, sliding_window
 
 from distributed import Client, wait, Nanny
 from distributed.config import config
 from distributed.metrics import time
 from distributed.utils import All
-from distributed.utils_test import (gen_cluster, cluster, inc, slowinc, loop,
-        slowadd, slow, slowsum)
-from distributed.client import _wait
+from distributed.utils_test import (gen_cluster, cluster, inc, slowinc,
+                                    slowadd, slow, slowsum, bump_rlimit)
+from distributed.utils_test import loop # flake8: noqa
+from distributed.client import wait
 from tornado import gen
 
 
@@ -29,14 +30,14 @@ def test_stress_1(c, s, a, b):
     while len(seq) > 1:
         yield gen.sleep(0.1)
         seq = [c.submit(add, seq[i], seq[i + 1])
-                for i in range(0, len(seq), 2)]
+               for i in range(0, len(seq), 2)]
     result = yield seq[0]
     assert result == sum(map(inc, range(n)))
 
 
 @pytest.mark.parametrize(('func', 'n'), [(slowinc, 100), (inc, 1000)])
 def test_stress_gc(loop, func, n):
-    with cluster() as (s, [a, b]):
+    with cluster(should_check_state=False) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             x = c.submit(func, 1)
             for i in range(n):
@@ -47,12 +48,13 @@ def test_stress_gc(loop, func, n):
 
 @pytest.mark.skipif(sys.platform.startswith('win'),
                     reason="test can leave dangling RPC objects")
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4, timeout=None)
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4, timeout=None,
+             should_check_state=False)
 def test_cancel_stress(c, s, *workers):
     da = pytest.importorskip('dask.array')
     x = da.random.random((40, 40), chunks=(1, 1))
     x = c.persist(x)
-    yield _wait([x])
+    yield wait([x])
     y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
     for i in range(5):
         f = c.compute(y)
@@ -64,7 +66,7 @@ def test_cancel_stress(c, s, *workers):
 def test_cancel_stress_sync(loop):
     da = pytest.importorskip('dask.array')
     x = da.random.random((40, 40), chunks=(1, 1))
-    with cluster() as (s, [a, b]):
+    with cluster(active_rpc_timeout=10) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             x = c.persist(x)
             y = (x.sum(axis=0) + x.sum(axis=1) + 1).std()
@@ -99,8 +101,8 @@ def test_stress_creation_and_deletion(c, s):
             print("Killed nanny")
 
     yield gen.with_timeout(timedelta(minutes=1),
-                          All([create_and_destroy_worker(0.1 * i) for i in
-                              range(10)]))
+                           All([create_and_destroy_worker(0.1 * i) for i in
+                                range(10)]))
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 10, client=True, timeout=60)
@@ -108,7 +110,7 @@ def test_stress_scatter_death(c, s, *workers):
     import random
     s.allowed_failures = 1000
     np = pytest.importorskip('numpy')
-    L = yield c._scatter([np.random.random(10000) for i in range(len(workers))])
+    L = yield c.scatter([np.random.random(10000) for i in range(len(workers))])
     yield c._replicate(L, n=2)
 
     adds = [delayed(slowadd, pure=True)(random.choice(L),
@@ -132,7 +134,8 @@ def test_stress_scatter_death(c, s, *workers):
         except Exception as c:
             logger.exception(c)
             if config.get('log-on-err'):
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             else:
                 raise
         w = random.choice(alive)
@@ -148,10 +151,11 @@ def test_stress_scatter_death(c, s, *workers):
         print(futures)
         try:
             worker = [w for w in ws.values() if w.waiting_for_data][0]
-        except:
+        except Exception:
             pass
         if config.get('log-on-err'):
-            import pdb; pdb.set_trace()
+            import pdb
+            pdb.set_trace()
         else:
             raise
     except CancelledError:
@@ -166,18 +170,11 @@ def vsum(*args):
 @slow
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 80, timeout=1000)
 def test_stress_communication(c, s, *workers):
-    s.validate = False # very slow otherwise
+    s.validate = False  # very slow otherwise
     da = pytest.importorskip('dask.array')
     # Test consumes many file descriptors and can hang if the limit is too low
     resource = pytest.importorskip('resource')
-    try:
-        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-        lim = 8192
-        if soft < lim:
-            resource.setrlimit(resource.RLIMIT_NOFILE, (lim, max(hard, lim)))
-    except Exception as e:
-        pytest.skip("file descriptor limit too low and can't be increased :"
-                    + str(e))
+    bump_rlimit(resource.RLIMIT_NOFILE, 8192)
 
     n = 20
     xs = [da.random.random((100, 100), chunks=(5, 5)) for i in range(n)]
@@ -236,4 +233,35 @@ def test_close_connections(c, s, *workers):
         # for w in workers:
         #     print(w)
 
-    yield _wait(future)
+    yield wait(future)
+
+
+@pytest.mark.xfail(reason="IOStream._handle_write blocks on large write_buffer"
+                          " https://github.com/tornadoweb/tornado/issues/2110")
+@gen_cluster(client=True, timeout=20, ncores=[('127.0.0.1', 1)])
+def test_no_delay_during_large_transfer(c, s, w):
+    pytest.importorskip('crick')
+    np = pytest.importorskip('numpy')
+    x = np.random.random(100000000)
+
+    # Reset digests
+    from distributed.counter import Digest
+    from collections import defaultdict
+    from functools import partial
+    from dask.diagnostics import ResourceProfiler
+
+    for server in [s, w]:
+        server.digests = defaultdict(partial(Digest, loop=server.io_loop))
+        server._last_tick = time()
+
+    with ResourceProfiler(dt=0.01) as rprof:
+        future = yield c.scatter(x, direct=True, hash=False)
+        yield gen.sleep(0.5)
+
+    for server in [s, w]:
+        assert server.digests['tick-duration'].components[0].max() < 0.5
+
+    nbytes = np.array([t.mem for t in rprof.results])
+    nbytes -= nbytes[0]
+    assert nbytes.max() < (x.nbytes * 2) / 1e6
+    assert nbytes[-1] < (x.nbytes * 1.2) / 1e6

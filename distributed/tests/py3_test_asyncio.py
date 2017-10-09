@@ -28,6 +28,7 @@ def coro_test(fn):
         try:
             IOLoop.clear_current()
             loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(fn(*args, **kwargs))
         finally:
             if loop is not None:
@@ -40,7 +41,12 @@ def coro_test(fn):
 
 
 @coro_test
-async def test_asyncio_start_shutdown():
+async def test_coro_test():
+    assert asyncio.get_event_loop().is_running()
+
+
+@coro_test
+async def test_asyncio_start_close():
     c = await AioClient(processes=False)
 
     assert c.status == 'running'
@@ -50,7 +56,7 @@ async def test_asyncio_start_shutdown():
     result = await c.submit(inc, 10)
     assert result == 11
 
-    await c.shutdown()
+    await c.close()
     assert c.status == 'closed'
     assert IOLoop.current(instance=False) is None
 
@@ -163,7 +169,7 @@ async def test_asyncio_get():
         assert result == []
 
         result = await c.get({('x', 1): (inc, 1), ('x', 2): (inc, ('x', 1))},
-                              ('x', 2))
+                             ('x', 2))
         assert result == 3
 
 
@@ -178,46 +184,6 @@ async def test_asyncio_exceptions():
 
         result = await c.submit(div, 10, 2)  # continues to operate
         assert result == 10 / 2
-
-
-@coro_test
-async def test_asyncio_channels():
-    async with AioClient(processes=False) as c:
-        x = c.channel('x')
-        y = c.channel('y')
-
-        assert len(x) == 0
-
-        while set(c.extensions['channels'].channels) != {'x', 'y'}:
-            await asyncio.sleep(0.01)
-
-        xx = c.channel('x')
-        yy = c.channel('y')
-
-        assert len(x) == 0
-
-        await asyncio.sleep(0.1)
-        assert set(c.extensions['channels'].channels) == {'x', 'y'}
-
-        future = c.submit(inc, 1)
-
-        x.append(future)
-
-        while not x.data:
-            await asyncio.sleep(0.01)
-
-        assert len(x) == 1
-
-        assert xx.data[0].key == future.key
-
-        xxx = c.channel('x')
-        while not xxx.data:
-            await asyncio.sleep(0.01)
-
-        assert xxx.data[0].key == future.key
-
-        assert 'x' in repr(x)
-        assert '1' in repr(x)
 
 
 @coro_test
@@ -342,7 +308,7 @@ async def test_asyncio_run_coroutine():
 
         with pytest.raises(RuntimeError) as exc_info:
             await c.run_coroutine(aiothrows, 1)
-        exc_info.match("hello")
+        assert "hello" in str(exc_info)
 
 
 @slow
@@ -359,7 +325,8 @@ async def test_asyncio_restart():
 
     key = x.key
     del x
-    import gc; gc.collect()
+    import gc
+    gc.collect()
 
     assert key not in c.refcount
     await c.shutdown()

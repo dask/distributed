@@ -6,22 +6,22 @@ import math
 import os
 
 from bokeh.layouts import row, column, widgetbox
-from bokeh.models import ( ColumnDataSource, DataRange1d, HoverTool,
-        BoxZoomTool, ResetTool, PanTool, WheelZoomTool, NumeralTickFormatter,
-        Select)
+from bokeh.models import (ColumnDataSource, DataRange1d, HoverTool,
+                          BoxZoomTool, ResetTool, PanTool, WheelZoomTool, NumeralTickFormatter,
+                          Select)
 
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import RdBu
 from toolz import merge, partition_all
 
-from .components import DashboardComponent
-from .core import BokehServer, format_time
+from .components import DashboardComponent, ProfileTimePlot
+from .core import BokehServer
 from .utils import transpose
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..metrics import time
-from ..utils import log_errors, key_split, format_bytes
+from ..utils import log_errors, key_split, format_bytes, format_time
 
 
 logger = logging.getLogger(__name__)
@@ -32,11 +32,12 @@ with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
     template_source = f.read()
 
 template = jinja2.Template(template_source)
-template_variables = {'pages': ['main', 'system', 'crossfilter', 'counters']}
+template_variables = {'pages': ['main', 'system', 'profile', 'crossfilter', 'counters']}
 
 
 class StateTable(DashboardComponent):
     """ Currently running tasks """
+
     def __init__(self, worker):
         self.worker = worker
 
@@ -69,7 +70,7 @@ class CommunicatingStream(DashboardComponent):
         with log_errors():
             self.worker = worker
             names = ['start', 'stop', 'middle', 'duration', 'who', 'y',
-                    'hover', 'alpha', 'bandwidth', 'total' ]
+                     'hover', 'alpha', 'bandwidth', 'total']
 
             self.incoming = ColumnDataSource({name: [] for name in names})
             self.outgoing = ColumnDataSource({name: [] for name in names})
@@ -78,8 +79,8 @@ class CommunicatingStream(DashboardComponent):
             y_range = DataRange1d(range_padding=0)
 
             fig = figure(title='Peer Communications',
-                    x_axis_type='datetime', x_range=x_range, y_range=y_range,
-                    height=height, tools='', **kwargs)
+                         x_axis_type='datetime', x_range=x_range, y_range=y_range,
+                         height=height, tools='', **kwargs)
 
             fig.rect(source=self.incoming, x='middle', y='y', width='duration',
                      height=0.9, color='red', alpha='alpha')
@@ -133,9 +134,9 @@ class CommunicatingStream(DashboardComponent):
                         msg['y'] = self.who[msg['who']]
 
                     msg['hover'] = '%s / %s = %s/s' % (
-                                format_bytes(msg['total']),
-                                format_time(msg['duration']),
-                                format_bytes(msg['total'] / msg['duration']))
+                        format_bytes(msg['total']),
+                        format_time(msg['duration']),
+                        format_bytes(msg['total'] / msg['duration']))
 
                     for k in ['middle', 'duration', 'start', 'stop']:
                         msg[k] = msg[k] * 1000
@@ -143,7 +144,7 @@ class CommunicatingStream(DashboardComponent):
                 if msgs:
                     msgs = transpose(msgs)
                     if (len(source.data['stop']) and
-                        min(msgs['start']) > source.data['stop'][-1] + 10000):
+                            min(msgs['start']) > source.data['stop'][-1] + 10000):
                         source.data.update(msgs)
                     else:
                         source.stream(msgs, rollover=10000)
@@ -176,7 +177,7 @@ class CommunicatingTimeSeries(DashboardComponent):
             self.source.stream({'x': [time() * 1000],
                                 'out': [len(self.worker._comms)],
                                 'in': [len(self.worker.in_flight_workers)]},
-                                10000)
+                               10000)
 
 
 class ExecutingTimeSeries(DashboardComponent):
@@ -290,7 +291,7 @@ class CrossFilter(DashboardComponent):
             if out:
                 out = transpose(out)
                 if (len(self.source.data['stop']) and
-                    min(out['start']) > self.source.data['stop'][-1] + 10):
+                        min(out['start']) > self.source.data['stop'][-1] + 10):
                     self.source.data.update(out)
                 else:
                     self.source.stream(out, rollover=1000)
@@ -325,22 +326,23 @@ class CrossFilter(DashboardComponent):
 
     def process_msg(self, msg):
         try:
-            func = lambda k: msg['keys'].get(k, 0)
+            def func(k):
+                return msg['keys'].get(k, 0)
             main_key = max(msg['keys'], key=func)
             typ = self.worker.types.get(main_key, object).__name__
             keyname = key_split(main_key)
             d = {
-                  'nbytes': msg['total'],
-                  'duration': msg['duration'],
-                  'bandwidth': msg['bandwidth'],
-                  'count': len(msg['keys']),
-                  'type': typ,
-                  'type-color': color_of(typ),
-                  'key': keyname,
-                  'key-color': color_of(keyname),
-                  'start': msg['start'],
-                  'stop': msg['stop']
-                 }
+                'nbytes': msg['total'],
+                'duration': msg['duration'],
+                'bandwidth': msg['bandwidth'],
+                'count': len(msg['keys']),
+                'type': typ,
+                'type-color': color_of(typ),
+                'key': keyname,
+                'key-color': color_of(keyname),
+                'start': msg['start'],
+                'stop': msg['stop']
+            }
             return d
         except Exception as e:
             logger.exception(e)
@@ -359,7 +361,7 @@ class SystemMonitor(DashboardComponent):
         x_range = DataRange1d(follow='end', follow_interval=20000,
                               range_padding=0)
 
-        tools = 'reset,pan,wheel_zoom'
+        tools = 'reset,xpan,xwheel_zoom'
 
         self.cpu = figure(title="CPU", x_axis_type='datetime',
                           height=height, tools=tools, x_range=x_range, **kwargs)
@@ -446,14 +448,14 @@ class Counters(DashboardComponent):
         with log_errors():
             n = len(self.server.digests[name].intervals)
             sources = {i: ColumnDataSource({'x': [], 'y': []})
-                        for i in range(n)}
+                       for i in range(n)}
 
             kwargs = {}
             if name.endswith('duration'):
                 kwargs['x_axis_type'] = 'datetime'
 
             fig = figure(title=name, tools='', height=150,
-                    sizing_mode=self.sizing_mode, **kwargs)
+                         sizing_mode=self.sizing_mode, **kwargs)
             fig.yaxis.visible = False
             fig.ygrid.visible = False
             if name.endswith('bandwidth') or name.endswith('bytes'):
@@ -475,17 +477,17 @@ class Counters(DashboardComponent):
             n = len(self.server.counters[name].intervals)
             sources = {i: ColumnDataSource({'x': [], 'y': [],
                                             'y-center': [], 'counts': []})
-                        for i in range(n)}
+                       for i in range(n)}
 
             fig = figure(title=name, tools='', height=150,
-                    sizing_mode=self.sizing_mode,
-                    x_range=sorted(map(str, self.server.counters[name].components[0])))
+                         sizing_mode=self.sizing_mode,
+                         x_range=sorted(map(str, self.server.counters[name].components[0])))
             fig.ygrid.visible = False
 
             for i in range(n):
                 width = 0.5 + 0.4 * i / n
                 fig.rect(source=sources[i], x='x', y='y-center', width=width,
-                        height='y', alpha=0.3, color=RdBu[max(n, 3)][-i])
+                         height='y', alpha=0.3, color=RdBu[max(n, 3)][-i])
                 hover = HoverTool(
                     point_policy="follow_mouse",
                     tooltips="""@x : @counts"""
@@ -535,14 +537,14 @@ from bokeh.application.handlers.function import FunctionHandler
 from bokeh.application import Application
 
 
-def main_doc(worker, doc):
+def main_doc(worker, extra, doc):
     with log_errors():
         statetable = StateTable(worker)
         executing_ts = ExecutingTimeSeries(worker, sizing_mode='scale_width')
         communicating_ts = CommunicatingTimeSeries(worker,
-                sizing_mode='scale_width')
+                                                   sizing_mode='scale_width')
         communicating_stream = CommunicatingStream(worker,
-                sizing_mode='scale_width')
+                                                   sizing_mode='scale_width')
 
         xr = executing_ts.root.x_range
         communicating_ts.root.x_range = xr
@@ -559,11 +561,11 @@ def main_doc(worker, doc):
                             communicating_stream.root,
                             sizing_mode='scale_width'))
         doc.template = template
-        doc.template_variables.update(template_variables)
         doc.template_variables['active_page'] = 'main'
+        doc.template_variables.update(extra)
 
 
-def crossfilter_doc(worker, doc):
+def crossfilter_doc(worker, extra, doc):
     with log_errors():
         statetable = StateTable(worker)
         crossfilter = CrossFilter(worker)
@@ -574,11 +576,11 @@ def crossfilter_doc(worker, doc):
 
         doc.add_root(column(statetable.root, crossfilter.root))
         doc.template = template
-        doc.template_variables.update(template_variables)
         doc.template_variables['active_page'] = 'crossfilter'
+        doc.template_variables.update(extra)
 
 
-def systemmonitor_doc(worker, doc):
+def systemmonitor_doc(worker, extra, doc):
     with log_errors():
         sysmon = SystemMonitor(worker, sizing_mode='scale_width')
         doc.title = "Dask Worker Monitor"
@@ -586,11 +588,11 @@ def systemmonitor_doc(worker, doc):
 
         doc.add_root(sysmon.root)
         doc.template = template
-        doc.template_variables.update(template_variables)
         doc.template_variables['active_page'] = 'system'
+        doc.template_variables.update(extra)
 
 
-def counters_doc(server, doc):
+def counters_doc(server, extra, doc):
     with log_errors():
         doc.title = "Dask Worker Counters"
         counter = Counters(server, sizing_mode='stretch_both')
@@ -598,23 +600,47 @@ def counters_doc(server, doc):
 
         doc.add_root(counter.root)
         doc.template = template
-        doc.template_variables.update(template_variables)
         doc.template_variables['active_page'] = 'counters'
+        doc.template_variables.update(extra)
+
+
+def profile_doc(server, extra, doc):
+    with log_errors():
+        doc.title = "Dask Worker Profile"
+        profile = ProfileTimePlot(server, sizing_mode='scale_width')
+        profile.trigger_update()
+
+        doc.add_root(profile.root)
+        doc.template = template
+        doc.template_variables['active_page'] = 'profile'
+        doc.template_variables.update(extra)
 
 
 class BokehWorker(BokehServer):
-    def __init__(self, worker, io_loop=None, **kwargs):
+    def __init__(self, worker, io_loop=None, prefix='', **kwargs):
         self.worker = worker
         self.server_kwargs = kwargs
-        main = Application(FunctionHandler(partial(main_doc, worker)))
-        crossfilter = Application(FunctionHandler(partial(crossfilter_doc, worker)))
-        systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc, worker)))
-        counters = Application(FunctionHandler(partial(counters_doc, worker)))
+        self.server_kwargs['prefix'] = prefix or None
+        prefix = prefix or ''
+        prefix = prefix.rstrip('/')
+        if prefix and not prefix.startswith('/'):
+            prefix = '/' + prefix
+
+        extra = {'prefix': prefix}
+
+        extra.update(template_variables)
+
+        main = Application(FunctionHandler(partial(main_doc, worker, extra)))
+        crossfilter = Application(FunctionHandler(partial(crossfilter_doc, worker, extra)))
+        systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc, worker, extra)))
+        counters = Application(FunctionHandler(partial(counters_doc, worker, extra)))
+        profile = Application(FunctionHandler(partial(profile_doc, worker, extra)))
 
         self.apps = {'/main': main,
                      '/counters': counters,
                      '/crossfilter': crossfilter,
-                     '/system': systemmonitor}
+                     '/system': systemmonitor,
+                     '/profile': profile}
 
         self.loop = io_loop or worker.loop
         self.server = None

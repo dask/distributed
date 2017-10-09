@@ -3,28 +3,35 @@ from __future__ import print_function, division, absolute_import
 from bisect import bisect
 from operator import add
 from time import time
+import weakref
 
 from bokeh.layouts import row, column
 from bokeh.models import (
-    ColumnDataSource, Plot, DataRange1d, Rect, LinearAxis,
-    DatetimeAxis, Grid, BasicTicker, HoverTool, BoxZoomTool, ResetTool,
+    ColumnDataSource, Plot, DataRange1d, LinearAxis,
+    DatetimeAxis, HoverTool, BoxZoomTool, ResetTool,
     PanTool, WheelZoomTool, Title, Range1d, Quad, Text, value, Line,
-    NumeralTickFormatter, ToolbarBox, Legend, BoxSelectTool,
-    Circle
+    NumeralTickFormatter, ToolbarBox, Legend, BoxSelectTool, TapTool,
+    Circle, OpenURL,
 )
-from bokeh.models.widgets import DataTable, TableColumn, NumberFormatter
+from bokeh.models.widgets import (DataTable, TableColumn, NumberFormatter,
+        Button, Select)
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from toolz import valmap
+from tornado import gen
 
-from distributed.config import config
-from distributed.diagnostics.progress_stream import progress_quads, nbytes_bar
-from distributed.utils import log_errors
+from ..config import config
+from ..diagnostics.progress_stream import progress_quads, nbytes_bar
+from .. import profile
+from ..utils import log_errors
 
 if config.get('bokeh-export-tool', False):
     from .export_tool import ExportTool
 else:
     ExportTool = None
+
+
+profile_interval = config.get('profile-interval', 10) / 1000
 
 
 class DashboardComponent(object):
@@ -38,13 +45,13 @@ class DashboardComponent(object):
     *  update: a method that consumes the messages dictionary found in
                distributed.bokeh.messages
     """
+
     def __init__(self):
         self.source = None
         self.root = None
 
     def update(self, messages):
         """ Reads from bokeh.distributed.messages and updates self.source """
-        pass
 
 
 class TaskStream(DashboardComponent):
@@ -52,6 +59,7 @@ class TaskStream(DashboardComponent):
 
     The start and stop time of tasks as they occur on each core of the cluster.
     """
+
     def __init__(self, n_rectangles=1000, clear_interval=20000, **kwargs):
         """
         kwargs are applied to the bokeh.models.plots.Plot constructor
@@ -69,25 +77,21 @@ class TaskStream(DashboardComponent):
         x_range = DataRange1d(range_padding=0)
         y_range = DataRange1d(range_padding=0)
 
-        self.root = Plot(
-            title=Title(text="Task Stream"), id='bk-task-stream-plot',
+        self.root = figure(
+            title="Task Stream", id='bk-task-stream-plot',
             x_range=x_range, y_range=y_range, toolbar_location="above",
-            min_border_right=35, **kwargs
-        )
+            x_axis_type='datetime', min_border_right=35, tools='', **kwargs)
+        self.root.yaxis.axis_label = 'Worker Core'
 
-        self.root.add_glyph(
-            self.source,
-            Rect(x="start", y="y", width="duration", height=0.4, fill_color="color",
-                 line_color="color", line_alpha=0.6, fill_alpha="alpha", line_width=3)
-        )
-
-        self.root.add_layout(DatetimeAxis(axis_label="Time"), "below")
-
-        ticker = BasicTicker(num_minor_ticks=0)
-        self.root.add_layout(LinearAxis(axis_label="Worker Core", ticker=ticker), "left")
-        self.root.add_layout(Grid(dimension=1, grid_line_alpha=0.4, ticker=ticker))
+        rect = self.root.rect(source=self.source, x="start", y="y",
+            width="duration", height=0.4, fill_color="color",
+            line_color="color", line_alpha=0.6, fill_alpha="alpha",
+            line_width=3)
+        rect.nonselection_glyph = None
 
         self.root.yaxis.major_label_text_alpha = 0
+        self.root.yaxis.minor_tick_line_alpha = 0
+        self.root.xgrid.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -100,8 +104,10 @@ class TaskStream(DashboardComponent):
                 """
         )
 
+        tap = TapTool(callback=OpenURL(url='/profile?key=@name'))
+
         self.root.add_tools(
-            hover,
+            hover, tap,
             BoxZoomTool(),
             ResetTool(reset_size=False),
             PanTool(dimensions="width"),
@@ -219,13 +225,14 @@ class TaskProgress(DashboardComponent):
             self.source.data.update(d)
             if messages['tasks']['deque']:
                 self.root.title.text = ("Progress -- total: %(total)s, "
-                    "in-memory: %(in-memory)s, processing: %(processing)s, "
-                    "waiting: %(waiting)s, failed: %(failed)s"
-                    % messages['tasks']['deque'][-1])
+                                        "in-memory: %(in-memory)s, processing: %(processing)s, "
+                                        "waiting: %(waiting)s, failed: %(failed)s"
+                                        % messages['tasks']['deque'][-1])
 
 
 class MemoryUsage(DashboardComponent):
     """ The memory usage across the cluster, grouped by task type """
+
     def __init__(self, **kwargs):
         self.source = ColumnDataSource(data=dict(
             name=[], left=[], right=[], center=[], color=[],
@@ -273,7 +280,7 @@ class MemoryUsage(DashboardComponent):
             nb = nbytes_bar(msg['nbytes'])
             self.source.data.update(nb)
             self.root.title.text = \
-                    "Memory Use: %0.2f MB" % (sum(msg['nbytes'].values()) / 1e6)
+                "Memory Use: %0.2f MB" % (sum(msg['nbytes'].values()) / 1e6)
 
 
 class ResourceProfiles(DashboardComponent):
@@ -281,10 +288,11 @@ class ResourceProfiles(DashboardComponent):
 
     This is two plots, one for CPU and Memory and another for Network I/O
     """
+
     def __init__(self, **kwargs):
         self.source = ColumnDataSource(data={'time': [], 'cpu': [],
-            'memory_percent':[], 'network-send':[], 'network-recv':[]}
-        )
+                                             'memory_percent': [], 'network-send': [], 'network-recv': []}
+                                       )
 
         x_range = DataRange1d(follow='end', follow_interval=30000, range_padding=0)
 
@@ -383,6 +391,7 @@ class WorkerTable(DashboardComponent):
     This is two plots, a text-based table for each host and a thin horizontal
     plot laying out hosts by their current memory use.
     """
+
     def __init__(self, **kwargs):
         names = ['processes', 'disk-read', 'cores', 'cpu', 'disk-write',
                  'memory', 'last-seen', 'memory_percent', 'host']
@@ -476,12 +485,13 @@ class Processing(DashboardComponent):
     This shows how many tasks are actively running on each worker and how many
     tasks are enqueued for each worker and how many are in the common pool
     """
+
     def __init__(self, **kwargs):
         data = self.processing_update({'processing': {}, 'ncores': {}})
         self.source = ColumnDataSource(data)
 
         x_range = Range1d(-1, 1)
-        fig = figure(title='Processing and Pending', tools='resize',
+        fig = figure(title='Processing and Pending', tools='',
                      x_range=x_range, id='bk-processing-stacks-plot', **kwargs)
         fig.quad(source=self.source, left=0, right='right', color=Spectral9[0],
                  top='top', bottom='bottom')
@@ -543,3 +553,231 @@ class Processing(DashboardComponent):
             d['alpha'] = [0.7] * n
 
             return d
+
+
+class ProfilePlot(DashboardComponent):
+    """ Time plots of the current resource usage on the cluster
+
+    This is two plots, one for CPU and Memory and another for Network I/O
+    """
+
+    def __init__(self, **kwargs):
+        state = profile.create()
+        data = profile.plot_data(state, profile_interval)
+        self.states = data.pop('states')
+        self.source = ColumnDataSource(data=data)
+
+        def cb(attr, old, new):
+            with log_errors():
+                try:
+                    ind = new['1d']['indices'][0]
+                except IndexError:
+                    return
+                data = profile.plot_data(self.states[ind], profile_interval)
+                del self.states[:]
+                self.states.extend(data.pop('states'))
+                self.source.data.update(data)
+                self.source.selected = old
+
+        self.source.on_change('selected', cb)
+
+        self.root = figure(tools='tap', **kwargs)
+        self.root.quad('left', 'right', 'top', 'bottom', color='color',
+                      line_color='black', line_width=2, source=self.source)
+
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
+                </div>
+                """
+        )
+        self.root.add_tools(hover)
+
+        self.root.xaxis.visible = False
+        self.root.yaxis.visible = False
+        self.root.grid.visible = False
+
+    def update(self, state):
+        with log_errors():
+            self.state = state
+            data = profile.plot_data(self.state, profile_interval)
+            self.states = data.pop('states')
+            self.source.data.update(data)
+
+
+class ProfileTimePlot(DashboardComponent):
+    """ Time plots of the current resource usage on the cluster
+
+    This is two plots, one for CPU and Memory and another for Network I/O
+    """
+
+    def __init__(self, server, doc=None, **kwargs):
+        if doc is not None:
+            self.doc = weakref.ref(doc)
+            try:
+                self.key = doc.session_context.request.arguments.get('key', None)
+            except AttributeError:
+                self.key = None
+            if isinstance(self.key, list):
+                self.key = self.key[0]
+            if isinstance(self.key, bytes):
+                self.key = self.key.decode()
+            self.task_names = ['All', self.key]
+        else:
+            self.key = None
+            self.task_names = ['All']
+
+        self.server = server
+        self.start = None
+        self.stop = None
+        self.ts = {'count': [], 'time': []}
+        self.state = profile.create()
+        data = profile.plot_data(self.state, profile_interval)
+        self.states = data.pop('states')
+        self.source = ColumnDataSource(data=data)
+
+        def cb(attr, old, new):
+            with log_errors():
+                try:
+                    ind = new['1d']['indices'][0]
+                except IndexError:
+                    return
+                data = profile.plot_data(self.states[ind], profile_interval)
+                del self.states[:]
+                self.states.extend(data.pop('states'))
+                self.source.data.update(data)
+                self.source.selected = old
+
+        self.source.on_change('selected', cb)
+
+        self.profile_plot = figure(tools='tap', height=400, **kwargs)
+        self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
+                               line_color='black', source=self.source)
+
+        hover = HoverTool(
+            point_policy="follow_mouse",
+            tooltips="""
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
+                </div>
+                """
+        )
+        self.profile_plot.add_tools(hover)
+
+        self.profile_plot.xaxis.visible = False
+        self.profile_plot.yaxis.visible = False
+        self.profile_plot.grid.visible = False
+
+        self.ts_source = ColumnDataSource({'time': [], 'count': []})
+        self.ts_plot = figure(title='Activity over time', height=100,
+                              x_axis_type='datetime', active_drag='xbox_select',
+                              tools='xpan,xwheel_zoom,xbox_select,reset',
+                              **kwargs)
+        self.ts_plot.line('time', 'count', source=self.ts_source)
+        self.ts_plot.circle('time', 'count', source=self.ts_source, color=None,
+                            selection_color='orange')
+        self.ts_plot.yaxis.visible = False
+        self.ts_plot.grid.visible = False
+
+        def ts_change(attr, old, new):
+            with log_errors():
+                selected = self.ts_source.selected['1d']['indices']
+                if selected:
+                    start = self.ts_source.data['time'][min(selected)] / 1000
+                    stop = self.ts_source.data['time'][max(selected)] / 1000
+                    self.start, self.stop = min(start, stop), max(start, stop)
+                else:
+                    self.start = self.stop = None
+                self.trigger_update(update_metadata=False)
+
+        self.ts_source.on_change('selected', ts_change)
+
+        self.reset_button = Button(label="Reset", button_type="success")
+        self.reset_button.on_click(lambda: self.update(self.state) )
+
+        self.update_button = Button(label="Update", button_type="success")
+        self.update_button.on_click(self.trigger_update)
+
+        self.select = Select(value=self.task_names[-1], options=self.task_names)
+
+        def select_cb(attr, old, new):
+            if new == 'All':
+                new = None
+            self.key = new
+            self.trigger_update(update_metadata=False)
+
+        self.select.on_change('value', select_cb)
+
+        self.root = column(row(self.select, self.reset_button,
+                               self.update_button, sizing_mode='scale_width'),
+                           self.profile_plot, self.ts_plot, **kwargs)
+
+    def update(self, state, metadata=None):
+        with log_errors():
+            self.state = state
+            data = profile.plot_data(self.state, profile_interval)
+            self.states = data.pop('states')
+            self.source.data.update(data)
+
+            if metadata is not None and metadata['counts']:
+                self.task_names = ['All'] + sorted(metadata['keys'])
+                self.select.options = self.task_names
+                if self.key:
+                    ts = metadata['keys'][self.key]
+                else:
+                    ts = metadata['counts']
+                times, counts = zip(*ts)
+                self.ts = {'count': counts, 'time': [t * 1000 for t in times]}
+
+                self.ts_source.data.update(self.ts)
+
+    def trigger_update(self, update_metadata=True):
+        @gen.coroutine
+        def cb():
+            with log_errors():
+                prof = self.server.get_profile(key=self.key, start=self.start, stop=self.stop)
+                if update_metadata:
+                    metadata = self.server.get_profile_metadata()
+                else:
+                    metadata = None
+                if isinstance(prof, gen.Future):
+                    prof, metadata = yield [prof, metadata]
+                self.doc().add_next_tick_callback(lambda: self.update(prof, metadata))
+
+        self.server.loop.add_callback(cb)

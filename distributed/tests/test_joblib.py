@@ -4,7 +4,8 @@ import pytest
 from random import random
 from time import sleep
 
-from distributed.utils_test import inc, cluster, loop
+from distributed.utils_test import cluster, inc
+from distributed.utils_test import loop # flake8: noqa
 
 distributed_joblib = pytest.importorskip('distributed.joblib')
 joblibs = [distributed_joblib.joblib, distributed_joblib.sk_joblib]
@@ -38,7 +39,7 @@ def test_simple(loop, joblib):
             seq = Parallel()(delayed(inc)(i) for i in range(10))
             assert seq == [inc(i) for i in range(10)]
 
-            ba.client.shutdown()
+            ba.client.close()
 
 
 def random2():
@@ -58,7 +59,7 @@ def test_dont_assume_function_purity(loop, joblib):
             x, y = Parallel()(delayed(random2)() for i in range(2))
             assert x != y
 
-            ba.client.shutdown()
+            ba.client.close()
 
 
 @pytest.mark.parametrize('joblib', joblibs)
@@ -123,7 +124,7 @@ def test_joblib_scatter(loop, joblib):
             sols = [func(*args, **kwargs) for func, args, kwargs in tasks]
             results = Parallel()(tasks)
 
-            ba.client.shutdown()
+            ba.client.close()
 
         # Scatter must take a list/tuple
         with pytest.raises(TypeError):

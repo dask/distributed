@@ -6,6 +6,7 @@ import logging
 import six
 import traceback
 import uuid
+import weakref
 
 from six import string_types
 
@@ -18,6 +19,7 @@ from tornado.locks import Event
 from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)
+from .config import config
 from .metrics import time
 from .system_monitor import SystemMonitor
 from .utils import get_traceback, truncate_exception, ignoring, shutting_down
@@ -76,6 +78,7 @@ class Server(object):
 
     *  ``{'op': 'ping'}``
     *  ``{'op': 'add': 'x': 10, 'y': 20}``
+
     """
     default_ip = ''
     default_port = 0
@@ -83,7 +86,7 @@ class Server(object):
     def __init__(self, handlers, connection_limit=512, deserialize=True,
                  io_loop=None):
         self.handlers = assoc(handlers, 'identity', self.identity)
-        self.id = str(uuid.uuid1())
+        self.id = type(self).__name__ + '-' + str(uuid.uuid4())
         self._address = None
         self._listen_address = None
         self._port = None
@@ -94,6 +97,7 @@ class Server(object):
         self.digests = None
         self.events = None
         self.event_counts = None
+        self._ongoing_coroutines = weakref.WeakSet()
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
@@ -108,13 +112,17 @@ class Server(object):
         self.events = defaultdict(lambda: deque(maxlen=10000))
         self.event_counts = defaultdict(lambda: 0)
 
+        self.periodic_callbacks = dict()
+
         pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.io_loop)
         self.io_loop.add_callback(pc.start)
-        if self.digests is not None:
-            self._last_tick = time()
-            self._tick_pc = PeriodicCallback(self._measure_tick, 20,
-                                             io_loop=self.io_loop)
-            self.io_loop.add_callback(self._tick_pc.start)
+        self.periodic_callbacks['monitor'] = pc
+
+        self._last_tick = time()
+        pc = PeriodicCallback(self._measure_tick, config.get('tick-time', 20),
+                              io_loop=self.io_loop)
+        self.io_loop.add_callback(pc.start)
+        self.periodic_callbacks['tick'] = pc
 
         self.__stopped = False
 
@@ -133,8 +141,16 @@ class Server(object):
 
     def _measure_tick(self):
         now = time()
-        self.digests['tick-duration'].add(now - self._last_tick)
+        diff = now - self._last_tick
         self._last_tick = now
+        if diff > config.get('tick-maximum-delay', 1000) / 1000:
+            logger.warn("Event loop was unresponsive for %.2fs.  "
+                        "This is often caused by long-running GIL-holding "
+                        "functions or moving large chunks of data. "
+                        "This can cause timeouts and instability.",
+                        diff)
+        if self.digests is not None:
+            self.digests['tick-duration'].add(diff)
 
     def log_event(self, name, msg):
         msg['time'] = time()
@@ -227,8 +243,8 @@ class Server(object):
                 except EnvironmentError as e:
                     if not shutting_down():
                         logger.debug("Lost connection to %r while reading message: %s."
-                                    " Last operation: %s",
-                                    address, e, op)
+                                     " Last operation: %s",
+                                     address, e, op)
                     break
                 except Exception as e:
                     logger.exception(e)
@@ -257,6 +273,7 @@ class Server(object):
                     try:
                         result = handler(comm, **msg)
                         if type(result) is gen.Future:
+                            self._ongoing_coroutines.add(result)
                             result = yield result
                     except CommClosedError as e:
                         logger.warning("Lost connection to %r: %s", address, e)
@@ -268,8 +285,8 @@ class Server(object):
                     try:
                         yield comm.write(result)
                     except EnvironmentError as e:
-                        logger.warning("Lost connection to %r while sending result for op %r: %s",
-                                       address, op, e)
+                        logger.debug("Lost connection to %r while sending result for op %r: %s",
+                                     address, op, e)
                         break
                 msg = result = None
                 if close_desired:
@@ -285,6 +302,19 @@ class Server(object):
                 except Exception as e:
                     logger.error("Failed while closing connection to %r: %s",
                                  address, e)
+
+    @gen.coroutine
+    def close(self):
+        self.listener.stop()
+        for comm in self._comms:
+            comm.close()
+        for cb in self._ongoing_coroutines:
+            cb.cancel()
+        for i in range(10):
+            if all(cb.cancelled() for c in self._ongoing_coroutines):
+                break
+            else:
+                yield gen.sleep(0.01)
 
 
 def pingpong(comm):
@@ -353,7 +383,7 @@ class rpc(object):
     comms = ()
     address = None
 
-    def __init__(self, arg=None, comm=None, deserialize=True, timeout=3,
+    def __init__(self, arg=None, comm=None, deserialize=True, timeout=None,
                  connection_args=None):
         self.comms = {}
         self.address = coerce_to_address(arg)
@@ -463,6 +493,7 @@ class PooledRPCCall(object):
     See Also:
         ConnectionPool
     """
+
     def __init__(self, addr, pool):
         self.addr = addr
         self.pool = pool
@@ -526,6 +557,7 @@ class ConnectionPool(object):
     deserialize: bool
         Whether or not to deserialize data by default or pass it through
     """
+
     def __init__(self, limit=512, deserialize=True, connection_args=None):
         self.open = 0          # Total number of open comms
         self.active = 0        # Number of comms currently in use
@@ -540,7 +572,7 @@ class ConnectionPool(object):
 
     def __str__(self):
         return "<ConnectionPool: open=%d, active=%d>" % (self.open,
-                self.active)
+                                                         self.active)
 
     __repr__ = __str__
 
@@ -550,7 +582,7 @@ class ConnectionPool(object):
         return PooledRPCCall(addr, self)
 
     @gen.coroutine
-    def connect(self, addr, timeout=3):
+    def connect(self, addr, timeout=None):
         """
         Get a Comm to the given address.  For internal use.
         """

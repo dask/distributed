@@ -7,8 +7,14 @@ import uuid
 from tornado import gen
 import tornado.queues
 
+try:
+    from cytoolz import assoc
+except ImportError:
+    from toolz import assoc
+
 from .client import Future, _get_global_client, Client
 from .utils import tokey, sync
+from .worker import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +30,7 @@ class QueueExtension(object):
     *  queue_get
     *  queue_size
     """
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.queues = dict()
@@ -74,9 +81,40 @@ class QueueExtension(object):
             del self.future_refcount[name, key]
 
     @gen.coroutine
-    def get(self, stream=None, name=None, client=None, timeout=None):
-        record = yield self.queues[name].get(timeout=timeout)
-        raise gen.Return(record)
+    def get(self, stream=None, name=None, client=None, timeout=None,
+            batch=False):
+        def process(record):
+            """ Add task status if known """
+            if record['type'] == 'Future':
+                try:
+                    state = self.scheduler.task_state[record['value']]
+                except KeyError:
+                    state = 'lost'
+                return assoc(record, 'state', state)
+            else:
+                return record
+
+        if batch:
+            q = self.queues[name]
+            out = []
+            if batch is True:
+                while not q.empty():
+                    record = yield q.get()
+                    out.append(record)
+            else:
+                if timeout is not None:
+                    msg = ("Dask queues don't support simultaneous use of "
+                           "integer batch sizes and timeouts")
+                    raise NotImplementedError(msg)
+                for i in range(batch):
+                    record = yield q.get()
+                    out.append(record)
+            out = [process(o) for o in out]
+            raise gen.Return(out)
+        else:
+            record = yield self.queues[name].get(timeout=timeout)
+            record = process(record)
+            raise gen.Return(record)
 
     def qsize(self, stream=None, name=None, client=None):
         return self.queues[name].qsize()
@@ -110,6 +148,7 @@ class Queue(object):
     --------
     Variable: shared variable between clients
     """
+
     def __init__(self, name=None, client=None, maxsize=0):
         self.client = client or _get_global_client()
         self.name = name or 'queue-' + uuid.uuid4().hex
@@ -139,29 +178,53 @@ class Queue(object):
                                                   timeout=timeout,
                                                   name=self.name)
 
-    def put(self, value, timeout=None):
+    def put(self, value, timeout=None, **kwargs):
         """ Put data into the queue """
-        return self.client.sync(self._put, value, timeout=timeout)
+        return self.client.sync(self._put, value, timeout=timeout, **kwargs)
 
-    def get(self, timeout=None):
-        """ Get data from the queue """
-        return self.client.sync(self._get, timeout=timeout)
+    def get(self, timeout=None, batch=False, **kwargs):
+        """ Get data from the queue
 
-    def qsize(self):
+        Parameters
+        ----------
+        timeout: Number (optional)
+            Time in seconds to wait before timing out
+        batch: boolean, int (optional)
+            If True then return all elements currently waiting in the queue.
+            If an integer than return that many elements from the queue
+            If False (default) then return one item at a time
+         """
+        return self.client.sync(self._get, timeout=timeout, batch=batch,
+                                **kwargs)
+
+    def qsize(self, **kwargs):
         """ Current number of elements in the queue """
-        return self.client.sync(self._qsize)
+        return self.client.sync(self._qsize, **kwargs)
 
     @gen.coroutine
-    def _get(self, timeout=None):
-        d = yield self.client.scheduler.queue_get(timeout=timeout, name=self.name)
-        if d['type'] == 'Future':
-            value = Future(d['value'], self.client, inform=True)
-            self.client._send_to_scheduler({'op': 'queue-future-release',
-                                            'name': self.name,
-                                            'key': d['value']})
+    def _get(self, timeout=None, batch=False):
+        resp = yield self.client.scheduler.queue_get(timeout=timeout,
+                                                     name=self.name,
+                                                     batch=batch)
+
+        def process(d):
+            if d['type'] == 'Future':
+                value = Future(d['value'], self.client, inform=True,
+                               state=d['state'])
+                self.client._send_to_scheduler({'op': 'queue-future-release',
+                                                'name': self.name,
+                                                'key': d['value']})
+            else:
+                value = d['value']
+
+            return value
+
+        if batch is False:
+            result = process(resp)
         else:
-            value = d['value']
-        raise gen.Return(value)
+            result = list(map(process, resp))
+
+        raise gen.Return(result)
 
     @gen.coroutine
     def _qsize(self):
@@ -181,7 +244,9 @@ class Queue(object):
 
     def __setstate__(self, state):
         name, address = state
-        client = _get_global_client()
-        if client is None or client.scheduler.address != address:
+        try:
+            client = get_client(address)
+            assert client.address == address
+        except (AttributeError, AssertionError):
             client = Client(address, set_as_default=False)
         self.__init__(name=name, client=client)

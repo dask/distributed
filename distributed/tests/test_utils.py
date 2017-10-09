@@ -3,7 +3,6 @@ from __future__ import print_function, division, absolute_import
 from collections import Iterator
 from functools import partial
 import io
-import logging
 import socket
 import sys
 from time import sleep
@@ -14,18 +13,18 @@ import traceback
 import numpy as np
 import pytest
 from tornado import gen
-from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 import dask
 from distributed.compatibility import Queue, isqueue, PY2
 from distributed.metrics import time
 from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
-        truncate_exception, get_traceback, queue_to_iterator,
-        iterator_to_queue, _maybe_complex, read_block, seek_delimiter,
-        funcname, ensure_bytes, open_port, get_ip_interface, nbytes)
-from distributed.utils_test import (loop, inc, throws, div, captured_handler,
-                                    captured_logger, has_ipv6)
+                               truncate_exception, get_traceback, queue_to_iterator,
+                               iterator_to_queue, _maybe_complex, read_block, seek_delimiter,
+                               funcname, ensure_bytes, open_port, get_ip_interface, nbytes,
+                               set_thread_state, thread_state)
+from distributed.utils_test import loop # flake8: noqa
+from distributed.utils_test import div, has_ipv6, inc, throws
 
 
 def test_All(loop):
@@ -177,7 +176,7 @@ def test_get_ip_interface():
 
 
 def test_truncate_exception():
-    e = ValueError('a'*1000)
+    e = ValueError('a' * 1000)
     assert len(str(e)) >= 1000
     f = truncate_exception(e, 100)
     assert type(f) == type(e)
@@ -191,13 +190,15 @@ def test_truncate_exception():
 def test_get_traceback():
     def a(x):
         return div(x, 0)
+
     def b(x):
         return a(x)
+
     def c(x):
         return b(x)
 
     try:
-        c(x)
+        c(1)
     except Exception as e:
         tb = get_traceback()
         assert type(tb).__name__ == 'traceback'
@@ -315,7 +316,7 @@ def test_funcname():
 def test_ensure_bytes():
     data = [b'1', '1', memoryview(b'1'), bytearray(b'1')]
     if PY2:
-        data.append(buffer(b'1'))
+        data.append(buffer(b'1'))  # flake8: noqa
     for d in data:
         result = ensure_bytes(d)
         assert isinstance(result, bytes)
@@ -323,7 +324,7 @@ def test_ensure_bytes():
 
 
 def test_nbytes():
-    multi_dim = np.ones(shape=(10,10))
+    multi_dim = np.ones(shape=(10, 10))
     scalar = np.array(1)
 
     assert nbytes(scalar) == scalar.nbytes
@@ -332,93 +333,16 @@ def test_nbytes():
     assert nbytes(memoryview(scalar)) == scalar.nbytes
     assert nbytes(memoryview(multi_dim)) == multi_dim.nbytes
 
-def dump_logger_list():
-    root = logging.getLogger()
-    loggers = root.manager.loggerDict
-    print()
-    print("== Loggers (name, level, effective level, propagate) ==")
-
-    def logger_info(name, logger):
-        return (name, logging.getLevelName(logger.level),
-                logging.getLevelName(logger.getEffectiveLevel()),
-                logger.propagate)
-
-    infos = []
-    infos.append(logger_info('<root>', root))
-
-    for name, logger in sorted(loggers.items()):
-        if not isinstance(logger, logging.Logger):
-            # Skip 'PlaceHolder' objects
-            continue
-        assert logger.name == name
-        infos.append(logger_info(name, logger))
-
-    for info in infos:
-        print("%-40s %-8s %-8s %-5s" % info)
-
-    print()
-
-
-def test_logging():
-    """
-    Test default logging configuration.
-    """
-    d = logging.getLogger('distributed')
-    assert len(d.handlers) == 1
-    assert isinstance(d.handlers[0], logging.StreamHandler)
-
-    # Work around Bokeh messing with the root logger level
-    # https://github.com/bokeh/bokeh/issues/5793
-    root = logging.getLogger('')
-    old_root_level = root.level
-    root.setLevel('WARN')
-
-    try:
-        dfb = logging.getLogger('distributed.foo.bar')
-        f = logging.getLogger('foo')
-        fb = logging.getLogger('foo.bar')
-
-        with captured_handler(d.handlers[0]) as distributed_log:
-            with captured_logger(root) as foreign_log:
-                h = logging.StreamHandler(foreign_log)
-                fmt = '[%(levelname)s in %(name)s] - %(message)s'
-                h.setFormatter(logging.Formatter(fmt))
-                fb.addHandler(h)
-                fb.propagate = False
-
-                # For debugging
-                dump_logger_list()
-
-                d.debug("1: debug")
-                d.info("2: info")
-                dfb.info("3: info")
-                fb.info("4: info")
-                fb.error("5: error")
-                f.info("6: info")
-                f.error("7: error")
-
-        distributed_log = distributed_log.getvalue().splitlines()
-        foreign_log = foreign_log.getvalue().splitlines()
-
-        # distributed log is configured at INFO level by default
-        assert distributed_log == [
-            "distributed - INFO - 2: info",
-            "distributed.foo.bar - INFO - 3: info",
-            ]
-
-        # foreign logs should be unaffected by distributed's logging
-        # configuration.  They get the default ERROR level from logging.
-        assert foreign_log == [
-            "[ERROR in foo.bar] - 5: error",
-            "7: error",
-            ]
-
-    finally:
-        root.setLevel(old_root_level)
-
 
 def test_open_port():
     port = open_port()
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.bind(('', port))
     s.close()
+
+
+def test_set_thread_state():
+    with set_thread_state(x=1):
+        assert thread_state.x == 1
+
+    assert not hasattr(thread_state, 'x')

@@ -1,6 +1,8 @@
 from __future__ import print_function, division, absolute_import
 
+from contextlib import contextmanager
 import logging
+import logging.config
 import os
 import sys
 import warnings
@@ -35,7 +37,7 @@ def determine_config_file():
     path = os.environ.get('DASK_CONFIG')
     if path:
         if (os.path.exists(path) and
-            (os.path.isfile(path) or os.path.islink(path))):
+                (os.path.isfile(path) or os.path.islink(path))):
             return path
         warnings.warn("DASK_CONFIG set to '%s' but file does not exist "
                       "or is not a regular file" % (path,),
@@ -68,7 +70,17 @@ def load_env_vars(config):
             config[varname] = value
 
 
-def initialize_logging(config):
+def _initialize_logging_old_style(config):
+    """
+    Initialize logging using the "old-style" configuration scheme, e.g.:
+        {
+        'logging': {
+            'distributed': 'info',
+            'tornado': 'critical',
+            'tornado.application': 'error',
+            }
+        }
+    """
     loggers = config.get('logging', {})
     loggers.setdefault('distributed', 'info')
     # We could remove those lines and let the default config.yaml handle it
@@ -84,8 +96,60 @@ def initialize_logging(config):
             level = logging_names[level.upper()]
         logger = logging.getLogger(name)
         logger.setLevel(level)
+        logger.handlers[:] = []
         logger.addHandler(handler)
         logger.propagate = False
+
+
+def _initialize_logging_new_style(config):
+    """
+    Initialize logging using logging's "Configuration dictionary schema".
+    (ref.: https://docs.python.org/2/library/logging.config.html#logging-config-dictschema)
+    """
+    logging.config.dictConfig(config['logging'])
+
+
+def _initialize_logging_file_config(config):
+    """
+    Initialize logging using logging's "Configuration file format".
+    (ref.: https://docs.python.org/2/library/logging.config.html#configuration-file-format)
+    """
+    logging.config.fileConfig(config['logging-file-config'], disable_existing_loggers=False)
+
+
+def initialize_logging(config):
+    if 'logging-file-config' in config:
+        if 'logging' in config:
+            raise RuntimeError("Config options 'logging-file-config' and 'logging' are mutually exclusive.")
+        _initialize_logging_file_config(config)
+    else:
+        log_config = config.get('logging', {})
+        if 'version' in log_config:
+            # logging module mandates version to be an int
+            log_config['version'] = int(log_config['version'])
+            _initialize_logging_new_style(config)
+        else:
+            _initialize_logging_old_style(config)
+
+
+@contextmanager
+def set_config(**kwargs):
+    old = {}
+    for key in kwargs:
+        if key in config:
+            old[key] = config[key]
+
+    for key, value in kwargs.items():
+        config[key] = value
+
+    try:
+        yield
+    finally:
+        for key in kwargs:
+            if key in old:
+                config[key] = old[key]
+            else:
+                del config[key]
 
 
 try:

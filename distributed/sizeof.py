@@ -9,7 +9,8 @@ try:  # PyPy does not support sys.getsizeof
     sys.getsizeof(1)
     getsizeof = sys.getsizeof
 except (AttributeError, TypeError):  # Monkey patch
-    getsizeof = lambda x: 100
+    def getsizeof(x):
+        return 100
 
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,6 @@ def safe_sizeof(obj, default_size=1e6):
     try:
         return sizeof(obj)
     except Exception:
-        logger.warn('Sizeof calculation failed.  Defaulting to 1MB',
-                    exc_info=True)
+        logger.warning('Sizeof calculation failed.  Defaulting to 1MB',
+                       exc_info=True)
         return int(default_size)

@@ -1,12 +1,16 @@
 from collections import Iterator
 from operator import add
 import random
+from time import sleep
 
 import pytest
+from tornado import gen
 
 from distributed import Client
 from distributed.client import _as_completed, as_completed, _first_completed
-from distributed.utils_test import gen_cluster, inc, loop, cluster
+from distributed.compatibility import Empty
+from distributed.utils_test import cluster, gen_cluster, inc
+from distributed.utils_test import loop # flake8: noqa
 from distributed.compatibility import Queue
 
 
@@ -108,3 +112,41 @@ def test_as_completed_is_empty(loop):
             assert not ac.is_empty()
             assert next(ac) is x
             assert ac.is_empty()
+
+
+def test_as_completed_cancel(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x = c.submit(sleep, 1)
+            y = c.submit(inc, 1)
+
+            ac = as_completed([x, y])
+            x.cancel()
+
+            assert next(ac) is y
+
+            with pytest.raises(Empty):
+                ac.queue.get(timeout=0.1)
+
+            assert list(as_completed([x, y, x])) == [y]
+
+
+def test_as_completed_cancel_last(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            w = c.submit(sleep, 0.3)
+            x = c.submit(inc, 1)
+            y = c.submit(sleep, 0.3)
+
+            @gen.coroutine
+            def _():
+                yield gen.sleep(0.1)
+                yield w.cancel(asynchronous=True)
+                yield y.cancel(asynchronous=True)
+
+            loop.add_callback(_)
+
+            ac = as_completed([x, y])
+            result = list(ac)
+
+            assert result == [x]

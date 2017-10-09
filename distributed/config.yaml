@@ -13,14 +13,17 @@ bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
 allowed-failures: 3     # number of retries before a task is considered bad
 pdb-on-err: False       # enter debug mode on scheduling error
 transition-log-length: 100000 
+work-stealing: True     # workers should steal tasks from each other
 
 # Worker options
 multiprocessing-method: forkserver
 
 # Communication options
+connect-timeout: 3      # seconds delay before connecting fails
 tcp-timeout: 30         # seconds delay before calling an unresponsive connection dead
 default-scheme: tcp
 require-encryption: False   # whether to require encryption on non-local comms
+socket-backlog: 2048
 #tls:
     #ca-file: xxx.pem
     #scheduler:
@@ -37,3 +40,16 @@ require-encryption: False   # whether to require encryption on non-local comms
 
 # Bokeh web dashboard
 bokeh-export-tool: False
+
+tick-time: 20             # milliseconds between event loop health checks
+tick-maximum-delay: 1000  # milliseconds allowed before triggering a warning
+
+profile-interval: 10  # milliseconds in between statistical profiling queries
+profile-cycle-interval: 1000  # milliseconds between starting new profile
+
+# Fractions of worker memory at which we take action to avoid memory blowup
+# Set any of the lower three values to False to turn off the behavior entirely
+worker-memory-target: 0.60  # target fraction to stay below
+worker-memory-spill: 0.70  # fraction at which we spill to disk
+worker-memory-pause: 0.80  # fraction at which we pause worker threads
+worker-memory-terminate: 0.95  # fraction at which we terminate the worker

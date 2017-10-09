@@ -6,10 +6,11 @@ import dask
 import pytest
 
 from distributed.protocol import (loads, dumps, msgpack, maybe_compress,
-        to_serialize)
+                                  to_serialize)
 from distributed.protocol.compression import compressions
 from distributed.protocol.serialize import (Serialize, Serialized,
                                             serialize, deserialize)
+from distributed.utils import nbytes
 from distributed.utils_test import slow
 
 
@@ -23,7 +24,7 @@ def test_compression_1():
     np = pytest.importorskip('numpy')
     x = np.ones(1000000)
     frames = dumps({'x': Serialize(x.tobytes())})
-    assert sum(map(len, frames)) < x.nbytes
+    assert sum(map(nbytes, frames)) < x.nbytes
     y = loads(frames)
     assert {'x': x.tobytes()} == y
 
@@ -50,8 +51,8 @@ def test_compression_without_deserialization():
 
 
 def test_small():
-    assert sum(map(len, dumps(b''))) < 10
-    assert sum(map(len, dumps(1))) < 10
+    assert sum(map(nbytes, dumps(b''))) < 10
+    assert sum(map(nbytes, dumps(1))) < 10
 
 
 def test_small_and_big():
@@ -63,7 +64,7 @@ def test_small_and_big():
 
 
 def test_maybe_compress():
-    import zlib
+    pass
 
     try_converters = [bytes, memoryview]
     try_compressions = ['zlib', 'lz4']
@@ -97,7 +98,7 @@ def test_maybe_compress_sample():
     lz4 = pytest.importorskip('lz4')
     payload = np.random.randint(0, 255, size=10000).astype('u1').tobytes()
     fmt, compressed = maybe_compress(payload)
-    assert fmt == None
+    assert fmt is None
     assert compressed == payload
 
 
@@ -109,6 +110,7 @@ def test_large_bytes():
     assert len(frames[1]) < 1000
 
     assert loads(frames, deserialize=False) == msg
+
 
 @slow
 def test_large_messages():
@@ -154,10 +156,10 @@ def test_loads_without_deserialization_avoids_compression():
     msg = {'x': 1, 'data': to_serialize(b)}
     frames = dumps(msg)
 
-    assert sum(map(len, frames)) < 10000
+    assert sum(map(nbytes, frames)) < 10000
 
     msg2 = loads(frames, deserialize=False)
-    assert sum(map(len, msg2['data'].frames)) < 10000
+    assert sum(map(nbytes, msg2['data'].frames)) < 10000
 
     msg3 = dumps(msg2)
     msg4 = loads(msg3)
@@ -168,7 +170,7 @@ def test_loads_without_deserialization_avoids_compression():
 def eq_frames(a, b):
     if b'headers' in a:
         return (msgpack.loads(a, use_list=False)
-             == msgpack.loads(b, use_list=False))
+                == msgpack.loads(b, use_list=False))
     else:
         return a == b
 
@@ -213,13 +215,15 @@ def test_dumps_loads_Serialized():
     assert result == result3
 
 
+@pytest.mark.skipif(sys.version_info[0] < 3,
+                    reason='NumPy doesnt use memoryviews')
 def test_maybe_compress_memoryviews():
     np = pytest.importorskip('numpy')
     pytest.importorskip('lz4')
     x = np.arange(1000000, dtype='int64')
     compression, payload = maybe_compress(x.data)
     try:
-        import blosc
+        import blosc  # flake8: noqa
     except ImportError:
         assert compression == 'lz4'
         assert len(payload) < x.nbytes * 0.75

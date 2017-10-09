@@ -2,8 +2,8 @@ from __future__ import print_function, division, absolute_import
 
 import logging
 from tornado import gen
-from .client import futures_of, _wait
-from .utils import sync
+from .client import futures_of, wait
+from .utils import sync, tokey
 from .utils_comm import pack_data
 from .worker import _deserialize
 
@@ -17,6 +17,7 @@ class ReplayExceptionScheduler(object):
 
     *  cause_of_failure
     """
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.scheduler.handlers['cause_of_failure'] = self.cause_of_failure
@@ -42,6 +43,7 @@ class ReplayExceptionScheduler(object):
         for key in keys:
             if isinstance(key, list):
                 key = tuple(key)  # ensure not a list from msgpack
+            key = tokey(key)
             if key in self.scheduler.exceptions_blame:
                 cause = self.scheduler.exceptions_blame[key]
                 # cannot serialize sets
@@ -122,7 +124,7 @@ class ReplayExceptionClient(object):
 
     @gen.coroutine
     def _recreate_error_locally(self, future):
-        yield _wait(future)
+        yield wait(future)
         out = yield self._get_futures_error(future)
         function, args, kwargs, deps = out
         futures = self.client._graph_to_futures({}, deps)
