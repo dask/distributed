@@ -12,6 +12,7 @@ from tornado.platform.asyncio import to_asyncio_future
 
 from . import client
 from .client import Client, Future
+from .variable import Variable
 from .utils import ignoring
 
 
@@ -105,62 +106,49 @@ class AioClient(Client):
     _Future = AioFuture
 
     def __init__(self, *args, **kwargs):
-        if kwargs.get('set_as_default'):
-            raise Exception("AioClient instance can't be set as default")
-
         loop = asyncio.get_event_loop()
         ioloop = BaseAsyncIOLoop(loop)
-        super().__init__(*args, loop=ioloop, set_as_default=False, asynchronous=True, **kwargs)
+        super().__init__(*args, loop=ioloop, asynchronous=True, **kwargs)
 
     async def __aenter__(self):
         await to_asyncio_future(self._started)
         return self
 
     async def __aexit__(self, type, value, traceback):
-        await self.close()
+        await to_asyncio_future(self._close())
 
     def __await__(self):
         return to_asyncio_future(self._started).__await__()
 
-    async def close(self, fast=False):
-        if self.status == 'closed':
-            return
-
-        try:
-            future = self._close(fast=fast)
-            await to_asyncio_future(future)
-
-            with ignoring(AttributeError):
-                future = self.cluster._close()
-                await to_asyncio_future(future)
-                self.cluster.status = 'closed'
-        finally:
-            BaseAsyncIOLoop.clear_current()
-
-    def __del__(self):
-        # Override Client.__del__ to avoid running self.close()
-        assert self.status != 'running'
-
-    gather = to_asyncio(Client._gather)
-    scatter = to_asyncio(Client._scatter)
-    cancel = to_asyncio(Client._cancel)
-    publish_dataset = to_asyncio(Client._publish_dataset)
-    get_dataset = to_asyncio(Client._get_dataset)
-    run_on_scheduler = to_asyncio(Client._run_on_scheduler)
-    run = to_asyncio(Client._run)
-    run_coroutine = to_asyncio(Client._run_coroutine)
+    gather = to_asyncio(Client.gather)
+    scatter = to_asyncio(Client.scatter)
+    cancel = to_asyncio(Client.cancel)
+    publish_dataset = to_asyncio(Client.publish_dataset)
+    get_dataset = to_asyncio(Client.get_dataset)
+    run_on_scheduler = to_asyncio(Client.run_on_scheduler)
+    run = to_asyncio(Client.run)
+    run_coroutine = to_asyncio(Client.run_coroutine)
     get = to_asyncio(Client.get, sync=False)
-    upload_environment = to_asyncio(Client._upload_environment)
-    restart = to_asyncio(Client._restart)
-    upload_file = to_asyncio(Client._upload_file)
-    upload_large_file = to_asyncio(Client._upload_large_file)
-    rebalance = to_asyncio(Client._rebalance)
-    replicate = to_asyncio(Client._replicate)
-    start_ipython_workers = to_asyncio(Client._start_ipython_workers)
-    shutdown = close
+    upload_environment = to_asyncio(Client.upload_environment)
+    restart = to_asyncio(Client.restart)
+    upload_file = to_asyncio(Client.upload_file)
+    rebalance = to_asyncio(Client.rebalance)
+    replicate = to_asyncio(Client.replicate)
+    start_ipython_workers = to_asyncio(Client.start_ipython_workers)
+    close = to_asyncio(Client.close)
+    shutdown = to_asyncio(Client.shutdown)
 
     def __enter__(self):
         raise RuntimeError("Use AioClient in an 'async with' block, not 'with'")
+
+
+class AioVariable(Variable):
+
+    _Client = AioClient
+    _Future = AioFuture
+
+    get = to_asyncio(Variable.get)
+    set = to_asyncio(Variable.set)
 
 
 class as_completed(client.as_completed):
