@@ -155,7 +155,18 @@ class Future(WrappedKey):
         If *timeout* seconds are elapsed before returning, a TimeoutError
         is raised.
         """
-        return self.client.sync(self._result, callback_timeout=timeout)
+        if self.client.asynchronous:
+            return self.client.sync(self._result, callback_timeout=timeout)
+
+        # shorten error traceback
+        result = self.client.sync(self._result, callback_timeout=timeout,
+                                  raiseit=False)
+        if self.status == 'error':
+            six.reraise(*result)
+        elif self.status == 'cancelled':
+            raise result
+        else:
+            return result
 
     @gen.coroutine
     def _result(self, raiseit=True):
