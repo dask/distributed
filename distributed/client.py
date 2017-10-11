@@ -48,7 +48,8 @@ from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .security import Security
 from .sizeof import sizeof
-from .worker import dumps_task, get_client, get_worker
+from .threadpoolexecutor import rejoin
+from .worker import dumps_task, get_client, get_worker, secede
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
                     tokey, log_errors, str_graph, key_split, format_bytes, asciitable,
                     thread_state)
@@ -1942,11 +1943,15 @@ class Client(Node):
                                          resources=resources)
         packed = pack_data(keys, futures)
         if sync:
+            if getattr(thread_state, 'key', False):
+                secede()
             try:
                 results = self.gather(packed, asynchronous=asynchronous)
             finally:
                 for f in futures.values():
                     f.release()
+                if getattr(thread_state, 'key', False):
+                    rejoin()
             return results
         return packed
 
@@ -3153,7 +3158,7 @@ def AsCompleted(*args, **kwargs):
 
 
 def default_client(c=None):
-    """ Return an client if exactly one has started """
+    """ Return a client if one has started """
     c = c or _get_global_client()
     if c:
         return c

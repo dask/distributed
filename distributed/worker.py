@@ -14,6 +14,7 @@ import shutil
 import sys
 import weakref
 
+import dask
 from dask.core import istask
 from dask.compatibility import apply
 try:
@@ -356,6 +357,7 @@ class WorkerBase(ServerNode):
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
 
+        dask.set_options(distributed_worker=True)
         for pc in self.periodic_callbacks.values():
             pc.start()
 

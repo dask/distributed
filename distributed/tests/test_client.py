@@ -4793,5 +4793,23 @@ def test_client_async_before_loop_starts():
     assert client.asynchronous
 
 
+@slow
+@gen_cluster(client=True, Worker=Nanny, timeout=None)
+def test_nested_compute(c, s, a, b):
+    def fib(x):
+        assert get_worker().get_current_task()
+        if x < 2:
+            return x
+        a = delayed(fib)(x - 1)
+        b = delayed(fib)(x - 2)
+        c = a + b
+        return c.compute()
+
+    future = c.submit(fib, 8)
+    result = yield future
+    assert result == 21
+    assert len(s.transition_log) > 50
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # flake8: noqa
