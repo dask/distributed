@@ -35,6 +35,7 @@ from distributed.client import (Client, Future, wait, as_completed, tokenize,
                                 _get_global_client, default_client,
                                 ensure_default_get, futures_of,
                                 temp_default_client)
+from distributed.compatibility import PY3
 
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
@@ -4794,7 +4795,7 @@ def test_client_async_before_loop_starts():
 
 
 @slow
-@gen_cluster(client=True, Worker=Nanny, timeout=None)
+@gen_cluster(client=True, Worker=Nanny if PY3 else Worker, timeout=60)
 def test_nested_compute(c, s, a, b):
     def fib(x):
         assert get_worker().get_current_task()

@@ -458,7 +458,7 @@ class Client(Node):
         self.coroutines = []
         self.id = type(self).__name__ + ('-' + name + '-' if name else '-') + str(uuid.uuid1(clock_seq=os.getpid()))
         self.generation = 0
-        self.status = None
+        self.status = 'newly-created'
         self._pending_msg_buffer = []
         self.extensions = {}
         self.scheduler_file = scheduler_file
@@ -650,14 +650,14 @@ class Client(Node):
     def _send_to_scheduler_safe(self, msg):
         if self.status in ('running', 'closing'):
             self.scheduler_comm.send(msg)
-        elif self.status is 'connecting':
+        elif self.status in ('connecting', 'newly-created'):
             self._pending_msg_buffer.append(msg)
         else:
             raise Exception("Tried sending message after closing.  Status: %s\n"
                             "Message: %s" % (self.status, msg))
 
     def _send_to_scheduler(self, msg):
-        if self.status in ('running', 'closing', 'connecting'):
+        if self.status in ('running', 'closing', 'connecting', 'newly-created'):
             self.loop.add_callback(self._send_to_scheduler_safe, msg)
         else:
             raise Exception("Tried sending message after closing.  Status: %s\n"
