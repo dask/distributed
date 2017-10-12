@@ -39,9 +39,9 @@ def _worker(executor, work_queue):
 
     try:
         while thread_state.proceed:
-            with executor.rejoin_lock:
-                if executor.rejoin_list:
-                    rejoin_thread, rejoin_event = executor.rejoin_list.pop()
+            with executor._rejoin_lock:
+                if executor._rejoin_list:
+                    rejoin_thread, rejoin_event = executor._rejoin_list.pop()
                     executor._threads.add(rejoin_thread)
                     executor._threads.remove(threading.current_thread())
                     rejoin_event.set()
@@ -64,8 +64,8 @@ def _worker(executor, work_queue):
 class ThreadPoolExecutor(thread.ThreadPoolExecutor):
     def __init__(self, *args, **kwargs):
         super(ThreadPoolExecutor, self).__init__(*args, **kwargs)
-        self.rejoin_list = []
-        self.rejoin_lock = threading.Lock()
+        self._rejoin_list = []
+        self._rejoin_lock = threading.Lock()
 
     def _adjust_thread_count(self):
         if len(self._threads) < self._max_workers:
@@ -118,8 +118,8 @@ def rejoin():
     thread = threading.current_thread()
     event = threading.Event()
     e = thread_state.executor
-    with e.rejoin_lock:
-        e.rejoin_list.append((thread, event))
+    with e._rejoin_lock:
+        e._rejoin_list.append((thread, event))
     e.submit(lambda: None)
     event.wait()
     thread_state.proceed = True
