@@ -46,6 +46,7 @@ API
    get_client
    secede
    rejoin
+   Reschedule
 
 .. currentmodule:: distributed.recreate_exceptions
 
