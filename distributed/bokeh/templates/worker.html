@@ -1,0 +1,43 @@
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title> {{title}} </title>
+  </head>
+
+  <body>
+    <h2> Processing <h2>
+    <ul>
+      {% for task in processing[worker] %}
+      <li> <a href="/scheduler/task/{{ url_escape(task) }}.html">{{task}}</a></li>
+      {% end %}
+    </ul>
+
+    <h2> In Memory </h2>
+    <ul>
+      {% for task in has_what[worker] %}
+      <li> <a href="/scheduler/task/{{ url_escape(task) }}.html">{{task}}</a></li>
+      {% end %}
+    </ul>
+
+    <h2> Resources </h2>
+    <table>
+      <tr>
+          <th> Resource </th>
+          <th> Consumed </th>
+          <th> Total </th>
+      </tr>
+
+      {% for resource in worker_resources.get(worker, []) %}
+      <tr>
+          <td> {{ resource }} </td>
+          <td> {{ used_resources[worker][resource] }} </td>
+          <td> {{ worker_resources[worker][resource] }} </td>
+      </tr>
+      {% end %}
+    </table>
+
+  </body>
+
+
+
+</html>

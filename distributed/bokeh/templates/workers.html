@@ -1,0 +1,26 @@
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title> {{title}} </title>
+  </head>
+
+  <body>
+  <table>
+    <tr>
+        <th> Worker </th>
+        {% for k in sorted(list(worker_info.values())[0]) %}
+        <th> {{k}} </th>
+        {% end %}
+    </tr>
+    {% for worker in workers %}
+    <tr>
+        <td><a href="/scheduler/worker/{{ url_escape(worker) }}.html">{{worker}}</a></td>
+        {% for k, v in sorted(worker_info[worker].items()) %}
+        <td> {{ v }} </td>
+        {% end %}
+    </tr>
+    {% end %}
+  </table>
+  </body>
+
+</html>
