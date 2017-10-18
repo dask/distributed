@@ -1,0 +1,141 @@
+/* Resets */
+html, body, div, span, applet, object, iframe,
+h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+a, abbr, acronym, address, big, cite, code,
+del, dfn, em, img, ins, kbd, q, s, samp,
+small, strike, strong, sub, sup, tt, var,
+b, u, i, center,
+dl, dt, dd, ol, ul, li,
+fieldset, form, label, legend,
+table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, embed, 
+figure, figcaption, footer, header, hgroup, 
+menu, nav, output, ruby, section, summary,
+time, mark, audio, video {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    vertical-align: baseline;
+}
+html {
+  -ms-text-size-adjust: 100%;
+  -webkit-text-size-adjust: 100%;
+}
+body {
+  margin: 0;
+  font: normal 16px/1.4 Helvetica, Arial, sans-serif;
+}
+pre {
+  overflow: auto;
+}
+code, kbd, pre, samp {
+  font-family: monospace, monospace;
+  font-size: 1em;
+}
+hr {
+  box-sizing: content-box;
+  height: 0;
+}
+
+ol, ul {
+    list-style-position: inside;
+}
+
+p {
+  margin-bottom: 15px;
+}
+
+input {
+  line-height: normal;
+}
+input[type="checkbox"], input[type="radio"] {
+  box-sizing: border-box;
+  padding: 0;
+}
+
+button, input, optgroup, select, textarea {
+  color: inherit;
+  font: inherit;
+  margin: 0;
+}
+button {
+  overflow: visible;
+}
+button, select {
+  text-transform: none;
+}
+button, html input[type="button"], input[type="reset"], input[type="submit"] {
+  -webkit-appearance: button;
+  cursor: pointer;
+}
+button[disabled], html input[disabled] {
+  cursor: default;
+}
+button::-moz-focus-inner, input::-moz-focus-inner {
+  border: 0;
+  padding: 0;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+table tr:not(:last-of-type) {
+  border-bottom: 1px solid #ddd;
+}
+table td, table th {
+  border: 1px solid #ddd;
+  padding: 0.65em;
+  padding: 0.65em;
+  text-align: left;
+}
+table th {
+  background: #ececec;
+  color: #414042;
+}
+table tr td:first-child {
+  border-left: 1px solid #ddd;
+}
+table tr td {
+  border-left: none;
+}
+
+/* Main Content */
+.container {
+  width: 98%;
+  max-width: 960px;
+  margin: 0 auto;
+}    
+.container > .section {      
+  margin: 20px 0;
+}
+
+/* Main Heading */
+h2.task-heading {
+  margin-top: 10px;
+}
+
+/* Dependencies & Dependents */
+#dependencies-dependents:after {
+  display: block;
+  content: '';
+  clear: both;
+}
+#dependencies-dependents ul,
+#holds ul,
+#requests ul {
+  border: 1px solid #ddd;
+  padding: 20px;
+  border-radius: 3px;
+  font-size: 14px;
+}    
+@media all and (min-width: 768px) {
+  #dependencies-dependents > div {
+    width: 50%;
+    float: left;
+  }
+  #dependencies-dependents > div ul {
+    width: 90%;
+  }
+}

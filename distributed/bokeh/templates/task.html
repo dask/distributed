@@ -1,90 +1,105 @@
 <html lang="en">
   <head>
-    <meta charset="utf-8">
+    <meta charset="utf-8" />
     <title> {{title}} </title>
+	<link rel="stylesheet" href="style.css" media="all" />
+
   </head>
-
-  <h2> {{ Task }}: {{ task_state[Task] }} </h2>
-
-  <table>
-      <tr>
-          <th> Status </th>
-          <td> {{ task_state[Task] }} </td>
-      </tr>
-      <tr>
-          <th> Processing on </th>
-          <td> {{ rprocessing.get(Task) }} </td>
-      </tr>
-      <tr>
-          <th> Bytes in memory </th>
-          <td> {{ nbytes.get(Task) }} </td>
-      </tr>
-  </table>
-
   <body>
-    <h3> Dependencies </h3>
-    <ul>
-      {% for task in dependencies.get(Task, ()) %}
-      <li> <a href="/scheduler/task/{{ url_escape(Task) }}.html">{{task}}</a></li>
-      {% end %}
-    </ul>
+  <div class="container">
 
-    <h3> Dependents  </h3>
-    <ul>
-      {% for task in dependents.get(Task, ()) %}
-      <li> <a href="/scheduler/task/{{ url_escape(Task) }}.html">{{task}}</a></li>
-      {% end %}
-    </ul>
+    <h2 class="task-heading"> {{ Task }}: {{ task_state[Task] }} </h2>
 
-    <h3> Holds in Memory</h3>
-    <ul>
-      {% for worker in who_has.get(Task, ()) %}
-      <li> <a href="/scheduler/worker/{{ url_escape(worker) }}.html">{{worker}}</a></li>
-      {% end %}
-    </ul>
-
-    <h3> Requested by </h3>
-    <ul>
-      {% for client in who_wants.get(Task, ()) %}
-      <li> <a href="/scheduler/client/{{ url_escape(client) }}.html">{{client}}</a></li>
-      {% end %}
-    </ul>
-
-    <h2> Transition Log </h2>
+    <div id="stats" class="section">
       <table>
           <tr>
-              <th> Index </th>
-              <th> Key </th>
-              <th> Start </th>
-              <th> Finish </th>
-              <th> Recommend Key </th>
-              <th> Recommend State </th>
+              <th> Status </th>
+              <td> {{ task_state[Task] }} </td>
           </tr>
-
-          {% for key, start, finish, recommendations, counter in server.story(Task) %}
           <tr>
-              <td> {{ counter }} </td>
-              <td> <a href="/scheduler/task/{{ url_escape(key) }}.html">{{key}}</a> </td>
-              <td> {{ start }} </td>
-              <td> {{ finish }} </td>
-              <td> </td>
-              <td> </td>
+              <th> Processing on </th>
+              <td> {{ rprocessing.get(Task) }} </td>
           </tr>
-            {% for key2, rec in recommendations.items() %}
           <tr>
-              <td> </td>
-              <td> </td>
-              <td> </td>
-              <td> </td>
-              <td> <a href="/scheduler/task/{{ url_escape(key2) }}.html">{{key2}}</a> </td>
-              <td> {{ rec }} </td>
+              <th> Bytes in memory </th>
+              <td> {{ nbytes.get(Task) }} </td>
           </tr>
-            {% end %}
-          {% end %}
       </table>
+    </div><!-- #stats -->
 
+    <div id="dependencies-dependents" class="section">
+      <div id="dependencies">
+        <h3> Dependencies </h3>
+        <ul>
+          {% for task in dependencies.get(Task, ()) %}
+          <li> <a href="/scheduler/task/{{ url_escape(Task) }}.html">{{task}}</a></li>
+          {% end %}
+        </ul>
+      </div><!-- #dependencies -->
+
+      <div id="dependents">
+        <h3> Dependents  </h3>
+        <ul>
+          {% for task in dependents.get(Task, ()) %}
+          <li> <a href="/scheduler/task/{{ url_escape(Task) }}.html">{{task}}</a></li>
+          {% end %}
+        </ul>
+      </div><!-- #dependents -->
+    </div><!-- #dependencies-dependents -->
+
+      <div id="holds" class="section">
+        <h3> Holds in Memory</h3>
+        <ul>
+          {% for worker in who_has.get(Task, ()) %}
+          <li> <a href="/scheduler/worker/{{ url_escape(worker) }}.html">{{worker}}</a></li>
+          {% end %}
+        </ul>
+      </div><!-- #holds -->
+
+      <div id="requests" class="section">
+        <h3> Requested by </h3>
+        <ul>
+          {% for client in who_wants.get(Task, ()) %}
+          <li> <a href="/scheduler/client/{{ url_escape(client) }}.html">{{client}}</a></li>
+          {% end %}
+        </ul>
+      </div><!-- #requests -->
+
+      <div id="transition-log" class="section">
+        <h2> Transition Log </h2>
+          <table>
+              <tr>
+                  <th> Index </th>
+                  <th> Key </th>
+                  <th> Start </th>
+                  <th> Finish </th>
+                  <th> Recommend Key </th>
+                  <th> Recommend State </th>
+              </tr>
+
+              {% for key, start, finish, recommendations, counter in server.story(Task) %}
+              <tr>
+                  <td> {{ counter }} </td>
+                  <td> <a href="/scheduler/task/{{ url_escape(key) }}.html">{{key}}</a> </td>
+                  <td> {{ start }} </td>
+                  <td> {{ finish }} </td>
+                  <td> </td>
+                  <td> </td>
+              </tr>
+                {% for key2, rec in recommendations.items() %}
+              <tr>
+                  <td> </td>
+                  <td> </td>
+                  <td> </td>
+                  <td> </td>
+                  <td> <a href="/scheduler/task/{{ url_escape(key2) }}.html">{{key2}}</a> </td>
+                  <td> {{ rec }} </td>
+              </tr>
+                {% end %}
+              {% end %}
+          </table>
+      </div><!-- #transition-log -->
+
+    </div><!-- .container -->
   </body>
-
-
-
 </html>
