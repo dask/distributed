@@ -7,10 +7,34 @@
 
   <body>
     <h1 class="title"> Worker: {{worker}} </h1>
-    <a class="button" href="/info/logs/{{ url_escape(worker) }}.html">Logs</a>
-    {% if 'bokeh' in worker_info[worker]['services'] %}
-    <a class="button" href="http://{{ worker_info[worker]['host'] }}:{{ worker_info[worker]['services']['bokeh'] }}">bokeh</a>
-    {% end %}
+      <table class="table is-striped is-hoverable">
+        <tr>
+            <th> Worker </th>
+            <th> cores </th>
+            <th> use </th>
+            <th> memory </th>
+            <th> occupancy </th>
+            <th> processing </th>
+            <th> in-memory </th>
+            <th> services</th>
+            <th> logs </th>
+        </tr>
+        <tr>
+            <td><a href="/info/worker/{{ url_escape(worker) }}.html">{{worker}}</a></td>
+            <td> {{ ncores[worker] }} </td>
+            <td> {{ format_bytes(worker_info[worker]['memory_limit']) }} </td>
+            <td> <progress class="progress" value="{{ worker_info[worker].get('memory-rss') }}" max="{{ worker_info[worker]['memory_limit'] }}"></progress> </td>
+            <td> {{ format_time(occupancy[worker]) }} </td>
+            <td> {{ len(processing[worker]) }} </td>
+            <td> {{ len(has_what[worker]) }} </td>
+            {% if 'bokeh' in worker_info[worker]['services'] %}
+            <td> <a href="http://{{ worker_info[worker]['host'] }}:{{ worker_info[worker]['services']['bokeh'] }}">bokeh</a> </td>
+            {% else %}
+            <td> </td>
+            {% end %}
+            <td> <a href="/info/logs/{{ url_escape(worker) }}.html">logs</a></td>
+        </tr>
+      </table>
 
     <div class="columns">
       <div class="column">
