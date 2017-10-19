@@ -18,7 +18,9 @@ def test_connect(c, s, a, b):
     http_client = AsyncHTTPClient()
     for suffix in ['scheduler/workers.html',
                    'scheduler/worker/' + url_escape(a.address) + '.html',
-                   'scheduler/task/' + url_escape(future.key) + '.html']:
+                   'scheduler/task/' + url_escape(future.key) + '.html',
+                   'scheduler/logs.html',
+                   'scheduler/logs/' + url_escape(a.address) + '.html']:
         response = yield http_client.fetch('http://localhost:%d/%s'
                                            % (s.services['bokeh'].port, suffix))
         assert response.code == 200

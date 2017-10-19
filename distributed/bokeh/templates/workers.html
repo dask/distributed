@@ -16,6 +16,7 @@
         <th> processing </th>
         <th> in-memory </th>
         <th> services</th>
+        <th> logs </th>
     </tr>
     {% for worker in workers %}
     <tr>
@@ -31,6 +32,7 @@
         {% else %}
         <td> </td>
         {% end %}
+        <td> <a href="/scheduler/logs/{{ url_escape(worker) }}.html">logs</a></td>
     </tr>
     {% end %}
   </table>

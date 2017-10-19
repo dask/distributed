@@ -7,6 +7,11 @@
 
   <body>
     <h1 class="title"> Worker: {{worker}} </h1>
+    <a class="button" href="/scheduler/logs/{{ url_escape(worker) }}.html">Logs</a>
+    {% if 'bokeh' in worker_info[worker]['services'] %}
+    <td> <a class="button" href="http://{{ worker_info[worker]['host'] }}:{{ worker_info[worker]['services']['bokeh'] }}">bokeh</a> </td>
+    {% end %}
+
     <div class="columns">
       <div class="column">
         <div class="content">
