@@ -30,7 +30,7 @@ class Worker(web.RequestHandler):
         worker = escape.url_unescape(worker)
         with log_errors():
             self.render(os.path.join(dirname, 'templates', 'worker.html'),
-                        title='Worker: ' + worker, worker=worker,
+                        title='Worker: ' + worker, Worker=worker,
                         **self.server.__dict__, **ns)
 
 

@@ -1,47 +1,15 @@
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <title> {{title}}: {{worker}} </title>
-	<link rel="stylesheet" href="/static/style.css" media="all" />
-  </head>
-
-  <body>
-    <h1 class="title"> Worker: {{worker}} </h1>
-      <table class="table is-striped is-hoverable">
-        <tr>
-            <th> Worker </th>
-            <th> cores </th>
-            <th> use </th>
-            <th> memory </th>
-            <th> occupancy </th>
-            <th> processing </th>
-            <th> in-memory </th>
-            <th> services</th>
-            <th> logs </th>
-        </tr>
-        <tr>
-            <td><a href="/info/worker/{{ url_escape(worker) }}.html">{{worker}}</a></td>
-            <td> {{ ncores[worker] }} </td>
-            <td> {{ format_bytes(worker_info[worker]['memory_limit']) }} </td>
-            <td> <progress class="progress" value="{{ worker_info[worker].get('memory-rss') }}" max="{{ worker_info[worker]['memory_limit'] }}"></progress> </td>
-            <td> {{ format_time(occupancy[worker]) }} </td>
-            <td> {{ len(processing[worker]) }} </td>
-            <td> {{ len(has_what[worker]) }} </td>
-            {% if 'bokeh' in worker_info[worker]['services'] %}
-            <td> <a href="http://{{ worker_info[worker]['host'] }}:{{ worker_info[worker]['services']['bokeh'] }}">bokeh</a> </td>
-            {% else %}
-            <td> </td>
-            {% end %}
-            <td> <a href="/info/logs/{{ url_escape(worker) }}.html">logs</a></td>
-        </tr>
-      </table>
+{% extends templates/main.html %}
+{% block content %}
+    <h1 class="title"> Worker: {{Worker}} </h1>
+      {% set workers = [Worker] %}
+      {% include "templates/worker-table.html" %}
 
     <div class="columns">
       <div class="column">
         <div class="content">
           <h2 class="subtitle"> In Memory </h2>
           <ul>
-            {% for task in has_what[worker] %}
+            {% for task in has_what[Worker] %}
             <li> <a href="/info/task/{{ url_escape(task) }}.html">{{task}}</a></li>
             {% end %}
           </ul>
@@ -50,9 +18,9 @@
 
       <div class="column">
         <div class="content">
-          <h2 class="subtitle"> Processing <h2>
+          <h2 class="subtitle"> Processing </h2>
           <ul>
-            {% for task in processing[worker] %}
+            {% for task in processing[Worker] %}
             <li> <a href="/info/task/{{ url_escape(task) }}.html">{{task}}</a></li>
             {% end %}
           </ul>
@@ -69,18 +37,13 @@
             <th> Total </th>
         </tr>
 
-        {% for resource in worker_resources.get(worker, []) %}
+        {% for resource in worker_resources.get(Worker, []) %}
         <tr>
             <td> {{ resource }} </td>
-            <td> {{ used_resources[worker][resource] }} </td>
-            <td> {{ worker_resources[worker][resource] }} </td>
+            <td> {{ used_resources[Worker][resource] }} </td>
+            <td> {{ worker_resources[Worker][resource] }} </td>
         </tr>
         {% end %}
       </table>
     </div>
-
-  </body>
-
-
-
-</html>
+{% end %}
