@@ -6,18 +6,30 @@
   </head>
 
   <body>
-  <table>
+  <table class="table is-striped is-hoverable">
     <tr>
         <th> Worker </th>
-        {% for k in sorted(list(worker_info.values())[0]) %}
-        <th> {{k}} </th>
-        {% end %}
+        <th> cores </th>
+        <th> use </th>
+        <th> memory </th>
+        <th> occupancy </th>
+        <th> processing </th>
+        <th> in-memory </th>
+        <th> services</th>
     </tr>
     {% for worker in workers %}
     <tr>
         <td><a href="/scheduler/worker/{{ url_escape(worker) }}.html">{{worker}}</a></td>
-        {% for k, v in sorted(worker_info[worker].items()) %}
-        <td> {{ v }} </td>
+        <td> {{ ncores[worker] }} </td>
+        <td> {{ format_bytes(worker_info[worker]['memory_limit']) }} </td>
+        <td> <progress class="progress" value="{{ worker_info[worker].get('memory-rss') }}" max="{{ worker_info[worker]['memory_limit'] }}"></progress> </td>
+        <td> {{ format_time(occupancy[worker]) }} </td>
+        <td> {{ len(processing[worker]) }} </td>
+        <td> {{ len(has_what[worker]) }} </td>
+        {% if 'bokeh' in worker_info[worker]['services'] %}
+        <td> <a href="http://{{ worker_info[worker]['host'] }}:{{ worker_info[worker]['services']['bokeh'] }}">bokeh</a> </td>
+        {% else %}
+        <td> </td>
         {% end %}
     </tr>
     {% end %}
