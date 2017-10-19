@@ -5,7 +5,7 @@ from tornado import escape
 
 from ..utils import log_errors
 
-dirname = os.path.join(os.path.dirname(__file__), 'templates')
+dirname = os.path.dirname(__file__)
 
 
 class Workers(web.RequestHandler):
@@ -14,7 +14,7 @@ class Workers(web.RequestHandler):
 
     def get(self):
         with log_errors():
-            self.render(os.path.join(dirname, 'workers.html'),
+            self.render(os.path.join(dirname, 'templates', 'workers.html'),
                         title='Workers',
                         **self.server.__dict__)
 
@@ -26,7 +26,7 @@ class Worker(web.RequestHandler):
     def get(self, worker):
         worker = escape.url_unescape(worker)
         with log_errors():
-            self.render(os.path.join(dirname, 'worker.html'),
+            self.render(os.path.join(dirname, 'templates', 'worker.html'),
                         title='Worker: ' + worker, worker=worker,
                         **self.server.__dict__)
 
@@ -38,7 +38,7 @@ class Task(web.RequestHandler):
     def get(self, task):
         task = escape.url_unescape(task)
         with log_errors():
-            self.render(os.path.join(dirname, 'task.html'),
+            self.render(os.path.join(dirname, 'templates', 'task.html'),
                         title='Task: ' + task,
                         Task=task,
                         server=self.server,
@@ -50,4 +50,5 @@ def get_handlers(server):
             (r'/scheduler/workers.html', Workers, {'server': server}),
             (r'/scheduler/worker/(.*).html', Worker, {'server': server}),
             (r'/scheduler/task/(.*).html', Task, {'server': server}),
+            (r'/static/(.*)', web.StaticFileHandler, {"path": os.path.join(dirname, 'static')}),
     ]
