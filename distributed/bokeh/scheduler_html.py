@@ -75,10 +75,10 @@ class WorkerLogs(web.RequestHandler):
 
 def get_handlers(server):
     return [
-            (r'/scheduler/workers.html', Workers, {'server': server}),
-            (r'/scheduler/worker/(.*).html', Worker, {'server': server}),
-            (r'/scheduler/task/(.*).html', Task, {'server': server}),
-            (r'/scheduler/logs.html', Logs, {'server': server}),
-            (r'/scheduler/logs/(.*).html', WorkerLogs, {'server': server}),
+            (r'/info/workers.html', Workers, {'server': server}),
+            (r'/info/worker/(.*).html', Worker, {'server': server}),
+            (r'/info/task/(.*).html', Task, {'server': server}),
+            (r'/info/logs.html', Logs, {'server': server}),
+            (r'/info/logs/(.*).html', WorkerLogs, {'server': server}),
             (r'/static/(.*)', web.StaticFileHandler, {"path": os.path.join(dirname, 'static')}),
     ]

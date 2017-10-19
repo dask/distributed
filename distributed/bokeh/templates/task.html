@@ -29,7 +29,7 @@
           {% for dep in waiting[dep] %}
           <tr>
               <td> waiting on </td>
-              <td><a href="/scheduler/task/{{ url_escape(dep) }}.html">{{dep}}</a> </td>
+              <td><a href="/info/task/{{ url_escape(dep) }}.html">{{dep}}</a> </td>
           </tr>
           {% end %}
           {% end %}
@@ -45,7 +45,7 @@
           </thead>
           {% for dep in dependencies.get(Task, ()) %}
           <tr>
-            <td> <a href="/scheduler/task/{{ url_escape(dep) }}.html">{{dep}}</a> </td>
+            <td> <a href="/info/task/{{ url_escape(dep) }}.html">{{dep}}</a> </td>
             <td> {{ task_state[dep] }} </td>
           </tr>
           {% end %}
@@ -61,7 +61,7 @@
           </thead>
           {% for dep in dependents.get(Task, ()) %}
           <tr>
-            <td> <a href="/scheduler/task/{{ url_escape(dep) }}.html">{{dep}}</a> </td>
+            <td> <a href="/info/task/{{ url_escape(dep) }}.html">{{dep}}</a> </td>
             <td> {{ task_state[dep] }} </td>
           </tr>
           {% end %}
@@ -76,7 +76,7 @@
         <div class="content">
           <ul>
             {% for worker in who_has.get(Task, ()) %}
-            <li> <a href="/scheduler/worker/{{ url_escape(worker) }}.html">{{worker}}</a></li>
+            <li> <a href="/info/worker/{{ url_escape(worker) }}.html">{{worker}}</a></li>
             {% end %}
           </ul>
         </div>
@@ -89,7 +89,7 @@
         <div class="content">
           <ul>
             {% for client in who_wants.get(Task, ()) %}
-            <li> <a href="/scheduler/client/{{ url_escape(client) }}.html">{{client}}</a></li>
+            <li> <a href="/info/client/{{ url_escape(client) }}.html">{{client}}</a></li>
             {% end %}
           </ul>
         </div>
@@ -112,7 +112,7 @@
               {% for key, start, finish, recommendations, counter in server.story(Task) %}
               <tr>
                   <td> {{ counter }} </td>
-                  <td> <a href="/scheduler/task/{{ url_escape(key) }}.html">{{key}}</a> </td>
+                  <td> <a href="/info/task/{{ url_escape(key) }}.html">{{key}}</a> </td>
                   <td> {{ start }} </td>
                   <td> {{ finish }} </td>
                   <td> </td>
@@ -124,7 +124,7 @@
                   <td> </td>
                   <td> </td>
                   <td> </td>
-                  <td> <a href="/scheduler/task/{{ url_escape(key2) }}.html">{{key2}}</a> </td>
+                  <td> <a href="/info/task/{{ url_escape(key2) }}.html">{{key2}}</a> </td>
                   <td> {{ rec }} </td>
               </tr>
                 {% end %}
