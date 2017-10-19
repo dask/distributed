@@ -409,7 +409,7 @@ def test_scheduler_as_center():
 
 @gen_cluster(client=True)
 def test_delete_data(c, s, a, b):
-    d = yield c._scatter({'x': 1, 'y': 2, 'z': 3})
+    d = yield c.scatter({'x': 1, 'y': 2, 'z': 3})
 
     assert set(s.who_has) == {'x', 'y', 'z'}
     assert set(a.data) | set(b.data) == {'x', 'y', 'z'}

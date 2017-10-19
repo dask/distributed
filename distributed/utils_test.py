@@ -397,7 +397,6 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
 
             saddr = scheduler_q.get()
 
-            start = time()
             try:
                 with rpc(saddr) as s:
                     while True:
@@ -441,9 +440,8 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
                 for fn in glob('_test_worker-*'):
                     shutil.rmtree(fn)
     assert not ws
-    after = process_state()
     if should_check_state:
-        check_state(before, after)
+        check_state(before)
 
 
 @gen.coroutine
@@ -493,9 +491,8 @@ def gen_test(timeout=10, should_check_state=True):
                     loop.run_sync(cor, timeout=timeout)
                 finally:
                     loop.stop()
-            after = process_state()
             if should_check_state:
-                check_state(before, after)
+                check_state(before)
         return test_func
     return _
 
@@ -516,7 +513,7 @@ def process_state():
 initial_state = process_state()
 
 
-def check_state(before, after):
+def check_state(before):
     """ Checks to ensure that process state is relatively clean
 
     We run process_state before and after each test that creates a local
@@ -528,11 +525,13 @@ def check_state(before, after):
 
     This isn't yet perfect, we do leak FDs and memory.
     """
+    after = process_state()
     if not WINDOWS:
         start = time()
         while after['num-fds'] > before['num-fds']:
+            after = process_state()
             sleep(0.1)
-            if time() > start + 2:
+            if time() > start + 0.2:
                 diff = after['num-fds'] - before['num-fds']
                 warnings.warn("This test leaked %d file descriptors" % diff)
                 break
@@ -540,10 +539,10 @@ def check_state(before, after):
     start = time()
     while after['used-memory'] > before['used-memory'] + 1e7:
         gc.collect()
-        sleep(0.10)
+        sleep(0.01)
         after = process_state()
         diff = (after['used-memory'] - before['used-memory']) // 1e6
-        if time() > start + 2:
+        if time() > start + 0.2:
             warnings.warn("This test leaked %d MB of memory" % diff)
             break
 
@@ -586,7 +585,7 @@ def end_cluster(s, workers):
     @gen.coroutine
     def end_worker(w):
         with ignoring(TimeoutError, CommClosedError, EnvironmentError):
-            yield w._close(report=False)
+            yield w._close(report=False, timeout=0, wait=False)
         if isinstance(w, Nanny):
             dir = w.worker_dir
         else:
@@ -595,7 +594,7 @@ def end_cluster(s, workers):
             shutil.rmtree(dir)
 
     yield [end_worker(w) for w in workers]
-    yield s.close()  # wait until scheduler stops completely
+    yield s.close(fast=True)
     s.stop()
 
 
@@ -666,9 +665,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                     w.data.clear()
             import gc
             gc.collect()
-            after = process_state()
             if should_check_state:
-                check_state(before, after)
+                check_state(before)
             return result
 
         return test_func
