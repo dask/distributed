@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 
 import toolz
@@ -9,7 +10,7 @@ from ..utils import log_errors, format_bytes, format_time
 
 dirname = os.path.dirname(__file__)
 
-ns = {func.__name__: func for func in [format_bytes, format_time]}
+ns = {func.__name__: func for func in [format_bytes, format_time, datetime.fromtimestamp]}
 
 
 class Workers(web.RequestHandler):

@@ -96,7 +96,7 @@
         <h3 class="title is-5"> Transition Log </h3>
           <table class="table is-bordered is-striped is-hoverable">
               <thead>
-                  <th> Index </th>
+                  <th> Time </th>
                   <th> Key </th>
                   <th> Start </th>
                   <th> Finish </th>
@@ -104,9 +104,9 @@
                   <th> Recommended Action </th>
               </thead>
 
-              {% for key, start, finish, recommendations, counter in server.story(Task) %}
+              {% for key, start, finish, recommendations, time in server.story(Task) %}
               <tr>
-                  <td> {{ counter }} </td>
+                  <td> {{ fromtimestamp(time) }} </td>
                   <td> <a href="/info/task/{{ url_escape(key) }}.html">{{key}}</a> </td>
                   <td> {{ start }} </td>
                   <td> {{ finish }} </td>
