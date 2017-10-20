@@ -1,5 +1,6 @@
 import os
 
+import toolz
 from tornado import escape
 from tornado import gen
 from tornado import web
@@ -19,7 +20,7 @@ class Workers(web.RequestHandler):
         with log_errors():
             self.render(os.path.join(dirname, 'templates', 'workers.html'),
                         title='Workers',
-                        **self.server.__dict__, **ns)
+                        **toolz.merge(self.server.__dict__, ns))
 
 
 class Worker(web.RequestHandler):
@@ -31,7 +32,7 @@ class Worker(web.RequestHandler):
         with log_errors():
             self.render(os.path.join(dirname, 'templates', 'worker.html'),
                         title='Worker: ' + worker, Worker=worker,
-                        **self.server.__dict__, **ns)
+                        **toolz.merge(self.server.__dict__, ns))
 
 
 class Task(web.RequestHandler):
@@ -45,7 +46,7 @@ class Task(web.RequestHandler):
                         title='Task: ' + task,
                         Task=task,
                         server=self.server,
-                        **self.server.__dict__, **ns)
+                        **toolz.merge(self.server.__dict__, ns))
 
 
 class Logs(web.RequestHandler):
