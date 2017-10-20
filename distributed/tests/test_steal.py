@@ -331,18 +331,21 @@ def test_steal_when_more_tasks(c, s, a, *rest):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
 def test_steal_more_attractive_tasks(c, s, a, *rest):
+
     def slow2(x):
         sleep(1)
         return x
+
     s.extensions['stealing']._pc.callback_time = 20
     x = c.submit(mul, b'0', 100000000, workers=a.address)  # 100 MB
     yield wait(x)
+
     s.task_duration['slowidentity'] = 0.2
     s.task_duration['slow2'] = 1
 
-    future = c.submit(slow2, x)
     futures = [c.submit(slowidentity, x, pure=False, delay=0.2)
                for i in range(10)]
+    future = c.submit(slow2, x)
 
     while not any(w.task_state for w in rest):
         yield gen.sleep(0.01)
@@ -381,21 +384,28 @@ def assert_balanced(inp, expected, c, s, *workers):
     while len(s.rprocessing) < len(futures):
         yield gen.sleep(0.001)
 
-    s.extensions['stealing'].balance()
 
-    result = [sorted([int(key_split(k)) for k in s.processing[w.address]],
-                     reverse=True)
-              for w in workers]
+    for i in range(10):
+        steal.balance()
 
-    result2 = sorted(result, reverse=True)
-    expected2 = sorted(expected, reverse=True)
+        while steal.in_flight:
+            yield gen.sleep(0.001)
 
-    if config.get('pdb-on-err'):
-        if result2 != expected2:
-            import pdb
-            pdb.set_trace()
+        result = [sorted([int(key_split(k)) for k in s.processing[w.address]],
+                         reverse=True)
+                  for w in workers]
 
-    assert result2 == expected2
+        result2 = sorted(result, reverse=True)
+        expected2 = sorted(expected, reverse=True)
+
+        if config.get('pdb-on-err'):
+            if result2 != expected2:
+                import pdb
+                pdb.set_trace()
+
+        if result2 == expected2:
+            return
+    raise Exception()
 
 
 @pytest.mark.parametrize('inp,expected', [
@@ -478,6 +488,7 @@ def test_restart(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_steal_communication_heavy_tasks(c, s, a, b):
+    steal = s.extensions['stealing']
     s.task_duration['slowadd'] = 0.001
     x = c.submit(mul, b'0', int(BANDWIDTH), workers=a.address)
     y = c.submit(mul, b'1', int(BANDWIDTH), workers=b.address)
@@ -489,7 +500,9 @@ def test_steal_communication_heavy_tasks(c, s, a, b):
     while not any(f.key in s.rprocessing for f in futures):
         yield gen.sleep(0.01)
 
-    s.extensions['stealing'].balance()
+    steal.balance()
+    while steal.in_flight:
+        yield gen.sleep(0.001)
 
     assert s.processing[b.address]
 
@@ -516,21 +529,16 @@ def test_steal_twice(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_accept_old_result_if_stolen(c, s, a, b):
+def test_dont_steal_executing_tasks(c, s, a, b):
+    steal = s.extensions['stealing']
+
     future = c.submit(slowinc, 1, delay=0.5, workers=a.address)
     while not a.executing:
         yield gen.sleep(0.01)
-    steal = s.extensions['stealing']
 
-    yield gen.sleep(0.25)
-
-    steal.move_task(future.key, a.address, b.address)
-    while not b.executing:
-        yield gen.sleep(0.01)
-
-    yield gen.sleep(0.35)
-
-    assert future.key in s.who_has
+    steal.move_task_request(future.key, a.address, b.address)
+    yield gen.sleep(0.1)
+    assert future.key in b.executing
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
