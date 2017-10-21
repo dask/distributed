@@ -1152,6 +1152,9 @@ class Scheduler(ServerNode):
         assert all(self.who_has.values())
 
         for worker, occ in self.occupancy.items():
+            for d in self.extensions['stealing'].in_flight.values():
+                if worker in (d['thief'], d['victim']):
+                    continue
             assert abs(sum(self.processing[worker].values()) - occ) < 1e-8
 
     ###################
