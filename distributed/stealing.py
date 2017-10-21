@@ -87,7 +87,7 @@ class WorkStealing(SchedulerPlugin):
     def put_key_in_stealable(self, key, split=None):
         worker = self.scheduler.rprocessing[key]
         cost_multiplier, level = self.steal_time_ratio(key, split=split)
-        self.log.append([('add-stealable', key, worker, level)])
+        self.log.append(('add-stealable', key, worker, level))
         if cost_multiplier is not None:
             self.stealable_all[level].add(key)
             self.stealable[worker][level].add(key)
@@ -99,7 +99,7 @@ class WorkStealing(SchedulerPlugin):
             return
 
         worker, level = result
-        self.log.append([('remove-stealable', key, worker, level)])
+        self.log.append(('remove-stealable', key, worker, level))
         try:
             self.stealable[worker][level].remove(key)
         except KeyError:
@@ -209,7 +209,9 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.total_occupancy -= d['thief_duration']
                 self.scheduler.occupancy[victim] += d['victim_duration']
                 self.scheduler.total_occupancy += d['victim_duration']
-                self.log.append([('already-computing', key, victim, thief)])
+                self.log.append(('already-computing', key, victim, thief))
+                self.scheduler.check_idle_saturated(thief)
+                self.scheduler.check_idle_saturated(victim)
 
             # Victim was waiting, has given up task, enact steal
             elif state in ('waiting', 'ready'):
@@ -223,7 +225,7 @@ class WorkStealing(SchedulerPlugin):
                     self.scheduler.send_task_to_worker(thief, key)
                 except CommClosedError:
                     self.scheduler.remove_worker(thief)
-                self.log.append([('confirm', key, victim, thief)])
+                self.log.append(('confirm', key, victim, thief))
             else:
                 raise ValueError("Unexpected task state: %s" % state)
         except Exception as e:

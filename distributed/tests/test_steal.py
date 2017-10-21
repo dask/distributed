@@ -369,7 +369,7 @@ def assert_balanced(inp, expected, c, s, *workers):
 
     futures = []
     for w, ts in zip(workers, inp):
-        for t in ts:
+        for t in sorted(ts, reverse=True):
             if t:
                 [dat] = yield c._scatter([next(data_seq)], workers=w.address)
                 s.nbytes[dat.key] = BANDWIDTH * t
@@ -456,12 +456,12 @@ def assert_balanced(inp, expected, c, s, *workers):
       [1],
       [1]]),
 
-    ([[1, 1, 1, 1, 1, 1, 1],
+    pytest.mark.xfail(([[1, 1, 1, 1, 1, 1, 1],
       [1, 1], [1, 1], [1, 1],
       []],
      [[1, 1, 1, 1, 1],
       [1, 1], [1, 1], [1, 1],
-      [1, 1]])
+      [1, 1]]), reason="Some uncertainty based on executing stolen task")
 ])
 def test_balance(inp, expected):
     test = lambda *args, **kwargs: assert_balanced(inp, expected, *args, **kwargs)
@@ -538,7 +538,8 @@ def test_dont_steal_executing_tasks(c, s, a, b):
 
     steal.move_task_request(future.key, a.address, b.address)
     yield gen.sleep(0.1)
-    assert future.key in b.executing
+    assert future.key in a.executing
+    assert not b.executing
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
