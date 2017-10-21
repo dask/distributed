@@ -28,6 +28,7 @@
       </div>
     </div>
 
+    {% if worker in worker_resources %}
     <div class="content">
       <h2 class="subtitle"> Resources </h2>
       <table class="table is-striped is-hoverable">>
@@ -46,4 +47,5 @@
         {% end %}
       </table>
     </div>
+    {% end %}
 {% end %}
