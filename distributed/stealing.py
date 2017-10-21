@@ -192,6 +192,8 @@ class WorkStealing(SchedulerPlugin):
             raise
 
     def move_task_confirm(self, key=None, worker=None, state=None):
+        if self.scheduler.task_state.get(key) != 'processing':
+            return
         try:
             d = self.in_flight.pop(key)
             thief = d['thief']
