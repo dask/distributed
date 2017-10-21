@@ -192,12 +192,14 @@ class WorkStealing(SchedulerPlugin):
             raise
 
     def move_task_confirm(self, key=None, worker=None, state=None):
-        if self.scheduler.task_state.get(key) != 'processing':
-            return
         try:
             d = self.in_flight.pop(key)
             thief = d['thief']
             victim = d['victim']
+            if self.scheduler.task_state.get(key) != 'processing':
+                self.scheduler.occupancy[thief] = sum(self.scheduler.processing[thief].values())
+                self.scheduler.occupancy[victim] = sum(self.scheduler.processing[victim].values())
+                return
 
             # One of the pair has left, punt and reschedule
             if (thief not in self.scheduler.workers or

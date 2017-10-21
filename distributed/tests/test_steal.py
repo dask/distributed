@@ -523,7 +523,7 @@ def test_steal_twice(c, s, a, b):
     yield wait(futures)
 
     assert all(s.has_what.values())
-    assert max(map(len, s.has_what.values())) < 20
+    assert max(map(len, s.has_what.values())) < 30
 
     yield [w._close() for w in workers]
 
