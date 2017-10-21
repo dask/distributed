@@ -1,8 +1,8 @@
-{% extends templates/main.html %}
+{% extends main.html %}
 {% block content %}
     <h1 class="title"> Worker: {{Worker}} </h1>
       {% set workers = [Worker] %}
-      {% include "templates/worker-table.html" %}
+      {% include "worker-table.html" %}
 
     <div class="columns">
       <div class="column">

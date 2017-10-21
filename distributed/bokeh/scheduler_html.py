@@ -19,7 +19,7 @@ class Workers(web.RequestHandler):
 
     def get(self):
         with log_errors():
-            self.render(os.path.join(dirname, 'templates', 'workers.html'),
+            self.render(os.path.join(dirname, 'workers.html'),
                         title='Workers',
                         **toolz.merge(self.server.__dict__, ns))
 
@@ -31,7 +31,7 @@ class Worker(web.RequestHandler):
     def get(self, worker):
         worker = escape.url_unescape(worker)
         with log_errors():
-            self.render(os.path.join(dirname, 'templates', 'worker.html'),
+            self.render(os.path.join(dirname, 'worker.html'),
                         title='Worker: ' + worker, Worker=worker,
                         **toolz.merge(self.server.__dict__, ns))
 
@@ -43,7 +43,7 @@ class Task(web.RequestHandler):
     def get(self, task):
         task = escape.url_unescape(task)
         with log_errors():
-            self.render(os.path.join(dirname, 'templates', 'task.html'),
+            self.render(os.path.join(dirname, 'task.html'),
                         title='Task: ' + task,
                         Task=task,
                         server=self.server,
@@ -57,7 +57,7 @@ class Logs(web.RequestHandler):
     def get(self):
         with log_errors():
             logs = self.server.get_logs()
-            self.render(os.path.join(dirname, 'templates', 'logs.html'),
+            self.render(os.path.join(dirname, 'logs.html'),
                         title="Logs", logs=logs)
 
 
@@ -71,7 +71,7 @@ class WorkerLogs(web.RequestHandler):
             worker = escape.url_unescape(worker)
             logs = yield self.server.get_worker_logs(workers=[worker])
             logs = logs[worker]
-            self.render(os.path.join(dirname, 'templates', 'logs.html'),
+            self.render(os.path.join(dirname, 'logs.html'),
                         title="Logs: " + worker, logs=logs)
 
 
