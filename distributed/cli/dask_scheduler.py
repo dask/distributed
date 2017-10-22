@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
+from distutils.util import strtobool
 from functools import partial
 import logging
 import os
@@ -111,11 +112,73 @@ def main(host, port, http_port, bokeh_port, bokeh_internal_port, show, _bokeh,
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    # check in env vars if DASK_SCHEDULER_IP and DASK_SCHEDULER_PORT are defined
+    # check for env vars
+
+    # DASK_SCHEDULER_IP / DASK_SCHEDULER_PORT
     if not host:
         if 'scheduler-ip' in config and 'scheduler-port' in config:
             host = config['scheduler-ip']
             port = int(config['scheduler-port'])
+
+    # DASK_INTERFACE
+    if not interface:
+        if 'interface' in config:
+            interface = config['interface']
+
+    # DASK_HTTP_PORT
+    if not http_port:
+        if 'http-port' in config:
+            http_port = int(config['http-port'])
+
+    # DASK_BOKEH_PORT
+    if not bokeh_port:
+        if 'bokeh-port' in config:
+            bokeh_port = int(config['bokeh-port'])
+
+    # DASK_BOKEH
+    if not _bokeh:
+        if 'bokeh' in config:
+            _bokeh = config['bokeh']
+
+    # DASK_SHOW
+    if not show:
+        if 'show' in config:
+            show = config['show']
+
+    # DASK_BOKEH_WHITELIST
+    if not bokeh_whitelist:
+        if 'bokeh-whitelist' in config:
+            bokeh_whitelist = config['bokeh-whitelist']
+
+    # DASK_BOKEH_PREFIX
+    if not bokeh_prefix:
+        if 'bokeh-prefix' in config:
+            bokeh_prefix = config['bokeh-prefix']
+
+    # DASK_USE_XHEADERS
+    if not use_xheaders:
+        if 'use-xheaders' in config:
+            use_xheaders = strtobool(config['use-xheaders'])
+
+    # DASK_PID_FILE
+    if not pid_file:
+        if 'pid-file' in config:
+            pid_file = config['pid-file']
+
+    # DASK_SCHEDULER_FILE
+    if not scheduler_file:
+        if 'scheduler-file' in config:
+            scheduler_file = config['scheduler-file']
+
+    # DASK_LOCAL_DIRECTORY
+    if not local_directory:
+        if 'local-directory' in config:
+            local_directory = config['local-directory']
+
+    # DASK_PRELOAD
+    if not preload:
+        if 'preload' in config:
+            preload = config['preload']
 
     if interface:
         if host:
