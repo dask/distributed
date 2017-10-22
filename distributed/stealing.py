@@ -343,7 +343,14 @@ class WorkStealing(SchedulerPlugin):
 
     def story(self, *keys):
         keys = set(keys)
-        return [t for L in self.log for t in L if any(x in keys for x in t)]
+        out = []
+        for L in self.log:
+            if not isinstance(L, list):
+                L = [L]
+            for t in L:
+                if any(x in keys for x in t):
+                    out.append(t)
+        return out
 
 
 fast_tasks = {'shuffle-split'}
