@@ -1,11 +1,5 @@
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title> {{title}} </title>
-	<link rel="stylesheet" href="/static/style.css" media="all" />
-
-  </head>
-  <body>
+{% extends main.html %}
+{% block content %}
   <h1 class="title"> Task: {{ Task }} </h1>
 
       <table class="table">
@@ -126,6 +120,4 @@
               {% end %}
           </table>
       </div><!-- #transition-log -->
-
-  </body>
-</html>
+{% end %}

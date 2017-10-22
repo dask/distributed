@@ -82,5 +82,4 @@ def get_handlers(server):
             (r'/info/task/(.*).html', Task, {'server': server}),
             (r'/info/logs.html', Logs, {'server': server}),
             (r'/info/logs/(.*).html', WorkerLogs, {'server': server}),
-            (r'/static/(.*)', web.StaticFileHandler, {"path": os.path.join(dirname, 'static')}),
     ]
