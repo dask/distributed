@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-from operator import add, sub
 from time import sleep
 
 import pytest
@@ -10,14 +9,14 @@ from toolz import first
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
-from distributed.client import _wait
+from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec, slowinc
 from distributed.bokeh.worker import Counters, BokehWorker
 from distributed.bokeh.scheduler import (BokehScheduler, StateTable,
-        SystemMonitor, Occupancy, StealingTimeSeries, StealingEvents, Events,
-        TaskStream, TaskProgress, MemoryUse, CurrentLoad, ProcessingHistogram,
-        NBytesHistogram, WorkerTable)
+                                         SystemMonitor, Occupancy, StealingTimeSeries, StealingEvents, Events,
+                                         TaskStream, TaskProgress, MemoryUse, CurrentLoad, ProcessingHistogram,
+                                         NBytesHistogram, WorkerTable)
 
 from distributed.bokeh import scheduler
 
@@ -107,7 +106,7 @@ def test_task_stream(c, s, a, b):
 
     futures = c.map(slowinc, range(10), delay=0.001)
 
-    yield _wait(futures)
+    yield wait(futures)
 
     ts.update()
     d = dict(ts.source.data)
@@ -120,7 +119,7 @@ def test_task_stream(c, s, a, b):
     assert all(len(L) == 10 for L in d.values())
 
     total = c.submit(sum, futures)
-    yield _wait(total)
+    yield wait(total)
 
     ts.update()
     d = dict(ts.source.data)
@@ -131,7 +130,7 @@ def test_task_stream(c, s, a, b):
 def test_task_stream_n_rectangles(c, s, a, b):
     ts = TaskStream(s, n_rectangles=10)
     futures = c.map(slowinc, range(10), delay=0.001)
-    yield _wait(futures)
+    yield wait(futures)
     ts.update()
 
     assert len(ts.source.data['start']) == 10
@@ -142,22 +141,21 @@ def test_task_stream_second_plugin(c, s, a, b):
     ts = TaskStream(s, n_rectangles=10, clear_interval=10)
     ts.update()
     futures = c.map(inc, range(10))
-    yield _wait(futures)
+    yield wait(futures)
     ts.update()
 
     ts2 = TaskStream(s, n_rectangles=5, clear_interval=10)
     ts2.update()
 
 
-
 @gen_cluster(client=True)
 def test_task_stream_clear_interval(c, s, a, b):
     ts = TaskStream(s, clear_interval=200)
 
-    yield _wait(c.map(inc, range(10)))
+    yield wait(c.map(inc, range(10)))
     ts.update()
     yield gen.sleep(0.010)
-    yield _wait(c.map(dec, range(10)))
+    yield wait(c.map(dec, range(10)))
     ts.update()
 
     assert len(set(map(len, ts.source.data.values()))) == 1
@@ -165,7 +163,7 @@ def test_task_stream_clear_interval(c, s, a, b):
     assert ts.source.data['name'].count('dec') == 10
 
     yield gen.sleep(0.300)
-    yield _wait(c.map(inc, range(10, 20)))
+    yield wait(c.map(inc, range(10, 20)))
     ts.update()
 
     assert len(set(map(len, ts.source.data.values()))) == 1
@@ -178,7 +176,7 @@ def test_TaskProgress(c, s, a, b):
     tp = TaskProgress(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
-    yield _wait(futures)
+    yield wait(futures)
 
     tp.update()
     d = dict(tp.source.data)
@@ -186,7 +184,7 @@ def test_TaskProgress(c, s, a, b):
     assert d['name'] == ['slowinc']
 
     futures2 = c.map(dec, range(5))
-    yield _wait(futures2)
+    yield wait(futures2)
 
     tp.update()
     d = dict(tp.source.data)
@@ -208,7 +206,7 @@ def test_TaskProgress_empty(c, s, a, b):
     tp.update()
 
     futures = [c.submit(inc, i, key='f-' + 'a' * i) for i in range(20)]
-    yield _wait(futures)
+    yield wait(futures)
     tp.update()
 
     del futures
@@ -224,7 +222,7 @@ def test_MemoryUse(c, s, a, b):
     mu = MemoryUse(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
-    yield _wait(futures)
+    yield wait(futures)
 
     mu.update()
     d = dict(mu.source.data)
@@ -237,7 +235,7 @@ def test_CurrentLoad(c, s, a, b):
     cl = CurrentLoad(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
-    yield _wait(futures)
+    yield wait(futures)
 
     cl.update()
     d = dict(cl.source.data)
@@ -266,7 +264,7 @@ def test_NBytesHistogram(c, s, a, b):
     assert (nh.source.data['top'] != 0).sum() == 1
 
     futures = c.map(inc, range(10))
-    yield _wait(futures)
+    yield wait(futures)
 
     nh.update()
     assert nh.source.data['right'][-1] > 5 * 20

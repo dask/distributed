@@ -5,16 +5,11 @@ Most are taken from other test files and adapted.
 
 from __future__ import print_function, division, absolute_import
 
-from operator import add
-from time import sleep
 
-import pytest
-from toolz import take
 from tornado import gen
 
-from distributed import Nanny, worker_client
-from distributed.client import _wait
-from distributed.metrics import time
+from distributed import Nanny, worker_client, Queue
+from distributed.client import wait
 from distributed.utils_test import (gen_cluster, tls_only_security,
                                     inc, double, slowinc, slowadd)
 
@@ -26,22 +21,21 @@ def gen_tls_cluster(**kwargs):
 
 
 @gen_tls_cluster(client=True)
-def test_channel(c, s, a, b):
+def test_Queue(c, s, a, b):
     assert s.address.startswith('tls://')
 
-    x = c.channel('x')
-    y = c.channel('y')
+    x = Queue('x')
+    y = Queue('y')
 
-    assert len(x) == 0
+    size = yield x.qsize()
+    assert size == 0
 
     future = c.submit(inc, 1)
 
-    x.append(future)
+    yield x.put(future)
 
-    while not x.data:
-        yield gen.sleep(0.01)
-
-    assert len(x) == 1
+    future2 = yield x.get()
+    assert future.key == future2.key
 
 
 @gen_tls_cluster(client=True, timeout=None)
@@ -116,7 +110,7 @@ def test_work_stealing(c, s, a, b):
     [x] = yield c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50)
     yield gen.sleep(0.1)
-    yield _wait(futures)
+    yield wait(futures)
     assert len(a.data) > 10
     assert len(b.data) > 10
     assert len(a.data) > len(b.data) - 5

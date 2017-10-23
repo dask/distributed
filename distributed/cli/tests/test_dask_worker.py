@@ -3,18 +3,16 @@ from __future__ import print_function, division, absolute_import
 import pytest
 pytest.importorskip('requests')
 
-import os
-import requests
-import signal
+import sys
 from time import sleep
 from toolz import first
 
-from distributed import Scheduler, Client
-from distributed.core import rpc
+from distributed import Client
 from distributed.metrics import time
-from distributed.utils import sync, ignoring, tmpfile
-from distributed.utils_test import (loop, popen, slow, terminate_process,
+from distributed.utils import sync, tmpfile
+from distributed.utils_test import (popen, slow, terminate_process,
                                     wait_for_port)
+from distributed.utils_test import loop  # flake8: noqa
 
 
 def test_nanny_worker_ports(loop):
@@ -108,3 +106,62 @@ def test_scheduler_file(loop, nanny):
                     while not c.scheduler_info()['workers']:
                         sleep(0.1)
                         assert time() < start + 10
+
+
+def test_nprocs_requires_nanny(loop):
+    with popen(['dask-scheduler', '--no-bokeh']) as sched:
+        with popen(['dask-worker', '127.0.0.1:8786', '--nprocs=2',
+                    '--no-nanny']) as worker:
+            assert any(b'Failed to launch worker' in worker.stderr.readline()
+                       for i in range(15))
+
+
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Need 127.0.0.2 to mean localhost")
+@pytest.mark.parametrize('nanny', ['--nanny', '--no-nanny'])
+@pytest.mark.parametrize('listen_address', [
+    'tcp://0.0.0.0:39837',
+    'tcp://127.0.0.2:39837'])
+def test_contact_listen_address(loop, nanny, listen_address):
+    with popen(['dask-scheduler', '--no-bokeh']) as sched:
+        with popen(['dask-worker', '127.0.0.1:8786',
+                    nanny, '--no-bokeh',
+                    '--contact-address', 'tcp://127.0.0.2:39837',
+                    '--listen-address', listen_address]) as worker:
+            with Client('127.0.0.1:8786') as client:
+                while not client.ncores():
+                    sleep(0.1)
+                info = client.scheduler_info()
+                assert 'tcp://127.0.0.2:39837' in info['workers']
+
+                # roundtrip works
+                assert client.submit(lambda x: x + 1, 10).result() == 11
+
+                def func(dask_worker):
+                    return dask_worker.listener.listen_address
+
+                assert client.run(func) == {'tcp://127.0.0.2:39837': listen_address}
+
+
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Need 127.0.0.2 to mean localhost")
+@pytest.mark.parametrize('nanny', ['--nanny', '--no-nanny'])
+@pytest.mark.parametrize('host', ['127.0.0.2', '0.0.0.0'])
+def test_respect_host_listen_address(loop, nanny, host):
+    with popen(['dask-scheduler', '--no-bokeh']) as sched:
+        with popen(['dask-worker', '127.0.0.1:8786',
+                    nanny, '--no-bokeh',
+                    '--host', host]) as worker:
+            with Client('127.0.0.1:8786') as client:
+                while not client.ncores():
+                    sleep(0.1)
+                info = client.scheduler_info()
+
+                # roundtrip works
+                assert client.submit(lambda x: x + 1, 10).result() == 11
+
+                def func(dask_worker):
+                    return dask_worker.listener.listen_address
+
+                listen_addresses = client.run(func)
+                assert all(host in v for v in listen_addresses.values())

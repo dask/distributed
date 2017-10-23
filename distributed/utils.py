@@ -1,12 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from collections import Iterable
+from collections import Iterable, deque
 from contextlib import contextmanager
 from datetime import timedelta
-from importlib import import_module
-import inspect
 import functools
+import json
 import logging
 import math
 import multiprocessing
@@ -15,6 +14,8 @@ import os
 import re
 import shutil
 import socket
+from time import sleep
+from importlib import import_module
 import sys
 import tempfile
 import threading
@@ -37,9 +38,18 @@ from tornado.ioloop import IOLoop
 
 from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
 from .config import config
+from .metrics import time
 
+
+try:
+    from dask import thread_state
+except ImportError:
+    thread_state = threading.local()
 
 logger = logging.getLogger(__name__)
+
+
+no_default = '__no_default__'
 
 
 def _initialize_mp_context():
@@ -66,7 +76,7 @@ def funcname(func):
         func = func.func
     try:
         return func.__name__
-    except:
+    except AttributeError:
         return str(func)
 
 
@@ -198,6 +208,7 @@ def sync(loop, func, *args, **kwargs):
     Run coroutine in loop running in separate thread.
     """
     timeout = kwargs.pop('callback_timeout', None)
+
     def make_coro():
         coro = gen.maybe_future(func(*args, **kwargs))
         if timeout is None:
@@ -222,11 +233,13 @@ def sync(loop, func, *args, **kwargs):
             if main_tid == get_thread_identity():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
+            thread_state.asynchronous = True
             result[0] = yield make_coro()
         except Exception as exc:
             logger.exception(exc)
             error[0] = sys.exc_info()
         finally:
+            thread_state.asynchronous = False
             e.set()
 
     loop.add_callback(f)
@@ -236,6 +249,28 @@ def sync(loop, func, *args, **kwargs):
         six.reraise(*error[0])
     else:
         return result[0]
+
+
+@contextmanager
+def set_thread_state(**kwargs):
+    old = {}
+    for k in kwargs:
+        try:
+            old[k] = getattr(thread_state, k)
+        except AttributeError:
+            pass
+    for k, v in kwargs.items():
+        setattr(thread_state, k, v)
+    try:
+        yield
+    finally:
+        for k in kwargs:
+            try:
+                v = old[k]
+            except KeyError:
+                delattr(thread_state, k)
+            else:
+                setattr(thread_state, k, v)
 
 
 @contextmanager
@@ -320,7 +355,7 @@ def key_split(s):
             if result[0] == '<':
                 result = result.strip('<>').split()[0].split('.')[-1]
             return result
-    except:
+    except Exception:
         return 'Other'
 
 
@@ -331,49 +366,90 @@ except ImportError:
 else:
     key_split = lru_cache(100000)(key_split)
 
+if PY3:
+    def key_split_group(x):
+        """A more fine-grained version of key_split
 
-def key_split_group(x):
-    """A more fine-grained version of key_split
-
-    >>> key_split_group('x')
-    'x'
-    >>> key_split_group('x-1')
-    'x-1'
-    >>> key_split_group('x-1-2-3')
-    'x-1-2-3'
-    >>> key_split_group(('x-2', 1))
-    'x-2'
-    >>> key_split_group("('x-2', 1)")
-    'x-2'
-    >>> key_split_group('hello-world-1')
-    'hello-world-1'
-    >>> key_split_group(b'hello-world-1')
-    'hello-world-1'
-    >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
-    'data'
-    >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
-    'myclass'
-    >>> key_split_group(None)
-    'Other'
-    >>> key_split_group('x-abcdefab')  # ignores hex
-    'x-abcdefab'
-    """
-    typ = type(x)
-    if typ is tuple:
-        return x[0]
-    elif typ is str:
-        if x[0] == '(':
-            return x.split(',', 1)[0].strip('()"\'')
-        elif len(x) == 32 and re.match(r'[a-f0-9]{32}', x):
-            return 'data'
-        elif x[0] == '<':
-            return x.strip('<>').split()[0].split('.')[-1]
+        >>> key_split_group('x')
+        'x'
+        >>> key_split_group('x-1')
+        'x-1'
+        >>> key_split_group('x-1-2-3')
+        'x-1-2-3'
+        >>> key_split_group(('x-2', 1))
+        'x-2'
+        >>> key_split_group("('x-2', 1)")
+        'x-2'
+        >>> key_split_group('hello-world-1')
+        'hello-world-1'
+        >>> key_split_group(b'hello-world-1')
+        'hello-world-1'
+        >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
+        'data'
+        >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
+        'myclass'
+        >>> key_split_group(None)
+        'Other'
+        >>> key_split_group('x-abcdefab')  # ignores hex
+        'x-abcdefab'
+        """
+        typ = type(x)
+        if typ is tuple:
+            return x[0]
+        elif typ is str:
+            if x[0] == '(':
+                return x.split(',', 1)[0].strip('()"\'')
+            elif len(x) == 32 and re.match(r'[a-f0-9]{32}', x):
+                return 'data'
+            elif x[0] == '<':
+                return x.strip('<>').split()[0].split('.')[-1]
+            else:
+                return x
+        elif typ is bytes:
+            return key_split_group(x.decode())
         else:
-            return x
-    elif typ is bytes:
-        return key_split_group(x.decode())
-    else:
-        return 'Other'
+            return 'Other'
+else:
+    def key_split_group(x):
+        """A more fine-grained version of key_split
+
+        >>> key_split_group('x')
+        'x'
+        >>> key_split_group('x-1')
+        'x-1'
+        >>> key_split_group('x-1-2-3')
+        'x-1-2-3'
+        >>> key_split_group(('x-2', 1))
+        'x-2'
+        >>> key_split_group("('x-2', 1)")
+        'x-2'
+        >>> key_split_group('hello-world-1')
+        'hello-world-1'
+        >>> key_split_group(b'hello-world-1')
+        'hello-world-1'
+        >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
+        'data'
+        >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
+        'myclass'
+        >>> key_split_group(None)
+        'Other'
+        >>> key_split_group('x-abcdefab')  # ignores hex
+        'x-abcdefab'
+        """
+        typ = type(x)
+        if typ is tuple:
+            return x[0]
+        elif typ is str or typ is unicode:
+            if x[0] == '(':
+                return x.split(',', 1)[0].strip('()"\'')
+            elif len(x) == 32 and re.match(r'[a-f0-9]{32}', x):
+                return 'data'
+            elif x[0] == '<':
+                return x.strip('<>').split()[0].split('.')[-1]
+            else:
+                return x
+        else:
+            return 'Other'
 
 
 @contextmanager
@@ -384,9 +460,13 @@ def log_errors(pdb=False):
     except (CommClosedError, gen.Return):
         raise
     except Exception as e:
-        logger.exception(e)
+        try:
+            logger.exception(e)
+        except TypeError:  # logger becomes None during process cleanup
+            pass
         if pdb:
-            import pdb; pdb.set_trace()
+            import pdb
+            pdb.set_trace()
         raise
 
 
@@ -401,7 +481,7 @@ def silence_logging(level, root='distributed'):
     for name, logger in logging.root.manager.loggerDict.items():
         if (isinstance(logger, logging.Logger)
             and logger.name.startswith(root + '.')
-            and logger.level < level):
+                and logger.level < level):
             logger.setLevel(level)
 
 
@@ -452,10 +532,10 @@ def truncate_exception(e, n=10000):
         try:
             return type(e)("Long error message",
                            str(e)[:n])
-        except:
+        except Exception:
             return Exception("Long error message",
-                              type(e),
-                              str(e)[:n])
+                             type(e),
+                             str(e)[:n])
     else:
         return e
 
@@ -507,11 +587,9 @@ def tokey(o):
     >>> tokey(1)
     '1'
     """
-    t = type(o)
-    if t is str:
+    typ = type(o)
+    if typ is unicode or typ is bytes:
         return o
-    elif t is bytes:
-        return o.decode('latin1')
     else:
         return str(o)
 
@@ -519,9 +597,10 @@ def tokey(o):
 def validate_key(k):
     """Validate a key as received on a stream.
     """
-    if type(k) is not str:
+    typ = type(k)
+    if typ is not unicode and typ is not bytes:
         raise TypeError("Unexpected key type %s (value: %r)"
-                        % (type(k), k))
+                        % (typ, k))
 
 
 def _maybe_complex(task):
@@ -587,8 +666,8 @@ def read_block(f, offset, length, delimiter=None):
 
     Parameters
     ----------
-    fn: string
-        Path to filename on S3
+    f: file
+        File-like object supporting seek, read, tell, etc..
     offset: int
         Byte offset to start read
     length: int
@@ -670,7 +749,7 @@ def ensure_bytes(s):
     if hasattr(s, 'encode'):
         return s.encode()
     raise TypeError(
-            "Object %s is neither a bytes object nor has an encode method" % s)
+        "Object %s is neither a bytes object nor has an encode method" % s)
 
 
 def divide_n_among_bins(n, bins):
@@ -827,23 +906,45 @@ def format_bytes(n):
     return '%d B' % n
 
 
+def asciitable(columns, rows):
+    """Formats an ascii table for given columns and rows.
+
+    Parameters
+    ----------
+    columns : list
+        The column names
+    rows : list of tuples
+        The rows in the table. Each tuple must be the same length as
+        ``columns``.
+    """
+    rows = [tuple(str(i) for i in r) for r in rows]
+    columns = tuple(str(i) for i in columns)
+    widths = tuple(max(max(map(len, x)), len(c))
+                   for x, c in zip(zip(*rows), columns))
+    row_template = ('|' + (' %%-%ds |' * len(columns))) % widths
+    header = row_template % tuple(columns)
+    bar = '+%s+' % '+'.join('-' * (w + 2) for w in widths)
+    data = '\n'.join(row_template % r for r in rows)
+    return '\n'.join([bar, header, bar, data, bar])
+
+
 if PY2:
-    def nbytes(frame):
+    def nbytes(frame, _bytes_like=(bytes, bytearray, buffer)):
         """ Number of bytes of a frame or memoryview """
-        if isinstance(frame, (bytes, buffer)):
+        if isinstance(frame, _bytes_like):
             return len(frame)
         elif isinstance(frame, memoryview):
             if frame.shape is None:
                 return frame.itemsize
             else:
                 return functools.reduce(operator.mul, frame.shape,
-                                                      frame.itemsize)
+                                        frame.itemsize)
         else:
             return frame.nbytes
 else:
-    def nbytes(frame):
+    def nbytes(frame, _bytes_like=(bytes, bytearray)):
         """ Number of bytes of a frame or memoryview """
-        if isinstance(frame, bytes):
+        if isinstance(frame, _bytes_like):
             return len(frame)
         else:
             return frame.nbytes
@@ -916,3 +1017,57 @@ class PeriodicCallback(object):
                                                   callback_time_sec) + 1) * callback_time_sec
 
             self._timeout = self.io_loop.add_timeout(self._next_timeout, self._run)
+
+
+@contextmanager
+def time_warn(duration, text):
+    start = time()
+    yield
+    end = time()
+    if end - start > duration:
+        print('TIME WARNING', text, end - start)
+
+
+def json_load_robust(fn, load=json.load):
+    """ Reads a JSON file from disk that may be being written as we read """
+    while not os.path.exists(fn):
+        sleep(0.01)
+    for i in range(10):
+        try:
+            with open(fn) as f:
+                cfg = load(f)
+            if cfg:
+                return cfg
+        except (ValueError, KeyError):  # race with writing process
+            pass
+        sleep(0.1)
+
+
+def format_time(n):
+    """ format integers as time
+
+    >>> format_time(1)
+    '1.00 s'
+    >>> format_time(0.001234)
+    '1.23 ms'
+    >>> format_time(0.00012345)
+    '123.45 us'
+    >>> format_time(123.456)
+    '123.46 s'
+    """
+    if n >= 1:
+        return '%.2f s' % n
+    if n >= 1e-3:
+        return '%.2f ms' % (n * 1e3)
+    return '%.2f us' % (n * 1e6)
+
+
+class DequeHandler(logging.Handler):
+    """ A logging.Handler that records records into a deque """
+    def __init__(self, *args, **kwargs):
+        n = kwargs.pop('n', 10000)
+        self.deque = deque(maxlen=n)
+        super(DequeHandler, self).__init__(*args, **kwargs)
+
+    def emit(self, record):
+        self.deque.append(record)

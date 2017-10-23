@@ -14,7 +14,10 @@ from distributed.utils_test import slowinc
 from tornado.ioloop import IOLoop
 from tornado.platform.asyncio import BaseAsyncIOLoop
 
-from distributed.asyncio import AioClient, AioFuture, as_completed, wait
+from distributed.client import Future
+from distributed.variable import Variable
+from distributed.asyncio import AioClient
+from distributed.asyncio import as_completed, wait
 from distributed.utils_test import inc, div
 
 
@@ -27,6 +30,7 @@ def coro_test(fn):
         try:
             IOLoop.clear_current()
             loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
             loop.run_until_complete(fn(*args, **kwargs))
         finally:
             if loop is not None:
@@ -39,7 +43,12 @@ def coro_test(fn):
 
 
 @coro_test
-async def test_asyncio_start_shutdown():
+async def test_coro_test():
+    assert asyncio.get_event_loop().is_running()
+
+
+@coro_test
+async def test_asyncio_start_close():
     c = await AioClient(processes=False)
 
     assert c.status == 'running'
@@ -49,9 +58,9 @@ async def test_asyncio_start_shutdown():
     result = await c.submit(inc, 10)
     assert result == 11
 
-    await c.shutdown()
+    await c.close()
     assert c.status == 'closed'
-    assert IOLoop.current(instance=False) is None
+    # assert IOLoop.current(instance=False) is None
 
 
 @coro_test
@@ -60,7 +69,7 @@ async def test_asyncio_submit():
         x = c.submit(inc, 10)
         assert not x.done()
 
-        assert isinstance(x, AioFuture)
+        assert isinstance(x, Future)
         assert x.client is c
 
         result = await x.result()
@@ -80,7 +89,7 @@ async def test_asyncio_future_await():
         x = c.submit(inc, 10)
         assert not x.done()
 
-        assert isinstance(x, AioFuture)
+        assert isinstance(x, Future)
         assert x.client is c
 
         result = await x
@@ -100,7 +109,7 @@ async def test_asyncio_map():
         L1 = c.map(inc, range(5))
         assert len(L1) == 5
         assert isdistinct(x.key for x in L1)
-        assert all(isinstance(x, AioFuture) for x in L1)
+        assert all(isinstance(x, Future) for x in L1)
 
         result = await L1[0]
         assert result == inc(0)
@@ -161,8 +170,9 @@ async def test_asyncio_get():
         result = await c.get({}, [])
         assert result == []
 
-        result = await c.get({('x', 1): (inc, 1), ('x', 2): (inc, ('x', 1))},
-                              ('x', 2))
+        result = await c.get({('x', 1): (inc, 1),
+                              ('x', 2): (inc, ('x', 1))},
+                             ('x', 2))
         assert result == 3
 
 
@@ -177,46 +187,6 @@ async def test_asyncio_exceptions():
 
         result = await c.submit(div, 10, 2)  # continues to operate
         assert result == 10 / 2
-
-
-@coro_test
-async def test_asyncio_channels():
-    async with AioClient(processes=False) as c:
-        x = c.channel('x')
-        y = c.channel('y')
-
-        assert len(x) == 0
-
-        while set(c.extensions['channels'].channels) != {'x', 'y'}:
-            await asyncio.sleep(0.01)
-
-        xx = c.channel('x')
-        yy = c.channel('y')
-
-        assert len(x) == 0
-
-        await asyncio.sleep(0.1)
-        assert set(c.extensions['channels'].channels) == {'x', 'y'}
-
-        future = c.submit(inc, 1)
-
-        x.append(future)
-
-        while not x.data:
-            await asyncio.sleep(0.01)
-
-        assert len(x) == 1
-
-        assert xx.data[0].key == future.key
-
-        xxx = c.channel('x')
-        while not xxx.data:
-            await asyncio.sleep(0.01)
-
-        assert xxx.data[0].key == future.key
-
-        assert 'x' in repr(x)
-        assert '1' in repr(x)
 
 
 @coro_test
@@ -341,7 +311,7 @@ async def test_asyncio_run_coroutine():
 
         with pytest.raises(RuntimeError) as exc_info:
             await c.run_coroutine(aiothrows, 1)
-        exc_info.match("hello")
+        assert "hello" in str(exc_info)
 
 
 @slow
@@ -358,7 +328,8 @@ async def test_asyncio_restart():
 
     key = x.key
     del x
-    import gc; gc.collect()
+    import gc
+    gc.collect()
 
     assert key not in c.refcount
     await c.shutdown()
@@ -368,3 +339,31 @@ async def test_asyncio_restart():
 async def test_asyncio_nanny_workers():
     async with AioClient(n_workers=2) as c:
         assert await c.submit(inc, 1) == 2
+
+
+@coro_test
+async def test_asyncio_variable():
+    c = await AioClient(processes=False)
+    s = c.cluster.scheduler
+
+    x = Variable('x')
+    xx = Variable('x')
+    assert x.client is c
+
+    future = c.submit(inc, 1)
+
+    await x.set(future)
+    future2 = await xx.get()
+    assert future.key == future2.key
+
+    del future, future2
+
+    await asyncio.sleep(0.1)
+    assert s.task_state  # future still present
+
+    x.delete()
+
+    start = time()
+    while s.task_state:
+        await asyncio.sleep(0.01)
+        assert time() < start + 5

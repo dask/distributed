@@ -1,6 +1,111 @@
 Changelog
 =========
 
+1.19.3 - 2017-10-16
+-------------------
+
+-  Handle None case in profile.identity (:pr:`1456`)
+-  Asyncio rewrite (:pr:`1458`)
+-  Add rejoin function partner to secede (:pr:`1462`)
+-  Nested compute (:pr:`1465`)
+-  Use LooseVersion when comparing Bokeh versions (:pr:`1470`)
+
+
+1.19.2 - 2017-10-06
+-------------------
+
+-  as_completed doesn't block on cancelled futures (:pr:`1436`)
+-  Notify waiting threads/coroutines on cancellation (:pr:`1438`)
+-  Set Future(inform=True) as default (:pr:`1437`)
+-  Rename Scheduler.transition_story to story (:pr:`1445`)
+-  Future uses default client by default (:pr:`1449`)
+-  Add keys= keyword to Client.call_stack (:pr:`1446`)
+-  Add get_current_task to worker (:pr:`1444`)
+-  Ensure that Client remains asynchornous before ioloop starts (:pr:`1452`)
+-  Remove "click for worker page" in bokeh plot (:pr:`1453`)
+-  Add Client.current() (:pr:`1450`)
+-  Clean handling of restart timeouts (:pr:`1442`)
+
+1.19.1 - September 25th, 2017
+-----------------------------
+
+-  Fix tool issues with TaskStream plot (:pr:`1425`)
+-  Move profile module to top level (:pr:`1423`)
+
+1.19.0 - September 24th, 2017
+-----------------------------
+
+-  Avoid storing messages in message log (:pr:`1361`)
+-  fileConfig does not disable existing loggers (:pr:`1380`)
+-  Offload upload_file disk I/O to separate thread (:pr:`1383`)
+-  Add missing SSLContext (:pr:`1385`)
+-  Collect worker thread information from sys._curent_frames (:pr:`1387`)
+-  Add nanny timeout (:pr:`1395`)
+-  Restart worker if memory use goes above 95% (:pr:`1397`)
+-  Track workers memory use with psutil (:pr:`1398`)
+-  Track scheduler delay times in workers (:pr:`1400`)
+-  Add time slider to profile plot (:pr:`1403`)
+-  Change memory-limit keyword to refer to maximum number of bytes (:pr:`1405`)
+-  Add ``cancel(force=)`` keyword (:pr:`1408`)
+
+1.18.2 - September 2nd, 2017
+----------------------------
+-  Silently pass on cancelled futures in as_completed (:pr:`1366`)
+-  Fix unicode keys error in Python 2 (:pr:`1370`)
+-  Support numeric worker names
+-  Add dask-mpi executable (:pr:`1367`)
+
+1.18.1 - August 25th, 2017
+--------------------------
+-  Clean up forgotten keys in fire-and-forget workloads (:pr:`1250`)
+-  Handle missing extensions (:pr:`1263`)
+-  Allow recreate_exception on persisted collections (:pr:`1253`)
+-  Add asynchronous= keyword to blocking client methods (:pr:`1272`)
+-  Restrict to horizontal panning in bokeh plots (:pr:`1274`)
+-  Rename client.shutdown to client.close (:pr:`1275`)
+-  Avoid blocking on event loop (:pr:`1270`)
+-  Avoid cloudpickle errors for Client.get_versions (:pr:`1279`)
+-  Yield on Tornado IOStream.write futures (:pr:`1289`)
+-  Assume async behavior if inside a sync statement (:pr:`1284`)
+-  Avoid error messages on closing (:pr:`1297`), (:pr:`1296`) (:pr:`1318`)
+  (:pr:`1319`)
+-  Add timeout= keyword to get_client (:pr:`1290`)
+-  Respect timeouts when restarting (:pr:`1304`)
+-  Clean file descriptor and memory leaks in tests (:pr:`1317`)
+-  Deprecate Executor (:pr:`1302`)
+-  Add timeout to ThreadPoolExecutor.shutdown (:pr:`1330`)
+-  Clean up AsyncProcess handling (:pr:`1324`)
+-  Allow unicode keys in Python 2 scheduler (:pr:`1328`)
+-  Avoid leaking stolen data (:pr:`1326`)
+-  Improve error handling on failed nanny starts (:pr:`1337`), (:pr:`1331`)
+-  Make Adaptive more flexible
+-  Support ``--contact-address`` and ``--listen-address`` in worker (:pr:`1278`)
+-  Remove old dworker, dscheduler executables (:pr:`1355`)
+-  Exit workers if nanny process fails (:pr:`1345`)
+-  Auto pep8 and flake (:pr:`1353`)
+
+1.18.0 - July 8th, 2017
+-----------------------
+-  Multi-threading safety (:pr:`1191`), (:pr:`1228`), (:pr:`1229`)
+-  Improve handling of byte counting (:pr:`1198`) (:pr:`1224`)
+-  Add get_client, secede functions, refactor worker-client relationship
+  (:pr:`1201`)
+-  Allow logging configuraiton using logging.dictConfig() (:pr:`1206`) (:pr:`1211`)
+-  Offload serialization and deserialization to separate thread (:pr:`1218`)
+-  Support fire-and-forget tasks (:pr:`1221`)
+-  Support bytestrings as keys (for Julia) (:pr:`1234`)
+-  Resolve testing corner-cases (:pr:`1236`), (:pr:`1237`), (:pr:`1240`), (:pr:`1241`), (:pr:`1242`), (:pr:`1244`)
+-  Automatic use of scatter/gather(direct=True) in more cases (:pr:`1239`)
+
+1.17.1 - June 14th, 2017
+------------------------
+
+-  Remove Python 3.4 testing from travis-ci (:pr:`1157`)
+-  Remove ZMQ Support (:pr:`1160`)
+-  Fix memoryview nbytes issue in Python 2.7 (:pr:`1165`)
+-  Re-enable counters (:pr:`1168`)
+-  Improve scheduler.restart (:pr:`1175`)
+
 
 1.17.0 - June 9th, 2017
 -----------------------

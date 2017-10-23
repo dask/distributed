@@ -1,24 +1,19 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from datetime import timedelta
-from functools import partial
-import json
 import logging
 import os
-import shutil
 import signal
 from sys import exit
-from time import sleep
 
 import click
-from distributed import Nanny, Worker, rpc
-from distributed.utils import All, get_ip_interface
+from distributed import Nanny, Worker
+from distributed.utils import get_ip_interface
 from distributed.worker import _ncores
 from distributed.http import HTTPWorker
-from distributed.metrics import time
 from distributed.security import Security
 from distributed.cli.utils import check_python_3, uri_from_host_port
+from distributed.comm import get_address_host_port
 
 from toolz import valmap
 from tornado.ioloop import IOLoop, TimeoutError
@@ -28,6 +23,7 @@ logger = logging.getLogger('distributed.dask_worker')
 
 
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
+
 
 @click.command()
 @click.argument('scheduler', type=str, required=False)
@@ -47,9 +43,18 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="Bokeh port, defaults to 8789")
 @click.option('--bokeh/--no-bokeh', 'bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
+@click.option('--listen-address', type=str, default=None,
+        help="The address to which the worker binds. "
+             "Example: tcp://0.0.0.0:9000")
+@click.option('--contact-address', type=str, default=None,
+        help="The address the worker advertises to the scheduler for "
+             "communication with it and other workers. "
+             "Example: tcp://127.0.0.1:9000")
 @click.option('--host', type=str, default=None,
               help="Serving host. Should be an ip address that is"
                    " visible to the scheduler and other workers. "
+                   "See --listen-address and --contact-address if you "
+                   "need different listen and contact addresses. "
                    "See --interface.")
 @click.option('--interface', type=str, default=None,
               help="Network interface like 'eth0' or 'ib0'")
@@ -60,9 +65,9 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--name', type=str, default='',
               help="A unique name for this worker like 'worker-1'")
 @click.option('--memory-limit', default='auto',
-              help="Number of bytes before spilling data to disk. "
-                   "This can be an integer (nbytes) "
-                   "float (fraction of total memory) "
+              help="Bytes of memory that the worker can use. "
+                   "This can be an integer (bytes) "
+                   "float (fraction of total system memory) "
                    "or 'auto'")
 @click.option('--reconnect/--no-reconnect', default=True,
               help="Reconnect to scheduler if disconnected")
@@ -84,20 +89,16 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process '
                    'like "foo.bar" or "/path/to/foo.py"')
-def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
-         nanny, name, memory_limit, pid_file, reconnect,
-         resources, bokeh, bokeh_port, local_directory, scheduler_file,
-         interface, death_timeout, preload, bokeh_prefix,
-         tls_ca_file, tls_cert, tls_key):
+def main(scheduler, host, worker_port, listen_address, contact_address,
+         http_port, nanny_port, nthreads, nprocs, nanny, name,
+         memory_limit, pid_file, reconnect, resources, bokeh,
+         bokeh_port, local_directory, scheduler_file, interface,
+         death_timeout, preload, bokeh_prefix, tls_ca_file,
+         tls_cert, tls_key):
     sec = Security(tls_ca_file=tls_ca_file,
                    tls_worker_cert=tls_cert,
                    tls_worker_key=tls_key,
                    )
-
-    if nanny:
-        port = nanny_port
-    else:
-        port = worker_port
 
     if nprocs > 1 and worker_port != 0:
         logger.error("Failed to launch worker.  You cannot use the --port argument when nprocs > 1.")
@@ -106,6 +107,44 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     if nprocs > 1 and name:
         logger.error("Failed to launch worker.  You cannot use the --name argument when nprocs > 1.")
         exit(1)
+
+    if nprocs > 1 and not nanny:
+        logger.error("Failed to launch worker.  You cannot use the --no-nanny argument when nprocs > 1.")
+        exit(1)
+
+    if contact_address and not listen_address:
+        logger.error("Failed to launch worker. "
+                     "Must specify --listen-address when --contact-address is given")
+        exit(1)
+
+    if nprocs > 1 and listen_address:
+        logger.error("Failed to launch worker. "
+                     "You cannot specify --listen-address when nprocs > 1.")
+        exit(1)
+
+    if (worker_port or host) and listen_address:
+        logger.error("Failed to launch worker. "
+                     "You cannot specify --listen-address when --worker-port or --host is given.")
+        exit(1)
+
+    try:
+        if listen_address:
+            (host, worker_port) = get_address_host_port(listen_address, strict=True)
+
+        if contact_address:
+            # we only need this to verify it is getting parsed
+            (_, _) = get_address_host_port(contact_address, strict=True)
+        else:
+            # if contact address is not present we use the listen_address for contact
+            contact_address = listen_address
+    except ValueError as e:
+        logger.error("Failed to launch worker. " + str(e))
+        exit(1)
+
+    if nanny:
+        port = nanny_port
+    else:
+        port = worker_port
 
     if not nthreads:
         nthreads = _ncores // nprocs
@@ -143,7 +182,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     loop = IOLoop.current()
 
     if nanny:
-        kwargs = {'worker_port': worker_port}
+        kwargs = {'worker_port': worker_port, 'listen_address': listen_address}
         t = Nanny
     else:
         kwargs = {}
@@ -151,19 +190,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
             kwargs['service_ports'] = {'nanny': nanny_port}
         t = Worker
 
-    if scheduler_file:
-        while not os.path.exists(scheduler_file):
-            sleep(0.01)
-        for i in range(10):
-            try:
-                with open(scheduler_file) as f:
-                    cfg = json.load(f)
-                scheduler = cfg['address']
-                break
-            except (ValueError, KeyError):  # race with scheduler on file
-                sleep(0.01)
-
-    if not scheduler:
+    if not scheduler and not scheduler_file:
         raise ValueError("Need to provide scheduler address like\n"
                          "dask-worker SCHEDULER_ADDRESS:8786")
 
@@ -179,11 +206,11 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
         # Choose appropriate address for scheduler
         addr = None
 
-    nannies = [t(scheduler, ncores=nthreads,
+    nannies = [t(scheduler, scheduler_file=scheduler_file, ncores=nthreads,
                  services=services, name=name, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
                  local_dir=local_directory, death_timeout=death_timeout,
-                 preload=preload, security=sec,
+                 preload=preload, security=sec, contact_address=contact_address,
                  **kwargs)
                for i in range(nprocs)]
 
@@ -207,11 +234,9 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    for n in nannies:
-        n.start(addr)
-
     @gen.coroutine
     def run():
+        yield [n.start(addr) for n in nannies]
         while all(n.status != 'closed' for n in nannies):
             yield gen.sleep(0.2)
 
@@ -229,6 +254,7 @@ def main(scheduler, host, worker_port, http_port, nanny_port, nthreads, nprocs,
 def go():
     check_python_3()
     main()
+
 
 if __name__ == '__main__':
     go()

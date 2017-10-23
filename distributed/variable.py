@@ -7,9 +7,15 @@ import uuid
 from tornado import gen
 import tornado.locks
 
+try:
+    from cytoolz import merge
+except ImportError:
+    from toolz import merge
+
 from .client import Future, _get_global_client, Client
 from .metrics import time
 from .utils import tokey, log_errors
+from .worker import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +29,7 @@ class VariableExtension(object):
     *  variable-get
     *  variable-delete
     """
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.variables = dict()
@@ -82,9 +89,14 @@ class VariableExtension(object):
             yield self.started.wait(timeout=left)
         record = self.variables[name]
         if record['type'] == 'Future':
+            key = record['value']
             token = uuid.uuid4().hex
-            record['token'] = token
-            self.waiting[record['value'], name].add(token)
+            try:
+                state = self.scheduler.task_state[key]
+            except KeyError:
+                state = 'lost'
+            record = merge(record, {'token': token, 'state': state})
+            self.waiting[key, name].add(token)
         raise gen.Return(record)
 
     @gen.coroutine
@@ -130,8 +142,9 @@ class Variable(object):
 
     See Also
     --------
-    Queue:
+    Queue: shared multi-producer/multi-consumer queue between clients
     """
+
     def __init__(self, name=None, client=None, maxsize=0):
         self.client = client or _get_global_client()
         self.name = name or 'variable-' + uuid.uuid4().hex
@@ -145,7 +158,7 @@ class Variable(object):
             yield self.client.scheduler.variable_set(data=value,
                                                      name=self.name)
 
-    def set(self, value):
+    def set(self, value, **kwargs):
         """ Set the value of this variable
 
         Parameters
@@ -153,7 +166,7 @@ class Variable(object):
         value: Future or object
             Must be either a Future or a msgpack-encodable value
         """
-        return self.client.sync(self._set, value)
+        return self.client.sync(self._set, value, **kwargs)
 
     @gen.coroutine
     def _get(self, timeout=None):
@@ -161,7 +174,7 @@ class Variable(object):
                                                      name=self.name,
                                                      client=self.client.id)
         if d['type'] == 'Future':
-            value = Future(d['value'], self.client, inform=True)
+            value = Future(d['value'], self.client, inform=True, state=d['state'])
             self.client._send_to_scheduler({'op': 'variable-future-release',
                                             'name': self.name,
                                             'key': d['value'],
@@ -170,9 +183,9 @@ class Variable(object):
             value = d['value']
         raise gen.Return(value)
 
-    def get(self, timeout=None):
+    def get(self, timeout=None, **kwargs):
         """ Get the value of this variable """
-        return self.client.sync(self._get, timeout=timeout)
+        return self.client.sync(self._get, timeout=timeout, **kwargs)
 
     def delete(self):
         """ Delete this variable
@@ -188,7 +201,9 @@ class Variable(object):
 
     def __setstate__(self, state):
         name, address = state
-        client = _get_global_client()
-        if client is None or client.scheduler.address != address:
+        try:
+            client = get_client(address)
+            assert client.address == address
+        except (AttributeError, AssertionError):
             client = Client(address, set_as_default=False)
         self.__init__(name=name, client=client)

@@ -9,27 +9,32 @@ API
 
 .. autosummary::
    Client
+   Client.call_stack
    Client.cancel
+   Client.close
    Client.compute
    Client.gather
    Client.get
    Client.get_dataset
    Client.get_executor
+   Client.get_metadata
+   Client.get_scheduler_logs
+   Client.get_worker_logs
    Client.has_what
    Client.list_datasets
    Client.map
    Client.ncores
    Client.persist
    Client.publish_dataset
+   Client.profile
    Client.rebalance
    Client.replicate
    Client.restart
    Client.run
    Client.run_on_scheduler
    Client.scatter
-   Client.shutdown
    Client.scheduler_info
-   Client.shutdown
+   Client.set_metadata
    Client.start_ipython_workers
    Client.start_ipython_scheduler
    Client.submit
@@ -42,6 +47,10 @@ API
 .. autosummary::
    worker_client
    get_worker
+   get_client
+   secede
+   rejoin
+   Reschedule
 
 .. currentmodule:: distributed.recreate_exceptions
 
@@ -68,6 +77,7 @@ API
 
 .. currentmodule:: distributed
 
+.. autosummary:: Lock
 .. autosummary:: Queue
 .. autosummary:: Variable
 
@@ -78,6 +88,8 @@ API
    as_completed
    distributed.diagnostics.progress
    wait
+   fire_and_forget
+
 
 Asynchronous methods
 --------------------
@@ -114,6 +126,8 @@ The asynchronous variants must be run within a Tornado coroutine.  See the
 Client
 ------
 
+.. currentmodule:: distributed.client
+
 .. autoclass:: Client
    :members:
 
@@ -139,6 +153,9 @@ Other
 
 .. autofunction:: distributed.worker_client
 .. autofunction:: distributed.get_worker
+.. autofunction:: distributed.get_client
+.. autofunction:: distributed.secede
+.. autofunction:: distributed.rejoin
 
 .. autoclass:: Queue
    :members:
@@ -151,4 +168,12 @@ Asyncio Client
 
 .. currentmodule:: distributed.asyncio
 .. autoclass:: AioClient
+   :members:
+
+
+Adaptive
+--------
+
+.. currentmodule:: distributed.deploy
+.. autoclass:: Adaptive
    :members:

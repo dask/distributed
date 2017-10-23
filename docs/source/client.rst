@@ -153,7 +153,7 @@ Tornado Coroutines
 ------------------
 
 If we are operating in an asynchronous environment then the blocking functions
-listed above become have asynchronous equivalents.  You must start your client
+listed above become asynchronous equivalents.  You must start your client
 with the ``asynchronous=True`` keyword and ``yield`` or ``await`` blocking
 functions.
 
@@ -165,6 +165,20 @@ functions.
        future = client.submit(func, *args)
        result = yield future
        return result
+
+If you want to reuse the same client in asynchronous and synchronous
+environments you can apply the ``asynchronous=True`` keyword at each method
+call.
+
+.. code-block:: python
+
+   client = Client()  # normal blocking client
+
+   @gen.coroutine
+   def f():
+       futures = client.map(func, L)
+       results = yield client.gather(futures, asynchronous=True)
+       return results
 
 See the :doc:`Asynchronous <asynchronous>` documentation for more information.
 

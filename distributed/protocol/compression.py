@@ -14,6 +14,8 @@ from toolz import identity, partial
 try:
     import blosc
     n = blosc.set_nthreads(2)
+    if hasattr('blosc', 'releasegil'):
+        blosc.set_releasegil(True)
 except ImportError:
     blosc = False
 
@@ -23,6 +25,9 @@ from ..utils import ignoring, ensure_bytes
 
 compressions = {None: {'compress': identity,
                        'decompress': identity}}
+
+compressions[False] = compressions[None]  # alias
+
 
 default_compression = None
 
@@ -98,8 +103,8 @@ if default != 'auto':
         default_compression = default
     else:
         raise ValueError("Default compression '%s' not found.\n"
-                "Choices include auto, %s" % (
-                    default, ', '.join(sorted(map(str, compressions)))))
+                         "Choices include auto, %s" % (
+                             default, ', '.join(sorted(map(str, compressions)))))
 
 
 def byte_sample(b, size, n):
@@ -158,7 +163,7 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
     else:
         nbytes = len(payload)
 
-    if blosc and type(payload) is memoryview:
+    if default_compression and blosc and type(payload) is memoryview:
         # Blosc does itemsize-aware shuffling, resulting in better compression
         compressed = blosc.compress(payload, typesize=payload.itemsize,
                                     cname='lz4', clevel=5)

@@ -45,7 +45,10 @@ class Manager(object):
 
     def remove_listener(self, addr):
         with self.lock:
-            del self.listeners[addr]
+            try:
+                del self.listeners[addr]
+            except KeyError:
+                pass
 
     def get_listener_for(self, addr):
         with self.lock:
@@ -141,9 +144,11 @@ class InProc(Comm):
     Reminder: a Comm must always be used from a single thread.
     Its peer Comm can be running in any thread.
     """
+    _initialized = False
 
-    def __init__(self, peer_addr, read_q, write_q, write_loop,
+    def __init__(self, local_addr, peer_addr, read_q, write_q, write_loop,
                  deserialize=True):
+        self._local_addr = local_addr
         self._peer_addr = peer_addr
         self.deserialize = deserialize
         self._read_q = read_q
@@ -153,6 +158,7 @@ class InProc(Comm):
 
         self._finalizer = finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
+        self._initialized = True
 
     def _get_finalizer(self):
         def finalize(write_q=self._write_q, write_loop=self._write_loop,
@@ -162,8 +168,9 @@ class InProc(Comm):
 
         return finalize
 
-    def __repr__(self):
-        return "<InProc %r>" % (self._peer_addr,)
+    @property
+    def local_address(self):
+        return self._local_addr
 
     @property
     def peer_address(self):
@@ -215,7 +222,8 @@ class InProc(Comm):
         """
         if self._closed:
             return True
-        if self._read_q.peek(None) is _EOF:
+        # NOTE: repr() is called by finalize() during __init__()...
+        if self._initialized and self._read_q.peek(None) is _EOF:
             self._closed = True
             self._finalizer.detach()
             return True
@@ -224,6 +232,7 @@ class InProc(Comm):
 
 
 class InProcListener(Listener):
+    prefix = 'inproc'
 
     def __init__(self, address, comm_handler, deserialize=True):
         self.manager = global_manager
@@ -238,7 +247,8 @@ class InProcListener(Listener):
             conn_req = yield self.listen_q.get()
             if conn_req is None:
                 break
-            comm = InProc(peer_addr='inproc://' + conn_req.c_addr,
+            comm = InProc(local_addr='inproc://' + self.address,
+                          peer_addr='inproc://' + conn_req.c_addr,
                           read_q=conn_req.c2s_q,
                           write_q=conn_req.s2c_q,
                           write_loop=conn_req.c_loop,
@@ -291,7 +301,8 @@ class InProcConnector(Connector):
         #  created, for example if the listener was stopped in the meantime)
         yield conn_req.conn_event.wait()
 
-        comm = InProc(peer_addr='inproc://' + address,
+        comm = InProc(local_addr='inproc://' + conn_req.c_addr,
+                      peer_addr='inproc://' + address,
                       read_q=conn_req.s2c_q,
                       write_q=conn_req.c2s_q,
                       write_loop=listener.loop,

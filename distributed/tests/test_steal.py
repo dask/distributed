@@ -1,26 +1,24 @@
 from __future__ import print_function, division, absolute_import
 
 import itertools
-from functools import partial
 from operator import mul
 import random
 import sys
 from time import sleep
+import weakref
 
 import pytest
 from toolz import sliding_window, concat
 from tornado import gen
 
-import dask
-from dask import delayed
-from distributed import Worker, Nanny, worker_client
+from distributed import Nanny, Worker, wait, worker_client
 from distributed.config import config
-from distributed.client import Client, _wait, wait
 from distributed.metrics import time
 from distributed.scheduler import BANDWIDTH, key_split
-from distributed.utils_test import (cluster, slowinc, slowadd, randominc,
-        loop, inc, dec, div, throws, gen_cluster, gen_test, double, deep,
-        slowidentity)
+from distributed.utils_test import (slowinc, slowadd, inc, gen_cluster,
+                                    slowidentity)
+from distributed.utils_test import loop # flake8: noqa
+from distributed.worker import TOTAL_MEMORY
 
 import pytest
 
@@ -28,12 +26,12 @@ import pytest
 @pytest.mark.skipif(not sys.platform.startswith('linux'),
                     reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 2), ('127.0.0.2', 2)],
-        timeout=20)
+             timeout=20)
 def test_work_stealing(c, s, a, b):
     [x] = yield c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50)
     yield gen.sleep(0.1)
-    yield _wait(futures)
+    yield wait(futures)
     assert len(a.data) > 10
     assert len(b.data) > 10
     assert len(a.data) > len(b.data) - 5
@@ -43,13 +41,14 @@ def test_work_stealing(c, s, a, b):
 def test_dont_steal_expensive_data_fast_computation(c, s, a, b):
     np = pytest.importorskip('numpy')
     x = c.submit(np.arange, 1000000, workers=a.address)
-    yield _wait([x])
+    yield wait([x])
     future = c.submit(np.sum, [1], workers=a.address)  # learn that sum is fast
-    yield _wait([future])
+    yield wait([future])
 
     cheap = [c.submit(np.sum, x, pure=False, workers=a.address,
                       allow_other_workers=True) for i in range(10)]
-    yield _wait(cheap)
+    yield wait(cheap)
+    assert len(s.who_has[x.key]) == 1
     assert len(b.data) == 0
     assert len(a.data) == 12
 
@@ -57,26 +56,28 @@ def test_dont_steal_expensive_data_fast_computation(c, s, a, b):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
 def test_steal_cheap_data_slow_computation(c, s, a, b):
     x = c.submit(slowinc, 100, delay=0.1)  # learn that slowinc is slow
-    yield _wait([x])
+    yield wait(x)
 
     futures = c.map(slowinc, range(10), delay=0.1, workers=a.address,
                     allow_other_workers=True)
-    yield _wait(futures)
+    yield wait(futures)
     assert abs(len(a.data) - len(b.data)) <= 5
 
 
+@pytest.mark.avoid_travis
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
 def test_steal_expensive_data_slow_computation(c, s, a, b):
     np = pytest.importorskip('numpy')
 
     x = c.submit(slowinc, 100, delay=0.2, workers=a.address)
-    yield _wait([x])  # learn that slowinc is slow
+    yield wait(x)  # learn that slowinc is slow
 
     x = c.submit(np.arange, 1000000, workers=a.address)  # put expensive data
-    yield _wait([x])
+    yield wait(x)
 
     slow = [c.submit(slowinc, x, delay=0.1, pure=False) for i in range(20)]
-    yield _wait([slow])
+    yield wait(slow)
+    assert len(s.who_has[x.key]) > 1
 
     assert b.data  # not empty
 
@@ -88,18 +89,19 @@ def test_worksteal_many_thieves(c, s, *workers):
 
     xs = c.map(slowinc, [x] * 100, pure=False, delay=0.1)
 
-    yield _wait(xs)
+    yield wait(xs)
 
     for w, keys in s.has_what.items():
         assert 2 < len(keys) < 30
 
+    assert len(s.who_has[x.key]) > 1
     assert sum(map(len, s.has_what.values())) < 150
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)
 def test_dont_steal_unknown_functions(c, s, a, b):
     futures = c.map(inc, [1, 2], workers=a.address, allow_other_workers=True)
-    yield _wait(futures)
+    yield wait(futures)
     assert len(a.data) == 2
     assert len(b.data) == 0
 
@@ -108,7 +110,7 @@ def test_dont_steal_unknown_functions(c, s, a, b):
 def test_eventually_steal_unknown_functions(c, s, a, b):
     futures = c.map(slowinc, range(10), delay=0.1,  workers=a.address,
                     allow_other_workers=True)
-    yield _wait(futures)
+    yield wait(futures)
     assert len(a.data) >= 3
     assert len(b.data) >= 3
 
@@ -119,7 +121,7 @@ def test_steal_related_tasks(e, s, a, b, c):
     futures = e.map(slowinc, range(20), delay=0.05, workers=a.address,
                     allow_other_workers=True)
 
-    yield _wait(futures)
+    yield wait(futures)
 
     nearby = 0
     for f1, f2 in sliding_window(2, futures):
@@ -137,25 +139,26 @@ def test_dont_steal_fast_tasks(c, s, *workers):
     def do_nothing(x, y=None):
         pass
 
-    yield _wait(c.submit(do_nothing, 1))
+    yield wait(c.submit(do_nothing, 1))
 
     futures = c.map(do_nothing, range(1000), y=x)
 
-    yield _wait(futures)
+    yield wait(futures)
 
+    assert len(s.who_has[x.key]) == 1
     assert len(s.has_what[workers[0].address]) == 1001
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)], timeout=20)
 def test_new_worker_steals(c, s, a):
-    yield _wait(c.submit(slowinc, 1, delay=0.01))
+    yield wait(c.submit(slowinc, 1, delay=0.01))
 
     futures = c.map(slowinc, range(100), delay=0.05)
     total = c.submit(sum, futures)
     while len(a.task_state) < 10:
         yield gen.sleep(0.01)
 
-    b = Worker(s.ip, s.port, loop=s.loop, ncores=1)
+    b = Worker(s.ip, s.port, loop=s.loop, ncores=1, memory_limit=TOTAL_MEMORY)
     yield b._start()
 
     result = yield total
@@ -171,12 +174,12 @@ def test_new_worker_steals(c, s, a):
 
 @gen_cluster(client=True, timeout=20)
 def test_work_steal_no_kwargs(c, s, a, b):
-    yield _wait(c.submit(slowinc, 1, delay=0.05))
+    yield wait(c.submit(slowinc, 1, delay=0.05))
 
     futures = c.map(slowinc, range(100), workers=a.address,
                     allow_other_workers=True, delay=0.05)
 
-    yield _wait(futures)
+    yield wait(futures)
 
     assert 20 < len(a.data) < 80
     assert 20 < len(b.data) < 80
@@ -274,12 +277,13 @@ def test_steal_resource_restrictions(c, s, a):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 5, timeout=20)
 def test_balance_without_dependencies(c, s, *workers):
     s.extensions['stealing']._pc.callback_time = 20
+
     def slow(x):
         y = random.random() * 0.1
         sleep(y)
         return y
     futures = c.map(slow, range(100))
-    yield _wait(futures)
+    yield wait(futures)
 
     durations = [sum(w.data.values()) for w in workers]
     assert max(durations) / min(durations) < 3
@@ -290,7 +294,7 @@ def test_dont_steal_executing_tasks(c, s, a, b):
     futures = c.map(slowinc, range(4), delay=0.1, workers=a.address,
                     allow_other_workers=True)
 
-    yield _wait(futures)
+    yield wait(futures)
     assert len(a.data) == 4
     assert len(b.data) == 0
 
@@ -299,26 +303,27 @@ def test_dont_steal_executing_tasks(c, s, a, b):
 def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
     s.extensions['stealing']._pc.callback_time = 20
     x = c.submit(mul, b'0', 100000000, workers=a.address)  # 100 MB
-    yield _wait(x)
+    yield wait(x)
     s.task_duration['slowidentity'] = 0.2
 
     futures = [c.submit(slowidentity, x, pure=False, delay=0.2) for i in range(2)]
 
-    yield _wait(futures)
+    yield wait(futures)
 
     assert len(a.data) == 3
     assert not any(w.task_state for w in rest)
 
 
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10,
+             worker_kwargs={'memory_limit': TOTAL_MEMORY})
 def test_steal_when_more_tasks(c, s, a, *rest):
     s.extensions['stealing']._pc.callback_time = 20
-    x = c.submit(mul, b'0', 100000000, workers=a.address)  # 100 MB
-    yield _wait(x)
+    x = c.submit(mul, b'0', 50000000, workers=a.address)  # 50 MB
+    yield wait(x)
     s.task_duration['slowidentity'] = 0.2
 
     futures = [c.submit(slowidentity, x, pure=False, delay=0.2)
-                for i in range(20)]
+               for i in range(20)]
     yield gen.sleep(0.1)
 
     assert any(w.task_state for w in rest)
@@ -331,13 +336,13 @@ def test_steal_more_attractive_tasks(c, s, a, *rest):
         return x
     s.extensions['stealing']._pc.callback_time = 20
     x = c.submit(mul, b'0', 100000000, workers=a.address)  # 100 MB
-    yield _wait(x)
+    yield wait(x)
     s.task_duration['slowidentity'] = 0.2
     s.task_duration['slow2'] = 1
 
     future = c.submit(slow2, x)
     futures = [c.submit(slowidentity, x, pure=False, delay=0.2)
-                for i in range(10)]
+               for i in range(10)]
 
     while not any(w.task_state for w in rest):
         yield gen.sleep(0.01)
@@ -348,7 +353,6 @@ def test_steal_more_attractive_tasks(c, s, a, *rest):
 
 def func(x):
     sleep(1)
-    pass
 
 
 def assert_balanced(inp, expected, c, s, *workers):
@@ -388,66 +392,67 @@ def assert_balanced(inp, expected, c, s, *workers):
 
     if config.get('pdb-on-err'):
         if result2 != expected2:
-            import pdb; pdb.set_trace()
+            import pdb
+            pdb.set_trace()
 
     assert result2 == expected2
 
 
 @pytest.mark.parametrize('inp,expected', [
     ([[1], []],  # don't move unnecessarily
-    [[1], []]),
+     [[1], []]),
 
-   ([[0, 0], []],  # balance
-    [[0], [0]]),
+    ([[0, 0], []],  # balance
+     [[0], [0]]),
 
-   ([[0.1, 0.1], []],  # balance even if results in even
-    [[0], [0]]),
+    ([[0.1, 0.1], []],  # balance even if results in even
+     [[0], [0]]),
 
-   ([[0, 0, 0], []],  # don't over balance
-    [[0, 0], [0]]),
+    ([[0, 0, 0], []],  # don't over balance
+     [[0, 0], [0]]),
 
-   ([[0, 0], [0, 0, 0], []],  # move from larger
-    [[0, 0], [0, 0], [0]]),
+    ([[0, 0], [0, 0, 0], []],  # move from larger
+     [[0, 0], [0, 0], [0]]),
 
-   ([[0, 0, 0], [0], []],  # move to smaller
-    [[0, 0], [0], [0]]),
+    ([[0, 0, 0], [0], []],  # move to smaller
+     [[0, 0], [0], [0]]),
 
-   ([[0, 1], []],  # choose easier first
-    [[1], [0]]),
+    ([[0, 1], []],  # choose easier first
+     [[1], [0]]),
 
-   ([[0, 0, 0, 0], [], []],  # spread evenly
-    [[0, 0], [0], [0]]),
+    ([[0, 0, 0, 0], [], []],  # spread evenly
+     [[0, 0], [0], [0]]),
 
-   ([[1, 0, 2, 0], [], []],  # move easier
-    [[2, 1], [0], [0]]),
+    ([[1, 0, 2, 0], [], []],  # move easier
+     [[2, 1], [0], [0]]),
 
-   ([[1, 1, 1], []],  # be willing to move costly items
-    [[1, 1], [1]]),
+    ([[1, 1, 1], []],  # be willing to move costly items
+     [[1, 1], [1]]),
 
-   ([[1, 1, 1, 1], []],  # but don't move too many
-    [[1, 1, 1], [1]]),
+    ([[1, 1, 1, 1], []],  # but don't move too many
+     [[1, 1, 1], [1]]),
 
-   ([[0, 0], [0, 0], [0, 0], []],  # no one clearly saturated
-    [[0, 0], [0, 0], [0], [0]]),
+    ([[0, 0], [0, 0], [0, 0], []],  # no one clearly saturated
+     [[0, 0], [0, 0], [0], [0]]),
 
-   ([[4, 2, 2, 2, 2, 1, 1],
-     [4, 2, 1, 1],
-     [],
-     [],
-     []],
-    [[4, 2, 2, 2, 2],
-     [4, 2, 1],
-     [1],
-     [1],
-     [1]]),
+    ([[4, 2, 2, 2, 2, 1, 1],
+      [4, 2, 1, 1],
+      [],
+      [],
+      []],
+     [[4, 2, 2, 2, 2],
+      [4, 2, 1],
+      [1],
+      [1],
+      [1]]),
 
-   ([[1, 1, 1, 1, 1, 1, 1],
-     [1, 1], [1, 1], [1, 1],
-     []],
-    [[1, 1, 1, 1, 1],
-     [1, 1], [1, 1], [1, 1],
-     [1, 1]])
-    ])
+    ([[1, 1, 1, 1, 1, 1, 1],
+      [1, 1], [1, 1], [1, 1],
+      []],
+     [[1, 1, 1, 1, 1],
+      [1, 1], [1, 1], [1, 1],
+      [1, 1]])
+])
 def test_balance(inp, expected):
     test = lambda *args, **kwargs: assert_balanced(inp, expected, *args, **kwargs)
     test = gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * len(inp))(test)
@@ -479,7 +484,7 @@ def test_steal_communication_heavy_tasks(c, s, a, b):
 
     futures = [c.submit(slowadd, x, y, delay=1, pure=False, workers=a.address,
                         allow_other_workers=True)
-                for i in range(10)]
+               for i in range(10)]
 
     while not any(f.key in s.rprocessing for f in futures):
         yield gen.sleep(0.01)
@@ -492,7 +497,7 @@ def test_steal_communication_heavy_tasks(c, s, a, b):
 @gen_cluster(client=True)
 def test_steal_twice(c, s, a, b):
     x = c.submit(inc, 1, workers=a.address)
-    yield _wait(x)
+    yield wait(x)
 
     futures = [c.submit(slowadd, x, i, delay=0.2) for i in range(100)]
 
@@ -502,7 +507,7 @@ def test_steal_twice(c, s, a, b):
     workers = [Worker(s.ip, s.port, loop=s.loop) for _ in range(30)]
     yield [w._start() for w in workers]  # army of new workers arrives to help
 
-    yield _wait(futures)
+    yield wait(futures)
 
     assert all(s.has_what.values())
     assert max(map(len, s.has_what.values())) < 20
@@ -548,7 +553,7 @@ def test_dont_steal_long_running_tasks(c, s, a, b):
         assert time() < start + 1
 
     na = len(a.executing)
-    nb= len(b.executing)
+    nb = len(b.executing)
 
     incs = c.map(inc, range(100), workers=a.address, allow_other_workers=True)
 
@@ -556,4 +561,35 @@ def test_dont_steal_long_running_tasks(c, s, a, b):
 
     assert sum(1 for k in s.processing[b.address] if k.startswith('long')) <= nb
 
-    yield _wait(long_tasks)
+    yield wait(long_tasks)
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 5)] * 2)
+def test_cleanup_repeated_tasks(c, s, a, b):
+    class Foo(object):
+        pass
+
+    s.extensions['stealing']._pc.callback_time = 20
+    yield c.submit(slowidentity, -1, delay=0.1)
+    objects = [c.submit(Foo, pure=False, workers=a.address) for _ in range(50)]
+
+    x = c.map(slowidentity, objects, workers=a.address, allow_other_workers=True,
+              delay=0.05)
+    del objects
+    yield wait(x)
+    assert a.data and b.data
+    assert len(a.data) + len(b.data) > 10
+    ws = weakref.WeakSet()
+    ws.update(a.data.values())
+    ws.update(b.data.values())
+    del x
+
+    start = time()
+    while a.data or b.data:
+        yield gen.sleep(0.01)
+        assert time() < start + 1
+
+    assert not s.who_has
+    assert not any(s.has_what.values())
+
+    assert not list(ws)

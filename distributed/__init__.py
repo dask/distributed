@@ -5,13 +5,16 @@ from .core import connect, rpc
 from .deploy import LocalCluster
 from .diagnostics import progress
 from .client import (Client, Executor, CompatibleExecutor,
-                     wait, as_completed, default_client)
+                     wait, as_completed, default_client, fire_and_forget,
+                     Future)
+from .lock import Lock
 from .nanny import Nanny
 from .queues import Queue
 from .scheduler import Scheduler
+from .threadpoolexecutor import rejoin
 from .utils import sync
 from .variable import Variable
-from .worker import Worker, get_worker
+from .worker import Worker, get_worker, get_client, secede, Reschedule
 from .worker_client import local_client, worker_client
 
 from ._version import get_versions

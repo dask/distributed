@@ -86,6 +86,7 @@ Contents
    :maxdepth: 1
    :caption: Build Understanding
 
+   diagnosing-performance
    efficiency
    limitations
    locality
@@ -104,7 +105,6 @@ Contents
 
    adaptive
    asynchronous
-   channels
    configuration
    ec2
    local-cluster

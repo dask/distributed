@@ -6,16 +6,20 @@ import gc
 from glob import glob
 import inspect
 import logging
+import logging.config
 import os
 import shutil
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
 import textwrap
 from time import sleep
 import uuid
+import warnings
+import weakref
 
 import six
 
@@ -24,17 +28,24 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .config import config
+from .compatibility import WINDOWS
+from .config import config, initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
 from .nanny import Nanny
 from .security import Security
 from .utils import ignoring, log_errors, sync, mp_context, get_ip, get_ipv6
-from .worker import Worker
+from .worker import Worker, TOTAL_MEMORY
 import pytest
+import psutil
 
 
 logger = logging.getLogger(__name__)
+
+
+logging_levels = {name: logger.level for name, logger in
+                  logging.root.manager.loggerDict.items()
+                  if isinstance(logger, logging.Logger)}
 
 
 @pytest.fixture(scope='session')
@@ -48,7 +59,7 @@ def valid_python_script(tmpdir_factory):
 def client_contract_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp('data').join('distributed_script.py')
     lines = ("from distributed import Client", "e = Client('127.0.0.1:8989')",
-     'print(e)')
+             'print(e)')
     local_file.write('\n'.join(lines))
     return local_file
 
@@ -99,7 +110,10 @@ def pristine_loop():
     try:
         yield loop
     finally:
-        loop.close(all_fds=True)
+        try:
+            loop.close(all_fds=True)
+        except ValueError:
+            pass
         IOLoop.clear_instance()
         IOLoop.clear_current()
 
@@ -110,7 +124,8 @@ def mock_ipython():
     ip = mock.Mock()
     ip.user_ns = {}
     ip.kernel = None
-    get_ip = lambda : ip
+
+    def get_ip(): return ip
     with mock.patch('IPython.get_ipython', get_ip), \
             mock.patch('distributed._ipython_utils.get_ipython', get_ip):
         yield ip
@@ -157,6 +172,11 @@ def slowdec(x, delay=0.02):
     return x - 1
 
 
+def slowdouble(x, delay=0.02):
+    sleep(delay)
+    return 2 * x
+
+
 def randominc(x, scale=1):
     from random import random
     sleep(random() * scale)
@@ -176,7 +196,10 @@ def slowsum(seq, delay=0.02):
 def slowidentity(*args, **kwargs):
     delay = kwargs.get('delay', 0.02)
     sleep(delay)
-    return args
+    if len(args) == 1:
+        return args[0]
+    else:
+        return args
 
 
 @gen.coroutine
@@ -266,7 +289,11 @@ def run_worker(q, scheduler_q, **kwargs):
             loop.run_sync(lambda: worker._start(0))
             q.put(worker.address)
             try:
-                loop.start()
+                @gen.coroutine
+                def wait_until_closed():
+                    yield worker._closed.wait()
+
+                loop.run_sync(wait_until_closed)
             finally:
                 loop.close(all_fds=True)
 
@@ -288,7 +315,7 @@ def run_nanny(q, scheduler_q, **kwargs):
 
 
 @contextmanager
-def check_active_rpc(loop, active_rpc_timeout=0):
+def check_active_rpc(loop, active_rpc_timeout=1):
     if rpc.active > 0:
         # Streams from a previous test dangling around?
         gc.collect()
@@ -302,6 +329,7 @@ def check_active_rpc(loop, active_rpc_timeout=0):
         # as Nanny does.
         # (*) (example: gather_from_workers())
         deadline = loop.time() + active_rpc_timeout
+
         @gen.coroutine
         def wait_a_bit():
             yield gen.sleep(0.01)
@@ -315,8 +343,13 @@ def check_active_rpc(loop, active_rpc_timeout=0):
 
 
 @contextmanager
-def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
-            scheduler_kwargs={}):
+def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
+            scheduler_kwargs={}, should_check_state=True):
+    ws = weakref.WeakSet()
+    before = process_state()
+    for name, level in logging_levels.items():
+        logging.getLogger(name).setLevel(level)
+
     with pristine_loop() as loop:
         with check_active_rpc(loop, active_rpc_timeout):
             if nanny:
@@ -331,6 +364,7 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
             scheduler = mp_context.Process(target=run_scheduler,
                                            args=(scheduler_q, nworkers + 1),
                                            kwargs=scheduler_kwargs)
+            ws.add(scheduler)
             scheduler.daemon = True
             scheduler.start()
 
@@ -338,11 +372,13 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
             workers = []
             for i in range(nworkers):
                 q = mp_context.Queue()
-                fn = '_test_worker-%s' % uuid.uuid1()
-                kwargs = merge({'ncores': 1, 'local_dir': fn}, worker_kwargs)
+                fn = '_test_worker-%s' % uuid.uuid4()
+                kwargs = merge({'ncores': 1, 'local_dir': fn,
+                                'memory_limit': TOTAL_MEMORY}, worker_kwargs)
                 proc = mp_context.Process(target=_run_worker,
                                           args=(q, scheduler_q),
                                           kwargs=kwargs)
+                ws.add(proc)
                 workers.append({'proc': proc, 'queue': q, 'dir': fn})
 
             for worker in workers:
@@ -362,7 +398,10 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                         if time() - start > 5:
                             raise Exception("Timeout on cluster creation")
 
-                yield {'proc': scheduler, 'address': saddr}, workers
+                # avoid sending processes down to function
+                yield {'address': saddr}, [{'address': w['address'],
+                                            'proc': weakref.ref(w['proc'])}
+                                           for w in workers]
             finally:
                 logger.debug("Closing out test cluster")
 
@@ -371,18 +410,31 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=0,
                 loop.run_sync(lambda: disconnect(saddr, timeout=0.5))
 
                 scheduler.terminate()
-                for proc in [w['proc'] for w in workers]:
-                    with ignoring(EnvironmentError):
-                        proc.terminate()
+                scheduler_q.close()
+                scheduler_q._reader.close()
+                scheduler_q._writer.close()
 
-                scheduler.join(timeout=2)
+                for w in workers:
+                    w['proc'].terminate()
+                    w['queue'].close()
+                    w['queue']._reader.close()
+                    w['queue']._writer.close()
+
+                scheduler.join(2)
+                del scheduler
                 for proc in [w['proc'] for w in workers]:
                     proc.join(timeout=2)
 
-                for q in [w['queue'] for w in workers]:
-                    q.close()
+                with ignoring(UnboundLocalError):
+                    del worker, w, proc
+                del workers[:]
+
                 for fn in glob('_test_worker-*'):
                     shutil.rmtree(fn)
+    assert not ws
+    after = process_state()
+    if should_check_state:
+        check_state(before, after)
 
 
 @gen.coroutine
@@ -390,12 +442,8 @@ def disconnect(addr, timeout=3):
     @gen.coroutine
     def do_disconnect():
         with ignoring(EnvironmentError, CommClosedError):
-            comm = yield connect(addr)
-            try:
-                yield comm.write({'op': 'terminate', 'close': True})
-                response = yield comm.read()
-            finally:
-                yield comm.close()
+            with rpc(addr) as w:
+                yield w.terminate(close=True)
 
     with ignoring(TimeoutError):
         yield gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
@@ -409,8 +457,8 @@ def disconnect_all(addresses, timeout=3):
 import pytest
 try:
     slow = pytest.mark.skipif(
-                not pytest.config.getoption("--runslow"),
-                reason="need --runslow option to run")
+        not pytest.config.getoption("--runslow"),
+        reason="need --runslow option to run")
 except (AttributeError, ValueError):
     def slow(*args):
         pass
@@ -420,7 +468,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 
-def gen_test(timeout=10):
+def gen_test(timeout=10, should_check_state=True):
     """ Coroutine test
 
     @gen_test(timeout=5)
@@ -429,19 +477,72 @@ def gen_test(timeout=10):
     """
     def _(func):
         def test_func():
+            before = process_state()
             with pristine_loop() as loop:
                 cor = gen.coroutine(func)
                 try:
                     loop.run_sync(cor, timeout=timeout)
                 finally:
                     loop.stop()
+            after = process_state()
+            if should_check_state:
+                check_state(before, after)
         return test_func
     return _
 
 
 from .scheduler import Scheduler
 from .worker import Worker
-from .client import Client
+
+
+def process_state():
+    d = {}
+    if not WINDOWS:
+        d['num-fds'] = psutil.Process().num_fds()
+
+    d['used-memory'] = psutil.Process().memory_info().rss
+    return d
+
+
+initial_state = process_state()
+
+
+def check_state(before, after):
+    """ Checks to ensure that process state is relatively clean
+
+    We run process_state before and after each test that creates a local
+    cluster.  This function includes the following checks to ensure that the
+    process hasn't changed too much
+
+    1.  Ensure that the number of file descriptors has not risen much
+    2.  Ensure that the amount of used memory has not risen much
+
+    This isn't yet perfect, we do leak FDs and memory.
+    """
+    if not WINDOWS:
+        start = time()
+        while after['num-fds'] > before['num-fds']:
+            sleep(0.1)
+            if time() > start + 2:
+                diff = after['num-fds'] - before['num-fds']
+                warnings.warn("This test leaked %d file descriptors" % diff)
+                break
+
+    start = time()
+    while after['used-memory'] > before['used-memory'] + 1e7:
+        gc.collect()
+        sleep(0.10)
+        after = process_state()
+        diff = (after['used-memory'] - before['used-memory']) // 1e6
+        if time() > start + 2:
+            warnings.warn("This test leaked %d MB of memory" % diff)
+            break
+
+    print("leaked memory", (after['used-memory'] - before['used-memory']) / 1e6,
+          "total leaked total",  (after['used-memory'] - initial_state['used-memory']) / 1e6)  # , end=' ')
+
+    total_diff = after['used-memory'] - initial_state['used-memory']
+    # assert total_diff < 2e9, total_diff
 
 
 @gen.coroutine
@@ -485,7 +586,7 @@ def end_cluster(s, workers):
             shutil.rmtree(dir)
 
     yield [end_worker(w) for w in workers]
-    yield s.close() # wait until scheduler stops completely
+    yield s.close()  # wait until scheduler stops completely
     s.stop()
 
 
@@ -498,7 +599,7 @@ def iscoroutinefunction(f):
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
-                worker_kwargs={}, active_rpc_timeout=0):
+                worker_kwargs={}, active_rpc_timeout=1, should_check_state=True):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -510,23 +611,31 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         start
         end
     """
+    for name, level in logging_levels.items():
+        logging.getLogger(name).setLevel(level)
+
+    worker_kwargs = merge({'memory_limit': TOTAL_MEMORY}, worker_kwargs)
+
     def _(func):
         cor = func
         if not iscoroutinefunction(func):
             cor = gen.coroutine(func)
 
         def test_func():
+            before = process_state()
+            result = None
             with pristine_loop() as loop:
                 with check_active_rpc(loop, active_rpc_timeout):
                     s, workers = loop.run_sync(lambda: start_cluster(ncores,
-                                    scheduler, loop, security=security,
-                                    Worker=Worker,
-                                    scheduler_kwargs=scheduler_kwargs,
-                                    worker_kwargs=worker_kwargs))
+                                                                     scheduler, loop, security=security,
+                                                                     Worker=Worker,
+                                                                     scheduler_kwargs=scheduler_kwargs,
+                                                                     worker_kwargs=worker_kwargs))
                     args = [s] + workers
 
                     if client:
                         c = []
+
                         @gen.coroutine
                         def f():
                             c2 = yield Client(s.address, loop=loop, security=security,
@@ -535,14 +644,23 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                         loop.run_sync(f)
                         args = c + args
                     try:
-                        return loop.run_sync(lambda: cor(*args), timeout=timeout)
+                        result = loop.run_sync(lambda: cor(*args), timeout=timeout)
                     finally:
                         if client:
-                            loop.run_sync(c[0]._shutdown)
+                            loop.run_sync(c[0]._close)
                         loop.run_sync(lambda: end_cluster(s, workers))
 
-                    for w in workers:
-                        assert not w._comms
+                    # for w in workers:
+                    #     assert not w._comms
+            for w in workers:
+                if hasattr(w, 'data'):
+                    w.data.clear()
+            import gc
+            gc.collect()
+            after = process_state()
+            if should_check_state:
+                check_state(before, after)
+            return result
 
         return test_func
     return _
@@ -614,11 +732,11 @@ def popen(*args, **kwargs):
             # XXX Also dump stdout if return code != 0 ?
             out, err = proc.communicate()
             if dump_stdout:
-                print('\n\nPrint from stderr\n=================\n')
-                print(err)
+                print('\n\nPrint from stderr\n  %s\n=================\n' % args[0][0])
+                print(err.decode())
 
                 print('\n\nPrint from stdout\n=================\n')
-                print(out)
+                print(out.decode())
 
 
 def wait_for_port(address, timeout=5):
@@ -705,13 +823,14 @@ def assert_can_connect_from_everywhere_4_6(port, timeout=None, connection_args=N
     futures = [
         assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
         assert_can_connect('tcp://%s:%d' % (get_ip(), port), *args),
-        ]
+    ]
     if has_ipv6():
         futures += [
             assert_can_connect('tcp://[::1]:%d' % port, *args),
             assert_can_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
-            ]
+        ]
     yield futures
+
 
 @gen.coroutine
 def assert_can_connect_from_everywhere_4(port, timeout=None, connection_args=None):
@@ -720,15 +839,16 @@ def assert_can_connect_from_everywhere_4(port, timeout=None, connection_args=Non
     """
     args = (timeout, connection_args)
     futures = [
-            assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
-            assert_can_connect('tcp://%s:%d' % (get_ip(), port), *args),
-        ]
+        assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
+        assert_can_connect('tcp://%s:%d' % (get_ip(), port), *args),
+    ]
     if has_ipv6():
         futures += [
             assert_cannot_connect('tcp://[::1]:%d' % port, *args),
             assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
-            ]
+        ]
     yield futures
+
 
 @gen.coroutine
 def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
@@ -738,17 +858,18 @@ def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
     args = (timeout, connection_args)
     futures = [
         assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
-        ]
+    ]
     if get_ip() != '127.0.0.1':  # No outside IPv4 connectivity?
         futures += [
             assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), *args),
-            ]
+        ]
     if has_ipv6():
         futures += [
             assert_cannot_connect('tcp://[::1]:%d' % port, *args),
             assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
-            ]
+        ]
     yield futures
+
 
 @gen.coroutine
 def assert_can_connect_from_everywhere_6(port, timeout=None, connection_args=None):
@@ -762,8 +883,9 @@ def assert_can_connect_from_everywhere_6(port, timeout=None, connection_args=Non
         assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), *args),
         assert_can_connect('tcp://[::1]:%d' % port, *args),
         assert_can_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
-        ]
+    ]
     yield futures
+
 
 @gen.coroutine
 def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
@@ -776,27 +898,30 @@ def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
         assert_cannot_connect('tcp://127.0.0.1:%d' % port, *args),
         assert_cannot_connect('tcp://%s:%d' % (get_ip(), port), *args),
         assert_can_connect('tcp://[::1]:%d' % port, *args),
-        ]
+    ]
     if get_ipv6() != '::1':  # No outside IPv6 connectivity?
         futures += [
             assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
-            ]
+        ]
     yield futures
 
 
 @contextmanager
-def captured_logger(logger):
+def captured_logger(logger, level=logging.INFO):
     """Capture output from the given Logger.
     """
     if isinstance(logger, str):
         logger = logging.getLogger(logger)
+    orig_level = logger.level
     orig_handlers = logger.handlers[:]
     sio = six.StringIO()
     logger.handlers[:] = [logging.StreamHandler(sio)]
+    logger.setLevel(level)
     try:
         yield sio
     finally:
         logger.handlers[:] = orig_handlers
+        logger.setLevel(orig_level)
 
 
 @contextmanager
@@ -821,10 +946,12 @@ def new_config(new_config):
     try:
         config.clear()
         config.update(new_config)
+        initialize_logging(config)
         yield
     finally:
         config.clear()
         config.update(orig_config)
+        initialize_logging(config)
 
 
 @contextmanager
@@ -853,6 +980,7 @@ def new_config_file(c):
 certs_dir = os.path.abspath(os.path.join(os.path.dirname(__file__),
                                          'tests'))
 
+
 def get_cert(filename):
     """
     Get the path to one of the test TLS certificates.
@@ -874,15 +1002,15 @@ def tls_config():
             'ca-file': ca_file,
             'client': {
                 'cert': keycert,
-                },
+            },
             'scheduler': {
                 'cert': keycert,
-                },
+            },
             'worker': {
                 'cert': keycert,
-                },
             },
-        }
+        },
+    }
     return c
 
 
@@ -914,3 +1042,35 @@ def tls_only_security():
         sec = Security()
     assert sec.require_encryption
     return sec
+
+
+def get_server_ssl_context(certfile='tls-cert.pem', keyfile='tls-key.pem',
+                           ca_file='tls-ca-cert.pem'):
+    ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH,
+                                     cafile=get_cert(ca_file))
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
+    return ctx
+
+
+def get_client_ssl_context(certfile='tls-cert.pem', keyfile='tls-key.pem',
+                           ca_file='tls-ca-cert.pem'):
+    ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH,
+                                     cafile=get_cert(ca_file))
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.load_cert_chain(get_cert(certfile), get_cert(keyfile))
+    return ctx
+
+
+def bump_rlimit(limit, desired):
+    resource = pytest.importorskip('resource')
+    try:
+        soft, hard = resource.getrlimit(limit)
+        if soft < desired:
+            resource.setrlimit(limit,
+                               (desired, max(hard, desired)))
+    except Exception as e:
+        pytest.skip("rlimit too low (%s) and can't be increased: %s"
+                    % (soft, e))

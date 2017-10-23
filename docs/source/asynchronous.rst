@@ -43,6 +43,19 @@ received information from the scheduler should now be ``await``'ed.
 
    result = await client.gather(future)
 
+If you want to reuse the same client in asynchronous and synchronous
+environments you can apply the ``asynchronous=True`` keyword at each method
+call.
+
+.. code-block:: python
+
+   client = Client()  # normal blocking client
+
+   async def f():
+       futures = client.map(func, L)
+       results = await client.gather(futures, asynchronous=True)
+       return results
+
 AsyncIO
 -------
 
@@ -87,7 +100,7 @@ Python 3 with Tornado
        client = await Client(asynchronous=True)
        future = client.submit(lambda x: x + 1, 10)
        result = await future
-       await client.shutdown()
+       await client.close()
        return result
 
    from tornado.ioloop import IOLoop
@@ -106,7 +119,7 @@ Python 2/3 with Tornado
        client = yield Client(asynchronous=True)
        future = client.submit(lambda x: x + 1, 10)
        result = yield future
-       yield client.shutdown()
+       yield client.close()
        raise gen.Result(result)
 
    from tornado.ioloop import IOLoop
@@ -123,7 +136,7 @@ Python 3 with Asyncio
        client = await AioClient()
        future = client.submit(lambda x: x + 1, 10)
        result = await future
-       await client.shutdown()
+       await client.close()
        return result
 
    from asyncio import get_event_loop

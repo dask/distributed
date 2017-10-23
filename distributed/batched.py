@@ -7,7 +7,6 @@ from tornado import gen, locks
 from tornado.ioloop import IOLoop
 
 from .core import CommClosedError
-from .utils import ignoring
 
 
 logger = logging.getLogger(__name__)
@@ -65,23 +64,28 @@ class BatchedSend(object):
     @gen.coroutine
     def _background_send(self):
         while not self.please_stop:
-            with ignoring(gen.TimeoutError):
+            try:
                 yield self.waker.wait(self.next_deadline)
                 self.waker.clear()
+            except gen.TimeoutError:
+                pass
             if not self.buffer:
                 # Nothing to send
                 self.next_deadline = None
                 continue
             if (self.next_deadline is not None and
-                self.loop.time() < self.next_deadline):
+                    self.loop.time() < self.next_deadline):
                 # Send interval not expired yet
                 continue
             payload, self.buffer = self.buffer, []
             self.batch_count += 1
             self.next_deadline = self.loop.time() + self.interval
             try:
-                self.recent_message_log.append(payload)
                 nbytes = yield self.comm.write(payload)
+                if nbytes < 1e6:
+                    self.recent_message_log.append(payload)
+                else:
+                    self.recent_message_log.append('large-message')
                 self.byte_count += nbytes
             except CommClosedError as e:
                 logger.info("Batched Comm Closed: %s", e)
