@@ -2172,61 +2172,63 @@ class Worker(WorkerBase):
         if self._memory_monitoring:
             return
         self._memory_monitoring = True
-        total = 0
+        try:
+            total = 0
 
-        proc = psutil.Process()
-        memory = proc.memory_info().rss
-        frac = memory / self.memory_limit
+            proc = psutil.Process()
+            memory = proc.memory_info().rss
+            frac = memory / self.memory_limit
 
-        # Pause worker threads if above 80% memory use
-        if self.memory_pause_fraction and frac > self.memory_pause_fraction:
-            if not self.paused:
-                logger.warn("Worker is at %d%% memory usage. Pausing worker.  "
+            # Pause worker threads if above 80% memory use
+            if self.memory_pause_fraction and frac > self.memory_pause_fraction:
+                if not self.paused:
+                    logger.warn("Worker is at %d%% memory usage. Pausing worker.  "
+                                "Process memory: %s -- Worker memory limit: %s",
+                                int(frac * 100),
+                                format_bytes(proc.memory_info().rss),
+                                format_bytes(self.memory_limit))
+                    self.paused = True
+            elif self.paused:
+                logger.warn("Worker is at %d%% memory usage. Resuming worker. "
                             "Process memory: %s -- Worker memory limit: %s",
                             int(frac * 100),
                             format_bytes(proc.memory_info().rss),
                             format_bytes(self.memory_limit))
-                self.paused = True
-        elif self.paused:
-            logger.warn("Worker is at %d%% memory usage. Resuming worker. "
-                        "Process memory: %s -- Worker memory limit: %s",
-                        int(frac * 100),
-                        format_bytes(proc.memory_info().rss),
-                        format_bytes(self.memory_limit))
-            self.paused = False
-            self.ensure_computing()
+                self.paused = False
+                self.ensure_computing()
 
-        # Dump data to disk if above 70%
-        if self.memory_spill_fraction and frac > self.memory_spill_fraction:
-            target = self.memory_limit * self.memory_target_fraction
-            count = 0
-            need = memory - target
-            while memory > target:
-                if not self.data.fast:
-                    logger.warn("Memory use is high but worker has no data "
-                                "to store to disk.  Perhaps some other process "
-                                "is leaking memory?  Process memory: %s -- "
-                                "Worker memory limit: %s",
-                                format_bytes(proc.memory_info().rss),
-                                format_bytes(self.memory_limit))
-                    break
-                k, v, weight = self.data.fast.evict()
-                del k, v
-                total += weight
-                count += 1
-                yield gen.moment
-                memory = proc.memory_info().rss
-                if total > need and memory > target:
-                    # Issue a GC to ensure that the evicted data is actually
-                    # freed from memory and taken into account by the monitor
-                    # before trying to evict even more data.
-                    self.gc.collect()
+            # Dump data to disk if above 70%
+            if self.memory_spill_fraction and frac > self.memory_spill_fraction:
+                target = self.memory_limit * self.memory_target_fraction
+                count = 0
+                need = memory - target
+                while memory > target:
+                    if not self.data.fast:
+                        logger.warn("Memory use is high but worker has no data "
+                                    "to store to disk.  Perhaps some other process "
+                                    "is leaking memory?  Process memory: %s -- "
+                                    "Worker memory limit: %s",
+                                    format_bytes(proc.memory_info().rss),
+                                    format_bytes(self.memory_limit))
+                        break
+                    k, v, weight = self.data.fast.evict()
+                    del k, v
+                    total += weight
+                    count += 1
+                    yield gen.moment
                     memory = proc.memory_info().rss
-            if count:
-                logger.debug("Moved %d pieces of data data and %s to disk",
-                             count, format_bytes(total))
+                    if total > need and memory > target:
+                        # Issue a GC to ensure that the evicted data is actually
+                        # freed from memory and taken into account by the monitor
+                        # before trying to evict even more data.
+                        self.gc.collect()
+                        memory = proc.memory_info().rss
+                if count:
+                    logger.debug("Moved %d pieces of data data and %s to disk",
+                                 count, format_bytes(total))
 
-        self._memory_monitoring = False
+        finally:
+            self._memory_monitoring = False
         raise gen.Return(total)
 
     def cycle_profile(self):

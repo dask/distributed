@@ -75,6 +75,7 @@ class Nanny(ServerNode):
         self.name = name
         self.quiet = quiet
         self.auto_restart = True
+        self._memory_monitoring = False
 
         if memory_limit == 'auto':
             memory_limit = int(TOTAL_MEMORY * min(1, self.ncores / _ncores))
@@ -250,25 +251,31 @@ class Nanny(ServerNode):
     @gen.coroutine
     def memory_monitor(self):
         """ Track worker's memory.  Restart if it goes above 95% """
+        if self._memory_monitoring:
+            return
         if self.status != 'running':
             return
-        memory = psutil.Process(self.process.pid).memory_info().rss
-        frac = memory / self.memory_limit
-        if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
-            if hasattr(signal, 'SIGUSR1'):
-                # Try to be nice and tell the worker to free some memory.
-                logger.warn("Worker exceeded 95% memory budget.  Forcing GC")
-                os.kill(self.process.process.pid, signal.SIGUSR1)
+        self._memory_monitoring = True
+        try:
+            memory = psutil.Process(self.process.pid).memory_info().rss
+            frac = memory / self.memory_limit
+            if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
+                if hasattr(signal, 'SIGUSR1'):
+                    # Try to be nice and tell the worker to free some memory.
+                    logger.warn("Worker exceeded 95% memory budget.  Forcing GC")
+                    os.kill(self.process.process.pid, signal.SIGUSR1)
 
-                # Give some time to the worker to GC.
-                yield gen.sleep(0.2)
-                memory = psutil.Process(self.process.pid).memory_info().rss
-                frac = memory / self.memory_limit
+                    # Give some time to the worker to GC.
+                    yield gen.sleep(0.2)
+                    memory = psutil.Process(self.process.pid).memory_info().rss
+                    frac = memory / self.memory_limit
 
-            if frac > self.memory_terminate_fraction:
-                # The worker has not been nice enough.
-                logger.warn("Worker exceeded 95% memory budget.  Restarting")
-                self.process.process.terminate()
+                if frac > self.memory_terminate_fraction:
+                    # The worker has not been nice enough.
+                    logger.warn("Worker exceeded 95% memory budget.  Restarting")
+                    self.process.process.terminate()
+        finally:
+            self._memory_monitoring = False
 
     def is_alive(self):
         return self.process is not None and self.process.status == 'running'
