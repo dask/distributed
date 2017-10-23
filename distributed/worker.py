@@ -192,8 +192,7 @@ class WorkerBase(ServerNode):
 
         self._memory_monitoring = False
         pc = PeriodicCallback(self.memory_monitor,
-                              self.memory_monitor_interval,
-                              io_loop=self.loop)
+                              self.memory_monitor_interval)
         self.periodic_callbacks['memory'] = pc
 
     @property
@@ -266,8 +265,7 @@ class WorkerBase(ServerNode):
                         pid=os.getpid())
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
-                    future = gen.with_timeout(timedelta(seconds=diff), future,
-                                              io_loop=self.loop)
+                    future = gen.with_timeout(timedelta(seconds=diff), future)
                 response = yield future
                 _end = time()
                 middle = (_start + _end) / 2
@@ -384,8 +382,7 @@ class WorkerBase(ServerNode):
         with ignoring(EnvironmentError, gen.TimeoutError):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
-                                       self.scheduler.unregister(address=self.contact_address),
-                                       io_loop=self.loop)
+                                       self.scheduler.unregister(address=self.contact_address))
         self.scheduler.close_rpc()
         if isinstance(self.executor, ThreadPoolExecutor):
             self.executor.shutdown(timeout=timeout)
@@ -1125,13 +1122,11 @@ class Worker(WorkerBase):
         WorkerBase.__init__(self, *args, **kwargs)
 
         pc = PeriodicCallback(self.trigger_profile,
-                              config.get('profile-interval', 10),
-                              io_loop=self.loop)
+                              config.get('profile-interval', 10))
         self.periodic_callbacks['profile'] = pc
 
         pc = PeriodicCallback(self.cycle_profile,
-                              profile_cycle_interval,
-                              io_loop=self.loop)
+                              profile_cycle_interval)
         pc.start()
         self.periodic_callbacks['profile-cycle'] = pc
 
