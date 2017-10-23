@@ -304,17 +304,18 @@ class Server(object):
                                  address, e)
 
     @gen.coroutine
-    def close(self):
+    def close(self, wait=True):
         self.listener.stop()
         for comm in self._comms:
             comm.close()
         for cb in self._ongoing_coroutines:
             cb.cancel()
-        for i in range(10):
-            if all(cb.cancelled() for c in self._ongoing_coroutines):
-                break
-            else:
-                yield gen.sleep(0.01)
+        if wait:
+            for i in range(10):
+                if all(cb.cancelled() for c in self._ongoing_coroutines):
+                    break
+                else:
+                    yield gen.sleep(0.01)
 
 
 def pingpong(comm):

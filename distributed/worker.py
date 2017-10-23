@@ -374,7 +374,7 @@ class WorkerBase(ServerNode):
                 'memory_limit': self.memory_limit}
 
     @gen.coroutine
-    def _close(self, report=True, timeout=10, nanny=True):
+    def _close(self, report=True, timeout=10, nanny=True, wait=True):
         if self.status in ('closed', 'closing'):
             return
         logger.info("Stopping worker at %s", self.address)
@@ -407,7 +407,7 @@ class WorkerBase(ServerNode):
         self.rpc.close()
         self._closed.set()
         self._remove_from_global_workers()
-        yield super(WorkerBase, self).close()
+        yield super(WorkerBase, self).close(wait=wait)
 
     def __del__(self):
         self._remove_from_global_workers()

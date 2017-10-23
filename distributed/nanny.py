@@ -285,7 +285,7 @@ class Nanny(ServerNode):
         return self.process and self.process.pid
 
     @gen.coroutine
-    def _close(self, comm=None, timeout=5, report=None):
+    def _close(self, comm=None, timeout=5, report=None, wait=True):
         """
         Close the worker process, stop all comms.
         """
