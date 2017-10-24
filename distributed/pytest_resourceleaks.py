@@ -30,6 +30,17 @@ Can be 'all' or a comma-separated list of resource names
 (possible values: {known_checkers}).
 '''.format(known_checkers=', '.join(sorted("'%s'" % s for s in all_checkers)))
     )
+    group.addoption(
+        '--leaks-timeout',
+        action='store',
+        type='float',
+        dest='leaks_timeout',
+        default=0.5,
+        help='''\
+Wait at most this number of seconds to mark a test leaking
+(default: %(default)s).
+'''.format(known_checkers=', '.join(sorted("'%s'" % s for s in all_checkers)))
+    )
     #group.addoption(
         #'--leak-retries',
         #action='store',
@@ -55,7 +66,8 @@ def pytest_configure(config):
             raise ValueError("unknown resources: %r" % (unknown,))
 
         checkers = [all_checkers[leak]() for leak in leaks]
-        checker = LeakChecker(checkers=checkers)
+        checker = LeakChecker(checkers=checkers,
+                              grace_delay=config.getvalue('leaks_timeout'))
         config.pluginmanager.register(checker, 'leaks_checker')
 
 
@@ -135,8 +147,10 @@ all_checkers = {
 
 
 class LeakChecker(object):
-    def __init__(self, checkers):
+    def __init__(self, checkers, grace_delay):
         self.checkers = checkers
+        self.grace_delay = grace_delay
+
         # {nodeid: {checkers}}
         self.skip_checkers = {}
         # {nodeid: {checker: [(before, after)]}}
@@ -181,7 +195,7 @@ class LeakChecker(object):
             return leaks
 
         t1 = time.time()
-        deadline = t1 + 0.5
+        deadline = t1 + self.grace_delay
         leaks = run_measurements()
         if leaks:
             self.cleanup()
