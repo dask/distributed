@@ -9,7 +9,6 @@ import gc
 import time
 import os
 import threading
-import sys
 
 import pytest
 
@@ -143,7 +142,7 @@ all_checkers = {
     'fds': FDChecker,
     'memory': RSSMemoryChecker,
     'threads': ActiveThreadsChecker,
-    }
+}
 
 
 class LeakChecker(object):
