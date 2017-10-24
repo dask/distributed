@@ -1199,8 +1199,6 @@ class Worker(WorkerBase):
                         self.delete_data(**msg)
                     elif op == 'steal-request':
                         self.steal_request(**msg)
-                    elif op == 'steal-confirm':
-                        self.steal_confirm(**msg)
                     else:
                         logger.warning("Unknown operation %s, %s", op, msg)
 
@@ -1923,9 +1921,6 @@ class Worker(WorkerBase):
             if key not in self.task_state:
                 return
             state = self.task_state.pop(key)
-            if reason == 'stolen' and state in ('executing', 'long-running', 'memory'):
-                self.task_state[key] = state
-                return
             if cause:
                 self.log.append((key, 'release-key', {'cause': cause}))
             else:

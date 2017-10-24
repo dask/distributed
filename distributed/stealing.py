@@ -219,10 +219,10 @@ class WorkStealing(SchedulerPlugin):
 
             # Victim was waiting, has given up task, enact steal
             elif state in ('waiting', 'ready'):
+                self.remove_key_from_stealable(key)
                 self.scheduler.rprocessing[key] = thief
                 del self.scheduler.processing[victim][key]
                 self.scheduler.processing[thief][key] = d['thief_duration']
-                self.remove_key_from_stealable(key)
                 self.put_key_in_stealable(key)
 
                 try:
