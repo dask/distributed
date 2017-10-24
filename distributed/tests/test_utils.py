@@ -150,6 +150,7 @@ def test_sync_timeout(loop):
     thread.join()
 
 
+@pytest.mark.leaking('memory', 'fds')
 def test_is_kernel():
     pytest.importorskip('IPython')
     assert is_kernel() is False
