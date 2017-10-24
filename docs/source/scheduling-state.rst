@@ -30,6 +30,7 @@ system used to perform this tracking.
 For more abstract information about the policies used by the scheduler, see
 :doc:`Scheduling Policies<scheduling-policies>`.
 
+
 State Variables
 ---------------
 
@@ -233,7 +234,8 @@ get updated at each state transition.
 Worker state variables
 ''''''''''''''''''''''
 
-These state variables track the current state of each worker.
+These state variables track the current state of each worker, and are involved
+in deciding :ref:`which worker to run a task on <decide-worker>`.
 
 * **ncores:** ``{worker: int}``
 
@@ -281,19 +283,29 @@ following:
 
 .. code-block:: python
 
+   # Update task state
    task_state[key] = 'memory'
-
-   who_has[key].add(worker)
-   has_what[worker].add(key)
-
-   nbytes[key] = nbytes
 
    processing[worker].remove(key)
    del rprocessing[key]
 
+   who_has[key].add(worker)
+   has_what[worker].add(key)
+
+   # Update memory / resource / occupancy counters
+   nbytes[key] = nbytes
+   worker_bytes[worker] += nbytes
+
+   for key, value in resource_restrictions[key]:
+       used_resources[key] -= value
+
+   update_worker_occupancy_and_idleness(worker)
+
+   # Notify clients interested in this task's result
    if key in who_wants:
        send_done_message_to_clients(who_wants[key])
 
+   # Transitively update dependent tasks
    for dep in dependencies[key]:
        waiting_data[dep].remove(key)
 
@@ -332,15 +344,13 @@ Tasks fall into the following states with the following allowed transitions
 *  Forgotten (not actually a state): Task is no longer needed by any client and
    so is removed from state
 
-
-Tasks and states
-''''''''''''''''
+Tasks and task states
+'''''''''''''''''''''
 
 The table below shows which state variable a task is in, depending on the
 task's state.  Cells with a check mark (`✓`) indicate the task key *must*
 be present in the given state variable; cells with an question mark (`?`)
 indicate the task key *may* be present in the given state variable.
-
 
 ======================= ======== ======= ========= ========== ====== =====
 State variable          Released Waiting No-worker Processing Memory Erred
@@ -375,11 +385,28 @@ Notes:
 1. **nbytes**: a task can be in this collection as long as it was already
    computed, even if not currently held in a worker's memory.
 
+Transitions and worker state
+''''''''''''''''''''''''''''
+
+The table below shows which worker state variables are updated on each
+task state transition.
+
+==================================== ==========================================================
+Transition                           Affected worker state
+==================================== ==========================================================
+released → waiting                   occupancy, idle
+waiting → processing                 occupancy, idle, used_resources
+waiting → memory                     idle, worker_bytes
+processing → memory                  occupancy, idle, used_resources, worker_bytes
+processing → erred                   occupancy, idle, used_resources
+processing → released                occupancy, idle, used_resources
+memory → released                    worker_bytes
+memory → forgotten                   worker_bytes
+==================================== ==========================================================
 
 
 Implementation
 --------------
-
 
 Every transition between states is a separate method in the scheduler.  These
 task transition functions are prefixed with ``transition`` and then have the
