@@ -76,6 +76,7 @@ def pytest_configure(config):
 
 all_checkers = {}
 
+
 def register_checker(name):
     def decorate(cls):
         assert issubclass(cls, ResourceChecker), cls
