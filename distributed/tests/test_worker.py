@@ -1013,7 +1013,7 @@ def test_pause_executor(c, s, a):
         assert a.paused
         out = logger.getvalue()
         assert 'memory' in out.lower()
-        assert 'stop' in out.lower()
+        assert 'pausing' in out.lower()
 
     assert sum(f.status == 'finished' for f in futures) < 4
 
@@ -1061,3 +1061,12 @@ def test_reschedule(c, s, a, b):
     yield wait(futures)
 
     assert all(f.key in b.data for f in futures)
+
+
+def test_deque_handler():
+    from distributed.worker import deque_handler, logger
+    logger.info('foo456')
+    assert deque_handler.deque
+    msg = deque_handler.deque[-1]
+    assert 'distributed.worker' in deque_handler.format(msg)
+    assert any(msg.msg == 'foo456' for msg in deque_handler.deque)

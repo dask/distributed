@@ -28,7 +28,7 @@ from .batched import BatchedSend
 from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
 from .compatibility import finalize
-from .config import config
+from .config import config, log_format
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
 from . import profile
@@ -36,7 +36,7 @@ from .metrics import time
 from .node import ServerNode
 from .security import Security
 from .utils import (All, ignoring, get_ip, get_fileno_limit, log_errors,
-                    key_split, validate_key)
+                    key_split, validate_key, no_default, DequeHandler)
 from .utils_comm import (scatter_to_workers, gather_from_workers)
 from .versions import get_versions
 
@@ -49,6 +49,10 @@ from .variable import VariableExtension
 
 
 logger = logging.getLogger(__name__)
+deque_handler = DequeHandler(n=config.get('log-length', 10000))
+deque_handler.setFormatter(logging.Formatter(log_format))
+logger.addHandler(deque_handler)
+
 
 BANDWIDTH = config.get('bandwidth', 100e6)
 ALLOWED_FAILURES = config.get('allowed-failures', 3)
@@ -310,7 +314,7 @@ class Scheduler(ServerNode):
         self.plugins = []
         self.transition_log = deque(maxlen=config.get('transition-log-length',
                                                       100000))
-        self._transition_counter = 0
+        self.log = deque(maxlen=config.get('transition-log-length', 100000))
 
         self.worker_handlers = {'task-finished': self.handle_task_finished,
                                 'task-erred': self.handle_task_erred,
@@ -343,6 +347,8 @@ class Scheduler(ServerNode):
                          'processing': self.get_processing,
                          'call_stack': self.get_call_stack,
                          'profile': self.get_profile,
+                         'logs': self.get_logs,
+                         'worker_logs': self.get_worker_logs,
                          'nbytes': self.get_nbytes,
                          'versions': self.get_versions,
                          'add_keys': self.add_keys,
@@ -354,7 +360,8 @@ class Scheduler(ServerNode):
                          'set_resources': self.add_resources,
                          'retire_workers': self.retire_workers,
                          'get_metadata': self.get_metadata,
-                         'set_metadata': self.set_metadata}
+                         'set_metadata': self.set_metadata,
+                         'get_task_status': self.get_task_status}
 
         self._transitions = {
             ('released', 'waiting'): self.transition_released_waiting,
@@ -1351,7 +1358,7 @@ class Scheduler(ServerNode):
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
-        self.transition_log.append((key, 'missing', errant_worker, ()))
+        self.log.append(('missing', key, errant_worker))
         if key not in self.who_has:
             return
         if errant_worker in self.who_has[key]:
@@ -1754,10 +1761,7 @@ class Scheduler(ServerNode):
                 self.has_what[recipient].add(key)
                 self.worker_bytes[recipient] += self.nbytes.get(key,
                                                                 DEFAULT_DATA_SIZE)
-                self.transition_log.append((key, 'memory', 'memory', {},
-                                            self._transition_counter, sender,
-                                            recipient))
-            self._transition_counter += 1
+                self.log.append(('rebalance', key, time(), sender, recipient))
 
             result = yield {r: self.rpc(addr=r).delete_data(keys=v, report=False)
                             for r, v in to_senders.items()}
@@ -2174,12 +2178,20 @@ class Scheduler(ServerNode):
         except Exception as e:
             import pdb; pdb.set_trace()
 
-    def get_metadata(self, stream=None, keys=None):
+    def get_metadata(self, stream=None, keys=None, default=no_default):
         metadata = self.task_metadata
         for key in keys[:-1]:
             metadata = metadata[key]
-        return metadata[keys[-1]]
+        try:
+            return metadata[keys[-1]]
+        except KeyError:
+            if default != no_default:
+                return default
+            else:
+                raise
 
+    def get_task_status(self, stream=None, keys=None):
+        return {key: self.task_state.get(key) for key in keys}
 
     #####################
     # State Transitions #
@@ -3052,8 +3064,7 @@ class Scheduler(ServerNode):
                 start = 'released'
             finish2 = self.task_state.get(key, 'forgotten')
             self.transition_log.append((key, start, finish2, recommendations,
-                                        self._transition_counter))
-            self._transition_counter += 1
+                                        time()))
             if self.validate:
                 logger.debug("Transition %s->%s: %s New: %s",
                              start, finish2, key, recommendations)
@@ -3331,6 +3342,20 @@ class Scheduler(ServerNode):
 
         raise gen.Return({'counts': counts, 'keys': keys})
 
+    def get_logs(self, comm=None, n=None):
+        if n is None:
+            L = list(deque_handler.deque)
+        else:
+            L = deque_handler.deque
+            L = [L[-i] for i in range(min(n, len(L)))]
+        return [(msg.levelname, deque_handler.format(msg)) for msg in L]
+
+
+    @gen.coroutine
+    def get_worker_logs(self, comm=None, n=None, workers=None):
+        results = yield self.broadcast(msg={'op': 'get_logs', 'n': n},
+                                       workers=workers)
+        raise gen.Return(results)
 
     ###########
     # Cleanup #

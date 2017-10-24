@@ -43,6 +43,11 @@ import psutil
 logger = logging.getLogger(__name__)
 
 
+logging_levels = {name: logger.level for name, logger in
+                  logging.root.manager.loggerDict.items()
+                  if isinstance(logger, logging.Logger)}
+
+
 @pytest.fixture(scope='session')
 def valid_python_script(tmpdir_factory):
     local_file = tmpdir_factory.mktemp('data').join('file.py')
@@ -350,6 +355,9 @@ def check_active_rpc(loop, active_rpc_timeout=1):
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
             scheduler_kwargs={}):
     ws = weakref.WeakSet()
+    for name, level in logging_levels.items():
+        logging.getLogger(name).setLevel(level)
+
     with pristine_loop() as loop:
         with check_active_rpc(loop, active_rpc_timeout):
             if nanny:
@@ -554,7 +562,11 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         start
         end
     """
+    for name, level in logging_levels.items():
+        logging.getLogger(name).setLevel(level)
+
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY}, worker_kwargs)
+
     def _(func):
         cor = func
         if not iscoroutinefunction(func):

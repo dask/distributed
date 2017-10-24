@@ -10,6 +10,7 @@ import tornado.locks
 
 from .client import _get_global_client
 from .utils import log_errors
+from .worker import get_worker
 
 logger = logging.getLogger(__name__)
 
@@ -36,19 +37,29 @@ class LockExtension(object):
     @gen.coroutine
     def acquire(self, stream=None, name=None, id=None, timeout=None):
         with log_errors():
-            if name in self.ids:
-                event = tornado.locks.Event()
-                self.events[name].append(event)
-                future = event.wait()
-                if timeout is not None:
-                    future = gen.with_timeout(timedelta(seconds=timeout), future)
-                try:
-                    yield future
-                finally:
-                    event2 = self.events[name].popleft()
-                    assert event is event2
-            assert name not in self.ids
-            self.ids[name] = id
+            if name not in self.ids:
+                result = True
+            else:
+                while name in self.ids:
+                    event = tornado.locks.Event()
+                    self.events[name].append(event)
+                    future = event.wait()
+                    if timeout is not None:
+                        future = gen.with_timeout(timedelta(seconds=timeout), future)
+                    try:
+                        yield future
+                    except gen.TimeoutError:
+                        result = False
+                        break
+                    else:
+                        result = True
+                    finally:
+                        event2 = self.events[name].popleft()
+                        assert event is event2
+            if result:
+                assert name not in self.ids
+                self.ids[name] = id
+            raise gen.Return(result)
 
     def release(self, stream=None, name=None, id=None):
         with log_errors():
@@ -78,7 +89,7 @@ class Lock(object):
     >>> lock.release()  # doctest: +SKIP
     """
     def __init__(self, name=None, client=None):
-        self.client = client or _get_global_client()
+        self.client = client or _get_global_client() or get_worker().client
         self.name = name or 'variable-' + uuid.uuid4().hex
         self.id = uuid.uuid4().hex
         self._locked = False
@@ -96,6 +107,10 @@ class Lock(object):
         --------
         >>> lock = Lock('x')  # doctest: +SKIP
         >>> lock.acquire(timeout=1)  # doctest: +SKIP
+
+        Returns
+        -------
+        True or False whether or not it sucessfully acquired the lock
         """
         result = self.client.sync(self.client.scheduler.lock_acquire,
                                   name=self.name, id=self.id, timeout=timeout)

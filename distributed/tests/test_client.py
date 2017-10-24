@@ -4645,12 +4645,11 @@ def test_quiet_quit_when_cluster_leaves(loop):
     cluster = LocalCluster(loop=loop, scheduler_port=0, diagnostics_port=None,
                            silence_logs=False)
     with captured_logger('distributed.comm') as sio:
-        client = Client(cluster, loop=loop)
-        futures = client.map(lambda x: x + 1, range(10))
-        sleep(0.05)
-        cluster.close()
-        sleep(0.05)
-        client.close()
+        with Client(cluster, loop=loop) as client:
+            futures = client.map(lambda x: x + 1, range(10))
+            sleep(0.05)
+            cluster.close()
+            sleep(0.05)
 
     text = sio.getvalue()
     assert not text
@@ -4756,7 +4755,8 @@ def test_profile_keys(c, s, a, b):
 @gen_cluster()
 def test_client_with_name(s, a, b):
     with captured_logger('distributed.scheduler') as sio:
-        client = yield Client(s.address, asynchronous=True, name='foo')
+        client = yield Client(s.address, asynchronous=True, name='foo',
+                              silence_logs=False)
         assert 'foo' in client.id
         yield client.close()
 
@@ -4833,6 +4833,9 @@ def test_task_metadata(c, s, a, b):
     with pytest.raises(KeyError):
         yield c.get_metadata(key)
 
+    result = yield c.get_metadata(key, None)
+    assert result is None
+
     yield c.set_metadata(['x', 'a'], 1)
     result = yield c.get_metadata('x')
     assert result == {'a': 1}
@@ -4845,6 +4848,22 @@ def test_task_metadata(c, s, a, b):
     yield c.set_metadata(['x', 'a', 'c', 'd'], 1)
     result = yield c.get_metadata('x')
     assert result == {'a': {'c': {'d': 1}}, 'b': 2}
+
+
+@gen_cluster(client=True)
+def test_logs(c, s, a, b):
+    yield wait(c.map(inc, range(5)))
+    logs = yield c.get_scheduler_logs(n=5)
+    assert logs
+
+    for _, msg in logs:
+        assert 'distributed.scheduler' in msg
+
+    w_logs = yield c.get_worker_logs(n=5)
+    assert set(w_logs.keys()) == {a.address, b.address}
+    for log in w_logs.values():
+        for _, msg in log:
+            assert 'distributed.worker' in msg
 
 
 if sys.version_info >= (3, 5):
