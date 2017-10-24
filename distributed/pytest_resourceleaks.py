@@ -13,10 +13,6 @@ import threading
 import pytest
 
 
-# Whether to mark a leaking test failed
-MARK_FAILED = False
-
-
 def pytest_addoption(parser):
     group = parser.getgroup('resource leaks')
     group.addoption(
@@ -38,7 +34,14 @@ Can be 'all' or a comma-separated list of resource names
         help='''\
 Wait at most this number of seconds to mark a test leaking
 (default: %(default)s).
-'''.format(known_checkers=', '.join(sorted("'%s'" % s for s in all_checkers)))
+'''
+    )
+    group.addoption(
+        '--leaks-fail',
+        action='store_true',
+        dest='leaks_mark_failed',
+        default=False,
+        help='''Mark leaked tests failed.'''
     )
     #group.addoption(
         #'--leak-retries',
@@ -66,8 +69,21 @@ def pytest_configure(config):
 
         checkers = [all_checkers[leak]() for leak in leaks]
         checker = LeakChecker(checkers=checkers,
-                              grace_delay=config.getvalue('leaks_timeout'))
+                              grace_delay=config.getvalue('leaks_timeout'),
+                              mark_failed=config.getvalue('leaks_mark_failed'))
         config.pluginmanager.register(checker, 'leaks_checker')
+
+
+all_checkers = {}
+
+def register_checker(name):
+    def decorate(cls):
+        assert issubclass(cls, ResourceChecker), cls
+        assert name not in all_checkers
+        all_checkers[name] = cls
+        return cls
+
+    return decorate
 
 
 class ResourceChecker(object):
@@ -85,6 +101,7 @@ class ResourceChecker(object):
         raise NotImplementedError
 
 
+@register_checker('fds')
 class FDChecker(ResourceChecker):
 
     def measure(self):
@@ -104,6 +121,7 @@ class FDChecker(ResourceChecker):
         return "leaked %d file descriptor(s)" % (after - before)
 
 
+@register_checker('memory')
 class RSSMemoryChecker(ResourceChecker):
 
     def measure(self):
@@ -120,6 +138,7 @@ class RSSMemoryChecker(ResourceChecker):
         return "leaked %d MB of RSS memory" % ((after - before) / 1e6)
 
 
+@register_checker('threads')
 class ActiveThreadsChecker(ResourceChecker):
 
     def measure(self):
@@ -138,17 +157,11 @@ class ActiveThreadsChecker(ResourceChecker):
                 % (len(leaked), sorted(leaked, key=str)))
 
 
-all_checkers = {
-    'fds': FDChecker,
-    'memory': RSSMemoryChecker,
-    'threads': ActiveThreadsChecker,
-}
-
-
 class LeakChecker(object):
-    def __init__(self, checkers, grace_delay):
+    def __init__(self, checkers, grace_delay, mark_failed):
         self.checkers = checkers
         self.grace_delay = grace_delay
+        self.mark_failed = mark_failed
 
         # {nodeid: {checkers}}
         self.skip_checkers = {}
@@ -259,6 +272,9 @@ class LeakChecker(object):
         outcome = yield
         del outcome
         self.measure_after_test(item.nodeid)
+        if self.mark_failed and self.leaks.get(item.nodeid):
+            # Trigger fail here to allow stopping with `-x`
+            pytest.fail()
 
     @pytest.hookimpl(hookwrapper=True, trylast=True)
     def pytest_report_teststatus(self, report):
@@ -269,15 +285,22 @@ class LeakChecker(object):
         if report.when == 'teardown':
             leaks = self.leaks.get(report.nodeid)
             if leaks:
-                outcome.force_result(('leaked', 'L', 'LEAKED'))
-                if MARK_FAILED:
+                if self.mark_failed:
+                    outcome.force_result(('failed', 'L', 'LEAKED'))
                     report.outcome = 'failed'
+                    report.longrepr = "\n".join(
+                        ["%s %s" % (nodeid, checker.format(before, after))
+                         for checker, before, after in leaks])
+                else:
+                    outcome.force_result(('leaked', 'L', 'LEAKED'))
 
     @pytest.hookimpl
     def pytest_terminal_summary(self, terminalreporter, exitstatus):
         tr = terminalreporter
         leaked = tr.getreports('leaked')
         if leaked:
+            # If mark_failed is False, leaks are output as a separate
+            # results section
             tr.write_sep("=", 'RESOURCE LEAKS')
             for rep in leaked:
                 nodeid = rep.nodeid
