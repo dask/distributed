@@ -957,7 +957,7 @@ class ThrottledGC(object):
     def __init__(self, min_interval_in_sec=1.0):
         self.min_interval_in_sec = min_interval_in_sec
         self.last_collect = time()
-        gc.collect()
+        #gc.collect()
 
     def collect(self, force_gc=False):
         new_time = time()
