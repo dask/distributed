@@ -83,6 +83,9 @@ class WorkStealing(SchedulerPlugin):
                             continue
                         if self.scheduler.task_state[k] == 'processing':
                             self.put_key_in_stealable(k, split=ks)
+            else:
+                if key in self.in_flight:
+                    del self.in_flight[key]
 
     def put_key_in_stealable(self, key, split=None):
         worker = self.scheduler.rprocessing[key]
@@ -193,10 +196,14 @@ class WorkStealing(SchedulerPlugin):
 
     def move_task_confirm(self, key=None, worker=None, state=None):
         try:
-            d = self.in_flight.pop(key)
+            try:
+                d = self.in_flight.pop(key)
+            except KeyError:
+                return
             thief = d['thief']
             victim = d['victim']
-            if self.scheduler.task_state.get(key) != 'processing':
+            if (self.scheduler.task_state.get(key) != 'processing' or
+                    self.scheduler.rprocessing[key] != victim):
                 self.scheduler.occupancy[thief] = sum(self.scheduler.processing[thief].values())
                 self.scheduler.occupancy[victim] = sum(self.scheduler.processing[victim].values())
                 return
