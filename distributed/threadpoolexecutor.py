@@ -22,11 +22,11 @@ which is included as a comment at the end of this file:
 """
 from __future__ import print_function, division, absolute_import
 
-from concurrent.futures import thread
+from . import _concurrent_futures_thread as thread
 import logging
 import threading
 
-from .compatibility import get_thread_identity
+from .metrics import time
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,13 @@ def _worker(executor, work_queue):
 
     try:
         while thread_state.proceed:
+            with executor._rejoin_lock:
+                if executor._rejoin_list:
+                    rejoin_thread, rejoin_event = executor._rejoin_list.pop()
+                    executor._threads.add(rejoin_thread)
+                    executor._threads.remove(threading.current_thread())
+                    rejoin_event.set()
+                    break
             task = work_queue.get()
             if task is not None:  # sentinel
                 task.run()
@@ -55,6 +62,11 @@ def _worker(executor, work_queue):
 
 
 class ThreadPoolExecutor(thread.ThreadPoolExecutor):
+    def __init__(self, *args, **kwargs):
+        super(ThreadPoolExecutor, self).__init__(*args, **kwargs)
+        self._rejoin_list = []
+        self._rejoin_lock = threading.Lock()
+
     def _adjust_thread_count(self):
         if len(self._threads) < self._max_workers:
             t = threading.Thread(target=_worker,
@@ -64,21 +76,53 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
             self._threads.add(t)
             t.start()
 
-    def shutdown(self, wait=True):
+    def shutdown(self, wait=True, timeout=None):
         with threads_lock:
-            thread.ThreadPoolExecutor.shutdown(self, wait=wait)
+            with self._shutdown_lock:
+                self._shutdown = True
+                self._work_queue.put(None)
+            if timeout is not None:
+                deadline = time() + timeout
+            for t in self._threads:
+                if timeout is not None:
+                    timeout2 = max(deadline - time(), 0)
+                else:
+                    timeout2 = None
+                t.join(timeout=timeout2)
 
 
-def secede():
-    """ Have this thread secede from the ThreadPoolExecutor """
+def secede(adjust=True):
+    """ Have this thread secede from the ThreadPoolExecutor
+
+    See Also
+    --------
+    rejoin: rejoin the thread pool
+    """
     thread_state.proceed = False
-    ident = get_thread_identity()
     with threads_lock:
-        for t in list(thread_state.executor._threads):
-            if t.ident == ident:
-                thread_state.executor._threads.remove(t)
-                break
-        thread_state.executor._adjust_thread_count()
+        thread_state.executor._threads.remove(threading.current_thread())
+        if adjust:
+            thread_state.executor._adjust_thread_count()
+
+
+def rejoin():
+    """ Have this thread rejoin the ThreadPoolExecutor
+
+    This will block until a new slot opens up in the executor.  The next thread
+    to finish a task will leave the pool to allow this one to join.
+
+    See Also
+    --------
+    secede: leave the thread pool
+    """
+    thread = threading.current_thread()
+    event = threading.Event()
+    e = thread_state.executor
+    with e._rejoin_lock:
+        e._rejoin_list.append((thread, event))
+    e.submit(lambda: None)
+    event.wait()
+    thread_state.proceed = True
 
 
 threads_lock = threading.Lock()

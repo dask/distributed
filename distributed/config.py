@@ -37,7 +37,7 @@ def determine_config_file():
     path = os.environ.get('DASK_CONFIG')
     if path:
         if (os.path.exists(path) and
-            (os.path.isfile(path) or os.path.islink(path))):
+                (os.path.isfile(path) or os.path.islink(path))):
             return path
         warnings.warn("DASK_CONFIG set to '%s' but file does not exist "
                       "or is not a regular file" % (path,),
@@ -87,10 +87,8 @@ def _initialize_logging_old_style(config):
     loggers.setdefault('tornado', 'critical')
     loggers.setdefault('tornado.application', 'error')
 
-    fmt = '%(name)s - %(levelname)s - %(message)s'
-
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter(fmt))
+    handler.setFormatter(logging.Formatter(log_format))
     for name, level in loggers.items():
         if isinstance(level, str):
             level = logging_names[level.upper()]
@@ -114,7 +112,7 @@ def _initialize_logging_file_config(config):
     Initialize logging using logging's "Configuration file format".
     (ref.: https://docs.python.org/2/library/logging.config.html#configuration-file-format)
     """
-    logging.config.fileConfig(config['logging-file-config'])
+    logging.config.fileConfig(config['logging-file-config'], disable_existing_loggers=False)
 
 
 def initialize_logging(config):
@@ -161,5 +159,7 @@ else:
     load_config_file(config, path)
 
 load_env_vars(config)
+
+log_format = config.get('log-format', '%(name)s - %(levelname)s - %(message)s')
 
 initialize_logging(config)

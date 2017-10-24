@@ -1,15 +1,12 @@
 from __future__ import print_function, division, absolute_import
 
 import json
-import sys
 
-from tornado.ioloop import IOLoop
-from tornado import web, gen
 from tornado.httpclient import AsyncHTTPClient
 from tornado.httpserver import HTTPServer
 
-from distributed import Scheduler, Client
-from distributed.client import _wait
+from distributed import Scheduler
+from distributed.client import wait
 from distributed.sizeof import getsizeof
 from distributed.utils_test import gen_cluster, gen_test, inc, div
 from distributed.http.scheduler import HTTPScheduler
@@ -123,7 +120,7 @@ def test_with_data(e, s, a, b):
 
     L = e.map(inc, [1, 2, 3])
     L2 = yield e._scatter(['Hello', 'world!'])
-    yield _wait(L)
+    yield wait(L)
 
     client = AsyncHTTPClient()
     response = yield client.fetch('http://localhost:%d/memory-load.json' %
@@ -144,7 +141,7 @@ def test_with_data(e, s, a, b):
     assert all(isinstance(v, int) for d in out.values() for v in d.values())
 
     assert sum(v for d in out.values() for v in d.values()) == \
-            sum(map(getsizeof, [1, 2, 3, 'Hello', 'world!']))
+        sum(map(getsizeof, [1, 2, 3, 'Hello', 'world!']))
 
     ss.stop()
 
@@ -165,7 +162,7 @@ def test_with_status(e, s, a, b):
     assert out['waiting'] == 0
 
     L = e.map(div, range(10), range(10))
-    yield _wait(L)
+    yield wait(L)
 
     client = AsyncHTTPClient()
     response = yield client.fetch('http://localhost:%d/tasks.json' %
@@ -177,7 +174,6 @@ def test_with_status(e, s, a, b):
     assert out['waiting'] == 0
 
     ss.stop()
-
 
 
 @gen_cluster(client=True)

@@ -53,17 +53,21 @@ class SystemMonitor(object):
                   'count': self.count}
 
         if self._collect_net_io_counters:
-            ioc = psutil.net_io_counters()
-            last = self._last_io_counters
-            duration = now - self.last_time
-            read_bytes = (ioc.bytes_recv - last.bytes_recv) / (duration or 0.5)
-            write_bytes = (ioc.bytes_sent - last.bytes_sent) / (duration or 0.5)
-            self.last_time = now
-            self._last_io_counters = ioc
-            self.read_bytes.append(read_bytes)
-            self.write_bytes.append(write_bytes)
-            result['read_bytes'] = read_bytes
-            result['write_bytes'] = write_bytes
+            try:
+                ioc = psutil.net_io_counters()
+            except Exception:
+                pass
+            else:
+                last = self._last_io_counters
+                duration = now - self.last_time
+                read_bytes = (ioc.bytes_recv - last.bytes_recv) / (duration or 0.5)
+                write_bytes = (ioc.bytes_sent - last.bytes_sent) / (duration or 0.5)
+                self.last_time = now
+                self._last_io_counters = ioc
+                self.read_bytes.append(read_bytes)
+                self.write_bytes.append(write_bytes)
+                result['read_bytes'] = read_bytes
+                result['write_bytes'] = write_bytes
 
         if not WINDOWS:
             num_fds = self.proc.num_fds()
@@ -74,8 +78,8 @@ class SystemMonitor(object):
 
     def __str__(self):
         return '<SystemMonitor: cpu: %d memory: %d MB fds: %d>' % (
-                self.cpu[-1], self.memory[-1] / 1e6,
-                -1 if WINDOWS else self.num_fds[-1])
+            self.cpu[-1], self.memory[-1] / 1e6,
+            -1 if WINDOWS else self.num_fds[-1])
 
     __repr__ = __str__
 

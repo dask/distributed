@@ -1,7 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
 from concurrent.futures import CancelledError
-from datetime import timedelta
 from operator import add
 import os
 from time import sleep
@@ -13,23 +12,22 @@ from tornado import gen
 from dask import delayed
 from distributed import Client, Nanny, wait
 from distributed.comm import CommClosedError
-from distributed.compatibility import PY3
-from distributed.client import _wait
+from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils import sync, ignoring
-from distributed.utils_test import (gen_cluster, cluster, inc, loop, slow, div,
-        slowinc, slowadd, captured_logger)
+from distributed.utils_test import (gen_cluster, cluster, inc, slow, div,
+                                    slowinc, slowadd, captured_logger)
+from distributed.utils_test import loop # flake8: noqa
 
 
 def test_submit_after_failed_worker_sync(loop):
-    with cluster() as (s, [a, b]):
+    with cluster(active_rpc_timeout=10) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
-            a['proc'].terminate()
+            a['proc']().terminate()
             total = c.submit(sum, L)
             assert total.result() == sum(map(inc, range(10)))
-
 
 
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
@@ -40,7 +38,7 @@ def test_submit_after_failed_worker_async(c, s, a, b):
         yield gen.sleep(0.1)
 
     L = c.map(inc, range(10))
-    yield _wait(L)
+    yield wait(L)
 
     s.loop.add_callback(n.kill)
     total = c.submit(sum, L)
@@ -53,7 +51,7 @@ def test_submit_after_failed_worker_async(c, s, a, b):
 @gen_cluster(client=True)
 def test_submit_after_failed_worker(c, s, a, b):
     L = c.map(inc, range(10))
-    yield _wait(L)
+    yield wait(L)
     yield a._close()
 
     total = c.submit(sum, L)
@@ -62,29 +60,29 @@ def test_submit_after_failed_worker(c, s, a, b):
 
 
 def test_gather_after_failed_worker(loop):
-    with cluster() as (s, [a, b]):
+    with cluster(active_rpc_timeout=10) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(10))
             wait(L)
-            a['proc'].terminate()
+            a['proc']().terminate()
             result = c.gather(L)
             assert result == list(map(inc, range(10)))
 
 
 @slow
 def test_gather_then_submit_after_failed_workers(loop):
-    with cluster(nworkers=4) as (s, [w, x, y, z]):
+    with cluster(nworkers=4, active_rpc_timeout=10) as (s, [w, x, y, z]):
         with Client(s['address'], loop=loop) as c:
             L = c.map(inc, range(20))
             wait(L)
-            w['proc'].terminate()
+            w['proc']().terminate()
             total = c.submit(sum, L)
             wait([total])
 
             addr = c.who_has()[total.key][0]
             for d in [x, y, z]:
                 if d['address'] == addr:
-                    d['proc'].terminate()
+                    d['proc']().terminate()
                     break
             else:
                 assert 0, "Could not find worker %r" % (addr,)
@@ -96,7 +94,7 @@ def test_gather_then_submit_after_failed_workers(loop):
 @gen_cluster(Worker=Nanny, timeout=60, client=True)
 def test_failed_worker_without_warning(c, s, a, b):
     L = c.map(inc, range(10))
-    yield _wait(L)
+    yield wait(L)
 
     original_pid = a.pid
     with ignoring(CommClosedError):
@@ -113,17 +111,17 @@ def test_failed_worker_without_warning(c, s, a, b):
         yield gen.sleep(0.01)
         assert time() - start < 10
 
-    yield _wait(L)
+    yield wait(L)
 
     L2 = c.map(inc, range(10, 20))
-    yield _wait(L2)
+    yield wait(L2)
     assert all(len(keys) > 0 for keys in s.has_what.values())
     ncores2 = s.ncores.copy()
 
     yield c._restart()
 
     L = c.map(inc, range(10))
-    yield _wait(L)
+    yield wait(L)
     assert all(len(keys) > 0 for keys in s.has_what.values())
 
     assert not (set(ncores2) & set(s.ncores))  # no overlap
@@ -162,16 +160,16 @@ def test_restart(c, s, a, b):
 def test_restart_cleared(c, s, a, b):
     x = 2 * delayed(1) + 1
     f = c.compute(x)
-    yield _wait([f])
+    yield wait([f])
     assert s.released
 
     yield c._restart()
 
     for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
-            s.waiting_data, s.who_has, s.host_restrictions,
-            s.worker_restrictions, s.loose_restrictions,
-            s.released, s.priority, s.exceptions, s.who_wants,
-            s.exceptions_blame]:
+                 s.waiting_data, s.who_has, s.host_restrictions,
+                 s.worker_restrictions, s.loose_restrictions,
+                 s.released, s.priority, s.exceptions, s.who_wants,
+                 s.exceptions_blame]:
         assert not coll
 
 
@@ -275,7 +273,8 @@ def test_multiple_clients_restart(s, a, b):
 
 @gen_cluster(Worker=Nanny)
 def test_restart_scheduler(s, a, b):
-    import gc; gc.collect()
+    import gc
+    gc.collect()
     addrs = (a.worker_address, b.worker_address)
     yield s.restart()
     assert len(s.ncores) == 2
@@ -290,7 +289,8 @@ def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     yield c._restart()
     y = c.submit(inc, 1)
     del x
-    import gc; gc.collect()
+    import gc
+    gc.collect()
     yield gen.sleep(0.1)
     yield y
 
@@ -318,7 +318,7 @@ def test_broken_worker_during_computation(c, s, a, b):
     with ignoring(CommClosedError, EnvironmentError):  # perhaps new worker can't be contacted yet
         yield c._run(os._exit, 1, workers=[n.worker_address])
 
-    result = yield c._gather(L)
+    result = yield c.gather(L)
     assert isinstance(result[0], int)
 
     yield n._close()
@@ -352,7 +352,7 @@ def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         assert time() < start + 5
 
     futures = c.map(slowinc, range(20), delay=0.01)
-    yield _wait(futures)
+    yield wait(futures)
 
     result = yield c.submit(sum, futures, workers=a.address)
     for dep in set(a.dep_state) - set(a.task_state):
@@ -374,12 +374,13 @@ def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
     yield n._close()
 
 
-@gen_cluster(client=True, timeout=None, Worker=Nanny, ncores=[('127.0.0.1', 1)])
+@slow
+@gen_cluster(client=True, timeout=60, Worker=Nanny, ncores=[('127.0.0.1', 1)])
 def test_restart_timeout_on_long_running_task(c, s, a):
     with captured_logger('distributed.scheduler') as sio:
         future = c.submit(sleep, 3600)
         yield gen.sleep(0.1)
-        yield c.restart()
+        yield c.restart(timeout=20)
 
     text = sio.getvalue()
     assert 'timeout' not in text.lower()

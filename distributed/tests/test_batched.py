@@ -2,15 +2,16 @@
 from contextlib import contextmanager
 from datetime import timedelta
 import random
+import weakref
 
 import pytest
-from toolz import first, assoc
+from toolz import assoc
 from tornado import gen
 
 from distributed.batched import BatchedSend
 from distributed.core import listen, connect, CommClosedError
 from distributed.metrics import time
-from distributed.utils import sync, All
+from distributed.utils import All
 from distributed.utils_test import gen_test, slow, gen_cluster
 
 
@@ -32,6 +33,7 @@ class EchoServer(object):
         listener.start()
         self.address = listener.contact_address
         self.stop = listener.stop
+
 
 @contextmanager
 def echo_server():
@@ -63,8 +65,10 @@ def test_BatchedSend():
         b.send('HELLO')
         b.send('HELLO')
 
-        result = yield comm.read(); assert result == ['hello', 'hello', 'world']
-        result = yield comm.read(); assert result == ['HELLO', 'HELLO']
+        result = yield comm.read()
+        assert result == ['hello', 'hello', 'world']
+        result = yield comm.read()
+        assert result == ['HELLO', 'HELLO']
 
         assert b.byte_count > 1
 
@@ -80,7 +84,8 @@ def test_send_before_start():
         b.send('world')
 
         b.start(comm)
-        result = yield comm.read(); assert result == ['hello', 'world']
+        result = yield comm.read()
+        assert result == ['hello', 'world']
 
 
 @gen_test()
@@ -183,7 +188,7 @@ def test_stress():
 
 
 @gen.coroutine
-def _run_traffic_jam(nsends, nbytes):
+def run_traffic_jam(nsends, nbytes):
     # This test eats `nsends * nbytes` bytes in RAM
     np = pytest.importorskip('numpy')
     from distributed.protocol import to_serialize
@@ -221,10 +226,29 @@ def _run_traffic_jam(nsends, nbytes):
 
 @gen_test()
 def test_sending_traffic_jam():
-    yield _run_traffic_jam(50, 300000)
+    yield run_traffic_jam(50, 300000)
 
 
 @slow
 @gen_test()
 def test_large_traffic_jam():
-    yield _run_traffic_jam(500, 1500000)
+    yield run_traffic_jam(500, 1500000)
+
+
+@gen_cluster(client=True)
+def test_dont_hold_on_to_large_messages(c, s, a, b):
+    np = pytest.importorskip('numpy')
+    da = pytest.importorskip('dask.array')
+    x = np.random.random(1000000)
+    xr = weakref.ref(x)
+
+    d = da.from_array(x, chunks=(100000,))
+    d = d.persist()
+    del x
+
+    c.submit(lambda: 1)  # push one more message down the comm
+
+    start = time()
+    while xr() is not None:
+        yield gen.sleep(0.05)
+        assert time() < start + 1

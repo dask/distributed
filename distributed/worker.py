@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import bisect
 from collections import defaultdict, deque
 from datetime import timedelta
 import heapq
@@ -24,9 +25,11 @@ from tornado import gen
 from tornado.ioloop import IOLoop, PeriodicCallback
 from tornado.locks import Event
 
+from . import profile
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for
-from .config import config
+from .comm.utils import offload
+from .config import config, log_format
 from .compatibility import unicode, get_thread_identity
 from .core import (error_message, CommClosedError,
                    rpc, pingpong, coerce_to_address)
@@ -40,14 +43,18 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, validate_key, mp_context, import_file,
-                    silence_logging, ThrottledGC, thread_state)
+                    silence_logging, thread_state, json_load_robust, key_split,
+                    format_bytes, DequeHandler, ThrottledGC)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
 
 logger = logging.getLogger(__name__)
+deque_handler = DequeHandler(n=config.get('log-length', 10000))
+deque_handler.setFormatter(logging.Formatter(log_format))
+logger.addHandler(deque_handler)
 
-LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
+LOG_PDB = config.get('pdb-on-err')
 
 no_value = '--no-value-sentinel--'
 
@@ -65,17 +72,22 @@ PENDING = ('waiting', 'ready', 'constrained')
 PROCESSING = ('waiting', 'ready', 'constrained', 'executing', 'long-running')
 READY = ('ready', 'constrained')
 
+
 _global_workers = []
 
 
 class WorkerBase(ServerNode):
-    def __init__(self, scheduler_ip, scheduler_port=None, ncores=None,
-                 loop=None, local_dir=None, services=None, service_ports=None,
-                 name=None, heartbeat_interval=5000, reconnect=True,
-                 memory_limit='auto', executor=None, resources=None,
-                 silence_logs=None, death_timeout=None, preload=(),
-                 security=None, **kwargs):
-        if scheduler_port is None:
+    def __init__(self, scheduler_ip=None, scheduler_port=None,
+                 scheduler_file=None, ncores=None, loop=None, local_dir=None,
+                 services=None, service_ports=None, name=None,
+                 heartbeat_interval=5000, reconnect=True, memory_limit='auto',
+                 executor=None, resources=None, silence_logs=None,
+                 death_timeout=None, preload=(), security=None,
+                 contact_address=None, memory_monitor_interval=200, **kwargs):
+        if scheduler_file:
+            cfg = json_load_robust(scheduler_file)
+            scheduler_addr = cfg['address']
+        elif scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
@@ -85,6 +97,8 @@ class WorkerBase(ServerNode):
         self.available_resources = (resources or {}).copy()
         self.death_timeout = death_timeout
         self.preload = preload
+        self.contact_address = contact_address
+        self.memory_monitor_interval = memory_monitor_interval
         if silence_logs:
             silence_logging(level=silence_logs)
 
@@ -100,12 +114,17 @@ class WorkerBase(ServerNode):
         self.listen_args = self.security.get_listen_args('worker')
 
         if memory_limit == 'auto':
-            memory_limit = int(TOTAL_MEMORY * 0.6 * min(1, self.ncores / _ncores))
+            memory_limit = int(TOTAL_MEMORY * min(1, self.ncores / _ncores))
         with ignoring(TypeError):
             memory_limit = float(memory_limit)
         if isinstance(memory_limit, float) and memory_limit <= 1:
             memory_limit = memory_limit * TOTAL_MEMORY
         self.memory_limit = memory_limit
+        self.paused = False
+
+        self.memory_target_fraction = config.get('worker-memory-target', 0.6)
+        self.memory_spill_fraction = config.get('worker-memory-spill', 0.7)
+        self.memory_pause_fraction = config.get('worker-memory-pause', 0.8)
 
         if self.memory_limit:
             try:
@@ -114,7 +133,8 @@ class WorkerBase(ServerNode):
                 raise ImportError("Please `pip install zict` for spill-to-disk workers")
             path = os.path.join(self.local_dir, 'storage')
             storage = Func(serialize_bytelist, deserialize_bytes, File(path))
-            self.data = Buffer({}, storage, int(float(self.memory_limit)), weight)
+            target = int(float(self.memory_limit) * self.memory_target_fraction)
+            self.data = Buffer({}, storage, target, weight)
         else:
             self.data = dict()
         self.loop = loop or IOLoop.current()
@@ -124,6 +144,7 @@ class WorkerBase(ServerNode):
         self.executor = executor or ThreadPoolExecutor(self.ncores)
         self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.name = name
+        self.scheduler_delay = 0
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
         self.execution_state = {'scheduler': self.scheduler.address,
@@ -142,19 +163,23 @@ class WorkerBase(ServerNode):
         self.service_specs = services or {}
 
         handlers = {
-          'gather': self.gather,
-          'compute-stream': self.compute_stream,
-          'run': self.run,
-          'run_coroutine': self.run_coroutine,
-          'get_data': self.get_data,
-          'update_data': self.update_data,
-          'delete_data': self.delete_data,
-          'terminate': self.terminate,
-          'ping': pingpong,
-          'health': self.host_health,
-          'upload_file': self.upload_file,
-          'start_ipython': self.start_ipython,
-          'keys': self.keys,
+            'gather': self.gather,
+            'compute-stream': self.compute_stream,
+            'run': self.run,
+            'run_coroutine': self.run_coroutine,
+            'get_data': self.get_data,
+            'update_data': self.update_data,
+            'delete_data': self.delete_data,
+            'terminate': self.terminate,
+            'ping': pingpong,
+            'health': self.host_health,
+            'upload_file': self.upload_file,
+            'start_ipython': self.start_ipython,
+            'call_stack': self.get_call_stack,
+            'profile': self.get_profile,
+            'profile_metadata': self.get_profile_metadata,
+            'get_logs': self.get_logs,
+            'keys': self.keys,
         }
 
         super(WorkerBase, self).__init__(handlers, io_loop=self.loop,
@@ -165,6 +190,13 @@ class WorkerBase(ServerNode):
                               self.heartbeat_interval,
                               io_loop=self.loop)
         self.periodic_callbacks['heartbeat'] = pc
+        self._address = contact_address
+
+        self._memory_monitoring = False
+        pc = PeriodicCallback(self.memory_monitor,
+                              self.memory_monitor_interval,
+                              io_loop=self.loop)
+        self.periodic_callbacks['memory'] = pc
 
     @property
     def worker_address(self):
@@ -185,19 +217,23 @@ class WorkerBase(ServerNode):
                 else:
                     kwargs = {}
 
-                yield self.scheduler.register(
-                        address=self.address,
-                        name=self.name,
-                        ncores=self.ncores,
-                        now=time(),
-                        host_info=self.host_health(),
-                        services=self.service_ports,
-                        memory_limit=self.memory_limit,
-                        executing=len(self.executing),
-                        in_memory=len(self.data),
-                        ready=len(self.ready),
-                        in_flight=len(self.in_flight_tasks),
-                        **kwargs)
+                start = time()
+                response = yield self.scheduler.register(
+                    address=self.contact_address,
+                    name=self.name,
+                    ncores=self.ncores,
+                    now=time(),
+                    host_info=self.host_health(),
+                    services=self.service_ports,
+                    memory_limit=self.memory_limit,
+                    executing=len(self.executing),
+                    in_memory=len(self.data),
+                    ready=len(self.ready),
+                    in_flight=len(self.in_flight_tasks),
+                    **kwargs)
+                end = time()
+                middle = (start + end) / 2
+                self.scheduler_delay = response['time'] - middle
             finally:
                 self.heartbeat_active = False
         else:
@@ -207,6 +243,8 @@ class WorkerBase(ServerNode):
     def _register_with_scheduler(self):
         self.periodic_callbacks['heartbeat'].stop()
         start = time()
+        if self.contact_address is None:
+            self.contact_address = self.address
         while True:
             if self.death_timeout and time() > start + self.death_timeout:
                 yield self._close(timeout=1)
@@ -214,8 +252,10 @@ class WorkerBase(ServerNode):
             if self.status in ('closed', 'closing'):
                 raise gen.Return
             try:
+                _start = time()
                 future = self.scheduler.register(
-                        ncores=self.ncores, address=self.address,
+                        ncores=self.ncores,
+                        address=self.contact_address,
                         keys=list(self.data),
                         name=self.name,
                         nbytes=self.nbytes,
@@ -230,7 +270,10 @@ class WorkerBase(ServerNode):
                     diff = self.death_timeout - (time() - start)
                     future = gen.with_timeout(timedelta(seconds=diff), future,
                                               io_loop=self.loop)
-                resp = yield future
+                response = yield future
+                _end = time()
+                middle = (_start + _end) / 2
+                self.scheduler_delay = response['time'] - middle
                 self.status = 'running'
                 break
             except EnvironmentError:
@@ -239,8 +282,9 @@ class WorkerBase(ServerNode):
                 yield gen.sleep(0.1)
             except gen.TimeoutError:
                 pass
-        if resp != 'OK':
-            raise ValueError("Unexpected response from register: %r" % (resp,))
+        if response['status'] != 'OK':
+            raise ValueError("Unexpected response from register: %r" %
+                             (response,))
         self.periodic_callbacks['heartbeat'].start()
 
     def start_services(self, listen_ip=''):
@@ -254,7 +298,6 @@ class WorkerBase(ServerNode):
                 v, kwargs = v
             else:
                 v, kwargs = v, {}
-
             self.services[k] = v(self, io_loop=self.loop, **kwargs)
             self.services[k].listen((listen_ip, port))
             self.service_ports[k] = self.services[k].port
@@ -266,44 +309,60 @@ class WorkerBase(ServerNode):
         # XXX Factor this out
         if not addr_or_port:
             # Default address is the required one to reach the scheduler
+            listen_host = get_address_host(self.scheduler.address)
             self.listen(get_local_address_for(self.scheduler.address),
                         listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
         elif isinstance(addr_or_port, int):
             # addr_or_port is an integer => assume TCP
-            self.ip = get_ip(
+            listen_host = self.ip = get_ip(
                 get_address_host(self.scheduler.address)
             )
-            self.listen((self.ip, addr_or_port),
+            self.listen((listen_host, addr_or_port),
                         listen_args=self.listen_args)
         else:
             self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
+            try:
+                listen_host = get_address_host(addr_or_port)
+            except ValueError:
+                listen_host = addr_or_port
+
+        if '://' in listen_host:
+            protocol, listen_host = listen_host.split('://')
 
         self.name = self.name or self.address
         preload_modules(self.preload, parameter=self, file_dir=self.local_dir)
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...
-        self.start_services()
+        self.start_services(listen_host)
+
+        try:
+            listening_address = '%s%s:%d' % (self.listener.prefix, listen_host, self.port)
+        except Exception:
+            listening_address = '%s%s' % (self.listener.prefix, listen_host)
 
         logger.info('      Start worker at: %26s', self.address)
+        logger.info('         Listening to: %26s', listening_address)
         for k, v in self.service_ports.items():
-            logger.info('  %16s at: %20s:%d' % (k, self.ip, v))
-        logger.info('Waiting to connect to: %26s',
-                    self.scheduler.address)
+            logger.info('  %16s at: %26s' % (k, listen_host + ':' + str(v)))
+        logger.info('Waiting to connect to: %26s', self.scheduler.address)
         logger.info('-' * 49)
         logger.info('              Threads: %26d', self.ncores)
         if self.memory_limit:
-            logger.info('               Memory: %23.2f GB', self.memory_limit / 1e9)
+            logger.info('               Memory: %26s', format_bytes(self.memory_limit))
         logger.info('      Local Directory: %26s', self.local_dir)
         logger.info('-' * 49)
 
         yield self._register_with_scheduler()
 
         if self.status == 'running':
-            logger.info('        Registered to: %32s', self.scheduler.address)
+            logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
+
+        for pc in self.periodic_callbacks.values():
+            pc.start()
 
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
@@ -327,10 +386,13 @@ class WorkerBase(ServerNode):
         with ignoring(EnvironmentError, gen.TimeoutError):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
-                        self.scheduler.unregister(address=self.address),
-                        io_loop=self.loop)
+                                       self.scheduler.unregister(address=self.contact_address),
+                                       io_loop=self.loop)
         self.scheduler.close_rpc()
-        self.executor.shutdown(wait=False)
+        if isinstance(self.executor, ThreadPoolExecutor):
+            self.executor.shutdown(timeout=timeout)
+        else:
+            self.executor.shutdown(wait=False)
         if os.path.exists(self.local_dir):
             shutil.rmtree(self.local_dir)
 
@@ -346,6 +408,7 @@ class WorkerBase(ServerNode):
         self.rpc.close()
         self._closed.set()
         self._remove_from_global_workers()
+        yield super(WorkerBase, self).close()
 
     def __del__(self):
         self._remove_from_global_workers()
@@ -380,7 +443,7 @@ class WorkerBase(ServerNode):
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         future = self.executor.submit(function, *args, **kwargs)
         pc = PeriodicCallback(lambda: logger.debug("future state: %s - %s",
-            key, future._state), 1000, io_loop=self.loop); pc.start()
+                                                   key, future._state), 1000, io_loop=self.loop); pc.start()
         try:
             yield future
         finally:
@@ -437,7 +500,7 @@ class WorkerBase(ServerNode):
             if report:
                 logger.debug("Reporting loss of keys to scheduler")
                 # TODO: this route seems to not exist?
-                yield self.scheduler.remove_keys(address=self.address,
+                yield self.scheduler.remove_keys(address=self.contact_address,
                                                  keys=list(keys))
         raise Return('OK')
 
@@ -466,8 +529,8 @@ class WorkerBase(ServerNode):
         self.outgoing_count += 1
         duration = (stop - start) or 0.5  # windows
         self.outgoing_transfer_log.append({
-            'start': start,
-            'stop': stop,
+            'start': start + self.scheduler_delay,
+            'stop': stop + self.scheduler_delay,
             'middle': (start + stop) / 2,
             'duration': duration,
             'who': who,
@@ -489,7 +552,7 @@ class WorkerBase(ServerNode):
             self.total_resources[r] = quantity
 
         yield self.scheduler.set_resources(resources=self.total_resources,
-                                           worker=self.address)
+                                           worker=self.contact_address)
 
     def start_ipython(self, comm):
         """Start an IPython kernel
@@ -505,21 +568,32 @@ class WorkerBase(ServerNode):
             )
         return self._ipython_kernel.get_connection_info()
 
+    @gen.coroutine
     def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_dir, filename)
-        if isinstance(data, unicode):
-            data = data.encode()
-        with open(out_filename, 'wb') as f:
-            f.write(data)
-            f.flush()
+
+        def func(data):
+            if isinstance(data, unicode):
+                data = data.encode()
+            with open(out_filename, 'wb') as f:
+                f.write(data)
+                f.flush()
+            return data
+
+        if len(data) < 10000:
+            data = func(data)
+        else:
+            data = yield offload(func, data)
 
         if load:
             try:
                 import_file(out_filename)
             except Exception as e:
                 logger.exception(e)
-                return {'status': 'error', 'exception': pickle.dumps(e)}
-        return {'status': 'OK', 'nbytes': len(data)}
+                raise gen.Return({'status': 'error',
+                                  'exception': pickle.dumps(e)})
+
+        raise gen.Return({'status': 'OK', 'nbytes': len(data)})
 
     def host_health(self, comm=None):
         """ Information about worker """
@@ -564,10 +638,10 @@ class WorkerBase(ServerNode):
     @gen.coroutine
     def gather(self, comm=None, who_has=None):
         who_has = {k: [coerce_to_address(addr) for addr in v]
-                    for k, v in who_has.items()
-                    if k not in self.data}
+                   for k, v in who_has.items()
+                   if k not in self.data}
         result, missing_keys, missing_workers = yield gather_from_workers(
-                who_has, rpc=self.rpc)
+            who_has, rpc=self.rpc)
         if missing_keys:
             logger.warning("Could not find data: %s on workers: %s (who_has: %s)",
                            missing_keys, missing_workers, who_has)
@@ -625,7 +699,10 @@ def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     if func not in cache:
         b = pickle.dumps(func)
-        cache[func] = b
+        if len(b) < 100000:
+            cache[func] = b
+        else:
+            return b
     return cache[func]
 
 
@@ -658,17 +735,21 @@ def dumps_task(task):
             return d
         elif not any(map(_maybe_complex, task[1:])):
             return {'function': dumps_function(task[0]),
-                        'args': pickle.dumps(task[1:])}
+                    'args': pickle.dumps(task[1:])}
     return to_serialize(task)
 
 
-def apply_function(function, args, kwargs, execution_state, key):
+def apply_function(function, args, kwargs, execution_state, key,
+                   active_threads, active_threads_lock, time_delay):
     """ Run a function, collect information
 
     Returns
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
+    ident = get_thread_identity()
+    with active_threads_lock:
+        active_threads[ident] = key
     thread_state.start_time = time()
     thread_state.execution_state = execution_state
     thread_state.key = key
@@ -678,6 +759,7 @@ def apply_function(function, args, kwargs, execution_state, key):
     except Exception as e:
         msg = error_message(e)
         msg['op'] = 'task-erred'
+        msg['actual-exception'] = e
     else:
         msg = {'op': 'task-finished',
                'status': 'OK',
@@ -686,9 +768,11 @@ def apply_function(function, args, kwargs, execution_state, key):
                'type': type(result) if result is not None else None}
     finally:
         end = time()
-    msg['start'] = start
-    msg['stop'] = end
-    msg['thread'] = get_thread_identity()
+    msg['start'] = start + time_delay
+    msg['stop'] = end + time_delay
+    msg['thread'] = ident
+    with active_threads_lock:
+        del active_threads[ident]
     return msg
 
 
@@ -722,7 +806,7 @@ def convert_args_to_str(args, max_len=None):
     for i, arg in enumerate(args):
         try:
             sarg = repr(arg)
-        except:
+        except Exception:
             sarg = "< could not convert arg to str >"
         strs[i] = sarg
         length += len(sarg) + 2
@@ -741,7 +825,7 @@ def convert_kwargs_to_str(kwargs, max_len=None):
     for i, (argname, arg) in enumerate(kwargs.items()):
         try:
             sarg = repr(arg)
-        except:
+        except Exception:
             sarg = "< could not convert arg to str >"
         skwarg = repr(argname) + ": " + sarg
         strs[i] = skwarg
@@ -775,12 +859,12 @@ def run(server, comm, function, args=(), kwargs={}, is_coro=False, wait=True):
             result = (yield result) if wait else None
     except Exception as e:
         logger.warning(" Run Failed\n"
-            "Function: %s\n"
-            "args:     %s\n"
-            "kwargs:   %s\n",
-            str(funcname(function))[:1000],
-            convert_args_to_str(args, max_len=1000),
-            convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
+                       "Function: %s\n"
+                       "args:     %s\n"
+                       "kwargs:   %s\n",
+                       str(funcname(function))[:1000],
+                       convert_args_to_str(args, max_len=1000),
+                       convert_kwargs_to_str(kwargs, max_len=1000), exc_info=True)
 
         response = error_message(e)
     else:
@@ -902,6 +986,8 @@ class Worker(WorkerBase):
         The type of a particular piece of data
     * **threads**: ``{key: int}``
         The ID of the thread on which the task ran
+    * **active_threads**: ``{int: key}``
+        The keys currently running on active threads
     * **exceptions**: ``{key: exception}``
         The exception caused by running a task if it erred
     * **tracebacks**: ``{key: traceback}``
@@ -929,7 +1015,7 @@ class Worker(WorkerBase):
     heartbeat_interval: int
         Milliseconds between heartbeats to scheduler
     memory_limit: int
-        Number of bytes of data to keep in memory before using disk
+        Number of bytes of memory that this worker should use
     executor: concurrent.futures.Executor
     resources: dict
         Resources that thiw worker has like ``{'GPU': 2}``
@@ -951,6 +1037,7 @@ class Worker(WorkerBase):
     distributed.scheduler.Scheduler
     distributed.nanny.Nanny
     """
+
     def __init__(self, *args, **kwargs):
         self.tasks = dict()
         self.task_state = dict()
@@ -980,6 +1067,13 @@ class Worker(WorkerBase):
         self.exceptions = dict()
         self.tracebacks = dict()
 
+        self.active_threads_lock = threading.Lock()
+        self.active_threads = dict()
+        self.profile_keys = defaultdict(profile.create)
+        self.profile_keys_history = deque(maxlen=3600)
+        self.profile_recent = profile.create()
+        self.profile_history = deque(maxlen=3600)
+
         self.priorities = dict()
         self.priority_counter = 0
         self.durations = dict()
@@ -998,26 +1092,29 @@ class Worker(WorkerBase):
 
         self.log = deque(maxlen=100000)
         self.validate = kwargs.pop('validate', False)
+        self.gc = ThrottledGC(logger=logger)
 
         self._transitions = {
-                ('waiting', 'ready'): self.transition_waiting_ready,
-                ('waiting', 'memory'): self.transition_waiting_done,
-                ('waiting', 'error'): self.transition_waiting_done,
-                ('ready', 'executing'): self.transition_ready_executing,
-                ('ready', 'memory'): self.transition_ready_memory,
-                ('constrained', 'executing'): self.transition_constrained_executing,
-                ('executing', 'memory'): self.transition_executing_done,
-                ('executing', 'error'): self.transition_executing_done,
-                ('executing', 'long-running'): self.transition_executing_long_running,
-                ('long-running', 'error'): self.transition_executing_done,
-                ('long-running', 'memory'): self.transition_executing_done,
+            ('waiting', 'ready'): self.transition_waiting_ready,
+            ('waiting', 'memory'): self.transition_waiting_done,
+            ('waiting', 'error'): self.transition_waiting_done,
+            ('ready', 'executing'): self.transition_ready_executing,
+            ('ready', 'memory'): self.transition_ready_memory,
+            ('constrained', 'executing'): self.transition_constrained_executing,
+            ('executing', 'memory'): self.transition_executing_done,
+            ('executing', 'error'): self.transition_executing_done,
+            ('executing', 'rescheduled'): self.transition_executing_done,
+            ('executing', 'long-running'): self.transition_executing_long_running,
+            ('long-running', 'error'): self.transition_executing_done,
+            ('long-running', 'memory'): self.transition_executing_done,
+            ('long-running', 'rescheduled'): self.transition_executing_done,
         }
 
         self._dep_transitions = {
-                ('waiting', 'flight'): self.transition_dep_waiting_flight,
-                ('waiting', 'memory'): self.transition_dep_waiting_memory,
-                ('flight', 'waiting'): self.transition_dep_flight_waiting,
-                ('flight', 'memory'): self.transition_dep_flight_memory,
+            ('waiting', 'flight'): self.transition_dep_waiting_flight,
+            ('waiting', 'memory'): self.transition_dep_waiting_memory,
+            ('flight', 'waiting'): self.transition_dep_flight_waiting,
+            ('flight', 'memory'): self.transition_dep_flight_memory,
         }
 
         self.incoming_transfer_log = deque(maxlen=(100000))
@@ -1026,16 +1123,30 @@ class Worker(WorkerBase):
         self.outgoing_count = 0
         self._client = None
 
+        profile_cycle_interval = kwargs.pop('profile_cycle_interval',
+                                        config.get('profile-cycle-interval', 1000))
+
         WorkerBase.__init__(self, *args, **kwargs)
+
+        pc = PeriodicCallback(self.trigger_profile,
+                              config.get('profile-interval', 10),
+                              io_loop=self.loop)
+        self.periodic_callbacks['profile'] = pc
+
+        pc = PeriodicCallback(self.cycle_profile,
+                              profile_cycle_interval,
+                              io_loop=self.loop)
+        pc.start()
+        self.periodic_callbacks['profile-cycle'] = pc
 
         _global_workers.append(weakref.ref(self))
 
     def __str__(self):
         return "<%s: %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>" % (
-                self.__class__.__name__, self.address, self.status,
-                len(self.data), len(self.executing), self.ncores,
-                len(self.ready), len(self.in_flight_tasks),
-                len(self.waiting_for_data))
+            self.__class__.__name__, self.address, self.status,
+            len(self.data), len(self.executing), self.ncores,
+            len(self.ready), len(self.in_flight_tasks),
+            len(self.waiting_for_data))
 
     __repr__ = __str__
 
@@ -1086,7 +1197,7 @@ class Worker(WorkerBase):
                     elif op == 'compute-task':
                         self.add_task(**msg)
                     elif op == 'release-task':
-                        self.log.append((msg['key'], 'release-task'))
+                        self.log.append((msg['key'], 'release-task', msg.get('reason')))
                         self.release_key(report=False, **msg)
                     elif op == 'delete-data':
                         self.delete_data(**msg)
@@ -1109,8 +1220,8 @@ class Worker(WorkerBase):
             raise
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
-            who_has=None, nbytes=None, priority=None, duration=None,
-            resource_restrictions=None, **kwargs2):
+                 who_has=None, nbytes=None, priority=None, duration=None,
+                 resource_restrictions=None, **kwargs2):
         if isinstance(priority, list):
             priority.insert(1, self.priority_counter)
         try:
@@ -1119,7 +1230,7 @@ class Worker(WorkerBase):
                 if state in ('memory', 'error'):
                     if state == 'memory':
                         assert key in self.data
-                    logger.debug("Asked to compute pre-existing result: %s: %s" ,
+                    logger.debug("Asked to compute pre-existing result: %s: %s",
                                  key, state)
                     self.send_task_state_to_scheduler(key)
                     return
@@ -1172,9 +1283,11 @@ class Worker(WorkerBase):
 
                 if dep not in self.dep_state:
                     if self.task_state.get(dep) == 'memory':
-                        self.dep_state[dep] = 'memory'
+                        state = 'memory'
                     else:
-                        self.dep_state[dep] = 'waiting'
+                        state = 'waiting'
+                    self.dep_state[dep] = state
+                    self.log.append((dep, 'new-dep', state))
 
                 if self.dep_state[dep] != 'memory':
                     self.waiting_for_data[key].add(dep)
@@ -1204,7 +1317,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     ###############
@@ -1236,7 +1350,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def transition_dep_flight_waiting(self, dep, worker=None):
@@ -1267,7 +1382,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def transition_dep_flight_memory(self, dep, value=None):
@@ -1276,12 +1392,19 @@ class Worker(WorkerBase):
                 assert dep in self.in_flight_tasks
 
             del self.in_flight_tasks[dep]
-            self.dep_state[dep] = 'memory'
-            self.put_key_in_memory(dep, value)
+            if self.dependents[dep]:
+                self.dep_state[dep] = 'memory'
+                self.put_key_in_memory(dep, value)
+                self.batched_stream.send({'op': 'add-keys',
+                                          'keys': [dep]})
+            else:
+                self.release_dep(dep)
+
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def transition_dep_waiting_memory(self, dep, value=None):
@@ -1294,11 +1417,13 @@ class Worker(WorkerBase):
                     assert self.task_state[dep] == 'memory'
                 except Exception as e:
                     logger.exception(e)
-                    import pdb; pdb.set_trace()
+                    import pdb
+                    pdb.set_trace()
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def transition(self, key, finish, **kwargs):
@@ -1331,7 +1456,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def transition_waiting_done(self, key, value=None):
@@ -1347,7 +1473,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def transition_ready_executing(self, key):
@@ -1364,7 +1491,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def transition_ready_memory(self, key, value=None):
@@ -1378,7 +1506,7 @@ class Worker(WorkerBase):
         if self.validate:
             assert all(v >= 0 for v in self.available_resources.values())
 
-    def transition_executing_done(self, key, value=no_value):
+    def transition_executing_done(self, key, value=no_value, report=True):
         try:
             if self.validate:
                 assert key in self.executing or key in self.long_running
@@ -1411,7 +1539,7 @@ class Worker(WorkerBase):
                 if key in self.dep_state:
                     self.transition_dep(key, 'memory')
 
-            if self.batched_stream:
+            if report and self.batched_stream:
                 self.send_task_state_to_scheduler(key)
             else:
                 raise CommClosedError
@@ -1423,7 +1551,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def transition_executing_long_running(self, key, compute_duration=None):
@@ -1441,7 +1570,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def maybe_transition_long_running(self, key, compute_duration=None):
@@ -1485,7 +1615,7 @@ class Worker(WorkerBase):
                 if missing_deps:
                     logger.info("Can't find dependencies for key %s", key)
                     missing_deps2 = {dep for dep in missing_deps
-                                         if dep not in self._missing_dep_flight}
+                                     if dep not in self._missing_dep_flight}
                     for dep in missing_deps2:
                         self._missing_dep_flight.add(dep)
                     self.loop.add_callback(self.handle_missing_dep,
@@ -1505,7 +1635,7 @@ class Worker(WorkerBase):
                     if dep not in self.who_has:
                         continue
                     workers = [w for w in self.who_has[dep]
-                                  if w not in self.in_flight_workers]
+                               if w not in self.in_flight_workers]
                     if not workers:
                         in_flight = True
                         continue
@@ -1516,7 +1646,7 @@ class Worker(WorkerBase):
                     for d in to_gather:
                         self.transition_dep(d, 'flight', worker=worker)
                     self.loop.add_callback(self.gather_dep, worker, dep,
-                            to_gather, total_nbytes, cause=key)
+                                           to_gather, total_nbytes, cause=key)
                     changed = True
 
                 if not deps and not in_flight:
@@ -1524,7 +1654,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def send_task_state_to_scheduler(self, key):
@@ -1571,6 +1702,7 @@ class Worker(WorkerBase):
 
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
+
         self.types[key] = type(value)
 
         for dep in self.dependents.get(key, ()):
@@ -1612,12 +1744,16 @@ class Worker(WorkerBase):
                 if self.validate:
                     self.validate_state()
 
+                deps = tuple(dep for dep in deps
+                                 if self.dep_state.get(dep) in ('waiting', 'flight'))
+
                 self.log.append(('request-dep', dep, worker, deps))
                 logger.debug("Request %d keys", len(deps))
-                start = time()
-                response = yield self.rpc(worker).get_data(keys=list(deps),
+
+                start = time() + self.scheduler_delay
+                response = yield self.rpc(worker).get_data(keys=deps,
                                                            who=self.address)
-                stop = time()
+                stop = time() + self.scheduler_delay
 
                 if cause:
                     self.startstops[cause].append(('transfer', start, stop))
@@ -1657,7 +1793,8 @@ class Worker(WorkerBase):
             except Exception as e:
                 logger.exception(e)
                 if self.batched_stream and LOG_PDB:
-                    import pdb; pdb.set_trace()
+                    import pdb
+                    pdb.set_trace()
                 raise
             finally:
                 self.comm_nbytes -= total_nbytes
@@ -1670,6 +1807,9 @@ class Worker(WorkerBase):
 
                     if d not in response and d in self.dependents:
                         self.log.append(('missing-dep', d))
+                        self.batched_stream.send({'op': 'missing-data',
+                                                  'errant_worker': worker,
+                                                  'key': d})
 
                 if self.validate:
                     self.validate_state()
@@ -1732,8 +1872,11 @@ class Worker(WorkerBase):
             else:
                 raise
         finally:
-            for dep in original_deps:
-                self._missing_dep_flight.remove(dep)
+            try:
+                for dep in original_deps:
+                    self._missing_dep_flight.remove(dep)
+            except KeyError:
+                pass
 
             self.ensure_communicating()
 
@@ -1759,7 +1902,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def release_key(self, key, cause=None, reason=None, report=True):
@@ -1773,7 +1917,7 @@ class Worker(WorkerBase):
                 self.task_state[key] = state
                 return
             if cause:
-                self.log.append((key, 'release-key', cause))
+                self.log.append((key, 'release-key', {'cause': cause}))
             else:
                 self.log.append((key, 'release-key'))
             del self.tasks[key]
@@ -1787,7 +1931,7 @@ class Worker(WorkerBase):
 
             for dep in self.dependencies.pop(key, ()):
                 self.dependents[dep].remove(key)
-                if not self.dependents[dep] and self.dep_state[dep] == 'waiting':
+                if not self.dependents[dep] and self.dep_state[dep] in ('waiting', 'flight'):
                     self.release_dep(dep)
 
             if key in self.threads:
@@ -1824,7 +1968,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def release_dep(self, dep, report=False):
@@ -1848,7 +1993,8 @@ class Worker(WorkerBase):
                 del self.nbytes[dep]
 
             if dep in self.in_flight_tasks:
-                del self.in_flight_tasks[dep]
+                worker = self.in_flight_tasks.pop(dep)
+                self.in_flight_workers[worker].remove(dep)
 
             for key in self.dependents.pop(dep, ()):
                 self.dependencies[key].remove(dep)
@@ -1861,7 +2007,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def rescind_key(self, key):
@@ -1888,7 +2035,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     ################
@@ -1905,6 +2053,8 @@ class Worker(WorkerBase):
         return True
 
     def ensure_computing(self):
+        if self.paused:
+            return
         try:
             while self.constrained and len(self.executing) < self.ncores:
                 key = self.constrained[0]
@@ -1923,7 +2073,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     @gen.coroutine
@@ -1939,8 +2090,9 @@ class Worker(WorkerBase):
             function, args, kwargs = self.tasks[key]
 
             start = time()
-            args2 = pack_data(args, self.data, key_types=str)
-            kwargs2 = pack_data(kwargs, self.data, key_types=str)
+            data = {k: self.data[k] for k in self.dependencies[key]}
+            args2 = pack_data(args, data, key_types=(bytes, unicode))
+            kwargs2 = pack_data(kwargs, data, key_types=(bytes, unicode))
             stop = time()
             if stop - start > 0.005:
                 self.startstops[key].append(('disk-read', start, stop))
@@ -1951,7 +2103,10 @@ class Worker(WorkerBase):
             try:
                 result = yield self.executor_submit(key, apply_function, function,
                                                     args2, kwargs2,
-                                                    self.execution_state, key)
+                                                    self.execution_state, key,
+                                                    self.active_threads,
+                                                    self.active_threads_lock,
+                                                    self.scheduler_delay)
             except RuntimeError as e:
                 executor_error = e
                 raise
@@ -1962,7 +2117,7 @@ class Worker(WorkerBase):
             result['key'] = key
             value = result.pop('result', None)
             self.startstops[key].append(('compute', result['start'],
-                                                    result['stop']))
+                                         result['stop']))
             self.threads[key] = result['thread']
 
             if result['op'] == 'task-finished':
@@ -1973,18 +2128,23 @@ class Worker(WorkerBase):
                     self.digests['task-duration'].add(result['stop'] -
                                                       result['start'])
             else:
-                self.exceptions[key] = result['exception']
-                self.tracebacks[key] = result['traceback']
-                logger.warning(" Compute Failed\n"
-                    "Function:  %s\n"
-                    "args:      %s\n"
-                    "kwargs:    %s\n"
-                    "Exception: %s\n",
-                    str(funcname(function))[:1000],
-                    convert_args_to_str(args2, max_len=1000),
-                    convert_kwargs_to_str(kwargs2, max_len=1000),
-                    repr(pickle.loads(result['exception'])))
-                self.transition(key, 'error')
+                if isinstance(result.pop('actual-exception'), Reschedule):
+                    self.batched_stream.send({'op': 'reschedule', 'key': key})
+                    self.transition(key, 'rescheduled', report=False)
+                    self.release_key(key, report=False)
+                else:
+                    self.exceptions[key] = result['exception']
+                    self.tracebacks[key] = result['traceback']
+                    logger.warning(" Compute Failed\n"
+                                   "Function:  %s\n"
+                                   "args:      %s\n"
+                                   "kwargs:    %s\n"
+                                   "Exception: %s\n",
+                                   str(funcname(function))[:1000],
+                                   convert_args_to_str(args2, max_len=1000),
+                                   convert_kwargs_to_str(kwargs2, max_len=1000),
+                                   repr(pickle.loads(result['exception'])))
+                    self.transition(key, 'error')
 
             logger.debug("Send compute response to scheduler: %s, %s", key,
                          result)
@@ -2004,7 +2164,8 @@ class Worker(WorkerBase):
             else:
                 logger.exception(e)
                 if LOG_PDB:
-                    import pdb; pdb.set_trace()
+                    import pdb
+                    pdb.set_trace()
                 raise
         finally:
             if key in self.executing:
@@ -2013,6 +2174,179 @@ class Worker(WorkerBase):
     ##################
     # Administrative #
     ##################
+
+    @gen.coroutine
+    def memory_monitor(self):
+        """ Track this process's memory usage and act accordingly
+
+        If we rise above 70% memory use, start dumping data to disk.
+
+        If we rise above 80% memory use, stop execution of new tasks
+        """
+        if self._memory_monitoring:
+            return
+        self._memory_monitoring = True
+        total = 0
+
+        proc = psutil.Process()
+        memory = proc.memory_info().rss
+        frac = memory / self.memory_limit
+
+        # Pause worker threads if above 80% memory use
+        if self.memory_pause_fraction and frac > self.memory_pause_fraction:
+            if not self.paused:
+                logger.warn("Worker is at %d%% memory usage. Pausing worker.  "
+                            "Process memory: %s -- Worker memory limit: %s",
+                            int(frac * 100),
+                            format_bytes(proc.memory_info().rss),
+                            format_bytes(self.memory_limit))
+                self.paused = True
+        elif self.paused:
+            logger.warn("Worker is at %d%% memory usage. Resuming worker. "
+                        "Process memory: %s -- Worker memory limit: %s",
+                        int(frac * 100),
+                        format_bytes(proc.memory_info().rss),
+                        format_bytes(self.memory_limit))
+            self.paused = False
+            self.ensure_computing()
+
+        # Dump data to disk if above 70%
+        if self.memory_spill_fraction and frac > self.memory_spill_fraction:
+            target = self.memory_limit * self.memory_target_fraction
+            count = 0
+            need = memory - target
+            while memory > target:
+                if not self.data.fast:
+                    logger.warn("Memory use is high but worker has no data "
+                                "to store to disk.  Perhaps some other process "
+                                "is leaking memory?  Process memory: %s -- "
+                                "Worker memory limit: %s",
+                                format_bytes(proc.memory_info().rss),
+                                format_bytes(self.memory_limit))
+                    break
+                k, v, weight = self.data.fast.evict()
+                del k, v
+                total += weight
+                count += 1
+                yield gen.moment
+                memory = proc.memory_info().rss
+                if total > need and memory > target:
+                    # Issue a GC to ensure that the evicted data is actually
+                    # freed from memory and taken into account by the monitor
+                    # before trying to evict even more data.
+                    self.gc.collect()
+                    memory = proc.memory_info().rss
+            if count:
+                logger.debug("Moved %d pieces of data data and %s to disk",
+                             count, format_bytes(total))
+
+        self._memory_monitoring = False
+        raise gen.Return(total)
+
+    def cycle_profile(self):
+        now = time() + self.scheduler_delay
+        prof, self.profile_recent = self.profile_recent, profile.create()
+        self.profile_history.append((now, prof))
+
+        self.profile_keys_history.append((now, dict(self.profile_keys)))
+        self.profile_keys.clear()
+
+    def trigger_profile(self):
+        """
+        Get a frame from all actively computing threads
+
+        Merge these frames into existing profile counts
+        """
+        if not self.active_threads:  # hope that this is thread-atomic?
+            return
+        start = time()
+        with self.active_threads_lock:
+            active_threads = self.active_threads.copy()
+        frames = sys._current_frames()
+        frames = {ident: frames[ident] for ident in active_threads}
+        for ident, frame in frames.items():
+            key = key_split(active_threads[ident])
+            profile.process(frame, None, self.profile_recent, stop='_concurrent_futures_thread.py')
+            profile.process(frame, None, self.profile_keys[key], stop='_concurrent_futures_thread.py')
+        stop = time()
+        if self.digests is not None:
+            self.digests['profile-duration'].add(stop - start)
+
+    def get_profile(self, comm=None, start=None, stop=None, key=None):
+        now = time() + self.scheduler_delay
+        if key is None:
+            history = self.profile_history
+        else:
+            history = [(t, d[key]) for t, d in self.profile_keys_history
+                       if key in d]
+        if start is None:
+            istart = 0
+        else:
+            istart = bisect.bisect_left(history, (start,))
+
+        if stop is None:
+            istop = None
+        else:
+            istop = bisect.bisect_right(history, (stop,)) + 1
+            if istop >= len(history):
+                istop = None  # include end
+
+        if istart == 0 and istop is None:
+            history = list(history)
+        else:
+            iistop = len(history) if istop is None else istop
+            history = [history[i] for i in range(istart, iistop)]
+
+        prof = profile.merge(*pluck(1, history))
+
+        if not history:
+            return profile.create()
+
+        if istop is None and (start is None or start < now):
+            if key is None:
+                recent = self.profile_recent
+            else:
+                recent = self.profile_keys[key]
+            prof = profile.merge(prof, recent)
+
+        return prof
+
+    def get_profile_metadata(self, comm=None, start=0, stop=None):
+        if stop is None:
+            add_recent = True
+        now = time() + self.scheduler_delay
+        stop = stop or now
+        start = start or 0
+        result = {'counts': [(t, d['count']) for t, d in self.profile_history
+                             if start < t < stop],
+                  'keys': [(t, {k: d['count'] for k, d in v.items()})
+                           for t, v in self.profile_keys_history
+                           if start < t < stop]}
+        if add_recent:
+            result['counts'].append((now, self.profile_recent['count']))
+            result['keys'].append((now, {k: v['count']
+                                          for k, v in self.profile_keys.items()}))
+        return result
+
+    def get_call_stack(self, comm=None, keys=None):
+        with self.active_threads_lock:
+            frames = sys._current_frames()
+            active_threads = self.active_threads.copy()
+            frames = {k: frames[ident]
+                      for ident, k in active_threads.items()}
+        if keys is not None:
+            frames = {k: frame for k, frame in frames.items() if k in keys}
+
+        result = {k: profile.call_stack(frame) for k, frame in frames.items()}
+        return result
+
+    def get_logs(self, comm=None, n=None):
+        if n is None:
+            L = list(deque_handler.deque)
+        else:
+            L = deque_handler.deque
+            L = [L[-i] for i in range(min(n, len(L)))]
+        return [(msg.levelname, deque_handler.format(msg)) for msg in L]
 
     def validate_key_memory(self, key):
         assert key in self.data
@@ -2053,7 +2387,8 @@ class Worker(WorkerBase):
                 self.validate_key_executing(key)
         except Exception as e:
             logger.exception(e)
-            import pdb; pdb.set_trace()
+            import pdb
+            pdb.set_trace()
             raise
 
     def validate_dep_waiting(self, dep):
@@ -2089,7 +2424,8 @@ class Worker(WorkerBase):
                 raise ValueError("Unknown dependent state", state)
         except Exception as e:
             logger.exception(e)
-            import pdb; pdb.set_trace()
+            import pdb
+            pdb.set_trace()
             raise
 
     def validate_state(self):
@@ -2126,7 +2462,8 @@ class Worker(WorkerBase):
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
-                import pdb; pdb.set_trace()
+                import pdb
+                pdb.set_trace()
             raise
 
     def stateof(self, key):
@@ -2137,11 +2474,11 @@ class Worker(WorkerBase):
 
     def story(self, *keys):
         return [msg for msg in self.log
-                    if any(key in msg for key in keys)
-                    or any(key in c
-                           for key in keys
-                           for c in msg
-                           if isinstance(c, (tuple, list, set)))]
+                if any(key in msg for key in keys)
+                or any(key in c
+                       for key in keys
+                       for c in msg
+                       if isinstance(c, (tuple, list, set)))]
 
     @property
     def client(self):
@@ -2167,7 +2504,7 @@ class Worker(WorkerBase):
             pass
         else:
             if (client.scheduler and client.scheduler.address == self.scheduler.address
-                or client._start_arg == self.scheduler.address):
+                    or client._start_arg == self.scheduler.address):
                 self._client = client
 
         if not self._client:
@@ -2181,6 +2518,27 @@ class Worker(WorkerBase):
             if not asynchronous:
                 assert self._client.status == 'running'
         return self._client
+
+    def get_current_task(self):
+        """ Get the key of the task we are currently running
+
+        This only makes sense to run within a task
+
+        Examples
+        --------
+        >>> from dask.distributed import get_worker
+        >>> def f():
+        ...     return get_worker().get_current_task()
+
+        >>> future = client.submit(f)  # doctest: +SKIP
+        >>> future.result()  # doctest: +SKIP
+        'f-1234'
+
+        See Also
+        --------
+        get_worker
+        """
+        return self.active_threads[get_thread_identity()]
 
 
 def get_worker():
@@ -2278,3 +2636,18 @@ def secede():
     duration = time() - thread_state.start_time
     worker.loop.add_callback(worker.maybe_transition_long_running,
                              thread_state.key, compute_duration=duration)
+
+
+class Reschedule(Exception):
+    """ Reschedule this task
+
+    Raising this exception will stop the current execution of the task and ask
+    the scheduler to reschedule this task, possibly on a different machine.
+
+    This does not guarantee that the task will move onto a different machine.
+    The scheduler will proceed through its normal heuristics to determine the
+    optimal machine to accept this task.  The machine will likely change if the
+    load across the cluster has significantly changed since first scheduling
+    the task.
+    """
+    pass

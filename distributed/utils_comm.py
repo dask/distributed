@@ -13,9 +13,6 @@ from .core import rpc
 from .utils import All, tokey
 
 
-no_default = '__no_default__'
-
-
 @gen.coroutine
 def gather_from_workers(who_has, rpc, close=True):
     """ Gather data directly from peers
@@ -89,6 +86,7 @@ class WrappedKey(object):
     only be accessed in a certain way.  Schedulers may have particular needs
     that can only be addressed by additional metadata.
     """
+
     def __init__(self, key):
         self.key = key
 

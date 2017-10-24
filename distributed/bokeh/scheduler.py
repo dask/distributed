@@ -11,10 +11,10 @@ import os
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.layouts import column, row
-from bokeh.models import ( ColumnDataSource, DataRange1d, HoverTool, ResetTool,
-        PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad,
-        value, LinearAxis, NumeralTickFormatter, BasicTicker, NumberFormatter,
-        BoxSelectTool)
+from bokeh.models import (ColumnDataSource, DataRange1d, HoverTool, ResetTool,
+                          PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad,
+                          value, LinearAxis, NumeralTickFormatter, BasicTicker, NumberFormatter,
+                          BoxSelectTool)
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
@@ -26,12 +26,12 @@ except ImportError:
     np = False
 
 from . import components
-from .components import DashboardComponent
+from .components import DashboardComponent, ProfileTimePlot
 from .core import BokehServer
-from .worker import SystemMonitor, format_time, counters_doc
+from .worker import SystemMonitor, counters_doc
 from .utils import transpose
 from ..metrics import time
-from ..utils import log_errors, format_bytes
+from ..utils import log_errors, format_bytes, format_time
 from ..diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
 from ..diagnostics.progress import AllProgress
 from .task_stream import TaskStreamPlugin
@@ -53,7 +53,8 @@ with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
 
 template = jinja2.Template(template_source)
 
-template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'counters']}
+template_variables = {'pages': ['status', 'workers', 'tasks', 'system',
+                                'profile', 'counters']}
 
 
 def update(source, data):
@@ -88,6 +89,7 @@ def update(source, data):
 
 class StateTable(DashboardComponent):
     """ Currently running tasks """
+
     def __init__(self, scheduler):
         self.scheduler = scheduler
 
@@ -120,6 +122,7 @@ class StateTable(DashboardComponent):
 
 class Occupancy(DashboardComponent):
     """ Occupancy (in time) per worker """
+
     def __init__(self, scheduler, **kwargs):
         with log_errors():
             self.scheduler = scheduler
@@ -131,10 +134,11 @@ class Occupancy(DashboardComponent):
                                             'color': ['red', 'blue'],
                                             'bokeh_address': ['', '']})
 
-            fig = figure(title='Occupancy', tools='resize', id='bk-occupancy-plot',
+            fig = figure(title='Occupancy', tools='', id='bk-occupancy-plot',
                          x_axis_type='datetime', **kwargs)
-            fig.rect(source=self.source, x='x', width='ms', y='y', height=1,
-                     color='color')
+            rect = fig.rect(source=self.source, x='x', width='ms', y='y', height=1,
+                            color='color')
+            rect.nonselection_glyph = None
 
             fig.xaxis.minor_tick_line_alpha = 0
             fig.yaxis.visible = False
@@ -145,7 +149,7 @@ class Occupancy(DashboardComponent):
             tap = TapTool(callback=OpenURL(url='http://@bokeh_address/'))
 
             hover = HoverTool()
-            hover.tooltips = "@worker : @occupancy s.  Click for worker page"
+            hover.tooltips = "@worker : @occupancy s."
             hover.point_policy = 'follow_mouse'
             fig.add_tools(hover, tap)
 
@@ -177,8 +181,8 @@ class Occupancy(DashboardComponent):
 
             if total:
                 self.root.title.text = ('Occupancy -- total time: %s  wall time: %s' %
-                                  (format_time(total),
-                                  format_time(total / self.scheduler.total_ncores)))
+                                        (format_time(total),
+                                         format_time(total / self.scheduler.total_ncores)))
             else:
                 self.root.title.text = 'Occupancy'
 
@@ -195,6 +199,7 @@ class Occupancy(DashboardComponent):
 
 class ProcessingHistogram(DashboardComponent):
     """ How many tasks are on each worker """
+
     def __init__(self, scheduler, **kwargs):
         with log_errors():
             self.last = 0
@@ -227,6 +232,7 @@ class ProcessingHistogram(DashboardComponent):
 
 class NBytesHistogram(DashboardComponent):
     """ How many tasks are on each worker """
+
     def __init__(self, scheduler, **kwargs):
         with log_errors():
             self.last = 0
@@ -262,6 +268,7 @@ class NBytesHistogram(DashboardComponent):
 
 class CurrentLoad(DashboardComponent):
     """ How many tasks are on each worker """
+
     def __init__(self, scheduler, width=600, **kwargs):
         with log_errors():
             self.last = 0
@@ -271,27 +278,31 @@ class CurrentLoad(DashboardComponent):
                                             'nprocessing-color': ['red', 'blue'],
                                             'nbytes': [1, 2],
                                             'nbytes-half': [0.5, 1],
+                                            'nbytes_text': ['1B', '2B'],
                                             'worker': ['a', 'b'],
                                             'y': [1, 2],
                                             'nbytes-color': ['blue', 'blue'],
                                             'bokeh_address': ['', '']})
 
-            processing = figure(title='Tasks Processing', tools='resize', id='bk-nprocessing-plot',
+            processing = figure(title='Tasks Processing', tools='', id='bk-nprocessing-plot',
                                 width=int(width / 2), **kwargs)
-            processing.rect(source=self.source,
-                            x='nprocessing-half', y='y',
-                            width='nprocessing', height=1,
-                            color='nprocessing-color')
+            rect = processing.rect(source=self.source,
+                                   x='nprocessing-half', y='y',
+                                   width='nprocessing', height=1,
+                                   color='nprocessing-color')
             processing.x_range.start = 0
+            rect.nonselection_glyph = None
 
-            nbytes = figure(title='Bytes stored', tools='resize',
+            nbytes = figure(title='Bytes stored', tools='',
                             id='bk-nbytes-worker-plot', width=int(width / 2),
                             **kwargs)
-            nbytes.rect(source=self.source,
-                        x='nbytes-half', y='y',
-                        width='nbytes', height=1,
-                        color='nbytes-color')
-            nbytes.axis[0].ticker = BasicTicker(mantissas=[1,256,512], base=1024)
+            rect = nbytes.rect(source=self.source,
+                               x='nbytes-half', y='y',
+                               width='nbytes', height=1,
+                               color='nbytes-color')
+            rect.nonselection_glyph = None
+
+            nbytes.axis[0].ticker = BasicTicker(mantissas=[1, 256, 512], base=1024)
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format='0.0 b')
             nbytes.xaxis.major_label_orientation = -math.pi / 12
             nbytes.x_range.start = 0
@@ -309,12 +320,12 @@ class CurrentLoad(DashboardComponent):
                 fig.yaxis.visible = False
 
             hover = HoverTool()
-            hover.tooltips = "@worker : @nprocessing tasks.  Click for worker page"
+            hover.tooltips = "@worker : @nprocessing tasks"
             hover.point_policy = 'follow_mouse'
             processing.add_tools(hover)
 
             hover = HoverTool()
-            hover.tooltips = "@worker : @nbytes bytes.  Click for worker page"
+            hover.tooltips = "@worker : @nbytes_text bytes"
             hover.point_policy = 'follow_mouse'
             nbytes.add_tools(hover)
 
@@ -346,6 +357,7 @@ class CurrentLoad(DashboardComponent):
                     processing_color.append('blue')
 
             nbytes = [self.scheduler.worker_bytes[w] for w in workers]
+            nbytes_text = [format_bytes(nb) for nb in nbytes]
             nbytes_color = []
             max_limit = 0
             for w, nb in zip(workers, nbytes):
@@ -372,6 +384,7 @@ class CurrentLoad(DashboardComponent):
                           'nbytes': nbytes,
                           'nbytes-half': [nb / 2 for nb in nbytes],
                           'nbytes-color': nbytes_color,
+                          'nbytes_text': nbytes_text,
                           'bokeh_address': bokeh_addresses,
                           'worker': workers,
                           'y': y}
@@ -482,7 +495,7 @@ class StealingEvents(DashboardComponent):
                            map(self.convert), list, transpose)
                 if PROFILING:
                     curdoc().add_next_tick_callback(
-                            lambda: self.source.stream(new, 10000))
+                        lambda: self.source.stream(new, 10000))
                 else:
                     self.source.stream(new, 10000)
 
@@ -609,13 +622,14 @@ class TaskStream(components.TaskStream):
 
             if PROFILING:
                 curdoc().add_next_tick_callback(lambda:
-                        self.source.stream(rectangles, self.n_rectangles))
+                                                self.source.stream(rectangles, self.n_rectangles))
             else:
                 self.source.stream(rectangles, self.n_rectangles)
 
 
 class TaskProgress(DashboardComponent):
     """ Progress bars per task type """
+
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         ps = [p for p in scheduler.plugins if isinstance(p, AllProgress)]
@@ -714,15 +728,16 @@ class TaskProgress(DashboardComponent):
             totals = {k: sum(state[k].values())
                       for k in ['all', 'memory', 'erred', 'released']}
             totals['processing'] = totals['all'] - sum(v for k, v in
-                    totals.items() if k != 'all')
+                                                       totals.items() if k != 'all')
 
             self.root.title.text = ("Progress -- total: %(all)s, "
-                "in-memory: %(memory)s, processing: %(processing)s, "
-                "erred: %(erred)s" % totals)
+                                    "in-memory: %(memory)s, processing: %(processing)s, "
+                                    "erred: %(erred)s" % totals)
 
 
 class MemoryUse(DashboardComponent):
     """ The memory usage across the cluster, grouped by task type """
+
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         ps = [p for p in scheduler.plugins if isinstance(p, AllProgress)]
@@ -774,7 +789,7 @@ class MemoryUse(DashboardComponent):
             nb = nbytes_bar(self.plugin.nbytes)
             update(self.source, nb)
             self.root.title.text = \
-                    "Memory Use: %0.2f MB" % (sum(self.plugin.nbytes.values()) / 1e6)
+                "Memory Use: %0.2f MB" % (sum(self.plugin.nbytes.values()) / 1e6)
 
 
 class WorkerTable(DashboardComponent):
@@ -783,6 +798,7 @@ class WorkerTable(DashboardComponent):
     This is two plots, a text-based table for each host and a thin horizontal
     plot laying out hosts by their current memory use.
     """
+
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.names = ['disk-read', 'cores', 'cpu', 'disk-write',
@@ -986,6 +1002,18 @@ def status_doc(scheduler, extra, doc):
         doc.template_variables.update(extra)
 
 
+def profile_doc(scheduler, extra, doc):
+    with log_errors():
+        doc.title = "Dask Profile"
+        prof = ProfileTimePlot(scheduler, sizing_mode='scale_width', doc=doc)
+        doc.add_root(prof.root)
+        doc.template = template
+        doc.template_variables['active_page'] = 'profile'
+        doc.template_variables.update(extra)
+
+        prof.trigger_update()
+
+
 class BokehScheduler(BokehServer):
     def __init__(self, scheduler, io_loop=None, prefix='', **kwargs):
         self.scheduler = scheduler
@@ -1006,16 +1034,28 @@ class BokehScheduler(BokehServer):
         events = Application(FunctionHandler(partial(events_doc, scheduler, extra)))
         tasks = Application(FunctionHandler(partial(tasks_doc, scheduler, extra)))
         status = Application(FunctionHandler(partial(status_doc, scheduler, extra)))
+        profile = Application(FunctionHandler(partial(profile_doc, scheduler, extra)))
 
         self.apps = {
-                '/system': systemmonitor,
-                '/stealing': stealing,
-                '/workers': workers,
-                '/events': events,
-                '/counters': counters,
-                '/tasks': tasks,
-                '/status': status
+            '/system': systemmonitor,
+            '/stealing': stealing,
+            '/workers': workers,
+            '/events': events,
+            '/counters': counters,
+            '/tasks': tasks,
+            '/status': status,
+            '/profile': profile,
         }
 
         self.loop = io_loop or scheduler.loop
         self.server = None
+
+    @property
+    def my_server(self):
+        return self.scheduler
+
+    def listen(self, *args, **kwargs):
+        super(BokehScheduler, self).listen(*args, **kwargs)
+
+        from .scheduler_html import get_handlers
+        self.server._tornado.add_handlers(r'.*', get_handlers(self.my_server))

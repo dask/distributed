@@ -27,7 +27,8 @@ setup(name='distributed',
       maintainer='Matthew Rocklin',
       maintainer_email='mrocklin@gmail.com',
       license='BSD',
-      package_data={ '': ['templates/index.html', 'template.html'], },
+      package_data={'': ['templates/index.html', 'template.html'],
+                    'distributed': ['bokeh/templates/*.html']},
       include_package_data=True,
       install_requires=install_requires,
       extras_require=extras_require,
@@ -61,5 +62,6 @@ setup(name='distributed',
         dask-remote=distributed.cli.dask_remote:go
         dask-scheduler=distributed.cli.dask_scheduler:go
         dask-worker=distributed.cli.dask_worker:go
+        dask-mpi=distributed.cli.dask_mpi:go
       ''',
       zip_safe=False)

@@ -14,13 +14,12 @@ from time import sleep
 from tornado import gen
 
 from distributed import Scheduler, Client
-from distributed.compatibility import WINDOWS
-from distributed.utils import get_ip, get_ip_interface, ignoring, tmpfile
-from distributed.utils_test import (loop, popen,
-                                    assert_can_connect_from_everywhere_4,
+from distributed.utils import get_ip, get_ip_interface, tmpfile
+from distributed.utils_test import (popen,
                                     assert_can_connect_from_everywhere_4_6,
                                     assert_can_connect_locally_4,
                                     )
+from distributed.utils_test import loop  # flake8: noqa
 from distributed.metrics import time
 
 
@@ -33,19 +32,21 @@ def test_defaults(loop):
             yield [
                 assert_can_connect_from_everywhere_4_6(8786, 2.0),  # main port
                 assert_can_connect_from_everywhere_4_6(9786, 2.0),  # HTTP port
-                ]
+            ]
 
         loop.run_sync(f)
 
         with Client('127.0.0.1:%d' % Scheduler.default_port, loop=loop) as c:
-            response = requests.get('http://127.0.0.1:9786/info.json')
-            assert response.ok
-            assert response.json()['status'] == 'running'
+            pass
+
+        response = requests.get('http://127.0.0.1:9786/info.json')
+        assert response.ok
+        assert response.json()['status'] == 'running'
 
     with pytest.raises(Exception):
-        response = requests.get('http://127.0.0.1:9786/info.json')
-    with pytest.raises(Exception):
         requests.get('http://127.0.0.1:8787/status/')
+    with pytest.raises(Exception):
+        response = requests.get('http://127.0.0.1:9786/info.json')
 
 
 def test_hostport(loop):
@@ -56,8 +57,7 @@ def test_hostport(loop):
             yield [
                 # The scheduler's main port can't be contacted from the outside
                 assert_can_connect_locally_4(8978, 2.0),
-                # ... but its HTTP port can
-                assert_can_connect_from_everywhere_4_6(8979, 2.0),
+                assert_can_connect_locally_4(8979, 2.0),
                 ]
 
         loop.run_sync(f)
@@ -122,7 +122,7 @@ def test_bokeh_non_standard_ports(loop):
                 response = requests.get('http://localhost:4832/status/')
                 assert response.ok
                 break
-            except:
+            except Exception:
                 sleep(0.1)
                 assert time() < start + 20
     with pytest.raises(Exception):
@@ -274,7 +274,7 @@ def test_preload_file(loop):
                         '--preload', path]):
                 with Client(scheduler_file=fn, loop=loop) as c:
                     assert c.run_on_scheduler(check_scheduler) == \
-                           c.scheduler.address
+                        c.scheduler.address
     finally:
         shutil.rmtree(tmpdir)
 
@@ -301,6 +301,6 @@ def test_preload_module(loop):
                        env=env):
                 with Client(scheduler_file=fn, loop=loop) as c:
                     assert c.run_on_scheduler(check_scheduler) == \
-                           c.scheduler.address
+                        c.scheduler.address
     finally:
         shutil.rmtree(tmpdir)

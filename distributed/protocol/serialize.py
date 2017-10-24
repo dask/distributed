@@ -8,10 +8,7 @@ try:
 except ImportError:
     from toolz import valmap, get_in
 
-try:
-    import msgpack
-except ImportError:
-    import pandas.msgpack as msgpack
+import msgpack
 
 from . import pickle
 from ..compatibility import PY2
@@ -174,6 +171,7 @@ class Serialize(object):
     --------
     distributed.protocol.dumps
     """
+
     def __init__(self, data):
         self.data = data
 
@@ -204,6 +202,7 @@ class Serialized(object):
     typically used within the scheduler which accepts messages that contain
     data without actually unpacking that data.
     """
+
     def __init__(self, header, frames):
         self.header = header
         self.frames = frames

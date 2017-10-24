@@ -4,20 +4,24 @@ from datetime import timedelta
 import logging
 from multiprocessing.queues import Empty
 import os
+import psutil
 import shutil
 import threading
 
 from tornado import gen
-from tornado.ioloop import IOLoop, TimeoutError
+from tornado.ioloop import IOLoop, TimeoutError, PeriodicCallback
 from tornado.locks import Event
 
-from .comm import get_address_host, get_local_address_for
+from .comm import get_address_host, get_local_address_for, unparse_host_port
+from .config import config
 from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
+from .metrics import time
 from .node import ServerNode
 from .process import AsyncProcess
 from .security import Security
-from .utils import get_ip, mp_context, silence_logging
-from .worker import _ncores, run
+from .utils import (get_ip, mp_context, silence_logging, json_load_robust,
+        ignoring)
+from .worker import _ncores, run, TOTAL_MEMORY
 
 
 logger = logging.getLogger(__name__)
@@ -32,12 +36,17 @@ class Nanny(ServerNode):
     process = None
     status = None
 
-    def __init__(self, scheduler_ip, scheduler_port=None, worker_port=0,
+    def __init__(self, scheduler_ip=None, scheduler_port=None,
+                 scheduler_file=None, worker_port=0,
                  ncores=None, loop=None, local_dir=None, services=None,
                  name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
-                 death_timeout=None, preload=(), security=None, **kwargs):
-        if scheduler_port is None:
+                 death_timeout=None, preload=(), security=None,
+                 contact_address=None, listen_address=None, **kwargs):
+        if scheduler_file:
+            cfg = json_load_robust(scheduler_file)
+            self.scheduler_addr = cfg['address']
+        elif scheduler_port is None:
             self.scheduler_addr = coerce_to_address(scheduler_ip)
         else:
             self.scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
@@ -48,6 +57,8 @@ class Nanny(ServerNode):
         self.resources = resources
         self.death_timeout = death_timeout
         self.preload = preload
+        self.contact_address = contact_address
+        self.memory_terminate_fraction = config.get('worker-memory-terminate', 0.95)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -60,9 +71,16 @@ class Nanny(ServerNode):
         self.scheduler = rpc(self.scheduler_addr, connection_args=self.connection_args)
         self.services = services
         self.name = name
-        self.memory_limit = memory_limit
         self.quiet = quiet
         self.auto_restart = True
+
+        if memory_limit == 'auto':
+            memory_limit = int(TOTAL_MEMORY * min(1, self.ncores / _ncores))
+        with ignoring(TypeError):
+            memory_limit = float(memory_limit)
+        if isinstance(memory_limit, float) and memory_limit <= 1:
+            memory_limit = memory_limit * TOTAL_MEMORY
+        self.memory_limit = memory_limit
 
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -79,6 +97,10 @@ class Nanny(ServerNode):
                                     connection_args=self.connection_args,
                                     **kwargs)
 
+        pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
+        self.periodic_callbacks['memory'] = pc
+
+        self._listen_address = listen_address
         self.status = 'init'
 
     def __str__(self):
@@ -137,6 +159,9 @@ class Nanny(ServerNode):
             assert self.worker_address
             self.status = 'running'
 
+        for pc in self.periodic_callbacks.values():
+            pc.start()
+
     def start(self, addr_or_port=0):
         self.loop.add_callback(self._start, addr_or_port)
 
@@ -161,6 +186,13 @@ class Nanny(ServerNode):
 
         Blocks until the process is up and the scheduler is properly informed
         """
+        if self._listen_address:
+            start_arg = self._listen_address
+        else:
+            host = self.listener.bound_address[0]
+            start_arg = self.listener.prefix + unparse_host_port(host,
+                    self._given_worker_port)
+
         if self.process is None:
             self.process = WorkerProcess(
                 worker_args=(self.scheduler_addr,),
@@ -176,8 +208,9 @@ class Nanny(ServerNode):
                                    silence_logs=self.silence_logs,
                                    death_timeout=self.death_timeout,
                                    preload=self.preload,
-                                   security=self.security),
-                worker_start_args=(self._given_worker_port,),
+                                   security=self.security,
+                                   contact_address=self.contact_address),
+                worker_start_args=(start_arg,),
                 silence_logs=self.silence_logs,
                 on_exit=self._on_exit,
             )
@@ -196,10 +229,31 @@ class Nanny(ServerNode):
 
     @gen.coroutine
     def restart(self, comm=None, timeout=2):
-        if self.process is not None:
-            yield self.kill(timeout=timeout)
-        yield self.instantiate()
-        raise gen.Return('OK')
+        start = time()
+
+        @gen.coroutine
+        def _():
+            if self.process is not None:
+                yield self.kill()
+                yield self.instantiate()
+
+        try:
+            yield gen.with_timeout(timedelta(seconds=timeout), _())
+        except gen.TimeoutError:
+            logger.error("Restart timed out, returning before finished")
+            raise gen.Return('timed out')
+        else:
+            raise gen.Return('OK')
+
+    def memory_monitor(self):
+        """ Track worker's memory.  Restart if it goes above 95% """
+        if self.status != 'running':
+            return
+        memory = psutil.Process(self.process.pid).memory_info().rss
+        frac = memory / self.memory_limit
+        if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
+            logger.warn("Worker exceeded 95% memory budget.  Restarting")
+            self.process.process.terminate()
 
     def is_alive(self):
         return self.process is not None and self.process.status == 'running'
@@ -383,7 +437,7 @@ class WorkerProcess(object):
         delay = 0.05
         while True:
             if self.status != 'starting':
-                raise ValueError("Worker not started")
+                return
             try:
                 msg = self.init_result_q.get_nowait()
             except Empty:
