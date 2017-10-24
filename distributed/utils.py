@@ -948,23 +948,6 @@ else:
         else:
             return frame.nbytes
 
-
-class ThrottledGC(object):
-    """
-    Allows to run throttled garbage collection as a countermeasure to e.g.:
-    https://github.com/dask/zict/issues/19
-    """
-    def __init__(self, min_interval_in_sec=1.0):
-        self.min_interval_in_sec = min_interval_in_sec
-        self.last_collect = time()
-        #gc.collect()
-
-    def collect(self, force_gc=False):
-        new_time = time()
-        if force_gc or new_time - self.last_collect > self.min_interval_in_sec:
-            gc.collect()
-            self.last_collect = new_time
-
 @contextmanager
 def time_warn(duration, text):
     start = time()

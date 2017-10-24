@@ -649,8 +649,8 @@ class WorkerBase(ServerNode):
                           'keys': missing_keys})
         else:
             self.update_data(data=result, report=False)
-            #del result
-            #self._throttledGC.collect()
+            del result
+            self._throttledGC.collect()
             raise Return({'status': 'OK'})
 
 
@@ -1908,7 +1908,7 @@ class Worker(WorkerBase):
 
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
-            #nbytes_to_free = self.nbytes.get(key)
+            nbytes_to_free = self.nbytes.get(key)
 
             if key not in self.task_state:
                 return
@@ -1958,12 +1958,10 @@ class Worker(WorkerBase):
                                           'key': key,
                                           'cause': cause})
 
-            """
             force_gc = None
             if nbytes_to_free is not None:
                 force_gc = nbytes_to_free > 10 * 2**20
             self._throttledGC.collect(force_gc)
-            """
 
         except CommClosedError:
             pass
@@ -2158,8 +2156,8 @@ class Worker(WorkerBase):
             self.ensure_computing()
             self.ensure_communicating()
 
-            #del value
-            #self._throttledGC.collect()
+            del value
+            self._throttledGC.collect()
         except Exception as e:
             if executor_error is e:
                 logger.error("Thread Pool Executor error: %s", e)
