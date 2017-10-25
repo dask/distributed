@@ -632,14 +632,17 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         def test_func():
             before = process_state()
             result = None
+            workers = []
+
             with pristine_loop() as loop:
                 with check_active_rpc(loop, active_rpc_timeout):
                     @gen.coroutine
                     def coro():
-                        s, workers = yield start_cluster(
+                        s, ws = yield start_cluster(
                             ncores, scheduler, loop, security=security,
                             Worker=Worker, scheduler_kwargs=scheduler_kwargs,
                             worker_kwargs=worker_kwargs)
+                        workers[:] = ws
                         args = [s] + workers
                         if client:
                             c = yield Client(s.address, loop=loop, security=security,
@@ -653,12 +656,16 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                             if client:
                                 yield c._close()
                             yield end_cluster(s, workers)
-                            for w in workers:
-                                if hasattr(w, 'data'):
-                                    w.data.clear()
 
                     result = loop.run_sync(coro, timeout=timeout)
 
+            for w in workers:
+                if getattr(w, 'data', None):
+                    try:
+                        w.data.clear()
+                    except OSError:
+                        pass
+                    del w.data
             gc.collect()
             after = process_state()
             if should_check_state:
