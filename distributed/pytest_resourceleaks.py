@@ -239,6 +239,7 @@ class LeakChecker(object):
             # This invokes our setup/teardown hooks again
             # Inspired by https://pypi.python.org/pypi/pytest-rerunfailures
             from _pytest.runner import runtestprotocol
+            item._initrequest()  # Re-init fixtures
             reports = runtestprotocol(item, nextitem=nextitem, log=False)
 
         nodeid = item.nodeid
