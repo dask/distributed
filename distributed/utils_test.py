@@ -649,7 +649,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                                              asynchronous=True)
                             args = [c] + args
                         try:
-                            yield func(*args)
+                            result = yield func(*args)
                             # for w in workers:
                             #     assert not w._comms
                         finally:
@@ -657,13 +657,17 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                                 yield c._close()
                             yield end_cluster(s, workers)
 
+                        raise gen.Return(result)
+
                     result = loop.run_sync(coro, timeout=timeout)
 
             for w in workers:
                 if getattr(w, 'data', None):
                     try:
                         w.data.clear()
-                    except OSError:
+                    except EnvironmentError:
+                        # zict backends can fail if their storage directory
+                        # was already removed
                         pass
                     del w.data
             gc.collect()
