@@ -2209,6 +2209,7 @@ class Worker(WorkerBase):
                                 "Worker memory limit: %s",
                                 format_bytes(proc.memory_info().rss),
                                 format_bytes(self.memory_limit))
+                    self.gc.collect()
                     break
                 k, v, weight = self.data.fast.evict()
                 del k, v
