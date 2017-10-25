@@ -163,10 +163,12 @@ get updated at each state transition.
 * **processing:** ``{worker: {key: cost}}``:
 
    Keys that are currently allocated to a worker.  This is keyed by worker
-   address and contains the expected cost in seconds of running that task.
+   address and contains the expected cost in seconds of running each task,
+   summing both the task's expected computation time and the expected
+   communication time of its result.
 
-   Multiple tasks can typically be submitted to a worker in advance and the
-   worker will run them eventually, depending on its execution resources
+   Multiple tasks may be submitted to a worker in advance and the worker
+   will run them eventually, depending on its execution resources
    (but see :doc:`work-stealing`).
 
 * **rprocessing:** ``{key: worker}``:
@@ -258,17 +260,30 @@ in deciding :ref:`which worker to run a task on <decide-worker>`.
    The total memory size, in bytes, used by the keys currently held in memory
    on each given worker.
 
-* **idle:** ``{worker}``:
+* **occupancy:** ``{worker: duration}``:
 
-   A set of workers considered "idle", meaning we expect them to be able
-   to start processing a new task in a relatively short timespan
-   (for example because they are processing fewer tasks than their
-   number of CPU cores).
+   The total expected runtime, in seconds, of all tasks currently processing
+   on a worker.
+
+* **idle and saturated:** ``{worker}``:
+
+   Two sets of workers indicating their ability to start computing a new
+   task in a relatively short timespan.  "Idle" workers will be preferred
+   when :ref:`deciding a suitable worker <decide-worker>` to run a new
+   task on.  Conversely, "saturated" workers may see their workload
+   lightened through :doc:`work-stealing`.
+
+   These two sets are computed based on each worker's number of cores
+   (``ncores``), task queue (``processing``) and ``occupancy`` numbers.
+
+   These two sets are disjoint.  Also, some workers may be *neither* "idle"
+   nor "saturated".
 
 .. XXX list invariants somewhere?
 
    For every worker ``w``,
-   ``worker_bytes[w] == sum(nbytes[k] for k in has_what[w])``
+   * ``worker_bytes[w] == sum(nbytes[k] for k in has_what[w])``
+   * ``occupancy[w] == sum(processing[w].values())``
 
 
 Example Event and Response
@@ -394,15 +409,21 @@ task state transition.
 ==================================== ==========================================================
 Transition                           Affected worker state
 ==================================== ==========================================================
-released → waiting                   occupancy, idle
-waiting → processing                 occupancy, idle, used_resources
-waiting → memory                     idle, worker_bytes
-processing → memory                  occupancy, idle, used_resources, worker_bytes
-processing → erred                   occupancy, idle, used_resources
-processing → released                occupancy, idle, used_resources
+released → waiting                   occupancy, idle, saturated
+waiting → processing                 occupancy, idle, saturated, used_resources
+waiting → memory                     idle, saturated, worker_bytes
+processing → memory                  occupancy, idle, saturated, used_resources, worker_bytes
+processing → erred                   occupancy, idle, saturated, used_resources
+processing → released                occupancy, idle, saturated, used_resources
 memory → released                    worker_bytes
 memory → forgotten                   worker_bytes
 ==================================== ==========================================================
+
+.. note::
+   Another way of understanding this table is to observe that entering or
+   exiting a specific task state updates a well-defined set of worker state
+   variables.  For example, entering and exiting the Memory state updates
+   ``worker_bytes``.
 
 
 Implementation
