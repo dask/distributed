@@ -43,17 +43,17 @@ Wait at most this number of seconds to mark a test leaking
         default=False,
         help='''Mark leaked tests failed.'''
     )
-    #group.addoption(
-        #'--leak-retries',
-        #action='store',
-        #type=int,
-        #dest='leak_retries',
-        #default=1,
-        #help='''\
-#Max number of times to retry a test when it leaks, to ignore
-#warmup-related issues (default: 1).
-#'''
-    #)
+    group.addoption(
+        '--leak-retries',
+        action='store',
+        type=int,
+        dest='leak_retries',
+        default=1,
+        help='''\
+Max number of times to retry a test when it leaks, to ignore
+warmup-related issues (default: 1).
+'''
+    )
 
 
 def pytest_configure(config):
@@ -70,7 +70,9 @@ def pytest_configure(config):
         checkers = [all_checkers[leak]() for leak in leaks]
         checker = LeakChecker(checkers=checkers,
                               grace_delay=config.getvalue('leaks_timeout'),
-                              mark_failed=config.getvalue('leaks_mark_failed'))
+                              mark_failed=config.getvalue('leaks_mark_failed'),
+                              max_retries=config.getvalue('leak_retries'),
+                              )
         config.pluginmanager.register(checker, 'leaks_checker')
 
 
@@ -159,10 +161,11 @@ class ActiveThreadsChecker(ResourceChecker):
 
 
 class LeakChecker(object):
-    def __init__(self, checkers, grace_delay, mark_failed):
+    def __init__(self, checkers, grace_delay, mark_failed, max_retries):
         self.checkers = checkers
         self.grace_delay = grace_delay
         self.mark_failed = mark_failed
+        self.max_retries = max_retries
 
         # {nodeid: {checkers}}
         self.skip_checkers = {}
@@ -172,6 +175,9 @@ class LeakChecker(object):
         self.leaks = {}
         # {nodeid: {outcomes}}
         self.outcomes = collections.defaultdict(set)
+
+        # Reentrancy guard
+        self._retrying = False
 
     def cleanup(self):
         gc.collect()
@@ -225,8 +231,33 @@ class LeakChecker(object):
 
         if leaks:
             self.leaks[nodeid] = leaks
-            # ...
-            pass
+        else:
+            self.leaks.pop(nodeid, None)
+
+    def maybe_retry(self, item, nextitem=None):
+        def run_test_again():
+            # This invokes our setup/teardown hooks again
+            # Inspired by https://pypi.python.org/pypi/pytest-rerunfailures
+            from _pytest.runner import runtestprotocol
+            reports = runtestprotocol(item, nextitem=nextitem, log=False)
+
+        nodeid = item.nodeid
+        leaks = self.leaks.get(nodeid)
+        if leaks:
+            self._retrying = True
+            try:
+                for i in range(self.max_retries):
+                    run_test_again()
+            except Exception as e:
+                print("--- Exception when re-running test ---")
+                import traceback
+                traceback.print_exc()
+            else:
+                leaks = self.leaks.get(nodeid)
+            finally:
+                self._retrying = False
+
+        return leaks
 
     # Note on hook execution order:
     #   pytest_runtest_protocol
@@ -241,26 +272,21 @@ class LeakChecker(object):
 
     @pytest.hookimpl(hookwrapper=True)
     def pytest_runtest_protocol(self, item, nextitem):
-        def run_test():
-            # Unused
-            hook = item.ihook
-            hook.pytest_runtest_setup(item=item)
-            hook.pytest_runtest_call(item=item)
-            hook.pytest_runtest_teardown(item=item, nextitem=nextitem)
+        if not self._retrying:
+            nodeid = item.nodeid
+            assert nodeid not in self.counters
+            self.counters[nodeid] = {c: [] for c in self.checkers}
 
-        nodeid = item.nodeid
-        assert nodeid not in self.counters
-        self.counters[nodeid] = {c: [] for c in self.checkers}
+            leaking = item.get_marker('leaking')
+            if leaking is not None:
+                unknown = sorted(set(leaking.args) - set(all_checkers))
+                if unknown:
+                    raise ValueError("pytest.mark.leaking: unknown resources %r"
+                                     % (unknown,))
+                classes = tuple(all_checkers[a] for a in leaking.args)
+                self.skip_checkers[nodeid] = {c for c in self.checkers
+                                              if isinstance(c, classes)}
 
-        leaking = item.get_marker('leaking')
-        if leaking is not None:
-            unknown = sorted(set(leaking.args) - set(all_checkers))
-            if unknown:
-                raise ValueError("pytest.mark.leaking: unknown resources %r"
-                                 % (unknown,))
-            classes = tuple(all_checkers[a] for a in leaking.args)
-            self.skip_checkers[nodeid] = {c for c in self.checkers
-                                          if isinstance(c, classes)}
         yield
 
     @pytest.hookimpl(hookwrapper=True)
@@ -268,14 +294,15 @@ class LeakChecker(object):
         self.measure_before_test(item.nodeid)
         yield
 
-    @pytest.hookimpl(hookwrapper=True)
+    @pytest.hookimpl(hookwrapper=True, trylast=True)
     def pytest_runtest_teardown(self, item):
-        outcome = yield
-        del outcome
+        yield
         self.measure_after_test(item.nodeid)
-        if self.mark_failed and self.leaks.get(item.nodeid):
-            # Trigger fail here to allow stopping with `-x`
-            pytest.fail()
+        if not self._retrying:
+            leaks = self.maybe_retry(item)
+            if leaks and self.mark_failed:
+                # Trigger fail here to allow stopping with `-x`
+                pytest.fail()
 
     @pytest.hookimpl(hookwrapper=True, trylast=True)
     def pytest_report_teststatus(self, report):
@@ -283,17 +310,19 @@ class LeakChecker(object):
         outcomes = self.outcomes[nodeid]
         outcomes.add(report.outcome)
         outcome = yield
-        if report.when == 'teardown':
-            leaks = self.leaks.get(report.nodeid)
-            if leaks:
-                if self.mark_failed:
-                    outcome.force_result(('failed', 'L', 'LEAKED'))
-                    report.outcome = 'failed'
-                    report.longrepr = "\n".join(
-                        ["%s %s" % (nodeid, checker.format(before, after))
-                         for checker, before, after in leaks])
-                else:
-                    outcome.force_result(('leaked', 'L', 'LEAKED'))
+        if not self._retrying:
+            if report.when == 'teardown':
+                leaks = self.leaks.get(report.nodeid)
+                if leaks:
+                    if self.mark_failed:
+                        outcome.force_result(('failed', 'L', 'LEAKED'))
+                        report.outcome = 'failed'
+                        report.longrepr = "\n".join(
+                            ["%s %s" % (nodeid, checker.format(before, after))
+                             for checker, before, after in leaks])
+                    else:
+                        outcome.force_result(('leaked', 'L', 'LEAKED'))
+                # XXX should we log retried tests
 
     @pytest.hookimpl
     def pytest_terminal_summary(self, terminalreporter, exitstatus):

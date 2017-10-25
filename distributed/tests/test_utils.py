@@ -150,10 +150,16 @@ def test_sync_timeout(loop):
     thread.join()
 
 
-@pytest.mark.leaking('memory', 'fds')
 def test_is_kernel():
     pytest.importorskip('IPython')
     assert is_kernel() is False
+
+
+#@pytest.mark.leaking('fds')
+#def test_zzz_leaks(l=[]):
+    #import os
+    #l.append(b"x" * (17 * 1024**2))
+    #os.open(__file__, os.O_RDONLY)
 
 
 def test_ensure_ip():
