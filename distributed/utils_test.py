@@ -626,45 +626,39 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY}, worker_kwargs)
 
     def _(func):
-        cor = func
         if not iscoroutinefunction(func):
-            cor = gen.coroutine(func)
+            func = gen.coroutine(func)
 
         def test_func():
             before = process_state()
             result = None
             with pristine_loop() as loop:
                 with check_active_rpc(loop, active_rpc_timeout):
-                    s, workers = loop.run_sync(lambda: start_cluster(ncores,
-                                                                     scheduler, loop, security=security,
-                                                                     Worker=Worker,
-                                                                     scheduler_kwargs=scheduler_kwargs,
-                                                                     worker_kwargs=worker_kwargs))
-                    args = [s] + workers
-
-                    if client:
-                        c = []
-
-                        @gen.coroutine
-                        def f():
-                            c2 = yield Client(s.address, loop=loop, security=security,
-                                              asynchronous=True)
-                            c.append(c2)
-                        loop.run_sync(f)
-                        args = c + args
-                    try:
-                        result = loop.run_sync(lambda: cor(*args), timeout=timeout)
-                    finally:
+                    @gen.coroutine
+                    def coro():
+                        s, workers = yield start_cluster(
+                            ncores, scheduler, loop, security=security,
+                            Worker=Worker, scheduler_kwargs=scheduler_kwargs,
+                            worker_kwargs=worker_kwargs)
+                        args = [s] + workers
                         if client:
-                            loop.run_sync(c[0]._close)
-                        loop.run_sync(lambda: end_cluster(s, workers))
+                            c = yield Client(s.address, loop=loop, security=security,
+                                             asynchronous=True)
+                            args = [c] + args
+                        try:
+                            yield func(*args)
+                            # for w in workers:
+                            #     assert not w._comms
+                        finally:
+                            if client:
+                                yield c._close()
+                            yield end_cluster(s, workers)
+                            for w in workers:
+                                if hasattr(w, 'data'):
+                                    w.data.clear()
 
-                    # for w in workers:
-                    #     assert not w._comms
-            for w in workers:
-                if hasattr(w, 'data'):
-                    w.data.clear()
-            import gc
+                    result = loop.run_sync(coro, timeout=timeout)
+
             gc.collect()
             after = process_state()
             if should_check_state:
