@@ -34,7 +34,6 @@ def test_work_stealing(c, s, a, b):
     yield wait(futures)
     assert len(a.data) > 10
     assert len(b.data) > 10
-    assert len(a.data) > len(b.data) - 5
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2)

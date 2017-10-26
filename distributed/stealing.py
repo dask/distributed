@@ -163,7 +163,7 @@ class WorkStealing(SchedulerPlugin):
                     pdb.set_trace()
 
             self.remove_key_from_stealable(key)
-            logger.info("Request move %s, %s: %2f -> %s: %2f", key,
+            logger.debug("Request move %s, %s: %2f -> %s: %2f", key,
                          victim, self.scheduler.occupancy[victim],
                          thief, self.scheduler.occupancy[thief])
 
