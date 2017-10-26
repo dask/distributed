@@ -1906,7 +1906,7 @@ class Worker(WorkerBase):
             raise
 
     def steal_request(self, key):
-        state = self.task_state[key]
+        state = self.task_state.get(key, None)
 
         response = {'op': 'steal-response',
                     'key': key,
