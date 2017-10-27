@@ -393,6 +393,30 @@ class AllExit(Exception):
     """
 
 
+class Datasets(object):
+    """A dict-like wrapper around :class:`Client` dataset methods.
+
+    Parameters
+    ----------
+    client : Client
+
+    """
+    def __init__(self, client):
+        self.__client = client
+
+    def __getitem__(self, key):
+        return self.__client.get_dataset(key)
+
+    def __setitem__(self, key, value):
+        self.__client.publish_dataset(**{key: value})
+
+    def __delitem__(self, key):
+        self.__client.unpublish_dataset(key)
+
+    def keys(self):
+        return self.list_datasets()
+
+
 class Client(Node):
     """ Connect to and drive computation on a distributed Dask cluster
 
@@ -472,6 +496,7 @@ class Client(Node):
         self.scheduler = None
         self._lock = threading.Lock()
         self._refcount_lock = threading.Lock()
+        self.datasets = Datasets()
 
         if loop is None:
             self._should_close_loop = None

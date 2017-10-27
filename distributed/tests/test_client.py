@@ -4868,3 +4868,32 @@ def test_logs(c, s, a, b):
 
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # flake8: noqa
+
+
+@gen_cluster(client=True)
+def test_datasets_setitem(client, s, a, b):
+    key, value = 'key', 'value'
+    client.datasets[key] = value
+    assert client.get_dataset('key') == value
+
+
+@gen_cluster(client=True)
+def test_datasets_getitem(client, s, a, b):
+    key, value = 'key', 'value'
+    client.publish_dataset(key=value)
+    assert client.datasets[key] == value
+
+
+@gen_cluster(client=True)
+def test_datasets_delitem(client, s, a, b):
+    key, value = 'key', 'value'
+    client.publish_dataset(key=value)
+    del client.datasets[key]
+    assert key not in client.list_datasets()
+
+
+@gen_cluster(client=True)
+def test_datasets_keys(client, s, a, b):
+    client.publish_dataset(**{str(n): n for n in range(10)})
+    keys = client.datasets.keys()
+    assert keys == [str(n) for n in range(10)]
