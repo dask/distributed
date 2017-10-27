@@ -343,6 +343,7 @@ class WorkerProcess(object):
                         silence_logs=self.silence_logs,
                         init_result_q=self.init_result_q,
                         child_stop_q=self.child_stop_q),
+            inherit_stdin=True,
         )
         self.process.daemon = True
         self.process.set_exit_callback(self._on_exit)

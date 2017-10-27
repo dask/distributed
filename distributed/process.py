@@ -42,7 +42,8 @@ class AsyncProcess(object):
     All normally blocking methods are wrapped in Tornado coroutines.
     """
 
-    def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
+    def __init__(self, loop=None, target=None, name=None, args=(), kwargs={},
+                 inherit_stdin=False):
         if not callable(target):
             raise TypeError("`target` needs to be callable, not %r"
                             % (type(target),))
@@ -59,11 +60,20 @@ class AsyncProcess(object):
         # (for example due to SIGKILL). This variable is otherwise unused except
         # for the assignment here.
         parent_alive_pipe, self._keep_child_alive = mp_context.Pipe(duplex=False)
+        stdin_fd = None
+        if inherit_stdin and sys.stdin:
+            try:
+                stdin_fd = sys.stdin.fileno()
+            except Exception:
+                # stdin has no accessible FD,
+                # e.g. it has been redirected already
+                pass
 
         self._process = mp_context.Process(target=self._run, name=name,
                                            args=(target, args, kwargs,
                                                  parent_alive_pipe,
-                                                 self._keep_child_alive))
+                                                 self._keep_child_alive,
+                                                 stdin_fd))
         _dangling.add(self._process)
         self._name = self._process.name
         self._watch_q = PyQueue()
@@ -147,7 +157,7 @@ class AsyncProcess(object):
                     handler.createLock()
 
     @classmethod
-    def _run(cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive):
+    def _run(cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive, _stdin_fd):
         # On Python 2 with the fork method, we inherit the _keep_child_alive fd,
         # whether it is passed or not. Therefore, pass it unconditionally and
         # close it here, so that there are no other references to the pipe lying
@@ -155,6 +165,12 @@ class AsyncProcess(object):
         cls.reset_logger_locks()
 
         _keep_child_alive.close()
+
+        # reopen parent's stdin
+        if _stdin_fd is not None:
+            if sys.stdin:
+                sys.stdin.close()
+            sys.stdin = os.fdopen(_stdin_fd)
 
         # Child process entry point
         cls._immediate_exit_when_closed(parent_alive_pipe)
