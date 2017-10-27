@@ -288,7 +288,13 @@ class WorkStealing(SchedulerPlugin):
                         if not idle:
                             break
                         idl = idle[i % len(idle)]
-                        duration = s.processing[sat][key]
+
+                        durations = s.processing[sat]
+                        try:
+                            duration = durations[key]
+                        except KeyError:
+                            stealable.remove(key)
+                            continue
 
                         if (occupancy[idl] + cost_multiplier * duration
                                 <= occupancy[sat] - duration / 2):
@@ -308,7 +314,11 @@ class WorkStealing(SchedulerPlugin):
                         if not idle:
                             break
 
-                        sat = s.rprocessing[key]
+                        try:
+                            sat = s.rprocessing[key]
+                        except KeyError:
+                            stealable.remove(key)
+                            continue
                         if occupancy[sat] < 0.2:
                             continue
                         if len(s.processing[sat]) <= s.ncores[sat]:
