@@ -4897,3 +4897,18 @@ def test_datasets_keys(client, s, a, b):
     client.publish_dataset(**{str(n): n for n in range(10)})
     keys = client.datasets.keys()
     assert keys == [str(n) for n in range(10)]
+
+
+@gen_cluster(client=True)
+def test_datasets_contains(client, s, a, b):
+    key, value = 'key', 'value'
+    client.publish_dataset(key=value)
+    assert key in client.datasets
+
+
+@gen_cluster(client=True)
+def test_datasets_iter(client, s, a, b):
+    keys = [n for n in range(10)]
+    client.publish_dataset(**{str(key): key for key in keys})
+    for n, key in enumerate(client.datasets):
+        assert key == n
