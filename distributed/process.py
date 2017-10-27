@@ -36,6 +36,19 @@ class _ProcessState(object):
     exitcode = None
 
 
+def _safe_get_stdin_fd():
+    """Safely get the fileno of sys.stdin
+
+    May be None if sys.stdin has been closed or redirected.
+    """
+    if sys.stdin:
+        try:
+            return sys.stdin.fileno()
+        except Exception:
+            pass
+    return None
+
+
 class AsyncProcess(object):
     """
     A coroutine-compatible multiprocessing.Process-alike.
@@ -61,13 +74,8 @@ class AsyncProcess(object):
         # for the assignment here.
         parent_alive_pipe, self._keep_child_alive = mp_context.Pipe(duplex=False)
         stdin_fd = None
-        if inherit_stdin and sys.stdin:
-            try:
-                stdin_fd = sys.stdin.fileno()
-            except Exception:
-                # stdin has no accessible FD,
-                # e.g. it has been redirected already
-                pass
+        if inherit_stdin:
+            stdin_fd = _safe_get_stdin_fd()
 
         self._process = mp_context.Process(target=self._run, name=name,
                                            args=(target, args, kwargs,
@@ -157,7 +165,7 @@ class AsyncProcess(object):
                     handler.createLock()
 
     @classmethod
-    def _run(cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive, _stdin_fd):
+    def _run(cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive, _parent_stdin_fd):
         # On Python 2 with the fork method, we inherit the _keep_child_alive fd,
         # whether it is passed or not. Therefore, pass it unconditionally and
         # close it here, so that there are no other references to the pipe lying
@@ -166,11 +174,21 @@ class AsyncProcess(object):
 
         _keep_child_alive.close()
 
-        # reopen parent's stdin
-        if _stdin_fd is not None:
-            if sys.stdin:
-                sys.stdin.close()
-            sys.stdin = os.fdopen(_stdin_fd)
+        # Reopen parent's stdin.
+        # Reverses multiprocessing's close/capture of stdin so that stdin
+        # is inherited by subprocesses as usual.
+        # Enables terminal access by subprocesses, such as for debugging purposes.
+        if _parent_stdin_fd is not None:
+            if _safe_get_stdin_fd() == _parent_stdin_fd:
+                # stdin didn't get redirected, nothing to do.
+                # This seems to occur on Python 2.
+                pass
+            else:
+                # close previous stdin
+                if sys.stdin:
+                    sys.stdin.close()
+                # hook up to parent's stdin
+                sys.stdin = os.fdopen(_parent_stdin_fd)
 
         # Child process entry point
         cls._immediate_exit_when_closed(parent_alive_pipe)
