@@ -1193,6 +1193,8 @@ class Worker(WorkerBase):
                         self.release_key(report=False, **msg)
                     elif op == 'delete-data':
                         self.delete_data(**msg)
+                    elif op == 'steal-request':
+                        self.steal_request(**msg)
                     else:
                         logger.warning("Unknown operation %s, %s", op, msg)
 
@@ -1439,7 +1441,8 @@ class Worker(WorkerBase):
                 assert key not in self.executing
                 assert key not in self.ready
 
-            del self.waiting_for_data[key]
+            self.waiting_for_data.pop(key, None)
+
             if key in self.resource_restrictions:
                 self.constrained.append(key)
                 return 'constrained'
@@ -1898,14 +1901,22 @@ class Worker(WorkerBase):
                 pdb.set_trace()
             raise
 
+    def steal_request(self, key):
+        state = self.task_state.get(key, None)
+
+        response = {'op': 'steal-response',
+                    'key': key,
+                    'state': state}
+        self.batched_stream.send(response)
+
+        if state in ('ready', 'waiting'):
+            self.release_key(key)
+
     def release_key(self, key, cause=None, reason=None, report=True):
         try:
             if key not in self.task_state:
                 return
             state = self.task_state.pop(key)
-            if reason == 'stolen' and state in ('executing', 'long-running', 'memory'):
-                self.task_state[key] = state
-                return
             if cause:
                 self.log.append((key, 'release-key', {'cause': cause}))
             else:

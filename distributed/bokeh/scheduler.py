@@ -487,7 +487,7 @@ class StealingEvents(DashboardComponent):
         with log_errors():
             log = self.steal.log
             n = self.steal.count - self.last
-            log = [log[-i] for i in range(1, n + 1)]
+            log = [log[-i] for i in range(1, n + 1) if isinstance(log[-i], list)]
             self.last = self.steal.count
 
             if log:
@@ -1049,3 +1049,13 @@ class BokehScheduler(BokehServer):
 
         self.loop = io_loop or scheduler.loop
         self.server = None
+
+    @property
+    def my_server(self):
+        return self.scheduler
+
+    def listen(self, *args, **kwargs):
+        super(BokehScheduler, self).listen(*args, **kwargs)
+
+        from .scheduler_html import get_handlers
+        self.server._tornado.add_handlers(r'.*', get_handlers(self.my_server))

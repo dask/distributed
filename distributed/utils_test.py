@@ -71,7 +71,7 @@ def invalid_python_script(tmpdir_factory):
     return local_file
 
 
-@pytest.yield_fixture
+@pytest.fixture
 def loop():
     IOLoop.clear_instance()
     IOLoop.clear_current()
@@ -93,7 +93,7 @@ def loop():
     IOLoop.clear_current()
 
 
-@pytest.yield_fixture
+@pytest.fixture
 def zmq_ctx():
     import zmq
     ctx = zmq.Context.instance()
@@ -344,9 +344,8 @@ def check_active_rpc(loop, active_rpc_timeout=1):
 
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
-            scheduler_kwargs={}, should_check_state=True):
+            scheduler_kwargs={}):
     ws = weakref.WeakSet()
-    before = process_state()
     for name, level in logging_levels.items():
         logging.getLogger(name).setLevel(level)
 
@@ -432,9 +431,6 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
                 for fn in glob('_test_worker-*'):
                     shutil.rmtree(fn)
     assert not ws
-    after = process_state()
-    if should_check_state:
-        check_state(before, after)
 
 
 @gen.coroutine
@@ -468,7 +464,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 
-def gen_test(timeout=10, should_check_state=True):
+def gen_test(timeout=10):
     """ Coroutine test
 
     @gen_test(timeout=5)
@@ -477,72 +473,18 @@ def gen_test(timeout=10, should_check_state=True):
     """
     def _(func):
         def test_func():
-            before = process_state()
             with pristine_loop() as loop:
                 cor = gen.coroutine(func)
                 try:
                     loop.run_sync(cor, timeout=timeout)
                 finally:
                     loop.stop()
-            after = process_state()
-            if should_check_state:
-                check_state(before, after)
         return test_func
     return _
 
 
 from .scheduler import Scheduler
 from .worker import Worker
-
-
-def process_state():
-    d = {}
-    if not WINDOWS:
-        d['num-fds'] = psutil.Process().num_fds()
-
-    d['used-memory'] = psutil.Process().memory_info().rss
-    return d
-
-
-initial_state = process_state()
-
-
-def check_state(before, after):
-    """ Checks to ensure that process state is relatively clean
-
-    We run process_state before and after each test that creates a local
-    cluster.  This function includes the following checks to ensure that the
-    process hasn't changed too much
-
-    1.  Ensure that the number of file descriptors has not risen much
-    2.  Ensure that the amount of used memory has not risen much
-
-    This isn't yet perfect, we do leak FDs and memory.
-    """
-    if not WINDOWS:
-        start = time()
-        while after['num-fds'] > before['num-fds']:
-            sleep(0.1)
-            if time() > start + 2:
-                diff = after['num-fds'] - before['num-fds']
-                warnings.warn("This test leaked %d file descriptors" % diff)
-                break
-
-    start = time()
-    while after['used-memory'] > before['used-memory'] + 1e7:
-        gc.collect()
-        sleep(0.10)
-        after = process_state()
-        diff = (after['used-memory'] - before['used-memory']) // 1e6
-        if time() > start + 2:
-            warnings.warn("This test leaked %d MB of memory" % diff)
-            break
-
-    print("leaked memory", (after['used-memory'] - before['used-memory']) / 1e6,
-          "total leaked total",  (after['used-memory'] - initial_state['used-memory']) / 1e6)  # , end=' ')
-
-    total_diff = after['used-memory'] - initial_state['used-memory']
-    # assert total_diff < 2e9, total_diff
 
 
 @gen.coroutine
@@ -599,7 +541,7 @@ def iscoroutinefunction(f):
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
-                worker_kwargs={}, active_rpc_timeout=1, should_check_state=True):
+                worker_kwargs={}, active_rpc_timeout=1):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -617,49 +559,49 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY}, worker_kwargs)
 
     def _(func):
-        cor = func
         if not iscoroutinefunction(func):
-            cor = gen.coroutine(func)
+            func = gen.coroutine(func)
 
         def test_func():
-            before = process_state()
             result = None
+            workers = []
+
             with pristine_loop() as loop:
                 with check_active_rpc(loop, active_rpc_timeout):
-                    s, workers = loop.run_sync(lambda: start_cluster(ncores,
-                                                                     scheduler, loop, security=security,
-                                                                     Worker=Worker,
-                                                                     scheduler_kwargs=scheduler_kwargs,
-                                                                     worker_kwargs=worker_kwargs))
-                    args = [s] + workers
-
-                    if client:
-                        c = []
-
-                        @gen.coroutine
-                        def f():
-                            c2 = yield Client(s.address, loop=loop, security=security,
-                                              asynchronous=True)
-                            c.append(c2)
-                        loop.run_sync(f)
-                        args = c + args
-                    try:
-                        result = loop.run_sync(lambda: cor(*args), timeout=timeout)
-                    finally:
+                    @gen.coroutine
+                    def coro():
+                        s, ws = yield start_cluster(
+                            ncores, scheduler, loop, security=security,
+                            Worker=Worker, scheduler_kwargs=scheduler_kwargs,
+                            worker_kwargs=worker_kwargs)
+                        workers[:] = ws
+                        args = [s] + workers
                         if client:
-                            loop.run_sync(c[0]._close)
-                        loop.run_sync(lambda: end_cluster(s, workers))
+                            c = yield Client(s.address, loop=loop, security=security,
+                                             asynchronous=True)
+                            args = [c] + args
+                        try:
+                            result = yield func(*args)
+                            # for w in workers:
+                            #     assert not w._comms
+                        finally:
+                            if client:
+                                yield c._close()
+                            yield end_cluster(s, workers)
 
-                    # for w in workers:
-                    #     assert not w._comms
+                        raise gen.Return(result)
+
+                    result = loop.run_sync(coro, timeout=timeout)
+
             for w in workers:
-                if hasattr(w, 'data'):
-                    w.data.clear()
-            import gc
-            gc.collect()
-            after = process_state()
-            if should_check_state:
-                check_state(before, after)
+                if getattr(w, 'data', None):
+                    try:
+                        w.data.clear()
+                    except EnvironmentError:
+                        # zict backends can fail if their storage directory
+                        # was already removed
+                        pass
+                    del w.data
             return result
 
         return test_func

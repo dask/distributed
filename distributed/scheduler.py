@@ -314,7 +314,7 @@ class Scheduler(ServerNode):
         self.plugins = []
         self.transition_log = deque(maxlen=config.get('transition-log-length',
                                                       100000))
-        self._transition_counter = 0
+        self.log = deque(maxlen=config.get('transition-log-length', 100000))
 
         self.worker_handlers = {'task-finished': self.handle_task_finished,
                                 'task-erred': self.handle_task_erred,
@@ -1151,8 +1151,11 @@ class Scheduler(ServerNode):
 
         assert all(self.who_has.values())
 
-        for worker, occ in self.occupancy.items():
-            assert abs(sum(self.processing[worker].values()) - occ) < 1e-8
+        # for worker, occ in self.occupancy.items():
+        #     for d in self.extensions['stealing'].in_flight.values():
+        #         if worker in (d['thief'], d['victim']):
+        #             continue
+        #     assert abs(sum(self.processing[worker].values()) - occ) < 1e-8
 
     ###################
     # Manage Messages #
@@ -1358,7 +1361,7 @@ class Scheduler(ServerNode):
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
-        self.transition_log.append((key, 'missing', errant_worker, ()))
+        self.log.append(('missing', key, errant_worker))
         if key not in self.who_has:
             return
         if errant_worker in self.who_has[key]:
@@ -1577,6 +1580,13 @@ class Scheduler(ServerNode):
                                'count': len(keys)})
         raise gen.Return(result)
 
+    def clear_task_state(self):
+        logger.info("Clear task state")
+        for collection in self._task_collections:
+            collection.clear()
+        for collection in self._worker_collections:
+            collection.clear()
+
     @gen.coroutine
     def restart(self, client=None, timeout=3):
         """ Restart all workers.  Reset local state. """
@@ -1600,11 +1610,7 @@ class Scheduler(ServerNode):
                     logger.info("Exception while restarting.  This is normal",
                                 exc_info=True)
 
-            logger.info("Clear task state")
-            for collection in self._task_collections:
-                collection.clear()
-            for collection in self._worker_collections:
-                collection.clear()
+            self.clear_task_state()
 
             for plugin in self.plugins[:]:
                 try:
@@ -1761,10 +1767,7 @@ class Scheduler(ServerNode):
                 self.has_what[recipient].add(key)
                 self.worker_bytes[recipient] += self.nbytes.get(key,
                                                                 DEFAULT_DATA_SIZE)
-                self.transition_log.append((key, 'memory', 'memory', {},
-                                            self._transition_counter, sender,
-                                            recipient))
-            self._transition_counter += 1
+                self.log.append(('rebalance', key, time(), sender, recipient))
 
             result = yield {r: self.rpc(addr=r).delete_data(keys=v, report=False)
                             for r, v in to_senders.items()}
@@ -2533,16 +2536,10 @@ class Scheduler(ServerNode):
                 self.occupancy[w] -= duration
             self.check_idle_saturated(w)
             if w != worker:
-                logger.debug("Unexpected worker completed task, likely due to"
+                logger.error("Unexpected worker completed task, likely due to"
                              " work stealing.  Expected: %s, Got: %s, Key: %s",
                              w, worker, key)
-                msg = {'op': 'release-task', 'key': key, 'reason': 'stolen'}
-                try:
-                    self.worker_comms[w].send(msg)
-                except CommClosedError:
-                    # Don't try to resolve this now.  Proceed normally and
-                    # let normal resiliency mechanisms handle it later
-                    logger.info("Worker comm closed unexpectedly")
+                raise Exception()
 
             recommendations = OrderedDict()
 
@@ -3067,8 +3064,7 @@ class Scheduler(ServerNode):
                 start = 'released'
             finish2 = self.task_state.get(key, 'forgotten')
             self.transition_log.append((key, start, finish2, recommendations,
-                                        self._transition_counter))
-            self._transition_counter += 1
+                                        time()))
             if self.validate:
                 logger.debug("Transition %s->%s: %s New: %s",
                              start, finish2, key, recommendations)
