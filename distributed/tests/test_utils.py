@@ -23,7 +23,7 @@ from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
                                iterator_to_queue, _maybe_complex, read_block, seek_delimiter,
                                funcname, ensure_bytes, open_port, get_ip_interface, nbytes,
                                set_thread_state, thread_state)
-from distributed.utils_test import loop # flake8: noqa
+from distributed.utils_test import loop, loop_in_thread  # flake8: noqa
 from distributed.utils_test import div, has_ipv6, inc, throws
 
 
@@ -80,19 +80,8 @@ def test_sync(loop):
     thread.join()
 
 
-def test_sync_error(loop):
-    e = Event()
-
-    @gen.coroutine
-    def wait_until_event():
-        yield e.wait()
-
-    thread = Thread(target=loop.run_sync, args=(wait_until_event,))
-    thread.daemon = True
-    thread.start()
-    while not loop._running:
-        sleep(0.01)
-
+def test_sync_error(loop_in_thread):
+    loop = loop_in_thread
     try:
         result = sync(loop, throws, 1)
     except Exception as exc:
@@ -117,9 +106,6 @@ def test_sync_error(loop):
         assert any('function1' in line for line in L)
         assert any('function2' in line for line in L)
 
-    loop.add_callback(e.set)
-    thread.join()
-
 
 def test_sync_inactive_loop(loop):
     @gen.coroutine
@@ -130,24 +116,10 @@ def test_sync_inactive_loop(loop):
     assert y == 2
 
 
-def test_sync_timeout(loop):
-    e = Event()
-
-    @gen.coroutine
-    def wait_until_event():
-        yield e.wait()
-
-    thread = Thread(target=loop.run_sync, args=(wait_until_event,))
-    thread.daemon = True
-    thread.start()
-    while not loop._running:
-        sleep(0.01)
-
+def test_sync_timeout(loop_in_thread):
+    loop = loop_in_thread
     with pytest.raises(gen.TimeoutError):
-        sync(loop, gen.sleep, 0.5, callback_timeout=0.05)
-
-    loop.add_callback(e.set)
-    thread.join()
+        sync(loop_in_thread, gen.sleep, 0.5, callback_timeout=0.05)
 
 
 def test_is_kernel():

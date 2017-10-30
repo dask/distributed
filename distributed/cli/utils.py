@@ -28,17 +28,26 @@ def check_python_3():
         sys.exit(1)
 
 
-def install_signal_handlers():
+def install_signal_handlers(loop, cleanup=None):
     """Install global signal handlers to halt the Tornado IOLoop in case of
     a SIGINT or SIGTERM."""
-    from tornado.ioloop import IOLoop
     import signal
 
-    def handle_signal(sig, frame):
-        IOLoop.instance().add_callback_from_signal(IOLoop.instance().stop)
+    old_handlers = {}
 
-    signal.signal(signal.SIGINT, handle_signal)
-    signal.signal(signal.SIGTERM, handle_signal)
+    def handle_signal(sig, frame):
+        def cleanup_and_stop():
+            try:
+                if cleanup is not None:
+                    cleanup(sig)
+            finally:
+                loop.stop()
+
+        loop.add_callback_from_signal(cleanup_and_stop)
+        signal.signal(sig, old_handlers[sig])
+
+    for sig in [signal.SIGINT, signal.SIGTERM]:
+        old_handlers[sig] = signal.signal(sig, handle_signal)
 
 
 def uri_from_host_port(host_arg, port_arg, default_port):

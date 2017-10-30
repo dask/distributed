@@ -45,7 +45,7 @@ from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     randominc, inc, dec, div, throws, geninc, asyncinc,
                                     gen_cluster, gen_test, double, deep, popen,
                                     captured_logger)
-from distributed.utils_test import loop # flake8: noqa
+from distributed.utils_test import loop, loop_in_thread  # flake8: noqa
 
 
 @gen_cluster(client=True, timeout=None)
@@ -4633,15 +4633,10 @@ def test_use_synchronous_client_in_async_context(loop):
             assert z == 124
 
 
-def test_quiet_quit_when_cluster_leaves(loop):
+def test_quiet_quit_when_cluster_leaves(loop_in_thread):
     from distributed import LocalCluster
-    thread = Thread(target=loop.start,
-                    name="LocalCluster loop")
-    thread.daemon = True
-    thread.start()
-    while not loop._running:
-        sleep(0.001)
 
+    loop = loop_in_thread
     cluster = LocalCluster(loop=loop, scheduler_port=0, diagnostics_port=None,
                            silence_logs=False)
     with captured_logger('distributed.comm') as sio:
@@ -4653,9 +4648,6 @@ def test_quiet_quit_when_cluster_leaves(loop):
 
     text = sio.getvalue()
     assert not text
-
-    loop.add_callback(loop.stop)
-    thread.join(timeout=1)
 
 
 def test_warn_executor(loop):
