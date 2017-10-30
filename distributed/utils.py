@@ -34,6 +34,7 @@ except ImportError:
 
 from dask import istask
 from toolz import memoize, valmap
+import tornado
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -951,73 +952,15 @@ else:
             return frame.nbytes
 
 
-class PeriodicCallback(object):
+def PeriodicCallback(callback, callback_time, io_loop=None):
     """
-    Modified version of tornado.IOLoop.PeriodicCallback that doesn't
-    store the "current" IOLoop in its constructor.  The "current" IOLoop
-    is per-thread and we typically instantiate a PeriodicCallback in
-    another thread than the one running the event loop.
-
-    Schedules the given callback to be called periodically.
-
-    The callback is called every ``callback_time`` milliseconds.
-    Note that the timeout is given in milliseconds, while most other
-    time-related functions in Tornado use seconds.
-
-    If the callback runs for longer than ``callback_time`` milliseconds,
-    subsequent invocations will be skipped to get back on schedule.
-
-    `start` must be called after the `PeriodicCallback` is created.
+    Wrapper around tornado.IOLoop.PeriodicCallback, for compatibility
+    with removal of the `io_loop` parameter in Tornado 5.0.
     """
-    def __init__(self, callback, callback_time, io_loop=None):
-        self.callback = callback
-        if callback_time <= 0:
-            raise ValueError("Periodic callback must have a positive callback_time")
-        self.callback_time = callback_time
-        self._running = False
-        self._timeout = None
-
-    def start(self):
-        """Starts the timer."""
-        self.io_loop = IOLoop.current(instance=False)
-        self._running = True
-        self._next_timeout = self.io_loop.time()
-        self._schedule_next()
-
-    def stop(self):
-        """Stops the timer."""
-        self._running = False
-        if self._timeout is not None:
-            self.io_loop.remove_timeout(self._timeout)
-            self._timeout = None
-
-    def is_running(self):
-        """Return True if this `.PeriodicCallback` has been started.
-
-        .. versionadded:: 4.1
-        """
-        return self._running
-
-    def _run(self):
-        if not self._running:
-            return
-        try:
-            return self.callback()
-        except Exception:
-            self.io_loop.handle_callback_exception(self.callback)
-        finally:
-            self._schedule_next()
-
-    def _schedule_next(self):
-        if self._running:
-            current_time = self.io_loop.time()
-
-            if self._next_timeout <= current_time:
-                callback_time_sec = self.callback_time / 1000.0
-                self._next_timeout += (math.floor((current_time - self._next_timeout) /
-                                                  callback_time_sec) + 1) * callback_time_sec
-
-            self._timeout = self.io_loop.add_timeout(self._next_timeout, self._run)
+    if tornado.version_info >= (5,):
+        return tornado.ioloop.PeriodicCallback(callback, callback_time)
+    else:
+        return tornado.ioloop.PeriodicCallback(callback, callback_time, io_loop)
 
 
 @contextmanager
