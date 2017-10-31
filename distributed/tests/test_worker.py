@@ -318,20 +318,21 @@ def test_io_loop(loop):
 
 
 @gen_cluster(client=True, ncores=[])
-def test_spill_to_disk(e, s):
+def test_spill_to_disk(c, s):
     np = pytest.importorskip('numpy')
-    w = Worker(s.address, loop=s.loop, memory_limit=1200 / 0.6)
+    w = Worker(s.address, loop=s.loop, memory_limit=1200 / 0.6,
+               memory_pause_fraction=None, memory_spill_fraction=None)
     yield w._start()
 
-    x = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')
+    x = c.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='x')
     yield wait(x)
-    y = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='y')
+    y = c.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='y')
     yield wait(y)
 
     assert set(w.data) == {x.key, y.key}
     assert set(w.data.fast) == {x.key, y.key}
 
-    z = e.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='z')
+    z = c.submit(np.random.randint, 0, 255, size=500, dtype='u1', key='z')
     yield wait(z)
     assert set(w.data) == {x.key, y.key, z.key}
     assert set(w.data.fast) == {y.key, z.key}
@@ -949,7 +950,6 @@ def test_statistical_profiling(c, s, a, b):
 
     profile = a.profile_keys['slowinc']
     assert profile['count']
-    assert 'threading' not in str(profile)
 
 
 @gen_cluster(client=True)
@@ -961,9 +961,7 @@ def test_statistical_profiling_2(c, s, a, b):
         yield wait(y)
     profile = a.get_profile()
     assert profile['count']
-    assert 'threading' not in str(profile)
-    assert 'sum' in str(profile)
-    assert 'random' in str(profile)
+    assert 'sum' in str(profile) or 'random' in str(profile)
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)], client=True, worker_kwargs={'memory_monitor_interval': 10})

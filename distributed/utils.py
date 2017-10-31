@@ -7,6 +7,7 @@ from datetime import timedelta
 import functools
 import json
 import logging
+import math
 import multiprocessing
 import operator
 import os
@@ -15,14 +16,14 @@ import shutil
 import socket
 from time import sleep
 from importlib import import_module
-
-import six
 import sys
-import tblib.pickling_support
 import tempfile
 import threading
 import warnings
 import gc
+
+import six
+import tblib.pickling_support
 
 from .compatibility import cache_from_source, getargspec, invalidate_caches, reload
 
@@ -33,7 +34,9 @@ except ImportError:
 
 from dask import istask
 from toolz import memoize, valmap
+import tornado
 from tornado import gen
+from tornado.ioloop import IOLoop
 
 from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
 from .config import config
@@ -52,7 +55,7 @@ no_default = '__no_default__'
 
 
 def _initialize_mp_context():
-    if PY3 and not sys.platform.startswith('win'):
+    if PY3 and not sys.platform.startswith('win') and 'PyPy' not in sys.version:
         method = config.get('multiprocessing-method', 'forkserver')
         ctx = multiprocessing.get_context(method)
         # Makes the test suite much faster
@@ -950,6 +953,17 @@ else:
             return len(frame)
         else:
             return frame.nbytes
+
+
+def PeriodicCallback(callback, callback_time, io_loop=None):
+    """
+    Wrapper around tornado.IOLoop.PeriodicCallback, for compatibility
+    with removal of the `io_loop` parameter in Tornado 5.0.
+    """
+    if tornado.version_info >= (5,):
+        return tornado.ioloop.PeriodicCallback(callback, callback_time)
+    else:
+        return tornado.ioloop.PeriodicCallback(callback, callback_time, io_loop)
 
 
 @contextmanager

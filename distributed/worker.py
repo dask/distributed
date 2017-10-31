@@ -22,7 +22,7 @@ except ImportError:
     from toolz import pluck
 from tornado.gen import Return
 from tornado import gen
-from tornado.ioloop import IOLoop, PeriodicCallback
+from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 from . import profile
@@ -44,7 +44,7 @@ from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, validate_key, mp_context, import_file,
                     silence_logging, thread_state, json_load_robust, key_split,
-                    format_bytes, DequeHandler, ThrottledGC)
+                    format_bytes, DequeHandler, ThrottledGC, PeriodicCallback)
 from .utils_comm import pack_data, gather_from_workers
 
 _ncores = mp_context.cpu_count()
@@ -122,9 +122,18 @@ class WorkerBase(ServerNode):
         self.memory_limit = memory_limit
         self.paused = False
 
-        self.memory_target_fraction = config.get('worker-memory-target', 0.6)
-        self.memory_spill_fraction = config.get('worker-memory-spill', 0.7)
-        self.memory_pause_fraction = config.get('worker-memory-pause', 0.8)
+        if 'memory_target_fraction' in kwargs:
+            self.memory_target_fraction = kwargs.pop('memory_target_fraction')
+        else:
+            self.memory_target_fraction = config.get('worker-memory-target', 0.6)
+        if 'memory_spill_fraction' in kwargs:
+            self.memory_spill_fraction = kwargs.pop('memory_spill_fraction')
+        else:
+            self.memory_spill_fraction = config.get('worker-memory-spill', 0.7)
+        if 'memory_pause_fraction' in kwargs:
+            self.memory_pause_fraction = kwargs.pop('memory_pause_fraction')
+        else:
+            self.memory_pause_fraction = config.get('worker-memory-pause', 0.8)
 
         if self.memory_limit:
             try:
@@ -186,15 +195,13 @@ class WorkerBase(ServerNode):
                                          **kwargs)
 
         pc = PeriodicCallback(self.heartbeat,
-                              self.heartbeat_interval,
-                              io_loop=self.loop)
+                              self.heartbeat_interval)
         self.periodic_callbacks['heartbeat'] = pc
         self._address = contact_address
 
         self._memory_monitoring = False
         pc = PeriodicCallback(self.memory_monitor,
-                              self.memory_monitor_interval,
-                              io_loop=self.loop)
+                              self.memory_monitor_interval)
         self.periodic_callbacks['memory'] = pc
 
     @property
@@ -267,8 +274,7 @@ class WorkerBase(ServerNode):
                         pid=os.getpid())
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
-                    future = gen.with_timeout(timedelta(seconds=diff), future,
-                                              io_loop=self.loop)
+                    future = gen.with_timeout(timedelta(seconds=diff), future)
                 response = yield future
                 _end = time()
                 middle = (_start + _end) / 2
@@ -385,8 +391,7 @@ class WorkerBase(ServerNode):
         with ignoring(EnvironmentError, gen.TimeoutError):
             if report:
                 yield gen.with_timeout(timedelta(seconds=timeout),
-                                       self.scheduler.unregister(address=self.contact_address),
-                                       io_loop=self.loop)
+                                       self.scheduler.unregister(address=self.contact_address))
         self.scheduler.close_rpc()
         if isinstance(self.executor, ThreadPoolExecutor):
             self.executor.shutdown(timeout=timeout)
@@ -442,7 +447,8 @@ class WorkerBase(ServerNode):
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         future = self.executor.submit(function, *args, **kwargs)
         pc = PeriodicCallback(lambda: logger.debug("future state: %s - %s",
-                                                   key, future._state), 1000, io_loop=self.loop); pc.start()
+                                                   key, future._state), 1000)
+        pc.start()
         try:
             yield future
         finally:
@@ -1013,6 +1019,12 @@ class Worker(WorkerBase):
         Milliseconds between heartbeats to scheduler
     memory_limit: int
         Number of bytes of memory that this worker should use
+    memory_target_fraction: float
+        Fraction of memory to try to stay beneath
+    memory_spill_fraction: float
+        Fraction of memory at which we start spilling to disk
+    memory_pause_fraction: float
+        Fraction of memory at which we stop running new tasks
     executor: concurrent.futures.Executor
     resources: dict
         Resources that thiw worker has like ``{'GPU': 2}``
@@ -1126,13 +1138,11 @@ class Worker(WorkerBase):
         WorkerBase.__init__(self, *args, **kwargs)
 
         pc = PeriodicCallback(self.trigger_profile,
-                              config.get('profile-interval', 10),
-                              io_loop=self.loop)
+                              config.get('profile-interval', 10))
         self.periodic_callbacks['profile'] = pc
 
         pc = PeriodicCallback(self.cycle_profile,
-                              profile_cycle_interval,
-                              io_loop=self.loop)
+                              profile_cycle_interval)
         pc.start()
         self.periodic_callbacks['profile-cycle'] = pc
 
