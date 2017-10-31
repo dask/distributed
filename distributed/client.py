@@ -1,7 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from collections import Iterator, Mapping, defaultdict
+from collections import Iterator, Mapping, defaultdict, MutableMapping
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
 from contextlib import contextmanager
@@ -393,7 +393,7 @@ class AllExit(Exception):
     """
 
 
-class Datasets(object):
+class Datasets(MutableMapping):
     """A dict-like wrapper around :class:`Client` dataset methods.
 
     Parameters
@@ -420,8 +420,8 @@ class Datasets(object):
         for key in self.__client.list_datasets():
             yield key
 
-    def keys(self):
-        return self.list_datasets()
+    def __len__(self):
+        return len(self.__client.list_datasets())
 
 
 class Client(Node):
