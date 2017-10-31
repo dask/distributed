@@ -1,5 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
+from tornado import gen
+
+from distributed.comm import (parse_address, unparse_address,
+                              parse_host_port, unparse_host_port)
+
+
 py3_err_msg = """
 Your terminal does not properly support unicode text required by command line
 utilities running Python 3.  This is commonly solved by specifying encoding
@@ -10,10 +16,6 @@ environment variables, though exact solutions may depend on your system:
 
 For more information see: http://click.pocoo.org/5/python3/
 """.strip()
-
-
-from distributed.comm import (parse_address, unparse_address,
-                              parse_host_port, unparse_host_port)
 
 
 def check_python_3():
@@ -29,21 +31,27 @@ def check_python_3():
 
 
 def install_signal_handlers(loop, cleanup=None):
-    """Install global signal handlers to halt the Tornado IOLoop in case of
-    a SIGINT or SIGTERM."""
+    """
+    Install global signal handlers to halt the Tornado IOLoop in case of
+    a SIGINT or SIGTERM.  *cleanup* is an optional callback called,
+    before the loop stops, with a single signal number argument.
+    """
     import signal
 
     old_handlers = {}
 
     def handle_signal(sig, frame):
+        @gen.coroutine
         def cleanup_and_stop():
             try:
                 if cleanup is not None:
-                    cleanup(sig)
+                    yield cleanup(sig)
             finally:
                 loop.stop()
 
         loop.add_callback_from_signal(cleanup_and_stop)
+        # Restore old signal handler to allow for a quicker exit
+        # if the user sends the signal again.
         signal.signal(sig, old_handlers[sig])
 
     for sig in [signal.SIGINT, signal.SIGTERM]:
