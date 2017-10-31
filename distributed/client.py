@@ -503,7 +503,7 @@ class Client(Node):
         self.scheduler = None
         self._lock = threading.Lock()
         self._refcount_lock = threading.Lock()
-        self.datasets = Datasets()
+        self.datasets = Datasets(self)
 
         if loop is None:
             self._should_close_loop = None
