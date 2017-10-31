@@ -13,6 +13,7 @@ import traceback
 import numpy as np
 import pytest
 from tornado import gen
+from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 import dask
@@ -59,25 +60,10 @@ def test_All(loop):
     loop.run_sync(f)
 
 
-def test_sync(loop):
-    e = Event()
-    e2 = threading.Event()
-
-    @gen.coroutine
-    def wait_until_event():
-        e2.set()
-        yield e.wait()
-
-    thread = Thread(target=loop.run_sync, args=(wait_until_event,))
-    thread.daemon = True
-    thread.start()
-
-    e2.wait()
+def test_sync(loop_in_thread):
+    loop = loop_in_thread
     result = sync(loop, inc, 1)
     assert result == 2
-
-    loop.add_callback(e.set)
-    thread.join()
 
 
 def test_sync_error(loop_in_thread):
@@ -120,6 +106,17 @@ def test_sync_timeout(loop_in_thread):
     loop = loop_in_thread
     with pytest.raises(gen.TimeoutError):
         sync(loop_in_thread, gen.sleep, 0.5, callback_timeout=0.05)
+
+
+def test_sync_closed_loop():
+    loop = IOLoop.current()
+    loop.close()
+    IOLoop.clear_current()
+    IOLoop.clear_instance()
+
+    with pytest.raises(RuntimeError) as exc_info:
+        sync(loop, inc, 1)
+    exc_info.match("IO loop is closed")
 
 
 def test_is_kernel():

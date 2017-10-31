@@ -220,6 +220,9 @@ def sync(loop, func, *args, **kwargs):
             return loop.run_sync(make_coro)
         except RuntimeError:  # loop already running
             pass
+        except TypeError:
+            # TypeError: object of type 'NoneType' has no len()
+            raise RuntimeError("IO loop is closed")
 
     e = threading.Event()
     main_tid = get_thread_identity()

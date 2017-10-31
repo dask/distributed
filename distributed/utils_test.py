@@ -79,7 +79,12 @@ def loop():
         if getattr(loop, '_running', False):
             # XXX should warn?
             pass
-        sync(loop, loop.stop)  # just in case
+        # Stop the loop in case it's still running
+        try:
+            sync(loop, loop.stop)
+        except RuntimeError as e:
+            if not "IO loop is closed" in str(e):
+                raise
 
 
 @pytest.fixture
