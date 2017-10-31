@@ -4870,45 +4870,51 @@ if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # flake8: noqa
 
 
-@gen_cluster(client=True)
-def test_datasets_setitem(client, s, a, b):
-    key, value = 'key', 'value'
-    client.datasets[key] = value
-    assert client.get_dataset('key') == value
+def test_datasets_setitem(loop):
+    with cluster() as (s, _):
+        with Client(s['address'], loop=loop) as client:
+            key, value = 'key', 'value'
+            client.datasets[key] = value
+            assert client.get_dataset('key') == value
 
 
-@gen_cluster(client=True)
-def test_datasets_getitem(client, s, a, b):
-    key, value = 'key', 'value'
-    client.publish_dataset(key=value)
-    assert client.datasets[key] == value
+def test_datasets_getitem(loop):
+    with cluster() as (s, _):
+        with Client(s['address'], loop=loop) as client:
+            key, value = 'key', 'value'
+            client.publish_dataset(key=value)
+            assert client.datasets[key] == value
 
 
-@gen_cluster(client=True)
-def test_datasets_delitem(client, s, a, b):
-    key, value = 'key', 'value'
-    client.publish_dataset(key=value)
-    del client.datasets[key]
-    assert key not in client.list_datasets()
+def test_datasets_delitem(loop):
+    with cluster() as (s, _):
+        with Client(s['address'], loop=loop) as client:
+            key, value = 'key', 'value'
+            client.publish_dataset(key=value)
+            del client.datasets[key]
+            assert key not in client.list_datasets()
 
 
-@gen_cluster(client=True)
-def test_datasets_keys(client, s, a, b):
-    client.publish_dataset(**{str(n): n for n in range(10)})
-    keys = client.datasets.keys()
-    assert keys == [str(n) for n in range(10)]
+def test_datasets_keys(loop):
+    with cluster() as (s, _):
+        with Client(s['address'], loop=loop) as client:
+            client.publish_dataset(**{str(n): n for n in range(10)})
+            keys = list(client.datasets.keys())
+            assert keys == [str(n) for n in range(10)]
 
 
-@gen_cluster(client=True)
-def test_datasets_contains(client, s, a, b):
-    key, value = 'key', 'value'
-    client.publish_dataset(key=value)
-    assert key in client.datasets
+def test_datasets_contains(loop):
+    with cluster() as (s, _):
+        with Client(s['address'], loop=loop) as client:
+            key, value = 'key', 'value'
+            client.publish_dataset(key=value)
+            assert key in client.datasets
 
 
-@gen_cluster(client=True)
-def test_datasets_iter(client, s, a, b):
-    keys = [n for n in range(10)]
-    client.publish_dataset(**{str(key): key for key in keys})
-    for n, key in enumerate(client.datasets):
-        assert key == n
+def test_datasets_iter(loop):
+    with cluster() as (s, _):
+        with Client(s['address'], loop=loop) as client:
+            keys = [n for n in range(10)]
+            client.publish_dataset(**{str(key): key for key in keys})
+            for n, key in enumerate(client.datasets):
+                assert key == str(n)
