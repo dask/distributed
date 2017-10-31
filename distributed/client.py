@@ -1,7 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from collections import Iterator, Mapping, defaultdict, MutableMapping
+from collections import Iterator, Mapping, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
 from contextlib import contextmanager
@@ -46,6 +46,7 @@ from .metrics import time
 from .node import Node
 from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
+from .publish import Datasets
 from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
@@ -391,37 +392,6 @@ def normalize_future(f):
 class AllExit(Exception):
     """Custom exception class to exit All(...) early.
     """
-
-
-class Datasets(MutableMapping):
-    """A dict-like wrapper around :class:`Client` dataset methods.
-
-    Parameters
-    ----------
-    client : Client
-
-    """
-    def __init__(self, client):
-        self.__client = client
-
-    def __getitem__(self, key):
-        return self.__client.get_dataset(key)
-
-    def __setitem__(self, key, value):
-        self.__client.publish_dataset(**{key: value})
-
-    def __delitem__(self, key):
-        self.__client.unpublish_dataset(key)
-
-    def __contains__(self, key):
-        return key in self.__client.list_datasets()
-
-    def __iter__(self):
-        for key in self.__client.list_datasets():
-            yield key
-
-    def __len__(self):
-        return len(self.__client.list_datasets())
 
 
 class Client(Node):
