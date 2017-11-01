@@ -41,6 +41,19 @@ def test_gen_cluster(c, s, a, b):
     assert s.ncores == {w.address: w.ncores for w in [a, b]}
 
 
+def test_gen_cluster_cleans_up_client():
+    import dask.context
+    assert not dask.context._globals.get('get')
+
+    @gen_cluster(client=True)
+    def f(c, s, a, b):
+        pass
+
+    f()
+
+    assert not dask.context._globals.get('get')
+
+
 @gen_cluster(client=False)
 def test_gen_cluster_without_client(s, a, b):
     assert isinstance(s, Scheduler)

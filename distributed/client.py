@@ -891,6 +891,12 @@ class Client(Node):
     def _close(self, fast=False):
         """ Send close signal and wait until scheduler completes """
         with log_errors():
+            with ignoring(AttributeError):
+                dask.set_options(get=self._previous_get)
+            with ignoring(AttributeError):
+                dask.set_options(shuffle=self._previous_shuffle)
+            if self.get == _globals.get('get'):
+                del _globals['get']
             if self.status == 'closed':
                 raise gen.Return()
             if self.scheduler_comm and self.scheduler_comm.comm and not self.scheduler_comm.comm.closed():
