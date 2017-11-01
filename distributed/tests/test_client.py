@@ -3404,8 +3404,8 @@ def test_reconnect(loop):
         assert time() < start + 5
         sleep(0.1)
 
-    c.close()
     sync(loop, w._close)
+    c.close()
 
 
 # On Python 2, heavy process spawning can deadlock (e.g. on a logging IO lock)
