@@ -933,11 +933,11 @@ def test_get_releases_data(c, s, a, b):
 def test_Current(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            Client.current() is c
+            assert Client.current() is c
         with pytest.raises(ValueError):
             Client.current()
         with Client(s['address'], loop=loop) as c:
-            Client.current() is c
+            assert Client.current() is c
 
 
 def test_global_clients(loop):
