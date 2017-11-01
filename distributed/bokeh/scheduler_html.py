@@ -84,8 +84,8 @@ class TaskCallStack(RequestHandler):
             key = escape.url_unescape(key)
             call_stack = yield self.server.get_call_stack(keys=[key])
             if not call_stack:
-                self.write("Task not actively running.  "
-                           "It may be finished or not yet started")
+                self.write("<p>Task not actively running. "
+                           "It may be finished or not yet started</p>")
             else:
                 self.render('call-stack.html', title="Call Stack: " + key,
                             call_stack=call_stack)

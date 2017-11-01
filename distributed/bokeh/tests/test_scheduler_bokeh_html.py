@@ -31,4 +31,4 @@ def test_connect(c, s, a, b):
                                            % (s.services['bokeh'].port, suffix))
         assert response.code == 200
         body = response.body.decode()
-        assert xml.etree.ElementTree.fromstring(body)
+        assert xml.etree.ElementTree.fromstring(body) is not None
