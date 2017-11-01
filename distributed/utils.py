@@ -276,7 +276,7 @@ class LoopRunner(object):
             if asynchronous:
                 self._loop = IOLoop.current()
             else:
-                # We're expectinf the loop to run in another thread,
+                # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
                 self._loop = IOLoop()
             self._should_close_loop = True
