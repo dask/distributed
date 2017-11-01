@@ -7,6 +7,8 @@ import os
 import psutil
 import shutil
 import threading
+import signal
+import gc
 
 from tornado import gen
 from tornado.ioloop import IOLoop, TimeoutError
@@ -73,6 +75,7 @@ class Nanny(ServerNode):
         self.name = name
         self.quiet = quiet
         self.auto_restart = True
+        self._memory_monitoring = False
 
         if memory_limit == 'auto':
             memory_limit = int(TOTAL_MEMORY * min(1, self.ncores / _ncores))
@@ -245,15 +248,34 @@ class Nanny(ServerNode):
         else:
             raise gen.Return('OK')
 
+    @gen.coroutine
     def memory_monitor(self):
         """ Track worker's memory.  Restart if it goes above 95% """
+        if self._memory_monitoring:
+            return
         if self.status != 'running':
             return
-        memory = psutil.Process(self.process.pid).memory_info().rss
-        frac = memory / self.memory_limit
-        if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
-            logger.warn("Worker exceeded 95% memory budget.  Restarting")
-            self.process.process.terminate()
+        self._memory_monitoring = True
+        try:
+            memory = psutil.Process(self.process.pid).memory_info().rss
+            frac = memory / self.memory_limit
+            if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
+                if hasattr(signal, 'SIGUSR1'):
+                    # Try to be nice and tell the worker to free some memory.
+                    logger.warn("Worker exceeded 95% memory budget.  Forcing GC")
+                    os.kill(self.process.process.pid, signal.SIGUSR1)
+
+                    # Give some time to the worker to GC.
+                    yield gen.sleep(0.2)
+                    memory = psutil.Process(self.process.pid).memory_info().rss
+                    frac = memory / self.memory_limit
+
+                if frac > self.memory_terminate_fraction:
+                    # The worker has not been nice enough.
+                    logger.warn("Worker exceeded 95% memory budget.  Restarting")
+                    self.process.process.terminate()
+        finally:
+            self._memory_monitoring = False
 
     def is_alive(self):
         return self.process is not None and self.process.status == 'running'
@@ -304,6 +326,10 @@ class Nanny(ServerNode):
         self.scheduler.close_rpc()
         self.status = 'closed'
         raise gen.Return('OK')
+
+
+def _handle_gc_signal(signum, frame):
+    gc.collect()
 
 
 class WorkerProcess(object):
@@ -474,6 +500,11 @@ class WorkerProcess(object):
         loop = IOLoop()
         loop.make_current()
         worker = Worker(*worker_args, **worker_kwargs)
+
+        # Register a handler to let the nanny force a GC in case of memory
+        # high memory limit
+        if hasattr(signal, 'SIGUSR1'):
+            signal.signal(signal.SIGUSR1, _handle_gc_signal)
 
         @gen.coroutine
         def do_stop(timeout):
