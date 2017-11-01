@@ -339,15 +339,12 @@ class LoopRunner(object):
         Stop and close the loop if it was created by us.
         Otherwise, just mark this object "stopped".
         """
-        # XXX it would be more logical to stop an user-created loop
-        # if we started it, but that would break the current distributed API
         self._started = False
         if self._loop_thread is not None:
             try:
-                if self._should_close_loop:
-                    self._loop.add_callback(self._loop.stop)
-                    self._loop_thread.join(timeout=timeout)
-                    self._loop.close()
+                self._loop.add_callback(self._loop.stop)
+                self._loop_thread.join(timeout=timeout)
+                self._loop.close()
             finally:
                 self._loop_thread = None
 

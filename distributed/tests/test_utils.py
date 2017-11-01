@@ -372,8 +372,7 @@ def test_loop_runner(loop_in_thread):
     assert_running(loop)
     runner.stop()
     assert not runner.is_started()
-    # Explicit loop is still running
-    assert_running(loop)
+    assert_not_running(loop)
 
     # Explicit loop, already started
     runner = LoopRunner(loop=loop_in_thread)
