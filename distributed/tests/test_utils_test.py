@@ -12,7 +12,7 @@ from tornado import gen
 from distributed import Scheduler, Worker, Client, config
 from distributed.core import rpc
 from distributed.metrics import time
-from distributed.utils_test import (cluster, gen_cluster,
+from distributed.utils_test import (cluster, gen_cluster, inc,
                                     gen_test, wait_for_port, new_config,
                                     tls_only_security)
 from distributed.utils_test import loop # flake8: noqa
@@ -47,7 +47,8 @@ def test_gen_cluster_cleans_up_client():
 
     @gen_cluster(client=True)
     def f(c, s, a, b):
-        pass
+        assert dask.context._globals.get('get')
+        yield c.submit(inc, 1)
 
     f()
 
