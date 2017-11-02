@@ -2201,8 +2201,10 @@ class Worker(WorkerBase):
 
         # Pause worker threads if above 80% memory use
         if self.memory_pause_fraction and frac > self.memory_pause_fraction:
-            # Try to free some memory while in paused state
-            self._throttled_gc.collect()
+            # We intentionally restrain ourselves from calling
+            # self._throttled_gc.collect() here as we would rather call it just
+            # after self.data.fast.evict() to give it a higher likelyhood to
+            # actually free memory.
             if not self.paused:
                 logger.warn("Worker is at %d%% memory usage. Pausing worker.  "
                             "Process memory: %s -- Worker memory limit: %s",
@@ -2226,6 +2228,7 @@ class Worker(WorkerBase):
             need = memory - target
             while memory > target:
                 if not self.data.fast:
+                    self._throttled_gc.collect()
                     logger.warn("Memory use is high but worker has no data "
                                 "to store to disk.  Perhaps some other process "
                                 "is leaking memory?  Process memory: %s -- "
