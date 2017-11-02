@@ -998,6 +998,8 @@ class Client(Node):
         allow_other_workers: bool (defaults to False)
             Used with `workers`. Inidicates whether or not the computations
             may be performed on workers that are not in the `workers` set(s).
+        retries: int (default to 0)
+            Number of allowed automatic retries if the task fails
 
         Examples
         --------
@@ -1018,6 +1020,7 @@ class Client(Node):
         pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
         resources = kwargs.pop('resources', None)
+        retries = kwargs.pop('retries', None)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers not in (True, False, None):
@@ -1054,7 +1057,8 @@ class Client(Node):
 
         futures = self._graph_to_futures(dsk, [skey], restrictions,
                                          loose_restrictions, priority={skey: 0},
-                                         resources={skey: resources} if resources else None)
+                                         resources={skey: resources} if resources else None,
+                                         retries={skey: retries} if retries else None)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -1095,6 +1099,8 @@ class Client(Node):
         workers: set, iterable of sets
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
+        retries: int (default to 0)
+            Number of allowed automatic retries if a task fails
 
         Examples
         --------
@@ -1131,6 +1137,7 @@ class Client(Node):
         key = key or funcname(func)
         pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
+        retries = kwargs.pop('retries', None)
         resources = kwargs.pop('resources', None)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
@@ -1177,6 +1184,11 @@ class Client(Node):
         else:
             loose_restrictions = set()
 
+        if retries:
+            retries = {k: retries for k in keys}
+        else:
+            retries = None
+
         priority = dict(zip(keys, range(len(keys))))
 
         if resources:
@@ -1185,7 +1197,8 @@ class Client(Node):
             resources = None
 
         futures = self._graph_to_futures(dsk, keys, restrictions,
-                                         loose_restrictions, priority=priority, resources=resources)
+                                         loose_restrictions, priority=priority,
+                                         resources=resources, retries=retries)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(k)] for k in keys]
@@ -1838,8 +1851,8 @@ class Client(Node):
         return self.sync(self._run_coroutine, function, *args, **kwargs)
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
-                          loose_restrictions=None, allow_other_workers=True, priority=None,
-                          resources=None):
+                          loose_restrictions=None, priority=None,
+                          resources=None, retries=None):
         with self._lock:
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
@@ -1885,7 +1898,9 @@ class Client(Node):
                                      'loose_restrictions': loose_restrictions,
                                      'priority': priority,
                                      'resources': resources,
-                                     'submitting_task': getattr(thread_state, 'key', None)})
+                                     'submitting_task': getattr(thread_state, 'key', None),
+                                     'retries': retries,
+                                     })
             return futures
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,

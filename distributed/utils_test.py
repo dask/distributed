@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
 from datetime import timedelta
+import functools
 import gc
 from glob import glob
 import inspect
@@ -208,6 +209,57 @@ def slowidentity(*args, **kwargs):
         return args[0]
     else:
         return args
+
+
+def varying(items):
+    """
+    Return a function that returns a result (or raises an exception)
+    from *items* at each call.
+    """
+    # cloudpickle would serialize the *values* of all globals
+    # used by *func* below, so we can't use `global _varying_index`.
+    # Instead look up the module object to get the original namespace and
+    # not a copy.
+    mod = sys.modules[__name__]
+    mod._varying_index = 0
+
+    def func():
+        idx = mod._varying_index
+        if idx == len(items):
+            raise IndexError
+        else:
+            x = items[idx]
+            mod._varying_index = idx + 1
+            if isinstance(x, Exception):
+                raise x
+            else:
+                return x
+
+    return func
+
+
+def map_varying(itemslists):
+    """
+    Like *varying*, but return the full specification for a map() call
+    on multiple items lists.
+    """
+    n = len(itemslists)
+    mod = sys.modules[__name__]
+    mod._map_varying_indices = [0] * n
+
+    def func(i, items):
+        idx = mod._map_varying_indices[i]
+        if idx == len(items):
+            raise IndexError
+        else:
+            x = items[idx]
+            mod._map_varying_indices[i] = idx + 1
+            if isinstance(x, Exception):
+                raise x
+            else:
+                return x
+
+    return func, list(range(n)), itemslists
 
 
 @gen.coroutine

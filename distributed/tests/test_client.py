@@ -44,7 +44,7 @@ from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     randominc, inc, dec, div, throws, geninc, asyncinc,
                                     gen_cluster, gen_test, double, deep, popen,
-                                    captured_logger)
+                                    captured_logger, map_varying)
 from distributed.utils_test import loop, loop_in_thread  # flake8: noqa
 
 
@@ -133,6 +133,34 @@ def test_map_keynames(c, s, a, b):
     keys = ['inc-1', 'inc-2', 'inc-3', 'inc-4']
     futures = c.map(inc, range(4), key=keys)
     assert [f.key for f in futures] == keys
+
+
+@gen_cluster(client=True)
+def test_map_retries(c, s, a, b):
+    args = [[ZeroDivisionError("one"), 2, 3],
+            [4, 5, 6],
+            [ZeroDivisionError("seven"), ZeroDivisionError("eight"), 9]]
+
+    x, y, z = c.map(*map_varying(args), retries=2)
+    assert (yield x) == 2
+    assert (yield y) == 4
+    assert (yield z) == 9
+
+    x, y, z = c.map(*map_varying(args), retries=1, pure=False)
+    assert (yield x) == 2
+    assert (yield y) == 4
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield z
+    exc_info.match("eight")
+
+    x, y, z = c.map(*map_varying(args), retries=0, pure=False)
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield x
+    exc_info.match("one")
+    assert (yield y) == 4
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield z
+    exc_info.match("seven")
 
 
 @gen_cluster(client=True)
@@ -1703,7 +1731,7 @@ def test_repr(loop):
 
 @gen_cluster(client=True)
 def test_forget_simple(c, s, a, b):
-    x = c.submit(inc, 1)
+    x = c.submit(inc, 1, retries=2)
     y = c.submit(inc, 2)
     z = c.submit(add, x, y, workers=[a.ip], allow_other_workers=True)
 
@@ -1719,8 +1747,9 @@ def test_forget_simple(c, s, a, b):
     for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
                  s.waiting_data, s.who_has, s.worker_restrictions,
                  s.host_restrictions, s.loose_restrictions,
-                 s.released, s.priority, s.exceptions, s.who_wants,
-                 s.exceptions_blame, s.nbytes, s.task_state]:
+                 s.released, s.priority, s.exceptions, s.tracebacks,
+                 s.who_wants, s.exceptions_blame, s.nbytes, s.task_state,
+                 s.retries]:
         assert x.key not in coll
         assert z.key not in coll
 
