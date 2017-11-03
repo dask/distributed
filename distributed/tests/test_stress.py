@@ -264,3 +264,42 @@ def test_no_delay_during_large_transfer(c, s, w):
     nbytes -= nbytes[0]
     assert nbytes.max() < (x.nbytes * 2) / 1e6
     assert nbytes[-1] < (x.nbytes * 1.2) / 1e6
+
+
+def test_nanny_no_terminate_on_cyclic_ref():
+    from time import sleep
+
+    class BigCyclicRef(object):
+        def __init__(self, size):
+            sleep(0.1)
+            self.data = b'0' * size
+            self.cyclic_ref = self
+
+    w_kwargs = {'memory_limit': int(1e9)}
+    with cluster(nworkers=1, nanny=True, worker_kwargs=w_kwargs) as (s, [a]):
+        with Client(s['address']) as c:
+
+            def get_worker_pids():
+                info = c.scheduler_info()['workers']
+                return [w['pid'] for w in info.values()]
+
+            size = int(5e7)
+            pids = get_worker_pids()
+            # 40 x 50 MB should yield 2 GB of data on the worker. Because
+            # the memory limit is set to 1 GB, the worker should evict data
+            # to its disk-based store and use the GC to free the data with
+            # cyclic ref so as to complete the task. The nanny memory check
+            # should not be triggered.
+            futures = [c.submit(BigCyclicRef, size, pure=False)
+                       for _ in range(40)]
+            start = time()
+            while True:
+                sleep(0.1)
+                # Ensure that the worker process has not been restarted by the
+                # nanny memory monitor.
+                assert get_worker_pids() == pids
+                assert time() < start + 30
+                if all(f.done() for f in futures):
+                    break
+            len(futures[0].result().data) == size
+            del futures
