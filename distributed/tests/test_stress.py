@@ -5,11 +5,13 @@ from datetime import timedelta
 from operator import add
 import random
 import sys
+import os
 from time import sleep
 
 from dask import delayed
 import pytest
 from toolz import concat, sliding_window
+import psutil
 
 from distributed import Client, wait, Nanny
 from distributed.config import config
@@ -20,6 +22,17 @@ from distributed.utils_test import (gen_cluster, cluster, inc, slowinc,
 from distributed.utils_test import loop # flake8: noqa
 from distributed.client import wait
 from tornado import gen
+
+
+def get_folder_size(folder):
+    total_size = os.path.getsize(folder)
+    for item in os.listdir(folder):
+        itempath = os.path.join(folder, item)
+        if os.path.isfile(itempath):
+            total_size += os.path.getsize(itempath)
+        elif os.path.isdir(itempath):
+            total_size += get_folder_size(itempath)
+    return total_size
 
 
 @gen_cluster(client=True)
@@ -266,7 +279,7 @@ def test_no_delay_during_large_transfer(c, s, w):
     assert nbytes[-1] < (x.nbytes * 1.2) / 1e6
 
 
-def test_nanny_no_terminate_on_cyclic_ref():
+def test_nanny_no_terminate_on_cyclic_ref(tmpdir):
     from time import sleep
 
     class BigCyclicRef(object):
@@ -275,7 +288,11 @@ def test_nanny_no_terminate_on_cyclic_ref():
             self.data = b'0' * size
             self.cyclic_ref = self
 
-    w_kwargs = {'memory_limit': int(1e9)}
+    worker_folder = str(tmpdir)
+    memory_limit = int(1e9)
+    size = int(5e7)
+    n_tasks = 40
+    w_kwargs = {'memory_limit': memory_limit, 'local_dir': worker_folder}
     with cluster(nworkers=1, nanny=True, worker_kwargs=w_kwargs) as (s, [a]):
         with Client(s['address']) as c:
 
@@ -283,7 +300,7 @@ def test_nanny_no_terminate_on_cyclic_ref():
                 info = c.scheduler_info()['workers']
                 return [w['pid'] for w in info.values()]
 
-            size = int(5e7)
+
             pids = get_worker_pids()
             # 40 x 50 MB should yield 2 GB of data on the worker. Because
             # the memory limit is set to 1 GB, the worker should evict data
@@ -291,7 +308,7 @@ def test_nanny_no_terminate_on_cyclic_ref():
             # cyclic ref so as to complete the task. The nanny memory check
             # should not be triggered.
             futures = [c.submit(BigCyclicRef, size, pure=False)
-                       for _ in range(40)]
+                       for _ in range(n_tasks)]
             start = time()
             while True:
                 sleep(0.1)
@@ -301,5 +318,25 @@ def test_nanny_no_terminate_on_cyclic_ref():
                 assert time() < start + 30
                 if all(f.done() for f in futures):
                     break
-            len(futures[0].result().data) == size
-            del futures
+
+            # Check that the worker process does not exceed the use provided
+            # memory limit.
+            worker_mem = psutil.Process(pids[0]).memory_info().rss
+            assert worker_mem < memory_limit
+
+            # The remaining data should have been evicted to disk. We assume
+            # that the eviction to disk does not support compression for those
+            # types of objects:
+            total_size = n_tasks * size
+            assert get_folder_size(worker_folder) > total_size - memory_limit
+    
+            # It's still possible to fetch the data of the results of the
+            # computation from the client process if needed.
+            for f in futures:
+                assert len(f.result().data) == size
+            
+            # Fetching the data should not cause the worker to restart and
+            # its memory usage should still be low enough.
+            assert get_worker_pids() == pids
+            worker_mem = psutil.Process(pids[0]).memory_info().rss
+            assert worker_mem < memory_limit
