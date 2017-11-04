@@ -41,7 +41,7 @@ def test_gen_cluster(c, s, a, b):
     assert s.ncores == {w.address: w.ncores for w in [a, b]}
 
 
-def test_gen_cluster_cleans_up_client():
+def test_gen_cluster_cleans_up_client(loop):
     import dask.context
     assert not dask.context._globals.get('get')
 
