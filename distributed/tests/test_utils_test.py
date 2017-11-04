@@ -41,6 +41,7 @@ def test_gen_cluster(c, s, a, b):
     assert s.ncores == {w.address: w.ncores for w in [a, b]}
 
 
+@pytest.mark.skip(reason="This hangs on travis")
 def test_gen_cluster_cleans_up_client(loop):
     import dask.context
     assert not dask.context._globals.get('get')
