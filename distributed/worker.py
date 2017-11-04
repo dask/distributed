@@ -2182,24 +2182,9 @@ class Worker(WorkerBase):
     # Administrative #
     ##################
 
-    @gen.coroutine
-    def memory_monitor(self):
-        """ Track this process's memory usage and act accordingly
-
-        If we rise above 70% memory use, start dumping data to disk.
-
-        If we rise above 80% memory use, stop execution of new tasks
-        """
-        if self._memory_monitoring:
-            return
-        self._memory_monitoring = True
-        total = 0
-
-        proc = psutil.Process()
-        memory = proc.memory_info().rss
+    def _check_pause_resume(self, memory):
+        """Pause worker threads if above 80% memory use"""
         frac = memory / self.memory_limit
-
-        # Pause worker threads if above 80% memory use
         if self.memory_pause_fraction and frac > self.memory_pause_fraction:
             # We intentionally restrain ourselves from calling
             # self._throttled_gc.collect() here as we would rather call it just
@@ -2209,23 +2194,42 @@ class Worker(WorkerBase):
                 logger.warn("Worker is at %d%% memory usage. Pausing worker.  "
                             "Process memory: %s -- Worker memory limit: %s",
                             int(frac * 100),
-                            format_bytes(proc.memory_info().rss),
+                            format_bytes(memory),
                             format_bytes(self.memory_limit))
                 self.paused = True
         elif self.paused:
             logger.warn("Worker is at %d%% memory usage. Resuming worker. "
                         "Process memory: %s -- Worker memory limit: %s",
                         int(frac * 100),
-                        format_bytes(proc.memory_info().rss),
+                        format_bytes(memory),
                         format_bytes(self.memory_limit))
             self.paused = False
             self.ensure_computing()
+
+    @gen.coroutine
+    def memory_monitor(self):
+        """ Track this process's memory usage and act accordingly
+
+        If we rise above 70% memory use, dump data to disk.
+
+        If we rise above 80% memory use, pause execution of new tasks
+        """
+        total = 0
+        if self._memory_monitoring:
+            raise gen.Return(total)
+        self._memory_monitoring = True
+
+        proc = psutil.Process()
+        memory = proc.memory_info().rss
+        frac = memory / self.memory_limit
+
+        # Pause worker threads if above 80% memory use
+        self._check_pause_resume(memory)
 
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
             target = self.memory_limit * self.memory_target_fraction
             count = 0
-            need = memory - target
             while memory > target:
                 if not self.data.fast:
                     self._throttled_gc.collect()
@@ -2236,22 +2240,20 @@ class Worker(WorkerBase):
                                 format_bytes(proc.memory_info().rss),
                                 format_bytes(self.memory_limit))
                     break
-                k, v, weight = self.data.fast.evict()
-                del k, v
-                total += weight
+                self.data.fast.evict()
+                self._throttled_gc.collect()
                 count += 1
                 yield gen.moment
                 memory = proc.memory_info().rss
-                if total > need and memory > target:
-                    # Issue a GC to ensure that the evicted data is actually
-                    # freed from memory and taken into account by the monitor
-                    # before trying to evict even more data.
-                    self._throttled_gc.collect()
-                    memory = proc.memory_info().rss
+                # Check again if we should not pause the work as sometimes
+                # eviction and garbage collection can be slower than loading
+                # new task data in worker threads.
+                self._check_pause_resume(memory)
             if count:
-                logger.debug("Moved %d pieces of data data and %s to disk",
-                             count, format_bytes(total))
-
+                logger.debug("Moved %d pieces of data (approx %s) to disk. "
+                             "Process memory: %s -- Worker memory limit: %s",
+                             count, format_bytes(total), format_bytes(memory),
+                             format_bytes(self.memory_limit))
         self._memory_monitoring = False
         raise gen.Return(total)
 
