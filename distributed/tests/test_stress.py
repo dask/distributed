@@ -290,8 +290,8 @@ def test_nanny_no_terminate_on_cyclic_ref(tmpdir):
 
     worker_folder = str(tmpdir)
     memory_limit = int(1e9)
-    size = int(5e7)
-    n_tasks = 40
+    size = int(1e7)
+    n_tasks = 200
     w_kwargs = {'memory_limit': memory_limit, 'local_dir': worker_folder}
     with cluster(nworkers=1, nanny=True, worker_kwargs=w_kwargs) as (s, [a]):
         with Client(s['address']) as c:
@@ -302,7 +302,7 @@ def test_nanny_no_terminate_on_cyclic_ref(tmpdir):
 
 
             pids = get_worker_pids()
-            # 40 x 50 MB should yield 2 GB of data on the worker. Because
+            # 200 x 10 MB should yield 2 GB of data on the worker. Because
             # the memory limit is set to 1 GB, the worker should evict data
             # to its disk-based store and use the GC to free the data with
             # cyclic ref so as to complete the task. The nanny memory check
