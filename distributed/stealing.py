@@ -199,6 +199,9 @@ class WorkStealing(SchedulerPlugin):
                 return
             thief = d['thief']
             victim = d['victim']
+            logger.debug("Confirm move %s, %s -> %s.  State: %s", key, victim,
+                         thief, state)
+
             if (self.scheduler.task_state.get(key) != 'processing' or
                     self.scheduler.rprocessing[key] != victim):
                 self.scheduler.occupancy[thief] = sum(self.scheduler.processing[thief].values())
@@ -212,7 +215,7 @@ class WorkStealing(SchedulerPlugin):
                 return
 
             # Victim had already started execution, reverse stealing
-            if state in ('memory', 'executing', 'long-running'):
+            if state in ('memory', 'executing', 'long-running', None):
                 self.scheduler.occupancy[thief] -= d['thief_duration']
                 self.scheduler.total_occupancy -= d['thief_duration']
                 self.scheduler.occupancy[victim] += d['victim_duration']
