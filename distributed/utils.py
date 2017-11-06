@@ -394,11 +394,14 @@ class LoopRunner(object):
         Convenience helper: start the loop if needed,
         run sync(func, *args, **kwargs), then stop the loop again.
         """
-        self.start()
-        try:
+        if self._started:
             sync(self.loop, func, *args, **kwargs)
-        finally:
-            self.stop()
+        else:
+            self.start()
+            try:
+                sync(self.loop, func, *args, **kwargs)
+            finally:
+                self.stop()
 
     @property
     def loop(self):

@@ -218,10 +218,10 @@ class LocalCluster(object):
 
     @gen.coroutine
     def _close(self):
-        if self.status in ('closing', 'closed'):
+        # Can be 'closing' as we're called by close() below
+        if self.status == 'closed':
             return
 
-        self.status = 'closing'
         try:
             with ignoring(gen.TimeoutError, CommClosedError, OSError):
                 yield All([w._close() for w in self.workers])
@@ -231,12 +231,11 @@ class LocalCluster(object):
         finally:
             self.status = 'closed'
 
-    def close(self, timeout=60):
+    def close(self, timeout=20):
         """ Close the cluster """
-        if self.status in ('closing', 'closed'):
+        if self.status == 'closed':
             return
 
-        self.status = 'closing'
         try:
             self.scheduler.clear_task_state()
 
@@ -248,7 +247,7 @@ class LocalCluster(object):
                 else:
                     sleep(0.01)
             del self.workers[:]
-            sync(self.loop, self._close, callback_timeout=timeout)
+            self._loop_runner.run_sync(self._close, callback_timeout=timeout)
             self._loop_runner.stop()
         finally:
             self.status = 'closed'
