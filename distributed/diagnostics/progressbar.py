@@ -14,7 +14,7 @@ from ..compatibility import html_escape
 from ..core import connect, coerce_to_address, CommClosedError
 from ..client import default_client, futures_of
 from ..protocol.pickle import dumps
-from ..utils import sync, ignoring, key_split, is_kernel, LoopRunner
+from ..utils import ignoring, key_split, is_kernel, LoopRunner
 
 
 logger = logging.getLogger(__name__)
@@ -97,7 +97,6 @@ class TextProgressBar(ProgressBar):
         if start:
             loop_runner = LoopRunner(self.loop)
             loop_runner.run_sync(self.listen)
-
 
     def _draw_bar(self, remaining, all, **kwargs):
         frac = (1 - remaining / all) if all else 1.0
