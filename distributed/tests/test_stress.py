@@ -5,7 +5,6 @@ from datetime import timedelta
 from operator import add
 import random
 import sys
-import os
 from time import sleep
 
 from dask import delayed
@@ -22,17 +21,6 @@ from distributed.utils_test import (gen_cluster, cluster, inc, slowinc,
 from distributed.utils_test import loop # flake8: noqa
 from distributed.client import wait
 from tornado import gen
-
-
-def get_folder_size(folder):
-    total_size = os.path.getsize(folder)
-    for item in os.listdir(folder):
-        itempath = os.path.join(folder, item)
-        if os.path.isfile(itempath):
-            total_size += os.path.getsize(itempath)
-        elif os.path.isdir(itempath):
-            total_size += get_folder_size(itempath)
-    return total_size
 
 
 @gen_cluster(client=True)
@@ -316,20 +304,15 @@ def test_nanny_no_terminate_on_cyclic_ref(tmpdir):
                 # nanny memory monitor.
                 assert get_worker_pids() == pids
                 assert time() < start + 30
+
+                # Check that the worker process does not exceed the use
+                # provided memory limit.
+                worker_mem = psutil.Process(pids[0]).memory_info().rss
+                assert worker_mem < memory_limit
+
                 if all(f.done() for f in futures):
                     break
 
-            # Check that the worker process does not exceed the use provided
-            # memory limit.
-            worker_mem = psutil.Process(pids[0]).memory_info().rss
-            assert worker_mem < memory_limit
-
-            # The remaining data should have been evicted to disk. We assume
-            # that the eviction to disk does not support compression for those
-            # types of objects:
-            total_size = n_tasks * size
-            assert get_folder_size(worker_folder) > total_size - memory_limit
-    
             # It's still possible to fetch the data of the results of the
             # computation from the client process if needed.
             for f in futures:
