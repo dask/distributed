@@ -77,13 +77,27 @@ def invalid_python_script(tmpdir_factory):
 @pytest.fixture
 def loop():
     with pristine_loop() as loop:
+        # Monkey-patch IOLoop.start to wait for loop stop
+        orig_start = loop.start
+        is_stopped = threading.Event()
+        is_stopped.set()
+        def start():
+            is_stopped.clear()
+            try:
+                orig_start()
+            finally:
+                is_stopped.set()
+        loop.start = start
+
         yield loop
         # Stop the loop in case it's still running
         try:
-            sync(loop, loop.stop)
+            loop.add_callback(loop.stop)
         except RuntimeError as e:
             if not re.match("IOLoop is clos(ed|ing)", str(e)):
                 raise
+        else:
+            is_stopped.wait()
 
 
 @pytest.fixture

@@ -218,32 +218,40 @@ class LocalCluster(object):
 
     @gen.coroutine
     def _close(self):
-        if self.status == 'closed':
+        if self.status in ('closing', 'closed'):
             return
 
-        with ignoring(gen.TimeoutError, CommClosedError, OSError):
-            yield All([w._close() for w in self.workers])
-        with ignoring(gen.TimeoutError, CommClosedError, OSError):
-            yield self.scheduler.close(fast=True)
-        del self.workers[:]
-        self.status = 'closed'
+        self.status = 'closing'
+        try:
+            with ignoring(gen.TimeoutError, CommClosedError, OSError):
+                yield All([w._close() for w in self.workers])
+            with ignoring(gen.TimeoutError, CommClosedError, OSError):
+                yield self.scheduler.close(fast=True)
+            del self.workers[:]
+        finally:
+            self.status = 'closed'
 
-    def close(self):
+    def close(self, timeout=60):
         """ Close the cluster """
-        if self.status == 'closed':
+        if self.status in ('closing', 'closed'):
             return
 
-        self.scheduler.clear_task_state()
+        self.status = 'closing'
+        try:
+            self.scheduler.clear_task_state()
 
-        for w in self.workers:
-            self.loop.add_callback(self._stop_worker, w)
-        for i in range(10):
-            if not self.workers:
-                break
-            else:
-                sleep(0.01)
-        sync(self.loop, self._close)
-        self._loop_runner.stop()
+            for w in self.workers:
+                self.loop.add_callback(self._stop_worker, w)
+            for i in range(10):
+                if not self.workers:
+                    break
+                else:
+                    sleep(0.01)
+            del self.workers[:]
+            sync(self.loop, self._close, callback_timeout=timeout)
+            self._loop_runner.stop()
+        finally:
+            self.status = 'closed'
 
     @gen.coroutine
     def scale_up(self, n, **kwargs):
@@ -296,5 +304,5 @@ clusters_to_close = weakref.WeakSet()
 
 @atexit.register
 def close_clusters():
-    for cluster in clusters_to_close:
-        cluster.close()
+    for cluster in list(clusters_to_close):
+        cluster.close(timeout=10)

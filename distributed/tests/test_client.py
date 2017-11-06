@@ -4784,6 +4784,9 @@ def test_client_async_before_loop_starts():
     loop = IOLoop()
     client = Client(asynchronous=True, loop=loop)
     assert client.asynchronous
+    client.close()
+    # Avoid long wait for cluster close at shutdown
+    loop.close()
 
 
 @slow
