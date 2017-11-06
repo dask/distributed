@@ -400,7 +400,7 @@ class LoopRunner(object):
         run sync(func, *args, **kwargs), then stop the loop again.
         """
         if self._started:
-            sync(self.loop, func, *args, **kwargs)
+            return sync(self.loop, func, *args, **kwargs)
         else:
             self.start()
             try:

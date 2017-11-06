@@ -548,7 +548,7 @@ class Client(Node):
 
     def __str__(self):
         if self._loop_runner.is_started():
-            n = sync(self.loop, self.scheduler.ncores)
+            n = self._loop_runner.run_sync(self.scheduler.ncores)
             return '<%s: scheduler=%r processes=%d cores=%d>' % (
                 self.__class__.__name__,
                 self.scheduler.address, len(n), sum(n.values()))
