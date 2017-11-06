@@ -284,6 +284,9 @@ class WorkStealing(SchedulerPlugin):
                         seen = True
 
                     for key in list(stealable):
+                        if key not in self.key_stealable:
+                            stealable.remove(key)
+                            continue
                         i += 1
                         if not idle:
                             break
@@ -313,6 +316,9 @@ class WorkStealing(SchedulerPlugin):
                     for key in list(stealable):
                         if not idle:
                             break
+                        if key not in self.key_stealable:
+                            stealable.remove(key)
+                            continue
 
                         try:
                             sat = s.rprocessing[key]
