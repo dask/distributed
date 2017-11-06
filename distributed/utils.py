@@ -210,6 +210,11 @@ def sync(loop, func, *args, **kwargs):
     """
     Run coroutine in loop running in separate thread.
     """
+    # Tornado 4.5.x doesn't raise when using a closed PollIOLoop, do it
+    # ourselves
+    if tornado.version_info < (5, 0, 0) and getattr(loop, '_closing', False):
+        raise RuntimeError("IOLoop is closed")
+
     timeout = kwargs.pop('callback_timeout', None)
 
     def make_coro():
@@ -399,7 +404,7 @@ class LoopRunner(object):
         else:
             self.start()
             try:
-                sync(self.loop, func, *args, **kwargs)
+                return sync(self.loop, func, *args, **kwargs)
             finally:
                 self.stop()
 
