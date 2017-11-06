@@ -79,11 +79,7 @@ def loop():
     with pristine_loop() as loop:
         yield loop
         # Stop the loop in case it's still running
-        try:
-            sync(loop, loop.stop)
-        except RuntimeError as e:
-            if not re.match("IOLoop is clos(ed|ing)", str(e)):
-                raise
+        loop.add_callback(loop.stop)
 
 
 @pytest.fixture
