@@ -900,6 +900,8 @@ class Client(Node):
     @gen.coroutine
     def _close(self, fast=False):
         """ Send close signal and wait until scheduler completes """
+        self.status = 'closing'
+
         with log_errors():
             for pc in self._periodic_callbacks:
                 pc.stop()
@@ -927,10 +929,10 @@ class Client(Node):
                 _set_global_client(None)
             coroutines = set(self.coroutines)
             for f in self.coroutines:
-                # cancel() works on asyncio futures
+                # cancel() works on asyncio futures (Tornado 5)
                 # but is a no-op on Tornado futures
                 f.cancel()
-                if f.cancelled:
+                if f.cancelled():
                     coroutines.remove(f)
             del self.coroutines[:]
             if not fast:
@@ -940,6 +942,8 @@ class Client(Node):
             with ignoring(AttributeError):
                 self.scheduler.close_rpc()
             self.scheduler = None
+
+        self.status = 'closed'
 
     _shutdown = _close
 
@@ -955,16 +959,17 @@ class Client(Node):
         --------
         Client.restart
         """
+        # XXX handling of self.status here is not thread-safe
+        if self.status == 'closed':
+            return
+        self.status = 'closing'
+
         if self.asynchronous:
             future = self._close()
             if timeout:
                 future = gen.with_timeout(timedelta(seconds=timeout), future)
             return future
-        # XXX handling of self.status here is not thread-safe
-        if self.status == 'closed':
-            return
 
-        self.status = 'closing'
         if self._start_arg is None:
             with ignoring(AttributeError):
                 self.cluster.close()
