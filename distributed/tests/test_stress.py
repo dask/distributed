@@ -276,10 +276,13 @@ def test_nanny_no_terminate_on_cyclic_ref(tmpdir):
             self.data = b'0' * size
             self.cyclic_ref = self
 
+    def make_some_data(size):
+        return BigCyclicRef(size)
+
     worker_folder = str(tmpdir)
     memory_limit = int(1e9)
-    size = int(1e7)
-    n_tasks = 200
+    size = int(2e7)
+    n_tasks = 100
     w_kwargs = {'memory_limit': memory_limit, 'local_dir': worker_folder}
     with cluster(nworkers=1, nanny=True, worker_kwargs=w_kwargs) as (s, [a]):
         with Client(s['address']) as c:
@@ -290,12 +293,12 @@ def test_nanny_no_terminate_on_cyclic_ref(tmpdir):
 
 
             pids = get_worker_pids()
-            # 200 x 10 MB should yield 2 GB of data on the worker. Because
+            # 100 x 20 MB should yield 2 GB of data on the worker. Because
             # the memory limit is set to 1 GB, the worker should evict data
             # to its disk-based store and use the GC to free the data with
             # cyclic ref so as to complete the task. The nanny memory check
             # should not be triggered.
-            futures = [c.submit(BigCyclicRef, size, pure=False)
+            futures = [c.submit(make_some_data, size, pure=False)
                        for _ in range(n_tasks)]
             start = time()
             while True:
@@ -303,7 +306,7 @@ def test_nanny_no_terminate_on_cyclic_ref(tmpdir):
                 # Ensure that the worker process has not been restarted by the
                 # nanny memory monitor.
                 assert get_worker_pids() == pids
-                assert time() < start + 30
+                assert time() < start + 60
 
                 # Check that the worker process does not exceed the use
                 # provided memory limit.
@@ -315,11 +318,11 @@ def test_nanny_no_terminate_on_cyclic_ref(tmpdir):
 
             # It's still possible to fetch the data of the results of the
             # computation from the client process if needed.
-            for f in futures:
-                assert len(f.result().data) == size
-            
-            # Fetching the data should not cause the worker to restart and
-            # its memory usage should still be low enough.
-            assert get_worker_pids() == pids
-            worker_mem = psutil.Process(pids[0]).memory_info().rss
-            assert worker_mem < memory_limit
+            for i, f in enumerate(futures):
+                assert f.result() is not None
+
+                # Fetching the data should not cause the worker to restart and
+                # its memory usage should still be low enough.
+                assert get_worker_pids() == pids
+                worker_mem = psutil.Process(pids[0]).memory_info().rss
+                assert worker_mem < memory_limit
