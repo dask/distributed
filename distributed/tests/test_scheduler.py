@@ -22,7 +22,7 @@ from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils_test import (inc, dec, gen_cluster, gen_test, readone,
                                     slowinc, slowadd, slowdec, cluster, div)
-from distributed.utils_test import loop # flake8: noqa
+from distributed.utils_test import loop, nodebug  # flake8: noqa
 from distributed.utils import tmpfile
 from distributed.utils_test import slow
 from dask.compatibility import apply
@@ -802,6 +802,7 @@ def test_file_descriptors(c, s):
     yield [n._close() for n in nannies]
 
 
+@nodebug
 @gen_cluster(client=True)
 def test_learn_occupancy(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.01)
@@ -813,6 +814,7 @@ def test_learn_occupancy(c, s, a, b):
         assert 1 < s.occupancy[w.address] < 20
 
 
+@nodebug
 @gen_cluster(client=True)
 def test_learn_occupancy_2(c, s, a, b):
     future = c.map(slowinc, range(1000), delay=0.1)

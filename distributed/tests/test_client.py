@@ -192,10 +192,10 @@ def test_map_naming(c, s, a, b):
     assert [x.key for x in L1] == [x.key for x in L2]
 
     L3 = c.map(inc, [1, 1, 1, 1])
-    assert len({x.event for x in L3}) == 1
+    assert len({x._state for x in L3}) == 1
 
     L4 = c.map(inc, [1, 1, 1, 1], pure=False)
-    assert len({x.event for x in L4}) == 4
+    assert len({x._state for x in L4}) == 4
 
 
 @gen_cluster(client=True)
@@ -203,7 +203,7 @@ def test_submit_naming(c, s, a, b):
     a = c.submit(inc, 1)
     b = c.submit(inc, 1)
 
-    assert a.event is b.event
+    assert a._state is b._state
 
     c = c.submit(inc, 1, pure=False)
     assert c.key != a.key
@@ -470,7 +470,6 @@ def test_garbage_collection_with_scatter(c, s, a, b):
     [future] = yield c.scatter([1])
     assert future.key in c.futures
     assert future.status == 'finished'
-    assert future.event.is_set()
     assert s.who_wants[future.key] == {c.id}
 
     assert c.refcount[future.key] == 1
@@ -4689,7 +4688,7 @@ def test_call_stack_all(c, s, a, b):
 @gen_cluster([('127.0.0.1', 4)] * 2, client=True)
 def test_call_stack_collections(c, s, a, b):
     da = pytest.importorskip('dask.array')
-    x = da.random.random(1000, chunks=(10,)).map_blocks(slowinc).persist()
+    x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
     while not a.executing and not b.executing:
         yield gen.sleep(0.001)
     result = yield c.call_stack(x)
@@ -4699,7 +4698,7 @@ def test_call_stack_collections(c, s, a, b):
 @gen_cluster([('127.0.0.1', 4)] * 2, client=True)
 def test_call_stack_collections_all(c, s, a, b):
     da = pytest.importorskip('dask.array')
-    x = da.random.random(1000, chunks=(10,)).map_blocks(slowinc).persist()
+    x = da.random.random(100, chunks=(10,)).map_blocks(slowinc, delay=0.5).persist()
     while not a.executing and not b.executing:
         yield gen.sleep(0.001)
     result = yield c.call_stack()

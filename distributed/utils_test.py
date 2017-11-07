@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from contextlib import contextmanager
 from datetime import timedelta
+import functools
 import gc
 from glob import glob
 import inspect
@@ -23,6 +24,8 @@ import uuid
 import warnings
 import weakref
 
+import psutil
+import pytest
 import six
 
 from dask.context import _globals
@@ -39,8 +42,6 @@ from .nanny import Nanny
 from .security import Security
 from .utils import ignoring, log_errors, sync, mp_context, get_ip, get_ipv6
 from .worker import Worker, TOTAL_MEMORY
-import pytest
-import psutil
 
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,44 @@ def mock_ipython():
     with mock.patch('IPython.get_ipython', get_ip), \
             mock.patch('distributed._ipython_utils.get_ipython', get_ip):
         yield ip
+
+
+def nodebug(func):
+    """
+    A decorator to disable debug facilities during timing-sensitive tests.
+    Warning: this doesn't affect already created IOLoops.
+    """
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        old_asyncio_debug = os.environ.get("PYTHONASYNCIODEBUG")
+        if old_asyncio_debug is not None:
+            del os.environ["PYTHONASYNCIODEBUG"]
+        try:
+            return func(*args, **kwargs)
+        finally:
+            if old_asyncio_debug is not None:
+                os.environ["PYTHONASYNCIODEBUG"] = old_asyncio_debug
+
+    return wrapped
+
+
+def nodebug_setup_module(module):
+    """
+    A setup_module() that you can install in a test module to disable
+    debug facilities.
+    """
+    module._old_asyncio_debug = os.environ.get("PYTHONASYNCIODEBUG")
+    if module._old_asyncio_debug is not None:
+        del os.environ["PYTHONASYNCIODEBUG"]
+
+
+def nodebug_teardown_module(module):
+    """
+    A teardown_module() that you can install in a test module to reenable
+    debug facilities.
+    """
+    if module._old_asyncio_debug is not None:
+        os.environ["PYTHONASYNCIODEBUG"] = module._old_asyncio_debug
 
 
 def inc(x):
@@ -478,18 +517,16 @@ def disconnect_all(addresses, timeout=3):
     yield [disconnect(addr, timeout) for addr in addresses]
 
 
-import pytest
-try:
-    slow = pytest.mark.skipif(
-        not pytest.config.getoption("--runslow"),
-        reason="need --runslow option to run")
-except (AttributeError, ValueError):
-    def slow(*args):
-        pass
+def slow(func):
+    if not pytest.config.getoption("--runslow"):
+        func = pytest.mark.skip("need --runslow option to run")(func)
 
+    @functools.wraps(func)
+    def wrapped(*args, **kwargs):
+        # Slow tests needn't become slower because of debugging
+        return nodebug(func)(*args, **kwargs)
 
-from tornado import gen
-from tornado.ioloop import IOLoop
+    return wrapped
 
 
 def gen_test(timeout=10):
