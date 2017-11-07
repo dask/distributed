@@ -2233,12 +2233,17 @@ class Worker(WorkerBase):
             while memory > target:
                 if not self.data.fast:
                     self._throttled_gc.collect()
-                    logger.warn("Memory use is high but worker has no data "
-                                "to store to disk.  Perhaps some other process "
-                                "is leaking memory?  Process memory: %s -- "
-                                "Worker memory limit: %s",
-                                format_bytes(proc.memory_info().rss),
-                                format_bytes(self.memory_limit))
+                    yield gen.moment
+                    memory = proc.memory_info().rss
+                    self._check_pause_resume(memory)
+                    if memory > target:
+                        logger.warn(
+                            "Memory use is high but worker has no data to "
+                            "store to disk. Perhaps some task is leaking "
+                            "memory? "
+                            "Process memory: %s -- Worker memory limit: %s",
+                            format_bytes(memory),
+                            format_bytes(self.memory_limit))
                     break
                 self.data.fast.evict()
                 self._throttled_gc.collect()
@@ -2251,8 +2256,11 @@ class Worker(WorkerBase):
                 self._check_pause_resume(memory)
             if count:
                 logger.debug("Moved %d pieces of data (approx %s) to disk. "
+                             "%d items in memory, %d items on disk. "
                              "Process memory: %s -- Worker memory limit: %s",
-                             count, format_bytes(total), format_bytes(memory),
+                             count, format_bytes(total),
+                             len(self.data.fast), len(self.data.slow),
+                             format_bytes(memory),
                              format_bytes(self.memory_limit))
         self._memory_monitoring = False
         raise gen.Return(total)
