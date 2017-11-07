@@ -34,7 +34,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .compatibility import WINDOWS
+from .compatibility import WINDOWS, PY3
 from .config import config, initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
@@ -160,6 +160,12 @@ def nodebug(func):
     A decorator to disable debug facilities during timing-sensitive tests.
     Warning: this doesn't affect already created IOLoops.
     """
+    if not PY3:
+        # py.test's runner magic breaks horridly on Python 2
+        # when a test function is wrapped, so avoid it
+        # (incidently, asyncio is irrelevant anyway)
+        return func
+
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         old_asyncio_debug = os.environ.get("PYTHONASYNCIODEBUG")
@@ -518,15 +524,14 @@ def disconnect_all(addresses, timeout=3):
 
 
 def slow(func):
-    if not pytest.config.getoption("--runslow"):
-        func = pytest.mark.skip("need --runslow option to run")(func)
+    try:
+        if not pytest.config.getoption("--runslow"):
+            func = pytest.mark.skip("need --runslow option to run")(func)
+    except AttributeError:
+        # AttributeError: module 'pytest' has no attribute 'config'
+        pass
 
-    @functools.wraps(func)
-    def wrapped(*args, **kwargs):
-        # Slow tests needn't become slower because of debugging
-        return nodebug(func)(*args, **kwargs)
-
-    return wrapped
+    return nodebug(func)
 
 
 def gen_test(timeout=10):
