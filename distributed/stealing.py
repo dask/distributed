@@ -231,11 +231,11 @@ class WorkStealing(SchedulerPlugin):
                 del self.scheduler.processing[victim][key]
                 self.scheduler.processing[thief][key] = d['thief_duration']
                 self.put_key_in_stealable(key)
+                self.scheduler.consume_resources(key, thief)
+                self.scheduler.release_resources(key, victim)
 
                 try:
                     self.scheduler.send_task_to_worker(thief, key)
-                    self.scheduler.consume_resources(key, thief)
-                    self.scheduler.release_resources(key, victim)
                 except CommClosedError:
                     self.scheduler.remove_worker(thief)
                 self.log.append(('confirm', key, victim, thief))
@@ -293,7 +293,7 @@ class WorkStealing(SchedulerPlugin):
 
                         # in case the key has resource_restrictions,
                         # set i to next worker providing them
-                        if key in self.scheduler.resource_restrictions.keys():
+                        if key in self.scheduler.resource_restrictions:
                             resource_i = self.next_resource_i(
                                 idle,
                                 self.scheduler.resource_restrictions[key],
@@ -349,7 +349,7 @@ class WorkStealing(SchedulerPlugin):
 
                         # in case the key has resource_restrictions,
                         # set i to next worker providing them
-                        if key in self.scheduler.resource_restrictions.keys():
+                        if key in self.scheduler.resource_restrictions:
                             resource_i = self.next_resource_i(
                                 idle,
                                 self.scheduler.resource_restrictions[key],
@@ -397,7 +397,7 @@ class WorkStealing(SchedulerPlugin):
                     # Note: Since only idle workers are considered, this check
                     # is against the total amount of resources instead of those
                     # available (which for idle workers should be the same).
-                    if resource not in self.scheduler.worker_resources[workers[iworker]].keys() or \
+                    if resource not in self.scheduler.worker_resources[workers[iworker]] or \
                             quantity > self.scheduler.worker_resources[workers[iworker]][resource]:
                         suitable = False
                         break
