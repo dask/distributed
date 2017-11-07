@@ -4565,12 +4565,20 @@ def _dynamic_workload(x, delay=0.01):
     return total.result()
 
 
-@pytest.mark.parametrize('delay', [0.02, slow('random')])
-def test_dynamic_workloads_sync(loop, delay):
+def _test_dynamic_workloads_sync(loop, delay):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             future = c.submit(_dynamic_workload, 0, delay=delay)
             assert future.result(timeout=40) == 52
+
+
+def test_dynamic_workloads_sync(loop):
+    _test_dynamic_workloads_sync(loop, delay=0.02)
+
+
+@slow
+def test_dynamic_workloads_sync_random(loop):
+    _test_dynamic_workloads_sync(loop, delay='random')
 
 
 @gen_cluster(client=True)
