@@ -14,7 +14,7 @@ from distributed.batched import BatchedSend
 from distributed.core import listen, connect, CommClosedError
 from distributed.metrics import time
 from distributed.utils import All
-from distributed.utils_test import gen_test, slow, gen_cluster, nodebug
+from distributed.utils_test import gen_test, slow, gen_cluster
 
 
 class EchoServer(object):
