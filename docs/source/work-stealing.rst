@@ -80,7 +80,9 @@ Restrictions
 ~~~~~~~~~~~~
 
 If a task has been specifically restricted to run on particular workers (such
-as is the case when special hardware is required) then we do not steal.
+as is the case when special hardware is required) then we do not steal. However,
+using the resource framework is compatible with work stealing.
+
 
 Choosing tasks to steal
 -----------------------

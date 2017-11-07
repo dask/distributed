@@ -229,48 +229,52 @@ def test_dont_steal_host_restrictions(c, s, a, b):
     assert len(b.task_state) == 0
 
 
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 2}}),
-                                  ('127.0.0.1', 1)])
-def test_dont_steal_resource_restrictions(c, s, a, b):
-    future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
-    yield future
-
-    futures = c.map(slowinc, range(100), delay=0.1, resources={'A': 1})
-    yield gen.sleep(0.1)
-    assert len(a.task_state) == 100
-    assert len(b.task_state) == 0
-
-    result = s.extensions['stealing'].balance()
-
-    yield gen.sleep(0.1)
-    assert len(a.task_state) == 100
-    assert len(b.task_state) == 0
-
-
-@pytest.mark.xfail(reason='no stealing of resources')
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 2}})],
              timeout=3)
 def test_steal_resource_restrictions(c, s, a):
+
+    init_r_a = s.used_resources[a.address]['A']
+
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     yield future
 
-    futures = c.map(slowinc, range(100), delay=0.2, resources={'A': 1})
-    while len(a.task_state) < 101:
+    futures = c.map(slowinc, range(10), delay=0.2, resources={'A': 1})
+    while len(a.task_state) < 11:
         yield gen.sleep(0.01)
-    assert len(a.task_state) == 101
+    assert len(a.task_state) == 11
 
     b = Worker(s.ip, s.port, loop=s.loop, ncores=1, resources={'A': 4})
     yield b._start()
 
+    init_r_b = s.used_resources[b.address]['A']
+
     start = time()
-    while not b.task_state or len(a.task_state) == 101:
+    while not b.task_state or len(a.task_state) == 11:
         yield gen.sleep(0.01)
         assert time() < start + 3
 
     assert len(b.task_state) > 0
-    assert len(a.task_state) < 101
+    assert len(a.task_state) < 11
+
+    # assert that resources have been properly consumed and released during stealing
+    yield wait(futures+[future])
+    assert init_r_a == s.used_resources[a.address]['A']
+    assert init_r_b == s.used_resources[b.address]['A']
 
     yield b._close()
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 2}}),
+                                  ('127.0.0.1', 1, {'resources': {'A': 1}})])
+def test_dont_steal_when_resources_are_incompatible(c, s, a, b):
+
+    futures = c.map(slowinc, range(10), delay=0.1, workers=a.address,
+                    allow_other_workers=True,
+                    resources={'A': 2}  # tasks require resources that only worker a provides
+                    )
+    yield wait(futures)
+    assert len(a.task_state) == 10
+    assert len(b.task_state) == 0
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 5, timeout=20)

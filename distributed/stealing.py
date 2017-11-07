@@ -121,8 +121,7 @@ class WorkStealing(SchedulerPlugin):
         """
         if (key not in self.scheduler.loose_restrictions
                 and (key in self.scheduler.host_restrictions or
-                     key in self.scheduler.worker_restrictions) or
-                key in self.scheduler.resource_restrictions):
+                     key in self.scheduler.worker_restrictions)):
             return None, None  # don't steal
 
         if not self.scheduler.dependencies[key]:  # no dependencies fast path
@@ -177,11 +176,11 @@ class WorkStealing(SchedulerPlugin):
 
             self.scheduler.worker_comms[victim].send({'op': 'steal-request',
                                                       'key': key})
-
             self.in_flight[key] = {'victim': victim,
                                    'thief': thief,
                                    'victim_duration': victim_duration,
                                    'thief_duration': thief_duration}
+
         except CommClosedError:
             logger.info("Worker comm closed while stealing: %s", victim)
         except Exception as e:
@@ -225,7 +224,8 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.check_idle_saturated(victim)
 
             # Victim was waiting, has given up task, enact steal
-            elif state in ('waiting', 'ready'):
+            elif state in ('waiting', 'ready', 'constrained'):
+                # pdb.set_trace()
                 self.remove_key_from_stealable(key)
                 self.scheduler.rprocessing[key] = thief
                 del self.scheduler.processing[victim][key]
@@ -234,6 +234,8 @@ class WorkStealing(SchedulerPlugin):
 
                 try:
                     self.scheduler.send_task_to_worker(thief, key)
+                    self.scheduler.consume_resources(key, thief)
+                    self.scheduler.release_resources(key, victim)
                 except CommClosedError:
                     self.scheduler.remove_worker(thief)
                 self.log.append(('confirm', key, victim, thief))
@@ -288,6 +290,19 @@ class WorkStealing(SchedulerPlugin):
                             stealable.remove(key)
                             continue
                         i += 1
+
+                        # in case the key has resource_restrictions,
+                        # set i to next worker providing them
+                        if key in self.scheduler.resource_restrictions.keys():
+                            resource_i = self.next_resource_i(
+                                idle,
+                                self.scheduler.resource_restrictions[key],
+                                start_index=i)
+                            if resource_i is None:
+                                continue
+                            else:
+                                i = resource_i
+
                         if not idle:
                             break
                         idl = idle[i % len(idle)]
@@ -331,6 +346,19 @@ class WorkStealing(SchedulerPlugin):
                             continue
 
                         i += 1
+
+                        # in case the key has resource_restrictions,
+                        # set i to next worker providing them
+                        if key in self.scheduler.resource_restrictions.keys():
+                            resource_i = self.next_resource_i(
+                                idle,
+                                self.scheduler.resource_restrictions[key],
+                                start_index=i)
+                            if resource_i is None:
+                                continue
+                            else:
+                                i = resource_i
+
                         idl = idle[i % len(idle)]
                         duration = s.processing[sat][key]
 
@@ -353,6 +381,34 @@ class WorkStealing(SchedulerPlugin):
             stop = time()
             if self.scheduler.digests:
                 self.scheduler.digests['steal-duration'].add(stop - start)
+
+    def next_resource_i(self,workers,resources,start_index=0):
+        """
+        Increases start_index until index % len(workers)
+        points to a worker which provides the resources.
+        If no such worker exist, returns None.
+        """
+        for i in range(start_index, len(workers) + start_index):
+            iworker = i % len(workers)
+            suitable = True
+            for resource,quantity in resources.items():
+                try:
+                    # Check if resources are available.
+                    # Note: Since only idle workers are considered, this check
+                    # is against the total amount of resources instead of those
+                    # available (which for idle workers should be the same).
+                    if resource not in self.scheduler.worker_resources[workers[iworker]].keys() or \
+                            quantity > self.scheduler.worker_resources[workers[iworker]][resource]:
+                        suitable = False
+                        break
+                except KeyError:
+                    logger.debug('Worker %s does not appear in scheduler.worker_resources' % workers[iworker])
+                    suitable = False
+                    break
+
+            if suitable:
+                return i
+        return None
 
     def restart(self, scheduler):
         for stealable in self.stealable.values():
