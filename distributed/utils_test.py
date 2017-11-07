@@ -771,6 +771,16 @@ def wait_for_port(address, timeout=5):
             break
 
 
+def wait_for(predicate, timeout, fail_func=None):
+    start = time()
+    while not predicate():
+        sleep(0.001)
+        if time() > start + timeout:
+            if fail_func is not None:
+                fail_func()
+            pytest.fail("condition not reached until %s seconds" % (timeout,))
+
+
 @memoize
 def has_ipv6():
     """

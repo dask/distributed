@@ -279,10 +279,12 @@ class Future(WrappedKey):
     def type(self):
         return self._state.type
 
-    def release(self):
+    def release(self, _in_destructor=False):
+        # NOTE: this method can be called from different threads
+        # (see e.g. Client.get() or Future.__del__())
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
-            self.client._dec_ref(tokey(self.key))
+            self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
 
     def __getstate__(self):
         return (self.key, self.client.scheduler.address)
@@ -295,12 +297,10 @@ class Future(WrappedKey):
                               'keys': [tokey(self.key)], 'client': c.id})
 
     def __del__(self):
-        if not self._cleared and self.client.generation == self._generation:
-            self._cleared = True
-            try:
-                self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
-            except RuntimeError:  # closed event loop
-                pass
+        try:
+            self.release()
+        except RuntimeError:  # closed event loop
+            pass
 
     def __repr__(self):
         if self.type:

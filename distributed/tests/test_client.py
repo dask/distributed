@@ -44,8 +44,8 @@ from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     randominc, inc, dec, div, throws, geninc, asyncinc,
                                     gen_cluster, gen_test, double, deep, popen,
-                                    captured_logger)
-from distributed.utils_test import loop, loop_in_thread  # flake8: noqa
+                                    captured_logger, wait_for)
+from distributed.utils_test import loop, loop_in_thread, nodebug  # flake8: noqa
 
 
 @gen_cluster(client=True, timeout=None)
@@ -163,6 +163,46 @@ def test_Future_exception_sync(loop):
 
             x = c.submit(div, 1, 1)
             assert x.exception() is None
+
+
+@gen_cluster(client=True)
+def test_Future_release(c, s, a, b):
+    # Released Futures should be removed timely from the Client
+    x = c.submit(div, 1, 1)
+    yield x
+    x.release()
+    yield gen.moment
+    assert not c.futures
+
+    x = c.submit(slowinc, 1, delay=0.5)
+    x.release()
+    yield gen.moment
+    assert not c.futures
+
+    x = c.submit(div, 1, 0)
+    yield x.exception()
+    x.release()
+    yield gen.moment
+    assert not c.futures
+
+
+def test_Future_release_sync(loop):
+    # Released Futures should be removed timely from the Client
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x = c.submit(div, 1, 1)
+            x.result()
+            x.release()
+            wait_for(lambda: not c.futures, timeout=0.1)
+
+            x = c.submit(slowinc, 1, delay=0.5)
+            x.release()
+            wait_for(lambda: not c.futures, timeout=0.1)
+
+            x = c.submit(div, 1, 0)
+            x.exception()
+            x.release()
+            wait_for(lambda: not c.futures, timeout=0.1)
 
 
 def test_short_tracebacks(loop):
@@ -3205,6 +3245,7 @@ def test_close_idempotent(loop):
             c.close()
 
 
+@nodebug
 def test_get_returns_early(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
@@ -3212,12 +3253,10 @@ def test_get_returns_early(loop):
             with ignoring(RuntimeError):
                 result = c.get({'x': (throws, 1), 'y': (sleep, 1)}, ['x', 'y'])
             assert time() < start + 0.5
-            assert not c.futures
+            # Futures should be released and forgotten
+            wait_for(lambda: not c.futures, timeout=0.1)
 
-            start = time()
-            while any(c.processing().values()):
-                sleep(0.01)
-                assert time() < start + 3
+            wait_for(lambda: not any(c.processing().values()), timeout=3)
 
             x = c.submit(inc, 1)
             x.result()
@@ -3699,6 +3738,7 @@ def test_temp_client(s, a, b):
     yield f.close()
 
 
+@nodebug  # test timing is fragile
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 3, client=True)
 def test_persist_workers(e, s, a, b, c):
     L1 = [delayed(inc)(i) for i in range(4)]
