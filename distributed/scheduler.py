@@ -194,7 +194,7 @@ class Scheduler(ServerNode):
         Expected runtime for all tasks currently processing on a worker
 
     * **services:** ``{str: port}``:
-        Other services running on this scheduler, like HTTP
+        Other services running on this scheduler, like Bokeh
     * **loop:** ``IOLoop``:
         The running Tornado IOLoop
     * **comms:** ``[Comm]``:
@@ -400,11 +400,9 @@ class Scheduler(ServerNode):
     # Administration #
     ##################
 
-    def __str__(self):
+    def __repr__(self):
         return '<Scheduler: "%s" processes: %d cores: %d>' % (
             self.address, len(self.workers), self.total_ncores)
-
-    __repr__ = __str__
 
     def identity(self, comm=None):
         """ Basic information about ourselves and our cluster """
@@ -1581,8 +1579,11 @@ class Scheduler(ServerNode):
                 for worker in missing_workers:
                     self.remove_worker(address=worker)  # this is extreme
                 for key, workers in missing_keys.items():
-                    logger.exception("Workers don't have promised keys. "
-                                     "This should never occur")
+                    if not workers:
+                        continue
+                    logger.exception("Workers don't have promised key. "
+                                     "This should never occur: %s, %s",
+                                     str(workers), str(key))
                     for worker in workers:
                         if worker in self.workers and key in self.has_what[worker]:
                             self.has_what[worker].remove(key)
@@ -2486,6 +2487,12 @@ class Scheduler(ServerNode):
             if worker not in self.processing:
                 return {key: 'released'}
 
+            if worker != self.rprocessing[key]:  # someone else has this task
+                logger.warning("Unexpected worker completed task, likely due to"
+                               " work stealing.  Expected: %s, Got: %s, Key: %s",
+                             self.rprocessing[key], worker, key)
+                return {}
+
             if startstops:
                 L = [(b, c) for a, b, c in startstops if a == 'compute']
                 if L:
@@ -2549,11 +2556,6 @@ class Scheduler(ServerNode):
                 self.total_occupancy -= duration
                 self.occupancy[w] -= duration
             self.check_idle_saturated(w)
-            if w != worker:
-                logger.error("Unexpected worker completed task, likely due to"
-                             " work stealing.  Expected: %s, Got: %s, Key: %s",
-                             w, worker, key)
-                raise Exception()
 
             recommendations = OrderedDict()
 
