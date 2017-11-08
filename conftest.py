@@ -3,7 +3,9 @@ import os
 import pytest
 
 
-# Enable more logging and checks (https://docs.python.org/3/library/asyncio-dev.html)
+# Uncomment to enable more logging and checks
+# (https://docs.python.org/3/library/asyncio-dev.html)
+# Note this makes things slower and might consume much memory.
 #os.environ["PYTHONASYNCIODEBUG"] = "1"
 
 try:
