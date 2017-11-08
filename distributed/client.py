@@ -825,6 +825,8 @@ class Client(Node):
         with log_errors():
             try:
                 while True:
+                    if self.scheduler_comm is None:
+                        break
                     try:
                         msgs = yield self.scheduler_comm.comm.read()
                     except CommClosedError:
