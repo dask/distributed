@@ -193,16 +193,16 @@ def test_Future_release_sync(loop):
             x = c.submit(div, 1, 1)
             x.result()
             x.release()
-            wait_for(lambda: not c.futures, timeout=0.1)
+            wait_for(lambda: not c.futures, timeout=0.3)
 
-            x = c.submit(slowinc, 1, delay=0.5)
+            x = c.submit(slowinc, 1, delay=0.8)
             x.release()
-            wait_for(lambda: not c.futures, timeout=0.1)
+            wait_for(lambda: not c.futures, timeout=0.3)
 
             x = c.submit(div, 1, 0)
             x.exception()
             x.release()
-            wait_for(lambda: not c.futures, timeout=0.1)
+            wait_for(lambda: not c.futures, timeout=0.3)
 
 
 def test_short_tracebacks(loop):
