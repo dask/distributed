@@ -4,7 +4,7 @@ import pytest
 
 
 # Enable more logging and checks (https://docs.python.org/3/library/asyncio-dev.html)
-os.environ["PYTHONASYNCIODEBUG"] = "1"
+#os.environ["PYTHONASYNCIODEBUG"] = "1"
 
 try:
     import faulthandler
