@@ -205,22 +205,6 @@ def All(*args):
     raise gen.Return(results)
 
 
-def is_loop_running(loop):
-    """
-    Return whether an IOLoop is running.
-    """
-    # Tornado < 5.0
-    r = getattr(loop, '_running', None)
-    if r is not None:
-        return r
-    try:
-        # Tornado 5.0 with AsyncIOLoop (default setting)
-        return loop.asyncio_loop.is_running()
-    except AttributeError:
-        raise TypeError("don't know how to query the running state of %s"
-                        % (type(loop),))
-
-
 def sync(loop, func, *args, **kwargs):
     """
     Run coroutine in loop running in separate thread.
@@ -233,15 +217,6 @@ def sync(loop, func, *args, **kwargs):
             return coro
         else:
             return gen.with_timeout(timedelta(seconds=timeout), coro)
-
-    if not is_loop_running(loop):
-        try:
-            return loop.run_sync(make_coro)
-        except RuntimeError:  # loop already running
-            pass
-        except TypeError:
-            # TypeError: object of type 'NoneType' has no len()
-            raise RuntimeError("IOLoop is closed")
 
     e = threading.Event()
     main_tid = get_thread_identity()
