@@ -263,7 +263,7 @@ class Scheduler(ServerNode):
         self.worker_restrictions = dict()
         self.resource_restrictions = dict()
         self.loose_restrictions = set()
-        self.retries = defaultdict(lambda: 0)
+        self.retries = dict()
         self.suspicious_tasks = defaultdict(lambda: 0)
         self.waiting = dict()
         self.waiting_data = dict()
@@ -860,7 +860,7 @@ class Scheduler(ServerNode):
             return {}
 
         if self.task_state[key] == 'processing':
-            retries = self.retries[key]
+            retries = self.retries.get(key, 0)
             if retries > 0:
                 self.retries[key] = retries - 1
                 recommendations = self.transition(key, 'waiting')
