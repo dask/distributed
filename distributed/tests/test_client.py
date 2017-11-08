@@ -44,7 +44,7 @@ from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     randominc, inc, dec, div, throws, geninc, asyncinc,
                                     gen_cluster, gen_test, double, deep, popen,
-                                    captured_logger, wait_for)
+                                    captured_logger, wait_for, async_wait_for)
 from distributed.utils_test import loop, loop_in_thread, nodebug  # flake8: noqa
 
 
@@ -270,15 +270,11 @@ def test_gc(s, a, b):
 
     x = c.submit(inc, 10)
     yield x
-
     assert s.who_has[x.key]
-
     x.__del__()
-    yield gen.moment
+    yield async_wait_for(lambda: x.key not in s.who_has, timeout=0.3)
 
     yield c.close()
-
-    assert x.key not in s.who_has
 
 
 def test_thread(loop):
