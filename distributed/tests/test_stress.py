@@ -263,6 +263,8 @@ def test_no_delay_during_large_transfer(c, s, w):
         future = yield c.scatter(x, direct=True, hash=False)
         yield gen.sleep(0.5)
 
+    rprof.close()
+
     for server in [s, w]:
         assert server.digests['tick-duration'].components[0].max() < 0.5
 
