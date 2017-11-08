@@ -44,7 +44,7 @@ from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     randominc, inc, dec, div, throws, geninc, asyncinc,
                                     gen_cluster, gen_test, double, deep, popen,
-                                    captured_logger, map_varying)
+                                    captured_logger, varying, map_varying)
 from distributed.utils_test import loop, loop_in_thread  # flake8: noqa
 
 
@@ -161,6 +161,56 @@ def test_map_retries(c, s, a, b):
     with pytest.raises(ZeroDivisionError) as exc_info:
         yield z
     exc_info.match("seven")
+
+
+@gen_cluster(client=True)
+def test_compute_retries(c, s, a, b):
+    args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
+
+    # Sanity check
+    x = c.compute(delayed(varying(args))())
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield x
+    exc_info.match("one")
+
+    x = c.compute(delayed(varying(args))(), retries=1)
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield x
+    exc_info.match("two")
+
+    x = c.compute(delayed(varying(args))(), retries=2)
+    assert (yield x) == 3
+
+    args.append(4)
+    x = c.compute(delayed(varying(args))(), retries=2)
+    assert (yield x) == 3
+
+
+@gen_cluster(client=True)
+def test_compute_persisted_retries(c, s, a, b):
+    args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
+
+    # Sanity check
+    x = c.persist(delayed(varying(args))())
+    fut = c.compute(x)
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield fut
+    exc_info.match("one")
+
+    x = c.persist(delayed(varying(args))())
+    fut = c.compute(x, retries=1)
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield fut
+    exc_info.match("two")
+
+    x = c.persist(delayed(varying(args))())
+    fut = c.compute(x, retries=2)
+    assert (yield fut) == 3
+
+    args.append(4)
+    x = c.persist(delayed(varying(args))())
+    fut = c.compute(x, retries=3)
+    assert (yield fut) == 3
 
 
 @gen_cluster(client=True)

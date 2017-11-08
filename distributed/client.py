@@ -10,6 +10,7 @@ from datetime import timedelta
 import errno
 from functools import partial
 from glob import glob
+import itertools
 import json
 import logging
 from numbers import Number
@@ -2035,7 +2036,7 @@ class Client(Node):
 
     def compute(self, collections, sync=False, optimize_graph=True,
                 workers=None, allow_other_workers=False, resources=None,
-                **kwargs):
+                retries=0, **kwargs):
         """ Compute dask collections on cluster
 
         Parameters
@@ -2055,6 +2056,8 @@ class Client(Node):
         allow_other_workers: bool, list
             If True then all restrictions in workers= are considered loose
             If a list then only the keys for the listed collections are loose
+        retries: int (default to 0)
+            Number of allowed automatic retries if computing a result fails
         **kwargs:
             Options to pass to the graph optimize calls
 
@@ -2111,9 +2114,16 @@ class Client(Node):
         if resources:
             resources = self.expand_resources(resources)
 
+        if retries:
+            # Each task unit may potentially fail, allow retrying all of them
+            retries = {name: retries for name in itertools.chain(dsk, dsk2)}
+        else:
+            retries = None
+
         futures_dict = self._graph_to_futures(merge(dsk2, dsk), names,
                                               restrictions, loose_restrictions,
-                                              resources=resources)
+                                              resources=resources,
+                                              retries=retries)
 
         i = 0
         futures = []
