@@ -13,7 +13,7 @@ from glob import glob
 import itertools
 import json
 import logging
-from numbers import Number
+from numbers import Number, Integral
 import os
 import sys
 from time import sleep
@@ -2112,11 +2112,11 @@ class Client(Node):
                                                                  workers, allow_other_workers)
 
         if resources:
-            resources = self.expand_resources(resources)
+            resources = self._expand_resources(resources)
 
         if retries:
-            # Each task unit may potentially fail, allow retrying all of them
-            retries = {name: retries for name in itertools.chain(dsk, dsk2)}
+            retries = self._expand_retries(retries,
+                                           all_keys=itertools.chain(dsk, dsk2))
         else:
             retries = None
 
@@ -2199,7 +2199,7 @@ class Client(Node):
                                                                  workers, allow_other_workers)
 
         if resources:
-            resources = self.expand_resources(resources)
+            resources = self._expand_resources(resources)
 
         futures = self._graph_to_futures(dsk, names, restrictions,
                                          loose_restrictions, resources=resources)
@@ -2969,11 +2969,11 @@ class Client(Node):
                               extra_args=qtconsole_args,)
         return info
 
-    @staticmethod
-    def expand_resources(resources):
-        assert isinstance(resources, dict)
+    @classmethod
+    def _expand_per_key_specification(cls, spec):
+        assert isinstance(spec, dict)
         out = {}
-        for k, v in resources.items():
+        for k, v in spec.items():
             if not isinstance(k, tuple):
                 k = (k,)
             for kk in k:
@@ -2984,8 +2984,21 @@ class Client(Node):
                     out[tokey(kk)] = v
         return out
 
-    @staticmethod
-    def get_restrictions(collections, workers, allow_other_workers):
+    _expand_resources = _expand_per_key_specification
+
+    @classmethod
+    def _expand_retries(cls, retries, all_keys):
+        if retries and isinstance(retries, dict):
+            return cls._expand_per_key_specification(retries)
+        elif isinstance(retries, Integral):
+            # Each task unit may potentially fail, allow retrying all of them
+            return {name: retries for name in all_keys}
+        else:
+            raise TypeError("`retries` should be an integer or dict, got %r"
+                            % (type(retries,)))
+
+    @classmethod
+    def get_restrictions(cls, collections, workers, allow_other_workers):
         """ Get restrictions from inputs to compute/persist """
         if isinstance(workers, (str, tuple, list)):
             workers = {tuple(collections): workers}

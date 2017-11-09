@@ -167,12 +167,13 @@ def test_map_retries(c, s, a, b):
 def test_compute_retries(c, s, a, b):
     args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
 
-    # Sanity check
+    # Sanity check for varying() use
     x = c.compute(delayed(varying(args))())
     with pytest.raises(ZeroDivisionError) as exc_info:
         yield x
     exc_info.match("one")
 
+    # Same retries for all
     x = c.compute(delayed(varying(args))(), retries=1)
     with pytest.raises(ZeroDivisionError) as exc_info:
         yield x
@@ -184,6 +185,29 @@ def test_compute_retries(c, s, a, b):
     args.append(4)
     x = c.compute(delayed(varying(args))(), retries=2)
     assert (yield x) == 3
+
+    # Per-future retries
+    xargs = [ZeroDivisionError("one"), ZeroDivisionError("two"), 30, 40]
+    yargs = [ZeroDivisionError("five"), ZeroDivisionError("six"), 70]
+    zargs = [80, 90, 100]
+
+    x, y = [delayed(varying(args))() for args in (xargs, yargs)]
+    x, y = c.compute([x, y], retries={x: 2})
+    gc.collect()
+
+    assert (yield x) == 30
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield y
+    exc_info.match("five")
+
+    x, y, z = [delayed(varying(args))() for args in (xargs, yargs, zargs)]
+    x, y, z = c.compute([x, y, z], retries={(y, z): 2})
+
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield x
+    exc_info.match("one")
+    assert (yield y) == 70
+    assert (yield z) == 80
 
 
 @gen_cluster(client=True)

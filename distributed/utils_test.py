@@ -5,6 +5,7 @@ from datetime import timedelta
 import functools
 import gc
 from glob import glob
+import itertools
 import inspect
 import logging
 import logging.config
@@ -32,7 +33,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .compatibility import WINDOWS
+from .compatibility import WINDOWS, finalize
 from .config import config, initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
@@ -212,29 +213,49 @@ def slowidentity(*args, **kwargs):
         return args
 
 
+_varying_dict = {}
+_varying_key_gen = itertools.count()
+
+class _ModuleSlot(object):
+    def __init__(self, modname, slotname):
+        self.modname = modname
+        self.slotname = slotname
+
+    def get(self):
+        return getattr(sys.modules[self.modname], self.slotname)
+
+
 def varying(items):
     """
     Return a function that returns a result (or raises an exception)
     from *items* at each call.
     """
     # cloudpickle would serialize the *values* of all globals
-    # used by *func* below, so we can't use `global _varying_index`.
-    # Instead look up the module object to get the original namespace and
-    # not a copy.
-    mod = sys.modules[__name__]
-    mod._varying_index = 0
+    # used by *func* below, so we can't use `global <something>`.
+    # Instead look up the module by name to get the original namespace
+    # and not a copy.
+    slot = _ModuleSlot(__name__, '_varying_dict')
+    key = next(_varying_key_gen)
+    _varying_dict[key] = 0
 
     def func():
-        idx = mod._varying_index
-        if idx == len(items):
+        dct = slot.get()
+        i = dct[key]
+        if i == len(items):
             raise IndexError
         else:
-            x = items[idx]
-            mod._varying_index = idx + 1
+            x = items[i]
+            dct[key] = i + 1
             if isinstance(x, Exception):
                 raise x
             else:
                 return x
+
+    def finalize_func():
+        del _varying_dict[key]
+
+    # XXX may this finalize too early?
+    finalize(func, finalize_func)
 
     return func
 
@@ -245,22 +266,33 @@ def map_varying(itemslists):
     on multiple items lists.
     """
     n = len(itemslists)
-    mod = sys.modules[__name__]
-    mod._map_varying_indices = [0] * n
+    keys = list(itertools.islice(_varying_key_gen, n))
+    slot = _ModuleSlot(__name__, '_varying_dict')
+    for key in keys:
+        _varying_dict[key] = 0
 
-    def func(i, items):
-        idx = mod._map_varying_indices[i]
-        if idx == len(items):
+    def func(tup):
+        key, items = tup
+        dct = slot.get()
+        i = dct[key]
+        if i == len(items):
             raise IndexError
         else:
-            x = items[idx]
-            mod._map_varying_indices[i] = idx + 1
+            x = items[i]
+            dct[key] = i + 1
             if isinstance(x, Exception):
                 raise x
             else:
                 return x
 
-    return func, list(range(n)), itemslists
+    def finalize_func():
+        for key in keys:
+            del _varying_dict[key]
+
+    # XXX may this finalize too early?
+    finalize(func, finalize_func)
+
+    return func, zip(keys, itemslists)
 
 
 @gen.coroutine
