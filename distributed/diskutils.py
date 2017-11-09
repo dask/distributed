@@ -45,6 +45,9 @@ class WorkDir(object):
                                    self._lock_file, self.dir_path)
 
     def release(self):
+        """
+        Dispose of this directory.
+        """
         self._finalizer()
 
     @classmethod
@@ -115,7 +118,7 @@ class WorkSpace(object):
     def _on_remove_error(self, func, path, exc_info):
         t, v, tb = exc_info
         logger.error("Failed to remove %r (failed in %r): %s",
-                     path, func, path, str(v))
+                     path, func, str(v))
 
     def new_work_dir(self, **kwargs):
         """

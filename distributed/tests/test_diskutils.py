@@ -3,10 +3,12 @@ from __future__ import print_function, division, absolute_import
 import functools
 import gc
 import os
+import shutil
 import subprocess
 import sys
 
 from distributed.diskutils import WorkSpace
+from distributed.utils_test import captured_logger
 
 
 def assert_directory_contents(dir_path, expected):
@@ -108,9 +110,26 @@ def test_process_crash(tmpdir):
     # Kill the process so it's unable to clear the work dirs itself
     p.kill()
     assert p.wait()  # process returned with non-zero code
-    assert os.path.exists(a_path)
-    assert os.path.exists(b_path)
-
     assert_contents([a_path, a_path + '.lock', b_path, b_path + '.lock'])
-    ws._purge_leftovers()
+
+    with captured_logger('distributed.diskutils', 'WARNING', propagate=False) as sio:
+        ws._purge_leftovers()
     assert_contents([])
+    # One log line per purged directory
+    lines = sio.getvalue().splitlines()
+    assert len(lines) == 2
+    for p in (a_path, b_path):
+        assert any(repr(p) in line for line in lines)
+
+
+def test_rmtree_failure(tmpdir):
+    base_dir = str(tmpdir)
+
+    ws = WorkSpace(base_dir)
+    a = ws.new_work_dir(name='aa')
+    shutil.rmtree(a.dir_path)
+    with captured_logger('distributed.diskutils', 'ERROR', propagate=False) as sio:
+        a.release()
+    lines = sio.getvalue().splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("Failed to remove %r" % (a.dir_path,))

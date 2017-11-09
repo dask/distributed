@@ -33,6 +33,7 @@ from .config import config, log_format
 from .compatibility import unicode, get_thread_identity
 from .core import (error_message, CommClosedError,
                    rpc, pingpong, coerce_to_address)
+from .diskutils import WorkSpace
 from .metrics import time
 from .node import ServerNode
 from .preloading import preload_modules
@@ -104,9 +105,13 @@ class WorkerBase(ServerNode):
 
         if local_dir:
             local_dir = os.path.abspath(local_dir)
-            if not os.path.exists(local_dir):
-                os.mkdir(local_dir)
-        self.local_dir = tempfile.mkdtemp(prefix='worker-', dir=local_dir)
+        else:
+            local_dir = 'dask-worker-space'
+        if not os.path.exists(local_dir):
+            os.mkdir(local_dir)
+        self._workspace = WorkSpace(local_dir)
+        self._workdir = self._workspace.new_work_dir(prefix='worker-')
+        self.local_dir = self._workdir.dir_path
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -398,8 +403,7 @@ class WorkerBase(ServerNode):
             self.executor.shutdown(timeout=timeout)
         else:
             self.executor.shutdown(wait=False)
-        if os.path.exists(self.local_dir):
-            shutil.rmtree(self.local_dir)
+        self._workdir.release()
 
         for k, v in self.services.items():
             v.stop()
