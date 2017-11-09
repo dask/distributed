@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import errno
 import glob
 import logging
 import os
@@ -99,33 +100,42 @@ class WorkSpace(object):
     def _purge_directory(self, dir_path):
         shutil.rmtree(dir_path, onerror=self._on_remove_error)
 
-    def _check_lock_or_purge(self, path):
+    def _check_lock_or_purge(self, lock_path):
         # Try locking the given path, if it fails it's in use,
         # otherwise the corresponding directory can be deleted
-        assert path.endswith(DIR_LOCK_EXT)
-        if path in self._known_locks:
+        assert lock_path.endswith(DIR_LOCK_EXT)
+        if lock_path in self._known_locks:
             # Avoid touching a lock that we know is already taken
             return
-        logger.debug("Checking lock file %r...", path)
+        logger.debug("Checking lock file %r...", lock_path)
+        lock = locket.lock_file(lock_path, timeout=0)
         try:
-            with locket.lock_file(path, timeout=0):
-                # Lock file could be taken, therefore purge corresponding
-                # directory
-                dir_path = path[:-len(DIR_LOCK_EXT)]
-                if os.path.exists(dir_path):
-                    logger.warning("Found stale lock file and directory %r, purging",
-                                   dir_path)
-                    self._purge_directory(dir_path)
-            # Also clean up lock file (need to release it first)
-            os.unlink(path)
+            lock.acquire()
         except locket.LockError:
-            # Lock file still in use
-            pass
+            # Lock file still in use, ignore
+            return
+        try:
+            # Lock file is stale, therefore purge corresponding directory
+            dir_path = lock_path[:-len(DIR_LOCK_EXT)]
+            if os.path.exists(dir_path):
+                logger.warning("Found stale lock file and directory %r, purging",
+                               dir_path)
+                self._purge_directory(dir_path)
+        finally:
+            lock.release()
+        # Clean up lock file after we released it
+        try:
+            os.unlink(lock_path)
+        except EnvironmentError as e:
+            # Perhaps it was removed by someone else?
+            if e.errno != errno.ENOENT:
+                logger.error("Failed to remove %r", str(e))
+
 
     def _on_remove_error(self, func, path, exc_info):
-        t, v, tb = exc_info
-        logger.error("Failed to remove %r failed in %r: %s",
-                     path, func, str(v))
+        typ, exc, tb = exc_info
+        logger.error("Failed to remove %r (failed in %r): %s",
+                     path, func, str(exc))
 
     def new_work_dir(self, **kwargs):
         """
