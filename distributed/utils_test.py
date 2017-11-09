@@ -33,7 +33,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .compatibility import WINDOWS, finalize
+from .compatibility import WINDOWS
 from .config import config, initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
@@ -213,6 +213,7 @@ def slowidentity(*args, **kwargs):
         return args
 
 
+# This dict grows at every varying() invocation
 _varying_dict = {}
 _varying_key_gen = itertools.count()
 
@@ -251,12 +252,6 @@ def varying(items):
             else:
                 return x
 
-    def finalize_func():
-        del _varying_dict[key]
-
-    # XXX may this finalize too early?
-    finalize(func, finalize_func)
-
     return func
 
 
@@ -265,34 +260,10 @@ def map_varying(itemslists):
     Like *varying*, but return the full specification for a map() call
     on multiple items lists.
     """
-    n = len(itemslists)
-    keys = list(itertools.islice(_varying_key_gen, n))
-    slot = _ModuleSlot(__name__, '_varying_dict')
-    for key in keys:
-        _varying_dict[key] = 0
+    def apply(func, *args, **kwargs):
+        return func(*args, **kwargs)
 
-    def func(tup):
-        key, items = tup
-        dct = slot.get()
-        i = dct[key]
-        if i == len(items):
-            raise IndexError
-        else:
-            x = items[i]
-            dct[key] = i + 1
-            if isinstance(x, Exception):
-                raise x
-            else:
-                return x
-
-    def finalize_func():
-        for key in keys:
-            del _varying_dict[key]
-
-    # XXX may this finalize too early?
-    finalize(func, finalize_func)
-
-    return func, zip(keys, itemslists)
+    return apply, map(varying, itemslists)
 
 
 @gen.coroutine
