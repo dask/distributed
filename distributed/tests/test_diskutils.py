@@ -70,7 +70,12 @@ def test_two_workspaces_in_same_directory(tmpdir):
     assert_contents(['aa', 'aa.dirlock', 'bb', 'bb.dirlock'])
 
     del ws
+    del b
     gc.collect()
+    assert_contents(['aa', 'aa.dirlock'])
+    del a
+    gc.collect()
+    assert_contents([])
 
 
 def test_process_crash(tmpdir):
