@@ -8,9 +8,7 @@ import logging
 import os
 from pickle import PicklingError
 import random
-import tempfile
 import threading
-import shutil
 import sys
 import weakref
 
