@@ -138,5 +138,7 @@ def test_rmtree_failure(tmpdir):
     with captured_logger('distributed.diskutils', 'ERROR', propagate=False) as sio:
         a.release()
     lines = sio.getvalue().splitlines()
-    assert len(lines) == 1
-    assert lines[0].startswith("Failed to remove %r" % (a.dir_path,))
+    # shutil.rmtree() may call its onerror callback several times
+    assert lines
+    for line in lines:
+        assert line.startswith("Failed to remove %r" % (a.dir_path,))
