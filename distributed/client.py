@@ -2112,7 +2112,8 @@ class Client(Node):
                                                                  workers, allow_other_workers)
 
         if resources:
-            resources = self._expand_resources(resources)
+            resources = self._expand_resources(resources,
+                                               all_keys=itertools.chain(dsk, dsk2))
 
         if retries:
             retries = self._expand_retries(retries,
@@ -2199,7 +2200,8 @@ class Client(Node):
                                                                  workers, allow_other_workers)
 
         if resources:
-            resources = self._expand_resources(resources)
+            resources = self._expand_resources(resources,
+                                               all_keys=itertools.chain(dsk, names))
 
         futures = self._graph_to_futures(dsk, names, restrictions,
                                          loose_restrictions, resources=resources)
@@ -2970,32 +2972,66 @@ class Client(Node):
         return info
 
     @classmethod
-    def _expand_per_key_specification(cls, spec):
-        assert isinstance(spec, dict)
-        out = {}
-        for k, v in spec.items():
-            if not isinstance(k, tuple):
-                k = (k,)
-            for kk in k:
-                if dask.is_dask_collection(kk):
-                    for kkk in kk.__dask_keys__():
-                        out[tokey(kkk)] = v
-                else:
-                    out[tokey(kk)] = v
-        return out
-
-    _expand_resources = _expand_per_key_specification
+    def _expand_key(cls, k):
+        """
+        Expand a user-provided task key specification, e.g. in a resources
+        or retries dictionary.
+        """
+        if not isinstance(k, tuple):
+            k = (k,)
+        for kk in k:
+            if dask.is_dask_collection(kk):
+                for kkk in kk.__dask_keys__():
+                    yield tokey(kkk)
+            else:
+                yield tokey(kk)
 
     @classmethod
     def _expand_retries(cls, retries, all_keys):
+        """
+        Expand the user-provided "retries" specification
+        to a {task key: Integral} dictionary.
+        """
         if retries and isinstance(retries, dict):
-            return cls._expand_per_key_specification(retries)
+            return {name: value
+                    for key, value in retries.items()
+                    for name in cls._expand_key(key)}
         elif isinstance(retries, Integral):
             # Each task unit may potentially fail, allow retrying all of them
             return {name: retries for name in all_keys}
         else:
             raise TypeError("`retries` should be an integer or dict, got %r"
                             % (type(retries,)))
+
+    def _expand_resources(cls, resources, all_keys):
+        """
+        Expand the user-provided "resources" specification
+        to a {task key: {resource name: Number}} dictionary.
+        """
+        # Resources can either be a single dict such as {'GPU': 2},
+        # indicating a requirement for all keys, or a nested dict
+        # such as {'x': {'GPU': 1}, 'y': {'SSD': 4}} indicating
+        # per-key requirements
+        if not isinstance(resources, dict):
+            raise TypeError("`retries` should be a dict, got %r"
+                            % (type(retries,)))
+
+        per_key_reqs = {}
+        global_reqs = {}
+        all_keys = list(all_keys)
+        for k, v in resources.items():
+            if isinstance(v, dict):
+                # It's a per-key requirement
+                per_key_reqs.update((kk, v) for kk in cls._expand_key(k))
+            else:
+                # It's a global requirement
+                global_reqs.update((kk, {k: v}) for kk in all_keys)
+
+        if global_reqs and per_key_reqs:
+            raise ValueError("cannot have both per-key and all-key requirements "
+                             "in resources dict %r" % (resources,))
+        return global_reqs or per_key_reqs
+
 
     @classmethod
     def get_restrictions(cls, collections, workers, allow_other_workers):
