@@ -13,7 +13,9 @@ from distributed.utils_test import captured_logger
 
 def assert_directory_contents(dir_path, expected):
     expected = [os.path.join(dir_path, p) for p in expected]
-    actual = [os.path.join(dir_path, p) for p in os.listdir(dir_path)]
+    actual = [os.path.join(dir_path, p)
+              for p in os.listdir(dir_path)
+              if p != 'global.lock']
     assert sorted(actual) == sorted(expected)
 
 
@@ -25,14 +27,14 @@ def test_workdir_simple(tmpdir):
     ws = WorkSpace(base_dir)
     assert_contents([])
     a = ws.new_work_dir(name='aa')
-    assert_contents(['aa', 'aa.lock'])
+    assert_contents(['aa', 'aa.dirlock'])
     b = ws.new_work_dir(name='bb')
-    assert_contents(['aa', 'aa.lock', 'bb', 'bb.lock'])
+    assert_contents(['aa', 'aa.dirlock', 'bb', 'bb.dirlock'])
     ws._purge_leftovers()
-    assert_contents(['aa', 'aa.lock', 'bb', 'bb.lock'])
+    assert_contents(['aa', 'aa.dirlock', 'bb', 'bb.dirlock'])
 
     a.release()
-    assert_contents(['bb', 'bb.lock'])
+    assert_contents(['bb', 'bb.dirlock'])
     del b
     gc.collect()
     assert_contents([])
@@ -59,13 +61,13 @@ def test_two_workspaces_in_same_directory(tmpdir):
     ws = WorkSpace(base_dir)
     assert_contents([])
     a = ws.new_work_dir(name='aa')
-    assert_contents(['aa', 'aa.lock'])
+    assert_contents(['aa', 'aa.dirlock'])
 
     ws2 = WorkSpace(base_dir)
     ws2._purge_leftovers()
-    assert_contents(['aa', 'aa.lock'])
+    assert_contents(['aa', 'aa.dirlock'])
     b = ws.new_work_dir(name='bb')
-    assert_contents(['aa', 'aa.lock', 'bb', 'bb.lock'])
+    assert_contents(['aa', 'aa.dirlock', 'bb', 'bb.dirlock'])
 
     del ws
     gc.collect()
@@ -101,16 +103,16 @@ def test_process_crash(tmpdir):
     line = p.stdout.readline()
     assert p.poll() is None
     a_path, b_path = eval(line)
-    assert_contents([a_path, a_path + '.lock', b_path, b_path + '.lock'])
+    assert_contents([a_path, a_path + '.dirlock', b_path, b_path + '.dirlock'])
 
     # The child process holds a lock so the work dirs shouldn't be removed
     ws._purge_leftovers()
-    assert_contents([a_path, a_path + '.lock', b_path, b_path + '.lock'])
+    assert_contents([a_path, a_path + '.dirlock', b_path, b_path + '.dirlock'])
 
     # Kill the process so it's unable to clear the work dirs itself
     p.kill()
     assert p.wait()  # process returned with non-zero code
-    assert_contents([a_path, a_path + '.lock', b_path, b_path + '.lock'])
+    assert_contents([a_path, a_path + '.dirlock', b_path, b_path + '.dirlock'])
 
     with captured_logger('distributed.diskutils', 'WARNING', propagate=False) as sio:
         ws._purge_leftovers()

@@ -14,6 +14,8 @@ from .compatibility import finalize
 
 logger = logging.getLogger(__name__)
 
+DIR_LOCK_EXT = '.dirlock'
+
 
 class WorkDir(object):
     """
@@ -30,7 +32,7 @@ class WorkDir(object):
             os.mkdir(self.dir_path)  # it shouldn't already exist
 
         try:
-            self._lock_path = os.path.join(self.dir_path + '.lock')
+            self._lock_path = os.path.join(self.dir_path + DIR_LOCK_EXT)
             assert not os.path.exists(self._lock_path)
             logger.debug("Locking %r...", self._lock_path)
             self._lock_file = locket.lock_file(self._lock_path)
@@ -73,17 +75,22 @@ class WorkSpace(object):
 
     def __init__(self, base_dir):
         self.base_dir = os.path.abspath(base_dir)
+        self._global_lock = locket.lock_file(
+            os.path.join(self.base_dir, 'global.lock'))
 
     def _init_workspace(self):
         if not os.path.exists(self.base_dir):
             os.mkdir(self.base_dir)
 
     def _purge_leftovers(self):
-        for path in self._list_unknown_locks():
-            self._check_lock_or_purge(path)
+        # Need to hold the global lock to avoid several threads / processes
+        # purging at once
+        with self._global_lock:
+            for path in self._list_unknown_locks():
+                self._check_lock_or_purge(path)
 
     def _list_unknown_locks(self):
-        for p in glob.glob(os.path.join(self.base_dir, '*.lock')):
+        for p in glob.glob(os.path.join(self.base_dir, '*' + DIR_LOCK_EXT)):
             st = os.stat(p)
             # XXX restrict to files owned by current user?
             if stat.S_ISREG(st.st_mode):
@@ -95,7 +102,7 @@ class WorkSpace(object):
     def _check_lock_or_purge(self, path):
         # Try locking the given path, if it fails it's in use,
         # otherwise the corresponding directory can be deleted
-        assert path.endswith('.lock')
+        assert path.endswith(DIR_LOCK_EXT)
         if path in self._known_locks:
             # Avoid touching a lock that we know is already taken
             return
@@ -104,7 +111,7 @@ class WorkSpace(object):
             with locket.lock_file(path, timeout=0):
                 # Lock file could be taken, therefore purge corresponding
                 # directory
-                dir_path = path[:-5]
+                dir_path = path[:-len(DIR_LOCK_EXT)]
                 if os.path.exists(dir_path):
                     logger.warning("Found stale lock file and directory %r, purging",
                                    dir_path)
@@ -117,7 +124,7 @@ class WorkSpace(object):
 
     def _on_remove_error(self, func, path, exc_info):
         t, v, tb = exc_info
-        logger.error("Failed to remove %r (failed in %r): %s",
+        logger.error("Failed to remove %r failed in %r: %s",
                      path, func, str(v))
 
     def new_work_dir(self, **kwargs):
