@@ -92,10 +92,15 @@ class WorkSpace(object):
 
     def _list_unknown_locks(self):
         for p in glob.glob(os.path.join(self.base_dir, '*' + DIR_LOCK_EXT)):
-            st = os.stat(p)
-            # XXX restrict to files owned by current user?
-            if stat.S_ISREG(st.st_mode):
-                yield p
+            try:
+                st = os.stat(p)
+            except EnvironmentError:
+                # May have been removed in the meantime
+                pass
+            else:
+                # XXX restrict to files owned by current user?
+                if stat.S_ISREG(st.st_mode):
+                    yield p
 
     def _purge_directory(self, dir_path):
         shutil.rmtree(dir_path, onerror=self._on_remove_error)
