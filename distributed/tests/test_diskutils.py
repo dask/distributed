@@ -12,7 +12,7 @@ from distributed.compatibility import Empty
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.utils import mp_context
-from distributed.utils_test import captured_logger
+from distributed.utils_test import captured_logger, slow
 
 
 def assert_directory_contents(dir_path, expected):
@@ -171,15 +171,17 @@ def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt):
     purged_q.put(n_purged)
 
 
-def test_workspace_concurrency(tmpdir):
+def _test_workspace_concurrency(tmpdir, timeout, max_procs):
     base_dir = str(tmpdir)
 
     err_q = mp_context.Queue()
     purged_q = mp_context.Queue()
     stop_evt = mp_context.Event()
     ws = WorkSpace(base_dir)
+    # Make sure purging only happens in the child processes
+    ws._purge_leftovers = lambda: None
 
-    NPROCS = 8
+    NPROCS = 2 if sys.platform == 'win32' else max_procs
     processes = [mp_context.Process(target=_workspace_concurrency,
                                     args=(base_dir, purged_q, err_q, stop_evt))
                  for i in range(NPROCS)]
@@ -190,7 +192,7 @@ def test_workspace_concurrency(tmpdir):
     n_purged = 0
     try:
         t1 = time()
-        while time() - t1 < 3.0:
+        while time() - t1 < timeout:
             # Add a bunch of locks, and simulate forgetting them
             for i in range(50):
                 d = ws.new_work_dir(prefix='workspace-concurrency-')
@@ -215,4 +217,14 @@ def test_workspace_concurrency(tmpdir):
             n_purged += purged_q.get_nowait()
     except Empty:
         pass
-    assert n_purged >= 100
+    return n_created, n_purged
+
+
+def test_workspace_concurrency(tmpdir):
+    _test_workspace_concurrency(tmpdir, 2.0, 6)
+
+
+@slow
+def test_workspace_concurrency_intense(tmpdir):
+    n_purged, n_created = _test_workspace_concurrency(tmpdir, 8.0, 16)
+    assert n_purged >= n_created / 10 > 100
