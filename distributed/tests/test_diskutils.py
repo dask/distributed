@@ -6,8 +6,12 @@ import os
 import shutil
 import subprocess
 import sys
+from time import sleep
 
+from distributed.compatibility import Empty
 from distributed.diskutils import WorkSpace
+from distributed.metrics import time
+from distributed.utils import mp_context
 from distributed.utils_test import captured_logger
 
 
@@ -78,7 +82,7 @@ def test_two_workspaces_in_same_directory(tmpdir):
     assert_contents([])
 
 
-def test_process_crash(tmpdir):
+def test_workspace_process_crash(tmpdir):
     # WorkSpace should be able to clean up stale contents left by
     # crashed process
     base_dir = str(tmpdir)
@@ -129,7 +133,7 @@ def test_process_crash(tmpdir):
         assert any(repr(p) in line for line in lines)
 
 
-def test_rmtree_failure(tmpdir):
+def test_workspace_rmtree_failure(tmpdir):
     base_dir = str(tmpdir)
 
     ws = WorkSpace(base_dir)
@@ -142,3 +146,73 @@ def test_rmtree_failure(tmpdir):
     assert lines
     for line in lines:
         assert line.startswith("Failed to remove %r" % (a.dir_path,))
+
+
+def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt):
+    ws = WorkSpace(base_dir)
+    n_purged = 0
+    with captured_logger('distributed.diskutils', 'ERROR') as sio:
+        while not stop_evt.is_set():
+            # Add a bunch of locks, and simulate forgetting them
+            try:
+                purged = ws._purge_leftovers()
+            except Exception as e:
+                err_q.put(e)
+            else:
+                n_purged += len(purged)
+
+    lines = sio.getvalue().splitlines()
+    if lines:
+        try:
+            raise AssertionError("got %d logs, see stderr" % (len(lines,)))
+        except Exception as e:
+            err_q.put(e)
+
+    purged_q.put(n_purged)
+
+
+def test_workspace_concurrency(tmpdir):
+    base_dir = str(tmpdir)
+
+    err_q = mp_context.Queue()
+    purged_q = mp_context.Queue()
+    stop_evt = mp_context.Event()
+    ws = WorkSpace(base_dir)
+
+    NPROCS = 8
+    processes = [mp_context.Process(target=_workspace_concurrency,
+                                    args=(base_dir, purged_q, err_q, stop_evt))
+                 for i in range(NPROCS)]
+    for p in processes:
+        p.start()
+
+    n_created = 0
+    n_purged = 0
+    try:
+        t1 = time()
+        while time() - t1 < 3.0:
+            # Add a bunch of locks, and simulate forgetting them
+            for i in range(50):
+                d = ws.new_work_dir(prefix='workspace-concurrency-')
+                d._finalizer.detach()
+                n_created += 1
+            sleep(1e-2)
+    finally:
+        stop_evt.set()
+        for p in processes:
+            p.join()
+
+    # Any errors?
+    try:
+        err = err_q.get_nowait()
+    except Empty:
+        pass
+    else:
+        raise err
+
+    try:
+        while True:
+            n_purged += purged_q.get_nowait()
+    except Empty:
+        pass
+    assert n_purged >= 100

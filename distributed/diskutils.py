@@ -76,19 +76,26 @@ class WorkSpace(object):
 
     def __init__(self, base_dir):
         self.base_dir = os.path.abspath(base_dir)
+        self._init_workspace()
         self._global_lock = locket.lock_file(
             os.path.join(self.base_dir, 'global.lock'))
 
     def _init_workspace(self):
-        if not os.path.exists(self.base_dir):
+        try:
             os.mkdir(self.base_dir)
+        except EnvironmentError as e:
+            if e.errno != errno.EEXIST:
+                raise
 
     def _purge_leftovers(self):
         # Need to hold the global lock to avoid several threads / processes
         # purging at once
+        purged = []
         with self._global_lock:
             for path in self._list_unknown_locks():
-                self._check_lock_or_purge(path)
+                if self._check_lock_or_purge(path):
+                    purged.append(path)
+        return purged
 
     def _list_unknown_locks(self):
         for p in glob.glob(os.path.join(self.base_dir, '*' + DIR_LOCK_EXT)):
@@ -106,19 +113,23 @@ class WorkSpace(object):
         shutil.rmtree(dir_path, onerror=self._on_remove_error)
 
     def _check_lock_or_purge(self, lock_path):
-        # Try locking the given path, if it fails it's in use,
-        # otherwise the corresponding directory can be deleted
+        """
+        Try locking the given path, if it fails it's in use,
+        otherwise the corresponding directory is deleted.
+
+        Return True if the lock was stale.
+        """
         assert lock_path.endswith(DIR_LOCK_EXT)
         if lock_path in self._known_locks:
             # Avoid touching a lock that we know is already taken
-            return
+            return False
         logger.debug("Checking lock file %r...", lock_path)
         lock = locket.lock_file(lock_path, timeout=0)
         try:
             lock.acquire()
         except locket.LockError:
             # Lock file still in use, ignore
-            return
+            return False
         try:
             # Lock file is stale, therefore purge corresponding directory
             dir_path = lock_path[:-len(DIR_LOCK_EXT)]
@@ -135,7 +146,7 @@ class WorkSpace(object):
             # Perhaps it was removed by someone else?
             if e.errno != errno.ENOENT:
                 logger.error("Failed to remove %r", str(e))
-
+        return True
 
     def _on_remove_error(self, func, path, exc_info):
         typ, exc, tb = exc_info

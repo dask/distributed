@@ -105,8 +105,6 @@ class WorkerBase(ServerNode):
             local_dir = os.path.abspath(local_dir)
         else:
             local_dir = 'dask-worker-space'
-        if not os.path.exists(local_dir):
-            os.mkdir(local_dir)
         self._workspace = WorkSpace(local_dir)
         self._workdir = self._workspace.new_work_dir(prefix='worker-')
         self.local_dir = self._workdir.dir_path
