@@ -2748,8 +2748,12 @@ class Scheduler(ServerNode):
             w = self.rprocessing.pop(key)
             if w in self.workers:
                 duration = self.processing[w].pop(key)
-                self.occupancy[w] -= duration
-                self.total_occupancy -= duration
+                if not self.processing[w]:
+                    self.total_occupancy -= self.occupancy[w]
+                    self.occupancy[w] = 0
+                else:
+                    self.total_occupancy -= duration
+                    self.occupancy[w] -= duration
                 self.check_idle_saturated(w)
                 self.release_resources(key, w)
                 self.worker_send(w, {'op': 'release-task', 'key': key})
