@@ -647,6 +647,10 @@ class Scheduler(ServerNode):
                 self.has_what[address] = set()
                 self.worker_bytes[address] = 0
                 self.processing[address] = dict()
+                try:
+                    self.total_occupancy -= self.occupancy[address]
+                except KeyError:
+                    pass
                 self.occupancy[address] = 0
                 self.check_idle_saturated(address)
 
@@ -1411,6 +1415,7 @@ class Scheduler(ServerNode):
 
         worker = self.rprocessing[key]
         self.occupancy[actual_worker] -= self.processing[actual_worker][key]
+        self.total_occupancy -= self.processing[actual_worker][key]
         self.processing[actual_worker][key] = 0
 
     @gen.coroutine
