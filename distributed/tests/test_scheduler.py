@@ -833,7 +833,7 @@ def test_occupancy_cleardown(c, s, a, b):
         s.total_occupancy += 2    
         
     yield wait(futures)
-    assert abs(s.total_occupancy) < 1e-6
+    assert abs(s.total_occupancy) < 0.01
     
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 30)
