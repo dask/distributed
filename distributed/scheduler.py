@@ -647,11 +647,8 @@ class Scheduler(ServerNode):
                 self.has_what[address] = set()
                 self.worker_bytes[address] = 0
                 self.processing[address] = dict()
-                try:
-                    self.total_occupancy -= self.occupancy[address]
-                except KeyError:
-                    pass
                 self.occupancy[address] = 0
+                # Do not need to adjust self.total_occupancy as self.occupancy[address] cannot exist before this.
                 self.check_idle_saturated(address)
 
             # for key in keys:  # TODO
@@ -1135,7 +1132,8 @@ class Scheduler(ServerNode):
                 set(self.has_what) ==
                 set(self.processing) ==
                 set(self.worker_info) ==
-                set(self.worker_comms)):
+                set(self.worker_comms) ==
+                set(self.occupancy)):
             raise ValueError("Workers not the same in all collections")
 
         a = self.worker_bytes
