@@ -49,7 +49,7 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.events['stealing'] = deque(maxlen=100000)
         self.count = 0
         self.in_flight = dict()
-        self.in_flight_occupancy = dict()
+        self.in_flight_occupancy =  defaultdict(lambda: 0)
 
         self.scheduler.worker_handlers['steal-response'] = self.move_task_confirm
 
@@ -179,14 +179,9 @@ class WorkStealing(SchedulerPlugin):
                                    'thief': thief,
                                    'victim_duration': victim_duration,
                                    'thief_duration': thief_duration}
-            try:
-                self.in_flight_occupancy[victim] -= victim_duration
-            except KeyError:
-                self.in_flight_occupancy[victim] = -victim_duration
-            try:
-                self.in_flight_occupancy[thief] += thief_duration
-            except KeyError:
-                self.in_flight_occupancy[thief] = thief_duration
+
+            self.in_flight_occupancy[victim] -= victim_duration
+            self.in_flight_occupancy[thief] += thief_duration
         except CommClosedError:
             logger.info("Worker comm closed while stealing: %s", victim)
         except Exception as e:
@@ -264,7 +259,7 @@ class WorkStealing(SchedulerPlugin):
         s = self.scheduler
 
         def combined_occupancy(w):
-            return s.occupancy[w] + self.in_flight_occupancy.get(w, 0)
+            return s.occupancy[w] + self.in_flight_occupancy[w]
 
         with log_errors():
             i = 0
