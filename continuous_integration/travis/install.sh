@@ -60,7 +60,7 @@ pip install -q pytest-repeat
 
 if [[ $HDFS == true ]]; then
     conda install -q libxml2 krb5 boost
-    conda install -q -c conda-forge libhdfs3 libgsasl libntlm
+    conda install -q -c conda-forge libhdfs3 libgsasl libntlm pyarrow
     pip install -q git+https://github.com/dask/hdfs3 --upgrade
 fi;
 
