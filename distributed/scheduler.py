@@ -1157,6 +1157,8 @@ class Scheduler(ServerNode):
         #             continue
         #     assert abs(sum(self.processing[worker].values()) - occ) < 1e-8
 
+        assert abs(sum(self.occupancy.values()) - self.total_occupancy) < 1e-8
+
     ###################
     # Manage Messages #
     ###################

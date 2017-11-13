@@ -827,13 +827,6 @@ def test_occupancy_cleardown(c, s, a, b):
     futures = c.map(slowinc, range(100), delay=0.01)
     yield wait(futures)
 
-    for w in s.occupancy:
-        s.occupancy[w] += 2
-        s.total_occupancy += 2    
-
-    futures = c.map(slowinc, range(200), delay=0.01)
-    yield wait(futures)
-
     assert abs(s.total_occupancy) < 0.01
 
 
