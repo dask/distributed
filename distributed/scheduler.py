@@ -2228,16 +2228,15 @@ class Scheduler(ServerNode):
                        self.dependencies[key]):
                 return {key: 'forgotten'}
 
-            self.waiting[key] = set()
-
             recommendations = OrderedDict()
 
             for dep in self.dependencies[key]:
                 if dep in self.exceptions_blame:
-                    del self.waiting[key]
                     self.exceptions_blame[key] = self.exceptions_blame[dep]
                     recommendations[key] = 'erred'
                     return recommendations
+
+            self.waiting[key] = set()
 
             for dep in self.dependencies[key]:
                 if dep not in self.who_has:
