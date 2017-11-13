@@ -204,8 +204,13 @@ class WorkStealing(SchedulerPlugin):
 
             if (self.scheduler.task_state.get(key) != 'processing' or
                     self.scheduler.rprocessing[key] != victim):
-                self.scheduler.occupancy[thief] = sum(self.scheduler.processing[thief].values())
-                self.scheduler.occupancy[victim] = sum(self.scheduler.processing[victim].values())
+                old_thief = self.scheduler.occupancy[thief]
+                new_thief = sum(self.scheduler.processing[thief].values())
+                old_victim = self.scheduler.occupancy[thief]
+                new_victim = sum(self.scheduler.processing[victim].values())
+                self.scheduler.occupancy[thief] = new_thief
+                self.scheduler.occupancy[victim] = new_victim
+                self.scheduler.total_occupancy += new_thief - old_thief + new_victim - old_victim
                 return
 
             # One of the pair has left, punt and reschedule
