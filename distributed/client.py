@@ -121,7 +121,7 @@ class Future(WrappedKey):
         if tkey in self.client.futures:
             self._state = self.client.futures[tkey]
         else:
-            self._state = self.client.futures[tkey] = FutureState(Event())
+            self._state = self.client.futures[tkey] = FutureState()
 
         if inform:
             self.client._send_to_scheduler({'op': 'client-desires-keys',
@@ -144,13 +144,9 @@ class Future(WrappedKey):
     def status(self):
         return self._state.status
 
-    @property
-    def event(self):
-        return self._state.event
-
     def done(self):
         """ Is the computation complete? """
-        return self.event.is_set()
+        return self._state.done()
 
     def result(self, timeout=None):
         """ Wait until computation completes, gather result to local process.
@@ -173,7 +169,7 @@ class Future(WrappedKey):
 
     @gen.coroutine
     def _result(self, raiseit=True):
-        yield self._state.event.wait()
+        yield self._state.wait()
         if self.status == 'error':
             exc = clean_exception(self._state.exception,
                                   self._state.traceback)
@@ -193,7 +189,7 @@ class Future(WrappedKey):
 
     @gen.coroutine
     def _exception(self):
-        yield self.event.wait()
+        yield self._state.wait()
         if self.status == 'error':
             raise gen.Return(self._state.exception)
         else:
@@ -250,7 +246,7 @@ class Future(WrappedKey):
 
     @gen.coroutine
     def _traceback(self):
-        yield self.event.wait()
+        yield self._state.wait()
         if self.status == 'error':
             raise gen.Return(self._state.traceback)
         else:
@@ -284,10 +280,12 @@ class Future(WrappedKey):
     def type(self):
         return self._state.type
 
-    def release(self):
+    def release(self, _in_destructor=False):
+        # NOTE: this method can be called from different threads
+        # (see e.g. Client.get() or Future.__del__())
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
-            self.client._dec_ref(tokey(self.key))
+            self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
 
     def __getstate__(self):
         return (self.key, self.client.scheduler.address)
@@ -300,12 +298,10 @@ class Future(WrappedKey):
                               'keys': [tokey(self.key)], 'client': c.id})
 
     def __del__(self):
-        if not self._cleared and self.client.generation == self._generation:
-            self._cleared = True
-            try:
-                self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
-            except RuntimeError:  # closed event loop
-                pass
+        try:
+            self.release()
+        except RuntimeError:  # closed event loop
+            pass
 
     def __repr__(self):
         if self.type:
@@ -342,32 +338,53 @@ class FutureState(object):
 
     This is shared between all Futures with the same key and client.
     """
-    __slots__ = ('event', 'status', 'type', 'exception', 'traceback')
+    __slots__ = ('_event', 'status', 'type', 'exception', 'traceback')
 
-    def __init__(self, event):
-        self.event = event
+    def __init__(self):
+        self._event = None
         self.status = 'pending'
         self.type = None
 
+    def _get_event(self):
+        # Can't create Event eagerly in constructor as it can fetch
+        # its IOLoop from the wrong thread
+        # (https://github.com/tornadoweb/tornado/issues/2189)
+        event = self._event
+        if event is None:
+            event = self._event = Event()
+        return event
+
     def cancel(self):
         self.status = 'cancelled'
-        self.event.set()
+        self._get_event().set()
 
     def finish(self, type=None):
         self.status = 'finished'
-        self.event.set()
+        self._get_event().set()
         if type is not None:
             self.type = type
 
     def lose(self):
         self.status = 'lost'
-        self.event.clear()
+        self._get_event().clear()
 
     def set_error(self, exception, traceback):
         self.status = 'error'
         self.exception = exception
         self.traceback = traceback
-        self.event.set()
+        self._get_event().set()
+
+    def done(self):
+        return self._event is not None and self._event.is_set()
+
+    def reset(self):
+        self.status = 'pending'
+        if self._event is not None:
+            self._event.clear()
+
+    @gen.coroutine
+    def wait(self, timeout=None):
+        yield self._get_event().wait(timeout)
 
     def __repr__(self):
         return '<%s: %s>' % (self.__class__.__name__, self.status)
@@ -377,7 +394,7 @@ class FutureState(object):
 def done_callback(future, callback):
     """ Coroutine that waits on future, then calls callback """
     while future.status == 'pending':
-        yield future.event.wait()
+        yield future._state.wait()
     callback(future)
 
 
@@ -726,7 +743,7 @@ class Client(Node):
     @gen.coroutine
     def _ensure_connected(self, timeout=None):
         if (self.scheduler_comm and not self.scheduler_comm.closed() or
-                self._connecting_to_scheduler):
+                self._connecting_to_scheduler or self.scheduler is None):
             return
 
         self._connecting_to_scheduler = True
@@ -809,6 +826,8 @@ class Client(Node):
         with log_errors():
             try:
                 while True:
+                    if self.scheduler_comm is None:
+                        break
                     try:
                         msgs = yield self.scheduler_comm.comm.read()
                     except CommClosedError:
@@ -1255,7 +1274,7 @@ class Client(Node):
         def wait(k):
             """ Want to stop the All(...) early if we find an error """
             st = self.futures[k]
-            yield st.event.wait()
+            yield st.wait()
             if st.status != 'finished':
                 raise AllExit()
 
@@ -1322,7 +1341,7 @@ class Client(Node):
                     self._send_to_scheduler({'op': 'report-key',
                                              'key': key})
                 for key in response['keys']:
-                    self.futures[key].event.clear()
+                    self.futures[key].reset()
             else:
                 break
 
@@ -3098,7 +3117,7 @@ def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
                         "  Good: wait([x, y, z])")
     fs = futures_of(fs)
     if return_when == 'ALL_COMPLETED':
-        future = All({f.event.wait() for f in fs})
+        future = All({f._state.wait() for f in fs})
         if timeout is not None:
             future = gen.with_timeout(timedelta(seconds=timeout), future)
         yield future
@@ -3139,7 +3158,7 @@ def _as_completed(fs, queue):
     fs = futures_of(fs)
     groups = groupby(lambda f: f.key, fs)
     firsts = [v[0] for v in groups.values()]
-    wait_iterator = gen.WaitIterator(*[f.event.wait() for f in firsts])
+    wait_iterator = gen.WaitIterator(*[f._state.wait() for f in firsts])
 
     while not wait_iterator.done():
         yield wait_iterator.next()

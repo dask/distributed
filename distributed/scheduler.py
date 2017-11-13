@@ -846,7 +846,7 @@ class Scheduler(ServerNode):
                          worker, self.task_state.get(key), key,
                          self.who_has.get(key))
             if worker not in self.who_has.get(key, ()):
-                self.worker_comms[worker].send({'op': 'release-task', 'key': key})
+                self.worker_send(worker, {'op': 'release-task', 'key': key})
             recommendations = {}
 
         return recommendations
@@ -1340,10 +1340,7 @@ class Scheduler(ServerNode):
             else:
                 msg['task'] = task
 
-            self.worker_comms[worker].send(msg)
-        except CommClosedError:
-            logger.info("Tried to send task %r to closed worker %r", key, worker)
-            # Worker will be removed by handle_worker()
+            self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1513,6 +1510,17 @@ class Scheduler(ServerNode):
     def remove_plugin(self, plugin):
         """ Remove external plugin from scheduler """
         self.plugins.remove(plugin)
+
+    def worker_send(self, worker, msg):
+        """ Send message to worker
+
+        This also handles connection failures by adding a callback to remove
+        the worker on the next cycle.
+        """
+        try:
+            self.worker_comms[worker].send(msg)
+        except (CommClosedError, AttributeError):
+            self.loop.add_callback(self.remove_worker, address=worker)
 
     ############################
     # Less common interactions #
@@ -1992,9 +2000,9 @@ class Scheduler(ServerNode):
                 self.has_what[worker].add(key)
                 self.who_has[key].add(worker)
             else:
-                self.worker_comms[worker].send({'op': 'delete-data',
-                                                'keys': [key],
-                                                'report': False})
+                self.worker_send(worker, {'op': 'delete-data',
+                                          'keys': [key],
+                                          'report': False})
         return 'OK'
 
     def update_data(self, comm=None, who_has=None, nbytes=None, client=None):
@@ -2633,12 +2641,9 @@ class Scheduler(ServerNode):
                     self.has_what[w].remove(key)
                     self.worker_bytes[w] -= self.nbytes.get(key,
                                                             DEFAULT_DATA_SIZE)
-                    try:
-                        self.worker_comms[w].send({'op': 'delete-data',
-                                                   'keys': [key],
-                                                   'report': False})
-                    except EnvironmentError:
-                        self.loop.add_callback(self.remove_worker, address=w)
+                    self.worker_send(w, {'op': 'delete-data',
+                                         'keys': [key],
+                                         'report': False})
 
             self.released.add(key)
 
@@ -2761,7 +2766,7 @@ class Scheduler(ServerNode):
                 self.total_occupancy -= duration
                 self.check_idle_saturated(w)
                 self.release_resources(key, w)
-                self.worker_comms[w].send({'op': 'release-task', 'key': key})
+                self.worker_send(w, {'op': 'release-task', 'key': key})
 
             self.released.add(key)
             self.task_state[key] = 'released'
@@ -2930,12 +2935,9 @@ class Scheduler(ServerNode):
                     self.has_what[w].remove(key)
                     self.worker_bytes[w] -= self.nbytes.get(key,
                                                             DEFAULT_DATA_SIZE)
-                    try:
-                        self.worker_comms[w].send({'op': 'delete-data',
-                                                   'keys': [key],
-                                                   'report': False})
-                    except EnvironmentError:
-                        self.loop.add_callback(self.remove_worker, address=w)
+                    self.worker_send(w, {'op': 'delete-data',
+                                         'keys': [key],
+                                         'report': False})
 
             if self.validate:
                 assert all(key not in self.dependents[dep]
