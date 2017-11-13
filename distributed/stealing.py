@@ -281,11 +281,9 @@ class WorkStealing(SchedulerPlugin):
                              and len(s.processing[w]) > s.ncores[w]]
             elif len(s.saturated) < 20:
                 saturated = sorted(saturated, key=combined_occupancy, reverse=True)
-            print('saturated: '+str(saturated))
             if len(idle) < 20:
                 idle = sorted(idle, key=combined_occupancy)
 
-            print('cost_multipliers: '+str(self.cost_multipliers))
             for level, cost_multiplier in enumerate(self.cost_multipliers):
                 if not idle:
                     break
@@ -315,7 +313,6 @@ class WorkStealing(SchedulerPlugin):
                         if (combined_occupancy(idl) + cost_multiplier * duration
                                 <= combined_occupancy(sat) - duration / 2):
                             self.move_task_request(key, sat, idl)
-                            print('move_task_request: {} {} {}'.format(key,sat,idl))
                             log.append((start, level, key, duration,
                                         sat, combined_occupancy(sat),
                                         idl, combined_occupancy(idl)))
