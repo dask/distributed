@@ -220,18 +220,18 @@ def test_stress_steal(c, s, *workers):
 
 
 @slow
-@gen_cluster(ncores=[('127.0.0.1', 1)] * 10, client=True, timeout=120)
+@gen_cluster(ncores=[('127.0.0.1', 1)] * 20, client=True, timeout=120)
 def test_close_connections(c, s, *workers):
     da = pytest.importorskip('dask.array')
-    x = da.random.random(size=(1000, 1000), chunks=(1000, 1))
-    for i in range(3):
-        x = x.rechunk((1, 1000))
-        x = x.rechunk((1000, 1))
 
-    future = c.compute(x.sum())
-    while any(s.processing.values()):
+    N = 2000
+    x = da.random.random(size=(N, N), chunks=(N // 25, N // 25))
+
+    future = c.compute(x + x.T)
+    while not future.done():
         yield gen.sleep(0.5)
         worker = random.choice(list(workers))
+        print("-- Closing comms for worker", worker.address)
         for comm in worker._comms:
             comm.abort()
         # print(frequencies(s.task_state.values()))

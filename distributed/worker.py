@@ -2397,8 +2397,9 @@ class Worker(WorkerBase):
                 self.validate_key_executing(key)
         except Exception as e:
             logger.exception(e)
-            import pdb
-            pdb.set_trace()
+            if LOG_PDB:
+                import pdb
+                pdb.set_trace()
             raise
 
     def validate_dep_waiting(self, dep):
@@ -2434,8 +2435,9 @@ class Worker(WorkerBase):
                 raise ValueError("Unknown dependent state", state)
         except Exception as e:
             logger.exception(e)
-            import pdb
-            pdb.set_trace()
+            if LOG_PDB:
+                import pdb
+                pdb.set_trace()
             raise
 
     def validate_state(self):
