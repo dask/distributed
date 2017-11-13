@@ -49,6 +49,7 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.events['stealing'] = deque(maxlen=100000)
         self.count = 0
         self.in_flight = dict()
+        self.in_flight_occupancy = dict()
 
         self.scheduler.worker_handlers['steal-response'] = self.move_task_confirm
 
@@ -178,6 +179,14 @@ class WorkStealing(SchedulerPlugin):
                                    'thief': thief,
                                    'victim_duration': victim_duration,
                                    'thief_duration': thief_duration}
+            try:
+                self.in_flight_occupancy[victim] -= victim_duration
+            except KeyError:
+                self.in_flight_occupancy[victim] = -victim_duration
+            try:
+                self.in_flight_occupancy[thief] += thief_duration
+            except KeyError:
+                self.in_flight_occupancy[thief] = thief_duration
         except CommClosedError:
             logger.info("Worker comm closed while stealing: %s", victim)
         except Exception as e:
@@ -197,6 +206,9 @@ class WorkStealing(SchedulerPlugin):
             victim = d['victim']
             logger.debug("Confirm move %s, %s -> %s.  State: %s", key, victim,
                          thief, state)
+
+            self.in_flight_occupancy[thief] -= d['thief_duration']
+            self.in_flight_occupancy[victim] += d['victim_duration']
 
             if (self.scheduler.task_state.get(key) != 'processing' or
                     self.scheduler.rprocessing[key] != victim):
@@ -249,13 +261,16 @@ class WorkStealing(SchedulerPlugin):
             raise
 
     def balance(self):
+        s = self.scheduler
+
+        def combined_occupancy(w):
+            return s.occupancy[w] + self.in_flight_occupancy.get(w, 0)
+
         with log_errors():
             i = 0
-            s = self.scheduler
-            occupancy = s.occupancy
             idle = s.idle
             saturated = s.saturated
-            if not idle or len(idle) == len(self.scheduler.workers):
+            if not idle or len(idle) == len(s.workers):
                 return
 
             log = list()
@@ -265,16 +280,17 @@ class WorkStealing(SchedulerPlugin):
             acted = False
 
             if not s.saturated:
-                saturated = topk(10, s.workers, key=occupancy.get)
+                saturated = topk(10, s.workers, key=combined_occupancy)
                 saturated = [w for w in saturated
-                             if occupancy[w] > 0.2
+                             if combined_occupancy(w) > 0.2
                              and len(s.processing[w]) > s.ncores[w]]
             elif len(s.saturated) < 20:
-                saturated = sorted(saturated, key=occupancy.get, reverse=True)
-
+                saturated = sorted(saturated, key=combined_occupancy, reverse=True)
+            print('saturated: '+str(saturated))
             if len(idle) < 20:
-                idle = sorted(idle, key=occupancy.get)
+                idle = sorted(idle, key=combined_occupancy)
 
+            print('cost_multipliers: '+str(self.cost_multipliers))
             for level, cost_multiplier in enumerate(self.cost_multipliers):
                 if not idle:
                     break
@@ -301,14 +317,15 @@ class WorkStealing(SchedulerPlugin):
                             stealable.remove(key)
                             continue
 
-                        if (occupancy[idl] + cost_multiplier * duration
-                                <= occupancy[sat] - duration / 2):
+                        if (combined_occupancy(idl) + cost_multiplier * duration
+                                <= combined_occupancy(sat) - duration / 2):
                             self.move_task_request(key, sat, idl)
+                            print('move_task_request: {} {} {}'.format(key,sat,idl))
                             log.append((start, level, key, duration,
-                                        sat, occupancy[sat],
-                                        idl, occupancy[idl]))
-                            self.scheduler.check_idle_saturated(sat)
-                            self.scheduler.check_idle_saturated(idl)
+                                        sat, combined_occupancy(sat),
+                                        idl, combined_occupancy(idl)))
+                            s.check_idle_saturated(sat, occ=combined_occupancy(sat))
+                            s.check_idle_saturated(idl, occ=combined_occupancy(idl))
                             seen = True
 
                 if self.cost_multipliers[level] < 20:  # don't steal from public at cost
@@ -327,7 +344,7 @@ class WorkStealing(SchedulerPlugin):
                         except KeyError:
                             stealable.remove(key)
                             continue
-                        if occupancy[sat] < 0.2:
+                        if combined_occupancy(sat) < 0.2:
                             continue
                         if len(s.processing[sat]) <= s.ncores[sat]:
                             continue
@@ -336,14 +353,14 @@ class WorkStealing(SchedulerPlugin):
                         idl = idle[i % len(idle)]
                         duration = s.processing[sat][key]
 
-                        if (occupancy[idl] + cost_multiplier * duration
-                                <= occupancy[sat] - duration / 2):
+                        if (combined_occupancy(idl) + cost_multiplier * duration
+                                <= combined_occupancy(sat) - duration / 2):
                             self.move_task_request(key, sat, idl)
                             log.append((start, level, key, duration,
-                                        sat, occupancy[sat],
-                                        idl, occupancy[idl]))
-                            self.scheduler.check_idle_saturated(sat)
-                            self.scheduler.check_idle_saturated(idl)
+                                        sat, combined_occupancy(sat),
+                                        idl, combined_occupancy(idl)))
+                            s.check_idle_saturated(sat, occ=combined_occupancy(sat))
+                            s.check_idle_saturated(idl, occ=combined_occupancy(idl))
                             seen = True
 
                 if seen and not acted:
@@ -353,8 +370,8 @@ class WorkStealing(SchedulerPlugin):
                 self.log.append(log)
                 self.count += 1
             stop = time()
-            if self.scheduler.digests:
-                self.scheduler.digests['steal-duration'].add(stop - start)
+            if s.digests:
+                s.digests['steal-duration'].add(stop - start)
 
     def restart(self, scheduler):
         for stealable in self.stealable.values():

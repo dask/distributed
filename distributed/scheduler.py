@@ -3159,8 +3159,9 @@ class Scheduler(ServerNode):
     # Assigning Tasks to Workers #
     ##############################
 
-    def check_idle_saturated(self, worker):
-        occ = self.occupancy[worker]
+    def check_idle_saturated(self, worker, occ=0):
+        if not occ:
+            occ = self.occupancy[worker]
         nc = self.ncores[worker]
         p = len(self.processing[worker])
 
