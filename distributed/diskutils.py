@@ -77,8 +77,7 @@ class WorkSpace(object):
     def __init__(self, base_dir):
         self.base_dir = os.path.abspath(base_dir)
         self._init_workspace()
-        self._global_lock = locket.lock_file(
-            os.path.join(self.base_dir, 'global.lock'))
+        self._global_lock_path = os.path.join(self.base_dir, 'global.lock')
 
     def _init_workspace(self):
         try:
@@ -87,14 +86,27 @@ class WorkSpace(object):
             if e.errno != errno.EEXIST:
                 raise
 
+    def _global_lock(self, **kwargs):
+        return locket.lock_file(self._global_lock_path, **kwargs)
+
     def _purge_leftovers(self):
         # Need to hold the global lock to avoid several threads / processes
         # purging at once
         purged = []
-        with self._global_lock:
-            for path in self._list_unknown_locks():
-                if self._check_lock_or_purge(path):
-                    purged.append(path)
+        lock = self._global_lock(timeout=0)
+        try:
+            lock.acquire()
+        except locket.LockError:
+            # No need to waste time here if another lock holder is already
+            # purging the directory
+            pass
+        else:
+            try:
+                for path in self._list_unknown_locks():
+                    if self._check_lock_or_purge(path):
+                        purged.append(path)
+            finally:
+                lock.release()
         return purged
 
     def _list_unknown_locks(self):
