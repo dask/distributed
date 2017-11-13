@@ -824,17 +824,18 @@ def test_learn_occupancy_2(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_occupancy_cleardown(c, s, a, b):
-    futures = c.map(slowinc, range(1000), delay=0.01)
-    while not any(s.who_has):
-        yield gen.sleep(0.01)
+    futures = c.map(slowinc, range(100), delay=0.01)
+    yield wait(futures)
 
     for w in s.occupancy:
         s.occupancy[w] += 2
         s.total_occupancy += 2    
-        
+
+    futures = c.map(slowinc, range(200), delay=0.01)
     yield wait(futures)
+
     assert abs(s.total_occupancy) < 0.01
-    
+
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 30)
 def test_balance_many_workers(c, s, *workers):
