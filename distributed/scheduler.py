@@ -1109,8 +1109,8 @@ class Scheduler(ServerNode):
             except KeyError:
                 logger.debug("Key lost: %s", key)
             except AttributeError:
-                logger.info("self.validate_%s not found",
-                            self.task_state[key].replace('-', '_'))
+                logger.error("self.validate_%s not found",
+                             self.task_state[key].replace('-', '_'))
             else:
                 func(key)
         except Exception as e:
@@ -2234,6 +2234,7 @@ class Scheduler(ServerNode):
 
             for dep in self.dependencies[key]:
                 if dep in self.exceptions_blame:
+                    del self.waiting[key]
                     self.exceptions_blame[key] = self.exceptions_blame[dep]
                     recommendations[key] = 'erred'
                     return recommendations
@@ -2743,6 +2744,7 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert key in self.rprocessing
                 assert key not in self.who_has
+                assert key not in self.waiting
                 assert self.task_state[key] == 'processing'
 
             w = self.rprocessing.pop(key)
@@ -2946,6 +2948,7 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert self.task_state[key] == 'no-worker'
                 assert key not in self.who_has
+                assert key not in self.waiting
 
             self.unrunnable.remove(key)
             self.released.add(key)
