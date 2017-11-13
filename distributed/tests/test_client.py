@@ -238,6 +238,37 @@ def test_compute_persisted_retries(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test_persist_retries(c, s, a, b):
+    # Same retries for all
+    args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
+
+    x = c.persist(delayed(varying(args))(), retries=1)
+    x = c.compute(x)
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield x
+    exc_info.match("two")
+
+    x = c.persist(delayed(varying(args))(), retries=2)
+    x = c.compute(x)
+    assert (yield x) == 3
+
+    # Per-key retries
+    xargs = [ZeroDivisionError("one"), ZeroDivisionError("two"), 30, 40]
+    yargs = [ZeroDivisionError("five"), ZeroDivisionError("six"), 70]
+    zargs = [80, 90, 100]
+
+    x, y, z = [delayed(varying(args))() for args in (xargs, yargs, zargs)]
+    x, y, z = c.persist([x, y, z], retries={(y, z): 2})
+    x, y, z = c.compute([x, y, z])
+
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        yield x
+    exc_info.match("one")
+    assert (yield y) == 70
+    assert (yield z) == 80
+
+
+@gen_cluster(client=True)
 def test_future_repr(c, s, a, b):
     for func in [repr, lambda x: x._repr_html_()]:
         x = c.submit(inc, 10)

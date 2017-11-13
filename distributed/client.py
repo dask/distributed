@@ -2146,7 +2146,8 @@ class Client(Node):
             return result
 
     def persist(self, collections, optimize_graph=True, workers=None,
-                allow_other_workers=None, resources=None, **kwargs):
+                allow_other_workers=None, resources=None, retries=None,
+                **kwargs):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -2168,6 +2169,8 @@ class Client(Node):
         allow_other_workers: bool, list
             If True then all restrictions in workers= are considered loose
             If a list then only the keys for the listed collections are loose
+        retries: int (default to 0)
+            Number of allowed automatic retries if computing a result fails
         kwargs:
             Options to pass to the graph optimize calls
 
@@ -2203,8 +2206,15 @@ class Client(Node):
             resources = self._expand_resources(resources,
                                                all_keys=itertools.chain(dsk, names))
 
+        if retries:
+            retries = self._expand_retries(retries,
+                                           all_keys=itertools.chain(dsk, names))
+        else:
+            retries = None
+
         futures = self._graph_to_futures(dsk, names, restrictions,
-                                         loose_restrictions, resources=resources)
+                                         loose_restrictions,
+                                         resources=resources, retries=retries)
 
         postpersists = [c.__dask_postpersist__() for c in collections]
         result = [func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
