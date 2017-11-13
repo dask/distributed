@@ -78,3 +78,53 @@ class DaskHDFileSystem(HDFileSystem):
 
 
 core._filesystems['hdfs'] = DaskHDFileSystem
+
+
+try:
+    import posixpath
+    from dask.bytes.pyarrow_compat import get_pyarrow_fs
+    import pyarrow as pa
+
+    @get_pyarrow_fs.register(DaskHDFileSystem)
+    class HDFSWrapper(pa.filesystem.DaskFileSystem):
+        def isdir(self, path):
+            path = self.fs._trim_filename(path)
+            try:
+                info = self.fs.info(path)
+                return info['kind'] == 'directory'
+            except EnvironmentError:
+                return False
+
+        def isfile(self, path):
+            path = self.fs._trim_filename(path)
+            try:
+                info = self.fs.info(path)
+                return info['kind'] == 'file'
+            except EnvironmentError:
+                return False
+
+        def walk(self, path, **kwargs):
+            if kwargs.get('trim', True):
+                path = self.fs._trim_filename(path)
+
+            full_dirs = []
+            dirs = []
+            files = []
+
+            for info in self.fs.ls(path, True):
+                name = info['name']
+                tail = posixpath.split(name)[1]
+                if info['kind'] == 'directory':
+                    full_dirs.append(name)
+                    dirs.append(tail)
+                else:
+                    files.append(tail)
+
+            yield path, dirs, files
+
+            for d in full_dirs:
+                for res in self.walk(d, trim=False):
+                    yield res
+
+except ImportError:
+    pass
