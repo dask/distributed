@@ -64,7 +64,8 @@ if [[ $HDFS == true ]]; then
     pip install -q git+https://github.com/dask/hdfs3 --upgrade
 fi;
 
-pip install -q git+https://github.com/dask/dask.git --upgrade
+# TODO: revert to install from dask after this PR is merged
+pip install -q git+https://github.com/jcrist/dask.git@arrow-hdfs-works --upgrade
 pip install -q git+https://github.com/joblib/joblib.git --upgrade
 pip install -q git+https://github.com/dask/s3fs.git --upgrade
 pip install -q git+https://github.com/dask/zict.git --upgrade
