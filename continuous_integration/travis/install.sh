@@ -56,6 +56,8 @@ conda install -q -c conda-forge \
     tornado=4.5 \
     $PACKAGES
 
+pip install -q pytest-repeat
+
 if [[ $HDFS == true ]]; then
     conda install -q libxml2 krb5 boost
     conda install -q -c conda-forge libhdfs3 libgsasl libntlm
@@ -76,6 +78,13 @@ fi;
 
 # Install distributed
 pip install --no-deps -e .
+
+# Update Tornado to desired version
+if [[ $TORNADO == "dev" ]]; then
+    pip install -U https://github.com/tornadoweb/tornado/archive/master.zip
+elif [[ ! -z $TORNADO ]]; then
+    pip install -U tornado==$TORNADO
+fi
 
 # For debugging
 echo -e "--\n--Conda Environment\n--"
