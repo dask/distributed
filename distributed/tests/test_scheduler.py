@@ -20,11 +20,11 @@ from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
-from distributed.utils_test import (inc, dec, gen_cluster, gen_test, readone,
-                                    slowinc, slowadd, slowdec, cluster, div)
-from distributed.utils_test import loop # flake8: noqa
 from distributed.utils import tmpfile
-from distributed.utils_test import slow
+from distributed.utils_test import (inc, dec, gen_cluster, gen_test, readone,
+                                    slowinc, slowadd, slowdec, cluster, div,
+                                    varying, slow)
+from distributed.utils_test import loop, nodebug  # flake8: noqa
 from dask.compatibility import apply
 
 
@@ -781,7 +781,7 @@ def test_file_descriptors(c, s):
     num_fds_3 = proc.num_fds()
     assert num_fds_3 == num_fds_2
 
-    x = da.random.normal(10, 1, size=(1000, 1000), chunks=(10, 10))
+    x = da.random.random(size=(1000, 1000), chunks=(25, 25))
     x = c.persist(x)
     yield wait(x)
 
@@ -802,6 +802,7 @@ def test_file_descriptors(c, s):
     yield [n._close() for n in nannies]
 
 
+@nodebug
 @gen_cluster(client=True)
 def test_learn_occupancy(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.01)
@@ -813,6 +814,7 @@ def test_learn_occupancy(c, s, a, b):
         assert 1 < s.occupancy[w.address] < 20
 
 
+@nodebug
 @gen_cluster(client=True)
 def test_learn_occupancy_2(c, s, a, b):
     future = c.map(slowinc, range(1000), delay=0.1)
@@ -822,6 +824,7 @@ def test_learn_occupancy_2(c, s, a, b):
     assert 50 < s.total_occupancy < 200
 
 
+@nodebug
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 30)
 def test_balance_many_workers(c, s, *workers):
     futures = c.map(slowinc, range(20), delay=0.2)
@@ -829,6 +832,7 @@ def test_balance_many_workers(c, s, *workers):
     assert set(map(len, s.has_what.values())) == {0, 1}
 
 
+@nodebug
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 30)
 def test_balance_many_workers_2(c, s, *workers):
     s.extensions['stealing']._pc.callback_time = 100000000
@@ -1217,3 +1221,30 @@ def test_deque_handler():
     msg = deque_handler.deque[-1]
     assert 'distributed.scheduler' in deque_handler.format(msg)
     assert any(msg.msg == 'foo123' for msg in deque_handler.deque)
+
+
+@gen_cluster(client=True)
+def test_retries(c, s, a, b):
+    args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 42]
+
+    future = c.submit(varying(args), retries=3)
+    result = yield future
+    assert result == 42
+    assert s.retries[future.key] == 1
+    assert future.key not in s.exceptions
+
+    future = c.submit(varying(args), retries=2, pure=False)
+    result = yield future
+    assert result == 42
+    assert s.retries[future.key] == 0
+    assert future.key not in s.exceptions
+
+    future = c.submit(varying(args), retries=1, pure=False)
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        res = yield future
+    exc_info.match("two")
+
+    future = c.submit(varying(args), retries=0, pure=False)
+    with pytest.raises(ZeroDivisionError) as exc_info:
+        res = yield future
+    exc_info.match("one")

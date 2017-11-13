@@ -170,6 +170,8 @@ class Scheduler(ServerNode):
         A dict mapping a key to another key on which it depends that has failed
     * **suspicious_tasks:** ``{key: int}``
         Number of times a task has been involved in a worker failure
+    * **retries:** ``{key: int}``
+        Number of times a task may be automatically retried after failing
     * **deleted_keys:** ``{key: {workers}}``
         Locations of workers that have keys that should be deleted
     * **wants_what:** ``{client: {key}}``:
@@ -261,6 +263,7 @@ class Scheduler(ServerNode):
         self.worker_restrictions = dict()
         self.resource_restrictions = dict()
         self.loose_restrictions = set()
+        self.retries = dict()
         self.suspicious_tasks = defaultdict(lambda: 0)
         self.waiting = dict()
         self.waiting_data = dict()
@@ -287,7 +290,7 @@ class Scheduler(ServerNode):
                                   self.host_restrictions, self.worker_restrictions,
                                   self.loose_restrictions, self.ready, self.who_wants,
                                   self.wants_what, self.unknown_durations, self.rprocessing,
-                                  self.resource_restrictions]
+                                  self.resource_restrictions, self.retries]
 
         # Worker state
         self.ncores = dict()
@@ -691,7 +694,7 @@ class Scheduler(ServerNode):
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None, priority=None,
                      loose_restrictions=None, resources=None,
-                     submitting_task=None):
+                     submitting_task=None, retries=None):
         """
         Add new computations to the internal dask graph
 
@@ -786,6 +789,9 @@ class Scheduler(ServerNode):
         if resources:
             self.resource_restrictions.update(resources)
 
+        if retries:
+            self.retries.update(retries)
+
         for key in sorted(touched | keys, key=self.priority.get):
             if self.task_state[key] == 'released':
                 recommendations[key] = 'waiting'
@@ -840,7 +846,7 @@ class Scheduler(ServerNode):
                          worker, self.task_state.get(key), key,
                          self.who_has.get(key))
             if worker not in self.who_has.get(key, ()):
-                self.worker_comms[worker].send({'op': 'release-task', 'key': key})
+                self.worker_send(worker, {'op': 'release-task', 'key': key})
             recommendations = {}
 
         return recommendations
@@ -854,9 +860,17 @@ class Scheduler(ServerNode):
             return {}
 
         if self.task_state[key] == 'processing':
-            recommendations = self.transition(key, 'erred', cause=key,
-                                              exception=exception, traceback=traceback, worker=worker,
-                                              **kwargs)
+            retries = self.retries.get(key, 0)
+            if retries > 0:
+                self.retries[key] = retries - 1
+                recommendations = self.transition(key, 'waiting')
+            else:
+                recommendations = self.transition(key, 'erred',
+                                                  cause=key,
+                                                  exception=exception,
+                                                  traceback=traceback,
+                                                  worker=worker,
+                                                  **kwargs)
         else:
             recommendations = {}
 
@@ -1109,8 +1123,8 @@ class Scheduler(ServerNode):
             except KeyError:
                 logger.debug("Key lost: %s", key)
             except AttributeError:
-                logger.info("self.validate_%s not found",
-                            self.task_state[key].replace('-', '_'))
+                logger.error("self.validate_%s not found",
+                             self.task_state[key].replace('-', '_'))
             else:
                 func(key)
         except Exception as e:
@@ -1326,10 +1340,7 @@ class Scheduler(ServerNode):
             else:
                 msg['task'] = task
 
-            self.worker_comms[worker].send(msg)
-        except CommClosedError:
-            logger.info("Tried to send task %r to closed worker %r", key, worker)
-            # Worker will be removed by handle_worker()
+            self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1499,6 +1510,17 @@ class Scheduler(ServerNode):
     def remove_plugin(self, plugin):
         """ Remove external plugin from scheduler """
         self.plugins.remove(plugin)
+
+    def worker_send(self, worker, msg):
+        """ Send message to worker
+
+        This also handles connection failures by adding a callback to remove
+        the worker on the next cycle.
+        """
+        try:
+            self.worker_comms[worker].send(msg)
+        except (CommClosedError, AttributeError):
+            self.loop.add_callback(self.remove_worker, address=worker)
 
     ############################
     # Less common interactions #
@@ -1978,9 +2000,9 @@ class Scheduler(ServerNode):
                 self.has_what[worker].add(key)
                 self.who_has[key].add(worker)
             else:
-                self.worker_comms[worker].send({'op': 'delete-data',
-                                                'keys': [key],
-                                                'report': False})
+                self.worker_send(worker, {'op': 'delete-data',
+                                          'keys': [key],
+                                          'report': False})
         return 'OK'
 
     def update_data(self, comm=None, who_has=None, nbytes=None, client=None):
@@ -2220,8 +2242,6 @@ class Scheduler(ServerNode):
                        self.dependencies[key]):
                 return {key: 'forgotten'}
 
-            self.waiting[key] = set()
-
             recommendations = OrderedDict()
 
             for dep in self.dependencies[key]:
@@ -2229,6 +2249,8 @@ class Scheduler(ServerNode):
                     self.exceptions_blame[key] = self.exceptions_blame[dep]
                     recommendations[key] = 'erred'
                     return recommendations
+
+            self.waiting[key] = set()
 
             for dep in self.dependencies[key]:
                 if dep not in self.who_has:
@@ -2619,12 +2641,9 @@ class Scheduler(ServerNode):
                     self.has_what[w].remove(key)
                     self.worker_bytes[w] -= self.nbytes.get(key,
                                                             DEFAULT_DATA_SIZE)
-                    try:
-                        self.worker_comms[w].send({'op': 'delete-data',
-                                                   'keys': [key],
-                                                   'report': False})
-                    except EnvironmentError:
-                        self.loop.add_callback(self.remove_worker, address=w)
+                    self.worker_send(w, {'op': 'delete-data',
+                                         'keys': [key],
+                                         'report': False})
 
             self.released.add(key)
 
@@ -2738,6 +2757,7 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert key in self.rprocessing
                 assert key not in self.who_has
+                assert key not in self.waiting
                 assert self.task_state[key] == 'processing'
 
             w = self.rprocessing.pop(key)
@@ -2747,7 +2767,7 @@ class Scheduler(ServerNode):
                 self.total_occupancy -= duration
                 self.check_idle_saturated(w)
                 self.release_resources(key, w)
-                self.worker_comms[w].send({'op': 'release-task', 'key': key})
+                self.worker_send(w, {'op': 'release-task', 'key': key})
 
             self.released.add(key)
             self.task_state[key] = 'released'
@@ -2863,12 +2883,16 @@ class Scheduler(ServerNode):
             del self.exceptions[key]
         if key in self.exceptions_blame:
             del self.exceptions_blame[key]
+        if key in self.tracebacks:
+            del self.tracebacks[key]
         if key in self.released:
             self.released.remove(key)
         if key in self.waiting_data:
             del self.waiting_data[key]
         if key in self.suspicious_tasks:
             del self.suspicious_tasks[key]
+        if key in self.retries:
+            del self.retries[key]
         if key in self.nbytes:
             del self.nbytes[key]
         if key in self.resource_restrictions:
@@ -2912,12 +2936,9 @@ class Scheduler(ServerNode):
                     self.has_what[w].remove(key)
                     self.worker_bytes[w] -= self.nbytes.get(key,
                                                             DEFAULT_DATA_SIZE)
-                    try:
-                        self.worker_comms[w].send({'op': 'delete-data',
-                                                   'keys': [key],
-                                                   'report': False})
-                    except EnvironmentError:
-                        self.loop.add_callback(self.remove_worker, address=w)
+                    self.worker_send(w, {'op': 'delete-data',
+                                         'keys': [key],
+                                         'report': False})
 
             if self.validate:
                 assert all(key not in self.dependents[dep]
@@ -2944,6 +2965,7 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert self.task_state[key] == 'no-worker'
                 assert key not in self.who_has
+                assert key not in self.waiting
 
             self.unrunnable.remove(key)
             self.released.add(key)
