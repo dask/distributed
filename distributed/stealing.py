@@ -165,15 +165,11 @@ class WorkStealing(SchedulerPlugin):
                          thief, self.scheduler.occupancy[thief])
 
             victim_duration = self.scheduler.processing[victim][key]
-            self.scheduler.occupancy[victim] -= victim_duration
-            self.scheduler.total_occupancy -= victim_duration
 
             thief_duration = self.scheduler.task_duration.get(key_split(key), 0.5)
             thief_duration += sum(self.scheduler.nbytes[key] for key in
                                   self.scheduler.dependencies[key] -
                                   self.scheduler.has_what[thief]) / BANDWIDTH
-            self.scheduler.occupancy[thief] += thief_duration
-            self.scheduler.total_occupancy += thief_duration
 
             self.scheduler.worker_comms[victim].send({'op': 'steal-request',
                                                       'key': key})
@@ -206,7 +202,7 @@ class WorkStealing(SchedulerPlugin):
                     self.scheduler.rprocessing[key] != victim):
                 old_thief = self.scheduler.occupancy[thief]
                 new_thief = sum(self.scheduler.processing[thief].values())
-                old_victim = self.scheduler.occupancy[thief]
+                old_victim = self.scheduler.occupancy[victim]
                 new_victim = sum(self.scheduler.processing[victim].values())
                 self.scheduler.occupancy[thief] = new_thief
                 self.scheduler.occupancy[victim] = new_victim
@@ -221,10 +217,6 @@ class WorkStealing(SchedulerPlugin):
 
             # Victim had already started execution, reverse stealing
             if state in ('memory', 'executing', 'long-running', None):
-                self.scheduler.occupancy[thief] -= d['thief_duration']
-                self.scheduler.total_occupancy -= d['thief_duration']
-                self.scheduler.occupancy[victim] += d['victim_duration']
-                self.scheduler.total_occupancy += d['victim_duration']
                 self.log.append(('already-computing', key, victim, thief))
                 self.scheduler.check_idle_saturated(thief)
                 self.scheduler.check_idle_saturated(victim)
@@ -233,8 +225,13 @@ class WorkStealing(SchedulerPlugin):
             elif state in ('waiting', 'ready'):
                 self.remove_key_from_stealable(key)
                 self.scheduler.rprocessing[key] = thief
+                duration = self.scheduler.processing[victim][key]
+                self.scheduler.occupancy[victim] -= duration
+                self.scheduler.total_occupancy -= duration
                 del self.scheduler.processing[victim][key]
                 self.scheduler.processing[thief][key] = d['thief_duration']
+                self.scheduler.occupancy[thief] += d['thief_duration']
+                self.scheduler.total_occupancy += d['thief_duration']
                 self.put_key_in_stealable(key)
 
                 try:
