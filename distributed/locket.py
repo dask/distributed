@@ -1,6 +1,8 @@
 # Vendored up-to-date copy of locket.py
 # Based on https://github.com/mwilliamson/locket.py/pull/8
 
+# flake8: noqa
+
 import time
 import errno
 import threading
@@ -14,17 +16,18 @@ try:
 except ImportError:
     try:
         import ctypes
+        import ctypes.wintypes
         import msvcrt
     except ImportError:
         raise ImportError("Platform not supported (failed to import fcntl, ctypes, msvcrt)")
     else:
         _WinAPI_LockFile = ctypes.windll.kernel32.LockFile
-        _WinAPI_LockFile.restype = ctypes.c_int32
-        _WinAPI_LockFile.argtypes = [ctypes.c_int32] * 5
+        _WinAPI_LockFile.restype = ctypes.wintypes.BOOL
+        _WinAPI_LockFile.argtypes = [ctypes.wintypes.HANDLE] + [ctypes.wintypes.DWORD] * 4
 
         _WinAPI_UnlockFile = ctypes.windll.kernel32.UnlockFile
-        _WinAPI_UnlockFile.restype = ctypes.c_int32
-        _WinAPI_UnlockFile.argtypes = [ctypes.c_int32] * 5
+        _WinAPI_UnlockFile.restype = ctypes.wintypes.BOOL
+        _WinAPI_UnlockFile.argtypes = [ctypes.wintypes.HANDLE] + [ctypes.wintypes.DWORD] * 4
 
         _lock_file_blocking_available = False
 
