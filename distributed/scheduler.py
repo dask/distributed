@@ -3160,7 +3160,7 @@ class Scheduler(ServerNode):
     ##############################
 
     def check_idle_saturated(self, worker, occ=None):
-        if occ is not None:
+        if occ is None:
             occ = self.occupancy[worker]
         nc = self.ncores[worker]
         p = len(self.processing[worker])
