@@ -116,7 +116,7 @@ class _LockSet(object):
             for lock in self._locks:
                 lock.acquire(timeout, retry_period)
                 acquired_locks.append(lock)
-        except:  # noqa
+        except:
             for acquired_lock in reversed(acquired_locks):
                 # TODO: handle exceptions
                 acquired_lock.release()
