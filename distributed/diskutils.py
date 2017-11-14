@@ -8,7 +8,7 @@ import shutil
 import stat
 import tempfile
 
-import locket
+from . import locket
 
 from .compatibility import finalize
 
