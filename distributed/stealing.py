@@ -49,7 +49,7 @@ class WorkStealing(SchedulerPlugin):
         self.scheduler.events['stealing'] = deque(maxlen=100000)
         self.count = 0
         self.in_flight = dict()
-        self.in_flight_occupancy =  defaultdict(lambda: 0)
+        self.in_flight_occupancy = defaultdict(lambda: 0)
 
         self.scheduler.worker_handlers['steal-response'] = self.move_task_confirm
 
