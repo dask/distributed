@@ -205,6 +205,9 @@ class WorkStealing(SchedulerPlugin):
             self.in_flight_occupancy[thief] -= d['thief_duration']
             self.in_flight_occupancy[victim] += d['victim_duration']
 
+            if not self.in_flight:
+                self.in_flight_occupancy = defaultdict(lambda: 0)
+
             if (self.scheduler.task_state.get(key) != 'processing' or
                     self.scheduler.rprocessing[key] != victim):
                 old_thief = self.scheduler.occupancy[thief]
