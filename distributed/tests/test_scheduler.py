@@ -826,10 +826,17 @@ def test_learn_occupancy_2(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_occupancy_cleardown(c, s, a, b):
+    s.validate = False
+
+    # Inject excess values in s.occupancy
+    s.occupancy[a.address] = 2
+    s.total_occupancy += 2
     futures = c.map(slowinc, range(100), delay=0.01)
     yield wait(futures)
 
+    # Verify that occupancy values have been zeroed out
     assert abs(s.total_occupancy) < 0.01
+    assert all(v == 0 for v in s.occupancy.values())
 
 
 @nodebug
