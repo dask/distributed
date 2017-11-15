@@ -1,6 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import defaultdict, deque, OrderedDict
+from collections import defaultdict, deque, OrderedDict, Counter
 from datetime import timedelta
 from functools import partial
 import itertools
@@ -148,6 +148,9 @@ class Scheduler(ServerNode):
     * **worker_restrictions:** ``{key: {workers}}``:
         Like host_restrictions except that these include specific host:port
         worker names
+    * **task_partitions:** ``{key: partition}``:
+        The logical partition associated with a particular task. All tasks
+        within the same partition will be executed on the same worker.
     * **loose_restrictions:** ``{key}``:
         Set of keys for which we are allow to violate restrictions (see above)
         if not valid workers are present.
@@ -261,6 +264,9 @@ class Scheduler(ServerNode):
         self.unknown_durations = defaultdict(set)
         self.host_restrictions = dict()
         self.worker_restrictions = dict()
+        self.task_partitions = dict()
+        self.partition_counts = Counter()
+        self.partition_workers = dict()
         self.resource_restrictions = dict()
         self.loose_restrictions = set()
         self.retries = dict()
@@ -694,7 +700,7 @@ class Scheduler(ServerNode):
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None, priority=None,
                      loose_restrictions=None, resources=None,
-                     submitting_task=None, retries=None):
+                     submitting_task=None, retries=None, partitions=None):
         """
         Add new computations to the internal dask graph
 
@@ -785,6 +791,15 @@ class Scheduler(ServerNode):
 
             if loose_restrictions:
                 self.loose_restrictions |= set(loose_restrictions)
+
+        if partitions:
+            for k, p in partitions.items():
+                if p is None:
+                    continue
+                self.task_partitions[k] = p
+                self.partition_counts[p] += 1
+
+        logger.info("Task partitions %s" % self.task_partitions)
 
         if resources:
             self.resource_restrictions.update(resources)
@@ -2376,7 +2391,12 @@ class Scheduler(ServerNode):
 
             del self.waiting[key]
 
-            worker = self.decide_worker(key)
+            try:
+                p = self.task_partitions.get(key, -1)
+                worker = self.partition_workers[p]
+            except KeyError:
+                worker = self.decide_worker(key)
+
             if not worker:
                 return worker
 
@@ -2384,6 +2404,9 @@ class Scheduler(ServerNode):
 
             duration = self.get_task_duration(ks)
             comm = self.get_comm_cost(key, worker)
+
+            if not p == -1:
+                self.partition_workers[p] = worker
 
             self.processing[worker][key] = duration + comm
             self.rprocessing[key] = worker
@@ -2875,6 +2898,19 @@ class Scheduler(ServerNode):
             del self.worker_restrictions[key]
         if key in self.host_restrictions:
             del self.host_restrictions[key]
+
+        print("Removing key %s" % key)
+
+        p = self.task_partitions.get(key, None)
+        del self.task_partitions[key]
+
+        if p is not None:
+            self.partition_counts[p] -= 1
+            if self.partition_counts[p] == 0:
+                print("Removing partition %s" % p)
+                del self.partition_counts[p]
+                del self.partition_workers[p]
+
         if key in self.loose_restrictions:
             self.loose_restrictions.remove(key)
         if key in self.priority:
@@ -3178,6 +3214,7 @@ class Scheduler(ServerNode):
         *  worker_restrictions
         *  host_restrictions
         *  resource_restrictions
+        *  task-partitions
         """
         s = True
 
@@ -3208,6 +3245,17 @@ class Scheduler(ServerNode):
                 s = ww
             else:
                 s &= ww
+
+        # Is this key assigned to any partitions?
+        try:
+            p = self.task_partitions[key]
+        except KeyError:
+            pass
+        else:
+            try:
+                s &= self.partition_workers[p]
+            except KeyError:
+                pass
 
         return s
 

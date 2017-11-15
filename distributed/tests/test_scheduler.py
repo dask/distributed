@@ -98,6 +98,40 @@ def test_decide_worker_with_restrictions(client, s, a, b, c):
     yield wait(x)
     assert x.key in a.data or x.key in b.data
 
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
+def test_decide_worker_with_partitions(client, s, a, b, c):
+    partitions = ['p%s' % i for i in range(3)]
+
+    dsk = {}
+    parts = {}
+    part_key = defaultdict(set)
+    i = 0
+
+    for p in partitions:
+        for j in range(5):
+            key = 'key%s' % i
+            dsk[key] = (inc, i)
+            part_key[p].add(key)
+            parts[key] = p
+            i += 1
+
+    futures = client.get(dsk, dsk.keys(),
+                        partitions=parts,
+                        sync=False)
+
+    futures = yield wait(futures)
+
+    def _find_worker(key):
+        """ Return worker associated with a key """
+        ww = [w for w in (a,b,c) if key in w.data]
+        assert len(ww) > 0
+        return ww[0]
+
+    # Check that all keys a partition are
+    # assigned to the same worker
+    for p, keys in part_key.items():
+        workers = [_find_worker(k) for k in keys]
+        assert all(workers[0] == w for w in workers[1:])
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
 def test_move_data_over_break_restrictions(client, s, a, b, c):

@@ -1071,6 +1071,7 @@ class Client(Node):
         key = kwargs.pop('key', None)
         pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
+        partitions = kwargs.pop('partitions', None)
         resources = kwargs.pop('resources', None)
         retries = kwargs.pop('retries', None)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
@@ -1110,7 +1111,8 @@ class Client(Node):
         futures = self._graph_to_futures(dsk, [skey], restrictions,
                                          loose_restrictions, priority={skey: 0},
                                          resources={skey: resources} if resources else None,
-                                         retries={skey: retries} if retries else None)
+                                         retries={skey: retries} if retries else None,
+                                         partitions={skey: partitions} if partitions else None)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -1904,7 +1906,7 @@ class Client(Node):
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
                           loose_restrictions=None, priority=None,
-                          resources=None, retries=None):
+                          resources=None, retries=None, partitions=None):
         with self._lock:
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
@@ -1952,11 +1954,12 @@ class Client(Node):
                                      'resources': resources,
                                      'submitting_task': getattr(thread_state, 'key', None),
                                      'retries': retries,
+                                     'partitions': partitions,
                                      })
             return futures
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-            resources=None, sync=True, asynchronous=None, **kwargs):
+            resources=None, partitions=None, sync=True, asynchronous=None, **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -1966,6 +1969,9 @@ class Client(Node):
         restrictions: dict (optional)
             A mapping of {key: {set of worker hostnames}} that restricts where
             jobs can take place
+        partitions: dict (optional)
+            A mapping of {key: partition} that ensures that all keys in
+            the same partition are executed on the same worker.
         sync: bool (optional)
             Returns Futures if False or concrete values if True (default).
 
@@ -1982,6 +1988,7 @@ class Client(Node):
         """
         futures = self._graph_to_futures(dsk, set(flatten([keys])),
                                          restrictions, loose_restrictions,
+                                         partitions=partitions,
                                          resources=resources)
         packed = pack_data(keys, futures)
         if sync:
