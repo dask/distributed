@@ -1,16 +1,21 @@
 from __future__ import print_function, division, absolute_import
 
+import io
+import json
 import socket
 import sys
+
+import numpy as np
+import pandas as pd
+import pytest
 from toolz import concat
 from tornado import gen
 
-import pytest
-
-from dask.delayed import Delayed
+import dask
 import dask.bag as db
 import dask.dataframe as dd
 from dask import delayed
+from dask.delayed import Delayed
 from dask.bytes.core import read_bytes, write_bytes
 
 from distributed.compatibility import unicode
@@ -19,6 +24,11 @@ from distributed.utils_test import loop # flake8: noqa
 from distributed.utils import get_ip
 from distributed import Client
 from distributed.client import wait, Future
+
+try:
+    import pyarrow
+except ImportError:
+    pyarrow = None
 
 hdfs3 = pytest.importorskip('hdfs3')
 _orig_cluster = cluster
@@ -67,7 +77,6 @@ def test_get_block_locations():
 
 @gen_cluster([(ip, 1)], timeout=60, client=True)
 def dont_test_dataframes(e, s, a):  # slow
-    pytest.importorskip('pandas')
     n = 3000000
     with make_hdfs() as (hdfs, basedir):
         fn = '%s/file.csv' % basedir
@@ -81,9 +90,7 @@ def dont_test_dataframes(e, s, a):  # slow
 
         def load(b, **kwargs):
             assert b
-            from io import BytesIO
-            import pandas as pd
-            bio = BytesIO(b)
+            bio = io.BytesIO(b)
             return pd.read_csv(bio, **kwargs)
 
         dfs = e.map(load, futures, names=['name', 'amount', 'id'], skiprows=1)
@@ -245,8 +252,6 @@ def test_write_bytes(c, s, a, b):
 
 
 def test_read_csv_sync(loop):
-    import dask.dataframe as dd
-    import pandas as pd
     with cluster(nworkers=3) as (s, [a, b, c]):
         with make_hdfs() as (hdfs, basedir):
             with hdfs.open('%s/1.csv' % basedir, 'wb') as f:
@@ -346,7 +351,6 @@ def test__read_text(c, s, a, b):
         yield gen.sleep(0.5)
         assert not s.tasks
 
-        import dask
         b.compute(get=dask.get)
 
         coll = b.str.strip().str.split().map(len)
@@ -365,7 +369,6 @@ def test__read_text(c, s, a, b):
 
 @gen_cluster([(ip, 1)], timeout=60, client=True)
 def test__read_text_json_endline(e, s, a):
-    import json
     with make_hdfs() as (hdfs, basedir):
         with hdfs.open('%s/text.1.txt' % basedir, 'wb') as f:
             f.write(b'{"x": 1}\n{"x": 2}\n')
@@ -434,3 +437,20 @@ def test_write_bytes_2(c, s, a, b):
         futures = c.compute(list(concat(vals)))
         results = yield c._gather(futures)
         assert data == results
+
+
+@pytest.mark.skipif(not pyarrow, reason='pyarrow not installed')
+def test_parquet_pyarrow(loop):
+    with cluster(nworkers=1) as (s, [a]):
+        with make_hdfs() as (hdfs, basedir):
+            fn = 'hdfs://%s/test.parquet' % basedir
+            df = pd.DataFrame(np.random.normal(size=(1000, 4)),
+                              columns=list('abcd'))
+            ddf = dd.from_pandas(df, npartitions=4)
+
+            with Client(s['address'], loop=loop) as c:
+                ddf.to_parquet(fn, engine='pyarrow')
+                assert len(hdfs.ls(fn)) # Files are written
+
+                ddf2 = dd.read_parquet(fn, engine='pyarrow')
+                assert len(ddf2) == 1000  # smoke test on read
