@@ -21,7 +21,7 @@ def assert_directory_contents(dir_path, expected):
     expected = [os.path.join(dir_path, p) for p in expected]
     actual = [os.path.join(dir_path, p)
               for p in os.listdir(dir_path)
-              if p != 'global.lock']
+              if p not in ('global.lock', 'purge.lock')]
     assert sorted(actual) == sorted(expected)
 
 

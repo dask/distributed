@@ -92,6 +92,7 @@ class WorkSpace(object):
         self.base_dir = os.path.abspath(base_dir)
         self._init_workspace()
         self._global_lock_path = os.path.join(self.base_dir, 'global.lock')
+        self._purge_lock_path = os.path.join(self.base_dir, 'purge.lock')
 
     def _init_workspace(self):
         try:
@@ -103,11 +104,14 @@ class WorkSpace(object):
     def _global_lock(self, **kwargs):
         return locket.lock_file(self._global_lock_path, **kwargs)
 
+    def _purge_lock(self, **kwargs):
+        return locket.lock_file(self._purge_lock_path, **kwargs)
+
     def _purge_leftovers(self):
         if not is_locking_enabled():
             return []
 
-        # Take the global lock to list candidates, to avoid purging
+        # List candidates with the global lock taken, to avoid purging
         # a lock file that was just created but not yet locked
         # (see WorkDir.__init__)
         lock = self._global_lock(timeout=0)
@@ -124,11 +128,22 @@ class WorkSpace(object):
                 lock.release()
 
         # No need to hold the global lock here, especially as purging
-        # can take time.
+        # can take time.  Instead take the purge lock to avoid two
+        # processes purging at once.
         purged = []
-        for path in candidates:
-            if self._check_lock_or_purge(path):
-                purged.append(path)
+        lock = self._purge_lock(timeout=0)
+        try:
+            lock.acquire()
+        except locket.LockError:
+            # No need for two processes to purge one after another
+            pass
+        else:
+            try:
+                for path in candidates:
+                    if self._check_lock_or_purge(path):
+                        purged.append(path)
+            finally:
+                lock.release()
         return purged
 
     def _list_unknown_locks(self):
