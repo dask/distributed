@@ -8,11 +8,13 @@ import subprocess
 import sys
 from time import sleep
 
+import mock
+
 from distributed.compatibility import Empty
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.utils import mp_context
-from distributed.utils_test import captured_logger, slow
+from distributed.utils_test import captured_logger, slow, new_config
 
 
 def assert_directory_contents(dir_path, expected):
@@ -146,6 +148,31 @@ def test_workspace_rmtree_failure(tmpdir):
     assert lines
     for line in lines:
         assert line.startswith("Failed to remove %r" % (a.dir_path,))
+
+
+def test_locking_disabled(tmpdir):
+    base_dir = str(tmpdir)
+
+    with new_config({'use-file-locking': False}):
+        with mock.patch('distributed.diskutils.locket.lock_file') as lock_file:
+            assert_contents = functools.partial(assert_directory_contents, base_dir)
+
+            ws = WorkSpace(base_dir)
+            assert_contents([])
+            a = ws.new_work_dir(name='aa')
+            assert_contents(['aa'])
+            b = ws.new_work_dir(name='bb')
+            assert_contents(['aa', 'bb'])
+            ws._purge_leftovers()
+            assert_contents(['aa', 'bb'])
+
+            a.release()
+            assert_contents(['bb'])
+            del b
+            gc.collect()
+            assert_contents([])
+
+        lock_file.assert_not_called()
 
 
 def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt):

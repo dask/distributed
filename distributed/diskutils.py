@@ -10,12 +10,17 @@ import tempfile
 
 from . import locket
 
+from . import config
 from .compatibility import finalize
 
 
 logger = logging.getLogger(__name__)
 
 DIR_LOCK_EXT = '.dirlock'
+
+
+def is_locking_enabled():
+    return config.get('use-file-locking', True)
 
 
 class WorkDir(object):
@@ -32,20 +37,27 @@ class WorkDir(object):
             self.dir_path = os.path.join(workspace.base_dir, name)
             os.mkdir(self.dir_path)  # it shouldn't already exist
 
-        try:
-            self._lock_path = os.path.join(self.dir_path + DIR_LOCK_EXT)
-            assert not os.path.exists(self._lock_path)
-            logger.debug("Locking %r...", self._lock_path)
-            self._lock_file = locket.lock_file(self._lock_path)
-            self._lock_file.acquire()
-        except Exception:
-            shutil.rmtree(self.dir_path, ignore_errors=True)
-            raise
+        if is_locking_enabled():
+            try:
+                self._lock_path = os.path.join(self.dir_path + DIR_LOCK_EXT)
+                assert not os.path.exists(self._lock_path)
+                logger.debug("Locking %r...", self._lock_path)
+                # Avoid a race condition before locking the file
+                # by taking the global lock
+                with workspace._global_lock():
+                    self._lock_file = locket.lock_file(self._lock_path)
+                    self._lock_file.acquire()
+            except Exception:
+                shutil.rmtree(self.dir_path, ignore_errors=True)
+                raise
+            workspace._known_locks.add(self._lock_path)
 
-        workspace._known_locks.add(self._lock_path)
-        self._finalizer = finalize(self, self._finalize,
-                                   workspace, self._lock_path,
-                                   self._lock_file, self.dir_path)
+            self._finalizer = finalize(self, self._finalize,
+                                       workspace, self._lock_path,
+                                       self._lock_file, self.dir_path)
+        else:
+            self._finalizer = finalize(self, self._finalize,
+                                       workspace, None, None, self.dir_path)
 
     def release(self):
         """
@@ -58,9 +70,11 @@ class WorkDir(object):
         try:
             workspace._purge_directory(dir_path)
         finally:
-            lock_file.release()
-            workspace._known_locks.remove(lock_path)
-            os.unlink(lock_path)
+            if lock_file is not None:
+                lock_file.release()
+            if lock_path is not None:
+                workspace._known_locks.remove(lock_path)
+                os.unlink(lock_path)
 
 
 class WorkSpace(object):
@@ -90,23 +104,31 @@ class WorkSpace(object):
         return locket.lock_file(self._global_lock_path, **kwargs)
 
     def _purge_leftovers(self):
-        # Need to hold the global lock to avoid several threads / processes
-        # purging at once
-        purged = []
+        if not is_locking_enabled():
+            return []
+
+        # Take the global lock to list candidates, to avoid purging
+        # a lock file that was just created but not yet locked
+        # (see WorkDir.__init__)
         lock = self._global_lock(timeout=0)
         try:
             lock.acquire()
         except locket.LockError:
-            # No need to waste time here if another lock holder is already
-            # purging the directory
-            pass
+            # No need to waste time here if someone else is busy doing
+            # something on this workspace
+            return []
         else:
             try:
-                for path in self._list_unknown_locks():
-                    if self._check_lock_or_purge(path):
-                        purged.append(path)
+                candidates = list(self._list_unknown_locks())
             finally:
                 lock.release()
+
+        # No need to hold the global lock here, especially as purging
+        # can take time.
+        purged = []
+        for path in candidates:
+            if self._check_lock_or_purge(path):
+                purged.append(path)
         return purged
 
     def _list_unknown_locks(self):
