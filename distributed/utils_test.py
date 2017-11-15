@@ -438,7 +438,13 @@ def run_nanny(q, scheduler_q, **kwargs):
 
 @contextmanager
 def check_active_rpc(loop, active_rpc_timeout=1):
+    for rpc_inst in list(rpc.active):
+        rpc_inst.close()
+        del rpc_inst
     active_before = set(rpc.active)
+    if active_before and not PY3:
+        # On Python 2, try to avoid dangling comms before forking workers
+        gc.collect()
     yield
     # Some streams can take a bit of time to notice their peer
     # has closed, and keep a coroutine (*) waiting for a CommClosedError
