@@ -1,4 +1,6 @@
 language: generic
+# sudo shouldn't be required, but currently tests fail when run in a container
+# on travis instead of a vm. See https://github.com/dask/distributed/pull/1563.
 sudo: required
 dist: trusty
 
