@@ -1,5 +1,5 @@
 language: generic
-sudo: false
+sudo: required
 dist: trusty
 
 env:
@@ -21,13 +21,6 @@ matrix:
   - os: osx
     # This needs to be the exact same line as above
     env: PYTHON=3.6 RUNSLOW=false
-
-before_install:
-  - |
-    if [[ $HDFS == true ]]; then
-        echo foo
-        foo stuff
-    fi;
 
 install:
   - source continuous_integration/travis/install.sh
