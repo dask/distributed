@@ -22,6 +22,16 @@ matrix:
     # This needs to be the exact same line as above
     env: PYTHON=3.6 RUNSLOW=false
 
+before_install:
+  - |
+    if [[ $HDFS == true ]]; then
+        pushd continuous_integration
+        docker build -t distributed-hdfs-test .
+        # Run HDFS
+        ./run-hdfs.sh || exit 1
+        popd
+    fi;
+
 install:
   - source continuous_integration/travis/install.sh
 
