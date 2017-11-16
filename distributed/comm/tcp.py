@@ -8,10 +8,12 @@ import struct
 import sys
 
 import tornado
-from tornado import gen, netutil
+from tornado import gen
 from tornado.iostream import StreamClosedError
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
+
+from . import netutil
 
 from .. import config
 from ..compatibility import finalize

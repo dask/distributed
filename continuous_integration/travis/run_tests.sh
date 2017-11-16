@@ -13,4 +13,4 @@ echo "-- Hard limits"
 echo "--"
 ulimit -a -H
 
-py.test -m "not avoid_travis" distributed --verbose -r s --timeout-method=thread --timeout=300 --durations=20 -x
+py.test -m "not avoid_travis" distributed --verbose -r s --timeout-method=thread --timeout=300 --durations=20 -x distributed/comm
