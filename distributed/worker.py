@@ -369,7 +369,8 @@ class WorkerBase(ServerNode):
             logger.info('-' * 49)
 
         for pc in self.periodic_callbacks.values():
-            pc.start()
+            if not pc.is_running():
+                pc.start()
 
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
@@ -1145,7 +1146,6 @@ class Worker(WorkerBase):
 
         pc = PeriodicCallback(self.cycle_profile,
                               profile_cycle_interval)
-        pc.start()
         self.periodic_callbacks['profile-cycle'] = pc
 
         _global_workers.append(weakref.ref(self))

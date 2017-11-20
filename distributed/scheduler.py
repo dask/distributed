@@ -506,6 +506,12 @@ class Scheduler(ServerNode):
 
         self.loop.add_callback(self.reevaluate_occupancy)
 
+        def start_pcs():
+            for pc in self.periodic_callbacks.values():
+                if not pc.is_running():
+                    pc.start()
+        self.loop.add_callback(start_pcs)
+
         return self.finished()
 
     @gen.coroutine
