@@ -124,6 +124,18 @@ class Server(object):
 
         self.__stopped = False
 
+    def start_periodic_callbacks(self):
+        """ Start Periodic Callbacks consistently
+
+        This starts all PeriodicCallbacks stored in self.periodic_callbacks if
+        they are not yet running.  It does this safely on the IOLoop.
+        """
+        def start_pcs():
+            for pc in self.periodic_callbacks.values():
+                if not pc.is_running():
+                    pc.start()
+        self.loop.add_callback(start_pcs)
+
     def stop(self):
         if not self.__stopped:
             self.__stopped = True

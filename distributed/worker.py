@@ -368,9 +368,7 @@ class WorkerBase(ServerNode):
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
 
-        for pc in self.periodic_callbacks.values():
-            if not pc.is_running():
-                pc.start()
+        self.start_periodic_callbacks()
 
     def start(self, port=0):
         self.loop.add_callback(self._start, port)

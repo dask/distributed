@@ -505,12 +505,7 @@ class Scheduler(ServerNode):
             finalize(self, del_scheduler_file)
 
         self.loop.add_callback(self.reevaluate_occupancy)
-
-        def start_pcs():
-            for pc in self.periodic_callbacks.values():
-                if not pc.is_running():
-                    pc.start()
-        self.loop.add_callback(start_pcs)
+        self.start_periodic_callbacks()
 
         return self.finished()
 
