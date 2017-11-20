@@ -1,7 +1,6 @@
 click >= 6.6
 cloudpickle >= 0.2.2
-dask >= 0.14.1
-locket
+dask >= 0.16.0
 msgpack-python
 psutil
 six

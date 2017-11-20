@@ -14,7 +14,6 @@ import re
 import shutil
 import signal
 import socket
-import ssl
 import subprocess
 import sys
 import tempfile
@@ -24,6 +23,11 @@ from time import sleep
 import uuid
 import warnings
 import weakref
+
+try:
+    import ssl
+except ImportError:
+    ssl = None
 
 import psutil
 import pytest
@@ -725,23 +729,6 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
 
         return test_func
     return _
-
-
-@contextmanager
-def make_hdfs():
-    from hdfs3 import HDFileSystem
-    # from .hdfs import DaskHDFileSystem
-    basedir = '/tmp/test-distributed'
-    hdfs = HDFileSystem(host='localhost', port=8020)
-    if hdfs.exists(basedir):
-        hdfs.rm(basedir)
-    hdfs.mkdir(basedir)
-
-    try:
-        yield hdfs, basedir
-    finally:
-        if hdfs.exists(basedir):
-            hdfs.rm(basedir)
 
 
 def raises(func, exc=Exception):
