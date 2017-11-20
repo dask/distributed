@@ -21,11 +21,12 @@ except ImportError:
     except ImportError:
         raise ImportError("Platform not supported (failed to import fcntl, ctypes, msvcrt)")
     else:
-        _WinAPI_LockFile = ctypes.windll.kernel32.LockFile
+        _kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        _WinAPI_LockFile = _kernel32.LockFile
         _WinAPI_LockFile.restype = ctypes.wintypes.BOOL
         _WinAPI_LockFile.argtypes = [ctypes.wintypes.HANDLE] + [ctypes.wintypes.DWORD] * 4
 
-        _WinAPI_UnlockFile = ctypes.windll.kernel32.UnlockFile
+        _WinAPI_UnlockFile = _kernel32.UnlockFile
         _WinAPI_UnlockFile.restype = ctypes.wintypes.BOOL
         _WinAPI_UnlockFile.argtypes = [ctypes.wintypes.HANDLE] + [ctypes.wintypes.DWORD] * 4
 
@@ -36,10 +37,10 @@ except ImportError:
             if res:
                 return True
             else:
-                e = ctypes.WinError()
+                err = ctypes.get_last_error()
                 # 33 = ERROR_LOCK_VIOLATION
-                if e.winerror != 33:
-                    raise e
+                if err != 33:
+                    raise ctypes.WinError(err)
                 return False
 
         def _unlock_file(file_):
