@@ -4384,9 +4384,9 @@ def test_recreate_error_not_error(loop):
 
 @gen_cluster(client=True)
 def test_retire_workers(c, s, a, b):
-    assert s.workers == {a.address, b.address}
+    assert set(s.workers) == {a.address, b.address}
     yield c.scheduler.retire_workers(workers=[a.address], close_workers=True)
-    assert s.workers == {b.address}
+    assert set(s.workers) == {b.address}
 
     start = time()
     while a.status != 'closed':

@@ -116,7 +116,7 @@ def test_failed_worker_without_warning(c, s, a, b):
     L2 = c.map(inc, range(10, 20))
     yield wait(L2)
     assert all(len(keys) > 0 for keys in s.has_what.values())
-    ncores2 = s.ncores.copy()
+    ncores2 = dict(s.ncores)
 
     yield c._restart()
 

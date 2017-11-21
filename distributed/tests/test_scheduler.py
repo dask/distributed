@@ -387,7 +387,7 @@ def test_scheduler_as_center():
     c = Worker(s.address, ncores=3)
     yield [w._start(0) for w in [a, b, c]]
 
-    assert s.ncores == {w.address: w.ncores for w in [a, b, c]}
+    assert s.ncores == {w.address: w.ncores for w in [a, b, c]}, dict(s.ncores)
     assert not s.who_has
 
     s.update_graph(tasks={'a': dumps_task((inc, 1))},
@@ -690,7 +690,7 @@ def test_host_health(s, a, b, c):
 @gen_cluster(ncores=[])
 def test_add_worker_is_idempotent(s):
     s.add_worker(address=alice, ncores=1, resolve_address=False)
-    ncores = s.ncores.copy()
+    ncores = dict(s.ncores)
     s.add_worker(address=alice, resolve_address=False)
     assert s.ncores == s.ncores
 
@@ -830,14 +830,14 @@ def test_occupancy_cleardown(c, s, a, b):
     s.validate = False
 
     # Inject excess values in s.occupancy
-    s.occupancy[a.address] = 2
+    s.workers[a.address].occupancy = 2
     s.total_occupancy += 2
     futures = c.map(slowinc, range(100), delay=0.01)
     yield wait(futures)
 
     # Verify that occupancy values have been zeroed out
     assert abs(s.total_occupancy) < 0.01
-    assert all(v == 0 for v in s.occupancy.values())
+    assert all(ws.occupancy == 0 for ws in s.workers.values())
 
 
 @nodebug
