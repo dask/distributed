@@ -1,11 +1,12 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import defaultdict, deque, OrderedDict
+from collections import defaultdict, deque, OrderedDict, Mapping
 from datetime import timedelta
 from functools import partial
 import itertools
 import json
 import logging
+import operator
 import os
 import pickle
 import random
@@ -70,6 +71,33 @@ DEFAULT_EXTENSIONS = [
 
 if config.get('work-stealing', True):
     DEFAULT_EXTENSIONS.append(WorkStealing)
+
+
+class ClientState(object):
+    __slots__ = (
+        'client_key',
+        'wants_what',
+        )
+
+    def __init__(self, client):
+        self.client_key = client
+        self.wants_what = set()
+
+
+class _ClientStateLegacyMapping(Mapping):
+
+    def __init__(self, client_states, accessor):
+        self._states = client_states
+        self._accessor = accessor
+
+    def __iter__(self):
+        return iter(self._states)
+
+    def __len__(self):
+        return len(self._states)
+
+    def __getitem__(self, key):
+        return self._accessor(self._states[key])
 
 
 class Scheduler(ServerNode):
@@ -273,7 +301,7 @@ class Scheduler(ServerNode):
         self.who_has = dict()
         self.has_what = dict()
         self.who_wants = defaultdict(set)
-        self.wants_what = defaultdict(set)
+        #self.wants_what = defaultdict(set)
         self.exceptions = dict()
         self.tracebacks = dict()
         self.exceptions_blame = dict()
@@ -284,13 +312,11 @@ class Scheduler(ServerNode):
         self.idle = SortedSet()
         self.saturated = set()
 
-        self._task_collections = [self.tasks, self.dependencies,
-                                  self.dependents, self.waiting, self.waiting_data,
-                                  self.released, self.priority, self.nbytes,
-                                  self.host_restrictions, self.worker_restrictions,
-                                  self.loose_restrictions, self.ready, self.who_wants,
-                                  self.wants_what, self.unknown_durations, self.rprocessing,
-                                  self.resource_restrictions, self.retries]
+        # Client state
+        self.client_states = dict()
+        self.wants_what = _ClientStateLegacyMapping(
+            self.client_states, operator.attrgetter('wants_what'))
+        self.client_states['fire-and-forget'] = ClientState('fire-and-forget')
 
         # Worker state
         self.ncores = dict()
@@ -304,6 +330,14 @@ class Scheduler(ServerNode):
         self.resources = defaultdict(dict)
         self.aliases = dict()
         self.occupancy = dict()
+
+        self._task_collections = [self.tasks, self.dependencies,
+                                  self.dependents, self.waiting, self.waiting_data,
+                                  self.released, self.priority, self.nbytes,
+                                  self.host_restrictions, self.worker_restrictions,
+                                  self.loose_restrictions, self.ready, self.who_wants,
+                                  self.unknown_durations, self.rprocessing,
+                                  self.resource_restrictions, self.retries]
 
         self._worker_collections = [self.ncores, self.workers,
                                     self.worker_info, self.host_info, self.worker_resources,
@@ -453,6 +487,8 @@ class Scheduler(ServerNode):
 
     def start(self, addr_or_port=8786, start_queues=True):
         """ Clear out old state and restart all running coroutines """
+        # XXX what about nested state such as ClientState.wants_what
+        # (see also fire-and-forget...)
         for collection in self._task_collections:
             collection.clear()
 
@@ -1019,19 +1055,24 @@ class Scheduler(ServerNode):
             self.client_releases_keys(keys=[key], client=c)
 
     def client_desires_keys(self, keys=None, client=None):
+        cs = self.client_states.get(client)
+        if cs is None:
+            # For testing
+            cs = self.client_states[client] = ClientState(client)
         for k in keys:
             self.who_wants[k].add(client)
-            self.wants_what[client].add(k)
+            cs.wants_what.add(k)
 
             if self.task_state.get(k) in ('memory', 'erred'):
                 self.report_on_key(k, client=client)
 
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
+        cs = self.client_states[client]
         keys2 = set()
         for key in list(keys):
-            if key in self.wants_what[client]:
-                self.wants_what[client].remove(key)
+            if key in cs.wants_what:
+                cs.wants_what.remove(key)
                 s = self.who_wants[key]
                 s.remove(client)
                 if not s:
@@ -1047,9 +1088,13 @@ class Scheduler(ServerNode):
                 self.transitions(r)
 
     def client_wants_keys(self, keys=None, client=None):
+        cs = self.client_states.get(client)
+        if cs is None:
+            # For publish
+            cs = self.client_states[client] = ClientState(client)
         for k in keys:
             self.who_wants[k].add(client)
-            self.wants_what[client].add(k)
+            cs.wants_what.add(k)
 
     ######################################
     # Task Validation (currently unused) #
@@ -1217,9 +1262,11 @@ class Scheduler(ServerNode):
 
         We listen to all future messages from this Comm.
         """
+        assert client is not None
         logger.info("Receive client connection: %s", client)
         self.log_event(['all', client], {'action': 'add-client',
                                          'client': client})
+        self.client_states[client] = ClientState(client)
         try:
             yield self.handle_client(comm, client=client)
         finally:
@@ -1237,9 +1284,14 @@ class Scheduler(ServerNode):
         logger.info("Remove client %s", client)
         self.log_event(['all', client], {'action': 'remove-client',
                                          'client': client})
-        self.client_releases_keys(self.wants_what.get(client, ()), client)
-        with ignoring(KeyError):
-            del self.wants_what[client]
+        try:
+            cs = self.client_states[client]
+        except KeyError:
+            # XXX is this a legitimate condition?
+            pass
+        else:
+            self.client_releases_keys(keys=cs.wants_what, client=cs.client_key)
+            del self.client_states[client]
 
     @gen.coroutine
     def handle_client(self, comm, client=None):
@@ -1624,8 +1676,8 @@ class Scheduler(ServerNode):
             n_workers = len(self.workers)
 
             logger.info("Send lost future signal to clients")
-            for client, keys in self.wants_what.items():
-                self.client_releases_keys(keys=keys, client=client)
+            for cs in self.client_states.values():
+                self.client_releases_keys(keys=cs.wants_what, client=cs.client_key)
 
             nannies = {addr: self.get_worker_service_addr(addr, 'nanny')
                        for addr in self.workers}
@@ -2605,7 +2657,9 @@ class Scheduler(ServerNode):
 
             self.task_state[key] = 'memory'
 
-            if key in self.wants_what['fire-and-forget']:
+            # XXX query who_wants instead?
+            cs = self.client_states['fire-and-forget']
+            if key in cs.wants_what:
                 self.client_releases_keys(client='fire-and-forget', keys=[key])
 
             if self.validate:
@@ -2864,7 +2918,9 @@ class Scheduler(ServerNode):
                          'exception': self.exceptions[failing_key],
                          'traceback': self.tracebacks.get(failing_key)})
 
-            if key in self.wants_what['fire-and-forget']:
+            # XXX query who_wants instead?
+            cs = self.client_states['fire-and-forget']
+            if key in cs.wants_what:
                 self.client_releases_keys(client='fire-and-forget', keys=[key])
 
             if self.validate:

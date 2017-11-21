@@ -392,7 +392,8 @@ def test_scheduler_as_center():
 
     s.update_graph(tasks={'a': dumps_task((inc, 1))},
                    keys=['a'],
-                   dependencies={'a': []})
+                   dependencies={'a': []},
+                   client='foo')
     start = time()
     while 'a' not in s.who_has:
         assert time() - start < 5
