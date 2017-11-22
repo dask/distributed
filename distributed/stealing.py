@@ -79,7 +79,8 @@ class WorkStealing(SchedulerPlugin):
                     for k in self.stealable_unknown_durations.pop(ks):
                         if k in self.in_flight:
                             continue
-                        if self.scheduler.task_state[k] == 'processing':
+                        tts = self.scheduler.task_states[k]
+                        if tts.state == 'processing':
                             self.put_key_in_stealable(k, split=ks)
             else:
                 if key in self.in_flight:
@@ -205,10 +206,12 @@ class WorkStealing(SchedulerPlugin):
             self.in_flight_occupancy[thief] -= d['thief_duration']
             self.in_flight_occupancy[victim] += d['victim_duration']
 
+            ts = self.scheduler.task_states[key]
+
             if not self.in_flight:
                 self.in_flight_occupancy = defaultdict(lambda: 0)
 
-            if (self.scheduler.task_state.get(key) != 'processing' or
+            if (ts.state != 'processing' or
                     self.scheduler.rprocessing[key] != victim.worker_key):
                 old_thief = thief.occupancy
                 new_thief = sum(thief.processing.values())
