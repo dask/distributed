@@ -3320,10 +3320,10 @@ def test_get_foo(c, s, a, b):
     assert x == {a.address: s.ncores[a.address]}
 
     x = yield c.scheduler.has_what()
-    assert x == valmap(list, s.has_what)
+    assert valmap(sorted, x) == valmap(sorted, s.has_what)
 
     x = yield c.scheduler.has_what(workers=[a.address])
-    assert x == {a.address: list(s.has_what[a.address])}
+    assert valmap(sorted, x) == {a.address: sorted(s.has_what[a.address])}
 
     x = yield c.scheduler.nbytes(summary=False)
     assert x == s.nbytes
@@ -3332,10 +3332,10 @@ def test_get_foo(c, s, a, b):
     assert x == {futures[0].key: s.nbytes[futures[0].key]}
 
     x = yield c.scheduler.who_has()
-    assert x == valmap(list, s.who_has)
+    assert valmap(sorted, x) == valmap(sorted, s.who_has)
 
     x = yield c.scheduler.who_has(keys=[futures[0].key])
-    assert x == {futures[0].key: list(s.who_has[futures[0].key])}
+    assert valmap(sorted, x) == {futures[0].key: sorted(s.who_has[futures[0].key])}
 
 
 @slow

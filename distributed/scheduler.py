@@ -17,7 +17,7 @@ try:
     from cytoolz import frequencies, merge, pluck, merge_sorted, first
 except ImportError:
     from toolz import frequencies, merge, pluck, merge_sorted, first
-from toolz import memoize, valmap, first, second, concat
+from toolz import memoize, valmap, first, second, concat, compose
 from tornado import gen
 from tornado.gen import Return
 from tornado.ioloop import IOLoop
@@ -83,6 +83,12 @@ class ClientState(object):
         self.client_key = client
         self.wants_what = set()
 
+    def __repr__(self):
+        return "<Client %r>" % (self.client_key,)
+
+    def __str__(self):
+        return self.client_key
+
 
 class WorkerState(object):
     __slots__ = (
@@ -107,7 +113,7 @@ class WorkerState(object):
         self.has_what = set()
 
     def __repr__(self):
-        return "%s(%r)" % (self.__class__, self.worker_key)
+        return "<Worker %r>" % (self.worker_key,)
 
     def __str__(self):
         return self.worker_key
@@ -143,6 +149,7 @@ class TaskState(object):
     # XXX released, unrunnable
 
     def __init__(self, key, run_spec):
+        assert isinstance(key, (str, bytes))
         self.key = key
         self.run_spec = run_spec
         self.state = None
@@ -151,6 +158,9 @@ class TaskState(object):
         self.nbytes = None
         self.priority = None
         self.who_wants = set()
+        self.dependencies = set()
+        self.dependents = set()
+        self.who_has = set()
 
     def get_nbytes(self):
         nbytes = self.nbytes
@@ -158,6 +168,16 @@ class TaskState(object):
 
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
+
+    def validate(self):
+        for cs in self.who_wants:
+            assert isinstance(cs, ClientState), (repr(cs), self.who_wants)
+        for ws in self.who_has:
+            assert isinstance(ws, WorkerState), (repr(ws), self.who_has)
+        for ts in self.dependencies:
+            assert isinstance(ts, TaskState), (repr(ts), self.dependencies)
+        for ts in self.dependents:
+            assert isinstance(ts, TaskState), (repr(ts), self.dependents)
 
 
 class _StateLegacyMapping(Mapping):
@@ -218,6 +238,27 @@ class _StateLegacySet(Set):
 
     def __repr__(self):
         return "%s(%s)" % (self.__class__, set(self))
+
+
+def _legacy_task_key_set(tasks):
+    """
+    Transform a set of task states into a set of task keys.
+    """
+    return {ts.key for ts in tasks}
+
+
+def _legacy_client_key_set(clients):
+    """
+    Transform a set of client states into a set of client keys.
+    """
+    return {cs.client_key for cs in clients}
+
+
+def _legacy_worker_key_set(workers):
+    """
+    Transform a set of worker states into a set of worker keys.
+    """
+    return {ws.worker_key for ws in workers}
 
 
 class Scheduler(ServerNode):
@@ -395,22 +436,29 @@ class Scheduler(ServerNode):
 
         # Task state
         self.task_states = dict()
-        for old_attr, new_attr in [('task_state', 'state'),
-                                   ('priority', 'priority'),
-                                   ]:
+        for old_attr, new_attr, wrap in [
+                ('task_state', 'state', None),
+                ('priority', 'priority', None),
+                ('dependencies', 'dependencies', _legacy_task_key_set),
+                ('dependents', 'dependents', _legacy_task_key_set),
+                ]:
+            func = operator.attrgetter(new_attr)
+            if wrap is not None:
+                func = compose(wrap, func)
             setattr(self, old_attr,
-                    _StateLegacyMapping(self.task_states,
-                                        operator.attrgetter(new_attr)))
+                    _StateLegacyMapping(self.task_states, func))
 
-        for old_attr, new_attr in [('tasks', 'run_spec'),
-                                   ('who_wants', 'who_wants'),
-                                   ]:
+        for old_attr, new_attr, wrap in [
+                ('tasks', 'run_spec', None),
+                ('who_wants', 'who_wants', _legacy_client_key_set),
+                ('who_has', 'who_has', _legacy_worker_key_set),
+                ]:
+            func = operator.attrgetter(new_attr)
+            if wrap is not None:
+                func = compose(wrap, func)
             setattr(self, old_attr,
-                    _OptionalStateLegacyMapping(self.task_states,
-                                                operator.attrgetter(new_attr)))
+                    _OptionalStateLegacyMapping(self.task_states, func))
 
-        self.dependencies = dict()
-        self.dependents = dict()
         self.generation = 0
         self.released = set()
         self.nbytes = dict()
@@ -427,7 +475,6 @@ class Scheduler(ServerNode):
         self.waiting_data = dict()
         self.ready = deque()
         self.unrunnable = set()
-        self.who_has = dict()
         self.exceptions = dict()
         self.tracebacks = dict()
         self.exceptions_blame = dict()
@@ -436,25 +483,34 @@ class Scheduler(ServerNode):
         self.task_metadata = dict()
 
         # Client state
-        # XXX renamed to self.clients?
+        # XXX rename to self.clients?
         self.client_states = dict()
-        self.wants_what = _StateLegacyMapping(
-            self.client_states, operator.attrgetter('wants_what'))
+        for old_attr, new_attr, wrap in [
+                ('wants_what', 'wants_what', _legacy_task_key_set),
+                ]:
+            func = operator.attrgetter(new_attr)
+            if wrap is not None:
+                func = compose(wrap, func)
+            setattr(self, old_attr,
+                    _StateLegacyMapping(self.client_states, func))
         self.client_states['fire-and-forget'] = ClientState('fire-and-forget')
 
         # Worker state
         self.workers = SortedDict()
-        for old_attr, new_attr in [('ncores', 'ncores'),
-                                   ('worker_bytes', 'nbytes'),
-                                   ('worker_resources', 'resources'),
-                                   ('used_resources', 'used_resources'),
-                                   ('occupancy', 'occupancy'),
-                                   ('processing', 'processing'),
-                                   ('has_what', 'has_what'),
-                                   ]:
+        for old_attr, new_attr, wrap in [
+                ('ncores', 'ncores', None),
+                ('worker_bytes', 'nbytes', None),
+                ('worker_resources', 'resources', None),
+                ('used_resources', 'used_resources', None),
+                ('occupancy', 'occupancy', None),
+                ('processing', 'processing', None),
+                ('has_what', 'has_what', _legacy_task_key_set),
+                ]:
+            func = operator.attrgetter(new_attr)
+            if wrap is not None:
+                func = compose(wrap, func)
             setattr(self, old_attr,
-                    _StateLegacyMapping(self.workers,
-                                        operator.attrgetter(new_attr)))
+                    _StateLegacyMapping(self.workers, func))
 
         self.idle = SortedSet(key=operator.attrgetter('worker_key'))
         self.saturated = set()
@@ -466,8 +522,7 @@ class Scheduler(ServerNode):
         self.resources = defaultdict(dict)
         self.aliases = dict()
 
-        self._task_collections = [self.dependencies,
-                                  self.dependents, self.waiting, self.waiting_data,
+        self._task_collections = [self.waiting, self.waiting_data,
                                   self.released, self.nbytes,
                                   self.host_restrictions, self.worker_restrictions,
                                   self.loose_restrictions, self.ready,
@@ -479,7 +534,7 @@ class Scheduler(ServerNode):
                                     self.worker_restrictions, self.host_restrictions,
                                     self.resource_restrictions,
                                     self.resources, self.aliases,
-                                    self.rprocessing, self.who_has]
+                                    self.rprocessing]
 
         self.extensions = {}
         self.plugins = []
@@ -851,7 +906,7 @@ class Scheduler(ServerNode):
             recommendations = {}
             for key in list(self.unrunnable):
                 valid = self.valid_workers(key)
-                if valid is True or address in valid or name in valid:
+                if valid is True or ws in valid:
                     recommendations[key] = 'waiting'
 
             if recommendations:
@@ -878,15 +933,18 @@ class Scheduler(ServerNode):
             self.log_event(['all', client], {'action': 'update_graph',
                                              'count': len(tasks)})
 
+        # Remove aliases
         for k in list(tasks):
             if tasks[k] is k:
                 del tasks[k]
+
+        dependencies = dependencies or {}
 
         n = 0
         while len(tasks) != n:  # walk thorough new tasks, cancel any bad deps
             n = len(tasks)
             for k, deps in list(dependencies.items()):
-                if any(dep not in self.dependencies and dep not in tasks
+                if any(dep not in self.task_states and dep not in tasks
                        for dep in deps):  # bad key
                     logger.info('User asked for computation on lost data, %s', k)
                     del tasks[k]
@@ -896,21 +954,23 @@ class Scheduler(ServerNode):
                     self.report({'op': 'cancelled-key', 'key': k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
 
-        # Fails on test_publish_bag()
-        #if self.validate:
-            #if dependencies:
-                #for k, deps in dependencies.items():
-                    #if k in deps:
-                        #raise AssertionError("circular dependency %r <- %r"
-                                             #% (k, sorted(deps)))
+        # Remove any self-dependencies (happens on test_publish_bag()
+        # and others)
+        for k in dependencies:
+            deps = set(dependencies[k])
+            if k in deps:
+                deps.remove(k)
+            dependencies[k] = deps
+
+        # XXX use task states everywhere
 
         stack = list(keys)
         touched = set()
         while stack:
             k = stack.pop()
-            if k in self.dependencies:
+            if k in touched:
                 continue
-            touched.add(k)
+            # XXX Have a method get_task_state(self, k) ?
             ts = self.task_states.get(k)
             if ts is None:
                 ts = self.task_states[k] = TaskState(k, tasks.get(k))
@@ -919,16 +979,19 @@ class Scheduler(ServerNode):
             elif not ts.run_spec:
                 ts.run_spec = tasks.get(k)
 
-            if k not in self.dependents:
-                self.dependents[k] = set()
-            deps = self.dependencies[k] = set(dependencies.get(k, ()))
-            for dep in deps:
-                if dep not in self.dependents:
-                    self.dependents[dep] = set()
-                self.dependents[dep].add(k)
-            stack.extend(deps)
+            touched.add(k)
+            stack.extend(dependencies.get(k, ()))
 
         self.client_desires_keys(keys=keys, client=client)
+
+        for key, deps in dependencies.items():
+            ts = self.task_states.get(key)
+            if ts is None or ts.dependencies:
+                continue
+            for dep in deps:
+                dts = self.task_states[dep]
+                ts.dependencies.add(dts)
+                dts.dependents.add(ts)
 
         recommendations = OrderedDict()
 
@@ -946,6 +1009,14 @@ class Scheduler(ServerNode):
             ts = self.task_states[key]
             if ts.priority is None:
                 ts.priority = (generation, new_priority[key])  # prefer old
+
+        runnables = [key for key in keys | touched
+                     if self.task_states[key].run_spec]
+
+        for key in runnables:
+            ts = self.task_states[key]
+            if ts.priority is None and ts.run_spec:
+                ts.priority = (self.generation, 0)
 
         if restrictions:
             # *restrictions* is a dict keying task ids to lists of
@@ -976,15 +1047,16 @@ class Scheduler(ServerNode):
         if retries:
             self.retries.update(retries)
 
-        for ts in sorted([self.task_states[key] for key in touched | keys],
+        for ts in sorted([self.task_states[key] for key in runnables],
                           key=operator.attrgetter('priority')):
             if ts.state == 'released' and ts.run_spec:
                 recommendations[ts.key] = 'waiting'
 
         for key in touched | keys:
-            for dep in self.dependencies[key]:
-                if dep in self.exceptions_blame:
-                    self.exceptions_blame[key] = self.exceptions_blame[dep]
+            ts = self.task_states[key]
+            for dts in ts.dependencies:
+                if dts.key in self.exceptions_blame:
+                    self.exceptions_blame[key] = self.exceptions_blame[dts.key]
                     recommendations[key] = 'erred'
                     break
 
@@ -1024,15 +1096,15 @@ class Scheduler(ServerNode):
                                               **kwargs)
 
             if ts.state == 'memory':
-                if key not in ws.has_what:
-                    ws.has_what.add(key)
+                if ts not in ws.has_what:
+                    ws.has_what.add(ts)
                     ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
-                    self.who_has[key].add(worker)
+                    ts.who_has.add(ws)
         else:
             logger.debug("Received already computed task, worker: %s, state: %s"
                          ", key: %s, who_has: %s",
-                         worker, ts.state, key, self.who_has.get(key))
-            if worker not in self.who_has.get(key, ()):
+                         worker, ts.state, key, ts.who_has)
+            if ws not in ts.who_has:
                 self.worker_send(worker, {'op': 'release-task', 'key': key})
             recommendations = {}
 
@@ -1078,10 +1150,9 @@ class Scheduler(ServerNode):
             recommendations = OrderedDict()
 
             if cts is not None and cts.state == 'memory':  # couldn't find this
-                for w in set(self.who_has[cause]):  # TODO: this behavior is extreme
-                    ws = self.workers[w]
-                    ws.has_what.remove(cause)
-                    self.who_has[cause].remove(w)
+                for ws in cts.who_has:  # TODO: this behavior is extreme
+                    ws.has_what.remove(cts)
+                    cts.who_has.remove(ws)
                     ws.nbytes -= self.nbytes.get(cause, DEFAULT_DATA_SIZE)
                 recommendations[cause] = 'released'
 
@@ -1155,19 +1226,15 @@ class Scheduler(ServerNode):
 
             self.total_occupancy -= ws.occupancy
 
-            for key in ws.has_what:
-                ts = self.task_states[key]
-                self.who_has[key].remove(address)
-                if not self.who_has[key]:
+            for ts in ws.has_what:
+                ts.who_has.remove(ws)
+                if not ts.who_has:
                     if ts.run_spec:
-                        recommendations[key] = 'released'
-                    else:
-                        recommendations[key] = 'forgotten'
+                        recommendations[ts.key] = 'released'
+                    else:  # pure data
+                        recommendations[ts.key] = 'forgotten'
 
             self.transitions(recommendations)
-
-            if self.validate:
-                assert all(self.who_has.values()), len(self.who_has)
 
             for plugin in self.plugins[:]:
                 try:
@@ -1194,19 +1261,20 @@ class Scheduler(ServerNode):
         """ Cancel a particular key and all dependents """
         # TODO: this should be converted to use the transition mechanism
         ts = self.task_states.get(key)
+        cs = self.client_states[client]
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
             if retries:
                 self.loop.add_future(gen.sleep(0.2),
                                      lambda _: self.cancel_key(key, client, retries - 1))
             return
-        if force or ts.who_wants == {client}:  # no one else wants this key
-            for dep in list(self.dependents[key]):
-                self.cancel_key(dep, client, force=force)
+        if force or ts.who_wants == {cs}:  # no one else wants this key
+            for dts in list(ts.dependents):
+                self.cancel_key(dts.key, client, force=force)
         logger.info("Scheduler cancels key %s.  Force=%s", key, force)
         self.report({'op': 'cancelled-key', 'key': key})
-        clients = list(ts.who_wants) if force else [client]
+        clients = list(ts.who_wants) if force else [cs]
         for c in clients:
-            self.client_releases_keys(keys=[key], client=c)
+            self.client_releases_keys(keys=[key], client=c.client_key)
 
     def client_desires_keys(self, keys=None, client=None):
         cs = self.client_states.get(client)
@@ -1220,8 +1288,8 @@ class Scheduler(ServerNode):
                 ts = self.task_states[k] = TaskState(k, None)
                 ts.state = 'released'
                 self.released.add(k)
-            ts.who_wants.add(client)
-            cs.wants_what.add(k)
+            ts.who_wants.add(cs)
+            cs.wants_what.add(ts)
 
             if ts.state in ('memory', 'erred'):
                 self.report_on_key(k, client=client)
@@ -1229,22 +1297,22 @@ class Scheduler(ServerNode):
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
         cs = self.client_states[client]
-        keys2 = set()
+        tasks2 = set()
         for key in list(keys):
-            if key in cs.wants_what:
-                cs.wants_what.remove(key)
-                ts = self.task_states.get(key)
-                if ts is not None:
-                    s = ts.who_wants
-                    s.remove(client)
-                    if not s:
-                        keys2.add(key)
+            ts = self.task_states.get(key)
+            if ts is not None and ts in cs.wants_what:
+                cs.wants_what.remove(ts)
+                s = ts.who_wants
+                s.remove(cs)
+                if not s:
+                    tasks2.add(ts)
 
-        for key in keys2:
+        for ts in tasks2:
+            key = ts.key
             if key in self.waiting_data and not self.waiting_data[key]:
                 r = self.transition(key, 'released')
                 self.transitions(r)
-            if key in self.dependents and not self.dependents[key]:
+            if not ts.dependents:
                 r = self.transition(key, 'forgotten')
                 self.transitions(r)
 
@@ -1254,27 +1322,27 @@ class Scheduler(ServerNode):
 
     def validate_released(self, key):
         ts = self.task_states[key]
-        assert key in self.dependencies
         assert ts.state == 'released'
         assert key not in self.waiting_data
-        assert key not in self.who_has
+        assert not ts.who_has
         assert key not in self.rprocessing
         # assert key not in self.ready
         assert key not in self.waiting
-        assert not any(key in self.waiting_data.get(dep, ())
-                       for dep in self.dependencies[key])
+        assert not any(key in self.waiting_data.get(dts.key, ())
+                       for dts in ts.dependencies)
         assert key in self.released
 
     def validate_waiting(self, key):
         ts = self.task_states[key]
         assert key in self.waiting
         assert key in self.waiting_data
-        assert key not in self.who_has
+        assert not ts.who_has
         assert key not in self.rprocessing
         assert key not in self.released
-        for dep in self.dependencies[key]:
-            assert (dep in self.who_has) + (dep in self.waiting[key]) == 1
-            assert key in self.waiting_data[dep]
+        for dts in ts.dependencies:
+            assert bool(dts.who_has) + (dts.key in self.waiting[key]) == 1
+            #assert dep in self.waiting[key] == key in self.waiting_data[dep]
+            assert key in self.waiting_data[dts.key]
 
     def validate_processing(self, key):
         ts = self.task_states[key]
@@ -1283,29 +1351,19 @@ class Scheduler(ServerNode):
         assert key in self.rprocessing
         w = self.rprocessing[key]
         assert key in self.workers[w].processing
-        assert key not in self.who_has
-        for dep in self.dependencies[key]:
-            assert dep in self.who_has
-            assert key in self.waiting_data[dep]
+        assert not ts.who_has
+        for dts in ts.dependencies:
+            assert dts.who_has
+            assert key in self.waiting_data[dts.key]
 
     def validate_memory(self, key):
         ts = self.task_states[key]
-        assert key in self.who_has
+        assert ts.who_has
         assert key not in self.rprocessing
         assert key not in self.waiting
         assert key not in self.released
-        for dep in self.dependents[key]:
-            assert (dep in self.who_has) + (dep in self.waiting_data[key]) == 1
-
-    def validate_queue(self, key):
-        ts = self.task_states[key]
-        # assert key in self.ready
-        assert key not in self.released
-        assert key not in self.rprocessing
-        assert key not in self.who_has
-        assert key not in self.waiting
-        for dep in self.dependencies[key]:
-            assert dep in self.who_has
+        for dts in ts.dependents:
+            assert bool(dts.who_has) + (dts.key in self.waiting_data[key]) == 1
 
     def validate_no_worker(self, key):
         ts = self.task_states[key]
@@ -1313,14 +1371,14 @@ class Scheduler(ServerNode):
         assert key not in self.waiting
         assert key not in self.released
         assert key not in self.rprocessing
-        assert key not in self.who_has
-        for dep in self.dependencies[key]:
-            assert dep in self.who_has
+        assert not ts.who_has
+        for dts in ts.dependencies:
+            assert dts.who_has
 
     def validate_erred(self, key):
         ts = self.task_states[key]
         assert key in self.exceptions_blame
-        assert key not in self.who_has
+        assert not ts.who_has
 
     def validate_key(self, key):
         try:
@@ -1328,6 +1386,7 @@ class Scheduler(ServerNode):
             if ts is None:
                 logger.debug("Key lost: %s", key)
             else:
+                ts.validate()
                 try:
                     func = getattr(self, 'validate_' + ts.state.replace('-', '_'))
                 except AttributeError:
@@ -1343,28 +1402,47 @@ class Scheduler(ServerNode):
             raise
 
     def validate_state(self, allow_overlap=False):
+        # XXX rewrite this for state objects
         validate_state(self.dependencies, self.dependents, self.waiting,
                        self.waiting_data, self.ready, self.who_has,
                        self.processing, None, self.released, self.who_wants,
                        self.wants_what, tasks=self.tasks, erred=self.exceptions_blame,
                        allow_overlap=allow_overlap)
+
         if not (set(self.workers) ==
                 set(self.worker_info) ==
                 set(self.worker_comms)):
             raise ValueError("Workers not the same in all collections")
 
+        for w, ws in self.workers.items():
+            assert isinstance(w, str), (type(w), w)
+            assert isinstance(ws, WorkerState), (type(ws), ws)
+            assert ws.worker_key == w
+
+        for k, ts in self.task_states.items():
+            assert isinstance(k, str), (type(k), k)
+            assert isinstance(ts, TaskState), (type(ts), ts)
+            assert ts.key == k
+
+        for c, cs in self.client_states.items():
+            # client=None is often used in tests...
+            assert c is None or isinstance(c, str), (type(c), c)
+            assert isinstance(cs, ClientState), (type(cs), cs)
+            assert cs.client_key == c
+
         a = {w: ws.nbytes for w, ws in self.workers.items()}
-        b = {w: sum(self.nbytes[k] for k in ws.has_what)
+        b = {w: sum(self.nbytes[ts.key] for ts in ws.has_what)
              for w, ws in self.workers.items()}
         assert a == b, (a, b)
 
         for key, workers in self.who_has.items():
+            ts = self.task_states[key]
             for worker in workers:
-                assert key in self.workers[worker].has_what
+                assert ts in self.workers[worker].has_what
 
         for ws in self.workers.values():
-            for key in ws.has_what:
-                assert ws.worker_key in self.who_has[key]
+            for ts in ws.has_what:
+                assert ws.worker_key in self.who_has[ts.key]
 
         assert all(self.who_has.values())
 
@@ -1406,9 +1484,9 @@ class Scheduler(ServerNode):
             comms = self.comms.values()
         else:
             # Notify clients interested in key
-            comms = [self.comms[c]
+            comms = [self.comms[c.client_key]
                      for c in ts.who_wants
-                     if c in self.comms]
+                     if c.client_key in self.comms]
         for c in comms:
             try:
                 c.send(msg)
@@ -1451,7 +1529,8 @@ class Scheduler(ServerNode):
             # XXX is this a legitimate condition?
             pass
         else:
-            self.client_releases_keys(keys=cs.wants_what, client=cs.client_key)
+            self.client_releases_keys(keys=[ts.key for ts in cs.wants_what],
+                                      client=cs.client_key)
             del self.client_states[client]
 
     @gen.coroutine
@@ -1546,10 +1625,12 @@ class Scheduler(ServerNode):
             if key in self.resource_restrictions:
                 msg['resource_restrictions'] = self.resource_restrictions[key]
 
-            deps = self.dependencies[key]
+            deps = ts.dependencies
             if deps:
-                msg['who_has'] = {dep: list(self.who_has[dep]) for dep in deps}
-                msg['nbytes'] = {dep: self.nbytes.get(dep) for dep in deps}
+                #msg['who_has'] = {dep.key: list(self.who_has[dep.key]) for dep in deps}
+                msg['who_has'] = {dep.key: [ws.worker_key for ws in dep.who_has]
+                                  for dep in deps}
+                msg['nbytes'] = {dep.key: self.nbytes.get(dep.key) for dep in deps}
 
             if self.validate and deps:
                 assert all(msg['who_has'].values())
@@ -1585,22 +1666,20 @@ class Scheduler(ServerNode):
             return
         r = self.stimulus_missing_data(key=key, ensure=False, **msg)
         self.transitions(r)
-        if self.validate:
-            assert all(self.who_has.values())
 
     def handle_missing_data(self, key=None, errant_worker=None, **kwargs):
         logger.debug("handle missing data key=%s worker=%s", key, errant_worker)
         self.log.append(('missing', key, errant_worker))
 
         ts = self.task_states.get(key)
-        if ts is None or key not in self.who_has:
+        if ts is None or not ts.who_has:
             return
-        if errant_worker in self.who_has[key]:
-            ws = self.workers[errant_worker]
-            self.who_has[key].remove(errant_worker)
-            ws.has_what.remove(key)
+        ws = self.workers[errant_worker]
+        if ws in ts.who_has:
+            ts.who_has.remove(ws)
+            ws.has_what.remove(ts)
             ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
-        if not self.who_has[key]:
+        if not ts.who_has:
             if ts.run_spec:
                 self.transitions({key: 'released'})
             else:
@@ -1608,13 +1687,14 @@ class Scheduler(ServerNode):
 
     def release_worker_data(self, stream=None, keys=None, worker=None):
         ws = self.workers[worker]
-        removed_keys = set(keys) & ws.has_what
-        ws.has_what -= removed_keys
+        tasks = {self.task_states[k] for k in keys}
+        removed_tasks = tasks & ws.has_what
+        ws.has_what -= removed_tasks
 
         recommendations = {}
-        for key in removed_keys:
-            wh = self.who_has[key]
-            wh.remove(worker)
+        for ts in removed_tasks:
+            wh = ts.who_has
+            wh.remove(ws)
             if not wh:
                 recommendations[key] = 'released'
         if recommendations:
@@ -1797,7 +1877,8 @@ class Scheduler(ServerNode):
     def gather(self, comm=None, keys=None):
         """ Collect data in from workers """
         keys = list(keys)
-        who_has = {key: self.who_has.get(key, ()) for key in keys}
+        who_has = {key: [ws.worker_key for ws in self.task_states[key].who_has]
+                   for key in keys}
 
         data, missing_keys, missing_workers = yield gather_from_workers(
             who_has, rpc=self.rpc, close=False)
@@ -1816,14 +1897,15 @@ class Scheduler(ServerNode):
                 for key, workers in missing_keys.items():
                     if not workers:
                         continue
+                    ts = self.task_states[key]
                     logger.exception("Workers don't have promised key. "
                                      "This should never occur: %s, %s",
                                      str(workers), str(key))
                     for worker in workers:
                         ws = self.workers.get(worker)
-                        if ws is not None and key in ws.has_what:
-                            ws.has_what.remove(key)
-                            self.who_has[key].remove(worker)
+                        if ws is not None and ts in ws.has_what:
+                            ws.has_what.remove(ts)
+                            ts.who_has.remove(ws)
                             ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
                             self.transitions({key: 'released'})
 
@@ -1847,7 +1929,8 @@ class Scheduler(ServerNode):
 
             logger.info("Send lost future signal to clients")
             for cs in self.client_states.values():
-                self.client_releases_keys(keys=cs.wants_what, client=cs.client_key)
+                self.client_releases_keys(keys=[ts.key for ts in cs.wants_what],
+                                          client=cs.client_key)
 
             nannies = {addr: self.get_worker_service_addr(addr, 'nanny')
                        for addr in self.workers}
@@ -1944,22 +2027,32 @@ class Scheduler(ServerNode):
         average expected load.
         """
         with log_errors():
-            keys = set(keys or self.who_has)
-            workers = set(workers or self.workers)
+            if keys:
+                tasks = {self.task_states[k] for k in keys}
+                missing_data = [ts.key for ts in tasks if not ts.who_has]
+                if missing_data:
+                    raise Return({'status': 'missing-data',
+                                  'keys': missing_data})
+            else:
+                tasks = set(self.task_states.values())
 
-            if not keys.issubset(self.who_has):
-                raise Return({'status': 'missing-data',
-                              'keys': list(keys - set(self.who_has))})
+            if workers:
+                workers = {self.workers[w] for w in workers}
+                workers_by_task = {ts: ts.who_has & workers for ts in tasks}
+            else:
+                workers = set(self.workers.values())
+                workers_by_task = {ts: ts.who_has for ts in tasks}
 
-            workers_by_key = {k: self.who_has.get(k, set()) & workers for k in keys}
-            keys_by_worker = {w: set() for w in workers}
-            for k, v in workers_by_key.items():
+            tasks_by_worker = {ws: set() for ws in workers}
+
+            for k, v in workers_by_task.items():
                 for vv in v:
-                    keys_by_worker[vv].add(k)
+                    tasks_by_worker[vv].add(k)
 
-            worker_bytes = {w: sum(self.nbytes.get(k, DEFAULT_DATA_SIZE)
-                                   for k in v)
-                            for w, v in keys_by_worker.items()}
+            worker_bytes = {ws: sum(self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
+                                    for ts in v)
+                            for ws, v in tasks_by_worker.items()}
+
             avg = sum(worker_bytes.values()) / len(worker_bytes)
 
             sorted_workers = list(map(first, sorted(worker_bytes.items(),
@@ -1969,8 +2062,8 @@ class Scheduler(ServerNode):
             recipient = next(recipients)
             msgs = []  # (sender, recipient, key)
             for sender in sorted_workers[:len(workers) // 2]:
-                sender_keys = {k: self.nbytes.get(k, DEFAULT_DATA_SIZE)
-                               for k in keys_by_worker[sender]}
+                sender_keys = {ts: self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
+                               for ts in tasks_by_worker[sender]}
                 sender_keys = iter(sorted(sender_keys.items(),
                                           key=second, reverse=True))
 
@@ -1978,11 +2071,11 @@ class Scheduler(ServerNode):
                     while worker_bytes[sender] > avg:
                         while (worker_bytes[recipient] < avg and
                                worker_bytes[sender] > avg):
-                            k, nb = next(sender_keys)
-                            if k not in keys_by_worker[recipient]:
-                                keys_by_worker[recipient].add(k)
-                                # keys_by_worker[sender].remove(k)
-                                msgs.append((sender, recipient, k))
+                            ts, nb = next(sender_keys)
+                            if ts not in tasks_by_worker[recipient]:
+                                tasks_by_worker[recipient].add(ts)
+                                # tasks_by_worker[sender].remove(ts)
+                                msgs.append((sender, recipient, ts))
                                 worker_bytes[sender] -= nb
                                 worker_bytes[recipient] += nb
                         if worker_bytes[sender] > avg:
@@ -1992,9 +2085,9 @@ class Scheduler(ServerNode):
 
             to_recipients = defaultdict(lambda: defaultdict(list))
             to_senders = defaultdict(list)
-            for sender, recipient, key in msgs:
-                to_recipients[recipient][key].append(sender)
-                to_senders[sender].append(key)
+            for sender, recipient, ts in msgs:
+                to_recipients[recipient.worker_key][ts.key].append(sender.worker_key)
+                to_senders[sender.worker_key].append(ts.key)
 
             result = yield {r: self.rpc(addr=r).gather(who_has=v)
                             for r, v in to_recipients.items()}
@@ -2003,7 +2096,7 @@ class Scheduler(ServerNode):
                                    'who_has': v})
 
             self.log_event('all', {'action': 'rebalance',
-                                   'total-keys': len(keys),
+                                   'total-keys': len(tasks),
                                    'senders': valmap(len, to_senders),
                                    'recipients': valmap(len, to_recipients),
                                    'moved_keys': len(msgs)})
@@ -2013,21 +2106,20 @@ class Scheduler(ServerNode):
                               'keys': sum([r['keys'] for r in result
                                            if 'keys' in r], [])})
 
-            for sender, recipient, key in msgs:
-                ws = self.workers[recipient]
-                self.who_has[key].add(recipient)
-                ws.has_what.add(key)
-                ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
-                self.log.append(('rebalance', key, time(), sender, recipient))
+            for sender, recipient, ts in msgs:
+                ts.who_has.add(recipient)
+                recipient.has_what.add(ts)
+                recipient.nbytes += self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
+                self.log.append(('rebalance', ts.key, time(),
+                                 sender.worker_key, recipient.worker_key))
 
             result = yield {r: self.rpc(addr=r).delete_data(keys=v, report=False)
                             for r, v in to_senders.items()}
 
-            for sender, recipient, key in msgs:
-                ws = self.workers[sender]
-                self.who_has[key].remove(sender)
-                ws.has_what.remove(key)
-                ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
+            for sender, recipient, ts in msgs:
+                ts.who_has.remove(sender)
+                sender.has_what.remove(ts)
+                sender.nbytes -= self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
 
             raise Return({'status': 'OK'})
 
@@ -2046,59 +2138,71 @@ class Scheduler(ServerNode):
         n: int
             Number of replications we expect to see within the cluster
         branching_factor: int, optional
-            The number of workers that can copy data in each generation
+            The number of workers that can copy data in each generation.
+            The larger the branching factor, the more data we copy in
+            a single step, but the more a given worker risks being
+            swamped by data requests.
 
         See also
         --------
         Scheduler.rebalance
         """
-        workers = set(self.workers_list(workers))
+        assert branching_factor > 0
+
+        workers = {self.workers[w] for w in self.workers_list(workers)}
         if n is None:
             n = len(workers)
-        n = min(n, len(workers))
-        keys = set(keys)
-
+        else:
+            n = min(n, len(workers))
         if n == 0:
             raise ValueError("Can not use replicate to delete data")
 
-        if not keys.issubset(self.who_has):
+        tasks = {self.task_states[k] for k in keys}
+        missing_data = [ts.key for ts in tasks if not ts.who_has]
+        if missing_data:
             raise Return({'status': 'missing-data',
-                          'keys': list(keys - set(self.who_has))})
+                          'keys': missing_data})
 
         # Delete extraneous data
         if delete:
-            del_keys = {k: random.sample(self.who_has[k] & workers,
-                                         len(self.who_has[k] & workers) - n)
-                        for k in keys
-                        if len(self.who_has[k] & workers) > n}
-            del_workers = {k: v for k, v in reverse_dict(del_keys).items() if v}
-            yield [self.rpc(addr=worker).delete_data(keys=list(keys),
-                                                     report=False)
-                   for worker, keys in del_workers.items()]
+            del_worker_tasks = defaultdict(set)
+            for ts in tasks:
+                del_candidates = ts.who_has & workers
+                if len(del_candidates) > n:
+                    for ws in random.sample(del_candidates,
+                                            len(del_candidates) - n):
+                        del_worker_tasks[ws].add(ts)
 
-            for worker, keys in del_workers.items():
-                ws = self.workers[worker]
-                ws.has_what -= keys
-                for key in keys:
-                    self.who_has[key].remove(worker)
-                    ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
-                self.log_event(worker, {'action': 'replicate-remove',
-                                        'keys': keys})
+            yield [self.rpc(addr=ws.worker_key)
+                       .delete_data(keys=[ts.key for ts in tasks], report=False)
+                   for ws, tasks in del_worker_tasks.items()]
 
-        keys = {k for k in keys if len(self.who_has[k] & workers) < n}
+            for ws, tasks in del_worker_tasks.items():
+                ws.has_what -= tasks
+                for ts in tasks:
+                    ts.who_has.remove(ws)
+                    ws.nbytes -= self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
+                self.log_event(ws.worker_key,
+                               {'action': 'replicate-remove',
+                                'keys': [ts.key for ts in tasks]})
+
         # Copy not-yet-filled data
-        while keys:
+        while tasks:
             gathers = defaultdict(dict)
-            for k in list(keys):
-                missing = workers - self.who_has[k]
-                count = min(max(n - len(self.who_has[k] & workers), 0),
-                            branching_factor * len(self.who_has[k]))
-                if not count:
-                    keys.remove(k)
-                else:
-                    sample = random.sample(missing, count)
-                    for w in sample:
-                        gathers[w][k] = list(self.who_has[k])
+            for ts in list(tasks):
+                n_missing = n - len(ts.who_has & workers)
+                if n_missing <= 0:
+                    # Already replicated enough
+                    tasks.remove(ts)
+                    continue
+
+                count = min(n_missing,
+                            branching_factor * len(ts.who_has))
+                assert count > 0
+
+                for ws in random.sample(workers - ts.who_has, count):
+                    gathers[ws.worker_key][ts.key] = [wws.worker_key
+                                                      for wws in ts.who_has]
 
             results = yield {w: self.rpc(addr=w).gather(who_has=who_has)
                              for w, who_has in gathers.items()}
@@ -2185,33 +2289,37 @@ class Scheduler(ServerNode):
                     except KeyError:  # keys left during replicate
                         pass
 
-            workers = set(workers)
+            workers = {self.workers[w] for w in workers}
             if len(workers) > 0:
-                keys = set.union(*[self.workers[w].has_what for w in workers])
-                keys = {k for k in keys if self.who_has[k].issubset(workers)}
+                # Keys orphaned by retiring those workers
+                keys = set.union(*[w.has_what for w in workers])
+                keys = {ts.key for ts in keys if ts.who_has.issubset(workers)}
             else:
                 keys = set()
 
-            other_workers = set(self.worker_info) - workers
+            other_workers = set(self.workers.values()) - workers
             if keys:
                 if other_workers:
-                    yield self.replicate(keys=keys, workers=other_workers, n=1,
-                                         delete=False)
+                    yield self.replicate(keys=keys,
+                                         workers=[ws.worker_key for ws in other_workers],
+                                         n=1, delete=False)
                 else:
                     raise gen.Return([])
 
-            if close_workers and workers:
-                yield [self.close_worker(worker=w) for w in workers]
+            worker_keys = [ws.worker_key for ws in workers]
+            if close_workers and worker_keys:
+                yield [self.close_worker(worker=w)
+                       for w in worker_keys]
             if remove:
-                for w in workers:
+                for w in worker_keys:
                     self.remove_worker(address=w, safe=True)
 
             self.log_event('all', {'action': 'retire-workers',
-                                   'workers': workers,
+                                   'workers': worker_keys,
                                    'moved-keys': len(keys)})
-            self.log_event(list(workers), {'action': 'retired'})
+            self.log_event(worker_keys, {'action': 'retired'})
 
-            raise gen.Return(list(workers))
+            raise gen.Return(worker_keys)
 
     def add_keys(self, comm=None, worker=None, keys=()):
         """
@@ -2224,11 +2332,12 @@ class Scheduler(ServerNode):
             return 'not found'
         ws = self.workers[worker]
         for key in keys:
-            if key in self.who_has:
-                if key not in ws.has_what:
+            ts = self.task_states.get(key)
+            if ts is not None:
+                if ts not in ws.has_what:
                     ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
-                    ws.has_what.add(key)
-                    self.who_has[key].add(worker)
+                    ws.has_what.add(ts)
+                    ts.who_has.add(ws)
             else:
                 self.worker_send(worker, {'op': 'delete-data',
                                           'keys': [key],
@@ -2258,18 +2367,12 @@ class Scheduler(ServerNode):
                 if ts is None:
                     ts = self.task_states[key] = TaskState(key, None)
                 ts.state = 'memory'
-                if key not in self.dependents:
-                    self.dependents[key] = set()
-                if key not in self.dependencies:
-                    self.dependencies[key] = set()
-                if key not in self.who_has:
-                    self.who_has[key] = set()
                 for w in workers:
                     ws = self.workers[w]
-                    if key not in ws.has_what:
+                    if ts not in ws.has_what:
                         ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
-                        ws.has_what.add(key)
-                        self.who_has[key].add(w)
+                        ws.has_what.add(ts)
+                        ts.who_has.add(ws)
                 if key not in self.waiting_data:
                     self.waiting_data[key] = set()
                 self.report({'op': 'key-in-memory',
@@ -2341,31 +2444,26 @@ class Scheduler(ServerNode):
 
     def get_who_has(self, comm=None, keys=None):
         if keys is not None:
-            return {k: list(self.who_has.get(k, [])) for k in keys}
+            return {k: [ws.worker_key for ws in self.task_states[k].who_has]
+                    for k in keys if k in self.task_states}
         else:
-            return valmap(list, self.who_has)
+            return {key: [ws.worker_key for ws in ts.who_has]
+                    for key, ts in self.task_states.items()}
 
     def get_has_what(self, comm=None, workers=None):
         if workers is not None:
             workers = map(self.coerce_address, workers)
-            has_what = {}
-            for w in workers:
-                ws = self.workers.get(w)
-                if ws is not None:
-                    has_what[w] = list(ws.has_what)
-            return has_what
+            return {w: [ts.key for ts in self.workers[w].has_what]
+                    for w in workers if w in self.workers}
         else:
-            return {w: list(ws.has_what) for w, ws in self.workers.items()}
+            return {w: [ts.key for ts in ws.has_what]
+                    for w, ws in self.workers.items()}
 
     def get_ncores(self, comm=None, workers=None):
         if workers is not None:
             workers = map(self.coerce_address, workers)
-            ncores = {}
-            for w in workers:
-                ws = self.workers.get(w)
-                if ws is not None:
-                    ncores[w] = ws.ncores
-            return ncores
+            return {w: self.workers[w].ncores
+                    for w in workers if w in self.workers}
         else:
             return {w: ws.ncores for w, ws in self.workers.items()}
 
@@ -2378,7 +2476,7 @@ class Scheduler(ServerNode):
                 key = stack.pop()
                 ts = self.task_states[key]
                 if ts.state == 'waiting':
-                    stack.extend(self.dependencies[key])
+                    stack.extend(dts.key for dts in ts.dependencies)
                 elif ts.state == 'processing':
                     processing.add(key)
 
@@ -2418,8 +2516,10 @@ class Scheduler(ServerNode):
         Get the estimated communication cost (in s.) to compute key
         on the given worker.
         """
-        return (sum(self.nbytes[d] for d in
-                    self.dependencies[key] - self.workers[worker].has_what)
+        ts = self.task_states[key]
+        ws = self.workers[worker]
+        return (sum(self.nbytes[dts.key]
+                    for dts in ts.dependencies - ws.has_what)
                 / BANDWIDTH)
 
     def get_task_duration(self, key, default=0.5):
@@ -2483,40 +2583,38 @@ class Scheduler(ServerNode):
 
             if self.validate:
                 assert ts.run_spec
-                assert key in self.dependencies
-                assert key in self.dependents
                 assert key not in self.waiting
-                assert key not in self.who_has
+                assert not ts.who_has
                 assert key not in self.rprocessing
                 # assert all(dep in self.task_state
                 #            for dep in self.dependencies[key])
 
-            if not all(dep in self.task_states
-                       for dep in self.dependencies[key]):
+            if any(dts.state == 'forgotten' for dts in ts.dependencies):
                 return {key: 'forgotten'}
 
             recommendations = OrderedDict()
 
-            for dep in self.dependencies[key]:
-                if dep in self.exceptions_blame:
-                    self.exceptions_blame[key] = self.exceptions_blame[dep]
+            for dts in ts.dependencies:
+                if dts.key in self.exceptions_blame:
+                    self.exceptions_blame[key] = self.exceptions_blame[dts.key]
                     recommendations[key] = 'erred'
                     return recommendations
 
             self.waiting[key] = set()
 
-            for dep in self.dependencies[key]:
-                if dep not in self.who_has:
+            for dts in ts.dependencies:
+                dep = dts.key
+                if not dts.who_has:
                     self.waiting[key].add(dep)
                 if dep in self.released:
                     recommendations[dep] = 'waiting'
                 else:
                     self.waiting_data[dep].add(key)
 
-            self.waiting_data[key] = {dep for dep in self.dependents[key]
-                                      if dep not in self.who_has
-                                      and dep not in self.released
-                                      and dep not in self.exceptions_blame}
+            self.waiting_data[key] = {dts.key for dts in ts.dependents
+                                      if not dts.who_has
+                                      and dts.key not in self.released
+                                      and dts.key not in self.exceptions_blame}
 
             if not self.waiting[key]:
                 if self.workers:
@@ -2545,26 +2643,28 @@ class Scheduler(ServerNode):
 
     def transition_no_worker_waiting(self, key):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
                 assert key in self.unrunnable
                 assert key not in self.waiting
-                assert key not in self.who_has
+                assert not ts.who_has
                 assert key not in self.rprocessing
-
-            ts = self.task_states[key]
 
             self.unrunnable.remove(key)
 
-            if not all(dep in self.task_states
-                       for dep in self.dependencies[key]):
+            #if not all(dep in self.task_states
+                       #for dep in ts.dependencies):
+            if any(dts.state == 'forgotten' for dts in ts.dependencies):
                 return {key: 'forgotten'}
 
             recommendations = OrderedDict()
 
             self.waiting[key] = set()
 
-            for dep in self.dependencies[key]:
-                if dep not in self.who_has:
+            for dts in ts.dependencies:
+                dep = dts.key
+                if not dts.who_has:
                     self.waiting[key].add(dep)
                 if dep in self.released:
                     recommendations[dep] = 'waiting'
@@ -2588,58 +2688,64 @@ class Scheduler(ServerNode):
             raise
 
     def decide_worker(self, key):
+        """
+        Decide on a worker for processing *key*.  Return a WorkerState.
+        """
         ts = self.task_states[key]
         valid_workers = self.valid_workers(key)
 
         if not valid_workers and key not in self.loose_restrictions and self.workers:
             self.unrunnable.add(key)
             ts.state = 'no-worker'
-            return {}
+            return None
 
-        if self.dependencies.get(key, None) or valid_workers is not True:
-            worker = decide_worker(self.dependencies, self.workers,
-                                   self.who_has, valid_workers, self.loose_restrictions,
-                                   partial(self.worker_objective, key), key)
+        if ts.dependencies or valid_workers is not True:
+            worker = decide_worker(ts, self.workers.values(),
+                                   valid_workers, self.loose_restrictions,
+                                   partial(self.worker_objective, ts))
         elif self.idle:
             if len(self.idle) < 20:  # smart but linear in small case
                 worker = min(self.idle,
-                             key=operator.attrgetter('occupancy')).worker_key
+                             key=operator.attrgetter('occupancy'))
             else:  # dumb but fast in large case
-                worker = self.idle[self.n_tasks % len(self.idle)].worker_key
+                worker = self.idle[self.n_tasks % len(self.idle)]
         else:
             if len(self.workers) < 20:  # smart but linear in small case
                 worker = min(self.workers.values(),
-                             key=operator.attrgetter('occupancy')).worker_key
+                             key=operator.attrgetter('occupancy'))
             else:  # dumb but fast in large case
-                worker = self.workers.iloc[self.n_tasks % len(self.workers)]
+                worker = self.workers[
+                    self.workers.iloc[self.n_tasks % len(self.workers)]
+                    ]
 
-        assert worker
+        assert worker is None or isinstance(worker, WorkerState), (type(worker), worker)
         return worker
 
     def transition_waiting_processing(self, key):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
                 assert key in self.waiting
                 assert not self.waiting[key]
-                assert key not in self.who_has
+                assert not ts.who_has
                 assert key not in self.exceptions_blame
                 assert key not in self.rprocessing
                 # assert key not in self.readyset
                 assert key not in self.unrunnable
-                assert all(dep in self.who_has
-                           for dep in self.dependencies[key])
+                assert all(dts.who_has
+                           for dts in ts.dependencies)
 
-            ts = self.task_states[key]
-
-            if any(not self.who_has[dep] for dep in self.dependencies[key]):
+            if any(not dts.who_has for dts in ts.dependencies):
+                # XXX can happen? see validation above
                 return {}
 
             del self.waiting[key]
 
-            worker = self.decide_worker(key)
-            if not worker:
-                return worker
-            ws = self.workers[worker]
+            ws = self.decide_worker(key)
+            if ws is None:
+                return {}
+            worker = ws.worker_key
 
             ks = key_split(key)
 
@@ -2685,33 +2791,29 @@ class Scheduler(ServerNode):
             if nbytes is not None:
                 self.nbytes[key] = nbytes
 
-            if key not in self.who_has:
-                self.who_has[key] = set()
-
-            self.who_has[key].add(worker)
-            ws.has_what.add(key)
+            ts.who_has.add(ws)
+            ws.has_what.add(ts)
             ws.nbytes += nbytes or DEFAULT_DATA_SIZE
 
             self.check_idle_saturated(worker)
 
             recommendations = OrderedDict()
 
-            deps = self.dependents.get(key, [])
+            deps = ts.dependents
             if len(deps) > 1:
-                deps = [tts.key
-                        for tts in sorted([self.task_states[k] for k in deps],
-                                          key=operator.attrgetter('priority'),
-                                          reverse=True)]
+                deps = sorted(deps, key=operator.attrgetter('priority'),
+                              reverse=True)
 
-            for dep in deps:
+            for dts in deps:
+                dep = dts.key
                 if dep in self.waiting:
                     s = self.waiting[dep]
                     s.remove(key)
                     if not s:  # new task ready to run
                         recommendations[dep] = 'processing'
 
-            for dep in self.dependencies.get(key, []):
-                dts = self.task_states[dep]
+            for dts in ts.dependencies:
+                dep = dts.key
                 if dep in self.waiting_data:
                     s = self.waiting_data[dep]
                     s.remove(key)
@@ -2731,7 +2833,7 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert key not in self.rprocessing
                 assert key not in self.waiting
-                assert self.who_has[key]
+                assert ts.who_has
 
             return recommendations
         except Exception as e:
@@ -2744,24 +2846,27 @@ class Scheduler(ServerNode):
     def transition_processing_memory(self, key, nbytes=None, type=None,
                                      worker=None, startstops=None, **kwargs):
         try:
+            ts = self.task_states[key]
+            assert worker
+            assert isinstance(worker, str)
+
             if self.validate:
                 assert key in self.rprocessing
                 w = self.rprocessing[key]
                 assert key in self.workers[w].processing
                 assert key not in self.waiting
-                assert key not in self.who_has
+                assert not ts.who_has
                 assert key not in self.exceptions_blame
                 # assert all(dep in self.waiting_data[key ] for dep in
                 #         self.dependents[key] if self.task_state[dep] in
                 #         ['waiting', 'queue', 'stacks'])
                 # assert key not in self.nbytes
 
-                assert self.task_states[key].state == 'processing'
+                assert ts.state == 'processing'
 
             ws = self.workers.get(worker)
             if ws is None:
                 return {key: 'released'}
-            ts = self.task_states[key]
 
             if worker != self.rprocessing[key]:  # someone else has this task
                 logger.warning("Unexpected worker completed task, likely due to"
@@ -2814,13 +2919,10 @@ class Scheduler(ServerNode):
             if nbytes is not None:
                 self.nbytes[key] = nbytes
 
-            self.who_has[key] = set()
             self.release_resources(key, worker)
 
-            assert worker
-
-            self.who_has[key].add(worker)
-            ws.has_what.add(key)
+            ts.who_has.add(ws)
+            ws.has_what.add(ts)
             ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
 
             w = self.rprocessing.pop(key)
@@ -2836,22 +2938,21 @@ class Scheduler(ServerNode):
 
             recommendations = OrderedDict()
 
-            deps = self.dependents.get(key, [])
+            deps = ts.dependents
             if len(deps) > 1:
-                deps = [tts.key
-                        for tts in sorted([self.task_states[k] for k in deps],
-                                          key=operator.attrgetter('priority'),
-                                          reverse=True)]
+                deps = sorted(deps, key=operator.attrgetter('priority'),
+                              reverse=True)
 
-            for dep in deps:
+            for dts in deps:
+                dep = dts.key
                 if dep in self.waiting:
                     s = self.waiting[dep]
                     s.remove(key)
                     if not s:  # new task ready to run
                         recommendations[dep] = 'processing'
 
-            for dep in self.dependencies.get(key, []):
-                dts = self.task_states[dep]
+            for dts in ts.dependencies:
+                dep = dts.key
                 if dep in self.waiting_data:
                     s = self.waiting_data[dep]
                     s.remove(key)
@@ -2870,9 +2971,8 @@ class Scheduler(ServerNode):
 
             ts.state = 'memory'
 
-            # XXX query who_wants instead?
             cs = self.client_states['fire-and-forget']
-            if key in cs.wants_what:
+            if ts in cs.wants_what:
                 self.client_releases_keys(client='fire-and-forget', keys=[key])
 
             if self.validate:
@@ -2889,8 +2989,9 @@ class Scheduler(ServerNode):
 
     def transition_memory_released(self, key, safe=False):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
-                assert key in self.who_has
                 assert key not in self.released
                 # assert key not in self.readyset
                 assert key not in self.waiting
@@ -2901,8 +3002,6 @@ class Scheduler(ServerNode):
 
             recommendations = OrderedDict()
 
-            ts = self.task_states[key]
-
             for dep in self.waiting_data.get(key, ()):  # lost dependency
                 dts = self.task_states[dep]
                 if dts.state in ('no-worker', 'processing'):
@@ -2910,15 +3009,14 @@ class Scheduler(ServerNode):
                 elif dts.state == 'waiting':
                     self.waiting[dep].add(key)
 
-            workers = self.who_has.pop(key)
-            for w in workers:
-                ws = self.workers.get(w)
-                if ws is not None:  # in case worker has died
-                    ws.has_what.remove(key)
-                    ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
-                    self.worker_send(w, {'op': 'delete-data',
-                                         'keys': [key],
-                                         'report': False})
+            # XXX factor this out?
+            for ws in ts.who_has:
+                ws.has_what.remove(ts)
+                ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                self.worker_send(ws.worker_key, {'op': 'delete-data',
+                                                 'keys': [key],
+                                                 'report': False})
+            ts.who_has.clear()
 
             self.released.add(key)
 
@@ -2927,8 +3025,7 @@ class Scheduler(ServerNode):
 
             if not ts.run_spec:  # pure data
                 recommendations[key] = 'forgotten'
-            elif not all(dep in self.task_states
-                         for dep in self.dependencies[key]):
+            elif any(dts.state == 'forgotten' for dts in ts.dependencies):
                 recommendations[key] = 'forgotten'
             elif ts.who_wants or self.waiting_data.get(key):
                 recommendations[key] = 'waiting'
@@ -2949,21 +3046,23 @@ class Scheduler(ServerNode):
 
     def transition_released_erred(self, key):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
                 with log_errors(pdb=LOG_PDB):
                     assert key in self.exceptions_blame
-                    assert key not in self.who_has
+                    assert not ts.who_has
                     assert key not in self.waiting
                     assert key not in self.waiting_data
 
-            ts = self.task_states[key]
             recommendations = {}
 
             failing_key = self.exceptions_blame[key]
 
-            for dep in self.dependents[key]:
+            for dts in ts.dependents:
+                dep = dts.key
                 self.exceptions_blame[dep] = failing_key
-                if dep not in self.who_has:
+                if not dts.who_has:
                     recommendations[dep] = 'erred'
 
             self.report({'op': 'task-erred',
@@ -2985,19 +3084,20 @@ class Scheduler(ServerNode):
 
     def transition_waiting_released(self, key):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
                 assert key in self.waiting
                 assert key in self.waiting_data
-                assert key not in self.who_has
+                assert not ts.who_has
                 assert key not in self.rprocessing
 
-            ts = self.task_states[key]
             recommendations = {}
 
             del self.waiting[key]
 
-            for dep in self.dependencies[key]:
-                dts = self.task_states[key]
+            for dts in ts.dependencies:
+                dep = dts.key
                 if dep in self.waiting_data:
                     if key in self.waiting_data[dep]:
                         self.waiting_data[dep].remove(key)
@@ -3009,11 +3109,12 @@ class Scheduler(ServerNode):
             self.released.add(key)
 
             if self.validate:
-                assert not any(key in self.waiting_data.get(dep, ())
-                               for dep in self.dependencies[key])
+                assert not any(key in self.waiting_data.get(dts.key, ())
+                               for dts in ts.dependencies)
 
-            if any(dep not in self.task_states
-                   for dep in self.dependencies[key]):
+            #if any(dep not in self.task_states
+                   #for dep in ts.dependencies):
+            if any(dts.state == 'forgotten' for dts in ts.dependencies):
                 recommendations[key] = 'forgotten'
 
             elif (key not in self.exceptions_blame and
@@ -3032,13 +3133,13 @@ class Scheduler(ServerNode):
 
     def transition_processing_released(self, key):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
                 assert key in self.rprocessing
-                assert key not in self.who_has
+                assert not ts.who_has
                 assert key not in self.waiting
                 assert self.task_states[key].state == 'processing'
-
-            ts = self.task_states[key]
 
             w = self.rprocessing.pop(key)
             if w in self.workers:
@@ -3059,14 +3160,15 @@ class Scheduler(ServerNode):
 
             recommendations = OrderedDict()
 
-            if any(dep not in self.task_states
-                   for dep in self.dependencies[key]):
+            #if any(dep not in self.task_states
+                   #for dep in ts.dependencies):
+            if any(dts.state == 'forgotten' for dts in ts.dependencies):
                 recommendations[key] = 'forgotten'
             elif self.waiting_data[key] or ts.who_wants:
                 recommendations[key] = 'waiting'
             else:
-                for dep in self.dependencies[key]:
-                    dts = self.task_states[dep]
+                for dts in ts.dependencies:
+                    dep = dts.key
                     if dep not in self.released:
                         assert key in self.waiting_data[dep]
                         self.waiting_data[dep].remove(key)
@@ -3088,13 +3190,13 @@ class Scheduler(ServerNode):
     def transition_processing_erred(self, key, cause=None, exception=None,
                                     traceback=None, **kwargs):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
                 assert cause or key in self.exceptions_blame
                 assert key in self.rprocessing
-                assert key not in self.who_has
+                assert not ts.who_has
                 assert key not in self.waiting
-
-            ts = self.task_states[key]
 
             if exception:
                 self.exceptions[key] = exception
@@ -3107,12 +3209,13 @@ class Scheduler(ServerNode):
 
             recommendations = {}
 
-            for dep in self.dependents[key]:
+            for dts in ts.dependents:
+                dep = dts.key
                 self.exceptions_blame[dep] = key
                 recommendations[dep] = 'erred'
 
-            for dep in self.dependencies.get(key, []):
-                dts = self.task_states[dep]
+            for dts in ts.dependencies:
+                dep = dts.key
                 if dep in self.waiting_data:
                     s = self.waiting_data[dep]
                     if key in s:
@@ -3142,9 +3245,8 @@ class Scheduler(ServerNode):
                          'exception': self.exceptions[failing_key],
                          'traceback': self.tracebacks.get(failing_key)})
 
-            # XXX query who_wants instead?
             cs = self.client_states['fire-and-forget']
-            if key in cs.wants_what:
+            if ts in cs.wants_what:
                 self.client_releases_keys(client='fire-and-forget', keys=[key])
 
             if self.validate:
@@ -3161,9 +3263,6 @@ class Scheduler(ServerNode):
     def remove_key(self, key):
         ts = self.task_states.pop(key)
         ts.state = 'forgotten'
-        if key in self.dependencies:
-            del self.dependencies[key]
-        del self.dependents[key]
         if key in self.worker_restrictions:
             del self.worker_restrictions[key]
         if key in self.host_restrictions:
@@ -3191,58 +3290,64 @@ class Scheduler(ServerNode):
         if key in self.task_metadata:
             del self.task_metadata[key]
 
+    def _propagate_forgotten(self, ts, recommendations):
+        key = ts.key
+        for dts in ts.dependents:
+            dep = dts.key
+            if dts.state not in ('memory', 'error'):
+            #if dts.state == 'released':
+                recommendations[dep] = 'forgotten'
+
+        for dts in ts.dependencies:
+            dep = dts.key
+            try:
+                s = dts.dependents
+                s.remove(ts)
+                if not s and not dts.who_wants:
+                    assert dep is not key
+                    recommendations[dep] = 'forgotten'
+            except KeyError:
+                pass
+            try:
+                self.waiting_data[dep].discard(key)
+            except KeyError:
+                pass
+
+        # XXX redundant with dependents handling above?
+        if key in self.waiting_data:
+            for dep in self.waiting_data[key]:
+                recommendations[dep] = 'forgotten'
+
+        for ws in ts.who_has:
+            if ws is not None:  # in case worker has died
+                ws.has_what.remove(ts)
+                ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                self.worker_send(ws.worker_key, {'op': 'delete-data',
+                                                 'keys': [key],
+                                                 'report': False})
+        ts.who_has.clear()
+
+        if self.validate:
+            assert all(key not in dts.dependents
+                       for dts in ts.dependencies
+                       if dts.state != 'forgotten')
+            assert all(key not in self.waiting_data.get(dts.key, ())
+                       for dts in ts.dependencies
+                       if dts.state != 'forgotten')
+
     def transition_memory_forgotten(self, key):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
-                assert key in self.dependents
                 assert self.task_states[key].state == 'memory'
                 assert key in self.waiting_data
-                assert key in self.who_has
                 assert key not in self.rprocessing
                 # assert key not in self.ready
                 assert key not in self.waiting
 
-            ts = self.task_states[key]
-
             recommendations = {}
-
-            for dep in self.waiting_data[key]:
-                recommendations[dep] = 'forgotten'
-
-            for dep in self.dependents[key]:
-                dts = self.task_states[dep]
-                if dts.state == 'released':
-                    recommendations[dep] = 'forgotten'
-
-            for dep in self.dependencies.get(key, ()):
-                dts = self.task_states.get(dep)
-                if dts is not None:
-                    try:
-                        s = self.dependents[dep]
-                        s.remove(key)
-                        if not s and not dts.who_wants:
-                            assert dep is not key
-                            recommendations[dep] = 'forgotten'
-                    except KeyError:
-                        pass
-
-            workers = self.who_has.pop(key)
-            for w in workers:
-                ws = self.workers[w]
-                if ws is not None:  # in case worker has died
-                    ws.has_what.remove(key)
-                    ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
-                    self.worker_send(w, {'op': 'delete-data',
-                                         'keys': [key],
-                                         'report': False})
-
-            if self.validate:
-                assert all(key not in self.dependents[dep]
-                           for dep in self.dependencies[key]
-                           if dep in self.task_states)
-                assert all(key not in self.waiting_data.get(dep, ())
-                           for dep in self.dependencies[key]
-                           if dep in self.task_states)
+            self._propagate_forgotten(ts, recommendations)
 
             self.remove_key(key)
 
@@ -3258,20 +3363,20 @@ class Scheduler(ServerNode):
 
     def transition_no_worker_released(self, key):
         try:
+            ts = self.task_states[key]
+
             if self.validate:
                 assert self.task_states[key].state == 'no-worker'
-                assert key not in self.who_has
+                assert not ts.who_has
                 assert key not in self.waiting
-
-            ts = self.task_states[key]
 
             self.unrunnable.remove(key)
             self.released.add(key)
             ts.state = 'released'
 
-            for dep in self.dependencies[key]:
+            for dts in ts.dependencies:
                 try:
-                    self.waiting_data[dep].remove(key)
+                    self.waiting_data[dts.key].remove(key)
                 except KeyError:  # dep may also be released
                     pass
 
@@ -3290,58 +3395,21 @@ class Scheduler(ServerNode):
             ts = self.task_states[key]
 
             if self.validate:
-                assert key in self.dependencies
                 assert self.task_states[key].state in ('released', 'erred')
                 # assert not self.waiting_data[key]
-                if ts.run_spec and self.dependencies[key].issubset(self.task_states):
+                if ts.run_spec and all(dts.state != 'forgotten'
+                                       for dts in ts.dependencies):
                     assert not ts.who_wants
-                    assert not self.dependents[key]
+                    assert not ts.dependents
                     assert not any(key in self.waiting_data.get(dep, ())
-                                   for dep in self.dependencies[key])
-                assert key not in self.who_has
+                                   for dep in ts.dependencies)
+                assert not ts.who_has
                 assert key not in self.rprocessing
                 # assert key not in self.ready
                 assert key not in self.waiting
 
-            # XXX this is copy-pasted everywhere????
             recommendations = {}
-            for dep in self.dependencies[key]:
-                dts = self.task_states.get(dep)
-                if dep is not None:
-                    try:
-                        s = self.dependents[dep]
-                        s.remove(key)
-                        if not s and not dts.who_wants:
-                            assert dep is not key
-                            recommendations[dep] = 'forgotten'
-                    except KeyError:
-                        pass
-
-            for dep in self.dependents[key]:
-                dts = self.task_states[dep]
-                if dts.state not in ('memory', 'error'):
-                    recommendations[dep] = 'forgotten'
-
-            # XXX redundant with the above?
-            for dep in self.dependents[key]:
-                dts = self.task_states[dep]
-                if dts.state == 'released':
-                    recommendations[dep] = 'forgotten'
-
-            # XXX merge with loop above?
-            for dep in self.dependencies[key]:
-                try:
-                    self.waiting_data[dep].remove(key)
-                except KeyError:
-                    pass
-
-            if self.validate:
-                assert all(key not in self.dependents[dep]
-                           for dep in self.dependencies[key]
-                           if dep in self.task_states)
-                assert all(key not in self.waiting_data.get(dep, ())
-                           for dep in self.dependencies[key]
-                           if dep in self.task_states)
+            self._propagate_forgotten(ts, recommendations)
 
             self.remove_key(key)
 
@@ -3480,7 +3548,7 @@ class Scheduler(ServerNode):
                 self.saturated.discard(ws)
 
     def valid_workers(self, key):
-        """ Return set of currently valid worker addresses for key
+        """ Return set of currently valid workers for key
 
         If all workers are valid then this returns ``True``.
         This checks tracks the following state:
@@ -3492,13 +3560,14 @@ class Scheduler(ServerNode):
         s = True
 
         if key in self.worker_restrictions:
-            s = {w for w in self.worker_restrictions[key] if w in
-                 self.worker_info}
+            s = {w for w in self.worker_restrictions[key]
+                 if w in self.worker_info}
 
         if key in self.host_restrictions:
             # Resolve the alias here rather than early, for the worker
             # may not be connected when host_restrictions is populated
             hr = [self.coerce_hostname(h) for h in self.host_restrictions[key]]
+            # XXX need HostState?
             ss = [self.host_info[h]['addresses']
                   for h in hr if h in self.host_info]
             ss = set.union(*ss) if ss else set()
@@ -3519,7 +3588,10 @@ class Scheduler(ServerNode):
             else:
                 s &= ww
 
-        return s
+        if s is True:
+            return s
+        else:
+            return {self.workers[w] for w in s}
 
     def consume_resources(self, key, worker):
         ws = self.workers[worker]
@@ -3615,16 +3687,15 @@ class Scheduler(ServerNode):
             )
         return self._ipython_kernel.get_connection_info()
 
-    def worker_objective(self, key, worker):
+    def worker_objective(self, ts, ws):
         """
-        Objective function to determine which worker should get the key
+        Objective function to determine which worker should get the task
 
         Minimize expected start time.  If a tie then break with data storage.
         """
-        ws = self.workers[worker]
-        comm_bytes = sum([self.nbytes.get(k, DEFAULT_DATA_SIZE)
-                          for k in self.dependencies[key]
-                          if worker not in self.who_has[k]])
+        comm_bytes = sum([self.nbytes.get(dts.key, DEFAULT_DATA_SIZE)
+                          for dts in ts.dependencies
+                          if ws not in dts.who_has])
         stack_time = ws.occupancy / ws.ncores
         start_time = comm_bytes / BANDWIDTH + stack_time
         return (start_time, ws.nbytes)
@@ -3772,8 +3843,8 @@ class Scheduler(ServerNode):
                 steal.put_key_in_stealable(key)
 
 
-def decide_worker(dependencies, workers, who_has, valid_workers,
-                  loose_restrictions, objective, key):
+def decide_worker(ts, all_workers, valid_workers,
+                  loose_restrictions, objective):
     """
     # XXX docstring is obsolete
 
@@ -3821,24 +3892,23 @@ def decide_worker(dependencies, workers, who_has, valid_workers,
     ...               {}, set(), nbytes, ncores, 'c')
     'bob:8000'
     """
-    deps = dependencies[key]
-    assert all(d in who_has for d in deps)
-    candidates = frequencies([w for dep in deps
-                              for w in who_has[dep]])
-    if not candidates:
-        candidates = workers
-    if valid_workers is not True:
+    deps = ts.dependencies
+    assert all(dts.who_has for dts in deps)
+    candidates = frequencies([ws for dts in deps
+                              for ws in dts.who_has])
+    if valid_workers is True:
+        if not candidates:
+            candidates = all_workers
+    else:
         candidates = valid_workers & set(candidates)
         if not candidates:
             candidates = valid_workers
             if not candidates:
-                if key in loose_restrictions:
-                    return decide_worker(dependencies, workers, who_has,
-                                         True, set(), objective, key)
+                if ts.key in loose_restrictions:
+                    return decide_worker(ts, all_workers, True, set(), objective)
 
                 else:
                     return None
-    #if not candidates or not workers:
     if not candidates:
         return None
 

@@ -648,9 +648,6 @@ class Client(Node):
             self.scheduler_comm.send(msg)
         elif self.status in ('connecting', 'newly-created'):
             self._pending_msg_buffer.append(msg)
-        else:
-            raise Exception("Tried sending message after closing.  Status: %s\n"
-                            "Message: %s" % (self.status, msg))
 
     def _send_to_scheduler(self, msg):
         if self.status in ('running', 'closing', 'connecting', 'newly-created'):
@@ -931,12 +928,10 @@ class Client(Node):
             if self.status == 'closed':
                 raise gen.Return()
             if self.scheduler_comm and self.scheduler_comm.comm and not self.scheduler_comm.comm.closed():
-                for key in list(self.futures):
-                    self._release_key(key=key)
-                if self.status == 'running':
-                    self._send_to_scheduler({'op': 'close-stream'})
-            if self.scheduler_comm:
+                self._send_to_scheduler({'op': 'close-stream'})
                 yield self.scheduler_comm.close()
+            for key in list(self.futures):
+                self._release_key(key=key)
             if self._start_arg is None:
                 with ignoring(AttributeError):
                     yield self.cluster._close()
