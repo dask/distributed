@@ -250,7 +250,7 @@ def test_dont_hold_on_to_large_messages(c, s, a, b):
 
     start = time()
     while xr() is not None:
-        if time() > start + 1:
+        if s.tasks and not any(s.processing.values()):
             # Help diagnosing
             from types import FrameType
             x = xr()
