@@ -97,10 +97,16 @@ class CountsJSON(RequestHandler):
                     'processing': len(self.server.rprocessing),
                     'memory': len(self.server.who_has),
                     'workers': len(self.server.workers),
+                    'clients': len(self.server.wants_what),
+                    'hosts': len(self.server.host_info),
                     'cores': sum(self.server.ncores.values()),
                     'erred': len(self.server.exceptions_blame),
                     'bytes': sum(self.server.nbytes.values()),
                     'saturated': len(self.server.saturated),
+                    'waiting': len(self.server.waiting),
+                    'ready': len(self.server.ready),
+                    'unrunnable': len(self.server.unrunnable),
+                    'released': len(self.server.released),
                     'idle': len(self.server.idle)}
         self.write(response)
 
