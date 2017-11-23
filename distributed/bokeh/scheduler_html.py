@@ -93,21 +93,24 @@ class TaskCallStack(RequestHandler):
 
 class CountsJSON(RequestHandler):
     def get(self):
-        response = {'tasks': len(self.server.tasks),
-                    'processing': len(self.server.rprocessing),
-                    'memory': len(self.server.who_has),
-                    'workers': len(self.server.workers),
-                    'clients': len(self.server.wants_what),
-                    'hosts': len(self.server.host_info),
-                    'cores': sum(self.server.ncores.values()),
-                    'erred': len(self.server.exceptions_blame),
-                    'bytes': sum(self.server.nbytes.values()),
-                    'saturated': len(self.server.saturated),
-                    'waiting': len(self.server.waiting),
-                    'ready': len(self.server.ready),
-                    'unrunnable': len(self.server.unrunnable),
-                    'released': len(self.server.released),
-                    'idle': len(self.server.idle)}
+        response = {
+            'bytes': sum(self.server.nbytes.values()),
+            'clients': len(self.server.wants_what),
+            'cores': sum(self.server.ncores.values()),
+            'erred': len(self.server.exceptions_blame),
+            'hosts': len(self.server.host_info),
+            'idle': len(self.server.idle),
+            'memory': len(self.server.who_has),
+            'processing': len(self.server.rprocessing),
+            'ready': len(self.server.ready),
+            'released': len(self.server.released),
+            'saturated': len(self.server.saturated),
+            'tasks': len(self.server.tasks),
+            'unrunnable': len(self.server.unrunnable),
+            'waiting': len(self.server.waiting),
+            'waiting_data': len(self.server.waiting_data),
+            'workers': len(self.server.workers),
+        }
         self.write(response)
 
 
