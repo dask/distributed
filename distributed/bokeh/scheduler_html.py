@@ -91,6 +91,20 @@ class TaskCallStack(RequestHandler):
                             call_stack=call_stack)
 
 
+class CountsJSON(RequestHandler):
+    def get(self):
+        response = {'tasks': len(self.server.tasks),
+                    'processing': len(self.server.rprocessing),
+                    'memory': len(self.server.who_has),
+                    'workers': len(self.server.workers),
+                    'cores': sum(self.server.ncores.values()),
+                    'erred': len(self.server.exceptions_blame),
+                    'bytes': sum(self.server.nbytes.values()),
+                    'saturated': len(self.server.saturated),
+                    'idle': len(self.server.idle)}
+        self.write(response)
+
+
 def get_handlers(server):
     return [
             (r'/info/workers.html', Workers, {'server': server}),
@@ -100,4 +114,5 @@ def get_handlers(server):
             (r'/info/call-stacks/(.*).html', WorkerCallStacks, {'server': server}),
             (r'/info/call-stack/(.*).html', TaskCallStack, {'server': server}),
             (r'/info/logs/(.*).html', WorkerLogs, {'server': server}),
+            (r'/json/counts.json', CountsJSON, {'server': server}),
     ]
