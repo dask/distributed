@@ -25,6 +25,7 @@ def test_pickle_numpy():
 def test_pickle_functions():
     def make_closure():
         value = 1
+
         def f(x):  # closure
             return x + value
         return f
