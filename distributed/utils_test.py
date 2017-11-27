@@ -44,7 +44,6 @@ from .config import config, initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
 from .nanny import Nanny
-from .scheduler import deque_handler
 from .security import Security
 from .utils import (ignoring, log_errors, sync, mp_context, get_ip, get_ipv6,
                     DequeHandler)
