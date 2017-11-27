@@ -1885,9 +1885,9 @@ def test_forget_simple(c, s, a, b):
     s.client_releases_keys(keys=[x.key], client=c.id)
     assert x.key in s.tasks
     s.client_releases_keys(keys=[z.key], client=c.id)
-    for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
-                 s.waiting_data, s.who_has, s.worker_restrictions,
-                 s.host_restrictions, s.loose_restrictions,
+    for coll in [s.task_states, s.tasks, s.dependencies, s.dependents,
+                 s.waiting, s.waiting_data, s.who_has,
+                 s.worker_restrictions, s.host_restrictions, s.loose_restrictions,
                  s.released, s.priority, s.exceptions, s.tracebacks,
                  s.who_wants, s.exceptions_blame, s.nbytes, s.task_state,
                  s.retries]:
@@ -2966,7 +2966,7 @@ def test_unrunnable_task_runs(c, s, a, b):
         assert time() < start + 5
         yield gen.sleep(0.01)
 
-    assert x.key in s.unrunnable
+    assert s.task_states[x.key] in s.unrunnable
     assert s.task_state[x.key] == 'no-worker'
 
     w = Worker(s.ip, s.port, loop=s.loop)
@@ -2977,7 +2977,7 @@ def test_unrunnable_task_runs(c, s, a, b):
         assert time() < start + 2
         yield gen.sleep(0.01)
 
-    assert x.key not in s.unrunnable
+    assert s.task_states[x.key] not in s.unrunnable
     result = yield x
     assert result == 2
     yield w._close()

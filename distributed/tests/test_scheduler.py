@@ -49,7 +49,7 @@ def test_respect_data_in_memory(c, s, a):
     f = c.persist(y)
     yield wait([f])
 
-    assert s.released == {x.key}
+    assert s.released == {s.task_states[x.key]}
     assert s.who_has == {y.key: {a.address}}
 
     z = delayed(add)(x, y)
@@ -123,7 +123,7 @@ def test_no_valid_workers(client, s, a, b, c):
     while not s.tasks:
         yield gen.sleep(0.01)
 
-    assert x.key in s.unrunnable
+    assert s.task_states[x.key] in s.unrunnable
 
     with pytest.raises(gen.TimeoutError):
         yield gen.with_timeout(timedelta(milliseconds=50), x)
@@ -144,7 +144,7 @@ def test_no_workers(client, s):
     while not s.tasks:
         yield gen.sleep(0.01)
 
-    assert x.key in s.unrunnable
+    assert s.task_states[x.key] in s.unrunnable
 
     with pytest.raises(gen.TimeoutError):
         yield gen.with_timeout(timedelta(milliseconds=50), x)
