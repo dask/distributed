@@ -88,6 +88,8 @@ class ClientState(object):
 
 
 class WorkerState(object):
+    # XXX need a state field to signal active/removed?
+
     __slots__ = (
         'worker_key',
         'ncores',
@@ -2598,6 +2600,24 @@ class Scheduler(ServerNode):
     # State Transitions #
     #####################
 
+    def _remove_from_processing(self, ts, send_worker_msg=None):
+        ws = ts.processing_on
+        ts.processing_on = None
+        w = ws.worker_key
+        if w in self.workers:  # may have been removed
+            duration = ws.processing.pop(ts)
+            if not ws.processing:
+                self.total_occupancy -= ws.occupancy
+                ws.occupancy = 0
+            else:
+                self.total_occupancy -= duration
+                ws.occupancy -= duration
+            self.check_idle_saturated(ws)
+            # XXX release_resources() and friends should take (ts, ws)?
+            self.release_resources(ts.key, w)
+            if send_worker_msg:
+                self.worker_send(w, send_worker_msg)
+
     def transition_released_waiting(self, key):
         try:
             ts = self.task_states[key]
@@ -2937,21 +2957,11 @@ class Scheduler(ServerNode):
             if nbytes is not None:
                 ts.nbytes = nbytes
 
-            self.release_resources(key, worker)
+            self._remove_from_processing(ts)
 
             ts.who_has.add(ws)
             ws.has_what.add(ts)
             ws.nbytes += ts.get_nbytes()
-
-            ts.processing_on = None
-            duration = ws.processing.pop(ts)
-            if not ws.processing:
-                self.total_occupancy -= ws.occupancy
-                ws.occupancy = 0
-            else:
-                self.total_occupancy -= duration
-                ws.occupancy -= duration
-            self.check_idle_saturated(ws)
 
             recommendations = OrderedDict()
 
@@ -3158,22 +3168,8 @@ class Scheduler(ServerNode):
                 assert key not in self.waiting
                 assert self.task_states[key].state == 'processing'
 
-            # XXX factor this out?
-            ws = ts.processing_on
-            ts.processing_on = None
-            w = ws.worker_key
-            if w in self.workers:
-                duration = ws.processing.pop(ts)
-                if not ws.processing:
-                    self.total_occupancy -= ws.occupancy
-                    ws.occupancy = 0
-                else:
-                    self.total_occupancy -= duration
-                    ws.occupancy -= duration
-                self.check_idle_saturated(ws)
-                # XXX release_resources() and friends should take (ts, ws)?
-                self.release_resources(key, w)
-                self.worker_send(w, {'op': 'release-task', 'key': key})
+            self._remove_from_processing(ts, send_worker_msg={'op': 'release-task',
+                                                              'key': key})
 
             self.released.add(key)
             ts.state = 'released'
@@ -3216,6 +3212,8 @@ class Scheduler(ServerNode):
                 assert not ts.who_has
                 assert key not in self.waiting
 
+            self._remove_from_processing(ts)
+
             if exception:
                 self.exceptions[key] = exception
             if traceback:
@@ -3240,20 +3238,6 @@ class Scheduler(ServerNode):
                         s.remove(key)
                     if not s and not dts.who_wants:
                         recommendations[dep] = 'released'
-
-            ws = ts.processing_on
-            ts.processing_on = None
-            w = ws.worker_key
-            if w in self.workers:  # worker may have been removed
-                duration = ws.processing.pop(ts)
-                if not ws.processing:
-                    self.total_occupancy -= ws.occupancy
-                    ws.occupancy = 0
-                else:
-                    self.total_occupancy -= duration
-                    ws.occupancy -= duration
-                self.check_idle_saturated(ws)
-                self.release_resources(key, w)
 
             del self.waiting_data[key]  # do anything with this?
 
