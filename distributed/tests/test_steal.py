@@ -377,7 +377,7 @@ def assert_balanced(inp, expected, c, s, *workers):
         for t in sorted(ts, reverse=True):
             if t:
                 [dat] = yield c._scatter([next(data_seq)], workers=w.address)
-                s.nbytes[dat.key] = BANDWIDTH * t
+                s.task_states[dat.key].nbytes = BANDWIDTH * t
             else:
                 dat = 123
             s.task_duration[str(int(t))] = 1

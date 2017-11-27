@@ -127,11 +127,12 @@ class WorkStealing(SchedulerPlugin):
                 key in self.scheduler.resource_restrictions):
             return None, None  # don't steal
 
-        if not self.scheduler.dependencies[key]:  # no dependencies fast path
+        ts = self.scheduler.task_states[key]
+
+        if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
-        nbytes = sum(self.scheduler.nbytes.get(k, 1000)
-                     for k in self.scheduler.dependencies[key])
+        nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
 
         transfer_time = nbytes / BANDWIDTH + LATENCY
         split = split or key_split(key)

@@ -178,6 +178,9 @@ class TaskState(object):
 
 
 class _StateLegacyMapping(Mapping):
+    """
+    A mapping interface mimicking the former Scheduler state dictionaries.
+    """
 
     def __init__(self, states, accessor):
         self._states = states
@@ -197,6 +200,10 @@ class _StateLegacyMapping(Mapping):
 
 
 class _OptionalStateLegacyMapping(_StateLegacyMapping):
+    """
+    Similar to _StateLegacyMapping, but a false-y value is interpreted
+    as a missing key.
+    """
     # For tasks etc.
 
     def __iter__(self):
@@ -218,6 +225,10 @@ class _OptionalStateLegacyMapping(_StateLegacyMapping):
 
 
 class _StateLegacySet(Set):
+    """
+    Similar to _StateLegacyMapping, but exposes a set containing
+    all values with a true value.
+    """
     # For loose_restrictions
 
     def __init__(self, states, accessor):
@@ -440,6 +451,7 @@ class Scheduler(ServerNode):
                 ('priority', 'priority', None),
                 ('dependencies', 'dependencies', _legacy_task_key_set),
                 ('dependents', 'dependents', _legacy_task_key_set),
+                ('nbytes', 'nbytes', None),
                 ]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
@@ -460,7 +472,6 @@ class Scheduler(ServerNode):
 
         self.generation = 0
         self.released = set()
-        self.nbytes = dict()
         self.rprocessing = dict()
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
         self.unknown_durations = defaultdict(set)
@@ -522,7 +533,7 @@ class Scheduler(ServerNode):
         self.aliases = dict()
 
         self._task_collections = [self.waiting, self.waiting_data,
-                                  self.released, self.nbytes,
+                                  self.released,
                                   self.host_restrictions, self.worker_restrictions,
                                   self.loose_restrictions, self.ready,
                                   self.unknown_durations, self.rprocessing,
@@ -1103,7 +1114,7 @@ class Scheduler(ServerNode):
             if ts.state == 'memory':
                 if ts not in ws.has_what:
                     ws.has_what.add(ts)
-                    ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                    ws.nbytes += ts.get_nbytes()
                     ts.who_has.add(ws)
         else:
             logger.debug("Received already computed task, worker: %s, state: %s"
@@ -1158,7 +1169,7 @@ class Scheduler(ServerNode):
                 for ws in cts.who_has:  # TODO: this behavior is extreme
                     ws.has_what.remove(cts)
                     cts.who_has.remove(ws)
-                    ws.nbytes -= self.nbytes.get(cause, DEFAULT_DATA_SIZE)
+                    ws.nbytes -= cts.get_nbytes()
                 recommendations[cause] = 'released'
 
             if key:
@@ -1436,7 +1447,7 @@ class Scheduler(ServerNode):
             assert cs.client_key == c
 
         a = {w: ws.nbytes for w, ws in self.workers.items()}
-        b = {w: sum(self.nbytes[ts.key] for ts in ws.has_what)
+        b = {w: sum(ts.nbytes for ts in ws.has_what)
              for w, ws in self.workers.items()}
         assert a == b, (a, b)
 
@@ -1635,7 +1646,7 @@ class Scheduler(ServerNode):
                 #msg['who_has'] = {dep.key: list(self.who_has[dep.key]) for dep in deps}
                 msg['who_has'] = {dep.key: [ws.worker_key for ws in dep.who_has]
                                   for dep in deps}
-                msg['nbytes'] = {dep.key: self.nbytes.get(dep.key) for dep in deps}
+                msg['nbytes'] = {dep.key: dep.nbytes for dep in deps}
 
             if self.validate and deps:
                 assert all(msg['who_has'].values())
@@ -1683,7 +1694,7 @@ class Scheduler(ServerNode):
         if ws in ts.who_has:
             ts.who_has.remove(ws)
             ws.has_what.remove(ts)
-            ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
+            ws.nbytes -= ts.get_nbytes()
         if not ts.who_has:
             if ts.run_spec:
                 self.transitions({key: 'released'})
@@ -1911,7 +1922,7 @@ class Scheduler(ServerNode):
                         if ws is not None and ts in ws.has_what:
                             ws.has_what.remove(ts)
                             ts.who_has.remove(ws)
-                            ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                            ws.nbytes -= ts.get_nbytes()
                             self.transitions({key: 'released'})
 
         self.log_event('all', {'action': 'gather',
@@ -2054,8 +2065,7 @@ class Scheduler(ServerNode):
                 for vv in v:
                     tasks_by_worker[vv].add(k)
 
-            worker_bytes = {ws: sum(self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
-                                    for ts in v)
+            worker_bytes = {ws: sum(ts.get_nbytes() for ts in v)
                             for ws, v in tasks_by_worker.items()}
 
             avg = sum(worker_bytes.values()) / len(worker_bytes)
@@ -2067,7 +2077,7 @@ class Scheduler(ServerNode):
             recipient = next(recipients)
             msgs = []  # (sender, recipient, key)
             for sender in sorted_workers[:len(workers) // 2]:
-                sender_keys = {ts: self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
+                sender_keys = {ts: ts.get_nbytes()
                                for ts in tasks_by_worker[sender]}
                 sender_keys = iter(sorted(sender_keys.items(),
                                           key=second, reverse=True))
@@ -2114,7 +2124,7 @@ class Scheduler(ServerNode):
             for sender, recipient, ts in msgs:
                 ts.who_has.add(recipient)
                 recipient.has_what.add(ts)
-                recipient.nbytes += self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
+                recipient.nbytes += ts.get_nbytes()
                 self.log.append(('rebalance', ts.key, time(),
                                  sender.worker_key, recipient.worker_key))
 
@@ -2124,7 +2134,7 @@ class Scheduler(ServerNode):
             for sender, recipient, ts in msgs:
                 ts.who_has.remove(sender)
                 sender.has_what.remove(ts)
-                sender.nbytes -= self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
+                sender.nbytes -= ts.get_nbytes()
 
             raise Return({'status': 'OK'})
 
@@ -2186,7 +2196,7 @@ class Scheduler(ServerNode):
                 ws.has_what -= tasks
                 for ts in tasks:
                     ts.who_has.remove(ws)
-                    ws.nbytes -= self.nbytes.get(ts.key, DEFAULT_DATA_SIZE)
+                    ws.nbytes -= ts.get_nbytes()
                 self.log_event(ws.worker_key,
                                {'action': 'replicate-remove',
                                 'keys': [ts.key for ts in tasks]})
@@ -2256,11 +2266,9 @@ class Scheduler(ServerNode):
 
             limit_bytes = {w: self.worker_info[w]['memory_limit']
                            for w in self.worker_info}
-            #worker_bytes = {w: ws.nbytes for w, ws in self.workers.items()}
 
             limit = sum(limit_bytes.values())
             total = sum(ws.nbytes for ws in self.workers.values())
-            #idle = sorted(self.idle, key=worker_bytes.get, reverse=True)
             idle = sorted(self.idle, key=operator.attrgetter('nbytes'), reverse=True)
 
             to_close = []
@@ -2340,7 +2348,7 @@ class Scheduler(ServerNode):
             ts = self.task_states.get(key)
             if ts is not None:
                 if ts not in ws.has_what:
-                    ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                    ws.nbytes += ts.get_nbytes()
                     ws.has_what.add(ts)
                     ts.who_has.add(ws)
             else:
@@ -2365,17 +2373,17 @@ class Scheduler(ServerNode):
             # for key, workers in who_has.items():  # TODO
             #     self.mark_key_in_memory(key, workers)
 
-            self.nbytes.update(nbytes)
-
             for key, workers in who_has.items():
                 ts = self.task_states.get(key)
                 if ts is None:
                     ts = self.task_states[key] = TaskState(key, None)
                 ts.state = 'memory'
+                if key in nbytes:
+                    ts.nbytes = nbytes[key]
                 for w in workers:
                     ws = self.workers[w]
                     if ts not in ws.has_what:
-                        ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                        ws.nbytes += ts.get_nbytes()
                         ws.has_what.add(ts)
                         ts.who_has.add(ws)
                 if key not in self.waiting_data:
@@ -2504,9 +2512,9 @@ class Scheduler(ServerNode):
     def get_nbytes(self, comm=None, keys=None, summary=True):
         with log_errors():
             if keys is not None:
-                result = {k: self.nbytes[k] for k in keys}
+                result = {k: self.task_states[k].nbytes for k in keys}
             else:
-                result = self.nbytes
+                result = dict(self.nbytes)
 
             if summary:
                 out = defaultdict(lambda: 0)
@@ -2523,7 +2531,7 @@ class Scheduler(ServerNode):
         """
         ts = self.task_states[key]
         ws = self.workers[worker]
-        return (sum(self.nbytes[dts.key]
+        return (sum(dts.nbytes
                     for dts in ts.dependencies - ws.has_what)
                 / BANDWIDTH)
 
@@ -2794,11 +2802,11 @@ class Scheduler(ServerNode):
             del self.waiting[key]
 
             if nbytes is not None:
-                self.nbytes[key] = nbytes
+                ts.nbytes = nbytes
 
             ts.who_has.add(ws)
             ws.has_what.add(ts)
-            ws.nbytes += nbytes or DEFAULT_DATA_SIZE
+            ws.nbytes += ts.get_nbytes()
 
             self.check_idle_saturated(worker)
 
@@ -2865,7 +2873,6 @@ class Scheduler(ServerNode):
                 # assert all(dep in self.waiting_data[key ] for dep in
                 #         self.dependents[key] if self.task_state[dep] in
                 #         ['waiting', 'queue', 'stacks'])
-                # assert key not in self.nbytes
 
                 assert ts.state == 'processing'
 
@@ -2922,13 +2929,13 @@ class Scheduler(ServerNode):
             # Update State Information #
             ############################
             if nbytes is not None:
-                self.nbytes[key] = nbytes
+                ts.nbytes = nbytes
 
             self.release_resources(key, worker)
 
             ts.who_has.add(ws)
             ws.has_what.add(ts)
-            ws.nbytes += self.nbytes.get(key, DEFAULT_DATA_SIZE)
+            ws.nbytes += ts.get_nbytes()
 
             w = self.rprocessing.pop(key)
             ws = self.workers[w]
@@ -3017,7 +3024,7 @@ class Scheduler(ServerNode):
             # XXX factor this out?
             for ws in ts.who_has:
                 ws.has_what.remove(ts)
-                ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                ws.nbytes -= ts.get_nbytes()
                 self.worker_send(ws.worker_key, {'op': 'delete-data',
                                                  'keys': [key],
                                                  'report': False})
@@ -3288,8 +3295,6 @@ class Scheduler(ServerNode):
             del self.suspicious_tasks[key]
         if key in self.retries:
             del self.retries[key]
-        if key in self.nbytes:
-            del self.nbytes[key]
         if key in self.resource_restrictions:
             del self.resource_restrictions[key]
         if key in self.task_metadata:
@@ -3326,7 +3331,7 @@ class Scheduler(ServerNode):
         for ws in ts.who_has:
             if ws is not None:  # in case worker has died
                 ws.has_what.remove(ts)
-                ws.nbytes -= self.nbytes.get(key, DEFAULT_DATA_SIZE)
+                ws.nbytes -= ts.get_nbytes()
                 self.worker_send(ws.worker_key, {'op': 'delete-data',
                                                  'keys': [key],
                                                  'report': False})
@@ -3698,7 +3703,7 @@ class Scheduler(ServerNode):
 
         Minimize expected start time.  If a tie then break with data storage.
         """
-        comm_bytes = sum([self.nbytes.get(dts.key, DEFAULT_DATA_SIZE)
+        comm_bytes = sum([dts.get_nbytes()
                           for dts in ts.dependencies
                           if ws not in dts.who_has])
         stack_time = ws.occupancy / ws.ncores
