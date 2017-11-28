@@ -120,23 +120,37 @@ class WorkerState(object):
 
 class TaskState(object):
     __slots__ = (
-        # General description
+        # === General description ===
+        # Key name
         'key',
+        # How to run the task (None if pure data)
         'run_spec',
+        # Alive dependents and dependencies
         'dependencies',
         'dependents',
+        # Compute priority
         'priority',
+        # Restrictions
         'host_restrictions',
         'worker_restrictions',
         'resource_restrictions',
         'loose_restrictions',
-        'who_wants',
-        # Task state
+        # === Task state ===
         'state',
+        # Whether some dependencies were forgotten
+        'has_lost_dependencies',
+        # If in 'waiting' state, which tasks need to complete
+        # before we can run
         'waiting_on',
+        # If in 'waiting' or 'processing' state, which tasks needs us
+        # to complete before they can run
         'waiters',
+        # In in 'processing' state, which worker we are processing on
         'processing_on',
+        # If in 'memory' state, Which workers have us
         'who_has',
+        # Which clients want us
+        'who_wants',
         'exception',
         'traceback',
         'exception_blame',
@@ -161,6 +175,7 @@ class TaskState(object):
         self.waiters = set()
         self.who_has = set()
         self.processing_on = None
+        self.has_lost_dependencies = False
 
     def get_nbytes(self):
         nbytes = self.nbytes
@@ -1333,17 +1348,15 @@ class Scheduler(ServerNode):
                 if not s:
                     tasks2.add(ts)
 
+        recommendations = {}
         for ts in tasks2:
-            # XXX instead remove forgotten dependents and dependencies,
-            # and have a "some_dependencies_lost" flag on TaskState?
-            # (such a flag would be needed in case an in-memory task
-            #  is lost and must be recomputed)
-            if all(dts.state == 'forgotten' for dts in ts.dependents):
-                r = self.transition(ts.key, 'forgotten')
-                self.transitions(r)
+            if not ts.dependents:
+                # No live dependents, can forget
+                recommendations[ts.key] = 'forgotten'
             elif ts.state != 'erred' and not ts.waiters:
-                r = self.transition(ts.key, 'released')
-                self.transitions(r)
+                recommendations[ts.key] = 'released'
+
+        self.transitions(recommendations)
 
     ###################
     # Task Validation #
@@ -2647,10 +2660,11 @@ class Scheduler(ServerNode):
                 assert not ts.processing_on
                 # assert all(dep in self.task_state
                 #            for dep in self.dependencies[key])
+                assert not any(dts.state == 'forgotten' for dts in ts.dependencies)
 
             self.released.remove(ts)
 
-            if any(dts.state == 'forgotten' for dts in ts.dependencies):
+            if ts.has_lost_dependencies:
                 return {key: 'forgotten'}
 
             recommendations = OrderedDict()
@@ -2671,10 +2685,7 @@ class Scheduler(ServerNode):
                     dts.waiters.add(ts)
 
             ts.waiters = {dts for dts in ts.dependents
-                          if not dts.who_has
-                          #and dts.state != 'released'  # XXX dts.state == 'waiting'?
-                          and dts.state == 'waiting'
-                          and dts.key not in self.exceptions_blame}
+                          if dts.state == 'waiting'}
 
             ts.state = 'waiting'
 
@@ -2779,6 +2790,7 @@ class Scheduler(ServerNode):
                 assert not ts.who_has
                 assert key not in self.exceptions_blame
                 assert not ts.processing_on
+                assert not ts.has_lost_dependencies
                 # assert key not in self.readyset
                 assert ts not in self.unrunnable
                 assert all(dts.who_has
@@ -3297,13 +3309,15 @@ class Scheduler(ServerNode):
         ts.state = 'forgotten'
         key = ts.key
         for dts in ts.dependents:
-            #dts.dependencies.remove(ts)
+            dts.has_lost_dependencies = True
+            dts.dependencies.remove(ts)
             dts.waiting_on.discard(ts)
             if dts.state not in ('memory', 'error'):
                 # Cannot compute task anymore
                 recommendations[dts.key] = 'forgotten'
 
         for dts in ts.dependencies:
+            dts.dependents.remove(ts)
             s = dts.waiters
             s.discard(ts)
             if not s and not dts.who_wants:
@@ -3368,7 +3382,7 @@ class Scheduler(ServerNode):
                 if not ts.run_spec:
                     # It's ok to forget a pure data task
                     pass
-                elif any(dts.state == 'forgotten' for dts in ts.dependencies):
+                elif ts.has_lost_dependencies:
                     # It's ok to forget a task with forgotten dependencies
                     pass
                 elif not ts.who_wants and not ts.waiters:
@@ -3376,11 +3390,6 @@ class Scheduler(ServerNode):
                     pass
                 else:
                     assert 0, (ts,)
-                #if ts.run_spec and all(dts.state != 'forgotten'
-                                       #for dts in ts.dependencies):
-                    #assert not ts.who_wants
-                    #assert not any(ts in dts.waiters
-                                   #for dts in ts.dependencies), (ts, ts.waiting_on, ts.dependencies)
 
             recommendations = {}
             self._propagate_forgotten(ts, recommendations)
