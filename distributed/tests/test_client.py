@@ -464,7 +464,7 @@ def test_gather_lost(c, s, a, b):
     yield a._close()
 
     with pytest.raises(Exception):
-        yield c.gather([x, y])
+        res = yield c.gather([x, y])
 
 
 def test_gather_sync(loop):
@@ -1877,8 +1877,8 @@ def test_forget_simple(c, s, a, b):
     z = c.submit(add, x, y, workers=[a.ip], allow_other_workers=True)
 
     yield wait([x, y, z])
-    assert not s.waiting_data[x.key]
-    assert not s.waiting_data[y.key]
+    assert not s.waiting_data.get(x.key)
+    assert not s.waiting_data.get(y.key)
 
     assert set(s.tasks) == {x.key, y.key, z.key}
 
@@ -1894,7 +1894,7 @@ def test_forget_simple(c, s, a, b):
         assert x.key not in coll
         assert z.key not in coll
 
-    assert z.key not in s.dependents[y.key]
+    #assert z.key not in s.dependents[y.key]
 
     s.client_releases_keys(keys=[y.key], client=c.id)
     assert not s.tasks
@@ -1935,10 +1935,10 @@ def test_forget_complex(e, s, A, B):
 def test_forget_in_flight(e, s, A, B):
     delayed2 = partial(delayed, pure=True)
     a, b, c, d = [delayed2(slowinc)(i) for i in range(4)]
-    ab = delayed2(slowadd)(a, b)
-    cd = delayed2(slowadd)(c, d)
-    ac = delayed2(slowadd)(a, c)
-    acab = delayed2(slowadd)(ac, ab)
+    ab = delayed2(slowadd)(a, b, dask_key_name="ab")
+    cd = delayed2(slowadd)(c, d, dask_key_name="cd")
+    ac = delayed2(slowadd)(a, c, dask_key_name="ac")
+    acab = delayed2(slowadd)(ac, ab, dask_key_name="acab")
 
     x, y = e.compute([ac, acab])
     s.validate_state()
@@ -2009,10 +2009,8 @@ def test_waiting_data(c, s, a, b):
 
     yield wait([x, y, z])
 
-    assert x.key not in s.waiting_data[x.key]
-    assert y.key not in s.waiting_data[y.key]
-    assert not s.waiting_data[x.key]
-    assert not s.waiting_data[y.key]
+    assert not s.waiting_data.get(x.key)
+    assert not s.waiting_data.get(y.key)
 
 
 @gen_cluster()
@@ -3338,6 +3336,38 @@ def test_get_foo(c, s, a, b):
     assert valmap(sorted, x) == {futures[0].key: sorted(s.who_has[futures[0].key])}
 
 
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
+def test_get_foo_lost_keys(c, s, u, v, w):
+    x = c.submit(inc, 1, workers=[u.address])
+    y = yield c.scatter(3, workers=[v.address])
+    yield wait([x, y])
+
+    ua, va, wa = u.address, v.address, w.address
+
+    d = yield c.scheduler.has_what()
+    assert d == {ua: [x.key], va: [y.key], wa: []}
+    d = yield c.scheduler.has_what(workers=[ua, va])
+    assert d == {ua: [x.key], va: [y.key]}
+    d = yield c.scheduler.who_has()
+    assert d == {x.key: [ua], y.key: [va]}
+    d = yield c.scheduler.who_has(keys=[x.key, y.key])
+    assert d == {x.key: [ua], y.key: [va]}
+
+    yield u._close()
+    yield v._close()
+
+    d = yield c.scheduler.has_what()
+    assert d == {wa: []}
+    d = yield c.scheduler.has_what(workers=[ua, va])
+    assert d == {ua: [], va: []}
+    # The scattered key cannot be recomputed so it is forgotten
+    d = yield c.scheduler.who_has()
+    assert d == {x.key: []}
+    # ... but when passed explicitly, it is included in the result
+    d = yield c.scheduler.who_has(keys=[x.key, y.key])
+    assert d == {x.key: [], y.key: []}
+
+
 @slow
 @gen_cluster(client=True, Worker=Nanny)
 def test_bad_tasks_fail(c, s, a, b):
@@ -4270,11 +4300,11 @@ def test_get_future_error_simple(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_get_futures_error(c, s, a, b):
-    x0 = delayed(dec)(2)
-    y0 = delayed(dec)(1)
-    x = delayed(div)(1, x0)
-    y = delayed(div)(1, y0)
-    tot = delayed(sum)(x, y)
+    x0 = delayed(dec)(2, dask_key_name='x0')
+    y0 = delayed(dec)(1, dask_key_name='y0')
+    x = delayed(div)(1, x0, dask_key_name='x')
+    y = delayed(div)(1, y0, dask_key_name='y')
+    tot = delayed(sum)(x, y, dask_key_name='tot')
 
     f = c.compute(tot)
     yield wait(f)

@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 from concurrent.futures import CancelledError
 from operator import add
 import os
+import random
 from time import sleep
 
 import pytest
@@ -306,20 +307,30 @@ def test_broken_worker_during_computation(c, s, a, b):
         yield gen.sleep(0.01)
         assert time() < start + 5
 
-    L = c.map(inc, range(256))
-    for i in range(8):
-        L = c.map(add, *zip(*partition_all(2, L)))
+    N = 256
+    expected_result = N * (N + 1) // 2
+    i = 0
+    L = c.map(inc, range(N),
+              key=['inc-%d-%d' % (i, j) for j in range(N)])
+    while len(L) > 1:
+        i += 1
+        L = c.map(slowadd, *zip(*partition_all(2, L)),
+                  key=['add-%d-%d' % (i, j) for j in range(len(L) // 2)])
 
-    from random import random
-    yield gen.sleep(random() / 2)
+    yield gen.sleep(random.random() / 20)
     with ignoring(CommClosedError):  # comm will be closed abrupty
         yield c._run(os._exit, 1, workers=[n.worker_address])
-    yield gen.sleep(random() / 2)
+
+    yield gen.sleep(random.random() / 20)
+    while len(s.workers) < 3:
+        yield gen.sleep(0.01)
+
     with ignoring(CommClosedError, EnvironmentError):  # perhaps new worker can't be contacted yet
         yield c._run(os._exit, 1, workers=[n.worker_address])
 
-    result = yield c.gather(L)
-    assert isinstance(result[0], int)
+    [result] = yield c.gather(L)
+    assert isinstance(result, int)
+    assert result == expected_result
 
     yield n._close()
 

@@ -121,11 +121,13 @@ def test_stress_scatter_death(c, s, *workers):
 
     adds = [delayed(slowadd, pure=True)(random.choice(L),
                                         random.choice(L),
-                                        delay=0.05)
+                                        delay=0.05,
+                                        dask_key_name='slowadd-1-%d' % i)
             for i in range(50)]
 
-    adds = [delayed(slowadd, pure=True)(a, b, delay=0.02)
-            for a, b in sliding_window(2, adds)]
+    adds = [delayed(slowadd, pure=True)(a, b, delay=0.02,
+                                        dask_key_name='slowadd-2-%d' % i)
+            for i, (a, b) in enumerate(sliding_window(2, adds))]
 
     futures = c.compute(adds)
     L = adds = None
