@@ -3224,7 +3224,7 @@ def test_scheduler_saturates_cores(c, s, a, b):
     for delay in [0, 0.01, 0.1]:
         futures = c.map(slowinc, range(100), delay=delay)
         futures = c.map(slowinc, futures, delay=delay / 10)
-        while not s.tasks or s.ready:
+        while not s.tasks:
             if s.tasks:
                 assert all(len(p) >= 20 for p in s.processing.values())
             yield gen.sleep(0.01)
@@ -3234,7 +3234,7 @@ def test_scheduler_saturates_cores(c, s, a, b):
 def test_scheduler_saturates_cores_random(c, s, a, b):
     for delay in [0, 0.01, 0.1]:
         futures = c.map(randominc, range(100), scale=0.1)
-        while not s.tasks or s.ready:
+        while not s.tasks:
             if s.tasks:
                 assert all(len(p) >= 20 for p in s.processing.values())
             yield gen.sleep(0.01)

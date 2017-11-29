@@ -357,8 +357,6 @@ class Scheduler(ServerNode):
         Dictionary like dependencies but excludes keys already computed
     * **waiting_data:** ``{key: {key}}``:
         Dictionary like dependents but excludes keys already computed
-    * **ready:** ``deque(key)``
-        Keys that are ready to run, but not yet assigned to a worker
     * **processing:** ``{worker: {key: cost}}``:
         Set of keys currently in execution on each worker and their expected
         duration
@@ -527,7 +525,6 @@ class Scheduler(ServerNode):
         self.exceptions_blame = dict()
 
         self.generation = 0
-        self.ready = deque()
         self.released = set()
         self.unrunnable = set()
 
@@ -578,9 +575,6 @@ class Scheduler(ServerNode):
         self.host_info = defaultdict(dict)
         self.resources = defaultdict(dict)
         self.aliases = dict()
-
-        # XXX what to do with ready?
-        self._task_collections = [self.ready]
 
         self._task_state_collections = [self.released, self.unrunnable]
 
@@ -1164,10 +1158,6 @@ class Scheduler(ServerNode):
 
             if ts.state == 'memory':
                 assert ws in ts.who_has
-                #if ts not in ws.has_what:
-                    #ws.has_what.add(ts)
-                    #ws.nbytes += ts.get_nbytes()
-                    #ts.who_has.add(ws)
         else:
             logger.debug("Received already computed task, worker: %s, state: %s"
                          ", key: %s, who_has: %s",
@@ -1397,7 +1387,6 @@ class Scheduler(ServerNode):
         assert not ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
-        # assert key not in self.ready
         assert not any(ts in dts.waiters
                        for dts in ts.dependencies)
         assert ts in self.released
@@ -1476,7 +1465,7 @@ class Scheduler(ServerNode):
         # XXX rewrite this for state objects
         released = {ts.key for ts in self.released}
         validate_state(self.dependencies, self.dependents, self.waiting,
-                       self.waiting_data, self.ready, self.who_has,
+                       self.waiting_data, self.who_has,
                        self.processing, None, released, self.who_wants,
                        self.wants_what, tasks=self.tasks, erred=self.exceptions_blame,
                        allow_overlap=allow_overlap)
@@ -1991,8 +1980,6 @@ class Scheduler(ServerNode):
         # XXX what about nested state such as ClientState.wants_what
         # (see also fire-and-forget...)
         logger.info("Clear task state")
-        for collection in self._task_collections:
-            collection.clear()
         for collection in self._task_state_collections:
             collection.clear()
 
@@ -2815,7 +2802,6 @@ class Scheduler(ServerNode):
                 assert key not in self.exceptions_blame
                 assert not ts.processing_on
                 assert not ts.has_lost_dependencies
-                # assert key not in self.readyset
                 assert ts not in self.unrunnable
                 assert all(dts.who_has
                            for dts in ts.dependencies)
@@ -2998,7 +2984,6 @@ class Scheduler(ServerNode):
             if len(deps) > 1:
                 deps = sorted(deps, key=operator.attrgetter('priority'),
                               reverse=True)
-            #for dts in ts.waiters:
             for dts in deps:
                 s = dts.waiting_on
                 if ts in s:
@@ -3045,7 +3030,6 @@ class Scheduler(ServerNode):
 
             if self.validate:
                 assert ts not in self.released
-                # assert key not in self.readyset
                 assert not ts.waiting_on
                 assert not ts.processing_on
                 if safe:
@@ -3349,14 +3333,6 @@ class Scheduler(ServerNode):
         ts.who_has.clear()
         ts.processing_on = None
 
-        #if self.validate:
-            #assert all(ts not in dts.dependents
-                       #for dts in ts.dependencies
-                       #if dts.state != 'forgotten')
-            #assert all(ts not in dts.waiters
-                       #for dts in ts.dependencies
-                       #if dts.state != 'forgotten')
-
     def transition_memory_forgotten(self, key):
         try:
             ts = self.task_states[key]
@@ -3364,7 +3340,6 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert ts.state == 'memory'
                 assert not ts.processing_on
-                # assert key not in self.ready
                 assert not ts.waiting_on
 
             recommendations = {}
@@ -3389,7 +3364,6 @@ class Scheduler(ServerNode):
                 assert ts.state in ('released', 'erred')
                 assert not ts.who_has
                 assert not ts.processing_on
-                # assert key not in self.ready
                 assert not ts.waiting_on, (ts, ts.waiting_on)
                 if not ts.run_spec:
                     # It's ok to forget a pure data task
@@ -3914,7 +3888,7 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     return min(candidates, key=objective)
 
 
-def validate_state(dependencies, dependents, waiting, waiting_data, ready,
+def validate_state(dependencies, dependents, waiting, waiting_data,
                    who_has, processing, finished_results, released,
                    who_wants, wants_what, tasks=None, allow_overlap=False,
                    erred=None, **kwargs):
@@ -3927,12 +3901,10 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
     # XXX update this for state objects?
     in_processing = {k for v in processing.values() for k in v}
     keys = {key for key in dependents if not dependents[key]}
-    ready_set = set(ready)
 
     assert set(waiting).issubset(dependencies), "waiting not subset of deps"
     assert set(waiting_data).issubset(dependents), "waiting_data not subset"
     if tasks is not None:
-        assert ready_set.issubset(tasks), "All ready tasks are tasks"
         assert set(dependents).issubset(set(tasks) | set(who_has)), "all dependents tasks"
         assert set(dependencies).issubset(set(tasks) | set(who_has)), "all dependencies tasks"
 
@@ -3963,7 +3935,6 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
     def check_key(key):
         """ Validate a single key, recurse downwards """
         vals = ([key in waiting,
-                 key in ready,
                  key in in_processing,
                  not not who_has.get(key),
                  key in released,
@@ -3986,7 +3957,6 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
                 raise ValueError("Key in processing without all deps",
                                  key)
             assert not waiting.get(key)
-            assert key not in ready
 
         if finished_results is not None:
             if key in finished_results:
@@ -4003,9 +3973,6 @@ def validate_state(dependencies, dependents, waiting, waiting_data, ready,
 
         if key in waiting:
             assert waiting[key], 'waiting empty'
-
-        if key in ready:
-            assert key not in waiting
 
         return True
 
