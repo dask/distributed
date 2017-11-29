@@ -380,7 +380,7 @@ def test_filtered_communication(s, a, b):
     yield c.read()
     yield f.read()
 
-    assert set(s.comms) == {'c', 'f'}
+    assert set(s.client_comms) == {'c', 'f'}
 
     yield c.write({'op': 'update-graph',
                    'tasks': {'x': dumps_task((inc, 1)),

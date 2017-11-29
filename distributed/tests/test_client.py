@@ -2019,7 +2019,7 @@ def test_multi_client(s, a, b):
 
     f = yield Client((s.ip, s.port), asynchronous=True)
 
-    assert set(s.comms) == {c.id, f.id}
+    assert set(s.client_comms) == {c.id, f.id}
 
     x = c.submit(inc, 1)
     y = f.submit(inc, 2)

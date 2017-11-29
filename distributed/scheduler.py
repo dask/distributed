@@ -474,8 +474,7 @@ class Scheduler(ServerNode):
         # Communication state
         self.loop = loop or IOLoop.current()
         self.worker_comms = dict()
-        # XXX rename to client_comms?
-        self.comms = dict()
+        self.client_comms = dict()
         self.coroutines = []
         self._worker_coroutines = []
         self._ipython_kernel = None
@@ -787,7 +786,7 @@ class Scheduler(ServerNode):
 
     def close_comms(self):
         """ Close all active Comms."""
-        for comm in self.comms.values():
+        for comm in self.client_comms.values():
             comm.abort()
         self.rpc.close()
 
@@ -1518,7 +1517,7 @@ class Scheduler(ServerNode):
         """
         if client is not None:
             try:
-                comm = self.comms[client]
+                comm = self.client_comms[client]
                 comm.send(msg)
             except CommClosedError:
                 if self.status == 'running':
@@ -1530,12 +1529,12 @@ class Scheduler(ServerNode):
             ts = self.task_states.get(msg['key'])
         if ts is None:
             # Notify all clients
-            comms = self.comms.values()
+            comms = self.client_comms.values()
         else:
             # Notify clients interested in key
-            comms = [self.comms[c.client_key]
+            comms = [self.client_comms[c.client_key]
                      for c in ts.who_wants
-                     if c.client_key in self.comms]
+                     if c.client_key in self.client_comms]
         for c in comms:
             try:
                 c.send(msg)
@@ -1559,10 +1558,10 @@ class Scheduler(ServerNode):
             yield self.handle_client(comm, client=client)
         finally:
             if not comm.closed():
-                self.comms[client].send({'op': 'stream-closed'})
+                self.client_comms[client].send({'op': 'stream-closed'})
             try:
-                yield self.comms[client].close()
-                del self.comms[client]
+                yield self.client_comms[client].close()
+                del self.client_comms[client]
                 logger.info("Close client connection: %s", client)
             except TypeError:  # comm becomes None during GC
                 pass
@@ -1595,7 +1594,7 @@ class Scheduler(ServerNode):
         """
         bcomm = BatchedSend(interval=2, loop=self.loop)
         bcomm.start(comm)
-        self.comms[client] = bcomm
+        self.client_comms[client] = bcomm
 
         try:
             bcomm.send({'op': 'stream-start'})
