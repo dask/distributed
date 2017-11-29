@@ -1467,12 +1467,7 @@ class Scheduler(ServerNode):
 
     def validate_state(self, allow_overlap=False):
         # XXX rewrite this for state objects
-        released = {ts.key for ts in self.released}
-        validate_state(self.dependencies, self.dependents, self.waiting,
-                       self.waiting_data, self.who_has,
-                       self.processing, None, released, self.who_wants,
-                       self.wants_what, tasks=self.tasks, erred=self.exceptions_blame,
-                       allow_overlap=allow_overlap)
+        validate_state(self.task_states, self.workers, self.client_states)
 
         if not (set(self.workers) ==
                 set(self.worker_info) ==
@@ -1499,17 +1494,6 @@ class Scheduler(ServerNode):
         b = {w: sum(ts.nbytes for ts in ws.has_what)
              for w, ws in self.workers.items()}
         assert a == b, (a, b)
-
-        for key, workers in self.who_has.items():
-            ts = self.task_states[key]
-            for worker in workers:
-                assert ts in self.workers[worker].has_what
-
-        for ws in self.workers.values():
-            for ts in ws.has_what:
-                assert ws.worker_key in self.who_has[ts.key]
-
-        assert all(self.who_has.values())
 
         actual_total_occupancy = 0
         for worker, ws in self.workers.items():
@@ -3222,7 +3206,7 @@ class Scheduler(ServerNode):
             recommendations = {}
 
             for dts in ts.dependents:
-                dts.exception_blame = failing_ts  # XXX ts?
+                dts.exception_blame = failing_ts
                 recommendations[dts.key] = 'erred'
 
             for dts in ts.dependencies:
@@ -3283,15 +3267,14 @@ class Scheduler(ServerNode):
 
     def remove_key(self, key):
         ts = self.task_states.pop(key)
-        ts.state = 'forgotten'
+        assert ts.state == 'forgotten'
         self.released.discard(ts)
         self.unrunnable.discard(ts)
-        ts.waiters.clear()
-        ts.waiting_on.clear()
-        ts.who_has.clear()
+        for cs in ts.who_wants:
+            cs.wants_what.remove(ts)
         ts.who_wants.clear()
         ts.processing_on = None
-        ts.exception_blame = None
+        ts.exception_blame = ts.exception = ts.traceback = None
 
         if key in self.task_metadata:
             del self.task_metadata[key]
@@ -3306,6 +3289,8 @@ class Scheduler(ServerNode):
             if dts.state not in ('memory', 'error'):
                 # Cannot compute task anymore
                 recommendations[dts.key] = 'forgotten'
+        ts.dependents.clear()
+        ts.waiters.clear()
 
         for dts in ts.dependencies:
             dts.dependents.remove(ts)
@@ -3315,6 +3300,8 @@ class Scheduler(ServerNode):
                 # Task not needed anymore
                 assert dts is not ts
                 recommendations[dts.key] = 'forgotten'
+        ts.dependencies.clear()
+        ts.waiting_on.clear()
 
         for ws in ts.who_has:
             ws.has_what.remove(ts)
@@ -3324,9 +3311,7 @@ class Scheduler(ServerNode):
                 self.worker_send(w, {'op': 'delete-data',
                                      'keys': [key],
                                      'report': False})
-
         ts.who_has.clear()
-        ts.processing_on = None
 
     def transition_memory_forgotten(self, key):
         try:
@@ -3336,6 +3321,17 @@ class Scheduler(ServerNode):
                 assert ts.state == 'memory'
                 assert not ts.processing_on
                 assert not ts.waiting_on
+                if not ts.run_spec:
+                    # It's ok to forget a pure data task
+                    pass
+                elif ts.has_lost_dependencies:
+                    # It's ok to forget a task with forgotten dependencies
+                    pass
+                elif not ts.who_wants and not ts.waiters:
+                    # It's ok to forget a task that nobody needs
+                    pass
+                else:
+                    assert 0, (ts,)
 
             recommendations = {}
             self._propagate_forgotten(ts, recommendations)
@@ -3883,95 +3879,70 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     return min(candidates, key=objective)
 
 
-def validate_state(dependencies, dependents, waiting, waiting_data,
-                   who_has, processing, finished_results, released,
-                   who_wants, wants_what, tasks=None, allow_overlap=False,
-                   erred=None, **kwargs):
+def validate_state(task_states, workers, client_states):
     """
     Validate a current runtime state
 
     This performs a sequence of checks on the entire graph, running in about
     linear time.  This raises assert errors if anything doesn't check out.
     """
-    # XXX update this for state objects?
-    in_processing = {k for v in processing.values() for k in v}
-    keys = {key for key in dependents if not dependents[key]}
+    for ts in task_states.values():
+        if ts.waiting_on:
+            assert ts.waiting_on.issubset(ts.dependencies), \
+                ("waiting not subset of dependencies", str(ts.waiting_on), str(ts.dependencies))
+        if ts.waiters:
+            assert ts.waiters.issubset(ts.dependents), \
+                ("waiters not subset of dependents", str(ts.waiters), str(ts.dependents))
 
-    assert set(waiting).issubset(dependencies), "waiting not subset of deps"
-    assert set(waiting_data).issubset(dependents), "waiting_data not subset"
-    if tasks is not None:
-        assert set(dependents).issubset(set(tasks) | set(who_has)), "all dependents tasks"
-        assert set(dependencies).issubset(set(tasks) | set(who_has)), "all dependencies tasks"
+        for dts in ts.waiting_on:
+            assert not dts.who_has, \
+                ("waiting on in-memory dep", str(ts), str(dts))
+            assert dts.state != 'released', \
+                ("waiting on released dep", str(ts), str(dts))
+        for dts in ts.dependencies:
+            assert ts in dts.dependents, \
+                ("not in dependency's dependents", str(ts), str(dts), str(dts.dependents))
+            if ts.state in ('waiting', 'processing'):
+                assert dts in ts.waiting_on or dts.who_has, \
+                    ("dep missing", str(ts), str(dts))
 
-    for k, v in waiting.items():
-        assert v, "waiting on empty set"
-        assert v.issubset(dependencies[k]), "waiting set not dependencies"
-        for vv in v:
-            assert vv not in who_has, ("waiting dependency in memory", k, vv)
-            assert vv not in released, ("dependency released", k, vv)
-        for dep in dependencies[k]:
-            assert dep in v or who_has.get(dep), ("dep missing", k, dep)
+        for dts in ts.waiters:
+            assert dts.state in ('waiting', 'processing'), \
+                ("waiter not in play", str(ts), str(dts))
+        for dts in ts.dependents:
+            assert ts in dts.dependencies, \
+                ("not in dependent's dependencies", str(ts), str(dts), str(dts.dependencies))
 
-    for k, v in waiting_data.items():
-        for vv in v:
-            if vv in released:
-                raise ValueError('dependent not in play', k, vv)
-            if not (vv in waiting or
-                    vv in in_processing):
-                raise ValueError('dependent not in play2', k, vv)
+        assert (ts.processing_on is not None) == (ts.state == 'processing')
+        assert bool(ts.who_has) == (ts.state == 'memory')
 
-    for v in concat(processing.values()):
-        assert v in dependencies, ("all processing keys in dependencies", sorted(processing.values()), sorted(dependencies))
+        if ts.state == 'processing':
+            assert all(dts.who_has for dts in ts.dependencies), \
+                ("task processing without all deps", str(ts), str(ts.dependencies))
+            assert not ts.waiting_on
 
-    for key in who_has:
-        assert key in waiting_data or key in who_wants, (key, dependents[key])
+        if ts.who_has:
+            assert ts.waiters or ts.who_wants, \
+                ("unneeded task in memory", str(ts), str(ts.who_has))
+            assert not any(ts in dts.waiting_on for dts in ts.dependents)
+            for ws in ts.who_has:
+                assert ts in ws.has_what, \
+                    ("not in who_has' has_what", str(ts), str(ws), str(ws.has_what))
 
-    @memoize
-    def check_key(key):
-        """ Validate a single key, recurse downwards """
-        vals = ([key in waiting,
-                 key in in_processing,
-                 not not who_has.get(key),
-                 key in released,
-                 key in erred])
-        if ((allow_overlap and sum(vals) < 1) or
-                (not allow_overlap and sum(vals) != 1)):
-            raise ValueError("Key exists in wrong number of places", key, vals)
+        if ts.who_wants:
+            for cs in ts.who_wants:
+                assert ts in cs.wants_what, \
+                    ("not in who_wants' wants_what", str(ts), str(cs), str(cs.wants_what))
 
-        for dep in dependencies[key]:
-            if dep in dependents:
-                check_key(dep)  # Recursive case
+    for ws in workers.values():
+        for ts in ws.has_what:
+            assert ws in ts.who_has, \
+                ("not in has_what' who_has", str(ws), str(ts), str(ts.who_has))
 
-        if who_has.get(key):
-            assert not any(key in waiting.get(dep, ())
-                           for dep in dependents.get(key, ()))
-            assert not waiting.get(key)
-
-        if key in in_processing:
-            if not all(who_has.get(dep) for dep in dependencies[key]):
-                raise ValueError("Key in processing without all deps",
-                                 key)
-            assert not waiting.get(key)
-
-        if finished_results is not None:
-            if key in finished_results:
-                assert who_has.get(key)
-                assert key in keys
-
-            if key in keys and who_has.get(key):
-                assert key in finished_results
-
-        for key, s in who_wants.items():
-            assert s, "empty who_wants"
-            for client in s:
-                assert key in wants_what[client]
-
-        if key in waiting:
-            assert waiting[key], 'waiting empty'
-
-        return True
-
-    assert all(map(check_key, keys))
+    for cs in client_states.values():
+        for ts in cs.wants_what:
+            assert cs in ts.who_wants, \
+                ("not in wants_what' who_wants", str(cs), str(ts), str(ts.who_wants))
 
 
 _round_robin = [0]

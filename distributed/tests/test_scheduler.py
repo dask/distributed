@@ -15,7 +15,7 @@ import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
 from distributed.core import connect, rpc, CommClosedError
-from distributed.scheduler import validate_state, Scheduler, BANDWIDTH
+from distributed.scheduler import Scheduler, BANDWIDTH
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -153,74 +153,6 @@ def test_no_workers(client, s):
 @gen_cluster(ncores=[])
 def test_retire_workers_empty(s):
     yield s.retire_workers(workers=[])
-
-
-@pytest.mark.skip
-def test_validate_state():
-    dsk = {'x': 1, 'y': (inc, 'x')}
-    dependencies = {'x': set(), 'y': {'x'}}
-    waiting = {'y': {'x'}}
-    ready = deque(['x'])
-    dependents = {'x': {'y'}, 'y': set()}
-    waiting_data = {'x': {'y'}}
-    who_has = dict()
-    stacks = {alice: [], bob: []}
-    processing = {alice: dict(), bob: dict()}
-    finished_results = set()
-    released = set()
-    in_play = {'x', 'y'}
-    who_wants = {'y': {'client'}}
-    wants_what = {'client': {'y'}}
-    erred = {}
-
-    validate_state(**locals())
-
-    who_has['x'] = {alice}
-    with pytest.raises(Exception):
-        validate_state(**locals())
-
-    ready.remove('x')
-    with pytest.raises(Exception):
-        validate_state(**locals())
-
-    waiting['y'].remove('x')
-    with pytest.raises(Exception):
-        validate_state(**locals())
-
-    del waiting['y']
-    ready.appendleft('y')
-    validate_state(**locals())
-
-    stacks[alice].append('y')
-    with pytest.raises(Exception):
-        validate_state(**locals())
-
-    ready.remove('y')
-    validate_state(**locals())
-
-    stacks[alice].pop()
-    with pytest.raises(Exception):
-        validate_state(**locals())
-
-    processing[alice]['y'] = 1
-    validate_state(**locals())
-
-    del processing[alice]['y']
-    with pytest.raises(Exception):
-        validate_state(**locals())
-
-    who_has['y'] = {alice}
-    with pytest.raises(Exception):
-        validate_state(**locals())
-
-    finished_results.add('y')
-    with pytest.raises(Exception):
-        validate_state(**locals())
-
-    waiting_data.pop('x')
-    who_has.pop('x')
-    released.add('x')
-    validate_state(**locals())
 
 
 @gen_cluster()
