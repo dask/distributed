@@ -102,7 +102,6 @@ class CountsJSON(RequestHandler):
             'idle': len(self.server.idle),
             'memory': len(self.server.who_has),
             'processing': len(self.server.rprocessing),
-            'ready': len(self.server.ready),
             'released': len(self.server.released),
             'saturated': len(self.server.saturated),
             'tasks': len(self.server.tasks),

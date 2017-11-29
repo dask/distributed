@@ -487,7 +487,6 @@ class Scheduler(ServerNode):
                 ('priority', 'priority', None),
                 ('dependencies', 'dependencies', _legacy_task_key_set),
                 ('dependents', 'dependents', _legacy_task_key_set),
-                ('nbytes', 'nbytes', None),
                 ('retries', 'retries', None),
                 ]:
             func = operator.attrgetter(new_attr)
@@ -498,6 +497,7 @@ class Scheduler(ServerNode):
 
         for old_attr, new_attr, wrap in [
                 ('tasks', 'run_spec', None),
+                ('nbytes', 'nbytes', None),
                 ('who_wants', 'who_wants', _legacy_client_key_set),
                 ('who_has', 'who_has', _legacy_worker_key_set),
                 ('waiting', 'waiting_on', _legacy_task_key_set),
@@ -2559,13 +2559,14 @@ class Scheduler(ServerNode):
             if keys is not None:
                 result = {k: self.task_states[k].nbytes for k in keys}
             else:
-                result = {k: ts.nbytes for k, ts in self.task_states.items()}
+                result = {k: ts.nbytes for k, ts in self.task_states.items()
+                          if ts.nbytes is not None}
 
             if summary:
                 out = defaultdict(lambda: 0)
                 for k, v in result.items():
                     out[key_split(k)] += v
-                result = out
+                result = dict(out)
 
             return result
 
