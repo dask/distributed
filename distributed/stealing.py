@@ -170,7 +170,7 @@ class WorkStealing(SchedulerPlugin):
             victim_duration = victim.processing[ts]
 
             thief_duration = (
-                self.scheduler.get_task_duration(key) +
+                self.scheduler.get_task_duration(ts) +
                 self.scheduler.get_comm_cost(ts, thief)
                 )
 

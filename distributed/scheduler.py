@@ -123,6 +123,8 @@ class TaskState(object):
         # === General description ===
         # Key name
         'key',
+        # Key prefix (see key_split())
+        'prefix',
         # How to run the task (None if pure data)
         'run_spec',
         # Alive dependents and dependencies
@@ -162,6 +164,7 @@ class TaskState(object):
     def __init__(self, key, run_spec):
         assert isinstance(key, (str, bytes))
         self.key = key
+        self.prefix = key_split(key)
         self.run_spec = run_spec
         self.state = None
         self.exception = self.traceback = self.exception_blame = None
@@ -470,6 +473,7 @@ class Scheduler(ServerNode):
         # Communication state
         self.loop = loop or IOLoop.current()
         self.worker_comms = dict()
+        # XXX rename to client_comms?
         self.comms = dict()
         self.coroutines = []
         self._worker_coroutines = []
@@ -517,8 +521,6 @@ class Scheduler(ServerNode):
             setattr(self, old_attr,
                     _StateLegacySet(self.task_states, func))
 
-        self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
-        self.unknown_durations = defaultdict(set)
         self.suspicious_tasks = defaultdict(lambda: 0)
         self.exceptions = dict()
         self.tracebacks = dict()
@@ -532,6 +534,10 @@ class Scheduler(ServerNode):
         self.n_tasks = 0
         self.task_metadata = dict()
         self.datasets = dict()
+
+        # Prefix-keyed containers
+        self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
+        self.unknown_durations = defaultdict(set)
 
         # Client state
         # XXX rename to self.clients?
@@ -574,7 +580,7 @@ class Scheduler(ServerNode):
         self.aliases = dict()
 
         # XXX what to do with ready?
-        self._task_collections = [self.ready, self.unknown_durations]
+        self._task_collections = [self.ready]
 
         self._task_state_collections = [self.released, self.unrunnable]
 
@@ -1687,7 +1693,7 @@ class Scheduler(ServerNode):
             msg = {'op': 'compute-task',
                    'key': key,
                    'priority': ts.priority,
-                   'duration': self.get_task_duration(key)}
+                   'duration': self.get_task_duration(ts)}
             if ts.resource_restrictions:
                 msg['resource_restrictions'] = ts.resource_restrictions
 
@@ -1786,8 +1792,8 @@ class Scheduler(ServerNode):
             return
 
         if compute_duration:
-            ks = key_split(key)
-            old_duration = self.task_duration.get(ks, 0)
+            prefix = ts.prefix
+            old_duration = self.task_duration.get(prefix, 0)
             new_duration = compute_duration
             if not old_duration:
                 avg_duration = new_duration
@@ -1795,7 +1801,7 @@ class Scheduler(ServerNode):
                 avg_duration = (0.5 * old_duration
                                 + 0.5 * new_duration)
 
-            self.task_duration[ks] = avg_duration
+            self.task_duration[prefix] = avg_duration
 
         ws.occupancy -= ws.processing[ts]
         self.total_occupancy -= ws.processing[ts]
@@ -2578,7 +2584,7 @@ class Scheduler(ServerNode):
             if keys is not None:
                 result = {k: self.task_states[k].nbytes for k in keys}
             else:
-                result = dict(self.nbytes)
+                result = {k: ts.nbytes for k, ts in self.task_states.items()}
 
             if summary:
                 out = defaultdict(lambda: 0)
@@ -2597,16 +2603,16 @@ class Scheduler(ServerNode):
                     for dts in ts.dependencies - ws.has_what)
                 / BANDWIDTH)
 
-    def get_task_duration(self, key, default=0.5):
+    def get_task_duration(self, ts, default=0.5):
         """
-        Get the estimated computation cost of the given key
+        Get the estimated computation cost of the given task
         (not including any communication cost).
         """
-        ks = key_split(key)
+        prefix = ts.prefix
         try:
-            return self.task_duration[ks]
+            return self.task_duration[prefix]
         except KeyError:
-            self.unknown_durations[ks].add(key)
+            self.unknown_durations[prefix].add(ts)
             return default
 
     def run_function(self, stream, function, args=(), kwargs={}):
@@ -2823,7 +2829,7 @@ class Scheduler(ServerNode):
                 return {}
             worker = ws.worker_key
 
-            duration = self.get_task_duration(key)
+            duration = self.get_task_duration(ts)
             comm = self.get_comm_cost(ts, ws)
 
             ws.processing[ts] = duration + comm
@@ -2952,8 +2958,8 @@ class Scheduler(ServerNode):
             if compute_start and ws.processing.get(ts, True):
                 # Update average task duration for worker
                 info = self.worker_info[worker]
-                ks = key_split(key)
-                old_duration = self.task_duration.get(ks, 0)
+                prefix = ts.prefix
+                old_duration = self.task_duration.get(prefix, 0)
                 new_duration = compute_stop - compute_start
                 if not old_duration:
                     avg_duration = new_duration
@@ -2961,18 +2967,16 @@ class Scheduler(ServerNode):
                     avg_duration = (0.5 * old_duration
                                     + 0.5 * new_duration)
 
-                self.task_duration[ks] = avg_duration
+                self.task_duration[prefix] = avg_duration
 
-                if ks in self.unknown_durations:
-                    for k in self.unknown_durations.pop(ks):
-                        tts = self.task_states[k]
-                        if tts.processing_on:
-                            wws = tts.processing_on
-                            old = wws.processing[tts]
-                            comm = self.get_comm_cost(tts, wws)
-                            wws.processing[tts] = avg_duration + comm
-                            wws.occupancy += avg_duration + comm - old
-                            self.total_occupancy += avg_duration + comm - old
+                for tts in self.unknown_durations.pop(prefix, ()):
+                    if tts.processing_on:
+                        wws = tts.processing_on
+                        old = wws.processing[tts]
+                        comm = self.get_comm_cost(tts, wws)
+                        wws.processing[tts] = avg_duration + comm
+                        wws.occupancy += avg_duration + comm - old
+                        self.total_occupancy += avg_duration + comm - old
 
                 info['last-task'] = compute_stop
 
@@ -3820,7 +3824,7 @@ class Scheduler(ServerNode):
         new = 0
         nbytes = 0
         for ts in ws.processing:
-            duration = self.get_task_duration(ts.key)
+            duration = self.get_task_duration(ts)
             comm = self.get_comm_cost(ts, ws)
             ws.processing[ts] = duration + comm
             new += duration + comm
