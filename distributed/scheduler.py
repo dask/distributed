@@ -483,6 +483,7 @@ class Scheduler(ServerNode):
                 ('dependencies', 'dependencies', _legacy_task_key_set),
                 ('dependents', 'dependents', _legacy_task_key_set),
                 ('nbytes', 'nbytes', None),
+                ('retries', 'retries', None),
                 ]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
@@ -518,7 +519,6 @@ class Scheduler(ServerNode):
 
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
         self.unknown_durations = defaultdict(set)
-        self.retries = dict()
         self.suspicious_tasks = defaultdict(lambda: 0)
         self.exceptions = dict()
         self.tracebacks = dict()
@@ -573,8 +573,8 @@ class Scheduler(ServerNode):
         self.resources = defaultdict(dict)
         self.aliases = dict()
 
-        self._task_collections = [self.ready, self.unknown_durations,
-                                  self.retries]
+        # XXX what to do with ready?
+        self._task_collections = [self.ready, self.unknown_durations]
 
         self._task_state_collections = [self.released, self.unrunnable]
 
@@ -1101,7 +1101,12 @@ class Scheduler(ServerNode):
                 ts.resource_restrictions = v
 
         if retries:
-            self.retries.update(retries)
+            for k, v in retries.items():
+                assert isinstance(v, int)
+                ts = self.task_states.get(k)
+                if ts is None:
+                    continue
+                ts.retries = v
 
         for ts in sorted([self.task_states[key] for key in runnables],
                           key=operator.attrgetter('priority')):
@@ -1177,9 +1182,9 @@ class Scheduler(ServerNode):
             return {}
 
         if ts.state == 'processing':
-            retries = self.retries.get(key, 0)
+            retries = ts.retries
             if retries > 0:
-                self.retries[key] = retries - 1
+                ts.retries = retries - 1
                 recommendations = self.transition(key, 'waiting')
             else:
                 recommendations = self.transition(key, 'erred',
@@ -3305,8 +3310,6 @@ class Scheduler(ServerNode):
             del self.tracebacks[key]
         if key in self.suspicious_tasks:
             del self.suspicious_tasks[key]
-        if key in self.retries:
-            del self.retries[key]
         if key in self.task_metadata:
             del self.task_metadata[key]
 
