@@ -303,6 +303,10 @@ def _legacy_task_key_dict(task_dict):
     return {ts.key: value for ts, value in task_dict.items()}
 
 
+def _task_key_or_none(task):
+    return task.key if task is not None else None
+
+
 class Scheduler(ServerNode):
     """ Dynamic distributed task scheduler
 
@@ -504,6 +508,9 @@ class Scheduler(ServerNode):
                 ('worker_restrictions', 'worker_restrictions', None),
                 ('resource_restrictions', 'resource_restrictions', None),
                 ('suspicious_tasks', 'suspicious', None),
+                ('exceptions', 'exception', None),
+                ('tracebacks', 'traceback', None),
+                ('exceptions_blame', 'exception_blame', _task_key_or_none),
                 ]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
@@ -519,10 +526,6 @@ class Scheduler(ServerNode):
                 func = compose(wrap, func)
             setattr(self, old_attr,
                     _StateLegacySet(self.task_states, func))
-
-        self.exceptions = dict()
-        self.tracebacks = dict()
-        self.exceptions_blame = dict()
 
         self.generation = 0
         self.released = set()
@@ -1116,8 +1119,8 @@ class Scheduler(ServerNode):
         for key in touched | keys:
             ts = self.task_states[key]
             for dts in ts.dependencies:
-                if dts.key in self.exceptions_blame:
-                    self.exceptions_blame[key] = self.exceptions_blame[dts.key]
+                if dts.exception_blame:
+                    ts.exception_blame = dts.exception_blame
                     recommendations[key] = 'erred'
                     break
 
@@ -1437,7 +1440,7 @@ class Scheduler(ServerNode):
 
     def validate_erred(self, key):
         ts = self.task_states[key]
-        assert key in self.exceptions_blame
+        assert ts.exception_blame
         assert not ts.who_has
 
     def validate_key(self, key):
@@ -2461,11 +2464,11 @@ class Scheduler(ServerNode):
             self.report({'op': 'key-in-memory',
                          'key': key}, ts=ts, client=client)
         elif ts.state == 'erred':
-            failing_key = self.exceptions_blame[key]
+            failing_ts = ts.exception_blame
             self.report({'op': 'task-erred',
                          'key': key,
-                         'exception': self.exceptions[failing_key],
-                         'traceback': self.tracebacks.get(failing_key, None)},
+                         'exception': failing_ts.exception,
+                         'traceback': failing_ts.traceback},
                         ts=ts, client=client)
 
     @gen.coroutine
@@ -2683,8 +2686,8 @@ class Scheduler(ServerNode):
             recommendations = OrderedDict()
 
             for dts in ts.dependencies:
-                if dts.key in self.exceptions_blame:
-                    self.exceptions_blame[key] = self.exceptions_blame[dts.key]
+                if dts.exception_blame:
+                    ts.exception_blame = dts.exception_blame
                     recommendations[key] = 'erred'
                     return recommendations
 
@@ -2799,7 +2802,7 @@ class Scheduler(ServerNode):
             if self.validate:
                 assert not ts.waiting_on
                 assert not ts.who_has
-                assert key not in self.exceptions_blame
+                assert not ts.exception_blame
                 assert not ts.processing_on
                 assert not ts.has_lost_dependencies
                 assert ts not in self.unrunnable
@@ -2916,7 +2919,7 @@ class Scheduler(ServerNode):
                 assert ts in ws.processing
                 assert not ts.waiting_on
                 assert not ts.who_has, (ts, ts.who_has)
-                assert key not in self.exceptions_blame
+                assert not ts.exception_blame
                 assert ts.state == 'processing'
 
             ws = self.workers.get(worker)
@@ -3081,25 +3084,24 @@ class Scheduler(ServerNode):
 
             if self.validate:
                 with log_errors(pdb=LOG_PDB):
-                    assert key in self.exceptions_blame
+                    assert ts.exception_blame
                     assert not ts.who_has
                     assert not ts.waiting_on
                     assert not ts.waiters
 
             recommendations = {}
 
-            failing_key = self.exceptions_blame[key]
+            failing_ts = ts.exception_blame
 
             for dts in ts.dependents:
-                dep = dts.key
-                self.exceptions_blame[dep] = failing_key
+                dts.exception_blame = failing_ts
                 if not dts.who_has:
-                    recommendations[dep] = 'erred'
+                    recommendations[dts.key] = 'erred'
 
             self.report({'op': 'task-erred',
                          'key': key,
-                         'exception': self.exceptions[failing_key],
-                         'traceback': self.tracebacks.get(failing_key, None)})
+                         'exception': failing_ts.exception,
+                         'traceback': failing_ts.traceback})
 
             ts.state = 'erred'
             self.released.remove(ts)
@@ -3137,8 +3139,7 @@ class Scheduler(ServerNode):
             if any(dts.state == 'forgotten' for dts in ts.dependencies):
                 recommendations[key] = 'forgotten'
 
-            elif (key not in self.exceptions_blame and
-                  (ts.who_wants or ts.waiters)):
+            elif not ts.exception_blame and (ts.who_wants or ts.waiters):
                 recommendations[key] = 'waiting'
 
             else:
@@ -3200,28 +3201,28 @@ class Scheduler(ServerNode):
             ts = self.task_states[key]
 
             if self.validate:
-                assert cause or key in self.exceptions_blame
+                assert cause or ts.exception_blame
                 assert ts.processing_on
                 assert not ts.who_has
                 assert not ts.waiting_on
 
             self._remove_from_processing(ts)
 
-            if exception:
-                self.exceptions[key] = exception
-            if traceback:
-                self.tracebacks[key] = traceback
-            if cause:
-                self.exceptions_blame[key] = cause
-
-            failing_key = self.exceptions_blame[key]
+            if exception is not None:
+                ts.exception = exception
+            if traceback is not None:
+                ts.traceback = traceback
+            if cause is not None:
+                failing_ts = self.task_states[cause]
+                ts.exception_blame = failing_ts
+            else:
+                failing_ts = ts.exception_blame
 
             recommendations = {}
 
             for dts in ts.dependents:
-                dep = dts.key
-                self.exceptions_blame[dep] = key
-                recommendations[dep] = 'erred'
+                dts.exception_blame = failing_ts  # XXX ts?
+                recommendations[dts.key] = 'erred'
 
             for dts in ts.dependencies:
                 s = dts.waiters
@@ -3235,8 +3236,8 @@ class Scheduler(ServerNode):
 
             self.report({'op': 'task-erred',
                          'key': key,
-                         'exception': self.exceptions[failing_key],
-                         'traceback': self.tracebacks.get(failing_key)})
+                         'exception': failing_ts.exception,
+                         'traceback': failing_ts.traceback})
 
             cs = self.client_states['fire-and-forget']
             if ts in cs.wants_what:
@@ -3289,13 +3290,8 @@ class Scheduler(ServerNode):
         ts.who_has.clear()
         ts.who_wants.clear()
         ts.processing_on = None
+        ts.exception_blame = None
 
-        if key in self.exceptions:
-            del self.exceptions[key]
-        if key in self.exceptions_blame:
-            del self.exceptions_blame[key]
-        if key in self.tracebacks:
-            del self.tracebacks[key]
         if key in self.task_metadata:
             del self.task_metadata[key]
 
