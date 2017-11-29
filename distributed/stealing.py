@@ -172,7 +172,7 @@ class WorkStealing(SchedulerPlugin):
             thief_duration = (
                 self.scheduler.get_task_duration(ts) +
                 self.scheduler.get_comm_cost(ts, thief)
-                )
+            )
 
             self.scheduler.worker_comms[victim.worker_key].send(
                 {'op': 'steal-request', 'key': key})
