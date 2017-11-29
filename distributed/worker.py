@@ -2591,6 +2591,12 @@ def get_client(address=None, timeout=3):
 
     This client connects to the same scheduler to which the worker is connected
 
+    Submitting new jobs with the client returned by this function will likely
+    work best with ``client.compute``, especially if no computation can proceed
+    until task completion and the tasks take a significant amount of time.
+    However, calls to ``secede`` and ``rejoin`` `may` be more adventageous for
+    particular use cases.
+
     Examples
     --------
     >>> def f():
@@ -2608,6 +2614,7 @@ def get_client(address=None, timeout=3):
     get_worker
     worker_client
     secede
+    compute
     """
     try:
         worker = get_worker()
