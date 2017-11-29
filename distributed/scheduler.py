@@ -503,6 +503,7 @@ class Scheduler(ServerNode):
                 ('host_restrictions', 'host_restrictions', None),
                 ('worker_restrictions', 'worker_restrictions', None),
                 ('resource_restrictions', 'resource_restrictions', None),
+                ('suspicious_tasks', 'suspicious', None),
                 ]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
@@ -519,7 +520,6 @@ class Scheduler(ServerNode):
             setattr(self, old_attr,
                     _StateLegacySet(self.task_states, func))
 
-        self.suspicious_tasks = defaultdict(lambda: 0)
         self.exceptions = dict()
         self.tracebacks = dict()
         self.exceptions_blame = dict()
@@ -1274,8 +1274,8 @@ class Scheduler(ServerNode):
                 k = ts.key
                 recommendations[k] = 'released'
                 if not safe:
-                    self.suspicious_tasks[k] += 1
-                    if self.suspicious_tasks[k] > self.allowed_failures:
+                    ts.suspicious += 1
+                    if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
                         e = pickle.dumps(KilledWorker(k, address))
                         r = self.transition(k, 'erred', exception=e, cause=k)
@@ -3296,8 +3296,6 @@ class Scheduler(ServerNode):
             del self.exceptions_blame[key]
         if key in self.tracebacks:
             del self.tracebacks[key]
-        if key in self.suspicious_tasks:
-            del self.suspicious_tasks[key]
         if key in self.task_metadata:
             del self.task_metadata[key]
 
