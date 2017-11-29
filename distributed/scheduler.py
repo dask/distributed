@@ -179,10 +179,9 @@ class TaskState(object):
         self.who_has = set()
         self.processing_on = None
         self.has_lost_dependencies = False
-        # XXX Make those None by default?
-        self.host_restrictions = set()
-        self.worker_restrictions = set()
-        self.resource_restrictions = {}
+        self.host_restrictions = None
+        self.worker_restrictions = None
+        self.resource_restrictions = None
         self.loose_restrictions = False
 
     def get_nbytes(self):
@@ -1079,6 +1078,8 @@ class Scheduler(ServerNode):
                 ts = self.task_states.get(k)
                 if ts is None:
                     continue
+                ts.host_restrictions = set()
+                ts.worker_restrictions = set()
                 for w in v:
                     try:
                         w = self.coerce_address(w)
