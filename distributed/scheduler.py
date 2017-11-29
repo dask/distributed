@@ -1924,8 +1924,13 @@ class Scheduler(ServerNode):
     def gather(self, comm=None, keys=None):
         """ Collect data in from workers """
         keys = list(keys)
-        who_has = {key: [ws.worker_key for ws in self.task_states[key].who_has]
-                   for key in keys}
+        who_has = {}
+        for key in keys:
+            ts = self.task_states.get(key)
+            if ts is not None:
+                who_has[key] = [ws.worker_key for ws in ts.who_has]
+            else:
+                who_has[key] = []
 
         data, missing_keys, missing_workers = yield gather_from_workers(
             who_has, rpc=self.rpc, close=False)
