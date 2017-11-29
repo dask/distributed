@@ -3425,17 +3425,23 @@ class Scheduler(ServerNode):
                 raise RuntimeError("Impossible transition from %r to %r"
                                    % (start, finish))
 
-            finish2 = ts.state if key in self.task_states else 'forgotten'
+            finish2 = ts.state
             self.transition_log.append((key, start, finish2, recommendations,
                                         time()))
             if self.validate:
                 logger.debug("Transitioned %r %s->%s (actual: %s).  Consequence: %s",
                              key, start, finish2, ts.state, dict(recommendations))
-            for plugin in self.plugins:
-                try:
-                    plugin.transition(key, start, finish2, *args, **kwargs)
-                except Exception:
-                    logger.info("Plugin failed with exception", exc_info=True)
+            if self.plugins:
+                # Temporarily put back forgotten key for plugin to retrieve it
+                if ts.state == 'forgotten':
+                    self.task_states[ts.key] = ts
+                for plugin in self.plugins:
+                    try:
+                        plugin.transition(key, start, finish2, *args, **kwargs)
+                    except Exception:
+                        logger.info("Plugin failed with exception", exc_info=True)
+                if ts.state == 'forgotten':
+                    del self.task_states[ts.key]
 
             return recommendations
         except Exception as e:

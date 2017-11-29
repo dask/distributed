@@ -248,42 +248,42 @@ class AllProgress(SchedulerPlugin):
         self.state = defaultdict(lambda: defaultdict(set))
         self.scheduler = scheduler
 
-        for key, state in self.scheduler.task_state.items():
-            k = key_split(key)
-            self.all[k].add(key)
-            self.state[state][k].add(key)
-            if key in self.scheduler.nbytes:
-                self.nbytes[k] += self.scheduler.nbytes[key]
+        for ts in self.scheduler.task_states.values():
+            key = ts.key
+            prefix = ts.prefix
+            self.all[prefix].add(key)
+            self.state[ts.state][prefix].add(key)
+            if ts.nbytes is not None:
+                self.nbytes[prefix] += ts.nbytes
 
         scheduler.add_plugin(self)
 
     def transition(self, key, start, finish, *args, **kwargs):
-        k = key_split(key)
-        self.all[k].add(key)
+        ts = self.scheduler.task_states[key]
+        prefix = ts.prefix
+        self.all[prefix].add(key)
         try:
-            self.state[start][k].remove(key)
+            self.state[start][prefix].remove(key)
         except KeyError:  # TODO: remove me once we have a new or clean state
             pass
-        if finish != 'forgotten':
-            self.state[finish][k].add(key)
-        else:
-            self.all[k].remove(key)
-            if not self.all[k]:
-                del self.all[k]
-                try:
-                    del self.nbytes[k]
-                except KeyError:
-                    pass
-                for v in self.state.values():
-                    try:
-                        del v[k]
-                    except KeyError:
-                        pass
 
         if start == 'memory':
-            self.nbytes[k] -= self.scheduler.nbytes.get(key, 0)
+            # XXX why not respect DEFAULT_DATA_SIZE?
+            self.nbytes[prefix] -= ts.nbytes or 0
         if finish == 'memory':
-            self.nbytes[k] += self.scheduler.nbytes.get(key, 0)
+            self.nbytes[prefix] += ts.nbytes or 0
+
+        if finish != 'forgotten':
+            self.state[finish][prefix].add(key)
+        else:
+            s = self.all[prefix]
+            print("==", prefix, key, s)
+            s.remove(key)
+            if not s:
+                del self.all[prefix]
+                self.nbytes.pop(prefix, None)
+                for v in self.state.values():
+                    v.pop(prefix, None)
 
     def restart(self, scheduler):
         self.all.clear()
