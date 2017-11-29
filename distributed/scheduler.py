@@ -28,7 +28,7 @@ from dask.order import order
 from .batched import BatchedSend
 from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
-from .compatibility import finalize
+from .compatibility import finalize, unicode
 from .config import config, log_format
 from .core import (rpc, connect, Server, send_recv,
                    error_message, clean_exception, CommClosedError)
@@ -162,7 +162,6 @@ class TaskState(object):
         )
 
     def __init__(self, key, run_spec):
-        assert isinstance(key, (str, bytes))
         self.key = key
         self.prefix = key_split(key)
         self.run_spec = run_spec
@@ -1465,7 +1464,6 @@ class Scheduler(ServerNode):
             raise
 
     def validate_state(self, allow_overlap=False):
-        # XXX rewrite this for state objects
         validate_state(self.task_states, self.workers, self.client_states)
 
         if not (set(self.workers) ==
@@ -1474,12 +1472,11 @@ class Scheduler(ServerNode):
             raise ValueError("Workers not the same in all collections")
 
         for w, ws in self.workers.items():
-            assert isinstance(w, str), (type(w), w)
+            assert isinstance(w, (str, unicode)), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.worker_key == w
 
         for k, ts in self.task_states.items():
-            assert isinstance(k, str), (type(k), k)
             assert isinstance(ts, TaskState), (type(ts), ts)
             assert ts.key == k
 
@@ -1747,7 +1744,7 @@ class Scheduler(ServerNode):
             wh = ts.who_has
             wh.remove(ws)
             if not wh:
-                recommendations[key] = 'released'
+                recommendations[ts.key] = 'released'
         if recommendations:
             self.transitions(recommendations)
 
@@ -2896,7 +2893,7 @@ class Scheduler(ServerNode):
         try:
             ts = self.task_states[key]
             assert worker
-            assert isinstance(worker, str)
+            assert isinstance(worker, (str, unicode))
 
             if self.validate:
                 assert ts.processing_on
