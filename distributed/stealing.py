@@ -122,13 +122,11 @@ class WorkStealing(SchedulerPlugin):
         For example a result of zero implies a task without dependencies.
         level: The location within a stealable list to place this value
         """
-        if (key not in self.scheduler.loose_restrictions
-                and (key in self.scheduler.host_restrictions or
-                     key in self.scheduler.worker_restrictions) or
-                key in self.scheduler.resource_restrictions):
-            return None, None  # don't steal
-
         ts = self.scheduler.task_states[key]
+        if (not ts.loose_restrictions
+            and (ts.host_restrictions or ts.worker_restrictions
+                 or ts.resource_restrictions)):
+            return None, None  # don't steal
 
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0

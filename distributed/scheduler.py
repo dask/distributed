@@ -132,7 +132,7 @@ class TaskState(object):
         'priority',
         # Restrictions
         'host_restrictions',
-        'worker_restrictions',
+        'worker_restrictions',  # not WorkerStates but addresses
         'resource_restrictions',
         'loose_restrictions',
         # === Task state ===
@@ -176,6 +176,11 @@ class TaskState(object):
         self.who_has = set()
         self.processing_on = None
         self.has_lost_dependencies = False
+        # XXX Make those None by default?
+        self.host_restrictions = set()
+        self.worker_restrictions = set()
+        self.resource_restrictions = {}
+        self.loose_restrictions = False
 
     def get_nbytes(self):
         nbytes = self.nbytes
@@ -254,13 +259,14 @@ class _StateLegacySet(Set):
         self._accessor = accessor
 
     def __iter__(self):
-        return filter(None, map(self._accessor, self._states))
+        return (k for k, v in self._states.items() if self._accessor(v))
 
     def __len__(self):
-        return sum(map(bool, map(self._accessor, self._states)))
+        return sum(map(bool, map(self._accessor, self._states.values())))
 
     def __contains__(self, k):
-        return bool(self._accessor(self._states[k]))
+        st = self._states.get(k)
+        return st is not None and bool(self._accessor(st))
 
     def __repr__(self):
         return "%s(%s)" % (self.__class__, set(self))
@@ -491,6 +497,9 @@ class Scheduler(ServerNode):
                 ('waiting', 'waiting_on', _legacy_task_key_set),
                 ('waiting_data', 'waiters', _legacy_task_key_set),
                 ('rprocessing', 'processing_on', None),
+                ('host_restrictions', 'host_restrictions', None),
+                ('worker_restrictions', 'worker_restrictions', None),
+                ('resource_restrictions', 'resource_restrictions', None),
                 ]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
@@ -498,12 +507,17 @@ class Scheduler(ServerNode):
             setattr(self, old_attr,
                     _OptionalStateLegacyMapping(self.task_states, func))
 
+        for old_attr, new_attr, wrap in [
+                ('loose_restrictions', 'loose_restrictions', None),
+                ]:
+            func = operator.attrgetter(new_attr)
+            if wrap is not None:
+                func = compose(wrap, func)
+            setattr(self, old_attr,
+                    _StateLegacySet(self.task_states, func))
+
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
         self.unknown_durations = defaultdict(set)
-        self.host_restrictions = dict()
-        self.worker_restrictions = dict()
-        self.resource_restrictions = dict()
-        self.loose_restrictions = set()
         self.retries = dict()
         self.suspicious_tasks = defaultdict(lambda: 0)
         self.exceptions = dict()
@@ -559,17 +573,13 @@ class Scheduler(ServerNode):
         self.resources = defaultdict(dict)
         self.aliases = dict()
 
-        self._task_collections = [self.host_restrictions, self.worker_restrictions,
-                                  self.loose_restrictions, self.ready,
-                                  self.unknown_durations,
-                                  self.resource_restrictions, self.retries]
+        self._task_collections = [self.ready, self.unknown_durations,
+                                  self.retries]
 
         self._task_state_collections = [self.released, self.unrunnable]
 
         self._worker_collections = [self.workers,
                                     self.worker_info, self.host_info,
-                                    self.worker_restrictions, self.host_restrictions,
-                                    self.resource_restrictions,
                                     self.resources, self.aliases]
 
         self.extensions = {}
@@ -944,7 +954,7 @@ class Scheduler(ServerNode):
 
             recommendations = {}
             for ts in list(self.unrunnable):
-                valid = self.valid_workers(ts.key)
+                valid = self.valid_workers(ts)
                 if valid is True or ws in valid:
                     recommendations[ts.key] = 'waiting'
 
@@ -1060,28 +1070,35 @@ class Scheduler(ServerNode):
         if restrictions:
             # *restrictions* is a dict keying task ids to lists of
             # restriction specifications (either worker names or addresses)
-            worker_restrictions = defaultdict(set)
-            host_restrictions = defaultdict(set)
             for k, v in restrictions.items():
                 if v is None:
+                    continue
+                ts = self.task_states.get(k)
+                if ts is None:
                     continue
                 for w in v:
                     try:
                         w = self.coerce_address(w)
                     except ValueError:
                         # Not a valid address, but perhaps it's a hostname
-                        host_restrictions[k].add(w)
+                        ts.host_restrictions.add(w)
                     else:
-                        worker_restrictions[k].add(w)
-
-            self.worker_restrictions.update(worker_restrictions)
-            self.host_restrictions.update(host_restrictions)
+                        ts.worker_restrictions.add(w)
 
             if loose_restrictions:
-                self.loose_restrictions |= set(loose_restrictions)
+                for k in loose_restrictions:
+                    ts = self.task_states[k]
+                    ts.loose_restrictions = True
 
         if resources:
-            self.resource_restrictions.update(resources)
+            for k, v in resources.items():
+                if v is None:
+                    continue
+                assert isinstance(v, dict)
+                ts = self.task_states.get(k)
+                if ts is None:
+                    continue
+                ts.resource_restrictions = v
 
         if retries:
             self.retries.update(retries)
@@ -1666,12 +1683,11 @@ class Scheduler(ServerNode):
                    'key': key,
                    'priority': ts.priority,
                    'duration': self.get_task_duration(key)}
-            if key in self.resource_restrictions:
-                msg['resource_restrictions'] = self.resource_restrictions[key]
+            if ts.resource_restrictions:
+                msg['resource_restrictions'] = ts.resource_restrictions
 
             deps = ts.dependencies
             if deps:
-                #msg['who_has'] = {dep.key: list(self.who_has[dep.key]) for dep in deps}
                 msg['who_has'] = {dep.key: [ws.worker_key for ws in dep.who_has]
                                   for dep in deps}
                 msg['nbytes'] = {dep.key: dep.nbytes for dep in deps}
@@ -2644,8 +2660,7 @@ class Scheduler(ServerNode):
                 self.total_occupancy -= duration
                 ws.occupancy -= duration
             self.check_idle_saturated(ws)
-            # XXX release_resources() and friends should take (ts, ws)?
-            self.release_resources(ts.key, w)
+            self.release_resources(ts, ws)
             if send_worker_msg:
                 self.worker_send(w, send_worker_msg)
 
@@ -2747,21 +2762,19 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
-    def decide_worker(self, key):
+    def decide_worker(self, ts):
         """
-        Decide on a worker for processing *key*.  Return a WorkerState.
+        Decide on a worker for task *ts*.  Return a WorkerState.
         """
-        ts = self.task_states[key]
-        valid_workers = self.valid_workers(key)
+        valid_workers = self.valid_workers(ts)
 
-        if not valid_workers and key not in self.loose_restrictions and self.workers:
+        if not valid_workers and not ts.loose_restrictions and self.workers:
             self.unrunnable.add(ts)
             ts.state = 'no-worker'
             return None
 
         if ts.dependencies or valid_workers is not True:
-            worker = decide_worker(ts, self.workers.values(),
-                                   valid_workers, self.loose_restrictions,
+            worker = decide_worker(ts, self.workers.values(), valid_workers,
                                    partial(self.worker_objective, ts))
         elif self.idle:
             if len(self.idle) < 20:  # smart but linear in small case
@@ -2800,7 +2813,7 @@ class Scheduler(ServerNode):
                 # XXX can happen? see validation above
                 return {}
 
-            ws = self.decide_worker(key)
+            ws = self.decide_worker(ts)
             if ws is None:
                 return {}
             worker = ws.worker_key
@@ -2813,7 +2826,7 @@ class Scheduler(ServerNode):
             ws.occupancy += duration + comm
             self.total_occupancy += duration + comm
             ts.state = 'processing'
-            self.consume_resources(key, worker)
+            self.consume_resources(ts, ws)
             self.check_idle_saturated(ws)
             self.n_tasks += 1
 
@@ -3284,12 +3297,6 @@ class Scheduler(ServerNode):
         ts.who_wants.clear()
         ts.processing_on = None
 
-        if key in self.worker_restrictions:
-            del self.worker_restrictions[key]
-        if key in self.host_restrictions:
-            del self.host_restrictions[key]
-        if key in self.loose_restrictions:
-            self.loose_restrictions.remove(key)
         if key in self.exceptions:
             del self.exceptions[key]
         if key in self.exceptions_blame:
@@ -3300,8 +3307,6 @@ class Scheduler(ServerNode):
             del self.suspicious_tasks[key]
         if key in self.retries:
             del self.retries[key]
-        if key in self.resource_restrictions:
-            del self.resource_restrictions[key]
         if key in self.task_metadata:
             del self.task_metadata[key]
 
@@ -3534,7 +3539,7 @@ class Scheduler(ServerNode):
             else:
                 self.saturated.discard(ws)
 
-    def valid_workers(self, key):
+    def valid_workers(self, ts):
         """ Return set of currently valid workers for key
 
         If all workers are valid then this returns ``True``.
@@ -3544,17 +3549,16 @@ class Scheduler(ServerNode):
         *  host_restrictions
         *  resource_restrictions
         """
-        # XXX take (ts) instead?
         s = True
 
-        if key in self.worker_restrictions:
-            s = {w for w in self.worker_restrictions[key]
+        if ts.worker_restrictions:
+            s = {w for w in ts.worker_restrictions
                  if w in self.worker_info}
 
-        if key in self.host_restrictions:
+        if ts.host_restrictions:
             # Resolve the alias here rather than early, for the worker
             # may not be connected when host_restrictions is populated
-            hr = [self.coerce_hostname(h) for h in self.host_restrictions[key]]
+            hr = [self.coerce_hostname(h) for h in ts.host_restrictions]
             # XXX need HostState?
             ss = [self.host_info[h]['addresses']
                   for h in hr if h in self.host_info]
@@ -3564,10 +3568,10 @@ class Scheduler(ServerNode):
             else:
                 s |= ss
 
-        if self.resource_restrictions.get(key):
+        if ts.resource_restrictions:
             w = {resource: {w for w, supplied in self.resources[resource].items()
                             if supplied >= required}
-                 for resource, required in self.resource_restrictions[key].items()}
+                 for resource, required in ts.resource_restrictions.items()}
 
             ww = set.intersection(*w.values())
 
@@ -3581,16 +3585,14 @@ class Scheduler(ServerNode):
         else:
             return {self.workers[w] for w in s}
 
-    def consume_resources(self, key, worker):
-        ws = self.workers[worker]
-        if key in self.resource_restrictions:
-            for r, required in self.resource_restrictions[key].items():
+    def consume_resources(self, ts, ws):
+        if ts.resource_restrictions:
+            for r, required in ts.resource_restrictions.items():
                 ws.used_resources[r] += required
 
-    def release_resources(self, key, worker):
-        ws = self.workers[worker]
-        if key in self.resource_restrictions:
-            for r, required in self.resource_restrictions[key].items():
+    def release_resources(self, ts, ws):
+        if ts.resource_restrictions:
+            for r, required in ts.resource_restrictions.items():
                 ws.used_resources[r] -= required
 
     #####################
@@ -3832,8 +3834,7 @@ class Scheduler(ServerNode):
                 steal.put_key_in_stealable(ts.key)
 
 
-def decide_worker(ts, all_workers, valid_workers,
-                  loose_restrictions, objective):
+def decide_worker(ts, all_workers, valid_workers, objective):
     """
     # XXX docstring is obsolete
 
@@ -3893,9 +3894,8 @@ def decide_worker(ts, all_workers, valid_workers,
         if not candidates:
             candidates = valid_workers
             if not candidates:
-                if ts.key in loose_restrictions:
-                    return decide_worker(ts, all_workers, True, set(), objective)
-
+                if ts.loose_restrictions:
+                    return decide_worker(ts, all_workers, True, objective)
                 else:
                     return None
     if not candidates:

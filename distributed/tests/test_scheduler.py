@@ -1125,7 +1125,7 @@ def test_correct_bad_time_estimate(c, s, *workers):
 
     yield wait(futures)
 
-    assert all(w.data for w in workers)
+    assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'),
