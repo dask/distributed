@@ -35,6 +35,7 @@ from .core import (rpc, connect, Server, send_recv,
 from . import profile
 from .metrics import time
 from .node import ServerNode
+from .proctitle import setproctitle
 from .security import Security
 from .utils import (All, ignoring, get_ip, get_fileno_limit, log_errors,
                     key_split, validate_key, no_default, DequeHandler)
@@ -665,6 +666,8 @@ class Scheduler(ServerNode):
         for ext in extensions:
             ext(self)
 
+        setproctitle("dask-scheduler [not started]")
+
     ##################
     # Administration #
     ##################
@@ -775,6 +778,8 @@ class Scheduler(ServerNode):
         self.loop.add_callback(self.reevaluate_occupancy)
         self.start_periodic_callbacks()
 
+        setproctitle("dask-scheduler [%s]" % (self.address,))
+
         return self.finished()
 
     @gen.coroutine
@@ -800,6 +805,8 @@ class Scheduler(ServerNode):
         if self.status == 'closed':
             return
         logger.info("Scheduler closing...")
+        setproctitle("dask-scheduler [closing]")
+
         self.stop_services()
         for ext in self.extensions:
             with ignoring(AttributeError):
@@ -812,6 +819,8 @@ class Scheduler(ServerNode):
         self.status = 'closed'
         self.stop()
         yield super(Scheduler, self).close()
+
+        setproctitle("dask-scheduler [closed]")
 
     @gen.coroutine
     def close_worker(self, stream=None, worker=None):
