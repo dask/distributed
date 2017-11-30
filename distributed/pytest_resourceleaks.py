@@ -163,40 +163,46 @@ class _ChildProcess(collections.namedtuple('_ChildProcess',
 
     @classmethod
     def from_process(cls, p):
-        return cls(p.pid, p.name(), tuple(p.cmdline()))  # make cmdline hashable
+        return cls(p.pid, p.name(), p.cmdline())
 
 
 @register_checker('processes')
 class ChildProcessesChecker(ResourceChecker):
 
     def measure(self):
-        import psutil, time
-        children = set()
+        import psutil
+        # We use pid and creation time as keys to disambiguate between
+        # processes (and protect against pid reuse)
+        # Other properties such as cmdline may change for a given process
+        children = {}
         p = psutil.Process()
         for c in p.children():
-            if os.path.samefile(c.exe(), sys.executable):
-                cmdline = c.cmdline()
-                if any(a.startswith('from multiprocessing.semaphore_tracker import main')
-                       for a in cmdline):
-                    # Skip multiprocessing semaphore tracker
-                    continue
-                if any(a.startswith('from multiprocessing.forkserver import main')
-                       for a in cmdline):
-                    # The actual children are children of the forkserver process
-                    children.update(map(_ChildProcess.from_process,
-                                        c.children()))
-                    continue
-            children.add(_ChildProcess.from_process(c))
+            with c.oneshot():
+                if os.path.samefile(c.exe(), sys.executable):
+                    cmdline = c.cmdline()
+                    if any(a.startswith('from multiprocessing.semaphore_tracker import main')
+                           for a in cmdline):
+                        # Skip multiprocessing semaphore tracker
+                        continue
+                    if any(a.startswith('from multiprocessing.forkserver import main')
+                           for a in cmdline):
+                        # The actual children are children of the forkserver process
+                        for cc in c.children():
+                            with cc.oneshot():
+                                children[(cc.pid, cc.create_time())] = _ChildProcess.from_process(cc)
+                        continue
+                children[(c.pid, c.create_time())] = _ChildProcess.from_process(c)
         return children
 
     def has_leak(self, before, after):
-        return not after <= before
+        return not set(after) <= set(before)
 
     def format(self, before, after):
-        leaked = after - before
+        leaked = set(after) - set(before)
         assert leaked
         formatted = []
-        for p in sorted(leaked):
+        for key in sorted(leaked):
+            p = after[key]
             formatted.append('  - pid={p.pid}, name={p.name!r}, cmdline={p.cmdline!r}'
                              .format(p=p))
         return ("leaked %d processes:\n%s"
