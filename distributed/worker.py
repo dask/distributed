@@ -77,7 +77,7 @@ class WorkerBase(ServerNode):
     def __init__(self, scheduler_ip=None, scheduler_port=None,
                  scheduler_file=None, ncores=None, loop=None, local_dir=None,
                  services=None, service_ports=None, name=None,
-                 heartbeat_interval=5000, reconnect=True, memory_limit='auto',
+                 reconnect=True, memory_limit='auto',
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), security=None,
                  contact_address=None, memory_monitor_interval=200, **kwargs):
@@ -156,7 +156,6 @@ class WorkerBase(ServerNode):
         self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.name = name
         self.scheduler_delay = 0
-        self.heartbeat_interval = heartbeat_interval
         self.heartbeat_active = False
         self.execution_state = {'scheduler': self.scheduler.address,
                                 'ioloop': self.loop,
@@ -193,8 +192,7 @@ class WorkerBase(ServerNode):
                                          connection_args=self.connection_args,
                                          **kwargs)
 
-        pc = PeriodicCallback(self.heartbeat,
-                              self.heartbeat_interval)
+        pc = PeriodicCallback(self.heartbeat, 1000)
         self.periodic_callbacks['heartbeat'] = pc
         self._address = contact_address
 
@@ -240,6 +238,7 @@ class WorkerBase(ServerNode):
                 end = time()
                 middle = (start + end) / 2
                 self.scheduler_delay = response['time'] - middle
+                self.periodic_callbacks['heartbeat'].callback_time = response['heartbeat-interval'] * 1000
             finally:
                 self.heartbeat_active = False
         else:
