@@ -170,28 +170,29 @@ class _ChildProcess(collections.namedtuple('_ChildProcess',
 class ChildProcessesChecker(ResourceChecker):
 
     def measure(self):
-        import psutil
+        import psutil, time
         # We use pid and creation time as keys to disambiguate between
         # processes (and protect against pid reuse)
         # Other properties such as cmdline may change for a given process
         children = {}
         p = psutil.Process()
-        for c in p.children():
-            with c.oneshot():
-                if os.path.samefile(c.exe(), sys.executable):
-                    cmdline = c.cmdline()
-                    if any(a.startswith('from multiprocessing.semaphore_tracker import main')
-                           for a in cmdline):
-                        # Skip multiprocessing semaphore tracker
-                        continue
-                    if any(a.startswith('from multiprocessing.forkserver import main')
-                           for a in cmdline):
-                        # The actual children are children of the forkserver process
-                        for cc in c.children():
-                            with cc.oneshot():
-                                children[(cc.pid, cc.create_time())] = _ChildProcess.from_process(cc)
-                        continue
-                children[(c.pid, c.create_time())] = _ChildProcess.from_process(c)
+        for c in p.children(recursive=True):
+            try:
+                with c.oneshot():
+                    if c.ppid() == p.pid and os.path.samefile(c.exe(), sys.executable):
+                        cmdline = c.cmdline()
+                        if any(a.startswith('from multiprocessing.semaphore_tracker import main')
+                               for a in cmdline):
+                            # Skip multiprocessing semaphore tracker
+                            continue
+                        if any(a.startswith('from multiprocessing.forkserver import main')
+                               for a in cmdline):
+                            # Skip forkserver process, the forkserver's children
+                            # however will be recorded normally
+                            continue
+                    children[(c.pid, c.create_time())] = _ChildProcess.from_process(c)
+            except psutil.NoSuchProcess:
+                pass
         return children
 
     def has_leak(self, before, after):
