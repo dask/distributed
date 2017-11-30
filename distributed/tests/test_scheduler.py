@@ -241,7 +241,7 @@ def test_add_worker(s, a, b):
 @gen_cluster()
 def test_feed(s, a, b):
     def func(scheduler):
-        return dumps(scheduler.processing)
+        return dumps(dict(scheduler.processing))
 
     comm = yield connect(s.address)
     yield comm.write({'op': 'feed',
@@ -250,7 +250,7 @@ def test_feed(s, a, b):
 
     for i in range(5):
         response = yield comm.read()
-        expected = s.processing
+        expected = dict(s.processing)
         assert cloudpickle.loads(response) == expected
 
     yield comm.close()
