@@ -35,4 +35,3 @@ def setproctitle(title):
             pass
     if enabled:
         setproctitle_mod.setproctitle(title)
-
