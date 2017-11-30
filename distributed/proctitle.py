@@ -32,4 +32,3 @@ def setproctitle(title):
             pass
     if enabled:
         setproctitle.setproctitle(title)
-
