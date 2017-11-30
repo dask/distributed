@@ -60,27 +60,6 @@ def test_identity():
     assert isinstance(ident['memory_limit'], Number)
 
 
-def test_health():
-    w = Worker('127.0.0.1', 8019)
-    d = w.host_health()
-    assert isinstance(d, dict)
-    d = w.host_health()
-    try:
-        import psutil
-    except ImportError:
-        pass
-    else:
-        try:
-            psutil.disk_io_counters()
-        except RuntimeError:
-            pass
-        else:
-            assert 'disk-read' in d
-            assert 'disk-write' in d
-        assert 'network-recv' in d
-        assert 'network-send' in d
-
-
 @gen_cluster(client=True)
 def test_worker_bad_args(c, s, a, b):
     class NoReprObj(object):
@@ -718,7 +697,7 @@ def test_priorities_2(c, s, w):
 def test_heartbeats(c, s, a, b):
     pytest.importorskip('psutil')
     start = time()
-    while not all(s.worker_info[w].get('memory-rss') for w in s.workers):
+    while not all(s.worker_info[w].get('memory') for w in s.workers):
         yield gen.sleep(0.01)
         assert time() < start + 2
 
