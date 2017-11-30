@@ -8,6 +8,7 @@ import collections
 import gc
 import time
 import os
+import sys
 import threading
 
 import pytest
@@ -155,6 +156,51 @@ class ActiveThreadsChecker(ResourceChecker):
         assert leaked
         return ("leaked %d Python threads: %s"
                 % (len(leaked), sorted(leaked, key=str)))
+
+
+class _ChildProcess(collections.namedtuple('_ChildProcess',
+                                           ('pid', 'name', 'cmdline'))):
+
+    @classmethod
+    def from_process(cls, p):
+        return cls(p.pid, p.name(), tuple(p.cmdline()))  # make cmdline hashable
+
+
+@register_checker('processes')
+class ChildProcessesChecker(ResourceChecker):
+
+    def measure(self):
+        import psutil, time
+        children = set()
+        p = psutil.Process()
+        for c in p.children():
+            if os.path.samefile(c.exe(), sys.executable):
+                cmdline = c.cmdline()
+                if any(a.startswith('from multiprocessing.semaphore_tracker import main')
+                       for a in cmdline):
+                    # Skip multiprocessing semaphore tracker
+                    continue
+                if any(a.startswith('from multiprocessing.forkserver import main')
+                       for a in cmdline):
+                    # The actual children are children of the forkserver process
+                    children.update(map(_ChildProcess.from_process,
+                                        c.children()))
+                    continue
+            children.add(_ChildProcess.from_process(c))
+        return children
+
+    def has_leak(self, before, after):
+        return not after <= before
+
+    def format(self, before, after):
+        leaked = after - before
+        assert leaked
+        formatted = []
+        for p in sorted(leaked):
+            formatted.append('  - pid={p.pid}, name={p.name!r}, cmdline={p.cmdline!r}'
+                             .format(p=p))
+        return ("leaked %d processes:\n%s"
+                % (len(leaked), '\n'.join(formatted)))
 
 
 @register_checker('tracemalloc')
