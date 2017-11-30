@@ -2,6 +2,11 @@ from __future__ import print_function, division, absolute_import
 
 import os
 
+try:
+    import setproctitle as setproctitle_mod
+except ImportError:
+    setproctitle_mod = None
+
 
 _enabled = False
 
@@ -20,9 +25,7 @@ def enable_proctitle_on_current():
 
 
 def setproctitle(title):
-    try:
-        import setproctitle
-    except ImportError:
+    if setproctitle_mod is None:
         return
     enabled = _enabled
     if not enabled:
@@ -31,5 +34,5 @@ def setproctitle(title):
         except ValueError:
             pass
     if enabled:
-        setproctitle.setproctitle(title)
+        setproctitle_mod.setproctitle(title)
 

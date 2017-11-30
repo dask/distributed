@@ -372,7 +372,7 @@ class WorkerBase(ServerNode):
         logger.info('      Local Directory: %26s', self.local_dir)
         logger.info('-' * 49)
 
-        setproctitle("dask-worker [%s]" % listening_address)
+        setproctitle("dask-worker [%s]" % self.address)
 
         yield self._register_with_scheduler()
 
