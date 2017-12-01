@@ -918,8 +918,7 @@ def test_scheduler_delay(c, s, a, b):
     old = a.scheduler_delay
     assert abs(a.scheduler_delay) < 0.1
     assert abs(b.scheduler_delay) < 0.1
-
-    yield gen.sleep(a.periodic_callbacks['heartbeat'].callback_time / 1000)
+    yield gen.sleep(a.periodic_callbacks['heartbeat'].callback_time / 1000 + .3)
     assert a.scheduler_delay != old
 
 
