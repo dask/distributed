@@ -719,7 +719,7 @@ def test_retire_workers(c, s, a, b):
 
 @gen_cluster(client=True, timeout=1000)
 def test_retire_workers_no_suspicious_tasks(c, s, a, b):
-    c.submit(slowinc, 100, delay=0.5, workers=a.address, allow_other_workers=True)
+    future = c.submit(slowinc, 100, delay=0.5, workers=a.address, allow_other_workers=True)
     yield gen.sleep(0.2)
     yield s.retire_workers(workers=[a.address])
 
