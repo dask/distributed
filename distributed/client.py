@@ -49,6 +49,7 @@ from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
 from .cfexecutor import ClientExecutor
 from .compatibility import (Queue as pyQueue, Empty, isqueue,
                             get_thread_identity, html_escape)
+from .config import config
 from .core import connect, rpc, clean_exception, CommClosedError
 from .metrics import time
 from .node import Node
@@ -448,6 +449,9 @@ class Client(Node):
         Claim this scheduler as the global dask scheduler
     scheduler_file: string (optional)
         Path to a file with scheduler information if available
+    scheduler_env_variable: bool (optional)
+        If True then use DASK_SCHEDULER_ADDRESS for scheduler address if it
+        exists.  True by default.
     security: (optional)
         Optional security information
     asynchronous: bool (False by default)
@@ -483,7 +487,7 @@ class Client(Node):
     def __init__(self, address=None, loop=None, timeout=5,
                  set_as_default=True, scheduler_file=None,
                  security=None, asynchronous=False,
-                 name=None, **kwargs):
+                 name=None, scheduler_env_variable=True, **kwargs):
 
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
@@ -514,6 +518,9 @@ class Client(Node):
         self._periodic_callbacks = []
         pc = PeriodicCallback(self._update_scheduler_info, 2000, io_loop=self.loop)
         self._periodic_callbacks.append(pc)
+
+        if address is None and scheduler_env_variable and 'scheduler-address' in config:
+            address = config['scheduler-address']
 
         if hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object
