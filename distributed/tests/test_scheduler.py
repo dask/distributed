@@ -731,6 +731,15 @@ def test_workers_to_close(cl, s, *workers):
     assert all(not s.processing[w] for w in wtc)
     assert len(wtc) == 1
 
+    
+@gen_cluster(client=True)
+def test_retire_workers_no_suspicious_tasks(c, s, a, b):
+    future = c.submit(slowinc, 100, delay=0.5, workers=a.address, allow_other_workers=True)
+    yield gen.sleep(0.2)
+    yield s.retire_workers(workers=[a.address])
+
+    assert all(v==0 for v in s.suspicious_tasks.values())
+
 
 @slow
 @pytest.mark.skipif(sys.platform.startswith('win'),
