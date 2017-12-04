@@ -716,6 +716,7 @@ def test_retire_workers(c, s, a, b):
     workers = yield s.retire_workers()
     assert not workers
 
+    assert all(v==0 for v in s.suspicious_tasks.values())
 
 @slow
 @pytest.mark.skipif(sys.platform.startswith('win'),
