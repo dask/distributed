@@ -26,6 +26,36 @@ def test_get_scale_up_kwargs(loop):
             assert c.ncores()
             assert alc.get_scale_up_kwargs() == {'n': 3}
 
+@gen_test(timeout=5)
+def test_simultaneous_scale_up_and_down():
+    class TestAdaptive(Adaptive):
+        def get_scale_up_kwargs(self):
+            assert False
+        def _retire_workers(self):
+            assert False
+
+    loop = IOLoop.current()
+
+    cluster =  LocalCluster(n_workers=4, scheduler_port=0, silence_logs=False, processes=False,
+                      diagnostics_port=None, loop=loop, start=False)
+    s = cluster.scheduler
+    s.task_duration['a'] = 4
+    s.task_duration['b'] = 4
+    s.task_duration['c'] = 1
+
+    ta = TestAdaptive(s, cluster, interval=100, scale_factor=2)
+    c = yield Client(cluster, asynchronous=True, loop=loop)
+    future =  c.map(slowinc, [1, 1, 1], key=['a-4', 'b-4', 'c-1'])
+
+    while len(s.rprocessing) < 3:
+        yield gen.sleep(0.001)
+
+    yield gen.sleep(0.3)
+    yield c._gather(future)
+    yield c._close()
+    yield cluster._close()
+
+
 
 def test_adaptive_local_cluster(loop):
     with LocalCluster(0, scheduler_port=0, silence_logs=False,
@@ -86,3 +116,4 @@ def test_adaptive_local_cluster_multi_workers():
 
     yield c._close()
     yield cluster._close()
+
