@@ -349,7 +349,7 @@ def test_restart_during_computation(c, s, a, b):
     assert not s.rprocessing
 
     assert len(s.ncores) == 2
-    assert not s.task_state
+    assert not s.task_states
 
 
 @gen_cluster(client=True, timeout=None)

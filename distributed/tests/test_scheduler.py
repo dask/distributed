@@ -805,9 +805,11 @@ def test_worker_arrives_with_processing_data(c, s, a, b):
     while len(s.workers) < 3:
         yield gen.sleep(0.01)
 
-    assert s.task_state[y.key] == 'memory'
-    assert s.task_state[x.key] == 'released'
-    assert s.task_state[z.key] == 'processing'
+    assert s.get_task_status(keys={x.key, y.key, z.key}) == {
+        x.key: 'released',
+        y.key: 'memory',
+        z.key: 'processing',
+    }
 
     yield w._close()
 
@@ -829,7 +831,8 @@ def test_worker_breaks_and_returns(c, s, a):
 
     assert end - start < 1
 
-    assert frequencies(s.task_state.values()) == {'memory': 1, 'released': 10}
+    states = frequencies(ts.state for ts in s.task_states.values())
+    assert states == {'memory': 1, 'released': 10}
 
 
 @gen_cluster(client=True, ncores=[])
@@ -840,7 +843,7 @@ def test_no_workers_to_memory(c, s):
 
     yy, zz = c.persist([y, z])
 
-    while not s.task_state:
+    while not s.task_states:
         yield gen.sleep(0.01)
 
     w = Worker(s.ip, s.port, ncores=1)
@@ -853,9 +856,11 @@ def test_no_workers_to_memory(c, s):
     while not s.workers:
         yield gen.sleep(0.01)
 
-    assert s.task_state[y.key] == 'memory'
-    assert s.task_state[x.key] == 'released'
-    assert s.task_state[z.key] == 'processing'
+    assert s.get_task_status(keys={x.key, y.key, z.key}) == {
+        x.key: 'released',
+        y.key: 'memory',
+        z.key: 'processing',
+    }
 
     yield w._close()
 
@@ -868,7 +873,7 @@ def test_no_worker_to_memory_restrictions(c, s, a, b):
 
     yy, zz = c.persist([y, z], workers={(x, y, z): 'alice'})
 
-    while not s.task_state:
+    while not s.task_states:
         yield gen.sleep(0.01)
 
     w = Worker(s.ip, s.port, ncores=1, name='alice')
@@ -880,9 +885,11 @@ def test_no_worker_to_memory_restrictions(c, s, a, b):
         yield gen.sleep(0.01)
     yield gen.sleep(0.3)
 
-    assert s.task_state[y.key] == 'memory'
-    assert s.task_state[x.key] == 'released'
-    assert s.task_state[z.key] == 'processing'
+    assert s.get_task_status(keys={x.key, y.key, z.key}) == {
+        x.key: 'released',
+        y.key: 'memory',
+        z.key: 'processing',
+    }
 
     yield w._close()
 
@@ -1002,7 +1009,7 @@ def test_non_existent_worker(c, s):
     futures = c.map(inc, range(10))
     yield gen.sleep(4)
     assert not s.workers
-    assert all(v == 'no-worker' for v in s.task_state.values())
+    assert all(ts.state == 'no-worker' for ts in s.task_states.values())
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
@@ -1083,7 +1090,7 @@ def test_cancel_fire_and_forget(c, s, a, b):
     yield gen.sleep(0.05)
     yield future.cancel(force=True)
     assert future.status == 'cancelled'
-    assert not s.task_state
+    assert not s.task_states
 
 
 @gen_cluster(client=True, Worker=Nanny)
@@ -1101,7 +1108,7 @@ def test_reschedule(c, s, a, b):
     # add much more work onto worker a
     futures = c.map(slowinc, range(10, 20), delay=0.1, workers=a.address)
 
-    while len(s.task_state) < len(x) + len(futures):
+    while len(s.task_states) < len(x) + len(futures):
         yield gen.sleep(0.001)
 
     for future in x:

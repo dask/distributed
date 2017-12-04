@@ -297,13 +297,13 @@ class GroupProgress(SchedulerPlugin):
         self.dependencies = dict()
         self.dependents = dict()
 
-        for key, state in self.scheduler.task_state.items():
+        for key, ts in self.scheduler.task_states.items():
             k = key_split_group(key)
             if k not in self.groups:
                 self.create(key, k)
             self.keys[k].add(key)
-            self.groups[k][state] += 1
-            if state == 'memory' and key in self.scheduler.nbytes:
+            self.groups[k][ts.state] += 1
+            if ts.state == 'memory' and key in self.scheduler.nbytes:
                 self.nbytes[k] += self.scheduler.nbytes[key]
 
         scheduler.add_plugin(self)

@@ -193,7 +193,7 @@ def test_TaskProgress(c, s, a, b):
 
     del futures, futures2
 
-    while s.task_state:
+    while s.task_states:
         yield gen.sleep(0.01)
 
     tp.update()

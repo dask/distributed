@@ -240,7 +240,7 @@ def test_close_connections(c, s, *workers):
         worker = random.choice(list(workers))
         for comm in worker._comms:
             comm.abort()
-        # print(frequencies(s.task_state.values()))
+        # print(frequencies(ts.state for ts in s.task_states.values()))
         # for w in workers:
         #     print(w)
 

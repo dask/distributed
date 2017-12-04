@@ -1885,16 +1885,10 @@ def test_forget_simple(c, s, a, b):
     s.client_releases_keys(keys=[x.key], client=c.id)
     assert x.key in s.tasks
     s.client_releases_keys(keys=[z.key], client=c.id)
-    for coll in [s.task_states, s.tasks, s.dependencies, s.dependents,
-                 s.waiting, s.waiting_data, s.who_has,
-                 s.worker_restrictions, s.host_restrictions, s.loose_restrictions,
-                 s.released, s.priority, s.exceptions, s.tracebacks,
-                 s.who_wants, s.exceptions_blame, s.nbytes, s.task_state,
-                 s.retries]:
-        assert x.key not in coll
-        assert z.key not in coll
 
-    #assert z.key not in s.dependents[y.key]
+    assert x.key not in s.task_states
+    assert z.key not in s.task_states
+    assert not s.task_states[y.key].dependents
 
     s.client_releases_keys(keys=[y.key], client=c.id)
     assert not s.tasks
@@ -2965,7 +2959,7 @@ def test_unrunnable_task_runs(c, s, a, b):
         yield gen.sleep(0.01)
 
     assert s.task_states[x.key] in s.unrunnable
-    assert s.task_state[x.key] == 'no-worker'
+    assert s.get_task_status(keys=[x.key]) == {x.key: 'no-worker'}
 
     w = Worker(s.ip, s.port, loop=s.loop)
     yield w._start()
@@ -3756,7 +3750,7 @@ def test_lose_scattered_data(c, s, a, b):
     yield gen.sleep(0.1)
 
     assert x.status == 'cancelled'
-    assert x.key not in s.task_state
+    assert x.key not in s.task_states
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
@@ -3768,7 +3762,7 @@ def test_partially_lose_scattered_data(e, s, a, b, c):
     yield gen.sleep(0.1)
 
     assert x.status == 'finished'
-    assert s.task_state[x.key] == 'memory'
+    assert s.get_task_status(keys=[x.key]) == {x.key: 'memory'}
 
 
 @gen_cluster(client=True)
@@ -3823,7 +3817,7 @@ def test_scatter_compute_store_lose(c, s, a, b):
     del z
 
     start = time()
-    while s.task_state[zkey] != 'released':
+    while s.get_task_status(keys=[zkey]) != {zkey: 'released'}:
         yield gen.sleep(0.01)
         assert time() < start + 2
 
@@ -3831,9 +3825,9 @@ def test_scatter_compute_store_lose(c, s, a, b):
     del xx
 
     start = time()
-    while (x.key in s.task_state and
-           zkey not in s.task_state and
-           xxkey not in s.task_state):
+    while (x.key in s.task_states and
+           zkey not in s.task_states and
+           xxkey not in s.task_states):
         yield gen.sleep(0.01)
         assert time() < start + 2
 
@@ -4188,11 +4182,18 @@ def test_interleave_computations(c, s, a, b):
 
     yield gen.sleep(0.1)
 
+    x_keys = [x.key for x in xs]
+    y_keys = [y.key for y in ys]
+    z_keys = [z.key for z in zs]
+
     while not s.tasks or any(s.processing.values()):
         yield gen.sleep(0.05)
-        x_done = len([k for k in xs if s.task_state[k.key] in done])
-        y_done = len([k for k in ys if s.task_state[k.key] in done])
-        z_done = len([k for k in zs if s.task_state[k.key] in done])
+        x_done = sum(state in done
+                     for state in s.get_task_status(keys=x_keys).values())
+        y_done = sum(state in done
+                     for state in s.get_task_status(keys=y_keys).values())
+        z_done = sum(state in done
+                     for state in s.get_task_status(keys=z_keys).values())
 
         assert x_done >= y_done >= z_done
         assert x_done < y_done + 10
@@ -4210,11 +4211,18 @@ def test_interleave_computations_map(c, s, a, b):
 
     done = ('memory', 'released')
 
+    x_keys = [x.key for x in xs]
+    y_keys = [y.key for y in ys]
+    z_keys = [z.key for z in zs]
+
     while not s.tasks or any(s.processing.values()):
         yield gen.sleep(0.05)
-        x_done = len([k for k in xs if s.task_state[k.key] in done])
-        y_done = len([k for k in ys if s.task_state[k.key] in done])
-        z_done = len([k for k in zs if s.task_state[k.key] in done])
+        x_done = sum(state in done
+                     for state in s.get_task_status(keys=x_keys).values())
+        y_done = sum(state in done
+                     for state in s.get_task_status(keys=y_keys).values())
+        z_done = sum(state in done
+                     for state in s.get_task_status(keys=z_keys).values())
 
         assert x_done >= y_done >= z_done
         assert x_done < y_done + 10
@@ -4277,7 +4285,7 @@ def test_map_list_kwargs(c, s, a, b):
 def test_dont_clear_waiting_data(c, s, a, b):
     [x] = yield c.scatter([1])
     y = c.submit(slowinc, x, delay=0.2)
-    while y.key not in s.task_state:
+    while y.key not in s.task_states:
         yield gen.sleep(0.01)
     [x] = yield c.scatter([1])
     for i in range(5):
@@ -4507,12 +4515,12 @@ def test_fire_and_forget(c, s, a, b):
         del distributed.foo
 
     start = time()
-    while len(s.task_state) > 1:
+    while len(s.task_states) > 1:
         yield gen.sleep(0.01)
         assert time() < start + 2
 
     assert set(s.who_wants) == {future.key}
-    assert set(s.task_state) == {future.key}
+    assert set(s.task_states) == {future.key}
 
 
 @gen_cluster(client=True)
@@ -4522,7 +4530,7 @@ def test_fire_and_forget_err(c, s, a, b):
 
     # erred task should clear out quickly
     start = time()
-    while s.task_state:
+    while s.task_states:
         yield gen.sleep(0.01)
         assert time() < start + 1
 
@@ -4547,7 +4555,7 @@ def test_close(s, a, b):
     yield c.close()
 
     start = time()
-    while c.id in s.wants_what or s.task_state:
+    while c.id in s.wants_what or s.task_states:
         yield gen.sleep(0.01)
         assert time() < start + 5
 
@@ -4708,14 +4716,12 @@ def test_secede_balances(c, s, a, b):
 def test_sub_submit_priority(c, s, a, b):
     def f():
         client = get_client()
-        client.submit(slowinc, 1, delay=0.2)
+        client.submit(slowinc, 1, delay=0.2, key='slowinc')
 
-    future = c.submit(f)
+    future = c.submit(f, key='f')
     yield gen.sleep(0.1)
-    if len(s.task_state) == 2:
-        f_key = [k for k in s.task_state if k.startswith('f')][0]
-        slowinc_key = [k for k in s.task_state if k.startswith('slowinc')][0]
-        assert s.priorities[f_key] > s.priorities[slowinc_key]  # lower values schedule first
+    if len(s.task_states) == 2:
+        assert s.priorities['f'] > s.priorities['slowinc']  # lower values schedule first
 
 
 def test_get_client_sync(loop):
@@ -4799,7 +4805,7 @@ def test_bytes_keys(c, s, a, b):
     future = c.submit(inc, 1, key=key)
     result = yield future
     assert type(future.key) is bytes
-    assert list(s.task_state)[0] == key
+    assert set(s.task_states) == {key}
     assert key in a.data or key in b.data
     assert result == 2
 
@@ -4812,7 +4818,7 @@ def test_unicode_ascii_keys(c, s, a, b):
     future = c.submit(inc, 1, key=key)
     result = yield future
     assert type(future.key) is uni_type
-    assert list(s.task_state)[0] == key
+    assert set(s.task_states) == {key}
     assert key in a.data or key in b.data
     assert result == 2
 
@@ -4825,7 +4831,7 @@ def test_unicode_keys(c, s, a, b):
     future = c.submit(inc, 1, key=key)
     result = yield future
     assert type(future.key) is uni_type
-    assert list(s.task_state)[0] == key
+    assert set(s.task_states) == {key}
     assert key in a.data or key in b.data
     assert result == 2
 
@@ -5041,7 +5047,7 @@ def test_task_metadata(c, s, a, b):
 
     del future
 
-    while key in s.task_state:
+    while key in s.task_states:
         yield gen.sleep(0.01)
 
     with pytest.raises(KeyError):

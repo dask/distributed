@@ -351,9 +351,6 @@ class Scheduler(ServerNode):
         Dictionary showing which keys depend on which others
     * **dependents:** ``{key: {keys}}``:
         Dictionary showing which keys are dependent on which others
-    * **task_state:** ``{key: string}``:
-        Dictionary listing the current state of every task among the following:
-        released, waiting, queue, no-worker, processing, memory, erred
     * **priority:** ``{key: tuple}``:
         A score per key that determines its priority
     * **waiting:** ``{key: {key}}``:
@@ -482,7 +479,6 @@ class Scheduler(ServerNode):
         # Task state
         self.task_states = dict()
         for old_attr, new_attr, wrap in [
-                ('task_state', 'state', None),
                 ('priority', 'priority', None),
                 ('dependencies', 'dependencies', _legacy_task_key_set),
                 ('dependents', 'dependents', _legacy_task_key_set),
@@ -956,10 +952,11 @@ class Scheduler(ServerNode):
 
             if nbytes:
                 for key in nbytes:
-                    state = self.task_state.get(key)
-                    if state in ('processing', 'waiting'):
+                    ts = self.task_states.get(key)
+                    if ts is not None and ts.state in ('processing', 'waiting'):
                         recommendations = self.transition(key, 'memory',
-                                                          worker=address, nbytes=nbytes[key])
+                                                          worker=address,
+                                                          nbytes=nbytes[key])
                         self.transitions(recommendations)
 
             recommendations = {}
@@ -2707,8 +2704,6 @@ class Scheduler(ServerNode):
                 assert not ts.waiting_on
                 assert not ts.who_has
                 assert not ts.processing_on
-                # assert all(dep in self.task_state
-                #            for dep in self.dependencies[key])
                 assert not any(dts.state == 'forgotten' for dts in ts.dependencies)
 
             self.released.remove(ts)

@@ -519,7 +519,7 @@ def test_steal_twice(c, s, a, b):
 
     futures = [c.submit(slowadd, x, i, delay=0.2) for i in range(100)]
 
-    while len(s.task_state) < 100:  # tasks are all allocated
+    while len(s.task_states) < 100:  # tasks are all allocated
         yield gen.sleep(0.01)
 
     workers = [Worker(s.ip, s.port, loop=s.loop) for _ in range(20)]

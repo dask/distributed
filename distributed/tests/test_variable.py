@@ -28,12 +28,12 @@ def test_variable(c, s, a, b):
     del future, future2
 
     yield gen.sleep(0.1)
-    assert s.task_state  # future still present
+    assert s.task_states  # future still present
 
     x.delete()
 
     start = time()
-    while s.task_state:
+    while s.task_states:
         yield gen.sleep(0.01)
         assert time() < start + 5
 
