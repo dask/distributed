@@ -410,8 +410,6 @@ class Scheduler(ServerNode):
         Information about each worker host
     * **worker_bytes:** ``{worker: int}``:
         Number of bytes in memory on each worker
-    * **occupancy:** ``{worker: time}``
-        Expected runtime for all tasks currently processing on a worker
 
     * **services:** ``{str: port}``:
         Other services running on this scheduler, like Bokeh
@@ -540,7 +538,6 @@ class Scheduler(ServerNode):
                 ('worker_bytes', 'nbytes', None),
                 ('worker_resources', 'resources', None),
                 ('used_resources', 'used_resources', None),
-                ('occupancy', 'occupancy', None),
                 ('processing', 'processing', _legacy_task_key_dict),
                 ('has_what', 'has_what', _legacy_task_key_set),
                 ]:

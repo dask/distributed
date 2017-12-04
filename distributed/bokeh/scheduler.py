@@ -159,24 +159,23 @@ class Occupancy(DashboardComponent):
 
     def update(self):
         with log_errors():
-            o = self.scheduler.occupancy
-            workers = list(self.scheduler.workers)
+            workers = list(self.scheduler.workers.values())
 
             bokeh_addresses = []
-            for worker in workers:
-                addr = self.scheduler.get_worker_service_addr(worker, 'bokeh')
+            for ws in workers:
+                addr = self.scheduler.get_worker_service_addr(ws.worker_key, 'bokeh')
                 bokeh_addresses.append('%s:%d' % addr if addr is not None else '')
 
             y = list(range(len(workers)))
-            occupancy = [o[w] for w in workers]
+            occupancy = [ws.occupancy for ws in workers]
             ms = [occ * 1000 for occ in occupancy]
             x = [occ / 500 for occ in occupancy]
             total = sum(occupancy)
             color = []
-            for w in workers:
-                if w in self.scheduler.idle:
+            for ws in workers:
+                if ws in self.scheduler.idle:
                     color.append('red')
-                elif w in self.scheduler.saturated:
+                elif ws in self.scheduler.saturated:
                     color.append('green')
                 else:
                     color.append('blue')
@@ -190,7 +189,7 @@ class Occupancy(DashboardComponent):
 
             if occupancy:
                 result = {'occupancy': occupancy,
-                          'worker': workers,
+                          'worker': [ws.worker_key for ws in workers],
                           'ms': ms,
                           'color': color,
                           'bokeh_address': bokeh_addresses,

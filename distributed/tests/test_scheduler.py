@@ -457,11 +457,11 @@ def test_restart(c, s, a, b):
 
     yield s.restart()
 
-    for c in [s.processing, s.ncores, s.occupancy]:
-        assert len(c) == 2
+    assert len(s.workers) == 2
 
-    for c in [s.processing, s.occupancy]:
-        assert not any(v for v in c.values())
+    for ws in s.workers.values():
+        assert not ws.occupancy
+        assert not ws.processing
 
     assert not s.task_states
     assert not s.dependencies
@@ -704,7 +704,7 @@ def test_learn_occupancy(c, s, a, b):
 
     assert 1 < s.total_occupancy < 40
     for w in [a, b]:
-        assert 1 < s.occupancy[w.address] < 20
+        assert 1 < s.workers[w.address].occupancy < 20
 
 
 @nodebug

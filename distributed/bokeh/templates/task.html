@@ -73,7 +73,7 @@
       {% if ts.state == 'memory' %}
       <div id="workers" class="column">
         <h3 class="title is-5"> Workers with data </h3>
-          {% set workers = {ws.worker_key for ws in ts.who_has} %}
+          {% set worker_list = ts.who_has %}
           {% include "worker-table.html" %}
       </div><!-- #workers -->
       {% end %}
