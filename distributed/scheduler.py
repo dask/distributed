@@ -2393,7 +2393,6 @@ class Scheduler(ServerNode):
         if worker not in self.worker_info:
             return 'not found'
         ws = self.workers[worker]
-        #recommendations = {}
         for key in keys:
             ts = self.task_states.get(key)
             if ts is not None and ts.state == 'memory':
@@ -2401,16 +2400,11 @@ class Scheduler(ServerNode):
                     ws.nbytes += ts.get_nbytes()
                     ws.has_what.add(ts)
                     ts.who_has.add(ws)
-                #if ts.state == 'memory':
-                #else:
-                    #recommendations[key] = 'memory'
             else:
                 self.worker_send(worker, {'op': 'delete-data',
                                           'keys': [key],
                                           'report': False})
 
-        #if recommendations:
-            #self.transitions()
         return 'OK'
 
     def update_data(self, comm=None, who_has=None, nbytes=None, client=None):
@@ -2425,9 +2419,6 @@ class Scheduler(ServerNode):
             who_has = {k: [self.coerce_address(vv) for vv in v]
                        for k, v in who_has.items()}
             logger.debug("Update data %s", who_has)
-
-            # for key, workers in who_has.items():  # TODO
-            #     self.mark_key_in_memory(key, workers)
 
             for key, workers in who_has.items():
                 ts = self.task_states.get(key)
@@ -2648,6 +2639,9 @@ class Scheduler(ServerNode):
     #####################
 
     def _remove_from_processing(self, ts, send_worker_msg=None):
+        """
+        Remove *ts* from the set of processing tasks.
+        """
         ws = ts.processing_on
         ts.processing_on = None
         w = ws.worker_key
@@ -2665,6 +2659,9 @@ class Scheduler(ServerNode):
                 self.worker_send(w, send_worker_msg)
 
     def _add_to_memory(self, ts, ws, recommendations, type=None, **kwargs):
+        """
+        Add *ts* to the set of in-memory tasks.
+        """
         ts.who_has.add(ws)
         ws.has_what.add(ts)
         ws.nbytes += ts.get_nbytes()

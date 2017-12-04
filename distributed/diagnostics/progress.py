@@ -14,26 +14,30 @@ from ..utils import key_split, key_split_group, log_errors, tokey
 logger = logging.getLogger(__name__)
 
 
-def dependent_keys(keys, who_has, processing, dependencies, exceptions,
-                   complete=False):
-    """ All keys that need to compute for these keys to finish """
+def dependent_keys(tasks, complete=False):
+    """
+    All keys that need to compute for these keys to finish.
+
+    If *complete* is false, omit tasks that are busy processing or
+    have finished executing.
+    """
     out = set()
     errors = set()
-    stack = list(keys)
+    stack = list(tasks)
     while stack:
-        key = stack.pop()
+        ts = stack.pop()
+        key = ts.key
         if key in out:
             continue
-        if not complete and (who_has.get(key) or
-                             key in processing):
+        if not complete and ts.who_has:
             continue
-        if key in exceptions:
+        if ts.exception is not None:
             errors.add(key)
             if not complete:
                 continue
 
         out.add(key)
-        stack.extend(dependencies.get(key, []))
+        stack.extend(ts.dependencies)
     return out, errors
 
 
@@ -73,23 +77,19 @@ class Progress(SchedulerPlugin):
     def setup(self):
         keys = self.keys
 
-        while not keys.issubset(self.scheduler.task_state):
+        while not keys.issubset(self.scheduler.task_states):
             yield gen.sleep(0.05)
+
+        tasks = [self.scheduler.task_states[k] for k in keys]
 
         self.keys = None
 
         self.scheduler.add_plugin(self)  # subtle race condition here
-        self.all_keys, errors = dependent_keys(keys, self.scheduler.who_has,
-                                               self.scheduler.processing,
-                                               self.scheduler.dependencies, self.scheduler.exceptions,
-                                               complete=self.complete)
+        self.all_keys, errors = dependent_keys(tasks, complete=self.complete)
         if not self.complete:
             self.keys = self.all_keys.copy()
         else:
-            self.keys, _ = dependent_keys(keys, self.scheduler.who_has,
-                                          self.scheduler.processing,
-                                          self.scheduler.dependencies, self.scheduler.exceptions,
-                                          complete=False)
+            self.keys, _ = dependent_keys(tasks, complete=False)
         self.all_keys.update(keys)
         self.keys |= errors & self.all_keys
 
@@ -166,20 +166,16 @@ class MultiProgress(Progress):
         while not keys.issubset(self.scheduler.tasks):
             yield gen.sleep(0.05)
 
+        tasks = [self.scheduler.task_states[k] for k in keys]
+
         self.keys = None
 
         self.scheduler.add_plugin(self)  # subtle race condition here
-        self.all_keys, errors = dependent_keys(keys, self.scheduler.who_has,
-                                               self.scheduler.processing,
-                                               self.scheduler.dependencies, self.scheduler.exceptions,
-                                               complete=self.complete)
+        self.all_keys, errors = dependent_keys(tasks, complete=self.complete)
         if not self.complete:
             self.keys = self.all_keys.copy()
         else:
-            self.keys, _ = dependent_keys(keys, self.scheduler.who_has,
-                                          self.scheduler.processing,
-                                          self.scheduler.dependencies, self.scheduler.exceptions,
-                                          complete=False)
+            self.keys, _ = dependent_keys(tasks, complete=False)
         self.all_keys.update(keys)
         self.keys |= errors & self.all_keys
 
@@ -277,7 +273,6 @@ class AllProgress(SchedulerPlugin):
             self.state[finish][prefix].add(key)
         else:
             s = self.all[prefix]
-            print("==", prefix, key, s)
             s.remove(key)
             if not s:
                 del self.all[prefix]
