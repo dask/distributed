@@ -3801,51 +3801,19 @@ class Scheduler(ServerNode):
 
 def decide_worker(ts, all_workers, valid_workers, objective):
     """
-    # XXX docstring is obsolete
+    Decide which worker should take task *ts*.
 
-    Decide which worker should take task
+    We choose the worker that has the data on which *ts* depends.
 
-    >>> dependencies = {'c': {'b'}, 'b': {'a'}}
-    >>> occupancy = {'alice:8000': 0, 'bob:8000': 0}
-    >>> who_has = {'a': {'alice:8000'}}
-    >>> nbytes = {'a': 100}
-    >>> ncores = {'alice:8000': 1, 'bob:8000': 1}
-    >>> valid_workers = True
-    >>> loose_restrictions = set()
+    If several workers have dependencies then we choose the less-busy worker.
 
-    We choose the worker that has the data on which 'b' depends (alice has 'a')
+    Optionally provide *valid_workers* of where jobs are allowed to occur
+    (if all workers are allowed to take the task, pass True instead).
 
-    >>> decide_worker(dependencies, occupancy, who_has, has_what,
-    ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
-    'alice:8000'
-
-    If both Alice and Bob have dependencies then we choose the less-busy worker
-
-    >>> who_has = {'a': {'alice:8000', 'bob:8000'}}
-    >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'a'}}
-    >>> decide_worker(dependencies, who_has, has_what,
-    ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
-    'bob:8000'
-
-    Optionally provide valid workers of where jobs are allowed to occur
-
-    >>> valid_workers = {'alice:8000', 'charlie:8000'}
-    >>> decide_worker(dependencies, who_has, has_what,
-    ...               valid_workers, loose_restrictions, nbytes, ncores, 'b')
-    'alice:8000'
-
-    If the task requires data communication, then we choose to minimize the
-    number of bytes sent between workers. This takes precedence over worker
-    occupancy.
-
-    >>> dependencies = {'c': {'a', 'b'}}
-    >>> who_has = {'a': {'alice:8000'}, 'b': {'bob:8000'}}
-    >>> has_what = {'alice:8000': {'a'}, 'bob:8000': {'b'}}
-    >>> nbytes = {'a': 1, 'b': 1000}
-
-    >>> decide_worker(dependencies, who_has, has_what,
-    ...               {}, set(), nbytes, ncores, 'c')
-    'bob:8000'
+    If the task requires data communication because no eligible worker has
+    all the dependencies already, then we choose to minimize the number
+    of bytes sent between workers.  This is determined by calling the
+    *objective* function.
     """
     deps = ts.dependencies
     assert all(dts.who_has for dts in deps)
