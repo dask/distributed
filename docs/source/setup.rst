@@ -211,8 +211,8 @@ resources using Kubernetes_ and Helm_.
 .. _Helm: https://helm.sh/
 
 
-Setup Cluster
-~~~~~~~~~~~~~
+Launch Kubernetes Cluster
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 First you will need to set up an account with one of Google, Amazon, or
 Microsoft Azure,  and launch a cluster running Kubernetes.  This is
@@ -225,6 +225,9 @@ JupyterHub is not necessary to deploy Dask:
 - `Setting up Helm <https://zero-to-jupyterhub.readthedocs.io/en/v0.4-doc/setup-helm.html>`_
 
 Detailed instructions are available for all major Cloud providers.
+
+Alternatively you may want to experiment with Kubernetes locally using
+`Minikube <https://kubernetes.io/docs/getting-started-guides/minikube/>`_.
 
 
 Helm Install Dask
