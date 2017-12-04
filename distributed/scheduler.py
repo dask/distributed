@@ -344,15 +344,10 @@ class Scheduler(ServerNode):
     The scheduler contains the following state variables.  Each variable is
     listed along with what it stores and a brief description.
 
-    * **tasks:** ``{key: task}``:
-        Dictionary mapping key to a serialized task like the following:
-        ``{'function': b'...', 'args': b'...'}`` or ``{'task': b'...'}``
     * **dependencies:** ``{key: {keys}}``:
         Dictionary showing which keys depend on which others
     * **dependents:** ``{key: {keys}}``:
         Dictionary showing which keys are dependent on which others
-    * **priority:** ``{key: tuple}``:
-        A score per key that determines its priority
     * **waiting:** ``{key: {key}}``:
         Dictionary like dependencies but excludes keys already computed
     * **waiting_data:** ``{key: {key}}``:
@@ -399,10 +394,6 @@ class Scheduler(ServerNode):
         A dict mapping a key to another key on which it depends that has failed
     * **suspicious_tasks:** ``{key: int}``
         Number of times a task has been involved in a worker failure
-    * **retries:** ``{key: int}``
-        Number of times a task may be automatically retried after failing
-    * **deleted_keys:** ``{key: {workers}}``
-        Locations of workers that have keys that should be deleted
     * **wants_what:** ``{client: {key}}``:
         What keys are wanted by each client..  The transpose of who_wants.
     * **who_wants:** ``{key: {client}}``:
@@ -479,10 +470,8 @@ class Scheduler(ServerNode):
         # Task state
         self.task_states = dict()
         for old_attr, new_attr, wrap in [
-                ('priority', 'priority', None),
                 ('dependencies', 'dependencies', _legacy_task_key_set),
                 ('dependents', 'dependents', _legacy_task_key_set),
-                ('retries', 'retries', None),
                 ]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
@@ -491,7 +480,6 @@ class Scheduler(ServerNode):
                     _StateLegacyMapping(self.task_states, func))
 
         for old_attr, new_attr, wrap in [
-                ('tasks', 'run_spec', None),
                 ('nbytes', 'nbytes', None),
                 ('who_wants', 'who_wants', _legacy_client_key_set),
                 ('who_has', 'who_has', _legacy_worker_key_set),

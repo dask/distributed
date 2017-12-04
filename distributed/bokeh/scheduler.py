@@ -19,7 +19,7 @@ from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from bokeh.io import curdoc
-from toolz import pipe
+from toolz import frequencies, pipe
 try:
     import numpy as np
 except ImportError:
@@ -109,13 +109,15 @@ class StateTable(DashboardComponent):
     def update(self):
         with log_errors():
             s = self.scheduler
-            d = {'Tasks': [len(s.tasks)],
-                 'Stored': [len(s.who_has)],
-                 'Processing': ['%d / %d' % (len(s.rprocessing), s.total_ncores)],
-                 'Waiting': [len(s.waiting)],
-                 'No Worker': [len(s.unrunnable)],
-                 'Erred': [len(s.exceptions)],
-                 'Released': [len(s.released)]}
+            freqs = frequencies(ts.state for ts in s.task_states.values())
+            total = sum(freqs.values())
+            d = {'Tasks': [total],
+                 'Stored': [freqs.get('memory', 0)],
+                 'Processing': ['%d / %d' % (freqs.get('processing', 0), s.total_ncores)],
+                 'Waiting': [freqs.get('waiting', 0)],
+                 'No Worker': [freqs.get('no-worker', 0)],
+                 'Erred': [freqs.get('erred', 0)],
+                 'Released': [freqs.get('released', 0)]}
 
             update(self.source, d)
 

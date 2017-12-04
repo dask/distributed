@@ -78,14 +78,14 @@ def test_map(c, s, a, b):
 
     result = yield L1[0]
     assert result == inc(0)
-    assert len(s.tasks) == 5
+    assert len(s.task_states) == 5
 
     L2 = c.map(inc, L1)
 
     result = yield L2[1]
     assert result == inc(inc(1))
-    assert len(s.tasks) == 10
-    # assert L1[0].key in s.tasks[L2[0].key]
+    assert len(s.task_states) == 10
+    # assert L1[0].key in s.task_states[L2[0].key]
 
     total = c.submit(sum, L2)
     result = yield total
@@ -1880,10 +1880,10 @@ def test_forget_simple(c, s, a, b):
     assert not s.waiting_data.get(x.key)
     assert not s.waiting_data.get(y.key)
 
-    assert set(s.tasks) == {x.key, y.key, z.key}
+    assert set(s.task_states) == {x.key, y.key, z.key}
 
     s.client_releases_keys(keys=[x.key], client=c.id)
-    assert x.key in s.tasks
+    assert x.key in s.task_states
     s.client_releases_keys(keys=[z.key], client=c.id)
 
     assert x.key not in s.task_states
@@ -1891,7 +1891,7 @@ def test_forget_simple(c, s, a, b):
     assert not s.task_states[y.key].dependents
 
     s.client_releases_keys(keys=[y.key], client=c.id)
-    assert not s.tasks
+    assert not s.task_states
 
 
 @gen_cluster(client=True)
@@ -1904,16 +1904,16 @@ def test_forget_complex(e, s, A, B):
 
     yield wait([a, b, c, d, ab, ac, cd, acab])
 
-    assert set(s.tasks) == {f.key for f in [ab, ac, cd, acab]}
+    assert set(s.task_states) == {f.key for f in [ab, ac, cd, acab, a, b, c, d]}
 
     s.client_releases_keys(keys=[ab.key], client=e.id)
-    assert set(s.tasks) == {f.key for f in [ab, ac, cd, acab]}
+    assert set(s.task_states) == {f.key for f in [ab, ac, cd, acab, a, b, c, d]}
 
     s.client_releases_keys(keys=[b.key], client=e.id)
-    assert set(s.tasks) == {f.key for f in [ac, cd, acab]}
+    assert set(s.task_states) == {f.key for f in [ac, cd, acab, a, c, d]}
 
     s.client_releases_keys(keys=[acab.key], client=e.id)
-    assert set(s.tasks) == {f.key for f in [ac, cd]}
+    assert set(s.task_states) == {f.key for f in [ac, cd, a, c, d]}
     assert b.key not in s.who_has
 
     start = time()
@@ -1922,7 +1922,7 @@ def test_forget_complex(e, s, A, B):
         assert time() < start + 10
 
     s.client_releases_keys(keys=[ac.key], client=e.id)
-    assert set(s.tasks) == {f.key for f in [cd]}
+    assert set(s.task_states) == {f.key for f in [cd, a, c, d]}
 
 
 @gen_cluster(client=True)
@@ -1945,7 +1945,7 @@ def test_forget_in_flight(e, s, A, B):
     s.validate_state()
 
     for k in [acab.key, ab.key, b.key]:
-        assert k not in s.tasks
+        assert k not in s.task_states
         assert k not in s.waiting
         assert k not in s.who_has
 
@@ -2041,7 +2041,7 @@ def test_multi_client(s, a, b):
 
     yield f.close()
 
-    assert not s.tasks
+    assert not s.task_states
 
 
 def long_running_client_connection(address):
@@ -2061,14 +2061,14 @@ def test_cleanup_after_broken_client_connection(s, a, b):
     proc.start()
 
     start = time()
-    while not s.tasks:
+    while not s.task_states:
         yield gen.sleep(0.01)
         assert time() < start + 5
 
     proc.terminate()
 
     start = time()
-    while s.tasks:
+    while s.task_states:
         yield gen.sleep(0.01)
         assert time() < start + 5
 
@@ -2167,7 +2167,7 @@ def test__cancel(c, s, a, b):
     x = c.submit(slowinc, 1)
     y = c.submit(slowinc, x)
 
-    while y.key not in s.tasks:
+    while y.key not in s.task_states:
         yield gen.sleep(0.01)
 
     yield c.cancel([x])
@@ -2181,7 +2181,7 @@ def test__cancel(c, s, a, b):
         yield gen.sleep(0.01)
         assert time() < start + 5
 
-    assert not s.tasks
+    assert not s.task_states
     assert not s.who_has
     s.validate_state()
 
@@ -2212,7 +2212,7 @@ def test__cancel_multi_client(s, a, b):
     assert not y.cancelled()
 
     start = time()
-    while y.key not in s.tasks:
+    while y.key not in s.task_states:
         yield gen.sleep(0.01)
         assert time() < start + 5
 
@@ -2236,7 +2236,7 @@ def test__cancel_collection(c, s, a, b):
     yield c.cancel(x)
     yield c.cancel([x])
     assert all(f.cancelled() for f in L)
-    assert not s.tasks
+    assert not s.task_states
     assert not s.who_has
 
 
@@ -2313,7 +2313,7 @@ def test_map_iterator_with_return(c, s, a, b):
     assert isinstance(f1, Iterator)
 
     start = time()  # ensure that we compute eagerly
-    while not s.tasks:
+    while not s.task_states:
         yield gen.sleep(0.01)
         assert time() < start + 5
 
@@ -2337,7 +2337,7 @@ def test_map_iterator(c, s, a, b):
     assert isinstance(f1, Iterator)
 
     start = time()  # ensure that we compute eagerly
-    while not s.tasks:
+    while not s.task_states:
         yield gen.sleep(0.01)
         assert time() < start + 5
 
@@ -2419,7 +2419,7 @@ def test_async_persist(c, s, a, b):
     assert y.__dask_keys__() == yy.__dask_keys__()
     assert w.__dask_keys__() == ww.__dask_keys__()
 
-    while y.key not in s.tasks and w.key not in s.tasks:
+    while y.key not in s.task_states and w.key not in s.task_states:
         yield gen.sleep(0.01)
 
     assert s.who_wants[y.key] == {c.id}
@@ -2541,7 +2541,7 @@ def test_futures_of_cancelled_raises(c, s, a, b):
     with pytest.raises(CancelledError):
         c.map(add, [1], y=x)
 
-    assert 'y' not in s.tasks
+    assert 'y' not in s.task_states
 
 
 @pytest.mark.skip
@@ -2569,7 +2569,7 @@ def test_fatally_serialized_input(c, s):
 
     future = c.submit(inc, o)
 
-    while not s.tasks:
+    while not s.task_states:
         yield gen.sleep(0.01)
 
 
@@ -3218,8 +3218,8 @@ def test_scheduler_saturates_cores(c, s, a, b):
     for delay in [0, 0.01, 0.1]:
         futures = c.map(slowinc, range(100), delay=delay)
         futures = c.map(slowinc, futures, delay=delay / 10)
-        while not s.tasks:
-            if s.tasks:
+        while not s.task_states:
+            if s.task_states:
                 assert all(len(p) >= 20 for p in s.processing.values())
             yield gen.sleep(0.01)
 
@@ -3228,8 +3228,8 @@ def test_scheduler_saturates_cores(c, s, a, b):
 def test_scheduler_saturates_cores_random(c, s, a, b):
     for delay in [0, 0.01, 0.1]:
         futures = c.map(randominc, range(100), scale=0.1)
-        while not s.tasks:
-            if s.tasks:
+        while not s.task_states:
+            if s.task_states:
                 assert all(len(p) >= 20 for p in s.processing.values())
             yield gen.sleep(0.01)
 
@@ -3238,7 +3238,7 @@ def test_scheduler_saturates_cores_random(c, s, a, b):
 def test_cancel_clears_processing(c, s, *workers):
     da = pytest.importorskip('dask.array')
     x = c.submit(slowinc, 1, delay=0.2)
-    while not s.tasks:
+    while not s.task_states:
         yield gen.sleep(0.01)
 
     yield c.cancel(x)
@@ -3524,7 +3524,7 @@ def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=False)
         yield wait(b4)
 
-        assert set(map(tokey, b3.__dask_keys__())).issubset(s.tasks)
+        assert set(map(tokey, b3.__dask_keys__())).issubset(s.task_states)
 
         b = db.range(i, npartitions=2)
         i += 1
@@ -3534,7 +3534,7 @@ def test_persist_optimize_graph(c, s, a, b):
         b4 = method(b3, optimize_graph=True)
         yield wait(b4)
 
-        assert not any(tokey(k) in s.tasks for k in b2.__dask_keys__())
+        assert not any(tokey(k) in s.task_states for k in b2.__dask_keys__())
 
 
 @gen_cluster(client=True, ncores=[])
@@ -4186,7 +4186,7 @@ def test_interleave_computations(c, s, a, b):
     y_keys = [y.key for y in ys]
     z_keys = [z.key for z in zs]
 
-    while not s.tasks or any(s.processing.values()):
+    while not s.task_states or any(s.processing.values()):
         yield gen.sleep(0.05)
         x_done = sum(state in done
                      for state in s.get_task_status(keys=x_keys).values())
@@ -4215,7 +4215,7 @@ def test_interleave_computations_map(c, s, a, b):
     y_keys = [y.key for y in ys]
     z_keys = [z.key for z in zs]
 
-    while not s.tasks or any(s.processing.values()):
+    while not s.task_states or any(s.processing.values()):
         yield gen.sleep(0.05)
         x_done = sum(state in done
                      for state in s.get_task_status(keys=x_keys).values())
@@ -5092,7 +5092,7 @@ def test_avoid_delayed_finalize(c, s, a, b):
     future = c.compute(x)
     result = yield future
     assert result == 2
-    assert list(s.tasks) == [future.key] == [x.key]
+    assert list(s.task_states) == [future.key] == [x.key]
 
 
 if sys.version_info >= (3, 5):

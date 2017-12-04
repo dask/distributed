@@ -31,7 +31,7 @@ def test_simple(loop):
         with Client(c.scheduler_address, loop=loop) as e:
             x = e.submit(inc, 1)
             x.result()
-            assert x.key in c.scheduler.tasks
+            assert x.key in c.scheduler.task_states
             assert any(w.data == {x.key: 2} for w in c.workers)
 
 

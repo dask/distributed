@@ -163,7 +163,7 @@ class MultiProgress(Progress):
     def setup(self):
         keys = self.keys
 
-        while not keys.issubset(self.scheduler.tasks):
+        while not keys.issubset(self.scheduler.task_states):
             yield gen.sleep(0.05)
 
         tasks = [self.scheduler.task_states[k] for k in keys]

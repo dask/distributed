@@ -120,7 +120,7 @@ def test_balance_with_restrictions(client, s, a, b, c):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
 def test_no_valid_workers(client, s, a, b, c):
     x = client.submit(inc, 1, workers='127.0.0.5:9999')
-    while not s.tasks:
+    while not s.task_states:
         yield gen.sleep(0.01)
 
     assert s.task_states[x.key] in s.unrunnable
@@ -141,7 +141,7 @@ def test_no_valid_workers_loose_restrictions(client, s, a, b, c):
 @gen_cluster(client=True, ncores=[])
 def test_no_workers(client, s):
     x = client.submit(inc, 1)
-    while not s.tasks:
+    while not s.task_states:
         yield gen.sleep(0.01)
 
     assert s.task_states[x.key] in s.unrunnable
@@ -187,12 +187,12 @@ def test_remove_client(s, a, b):
                    keys=['y'],
                    client='ident')
 
-    assert s.tasks
+    assert s.task_states
     assert s.dependencies
 
     s.remove_client(client='ident')
 
-    assert not s.tasks
+    assert not s.task_states
     assert not s.dependencies
 
 
@@ -463,7 +463,7 @@ def test_restart(c, s, a, b):
     for c in [s.processing, s.occupancy]:
         assert not any(v for v in c.values())
 
-    assert not s.tasks
+    assert not s.task_states
     assert not s.dependencies
 
 
@@ -575,7 +575,7 @@ def test_update_graph_culls(s, a, b):
                    keys=['y'],
                    dependencies={'y': 'x', 'x': [], 'z': []},
                    client='client')
-    assert 'z' not in s.tasks
+    assert 'z' not in s.task_states
     assert 'z' not in s.dependencies
 
 
@@ -1147,13 +1147,13 @@ def test_retries(c, s, a, b):
     future = c.submit(varying(args), retries=3)
     result = yield future
     assert result == 42
-    assert s.retries[future.key] == 1
+    assert s.task_states[future.key].retries == 1
     assert future.key not in s.exceptions
 
     future = c.submit(varying(args), retries=2, pure=False)
     result = yield future
     assert result == 42
-    assert s.retries[future.key] == 0
+    assert s.task_states[future.key].retries == 0
     assert future.key not in s.exceptions
 
     future = c.submit(varying(args), retries=1, pure=False)

@@ -166,11 +166,7 @@ def test_restart_cleared(c, s, a, b):
 
     yield c._restart()
 
-    for coll in [s.tasks, s.dependencies, s.dependents, s.waiting,
-                 s.waiting_data, s.who_has, s.host_restrictions,
-                 s.worker_restrictions, s.loose_restrictions,
-                 s.released, s.priority, s.exceptions, s.who_wants,
-                 s.exceptions_blame]:
+    for coll in [s.task_states, s.released, s.unrunnable]:
         assert not coll
 
 

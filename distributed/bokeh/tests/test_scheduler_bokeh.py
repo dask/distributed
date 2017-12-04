@@ -210,7 +210,7 @@ def test_TaskProgress_empty(c, s, a, b):
     tp.update()
 
     del futures
-    while s.tasks:
+    while s.task_states:
         yield gen.sleep(0.01)
     tp.update()
 

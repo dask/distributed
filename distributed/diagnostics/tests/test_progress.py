@@ -204,7 +204,7 @@ def test_GroupProgress(c, s, a, b):
     assert fp.dependents[x.name] == {y.name, (x * y).name}
 
     del x, y, z
-    while s.tasks:
+    while s.task_states:
         yield gen.sleep(0.01)
 
     assert not fp.groups

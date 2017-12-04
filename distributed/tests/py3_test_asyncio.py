@@ -223,7 +223,7 @@ async def test_asyncio_cancel():
         x = c.submit(slowinc, 1)
         y = c.submit(slowinc, x)
 
-        while y.key not in s.tasks:
+        while y.key not in s.task_states:
             await asyncio.sleep(0.01)
 
         await c.cancel([x])
@@ -237,7 +237,7 @@ async def test_asyncio_cancel():
             await asyncio.sleep(0.01)
             assert time() < start + 5
 
-        assert not s.tasks
+        assert not s.task_states
         assert not s.who_has
         s.validate_state()
 
