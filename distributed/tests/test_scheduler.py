@@ -718,17 +718,17 @@ def test_retire_workers(c, s, a, b):
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
-def test_workers_to_close(cl, s, *_):
+def test_workers_to_close(cl, s, *workers):
     s.task_duration['a'] = 4
     s.task_duration['b'] = 4
     s.task_duration['c'] = 1
 
-    cl.map(slowinc, [1, 1, 1], key = ['a-4','b-4','c-1'])
+    cl.map(slowinc, [1, 1, 1], key=['a-4','b-4','c-1'])
     while len(s.rprocessing) < 3:
         yield gen.sleep(0.001)
 
     wtc = s.workers_to_close()
-    assert all(s.processing[w] =={} for w in wtc)
+    assert all(not s.processing[w] for w in wtc)
     assert len(wtc) == 1
 
 
