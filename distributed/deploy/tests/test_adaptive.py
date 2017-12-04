@@ -48,11 +48,12 @@ def test_simultaneous_scale_up_and_down(c, s, *workers):
     s.task_duration['b'] = 4
     s.task_duration['c'] = 1
 
-    ta = TestAdaptive(s, cluster, interval=100, scale_factor=2)
     future = c.map(slowinc, [1, 1, 1], key=['a-4', 'b-4', 'c-1'])
 
     while len(s.rprocessing) < 3:
         yield gen.sleep(0.001)
+
+    ta = TestAdaptive(s, cluster, interval=100, scale_factor=2)
 
     yield gen.sleep(0.3)
 
