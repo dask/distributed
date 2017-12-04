@@ -283,7 +283,9 @@ might want to conda-install XArray and Arrow::
 
 Conda packages are installed before pip packages.  These values are appended
 directly to the ``conda install`` and ``pip install`` commands and so you can
-also include flags, such as specifying conda channels.
+also include flags, such as specifying conda channels.  Currently conda
+installation is more robust, but does take a bit longer, and so can cause
+longer delays when starting new containers
 
 
 Using Google Cloud
