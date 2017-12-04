@@ -7,7 +7,7 @@ from tornado.ioloop import IOLoop
 
 from distributed import Client
 from distributed.deploy import Adaptive, LocalCluster
-from distributed.utils_test import gen_test, slowinc
+from distributed.utils_test import gen_cluster, gen_test, slowinc
 from distributed.utils_test import loop, nodebug  # flake8: noqa
 from distributed.metrics import time
 
@@ -26,35 +26,35 @@ def test_get_scale_up_kwargs(loop):
             assert c.ncores()
             assert alc.get_scale_up_kwargs() == {'n': 3}
 
-@gen_test(timeout=5)
-def test_simultaneous_scale_up_and_down():
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
+def test_simultaneous_scale_up_and_down(c, s, *workers):
     class TestAdaptive(Adaptive):
         def get_scale_up_kwargs(self):
             assert False
+
         def _retire_workers(self):
             assert False
 
-    loop = IOLoop.current()
+    class TestCluster(object):
+        def scale_up(self, n, **kwargs):
+            assert False
 
-    cluster =  LocalCluster(n_workers=4, scheduler_port=0, silence_logs=False, processes=False,
-                      diagnostics_port=None, loop=loop, start=False)
-    s = cluster.scheduler
+        def scale_down(self, workers):
+            assert False
+
+    cluster = TestCluster()
+
     s.task_duration['a'] = 4
     s.task_duration['b'] = 4
     s.task_duration['c'] = 1
 
     ta = TestAdaptive(s, cluster, interval=100, scale_factor=2)
-    c = yield Client(cluster, asynchronous=True, loop=loop)
-    future =  c.map(slowinc, [1, 1, 1], key=['a-4', 'b-4', 'c-1'])
+    future = c.map(slowinc, [1, 1, 1], key=['a-4', 'b-4', 'c-1'])
 
     while len(s.rprocessing) < 3:
         yield gen.sleep(0.001)
 
     yield gen.sleep(0.3)
-    yield c._gather(future)
-    yield c._close()
-    yield cluster._close()
-
 
 
 def test_adaptive_local_cluster(loop):
