@@ -575,7 +575,7 @@ class Scheduler(ServerNode):
                 except EnvironmentError as e:
                     logger.info("Exception from worker while closing: %s", e)
 
-            self.remove_worker(address=worker, safe-safe)
+            self.remove_worker(address=worker, safe=safe)
 
     @gen.coroutine
     def cleanup(self):
