@@ -392,8 +392,6 @@ class Scheduler(ServerNode):
         A dict mapping keys to remote tracebacks stored as a list of strings
     * **exceptions_blame:** ``{key: key}``:
         A dict mapping a key to another key on which it depends that has failed
-    * **suspicious_tasks:** ``{key: int}``
-        Number of times a task has been involved in a worker failure
     * **wants_what:** ``{client: {key}}``:
         What keys are wanted by each client..  The transpose of who_wants.
     * **who_wants:** ``{key: {client}}``:
@@ -487,7 +485,6 @@ class Scheduler(ServerNode):
                 ('host_restrictions', 'host_restrictions', None),
                 ('worker_restrictions', 'worker_restrictions', None),
                 ('resource_restrictions', 'resource_restrictions', None),
-                ('suspicious_tasks', 'suspicious', None),
                 ('exceptions', 'exception', None),
                 ('tracebacks', 'traceback', None),
                 ('exceptions_blame', 'exception_blame', _task_key_or_none),
