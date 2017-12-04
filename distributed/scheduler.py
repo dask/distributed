@@ -1023,13 +1023,13 @@ class Scheduler(ServerNode):
                 deps.remove(k)
             dependencies[k] = deps
 
-        # XXX use task states everywhere
-
+        # Get or create task states
         stack = list(keys)
-        touched = set()
+        touched_keys = set()
+        touched_tasks = []
         while stack:
             k = stack.pop()
-            if k in touched:
+            if k in touched_keys:
                 continue
             # XXX Have a method get_task_state(self, k) ?
             ts = self.task_states.get(k)
@@ -1040,11 +1040,13 @@ class Scheduler(ServerNode):
             elif not ts.run_spec:
                 ts.run_spec = tasks.get(k)
 
-            touched.add(k)
+            touched_keys.add(k)
+            touched_tasks.append(ts)
             stack.extend(dependencies.get(k, ()))
 
         self.client_desires_keys(keys=keys, client=client)
 
+        # Add dependencies
         for key, deps in dependencies.items():
             ts = self.task_states.get(key)
             if ts is None or ts.dependencies:
@@ -1054,8 +1056,7 @@ class Scheduler(ServerNode):
                 ts.dependencies.add(dts)
                 dts.dependents.add(ts)
 
-        recommendations = OrderedDict()
-
+        # Compute priorities
         new_priority = priority or order(tasks)  # TODO: define order wrt old graph
         if submitting_task:  # sub-tasks get better priority than parent tasks
             ts = self.task_states.get(submitting_task)
@@ -1066,16 +1067,15 @@ class Scheduler(ServerNode):
         else:
             self.generation += 1  # older graph generations take precedence
             generation = self.generation
-        for key in set(new_priority) & touched:
+        for key in set(new_priority) & touched_keys:
             ts = self.task_states[key]
             if ts.priority is None:
                 ts.priority = (generation, new_priority[key])  # prefer old
 
-        runnables = [key for key in keys | touched
-                     if self.task_states[key].run_spec]
-
-        for key in runnables:
-            ts = self.task_states[key]
+        # Ensure all runnables have a priority
+        runnables = [ts for ts in touched_tasks
+                     if ts.run_spec]
+        for ts in runnables:
             if ts.priority is None and ts.run_spec:
                 ts.priority = (self.generation, 0)
 
@@ -1122,13 +1122,14 @@ class Scheduler(ServerNode):
                     continue
                 ts.retries = v
 
-        for ts in sorted([self.task_states[key] for key in runnables],
-                          key=operator.attrgetter('priority')):
+        # Compute recommendations
+        recommendations = OrderedDict()
+
+        for ts in sorted(runnables, key=operator.attrgetter('priority')):
             if ts.state == 'released' and ts.run_spec:
                 recommendations[ts.key] = 'waiting'
 
-        for key in touched | keys:
-            ts = self.task_states[key]
+        for ts in touched_tasks:
             for dts in ts.dependencies:
                 if dts.exception_blame:
                     ts.exception_blame = dts.exception_blame
@@ -1146,10 +1147,9 @@ class Scheduler(ServerNode):
             except Exception as e:
                 logger.exception(e)
 
-        for key in keys:
-            ts = self.task_states[key]
+        for ts in touched_tasks:
             if ts.state in ('memory', 'erred'):
-                self.report_on_key(key, client=client)
+                self.report_on_key(ts.key, client=client)
 
         end = time()
         if self.digests is not None:
