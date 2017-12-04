@@ -2664,6 +2664,43 @@ class Scheduler(ServerNode):
             if send_worker_msg:
                 self.worker_send(w, send_worker_msg)
 
+    def _add_to_memory(self, ts, ws, recommendations, type=None, **kwargs):
+        ts.who_has.add(ws)
+        ws.has_what.add(ts)
+        ws.nbytes += ts.get_nbytes()
+
+        deps = ts.dependents
+        if len(deps) > 1:
+            deps = sorted(deps, key=operator.attrgetter('priority'),
+                          reverse=True)
+        for dts in deps:
+            s = dts.waiting_on
+            if ts in s:
+                s.discard(ts)
+                if not s:  # new task ready to run
+                    recommendations[dts.key] = 'processing'
+
+        for dts in ts.dependencies:
+            s = dts.waiters
+            s.discard(ts)
+            if not s and not dts.who_wants:
+                recommendations[dts.key] = 'released'
+
+        if not ts.waiters and not ts.who_wants:
+            recommendations[ts.key] = 'released'
+        else:
+            msg = {'op': 'key-in-memory',
+                   'key': ts.key}
+            if type is not None:
+                msg['type'] = type
+            self.report(msg)
+
+        ts.state = 'memory'
+
+        cs = self.clients['fire-and-forget']
+        if ts in cs.wants_what:
+            self.client_releases_keys(client='fire-and-forget', keys=[ts.key])
+
     def transition_released_waiting(self, key):
         try:
             ts = self.task_states[key]
@@ -2856,41 +2893,11 @@ class Scheduler(ServerNode):
             if nbytes is not None:
                 ts.nbytes = nbytes
 
-            ts.who_has.add(ws)
-            ws.has_what.add(ts)
-            ws.nbytes += ts.get_nbytes()
-
             self.check_idle_saturated(ws)
 
             recommendations = OrderedDict()
 
-            # XXX factor this out? (see transition_processing_memory)
-            deps = ts.dependents
-            if len(deps) > 1:
-                deps = sorted(deps, key=operator.attrgetter('priority'),
-                              reverse=True)
-            for dts in deps:
-                s = dts.waiting_on
-                if ts in s:
-                    s.discard(ts)
-                    if not s:  # new task ready to run
-                        recommendations[dts.key] = 'processing'
-
-            for dts in ts.dependencies:
-                s = dts.waiters
-                s.discard(ts)
-                if not s and not dts.who_wants:
-                    recommendations[dts.key] = 'released'
-
-            if not ts.waiters and not ts.who_wants:
-                # XXX what about 'fire-and-forget'?
-                recommendations[key] = 'released'
-            else:
-                msg = {'op': 'key-in-memory',
-                       'key': key}
-                self.report(msg)
-
-            ts.state = 'memory'
+            self._add_to_memory(ts, ws, recommendations, **kwargs)
 
             if self.validate:
                 assert not ts.processing_on
@@ -2974,45 +2981,11 @@ class Scheduler(ServerNode):
             if nbytes is not None:
                 ts.nbytes = nbytes
 
-            self._remove_from_processing(ts)
-
-            ts.who_has.add(ws)
-            ws.has_what.add(ts)
-            ws.nbytes += ts.get_nbytes()
-
             recommendations = OrderedDict()
 
-            deps = ts.dependents
-            if len(deps) > 1:
-                deps = sorted(deps, key=operator.attrgetter('priority'),
-                              reverse=True)
-            for dts in deps:
-                s = dts.waiting_on
-                if ts in s:
-                    s.discard(ts)
-                    if not s:  # new task ready to run
-                        recommendations[dts.key] = 'processing'
+            self._remove_from_processing(ts)
 
-            for dts in ts.dependencies:
-                s = dts.waiters
-                s.discard(ts)
-                if not s and not dts.who_wants:
-                    recommendations[dts.key] = 'released'
-
-            if not ts.waiters and not ts.who_wants:
-                recommendations[key] = 'released'
-            else:
-                msg = {'op': 'key-in-memory',
-                       'key': key}
-                if type is not None:
-                    msg['type'] = type
-                self.report(msg)
-
-            ts.state = 'memory'
-
-            cs = self.clients['fire-and-forget']
-            if ts in cs.wants_what:
-                self.client_releases_keys(client='fire-and-forget', keys=[key])
+            self._add_to_memory(ts, ws, recommendations, type=type)
 
             if self.validate:
                 assert not ts.processing_on
