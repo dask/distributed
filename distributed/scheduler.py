@@ -538,8 +538,7 @@ class Scheduler(ServerNode):
         self.unknown_durations = defaultdict(set)
 
         # Client state
-        # XXX rename to self.clients?
-        self.client_states = dict()
+        self.clients = dict()
         for old_attr, new_attr, wrap in [
                 ('wants_what', 'wants_what', _legacy_task_key_set),
                 ]:
@@ -547,8 +546,8 @@ class Scheduler(ServerNode):
             if wrap is not None:
                 func = compose(wrap, func)
             setattr(self, old_attr,
-                    _StateLegacyMapping(self.client_states, func))
-        self.client_states['fire-and-forget'] = ClientState('fire-and-forget')
+                    _StateLegacyMapping(self.clients, func))
+        self.clients['fire-and-forget'] = ClientState('fire-and-forget')
 
         # Worker state
         self.workers = SortedDict()
@@ -1260,7 +1259,7 @@ class Scheduler(ServerNode):
 
             self.log_event(['all', address], {'action': 'remove-worker',
                                               'worker': address,
-                                              'processing-tasks': ws.processing})
+                                              'processing-tasks': dict(ws.processing)})
             logger.info("Remove worker %s", address)
             if close:
                 with ignoring(AttributeError, CommClosedError):
@@ -1334,7 +1333,7 @@ class Scheduler(ServerNode):
         """ Cancel a particular key and all dependents """
         # TODO: this should be converted to use the transition mechanism
         ts = self.task_states.get(key)
-        cs = self.client_states[client]
+        cs = self.clients[client]
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
             if retries:
                 self.loop.add_future(gen.sleep(0.2),
@@ -1350,10 +1349,10 @@ class Scheduler(ServerNode):
             self.client_releases_keys(keys=[key], client=c.client_key)
 
     def client_desires_keys(self, keys=None, client=None):
-        cs = self.client_states.get(client)
+        cs = self.clients.get(client)
         if cs is None:
             # For publish, queues etc.
-            cs = self.client_states[client] = ClientState(client)
+            cs = self.clients[client] = ClientState(client)
         for k in keys:
             ts = self.task_states.get(k)
             if ts is None:
@@ -1370,7 +1369,7 @@ class Scheduler(ServerNode):
     def client_releases_keys(self, keys=None, client=None):
         """ Remove keys from client desired list """
         logger.debug("Client %s releases keys: %s", client, keys)
-        cs = self.client_states[client]
+        cs = self.clients[client]
         tasks2 = set()
         for key in list(keys):
             ts = self.task_states.get(key)
@@ -1477,7 +1476,7 @@ class Scheduler(ServerNode):
             raise
 
     def validate_state(self, allow_overlap=False):
-        validate_state(self.task_states, self.workers, self.client_states)
+        validate_state(self.task_states, self.workers, self.clients)
 
         if not (set(self.workers) ==
                 set(self.worker_info) ==
@@ -1493,7 +1492,7 @@ class Scheduler(ServerNode):
             assert isinstance(ts, TaskState), (type(ts), ts)
             assert ts.key == k
 
-        for c, cs in self.client_states.items():
+        for c, cs in self.clients.items():
             # client=None is often used in tests...
             assert c is None or isinstance(c, str), (type(c), c)
             assert isinstance(cs, ClientState), (type(cs), cs)
@@ -1563,7 +1562,7 @@ class Scheduler(ServerNode):
         logger.info("Receive client connection: %s", client)
         self.log_event(['all', client], {'action': 'add-client',
                                          'client': client})
-        self.client_states[client] = ClientState(client)
+        self.clients[client] = ClientState(client)
         try:
             yield self.handle_client(comm, client=client)
         finally:
@@ -1582,14 +1581,14 @@ class Scheduler(ServerNode):
         self.log_event(['all', client], {'action': 'remove-client',
                                          'client': client})
         try:
-            cs = self.client_states[client]
+            cs = self.clients[client]
         except KeyError:
             # XXX is this a legitimate condition?
             pass
         else:
             self.client_releases_keys(keys=[ts.key for ts in cs.wants_what],
                                       client=cs.client_key)
-            del self.client_states[client]
+            del self.clients[client]
 
     @gen.coroutine
     def handle_client(self, comm, client=None):
@@ -1993,7 +1992,7 @@ class Scheduler(ServerNode):
             n_workers = len(self.workers)
 
             logger.info("Send lost future signal to clients")
-            for cs in self.client_states.values():
+            for cs in self.clients.values():
                 self.client_releases_keys(keys=[ts.key for ts in cs.wants_what],
                                           client=cs.client_key)
 
@@ -3011,7 +3010,7 @@ class Scheduler(ServerNode):
 
             ts.state = 'memory'
 
-            cs = self.client_states['fire-and-forget']
+            cs = self.clients['fire-and-forget']
             if ts in cs.wants_what:
                 self.client_releases_keys(client='fire-and-forget', keys=[key])
 
@@ -3239,7 +3238,7 @@ class Scheduler(ServerNode):
                          'exception': failing_ts.exception,
                          'traceback': failing_ts.traceback})
 
-            cs = self.client_states['fire-and-forget']
+            cs = self.clients['fire-and-forget']
             if ts in cs.wants_what:
                 self.client_releases_keys(client='fire-and-forget', keys=[key])
 
@@ -3900,7 +3899,7 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     return min(candidates, key=objective)
 
 
-def validate_state(task_states, workers, client_states):
+def validate_state(task_states, workers, clients):
     """
     Validate a current runtime state
 
@@ -3960,7 +3959,7 @@ def validate_state(task_states, workers, client_states):
             assert ws in ts.who_has, \
                 ("not in has_what' who_has", str(ws), str(ts), str(ts.who_has))
 
-    for cs in client_states.values():
+    for cs in clients.values():
         for ts in cs.wants_what:
             assert cs in ts.who_wants, \
                 ("not in wants_what' who_wants", str(cs), str(ts), str(ts.who_wants))

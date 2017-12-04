@@ -154,7 +154,7 @@ def test_restart(c, s, a, b):
     assert z.key not in s.exceptions
 
     assert not s.who_wants
-    assert not any(cs.wants_what for cs in s.client_states.values())
+    assert not any(cs.wants_what for cs in s.clients.values())
 
 
 @gen_cluster(Worker=Nanny, client=True)

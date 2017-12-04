@@ -116,7 +116,7 @@ class CountsJSON(RequestHandler):
 
         response = {
             'bytes': nbytes,
-            'clients': len(scheduler.client_states),
+            'clients': len(scheduler.clients),
             'cores': ncores,
             'erred': erred,
             'hosts': len(scheduler.host_info),
