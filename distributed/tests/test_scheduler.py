@@ -716,12 +716,15 @@ def test_retire_workers(c, s, a, b):
     workers = yield s.retire_workers()
     assert not workers
 
-    c.map(slowinc, range(10), delay=0.05, workers=b.address)
+
+@gen_cluster(client=True, timeout=1000)
+def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     c.submit(slowinc, 100, delay=0.5, workers=a.address, allow_other_workers=True)
     yield gen.sleep(0.2)
-    yield s.retire_workers(a)
+    yield s.retire_workers(workers=[a.address])
 
     assert all(v==0 for v in s.suspicious_tasks.values())
+
 
 @slow
 @pytest.mark.skipif(sys.platform.startswith('win'),
