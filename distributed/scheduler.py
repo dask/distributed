@@ -800,7 +800,7 @@ class Scheduler(ServerNode):
         setproctitle("dask-scheduler [closed]")
 
     @gen.coroutine
-    def close_worker(self, stream=None, worker=None):
+    def close_worker(self, stream=None, worker=None, safe=None):
         """ Remove a worker from the cluster
 
         This both removes the worker from our local state and also sends a
@@ -813,7 +813,7 @@ class Scheduler(ServerNode):
             nanny_addr = self.get_worker_service_addr(worker, 'nanny')
             address = nanny_addr or worker
 
-            self.remove_worker(address=worker)
+            self.remove_worker(address=worker, safe=safe)
 
             with rpc(address, connection_args=self.connection_args) as r:
                 try:
@@ -821,7 +821,7 @@ class Scheduler(ServerNode):
                 except EnvironmentError as e:
                     logger.info("Exception from worker while closing: %s", e)
 
-            self.remove_worker(address=worker)
+            self.remove_worker(address=worker, safe=safe)
 
     @gen.coroutine
     def cleanup(self):
@@ -2269,7 +2269,7 @@ class Scheduler(ServerNode):
         Find workers that we can close with low cost
 
         This returns a list of workers that are good candidates to retire.
-        These workers are idle (not running anything) and are storing
+        These workers are not running anything and are storing
         relatively little data relative to their peers.  If all workers are
         idle then we still maintain enough workers to have enough RAM to store
         our data, with a comfortable buffer.
@@ -2297,7 +2297,8 @@ class Scheduler(ServerNode):
 
             limit = sum(limit_bytes.values())
             total = sum(ws.nbytes for ws in self.workers.values())
-            idle = sorted(self.idle, key=operator.attrgetter('nbytes'), reverse=True)
+            idle = sorted([ws for ws in self.idle if not ws.processing],
+                          key=operator.attrgetter('nbytes'), reverse=True)
 
             to_close = []
 
@@ -2349,7 +2350,7 @@ class Scheduler(ServerNode):
 
             worker_keys = [ws.worker_key for ws in workers]
             if close_workers and worker_keys:
-                yield [self.close_worker(worker=w)
+                yield [self.close_worker(worker=w, safe=True)
                        for w in worker_keys]
             if remove:
                 for w in worker_keys:
