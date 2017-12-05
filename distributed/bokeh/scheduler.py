@@ -224,7 +224,7 @@ class ProcessingHistogram(DashboardComponent):
                            color='blue')
 
     def update(self):
-        L = list(map(len, self.scheduler.processing.values()))
+        L = [len(ws.processing) for ws in self.scheduler.workers.values()]
         counts, x = np.histogram(L, bins=40)
         self.source.data.update({'left': x[:-1],
                                  'right': x[1:],
@@ -338,7 +338,6 @@ class CurrentLoad(DashboardComponent):
 
     def update(self):
         with log_errors():
-            processing = valmap(len, self.scheduler.processing)
             workers = list(self.scheduler.workers.values())
 
             bokeh_addresses = []
