@@ -19,7 +19,7 @@ from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from bokeh.io import curdoc
-from toolz import frequencies, pipe
+from toolz import pipe
 try:
     import numpy as np
 except ImportError:
@@ -85,41 +85,6 @@ def update(source, data):
         curdoc().add_next_tick_callback(lambda: source.data.update(d))
     else:
         source.data.update(d)
-
-
-class StateTable(DashboardComponent):
-    """ Currently running tasks """
-
-    def __init__(self, scheduler):
-        self.scheduler = scheduler
-
-        names = ['Tasks', 'Stored', 'Processing', 'Waiting', 'No Worker',
-                 'Erred', 'Released']
-        self.source = ColumnDataSource({name: [] for name in names})
-
-        columns = {name: TableColumn(field=name, title=name)
-                   for name in names}
-
-        table = DataTable(
-            source=self.source, columns=[columns[n] for n in names],
-            height=70,
-        )
-        self.root = table
-
-    def update(self):
-        with log_errors():
-            s = self.scheduler
-            freqs = frequencies(ts.state for ts in s.task_states.values())
-            total = sum(freqs.values())
-            d = {'Tasks': [total],
-                 'Stored': [freqs.get('memory', 0)],
-                 'Processing': ['%d / %d' % (freqs.get('processing', 0), s.total_ncores)],
-                 'Waiting': [freqs.get('waiting', 0)],
-                 'No Worker': [freqs.get('no-worker', 0)],
-                 'Erred': [freqs.get('erred', 0)],
-                 'Released': [freqs.get('released', 0)]}
-
-            update(self.source, d)
 
 
 class Occupancy(DashboardComponent):
@@ -890,14 +855,11 @@ class WorkerTable(DashboardComponent):
 
 def systemmonitor_doc(scheduler, extra, doc):
     with log_errors():
-        table = StateTable(scheduler)
         sysmon = SystemMonitor(scheduler, sizing_mode='scale_width')
         doc.title = "Dask Scheduler Internal Monitor"
-        doc.add_periodic_callback(table.update, 500)
         doc.add_periodic_callback(sysmon.update, 500)
 
-        doc.add_root(column(table.root, sysmon.root,
-                            sizing_mode='scale_width'))
+        doc.add_root(column(sysmon.root, sizing_mode='scale_width'))
         doc.template = template
         doc.template_variables['active_page'] = 'system'
         doc.template_variables.update(extra)
@@ -905,18 +867,16 @@ def systemmonitor_doc(scheduler, extra, doc):
 
 def stealing_doc(scheduler, extra, doc):
     with log_errors():
-        table = StateTable(scheduler)
         occupancy = Occupancy(scheduler, height=200, sizing_mode='scale_width')
         stealing_ts = StealingTimeSeries(scheduler, sizing_mode='scale_width')
         stealing_events = StealingEvents(scheduler, sizing_mode='scale_width')
         stealing_events.root.x_range = stealing_ts.root.x_range
         doc.title = "Dask Workers Monitor"
-        doc.add_periodic_callback(table.update, 500)
         doc.add_periodic_callback(occupancy.update, 500)
         doc.add_periodic_callback(stealing_ts.update, 500)
         doc.add_periodic_callback(stealing_events.update, 500)
 
-        doc.add_root(column(table.root, occupancy.root, stealing_ts.root,
+        doc.add_root(column(occupancy.root, stealing_ts.root,
                             stealing_events.root,
                             sizing_mode='scale_width'))
 
