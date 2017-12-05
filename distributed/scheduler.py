@@ -396,8 +396,6 @@ class Scheduler(ServerNode):
         What keys are wanted by each client..  The transpose of who_wants.
     * **who_wants:** ``{key: {client}}``:
         Which clients want each key.  The active targets of computation.
-    * **nbytes:** ``{key: int}``:
-        Number of bytes for a key as reported by workers holding that key.
     * **ncores:** ``{worker: int}``:
         Number of cores owned by each worker
     * **idle:** ``{worker}``:
@@ -476,7 +474,6 @@ class Scheduler(ServerNode):
                     _StateLegacyMapping(self.task_states, func))
 
         for old_attr, new_attr, wrap in [
-                ('nbytes', 'nbytes', None),
                 ('who_wants', 'who_wants', _legacy_client_key_set),
                 ('who_has', 'who_has', _legacy_worker_key_set),
                 ('waiting', 'waiting_on', _legacy_task_key_set),

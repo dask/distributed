@@ -303,8 +303,8 @@ class GroupProgress(SchedulerPlugin):
                 self.create(key, k)
             self.keys[k].add(key)
             self.groups[k][ts.state] += 1
-            if ts.state == 'memory' and key in self.scheduler.nbytes:
-                self.nbytes[k] += self.scheduler.nbytes[key]
+            if ts.state == 'memory' and ts.nbytes is not None:
+                self.nbytes[k] += ts.nbytes
 
         scheduler.add_plugin(self)
 
@@ -326,6 +326,7 @@ class GroupProgress(SchedulerPlugin):
 
     def transition(self, key, start, finish, *args, **kwargs):
         with log_errors():
+            ts = self.scheduler.task_states[key]
             k = key_split_group(key)
             if k not in self.groups:
                 self.create(key, k)
@@ -347,10 +348,10 @@ class GroupProgress(SchedulerPlugin):
                     for dep in self.dependencies.pop(k):
                         self.dependents[key_split_group(dep)].remove(k)
 
-            if start == 'memory':
-                self.nbytes[k] -= self.scheduler.nbytes[key]
-            if finish == 'memory':
-                self.nbytes[k] += self.scheduler.nbytes[key]
+            if start == 'memory' and ts.nbytes is not None:
+                self.nbytes[k] -= ts.nbytes
+            if finish == 'memory' and ts.nbytes is not None:
+                self.nbytes[k] += ts.nbytes
 
     def restart(self, scheduler):
         self.keys.clear()

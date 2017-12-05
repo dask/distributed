@@ -985,10 +985,10 @@ def test__scatter(c, s, a, b):
     d = yield c.scatter({'y': 20})
     assert isinstance(d['y'], Future)
     assert a.data.get('y') == 20 or b.data.get('y') == 20
-    assert (a.address in s.who_has['y'] or
-            b.address in s.who_has['y'])
-    assert s.who_has['y']
-    assert s.nbytes == {'y': sizeof(20)}
+    y_who_has = s.get_who_has(keys=['y'])['y']
+    assert (a.address in y_who_has or
+            b.address in y_who_has)
+    assert s.get_nbytes(summary=False) == {'y': sizeof(20)}
     yy = yield c.gather([d['y']])
     assert yy == [20]
 
@@ -996,10 +996,11 @@ def test__scatter(c, s, a, b):
     assert isinstance(x, Future)
     assert a.data.get(x.key) == 10 or b.data.get(x.key) == 10
     xx = yield c.gather([x])
+    x_who_has = s.get_who_has(keys=[x.key])[x.key]
     assert s.who_has[x.key]
     assert (a.address in s.who_has[x.key] or
             b.address in s.who_has[x.key])
-    assert s.nbytes == {'y': sizeof(20), x.key: sizeof(10)}
+    assert s.get_nbytes(summary=False) == {'y': sizeof(20), x.key: sizeof(10)}
     assert xx == [10]
 
     z = c.submit(add, x, d['y'])  # submit works on Future
@@ -1141,15 +1142,15 @@ def test_exception_on_exception(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_nbytes(c, s, a, b):
+def test_get_nbytes(c, s, a, b):
     [x] = yield c.scatter([1])
-    assert s.nbytes == {x.key: sizeof(1)}
+    assert s.get_nbytes(summary=False) == {x.key: sizeof(1)}
 
     y = c.submit(inc, x)
     yield y
 
-    assert s.nbytes == {x.key: sizeof(1),
-                        y.key: sizeof(2)}
+    assert s.get_nbytes(summary=False) == {x.key: sizeof(1),
+                                           y.key: sizeof(2)}
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'),
@@ -3318,10 +3319,10 @@ def test_get_foo(c, s, a, b):
     assert valmap(sorted, x) == {a.address: sorted(s.has_what[a.address])}
 
     x = yield c.scheduler.nbytes(summary=False)
-    assert x == s.nbytes
+    assert x == s.get_nbytes(summary=False)
 
     x = yield c.scheduler.nbytes(keys=[futures[0].key], summary=False)
-    assert x == {futures[0].key: s.nbytes[futures[0].key]}
+    assert x == {futures[0].key: s.task_states[futures[0].key].nbytes}
 
     x = yield c.scheduler.who_has()
     assert valmap(sorted, x) == valmap(sorted, s.who_has)
