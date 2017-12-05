@@ -70,6 +70,8 @@ DEFAULT_EXTENSIONS = [
 if config.get('work-stealing', True):
     DEFAULT_EXTENSIONS.append(WorkStealing)
 
+ALL_TASK_STATES = {'released', 'waiting', 'no-worker', 'processing', 'erred', 'memory'}
+
 
 class ClientState(object):
     __slots__ = (
@@ -1265,8 +1267,7 @@ class Scheduler(ServerNode):
 
             recommendations = OrderedDict()
 
-            in_flight = set(ws.processing)
-            for ts in list(in_flight):
+            for ts in list(ws.processing):
                 k = ts.key
                 recommendations[k] = 'released'
                 if not safe:
@@ -1276,7 +1277,6 @@ class Scheduler(ServerNode):
                         e = pickle.dumps(KilledWorker(k, address))
                         r = self.transition(k, 'erred', exception=e, cause=k)
                         recommendations.update(r)
-                        in_flight.remove(k)
 
             for ts in ws.has_what:
                 ts.who_has.remove(ws)
@@ -2700,10 +2700,11 @@ class Scheduler(ServerNode):
                 assert not ts.processing_on
                 assert not any(dts.state == 'forgotten' for dts in ts.dependencies)
 
-            self.released.remove(ts)
-
             if ts.has_lost_dependencies:
                 return {key: 'forgotten'}
+
+            self.released.remove(ts)
+            ts.state = 'waiting'
 
             recommendations = OrderedDict()
 
@@ -2724,8 +2725,6 @@ class Scheduler(ServerNode):
 
             ts.waiters = {dts for dts in ts.dependents
                           if dts.state == 'waiting'}
-
-            ts.state = 'waiting'
 
             if not ts.waiting_on:
                 if self.workers:
@@ -3014,8 +3013,8 @@ class Scheduler(ServerNode):
             ts.who_has.clear()
 
             self.released.add(ts)
-
             ts.state = 'released'
+
             self.report({'op': 'lost-data', 'key': key})
 
             if not ts.run_spec:  # pure data
@@ -3061,8 +3060,8 @@ class Scheduler(ServerNode):
                          'exception': failing_ts.exception,
                          'traceback': failing_ts.traceback})
 
-            ts.state = 'erred'
             self.released.remove(ts)
+            ts.state = 'erred'
 
             # TODO: waiting data?
             return recommendations
@@ -3137,7 +3136,7 @@ class Scheduler(ServerNode):
                 for dts in ts.dependencies:
                     if dts.state != 'released':
                         s = dts.waiters
-                        s.remove(ts)
+                        s.discard(ts)
                         if not s and not dts.who_wants:
                             recommendations[dts.key] = 'released'
                 ts.waiters.clear()
@@ -3830,6 +3829,8 @@ def validate_task_state(ts):
     """
     Validate the given TaskState.
     """
+    assert ts.state in ALL_TASK_STATES or ts.state == 'forgotten', ts
+
     if ts.waiting_on:
         assert ts.waiting_on.issubset(ts.dependencies), \
             ("waiting not subset of dependencies", str(ts.waiting_on), str(ts.dependencies))
@@ -3848,6 +3849,7 @@ def validate_task_state(ts):
         if ts.state in ('waiting', 'processing'):
             assert dts in ts.waiting_on or dts.who_has, \
                 ("dep missing", str(ts), str(dts))
+        assert dts.state != 'forgotten'
 
     for dts in ts.waiters:
         assert dts.state in ('waiting', 'processing'), \
@@ -3855,9 +3857,10 @@ def validate_task_state(ts):
     for dts in ts.dependents:
         assert ts in dts.dependencies, \
             ("not in dependent's dependencies", str(ts), str(dts), str(dts.dependencies))
+        assert dts.state != 'forgotten'
 
     assert (ts.processing_on is not None) == (ts.state == 'processing')
-    assert bool(ts.who_has) == (ts.state == 'memory')
+    assert bool(ts.who_has) == (ts.state == 'memory'), (ts, ts.who_has)
 
     if ts.state == 'processing':
         assert all(dts.who_has for dts in ts.dependencies), \
