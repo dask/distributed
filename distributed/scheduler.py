@@ -188,6 +188,13 @@ class TaskState(object):
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
+    def set_nbytes(self, nbytes):
+        old_nbytes = self.nbytes
+        diff = nbytes - (old_nbytes or 0)
+        for ws in self.who_has:
+            ws.nbytes += diff
+        self.nbytes = nbytes
+
     def __repr__(self):
         return "<Task %r %s>" % (self.key, self.state)
 
@@ -200,6 +207,7 @@ class TaskState(object):
             assert isinstance(ts, TaskState), (repr(ts), self.dependencies)
         for ts in self.dependents:
             assert isinstance(ts, TaskState), (repr(ts), self.dependents)
+        validate_task_state(self)
 
 
 class _StateLegacyMapping(Mapping):
@@ -1253,6 +1261,7 @@ class Scheduler(ServerNode):
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
+            self.total_occupancy -= ws.occupancy
 
             recommendations = OrderedDict()
 
@@ -1269,8 +1278,6 @@ class Scheduler(ServerNode):
                         recommendations.update(r)
                         in_flight.remove(k)
 
-            self.total_occupancy -= ws.occupancy
-
             for ts in ws.has_what:
                 ts.who_has.remove(ws)
                 if not ts.who_has:
@@ -1278,6 +1285,7 @@ class Scheduler(ServerNode):
                         recommendations[ts.key] = 'released'
                     else:  # pure data
                         recommendations[ts.key] = 'forgotten'
+            ws.has_what.clear()
 
             self.transitions(recommendations)
 
@@ -1387,6 +1395,7 @@ class Scheduler(ServerNode):
         assert ts not in self.released
         assert ts not in self.unrunnable
         for dts in ts.dependencies:
+            # We are waiting on a dependency iff it's not stored
             assert bool(dts.who_has) + (dts in ts.waiting_on) == 1
             assert ts in dts.waiters  # XXX even if dts.who_has?
 
@@ -1409,7 +1418,8 @@ class Scheduler(ServerNode):
         assert ts not in self.released
         assert ts not in self.unrunnable
         for dts in ts.dependents:
-            assert bool(dts.who_has) + (dts in ts.waiting_on) == 1
+            assert (dts in ts.waiters) == (dts.state in ('waiting', 'processing'))
+            assert ts not in dts.waiting_on
 
     def validate_no_worker(self, key):
         ts = self.task_states[key]
@@ -1427,9 +1437,10 @@ class Scheduler(ServerNode):
         assert ts.exception_blame
         assert not ts.who_has
 
-    def validate_key(self, key):
+    def validate_key(self, key, ts=None):
         try:
-            ts = self.task_states.get(key)
+            if ts is None:
+                ts = self.task_states.get(key)
             if ts is None:
                 logger.debug("Key lost: %s", key)
             else:
@@ -1464,6 +1475,7 @@ class Scheduler(ServerNode):
         for k, ts in self.task_states.items():
             assert isinstance(ts, TaskState), (type(ts), ts)
             assert ts.key == k
+            self.validate_key(k, ts)
 
         for c, cs in self.clients.items():
             # client=None is often used in tests...
@@ -1472,7 +1484,7 @@ class Scheduler(ServerNode):
             assert cs.client_key == c
 
         a = {w: ws.nbytes for w, ws in self.workers.items()}
-        b = {w: sum(ts.nbytes for ts in ws.has_what)
+        b = {w: sum(ts.get_nbytes() for ts in ws.has_what)
              for w, ws in self.workers.items()}
         assert a == b, (a, b)
 
@@ -1484,7 +1496,8 @@ class Scheduler(ServerNode):
             assert abs(sum(ws.processing.values()) - ws.occupancy) < 1e-8
             actual_total_occupancy += ws.occupancy
 
-        assert abs(actual_total_occupancy - self.total_occupancy) < 1e-8
+        assert abs(actual_total_occupancy - self.total_occupancy) < 1e-8, \
+            (actual_total_occupancy, self.total_occupancy)
 
     ###################
     # Manage Messages #
@@ -1726,6 +1739,7 @@ class Scheduler(ServerNode):
 
         recommendations = {}
         for ts in removed_tasks:
+            ws.nbytes -= ts.get_nbytes()
             wh = ts.who_has
             wh.remove(ws)
             if not wh:
@@ -2400,7 +2414,7 @@ class Scheduler(ServerNode):
                     ts = self.task_states[key] = TaskState(key, None)
                 ts.state = 'memory'
                 if key in nbytes:
-                    ts.nbytes = nbytes[key]
+                    ts.set_nbytes(nbytes[key])
                 for w in workers:
                     ws = self.workers[w]
                     if ts not in ws.has_what:
@@ -2636,6 +2650,9 @@ class Scheduler(ServerNode):
         """
         Add *ts* to the set of in-memory tasks.
         """
+        if self.validate:
+            assert ts not in ws.has_what
+
         ts.who_has.add(ws)
         ws.has_what.add(ts)
         ws.nbytes += ts.get_nbytes()
@@ -2860,7 +2877,7 @@ class Scheduler(ServerNode):
             ts.waiting_on.clear()
 
             if nbytes is not None:
-                ts.nbytes = nbytes
+                ts.set_nbytes(nbytes)
 
             self.check_idle_saturated(ws)
 
@@ -2948,7 +2965,7 @@ class Scheduler(ServerNode):
             # Update State Information #
             ############################
             if nbytes is not None:
-                ts.nbytes = nbytes
+                ts.set_nbytes(nbytes)
 
             recommendations = OrderedDict()
 
@@ -3809,6 +3826,58 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     return min(candidates, key=objective)
 
 
+def validate_task_state(ts):
+    """
+    Validate the given TaskState.
+    """
+    if ts.waiting_on:
+        assert ts.waiting_on.issubset(ts.dependencies), \
+            ("waiting not subset of dependencies", str(ts.waiting_on), str(ts.dependencies))
+    if ts.waiters:
+        assert ts.waiters.issubset(ts.dependents), \
+            ("waiters not subset of dependents", str(ts.waiters), str(ts.dependents))
+
+    for dts in ts.waiting_on:
+        assert not dts.who_has, \
+            ("waiting on in-memory dep", str(ts), str(dts))
+        assert dts.state != 'released', \
+            ("waiting on released dep", str(ts), str(dts))
+    for dts in ts.dependencies:
+        assert ts in dts.dependents, \
+            ("not in dependency's dependents", str(ts), str(dts), str(dts.dependents))
+        if ts.state in ('waiting', 'processing'):
+            assert dts in ts.waiting_on or dts.who_has, \
+                ("dep missing", str(ts), str(dts))
+
+    for dts in ts.waiters:
+        assert dts.state in ('waiting', 'processing'), \
+            ("waiter not in play", str(ts), str(dts))
+    for dts in ts.dependents:
+        assert ts in dts.dependencies, \
+            ("not in dependent's dependencies", str(ts), str(dts), str(dts.dependencies))
+
+    assert (ts.processing_on is not None) == (ts.state == 'processing')
+    assert bool(ts.who_has) == (ts.state == 'memory')
+
+    if ts.state == 'processing':
+        assert all(dts.who_has for dts in ts.dependencies), \
+            ("task processing without all deps", str(ts), str(ts.dependencies))
+        assert not ts.waiting_on
+
+    if ts.who_has:
+        assert ts.waiters or ts.who_wants, \
+            ("unneeded task in memory", str(ts), str(ts.who_has))
+        assert not any(ts in dts.waiting_on for dts in ts.dependents)
+        for ws in ts.who_has:
+            assert ts in ws.has_what, \
+                ("not in who_has' has_what", str(ts), str(ws), str(ws.has_what))
+
+    if ts.who_wants:
+        for cs in ts.who_wants:
+            assert ts in cs.wants_what, \
+                ("not in who_wants' wants_what", str(ts), str(cs), str(cs.wants_what))
+
+
 def validate_state(task_states, workers, clients):
     """
     Validate a current runtime state
@@ -3817,52 +3886,7 @@ def validate_state(task_states, workers, clients):
     linear time.  This raises assert errors if anything doesn't check out.
     """
     for ts in task_states.values():
-        if ts.waiting_on:
-            assert ts.waiting_on.issubset(ts.dependencies), \
-                ("waiting not subset of dependencies", str(ts.waiting_on), str(ts.dependencies))
-        if ts.waiters:
-            assert ts.waiters.issubset(ts.dependents), \
-                ("waiters not subset of dependents", str(ts.waiters), str(ts.dependents))
-
-        for dts in ts.waiting_on:
-            assert not dts.who_has, \
-                ("waiting on in-memory dep", str(ts), str(dts))
-            assert dts.state != 'released', \
-                ("waiting on released dep", str(ts), str(dts))
-        for dts in ts.dependencies:
-            assert ts in dts.dependents, \
-                ("not in dependency's dependents", str(ts), str(dts), str(dts.dependents))
-            if ts.state in ('waiting', 'processing'):
-                assert dts in ts.waiting_on or dts.who_has, \
-                    ("dep missing", str(ts), str(dts))
-
-        for dts in ts.waiters:
-            assert dts.state in ('waiting', 'processing'), \
-                ("waiter not in play", str(ts), str(dts))
-        for dts in ts.dependents:
-            assert ts in dts.dependencies, \
-                ("not in dependent's dependencies", str(ts), str(dts), str(dts.dependencies))
-
-        assert (ts.processing_on is not None) == (ts.state == 'processing')
-        assert bool(ts.who_has) == (ts.state == 'memory')
-
-        if ts.state == 'processing':
-            assert all(dts.who_has for dts in ts.dependencies), \
-                ("task processing without all deps", str(ts), str(ts.dependencies))
-            assert not ts.waiting_on
-
-        if ts.who_has:
-            assert ts.waiters or ts.who_wants, \
-                ("unneeded task in memory", str(ts), str(ts.who_has))
-            assert not any(ts in dts.waiting_on for dts in ts.dependents)
-            for ws in ts.who_has:
-                assert ts in ws.has_what, \
-                    ("not in who_has' has_what", str(ts), str(ws), str(ws.has_what))
-
-        if ts.who_wants:
-            for cs in ts.who_wants:
-                assert ts in cs.wants_what, \
-                    ("not in who_wants' wants_what", str(ts), str(cs), str(cs.wants_what))
+        validate_task_state(ts)
 
     for ws in workers.values():
         for ts in ws.has_what:

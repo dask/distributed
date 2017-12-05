@@ -357,7 +357,8 @@ def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
         yield gen.sleep(0.01)
         assert time() < start + 5
 
-    futures = c.map(slowinc, range(20), delay=0.01)
+    futures = c.map(slowinc, range(20), delay=0.01,
+                    key=['f%d' % i for i in range(20)])
     yield wait(futures)
 
     result = yield c.submit(sum, futures, workers=a.address)

@@ -368,7 +368,6 @@ def assert_balanced(inp, expected, c, s, *workers):
     steal._pc.stop()
 
     counter = itertools.count()
-    B = BANDWIDTH
     tasks = list(concat(inp))
     data_seq = itertools.count()
 
@@ -377,7 +376,12 @@ def assert_balanced(inp, expected, c, s, *workers):
         for t in sorted(ts, reverse=True):
             if t:
                 [dat] = yield c._scatter([next(data_seq)], workers=w.address)
-                s.task_states[dat.key].nbytes = BANDWIDTH * t
+                ts = s.task_states[dat.key]
+                # Ensure scheduler state stays consistent
+                old_nbytes = ts.nbytes
+                ts.nbytes = BANDWIDTH * t
+                for ws in ts.who_has:
+                    ws.nbytes += ts.nbytes - old_nbytes
             else:
                 dat = 123
             s.task_duration[str(int(t))] = 1

@@ -709,8 +709,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                             args = [c] + args
                         try:
                             result = yield func(*args)
-                            # for w in workers:
-                            #     assert not w._comms
+                            if s.validate:
+                                s.validate_state()
                         finally:
                             if client:
                                 yield c._close()
