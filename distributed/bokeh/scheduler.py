@@ -259,7 +259,7 @@ class NBytesHistogram(DashboardComponent):
                            color='blue')
 
     def update(self):
-        nbytes = np.asarray(list(self.scheduler.worker_bytes.values()))
+        nbytes = np.asarray([ws.nbytes for ws in self.scheduler.workers.values()])
         counts, x = np.histogram(nbytes, bins=40)
         d = {'left': x[:-1], 'right': x[1:], 'top': counts}
         self.source.data.update(d)
@@ -339,31 +339,31 @@ class CurrentLoad(DashboardComponent):
     def update(self):
         with log_errors():
             processing = valmap(len, self.scheduler.processing)
-            workers = list(self.scheduler.workers)
+            workers = list(self.scheduler.workers.values())
 
             bokeh_addresses = []
-            for worker in workers:
-                addr = self.scheduler.get_worker_service_addr(worker, 'bokeh')
+            for ws in workers:
+                addr = self.scheduler.get_worker_service_addr(ws.worker_key, 'bokeh')
                 bokeh_addresses.append('%s:%d' % addr if addr is not None else '')
 
             y = list(range(len(workers)))
-            nprocessing = [processing[w] for w in workers]
+            nprocessing = [len(ws.processing) for ws in workers]
             processing_color = []
-            for w in workers:
-                if w in self.scheduler.idle:
+            for ws in workers:
+                if ws in self.scheduler.idle:
                     processing_color.append('red')
-                elif w in self.scheduler.saturated:
+                elif ws in self.scheduler.saturated:
                     processing_color.append('green')
                 else:
                     processing_color.append('blue')
 
-            nbytes = [self.scheduler.worker_bytes[w] for w in workers]
+            nbytes = [ws.nbytes for ws in workers]
             nbytes_text = [format_bytes(nb) for nb in nbytes]
             nbytes_color = []
             max_limit = 0
-            for w, nb in zip(workers, nbytes):
+            for ws, nb in zip(workers, nbytes):
                 try:
-                    limit = self.scheduler.worker_info[w]['memory_limit']
+                    limit = self.scheduler.worker_info[ws.worker_key]['memory_limit']
                 except KeyError:
                     limit = 16e9
                 if limit > max_limit:
@@ -387,7 +387,7 @@ class CurrentLoad(DashboardComponent):
                           'nbytes-color': nbytes_color,
                           'nbytes_text': nbytes_text,
                           'bokeh_address': bokeh_addresses,
-                          'worker': workers,
+                          'worker': [ws.worker_key for ws in workers],
                           'y': y}
 
                 self.nbytes_figure.title.text = 'Bytes stored: ' + format_bytes(sum(nbytes))

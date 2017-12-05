@@ -404,8 +404,6 @@ class Scheduler(ServerNode):
         Information about each worker
     * **host_info:** ``{hostname: dict}``:
         Information about each worker host
-    * **worker_bytes:** ``{worker: int}``:
-        Number of bytes in memory on each worker
 
     * **services:** ``{str: port}``:
         Other services running on this scheduler, like Bokeh
@@ -529,7 +527,6 @@ class Scheduler(ServerNode):
         self.workers = SortedDict()
         for old_attr, new_attr, wrap in [
                 ('ncores', 'ncores', None),
-                ('worker_bytes', 'nbytes', None),
                 ('worker_resources', 'resources', None),
                 ('used_resources', 'used_resources', None),
                 ('processing', 'processing', _legacy_task_key_dict),

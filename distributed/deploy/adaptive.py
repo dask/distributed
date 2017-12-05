@@ -86,10 +86,10 @@ class Adaptive(object):
         """
         limit_bytes = {w: self.scheduler.worker_info[w]['memory_limit']
                         for w in self.scheduler.worker_info}
-        worker_bytes = self.scheduler.worker_bytes
+        worker_bytes = [ws.nbytes for ws in self.scheduler.workers.values()]
 
         limit = sum(limit_bytes.values())
-        total = sum(worker_bytes.values())
+        total = sum(worker_bytes)
         if total > 0.6 * limit:
             logger.info("Ram limit exceeded [%d/%d]", limit, total)
             return True
