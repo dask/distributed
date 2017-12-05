@@ -718,8 +718,9 @@ class Client(Node):
                 yield self.cluster._start()
 
             # Wait for all workers to be ready
+            # XXX should be a LocalCluster method instead
             while (not self.cluster.workers or
-                   len(self.cluster.scheduler.ncores) < len(self.cluster.workers)):
+                   len(self.cluster.scheduler.workers) < len(self.cluster.workers)):
                 yield gen.sleep(0.01)
 
             address = self.cluster.scheduler_address
