@@ -2977,7 +2977,7 @@ class Scheduler(ServerNode):
                 assert not ts.waiting_on
                 assert not ts.processing_on
                 if safe:
-                    assert not self.waiting_data.get(key)
+                    assert not ts.waiters
 
             recommendations = OrderedDict()
 

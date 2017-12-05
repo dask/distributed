@@ -309,18 +309,19 @@ class GroupProgress(SchedulerPlugin):
         scheduler.add_plugin(self)
 
     def create(self, key, k):
-        with log_errors(pdb=True):
+        with log_errors():
+            ts = self.scheduler.task_states[key]
             g = {'memory': 0, 'erred': 0, 'waiting': 0,
                  'released': 0, 'processing': 0}
             self.keys[k] = set()
             self.groups[k] = g
             self.nbytes[k] = 0
             self.durations[k] = 0
-            self.dependents[k] = {key_split_group(dep) for dep in
-                                  self.scheduler.dependents[key]}
+            self.dependents[k] = {key_split_group(dts.key)
+                                  for dts in ts.dependents}
             self.dependencies[k] = set()
-            for dep in self.scheduler.dependencies[key]:
-                d = key_split_group(dep)
+            for dts in ts.dependencies:
+                d = key_split_group(dts.key)
                 self.dependents[d].add(k)
                 self.dependencies[k].add(d)
 
