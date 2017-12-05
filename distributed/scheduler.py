@@ -2718,7 +2718,7 @@ class Scheduler(ServerNode):
                 dep = dts.key
                 if not dts.who_has:
                     ts.waiting_on.add(dts)
-                if dts in self.released:
+                if dts.state == 'released':
                     recommendations[dep] = 'waiting'
                 else:
                     dts.waiters.add(ts)
@@ -2762,7 +2762,7 @@ class Scheduler(ServerNode):
                 dep = dts.key
                 if not dts.who_has:
                     ts.waiting_on.add(dep)
-                if dts in self.released:
+                if dts.state == 'released':
                     recommendations[dep] = 'waiting'
                 else:
                     dts.waiters.add(ts)
@@ -2829,10 +2829,6 @@ class Scheduler(ServerNode):
                 assert ts not in self.unrunnable
                 assert all(dts.who_has
                            for dts in ts.dependencies)
-
-            if any(not dts.who_has for dts in ts.dependencies):
-                # XXX can happen? see validation above
-                return {}
 
             ws = self.decide_worker(ts)
             if ws is None:
