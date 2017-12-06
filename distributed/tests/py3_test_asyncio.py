@@ -223,7 +223,7 @@ async def test_asyncio_cancel():
         x = c.submit(slowinc, 1)
         y = c.submit(slowinc, x)
 
-        while y.key not in s.task_states:
+        while y.key not in s.tasks:
             await asyncio.sleep(0.01)
 
         await c.cancel([x])
@@ -237,7 +237,7 @@ async def test_asyncio_cancel():
             await asyncio.sleep(0.01)
             assert time() < start + 5
 
-        assert not s.task_states
+        assert not s.tasks
         assert not s.who_has
         s.validate_state()
 
@@ -359,11 +359,11 @@ async def test_asyncio_variable():
     del future, future2
 
     await asyncio.sleep(0.1)
-    assert s.task_states  # future still present
+    assert s.tasks  # future still present
 
     x.delete()
 
     start = time()
-    while s.task_states:
+    while s.tasks:
         await asyncio.sleep(0.01)
         assert time() < start + 5

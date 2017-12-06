@@ -138,7 +138,7 @@ def test_AllProgress(c, s, a, b):
     import gc
     gc.collect()
 
-    while tkey in s.task_states:
+    while tkey in s.tasks:
         yield gen.sleep(0.01)
 
     for coll in [p.all, p.nbytes] + list(p.state.values()):
@@ -204,7 +204,7 @@ def test_GroupProgress(c, s, a, b):
     assert fp.dependents[x.name] == {y.name, (x * y).name}
 
     del x, y, z
-    while s.task_states:
+    while s.tasks:
         yield gen.sleep(0.01)
 
     assert not fp.groups

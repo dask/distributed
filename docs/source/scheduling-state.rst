@@ -116,7 +116,7 @@ object named :class:`TaskState` and consists of the following information:
       This task's current state.  Valid states include ``released``,
       ``waiting``, ``no-worker``, ``processing``, ``memory``, ``erred``
       and ``forgotten``.  If it is ``forgotten``, the task isn't stored
-      in the ``task_states`` dictionary anymore and will probably disappear
+      in the ``tasks`` dictionary anymore and will probably disappear
       soon from memory.
 
    .. attribute:: dependencies: {TaskState}
@@ -295,7 +295,7 @@ object named :class:`TaskState` and consists of the following information:
 The scheduler keeps track of all the :class:`TaskState` objects (those
 not in the "forgotten" state) using several containers:
 
-.. attribute:: task_states: {str: TaskState}
+.. attribute:: tasks: {str: TaskState}
 
    A dictionary mapping task keys (usually strings) to :class:`TaskState`
    objects.  Task keys are how information about tasks is communicated

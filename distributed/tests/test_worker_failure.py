@@ -164,7 +164,7 @@ def test_restart_cleared(c, s, a, b):
 
     yield c._restart()
 
-    for coll in [s.task_states, s.unrunnable]:
+    for coll in [s.tasks, s.unrunnable]:
         assert not coll
 
 
@@ -343,7 +343,7 @@ def test_restart_during_computation(c, s, a, b):
     assert not s.rprocessing
 
     assert len(s.ncores) == 2
-    assert not s.task_states
+    assert not s.tasks
 
 
 @gen_cluster(client=True, timeout=None)

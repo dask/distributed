@@ -1,7 +1,7 @@
 {% extends main.html %}
 {% block content %}
 
-  {% set ts = task_states[Task] %}
+  {% set ts = tasks[Task] %}
   <h1 class="title"> Task: {{ ts.key }} </h1>
 
       <table class="table">

@@ -1780,7 +1780,7 @@ class Client(Node):
         --------
 
         >>> def get_number_of_tasks(dask_scheduler=None):
-        ...     return len(dask_scheduler.task_states)
+        ...     return len(dask_scheduler.tasks)
 
         >>> client.run_on_scheduler(get_number_of_tasks)  # doctest: +SKIP
         100

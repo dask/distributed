@@ -74,7 +74,7 @@ class WorkStealing(SchedulerPlugin):
 
     def transition(self, key, start, finish, compute_start=None,
                    compute_stop=None, *args, **kwargs):
-        ts = self.scheduler.task_states[key]
+        ts = self.scheduler.tasks[key]
         if finish == 'processing':
             self.put_key_in_stealable(ts)
 
@@ -194,7 +194,7 @@ class WorkStealing(SchedulerPlugin):
 
     def move_task_confirm(self, key=None, worker=None, state=None):
         try:
-            ts = self.scheduler.task_states[key]
+            ts = self.scheduler.tasks[key]
             try:
                 d = self.in_flight.pop(ts)
             except KeyError:

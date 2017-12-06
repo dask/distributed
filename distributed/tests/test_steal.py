@@ -376,7 +376,7 @@ def assert_balanced(inp, expected, c, s, *workers):
         for t in sorted(ts, reverse=True):
             if t:
                 [dat] = yield c._scatter([next(data_seq)], workers=w.address)
-                ts = s.task_states[dat.key]
+                ts = s.tasks[dat.key]
                 # Ensure scheduler state stays consistent
                 old_nbytes = ts.nbytes
                 ts.nbytes = BANDWIDTH * t
@@ -523,7 +523,7 @@ def test_steal_twice(c, s, a, b):
 
     futures = [c.submit(slowadd, x, i, delay=0.2) for i in range(100)]
 
-    while len(s.task_states) < 100:  # tasks are all allocated
+    while len(s.tasks) < 100:  # tasks are all allocated
         yield gen.sleep(0.01)
 
     workers = [Worker(s.ip, s.port, loop=s.loop) for _ in range(20)]
@@ -550,7 +550,7 @@ def test_dont_steal_executing_tasks(c, s, a, b):
     while not a.executing:
         yield gen.sleep(0.01)
 
-    steal.move_task_request(s.task_states[future.key],
+    steal.move_task_request(s.tasks[future.key],
                             s.workers[a.address], s.workers[b.address])
     yield gen.sleep(0.1)
     assert future.key in a.executing

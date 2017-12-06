@@ -91,7 +91,7 @@ class VariableExtension(object):
         if record['type'] == 'Future':
             key = record['value']
             token = uuid.uuid4().hex
-            ts = self.scheduler.task_states.get(key)
+            ts = self.scheduler.tasks.get(key)
             state = ts.state if ts is not None else 'lost'
             msg = {'token': token, 'state': state}
             if state == 'erred':

@@ -73,7 +73,7 @@ def test_scatter(c, s, a, b):
     assert s.address.startswith('tls://')
 
     d = yield c._scatter({'y': 20})
-    ts = s.task_states['y']
+    ts = s.tasks['y']
     assert ts.who_has
     assert ts.nbytes > 0
     yy = yield c._gather([d['y']])

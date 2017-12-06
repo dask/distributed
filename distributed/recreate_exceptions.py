@@ -44,7 +44,7 @@ class ReplayExceptionScheduler(object):
             if isinstance(key, list):
                 key = tuple(key)  # ensure not a list from msgpack
             key = tokey(key)
-            ts = self.scheduler.task_states.get(key)
+            ts = self.scheduler.tasks.get(key)
             if ts is not None and ts.exception_blame is not None:
                 cause = ts.exception_blame
                 # NOTE: cannot serialize sets

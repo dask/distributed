@@ -83,7 +83,7 @@ class QueueExtension(object):
             if record['type'] == 'Future':
                 record = record.copy()
                 key = record['value']
-                ts = self.scheduler.task_states.get(key)
+                ts = self.scheduler.tasks.get(key)
                 state = ts.state if ts is not None else 'lost'
 
                 record['state'] = state

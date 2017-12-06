@@ -77,10 +77,10 @@ class Progress(SchedulerPlugin):
     def setup(self):
         keys = self.keys
 
-        while not keys.issubset(self.scheduler.task_states):
+        while not keys.issubset(self.scheduler.tasks):
             yield gen.sleep(0.05)
 
-        tasks = [self.scheduler.task_states[k] for k in keys]
+        tasks = [self.scheduler.tasks[k] for k in keys]
 
         self.keys = None
 
@@ -163,10 +163,10 @@ class MultiProgress(Progress):
     def setup(self):
         keys = self.keys
 
-        while not keys.issubset(self.scheduler.task_states):
+        while not keys.issubset(self.scheduler.tasks):
             yield gen.sleep(0.05)
 
-        tasks = [self.scheduler.task_states[k] for k in keys]
+        tasks = [self.scheduler.tasks[k] for k in keys]
 
         self.keys = None
 
@@ -244,7 +244,7 @@ class AllProgress(SchedulerPlugin):
         self.state = defaultdict(lambda: defaultdict(set))
         self.scheduler = scheduler
 
-        for ts in self.scheduler.task_states.values():
+        for ts in self.scheduler.tasks.values():
             key = ts.key
             prefix = ts.prefix
             self.all[prefix].add(key)
@@ -255,7 +255,7 @@ class AllProgress(SchedulerPlugin):
         scheduler.add_plugin(self)
 
     def transition(self, key, start, finish, *args, **kwargs):
-        ts = self.scheduler.task_states[key]
+        ts = self.scheduler.tasks[key]
         prefix = ts.prefix
         self.all[prefix].add(key)
         try:
@@ -297,7 +297,7 @@ class GroupProgress(SchedulerPlugin):
         self.dependencies = dict()
         self.dependents = dict()
 
-        for key, ts in self.scheduler.task_states.items():
+        for key, ts in self.scheduler.tasks.items():
             k = key_split_group(key)
             if k not in self.groups:
                 self.create(key, k)
@@ -310,7 +310,7 @@ class GroupProgress(SchedulerPlugin):
 
     def create(self, key, k):
         with log_errors():
-            ts = self.scheduler.task_states[key]
+            ts = self.scheduler.tasks[key]
             g = {'memory': 0, 'erred': 0, 'waiting': 0,
                  'released': 0, 'processing': 0}
             self.keys[k] = set()
@@ -327,7 +327,7 @@ class GroupProgress(SchedulerPlugin):
 
     def transition(self, key, start, finish, *args, **kwargs):
         with log_errors():
-            ts = self.scheduler.task_states[key]
+            ts = self.scheduler.tasks[key]
             k = key_split_group(key)
             if k not in self.groups:
                 self.create(key, k)
