@@ -36,7 +36,6 @@ teardown_module = nodebug_teardown_module
 def test_work_stealing(c, s, a, b):
     [x] = yield c._scatter([1], workers=a.address)
     futures = c.map(slowadd, range(50), [x] * 50)
-    yield gen.sleep(0.1)
     yield wait(futures)
     assert len(a.data) > 10
     assert len(b.data) > 10
@@ -243,7 +242,8 @@ def test_dont_steal_resource_restrictions(c, s, a, b):
     yield future
 
     futures = c.map(slowinc, range(100), delay=0.1, resources={'A': 1})
-    yield gen.sleep(0.1)
+    while len(a.task_state) < 10:
+        yield gen.sleep(0.01)
     assert len(a.task_state) == 100
     assert len(b.task_state) == 0
 
