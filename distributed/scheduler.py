@@ -354,73 +354,35 @@ class Scheduler(ServerNode):
     The scheduler contains the following state variables.  Each variable is
     listed along with what it stores and a brief description.
 
-    * **dependencies:** ``{key: {keys}}``:
-        Dictionary showing which keys depend on which others
-    * **dependents:** ``{key: {keys}}``:
-        Dictionary showing which keys are dependent on which others
-    * **waiting:** ``{key: {key}}``:
-        Dictionary like dependencies but excludes keys already computed
-    * **waiting_data:** ``{key: {key}}``:
-        Dictionary like dependents but excludes keys already computed
-    * **processing:** ``{worker: {key: cost}}``:
-        Set of keys currently in execution on each worker and their expected
-        duration
-    * **rprocessing:** ``{key: worker}``:
-        The worker currently executing a particular task
-    * **who_has:** ``{key: {worker}}``:
-        Where each key lives.  The current state of distributed memory.
-    * **has_what:** ``{worker: {key}}``:
-        What worker has what keys.  The transpose of who_has.
-    * **released:** ``{keys}``
-        Set of keys that are known, but released from memory
-    * **unrunnable:** ``{key}``
-        Keys that we are unable to run
-    * **host_restrictions:** ``{key: {hostnames}}``:
-        A set of hostnames per key of where that key can be run.  Usually this
-        is empty unless a key has been specifically restricted to only run on
-        certain hosts.
-    * **worker_restrictions:** ``{key: {workers}}``:
-        Like host_restrictions except that these include specific host:port
-        worker names
-    * **loose_restrictions:** ``{key}``:
-        Set of keys for which we are allow to violate restrictions (see above)
-        if not valid workers are present.
-    * **resource_restrictions:** ``{key: {str: Number}}``:
-        Resources required by a task, such as ``{'GPU': 1}`` or
-        ``{'memory': 1e9}``.  These names must match resources specified when
-        creating workers.
-    * **worker_resources:** ``{worker: {str: Number}}``:
-        The available resources on each worker like ``{'gpu': 2, 'mem': 1e9}``.
-        These are abstract quantities that constrain certain tasks from running
-        at the same time.
-    * **used_resources:** ``{worker: {str: Number}}``:
-        The sum of each resource used by all tasks allocated to a particular
-        worker.
-    * **exceptions:** ``{key: Exception}``:
-        A dict mapping keys to remote exceptions
-    * **tracebacks:** ``{key: list}``:
-        A dict mapping keys to remote tracebacks stored as a list of strings
-    * **exceptions_blame:** ``{key: key}``:
-        A dict mapping a key to another key on which it depends that has failed
-    * **wants_what:** ``{client: {key}}``:
-        What keys are wanted by each client..  The transpose of who_wants.
-    * **who_wants:** ``{key: {client}}``:
-        Which clients want each key.  The active targets of computation.
-    * **ncores:** ``{worker: int}``:
-        Number of cores owned by each worker
-    * **idle:** ``{worker}``:
+    * **task_states:** ``{task key: TaskState}``
+        Tasks currently known to the scheduler
+    * **unrunnable:** ``{TaskState}``
+        Tasks in the "no-worker" state
+
+    * **workers:** ``{worker key: WorkerState}``
+        Workers currently connected to the scheduler
+    * **idle:** ``{WorkerState}``:
         Set of workers that are not fully utilized
+    * **saturated:** ``{WorkerState}``:
+        Set of workers that are not over-utilized
+
     * **worker_info:** ``{worker: {str: data}}``:
         Information about each worker
     * **host_info:** ``{hostname: dict}``:
         Information about each worker host
 
+    * **clients:** ``{client key: ClientState}``
+        Workers currently connected to the scheduler
+
     * **services:** ``{str: port}``:
         Other services running on this scheduler, like Bokeh
     * **loop:** ``IOLoop``:
         The running Tornado IOLoop
-    * **comms:** ``[Comm]``:
-        A list of Comms from which we both accept stimuli and
+    * **client_comms:** ``{client key: Comm}``
+        For each client, a Comm object used to receive task requests and
+        report task status updates.
+    * **worker_comms:** ``{worker key: Comm}``
+        For each worker, a Comm object from which we both accept stimuli and
         report results
     * **task_duration:** ``{key-prefix: time}``
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
@@ -510,7 +472,6 @@ class Scheduler(ServerNode):
                     _StateLegacySet(self.task_states, func))
 
         self.generation = 0
-        self.released = set()
         self.unrunnable = set()
 
         self.n_tasks = 0
@@ -558,7 +519,7 @@ class Scheduler(ServerNode):
         self.resources = defaultdict(dict)
         self.aliases = dict()
 
-        self._task_state_collections = [self.released, self.unrunnable]
+        self._task_state_collections = [self.unrunnable]
 
         self._worker_collections = [self.workers,
                                     self.worker_info, self.host_info,
@@ -1019,7 +980,6 @@ class Scheduler(ServerNode):
             if ts is None:
                 ts = self.task_states[k] = TaskState(k, tasks.get(k))
                 ts.state = 'released'
-                self.released.add(ts)
             elif not ts.run_spec:
                 ts.run_spec = tasks.get(k)
 
@@ -1340,7 +1300,6 @@ class Scheduler(ServerNode):
                 # For publish, queues etc.
                 ts = self.task_states[k] = TaskState(k, None)
                 ts.state = 'released'
-                self.released.add(ts)
             ts.who_wants.add(cs)
             cs.wants_what.add(ts)
 
@@ -1384,7 +1343,6 @@ class Scheduler(ServerNode):
         assert not ts.processing_on
         assert not any(ts in dts.waiters
                        for dts in ts.dependencies)
-        assert ts in self.released
         assert ts not in self.unrunnable
 
     def validate_waiting(self, key):
@@ -1392,7 +1350,6 @@ class Scheduler(ServerNode):
         assert ts.waiting_on
         assert not ts.who_has
         assert not ts.processing_on
-        assert ts not in self.released
         assert ts not in self.unrunnable
         for dts in ts.dependencies:
             # We are waiting on a dependency iff it's not stored
@@ -1415,7 +1372,6 @@ class Scheduler(ServerNode):
         assert ts.who_has
         assert not ts.processing_on
         assert not ts.waiting_on
-        assert ts not in self.released
         assert ts not in self.unrunnable
         for dts in ts.dependents:
             assert (dts in ts.waiters) == (dts.state in ('waiting', 'processing'))
@@ -1425,7 +1381,6 @@ class Scheduler(ServerNode):
         ts = self.task_states[key]
         assert ts in self.unrunnable
         assert not ts.waiting_on
-        assert ts not in self.released
         assert ts in self.unrunnable
         assert not ts.processing_on
         assert not ts.who_has
@@ -2703,7 +2658,6 @@ class Scheduler(ServerNode):
             if ts.has_lost_dependencies:
                 return {key: 'forgotten'}
 
-            self.released.remove(ts)
             ts.state = 'waiting'
 
             recommendations = OrderedDict()
@@ -2753,7 +2707,7 @@ class Scheduler(ServerNode):
 
             self.unrunnable.remove(ts)
 
-            if any(dts.state == 'forgotten' for dts in ts.dependencies):
+            if ts.has_lost_dependencies:
                 return {key: 'forgotten'}
 
             recommendations = OrderedDict()
@@ -2985,7 +2939,6 @@ class Scheduler(ServerNode):
             ts = self.task_states[key]
 
             if self.validate:
-                assert ts not in self.released
                 assert not ts.waiting_on
                 assert not ts.processing_on
                 if safe:
@@ -3008,14 +2961,13 @@ class Scheduler(ServerNode):
                                                  'report': False})
             ts.who_has.clear()
 
-            self.released.add(ts)
             ts.state = 'released'
 
             self.report({'op': 'lost-data', 'key': key})
 
             if not ts.run_spec:  # pure data
                 recommendations[key] = 'forgotten'
-            elif any(dts.state == 'forgotten' for dts in ts.dependencies):
+            elif ts.has_lost_dependencies:
                 recommendations[key] = 'forgotten'
             elif ts.who_wants or ts.waiters:
                 recommendations[key] = 'waiting'
@@ -3056,7 +3008,6 @@ class Scheduler(ServerNode):
                          'exception': failing_ts.exception,
                          'traceback': failing_ts.traceback})
 
-            self.released.remove(ts)
             ts.state = 'erred'
 
             # TODO: waiting data?
@@ -3087,14 +3038,11 @@ class Scheduler(ServerNode):
             ts.waiting_on.clear()
 
             ts.state = 'released'
-            self.released.add(ts)
 
-            if any(dts.state == 'forgotten' for dts in ts.dependencies):
+            if ts.has_lost_dependencies:
                 recommendations[key] = 'forgotten'
-
             elif not ts.exception_blame and (ts.who_wants or ts.waiters):
                 recommendations[key] = 'waiting'
-
             else:
                 ts.waiters.clear()
 
@@ -3119,12 +3067,11 @@ class Scheduler(ServerNode):
             self._remove_from_processing(ts, send_worker_msg={'op': 'release-task',
                                                               'key': key})
 
-            self.released.add(ts)
             ts.state = 'released'
 
             recommendations = OrderedDict()
 
-            if any(dts.state == 'forgotten' for dts in ts.dependencies):
+            if ts.has_lost_dependencies:
                 recommendations[key] = 'forgotten'
             elif ts.waiters or ts.who_wants:
                 recommendations[key] = 'waiting'
@@ -3217,7 +3164,6 @@ class Scheduler(ServerNode):
                 assert not ts.waiting_on
 
             self.unrunnable.remove(ts)
-            self.released.add(ts)
             ts.state = 'released'
 
             for dts in ts.dependencies:
@@ -3236,7 +3182,6 @@ class Scheduler(ServerNode):
     def remove_key(self, key):
         ts = self.task_states.pop(key)
         assert ts.state == 'forgotten'
-        self.released.discard(ts)
         self.unrunnable.discard(ts)
         for cs in ts.who_wants:
             cs.wants_what.remove(ts)

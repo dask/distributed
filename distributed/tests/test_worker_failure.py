@@ -161,11 +161,10 @@ def test_restart_cleared(c, s, a, b):
     x = 2 * delayed(1) + 1
     f = c.compute(x)
     yield wait([f])
-    assert s.released
 
     yield c._restart()
 
-    for coll in [s.task_states, s.released, s.unrunnable]:
+    for coll in [s.task_states, s.unrunnable]:
         assert not coll
 
 

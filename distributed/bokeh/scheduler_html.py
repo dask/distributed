@@ -99,11 +99,15 @@ class CountsJSON(RequestHandler):
         ncores = 0
         memory = 0
         processing = 0
+        released = 0
         waiting = 0
         waiting_data = 0
+
         for ts in scheduler.task_states.values():
             if ts.exception_blame is not None:
                 erred += 1
+            elif ts.state == 'released':
+                released += 1
             if ts.waiting_on:
                 waiting += 1
             if ts.waiters:
@@ -123,7 +127,7 @@ class CountsJSON(RequestHandler):
             'idle': len(scheduler.idle),
             'memory': memory,
             'processing': processing,
-            'released': len(scheduler.released),
+            'released': released,
             'saturated': len(scheduler.saturated),
             'tasks': len(scheduler.task_states),
             'unrunnable': len(scheduler.unrunnable),

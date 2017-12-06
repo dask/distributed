@@ -49,7 +49,6 @@ def test_respect_data_in_memory(c, s, a):
     f = c.persist(y)
     yield wait([f])
 
-    assert s.released == {s.task_states[x.key]}
     assert s.who_has == {y.key: {a.address}}
 
     z = delayed(add)(x, y)
