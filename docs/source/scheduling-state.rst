@@ -1,6 +1,8 @@
 Scheduling State
 ================
 
+.. currentmodule:: distributed.scheduler
+
 Overview
 --------
 
@@ -30,326 +32,27 @@ system used to perform this tracking.
 For more abstract information about the policies used by the scheduler, see
 :doc:`Scheduling Policies<scheduling-policies>`.
 
+The scheduler keeps internal state about several kinds of entities:
 
-State Variables
----------------
+* Individual tasks known to the scheduler
+* Workers connected to it
+* Clients connected to it
 
-We start with a description of the state that the scheduler keeps on each task.
-Each of the following is a dictionary keyed by task name (described below).
 
-Task description variables
-''''''''''''''''''''''''''
+.. note::
+   Everything listed in the page is an internal detail of how Dask operates.
+   It may change between versions and you should probably avoid relying
+   on it in user code (including on any APIs explained here).
 
-These containers keep task information accross a task's whole lifetime.
 
-* **tasks:** ``{key: task}``:
+Task State
+----------
 
-   Dictionary mapping key to a serialized task.
-
-   A key is the name of a task, generally formed from the name of the
-   function, followed by a hash of the function and arguments, like
-   ``'inc-ab31c010444977004d656610d2d421ec'``.
-
-   The value of this dictionary is the task, which is an unevaluated function
-   and arguments.  This is stored in one of two forms:
-
-   * ``{'function': inc, 'args': (1,), 'kwargs': {}}``; a dictionary with the
-     function, arguments, and keyword arguments (kwargs).  However in the
-     scheduler these are stored serialized, as they were sent from the client,
-     so it looks more like ``{'function': b'\x80\x04\x95\xcb\...', 'args':
-     b'...', }``
-
-   * ``(inc, 1)``: a tuple satisfying the `dask graph protocol
-     <http://dask.pydata.org/en/latest/graphs.html>`_.  This
-     again is stored serialized.
-
-   These are the values that will eventually be sent to a worker when the task
-   is ready to run.
-
-* **dependencies and dependents:** ``{key: {keys}}``:
-
-   These are dictionaries which show which tasks depend on which others.  They
-   contain redundant information.  If ``dependencies[a] == {b, c}`` then the
-   task with the name of ``a`` depends on the results of the two tasks with the
-   names of ``b`` and ``c``.  There will be complimentary entries in dependents
-   such that ``a in dependents[b]`` and ``a in dependents[c]`` such as
-   ``dependents[b] == {a, d}``.  Keeping the information around twice allows
-   for constant-time access for either direction of query, so we can both look
-   up a task's out-edges or in-edges efficiently.
-
-* **priority:** ``{key: tuple}``:
-
-   The ``priority`` dictionary provides each key with a relative ranking
-   which is used to break ties when many keys are being
-   considered for execution.
-
-   This ranking is generally a tuple of two parts.  The first (and dominant)
-   part corresponds to when it was submitted.  Generally earlier tasks take
-   precedence.  The second part is determined by the client, and is a way to
-   prioritize tasks within a large graph that may be important, such as if
-   they are on the critical path, or good to run in order to release many
-   dependencies.  This is explained further in :doc:`Scheduling Policy
-   <scheduling-policies>`.
-
-* **host_restrictions:** ``{key: {hostnames}}``:
-
-   A set of hostnames per key of where that key can be run.  Usually this
-   is empty unless a key has been specifically restricted to only run on
-   certain hosts.  A hostname may correspond to one or several connected
-   workers.
-
-* **worker_restrictions:** ``{key: {worker addresses}}``:
-
-   A set of complete worker addresses per key of where that key can
-   be run.  Usually this is empty unless a key has been specifically
-   restricted to only run on certain workers.
-
-* **resource_restrictions:** ``{key: {resource: quantity}}``:
-
-   Resources required by a task, such as ``{'gpu': 1}`` or ``{'memory': 1e9}``.
-   These are user-defined names and are matched against the contents
-   of the ``worker_resources`` dictionary.
-
-* **loose_restrictions:** ``{key}``:
-
-   Set of keys for which we are allowed to violate restrictions (see above)
-   if no valid workers are present and the task would otherwise go into the
-   ``unrunnable`` set.  In other words, if a key is in ``loose_restrictions``,
-   then its restrictions become mere preferences, otherwise they are mandatory.
-
-* **who_wants:** ``{key: {client}}``:
-
-   When a client submits a graph to the scheduler it also specifies which
-   output keys it desires.  Those keys are tracked here where each desired key
-   knows which clients want it.  These keys will not be released from memory
-   and, when they complete, messages will be sent to all of these clients that
-   the task is ready.
-
-* **wants_what:** ``{client: {key}}``:
-
-   The transpose of ``who_wants``.
-
-Task state flow
-'''''''''''''''
-
-These state variables reflect the current status of a task and may
-get updated at each state transition.
-
-* **task_state:** ``{key: string}``:
-
-   The ``task_state`` dictionary holds the current state of every key.
-   Current valid states include ``released``, ``waiting``, ``no-worker``,
-   ``processing``, ``memory``, and ``erred``.  These states are explained
-   :ref:`further below <task-states>`.
-
-* **waiting and waiting_data:** ``{key: {keys}}``:
-
-   These dictionaries are a subset of ``dependencies`` and ``dependents``
-   respectively, as they only track keys that are still in play.
-
-   For example ``waiting`` looks like ``dependencies``, tracking all of the
-   tasks that a certain task requires before it can run.  However, as tasks
-   are completed and arrive in memory they are removed from their dependents
-   sets in ``waiting``, so that when a set becomes empty we know that a
-   key is ready to run and ready to be allocated to a worker.
-
-   Similarly, the ``waiting_data`` dictionary holds all of the dependents
-   of a key that have yet to run and still require that this task
-   stay in memory in services of tasks that may depend on it (its
-   ``dependents``).  When a value set in this dictionary becomes empty
-   its task may be garbage-collected (unless some client actively desires
-   that this task stay in memory, as tracked in ``who_wants``).
-
-* **processing:** ``{worker: {key: cost}}``:
-
-   Keys that are currently allocated to a worker.  This is keyed by worker
-   address and contains the expected cost in seconds of running each task,
-   summing both the task's expected computation time and the expected
-   communication time of its result.
-
-   Multiple tasks may be submitted to a worker in advance and the worker
-   will run them eventually, depending on its execution resources
-   (but see :doc:`work-stealing`).
-
-* **rprocessing:** ``{key: worker}``:
-
-   The reverse of the ``processing`` dictionary.  This tracks the worker
-   processing each task that is currently running.  This is redundant
-   with ``processing`` and just here for faster indexed querying.
-
-* **who_has:** ``{key: {worker}}``:
-
-   For keys that are in memory this shows on which workers they currently
-   reside.
-
-* **has_what:** ``{worker: {key}}``:
-
-   This is the transpose of ``who_has``, showing all keys that currently
-   reside on each worker.
-
-* **released:** ``{keys}``
-
-   The set of keys that are neither waiting to be processed, nor in memory.
-   These typically are just-initialized tasks, or tasks that have already
-   been computed but which it is not necessary to keep in memory.
-
-* **unrunnable:** ``{key}``
-
-   The set of keys that are not currently able to run, either because they
-   have a user-defined restriction (described in ``host_restrictions``,
-   ``worker_restrictions`` and ``resource_restrictions``) that is not met
-   by any connected worker, or because no worker is connected at all.
-
-   These keys already have all their ``dependencies`` satisfied (their
-   ``waiting`` set is empty), and are waiting for an appropriate worker
-   to join the network before computing.
-
-* **exceptions and tracebacks:** ``{key: Exception/Traceback}``:
-
-   Dictionaries mapping keys to remote exceptions and tracebacks.  When tasks
-   fail we store their exceptions and tracebacks (serialized from the worker)
-   here so that users may gather the exceptions to see the error.
-
-* **exceptions_blame:** ``{key: key}``:
-
-   If a task fails then we mark all of its dependent tasks as failed as well.
-   This dictionary lets any failed task see which task was the origin of its
-   failure.
-
-* **suspicious_tasks:** ``{key: int}``
-
-   Number of times a task has been involved in a worker failure.  Some tasks
-   may cause workers to fail (such as ``sys.exit(0)``).  When a worker fails
-   all of the tasks on that worker are reassigned to others.  This combination
-   of behaviors can cause a bad task to catastrophically destroy all workers
-   on the cluster, one after another.  Whenever a worker fails we mark each
-   task currently running on that worker as suspicious.  If a task is involved
-   in three failures (or some other fixed constant) then we mark the task as
-   ``erred``.
-
-* **retries:** ``{key: int}``
-
-   Number of times a task is automatically retried in case of failure.
-   If present, this is decremented each time a task's execution failed,
-   until it reaches 0.
-
-* **nbytes:** ``{key: int}``:
-
-   The number of bytes, as determined by ``sizeof``, of the result of each
-   finished task.  This number is used for diagnostics and to help prioritize
-   work.
-
-Worker state variables
-''''''''''''''''''''''
-
-These state variables track the current state of each worker, and are involved
-in deciding :ref:`which worker to run a task on <decide-worker>`.
-
-* **ncores:** ``{worker: int}``
-
-   The number of CPU cores made available on each worker.
-
-* **worker_resources:** ``{worker: {str: Number}}``:
-
-   The available resources on each worker like ``{'gpu': 2, 'mem': 1e9}``.
-   These are abstract quantities that constrain certain tasks from running at
-   the same time on a given worker.
-
-* **used_resources:** ``{worker: {str: Number}}``:
-
-   The sum of each resource used by all tasks allocated to a particular
-   worker.  The numbers in this dictionary can only be less or equal than
-   those in ``worker_resources``.
-
-* **worker_bytes:** ``{worker: int}``:
-
-   The total memory size, in bytes, used by the keys currently held in memory
-   on each given worker.
-
-* **occupancy:** ``{worker: duration}``:
-
-   The total expected runtime, in seconds, of all tasks currently processing
-   on a worker.
-
-* **idle and saturated:** ``{worker}``:
-
-   Two sets of workers indicating their ability to start computing a new
-   task in a relatively short timespan.  "Idle" workers will be preferred
-   when :ref:`deciding a suitable worker <decide-worker>` to run a new
-   task on.  Conversely, "saturated" workers may see their workload
-   lightened through :doc:`work-stealing`.
-
-   These two sets are computed based on each worker's number of cores
-   (``ncores``), task queue (``processing``) and ``occupancy`` numbers.
-
-   These two sets are disjoint.  Also, some workers may be *neither* "idle"
-   nor "saturated".
-
-.. XXX list invariants somewhere?
-
-   For every worker ``w``,
-   * ``worker_bytes[w] == sum(nbytes[k] for k in has_what[w])``
-   * ``occupancy[w] == sum(processing[w].values())``
-
-
-Example Event and Response
---------------------------
-
-Whenever an event happens, like when a client sends up more tasks, or when a
-worker finishes a task, the scheduler changes the state above.  For example
-when a worker reports that a task has finished we perform actions like the
-following:
-
-**Task `key` finished by `worker`**:
-
-.. code-block:: python
-
-   # Update task state
-   task_state[key] = 'memory'
-
-   processing[worker].remove(key)
-   del rprocessing[key]
-
-   who_has[key].add(worker)
-   has_what[worker].add(key)
-
-   # Update memory / resource / occupancy counters
-   nbytes[key] = nbytes
-   worker_bytes[worker] += nbytes
-
-   for key, value in resource_restrictions[key]:
-       used_resources[key] -= value
-
-   update_worker_occupancy_and_idleness(worker)
-
-   # Notify clients interested in this task's result
-   if key in who_wants:
-       send_done_message_to_clients(who_wants[key])
-
-   # Transitively update dependent tasks
-   for dep in dependencies[key]:
-       waiting_data[dep].remove(key)
-
-   for dep in dependents[key]:
-       waiting[dep].remove(key)
-
-   for task in ready_tasks():
-       worker = best_worker(task):
-       send_task_to_worker(task, worker)
-
-
-.. _task-states:
-
-State Transitions
------------------
-
-The code presented in the section above is just for demonstration.  In practice
-writing this code for every possible event is highly error prone, resulting in
-hard-to-track-down bugs.  Instead the scheduler moves tasks between a fixed
-set of states, notably ``released``, ``waiting``, ``no-worker``, ``processing``,
+Internally, the scheduler moves tasks between a fixed set of states,
+notably ``released``, ``waiting``, ``no-worker``, ``processing``,
 ``memory``, ``error``.
 
-Tasks fall into the following states with the following allowed transitions
+Tasks flow along the following states with the following allowed transitions:
 
 .. image:: images/task-state.svg
     :alt: Dask scheduler task states
@@ -357,58 +60,417 @@ Tasks fall into the following states with the following allowed transitions
 *  *Released*: Known but not actively computing or in memory
 *  *Waiting*: On track to be computed, waiting on dependencies to arrive in
    memory
-*  *No-worker* (ready, rare): Ready to be computed, but no appropriate worker
-   exists
+*  *No-worker*: Ready to be computed, but no appropriate worker exists
+   (for example because of resource restrictions, or because no worker is
+   connected at all).
 *  *Processing*: Actively being computed by one or more workers
 *  *Memory*: In memory on one or more workers
 *  *Erred*: Task computation, or one of its dependencies, has encountered an error
-*  Forgotten (not actually a state): Task is no longer needed by any client and
-   so is removed from state
+*  *Forgotten* (not actually a state): Task is no longer needed by any client
+   or dependent task
 
-Tasks and task states
-'''''''''''''''''''''
+In addition to the literal state, though, other information needs to be
+kept and updated about each task.  Individual task state is stored in an
+object named :class:`TaskState` and consists of the following information:
+
+.. class:: TaskState
+
+   .. attribute:: key: str
+
+      The key is the unique identifier of a task, generally formed
+      from the name of the function, followed by a hash of the function
+      and arguments, like ``'inc-ab31c010444977004d656610d2d421ec'``.
+
+   .. attribute:: prefix: str
+
+      The key prefix, used in certain calculations to get an estimate
+      of the task's duration based on the duration of other tasks in the
+      same "family" (for example ``'inc'``).
+
+   .. attribute:: run_spec: object
+
+      A specification of how to run the task.  The type and meaning of this
+      value is opaque to the scheduler, as it is only interpreted by the
+      worker to which the task is sent for executing.
+
+      As a special case, this attribute may also be ``None``, in which case
+      the task is "pure data" (such as, for example, a piece of data loaded
+      in the scheduler using :meth:`Client.scatter`).  A "pure data" task
+      cannot be computed again if its value is lost.
+
+   .. attribute:: priority: tuple
+
+      The priority provides each task with a relative ranking which is used
+      to break ties when many tasks are being considered for execution.
+
+      This ranking is generally a 2-item tuple.  The first (and dominant)
+      item corresponds to when it was submitted.  Generally, earlier tasks
+      take precedence.  The second item is determined by the client, and is
+      a way to prioritize tasks within a large graph that may be important,
+      such as if they are on the critical path, or good to run in order to
+      release many dependencies.  This is explained further in
+      :doc:`Scheduling Policy <scheduling-policies>`.
+
+   .. attribute:: state: str
+
+      This task's current state.  Valid states include ``released``,
+      ``waiting``, ``no-worker``, ``processing``, ``memory``, ``erred``
+      and ``forgotten``.  If it is ``forgotten``, the task isn't stored
+      in the ``task_states`` dictionary anymore and will probably disappear
+      soon from memory.
+
+   .. attribute:: dependencies: {TaskState}
+
+      The set of tasks this task depends on for proper execution.  Only
+      tasks still alive are listed in this set.  If, for whatever reason,
+      this task also depends on a forgotten task, the
+      :attr:`has_lost_dependencies` flag is set.
+
+      A task can only be executed once all its dependencies have already
+      been successfully executed and have their result stored on at least
+      one worker.  This is tracked by progressively draining the
+      :attr:`waiting_on` set.
+
+   .. attribute:: dependents: {TaskState}
+
+      The set of tasks which depend on this task.  Only tasks still alive
+      are listed in this set.
+
+      This is the reverse mapping of :attr:`dependencies`.
+
+   .. attribute:: has_lost_dependencies: bool
+
+      Whether any of the dependencies of this task has been forgotten.
+      For memory consumption reasons, forgotten tasks are not kept in
+      memory even though they may have dependent tasks.  When a task is
+      forgotten, therefore, each of its dependents has their
+      :attr:`has_lost_dependencies` attribute set to ``True``.
+
+      If :attr:`has_lost_dependencies` is true, this task cannot go
+      into the "processing" state anymore.
+
+   .. attribute:: waiting_on: {TaskState}
+
+      The set of tasks this task is waiting on *before* it can be executed.
+      This is always a subset of :attr:`dependencies`.  Each time one of the
+      dependencies has finished processing, it is removed from the
+      :attr:`waiting_on` set.
+
+      Once :attr:`waiting_on` becomes empty, this task can move from the
+      "waiting" state to the "processing" state (unless one of the
+      dependencies errored out, in which case this task is instead
+      marked "erred").
+
+   .. attribute:: waiters: {TaskState}
+
+      The set of tasks which need this task to remain alive.  This is always
+      a subset of :attr:`dependents`.  Each time one of the dependents
+      has finished processing, it is removed from the :attr:`waiters`
+      set.
+
+      Once both :attr:`waiters` and :attr:`who_wants` become empty, this
+      task can be released (if it has a non-empty :attr:`run_spec`) or
+      forgotten (otherwise) by the scheduler, and by any workers
+      in :attr:`who_has`.
+
+      .. note:: Counter-intuitively, :attr:`waiting_on` and
+         :attr:`waiters` are not reverse mappings of each other.
+
+   .. attribute:: who_wants: {ClientState}
+
+      The set of clients who want this task's result to remain alive.
+      This is the reverse mapping of :attr:`ClientState.wants_what`.
+
+      When a client submits a graph to the scheduler it also specifies
+      which output tasks it desires, such that their results are not released
+      from memory.
+
+      Once a task has finished executing (i.e. moves into the "memory"
+      or "erred" state), the clients in :attr:`who_wants` are notified.
+
+      Once both :attr:`waiters` and :attr:`who_wants` become empty, this
+      task can be released (if it has a non-empty :attr:`run_spec`) or
+      forgotten (otherwise) by the scheduler, and by any workers
+      in :attr:`who_has`.
+
+   .. attribute:: who_has: {WorkerState}
+
+      The set of workers who have this task's result in memory.
+      It is non-empty iff the task is in the "memory" state.  There can be
+      more than one worker in this set if, for example, :meth:`Client.scatter`
+      or :meth:`Client.replicate` was used.
+
+      This is the reverse mapping of :attr:`WorkerState.has_what`.
+
+   .. attribute:: processing_on: WorkerState (or None)
+
+      If this task is in the "processing" state, which worker is currently
+      processing it.  Otherwise this is ``None``.
+
+      This attribute is kept in sync with :attr:`WorkerState.processing`.
+
+   .. attribute:: retries: int
+
+      The number of times this task can automatically be retried in case
+      of failure.  If a task fails executing (the worker returns with
+      an error), its :attr:`retries` attribute is checked.  If it is
+      equal to 0, the task is marked "erred".  If it is greater than 0,
+      the :attr:`retries` attribute is decremented and execution is
+      attempted again.
+
+   .. attribute:: nbytes: int (or None)
+
+      The number of bytes, as determined by ``sizeof``, of the result
+      of a finished task.  This number is used for diagnostics and to
+      help prioritize work.
+
+   .. attribute:: exception: object
+
+      If this task failed executing, the exception object is stored here.
+      Otherwise this is ``None``.
+
+   .. attribute:: traceback: object
+
+      If this task failed executing, the traceback object is stored here.
+      Otherwise this is ``None``.
+
+   .. attribute:: exception_blame: TaskState (or None)
+
+      If this task or one of its dependencies failed executing, the
+      failed task is stored here (possibly itself).  Otherwise this
+      is ``None``.
+
+   .. attribute:: suspicious: int
+
+      The number of times this task has been involved in a worker death.
+
+      Some tasks may cause workers to die (such as calling ``os._exit(0)``).
+      When a worker dies, all of the tasks on that worker are reassigned
+      to others.  This combination of behaviors can cause a bad task to
+      catastrophically destroy all workers on the cluster, one after
+      another.  Whenever a worker dies, we mark each task currently
+      processing on that worker (as recorded by
+      :attr:`WorkerState.processing`) as suspicious.
+
+      If a task is involved in three deaths (or some other fixed constant)
+      then we mark the task as ``erred``.
+
+   .. attribute:: host_restrictions: {hostnames}
+
+      A set of hostnames where this task can be run (or ``None`` if empty).
+      Usually this is empty unless the task has been specifically restricted
+      to only run on certain hosts.  A hostname may correspond to one or
+      several connected workers.
+
+   .. attribute:: worker_restrictions: {worker addresses}
+
+      A set of complete worker addresses where this can be run (or ``None``
+      if empty).  Usually this is empty unless the task has been specifically
+      restricted to only run on certain workers.
+
+      Note this is tracking worker addresses, not worker states, since
+      the specific workers may not be connected at this time.
+
+   .. attribute:: resource_restrictions: {resource: quantity}
+
+      Resources required by this task, such as ``{'gpu': 1}`` or
+      ``{'memory': 1e9}`` (or ``None`` if empty).  These are user-defined
+      names and are matched against the contents of each
+      :attr:`WorkerState.resources` dictionary.
+
+   .. attribute:: loose_restrictions: bool
+
+      If ``False``, each of :attr:`host_restrictions`,
+      :attr:`worker_restrictions` and :attr:`resource_restrictions` is
+      a hard constraint: if no worker is available satisfying those
+      restrictions, the task cannot go into the "processing" state and
+      will instead go into the "no-worker" state.
+
+      If ``True``, the above restrictions are mere preferences: if no worker
+      is available satisfying those restrictions, the task can still go
+      into the "processing" state and be sent for execution to another
+      connected worker.
+
+
+The scheduler keeps track of all the :class:`TaskState` objects (those
+not in the "forgotten" state) using several containers:
+
+.. attribute:: task_states: {str: TaskState}
+
+   A dictionary mapping task keys (usually strings) to :class:`TaskState`
+   objects.  Task keys are how information about tasks is communicated
+   between the scheduler and clients, or the scheduler and workers; this
+   dictionary is then used to find the corresponding :class:`TaskState`
+   object.
+
+.. attribute:: unrunnable: {TaskState}
+
+   A set of :class:`TaskState` objects in the "no-worker" state.  These
+   tasks already have all their :attr:`~TaskState.dependencies` satisfied
+   (their :attr:`~TaskState.waiting_on` set is empty), and are waiting
+   for an appropriate worker to join the network before computing.
+
+
+Worker State
+------------
+
+Each worker's current state is stored in a :class:`WorkerState` object.
+This information is involved in deciding
+:ref:`which worker to run a task on <decide-worker>`.
+
+.. class:: WorkerState
+
+   .. attribute:: worker_key
+
+      This worker's unique key.  This can be its connected address
+      (such as ``'tcp://127.0.0.1:8891``) or an alias (such as ``'alice'``).
+
+   .. attribute:: processing: {TaskState: cost}
+
+      A dictionary of tasks that have been submitted to this worker.
+      Each task state is asssociated with the expected cost in seconds
+      of running that task, summing both the task's expected computation
+      time and the expected communication time of its result.
+
+      Multiple tasks may be submitted to a worker in advance and the worker
+      will run them eventually, depending on its execution resources
+      (but see :doc:`work-stealing`).
+
+      All the tasks here are in the "processing" state.
+
+      This attribute is kept in sync with :attr:`TaskState.processing_on`.
+
+   .. attribute:: has_what: {TaskState}
+
+      The set of tasks which currently reside on this worker.
+      All the tasks here are in the "memory" state.
+
+      This is the reverse mapping of :class:`TaskState.who_has`.
+
+   .. attribute:: nbytes: int
+
+      The total memory size, in bytes, used by the tasks this worker
+      holds in memory (i.e. the tasks in this worker's :attr:`has_what`).
+
+   .. attribute:: ncores: int
+
+      The number of CPU cores made available on this worker.
+
+   .. attribute:: resources: {str: Number}
+
+      The available resources on this worker like ``{'gpu': 2}``.
+      These are abstract quantities that constrain certain tasks from
+      running at the same time on this worker.
+
+   .. attribute:: used_resources: {str: Number}
+
+      The sum of each resource used by all tasks allocated to this worker.
+      The numbers in this dictionary can only be less or equal than
+      those in this worker's :attr:`resources`.
+
+   .. attribute:: occupancy: Number
+
+      The total expected runtime, in seconds, of all tasks currently
+      processing on this worker.  This is the sum of all the costs in
+      this worker's :attr:`processing` dictionary.
+
+
+In addition to individual worker state, the scheduler maintains two
+containers to help with scheduling tasks:
+
+.. attribute:: Scheduler.saturated: {WorkerState}
+
+   A set of workers whose computing power (as
+   measured by :attr:`WorkerState.ncores`) is fully exploited by processing
+   tasks, and whose current :attr:`~WorkerState.occupancy` is a lot greater
+   than the average.
+
+.. attribute:: Scheduler.idle: {WorkerState}
+
+   A set of workers whose computing power is not fully exploited.  These
+   workers are assumed to be able to start computing new tasks immediately.
+
+
+These two sets are disjoint.  Also, some workers may be *neither* "idle"
+nor "saturated".  "Idle" workers will be preferred when
+:ref:`deciding a suitable worker <decide-worker>` to run a new task on.
+Conversely, "saturated" workers may see their workload lightened through
+:doc:`work-stealing`.
+
+
+Client State
+------------
+
+Information about each individual client is kept in a :class:`ClientState`
+object:
+
+.. class:: ClientState
+
+   .. attribute:: client_key: str
+
+      A unique identifier for this client.  This is generally an opaque
+      string generated by the client itself.
+
+   .. attribute:: wants_what: {TaskState}
+
+      A set of tasks this client wants kept in memory, so that it can
+      download its result when desired.  This is the reverse mapping of
+      :class:`TaskState.who_wants`.
+
+      Tasks are typically removed from this set when the corresponding
+      object in the client's space (for example a ``Future`` or a Dask
+      collection) gets garbage-collected.
+
+
+.. XXX list invariants somewhere?
+
+
+Understanding a Task's Flow
+---------------------------
+
+As seen above, there are numerous pieces of information pertaining to
+task and worker state, and some of them can be computed, updated or
+removed during a task's transitions.
 
 The table below shows which state variable a task is in, depending on the
 task's state.  Cells with a check mark (`✓`) indicate the task key *must*
 be present in the given state variable; cells with an question mark (`?`)
 indicate the task key *may* be present in the given state variable.
 
-======================= ======== ======= ========= ========== ====== =====
-State variable          Released Waiting No-worker Processing Memory Erred
-======================= ======== ======= ========= ========== ====== =====
-tasks                   ✓        ✓       ✓         ✓          ✓      ✓
-priority                ✓        ✓       ✓         ✓          ✓      ✓
-dependencies            ✓        ✓       ✓         ✓          ✓      ✓
-dependents              ✓        ✓       ✓         ✓          ✓      ✓
------------------------ -------- ------- --------- ---------- ------ -----
-host_restrictions       ?        ?       ?         ?          ?      ?
-worker_restrictions     ?        ?       ?         ?          ?      ?
-resource_restrictions   ?        ?       ?         ?          ?      ?
-loose_restrictions      ?        ?       ?         ?          ?      ?
------------------------ -------- ------- --------- ---------- ------ -----
-released                ✓
-waiting                          ✓
-waiting_data                     ✓
-unrunnable                               ✓
-processing                                         ✓
-rprocessing                                        ✓
-who_has                                                       ✓
-has_what                                                      ✓
-nbytes *(1)*            ?        ?       ?         ?          ✓      ?
-exceptions                                                           ✓
-tracebacks                                                           ✓
-exceptions_blame                                                     ✓
-retries                 ?        ?       ?         ?          ?      ?
-suspicious_tasks        ?        ?       ?         ?          ?      ?
-======================= ======== ======= ========= ========== ====== =====
+
+================================================================ ======== ======= ========= ========== ====== =====
+State variable                                                   Released Waiting No-worker Processing Memory Erred
+================================================================ ======== ======= ========= ========== ====== =====
+:attr:`TaskState.dependencies`                                   ✓        ✓       ✓         ✓          ✓      ✓
+:attr:`TaskState.dependents`                                     ✓        ✓       ✓         ✓          ✓      ✓
+---------------------------------------------------------------- -------- ------- --------- ---------- ------ -----
+:attr:`TaskState.host_restrictions`                              ?        ?       ?         ?          ?      ?
+:attr:`TaskState.worker_restrictions`                            ?        ?       ?         ?          ?      ?
+:attr:`TaskState.resource_restrictions`                          ?        ?       ?         ?          ?      ?
+:attr:`TaskState.loose_restrictions`                             ?        ?       ?         ?          ?      ?
+---------------------------------------------------------------- -------- ------- --------- ---------- ------ -----
+:attr:`TaskState.waiting_on`                                              ✓                 ✓
+:attr:`TaskState.waiters`                                                 ✓                 ✓
+:attr:`TaskState.processing_on`                                                             ✓
+:attr:`WorkerState.processing`                                                              ✓
+:attr:`TaskState.who_has`                                                                              ✓
+:attr:`WorkerState.has_what`                                                                           ✓
+:attr:`TaskState.nbytes` *(1)*                                   ?        ?       ?         ?          ✓      ?
+:attr:`TaskState.exception` *(2)*                                                                             ?
+:attr:`TaskState.traceback` *(2)*                                                                             ?
+:attr:`TaskState.exception_blame`                                                                             ✓
+:attr:`TaskState.retries`                                        ?        ?       ?         ?          ?      ?
+:attr:`TaskState.suspicious_tasks`                               ?        ?       ?         ?          ?      ?
+================================================================ ======== ======= ========= ========== ====== =====
 
 Notes:
 
-1. **nbytes**: a task can be in this collection as long as it was already
-   computed, even if not currently held in a worker's memory.
+1. :attr:`TaskState.nbytes`: this attribute can be known as long as a
+   task has already been computed, even if it has been later released.
 
-Transitions and worker state
-''''''''''''''''''''''''''''
+2. :attr:`TaskState.exception` and :attr:`TaskState.traceback` should
+   be looked up on the :attr:`TaskState.exception_blame` task.
+
 
 The table below shows which worker state variables are updated on each
 task state transition.
@@ -418,19 +480,19 @@ Transition                           Affected worker state
 ==================================== ==========================================================
 released → waiting                   occupancy, idle, saturated
 waiting → processing                 occupancy, idle, saturated, used_resources
-waiting → memory                     idle, saturated, worker_bytes
-processing → memory                  occupancy, idle, saturated, used_resources, worker_bytes
+waiting → memory                     idle, saturated, nbytes
+processing → memory                  occupancy, idle, saturated, used_resources, nbytes
 processing → erred                   occupancy, idle, saturated, used_resources
 processing → released                occupancy, idle, saturated, used_resources
-memory → released                    worker_bytes
-memory → forgotten                   worker_bytes
+memory → released                    nbytes
+memory → forgotten                   nbytes
 ==================================== ==========================================================
 
 .. note::
    Another way of understanding this table is to observe that entering or
    exiting a specific task state updates a well-defined set of worker state
-   variables.  For example, entering and exiting the Memory state updates
-   ``worker_bytes``.
+   variables.  For example, entering and exiting the "memory" state updates
+   :attr:`WorkerState.nbytes`.
 
 
 Implementation
