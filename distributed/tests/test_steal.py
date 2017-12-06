@@ -550,7 +550,8 @@ def test_dont_steal_executing_tasks(c, s, a, b):
     while not a.executing:
         yield gen.sleep(0.01)
 
-    steal.move_task_request(future.key, s.workers[a.address], s.workers[b.address])
+    steal.move_task_request(s.task_states[future.key],
+                            s.workers[a.address], s.workers[b.address])
     yield gen.sleep(0.1)
     assert future.key in a.executing
     assert not b.executing

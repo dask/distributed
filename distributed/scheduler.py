@@ -1753,10 +1753,10 @@ class Scheduler(ServerNode):
         We stop the task from being stolen in the future, and change task
         duration accounting as if the task has stopped.
         """
-        if 'stealing' in self.extensions:
-            self.extensions['stealing'].remove_key_from_stealable(key)
-
         ts = self.task_states[key]
+        if 'stealing' in self.extensions:
+            self.extensions['stealing'].remove_key_from_stealable(ts)
+
         ws = ts.processing_on
         if ws is None:
             logger.debug("Received long-running signal from duplicate task. "
@@ -3776,8 +3776,8 @@ class Scheduler(ServerNode):
         if (new > old * 1.3) and ('stealing' in self.extensions):
             steal = self.extensions['stealing']
             for ts in ws.processing:
-                steal.remove_key_from_stealable(ts.key)
-                steal.put_key_in_stealable(ts.key)
+                steal.remove_key_from_stealable(ts)
+                steal.put_key_in_stealable(ts)
 
 
 def decide_worker(ts, all_workers, valid_workers, objective):
