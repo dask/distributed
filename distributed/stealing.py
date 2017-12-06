@@ -9,7 +9,7 @@ from time import time
 from .config import config
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
-from .utils import key_split, log_errors, PeriodicCallback
+from .utils import log_errors, PeriodicCallback
 
 try:
     from cytoolz import topk
