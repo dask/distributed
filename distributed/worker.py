@@ -2637,7 +2637,7 @@ def parse_memory_limit(memory_limit, ncores):
         if isinstance(x, float) and x <= 1:
             return int(x * TOTAL_MEMORY)
 
-    if isinstance(memory_limit, str):
+    if isinstance(memory_limit, (unicode, str)):
         return parse_bytes(memory_limit)
     else:
         return int(memory_limit)

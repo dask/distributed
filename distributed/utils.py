@@ -1111,7 +1111,7 @@ def parse_bytes(s):
     1000000
     """
     s = s.replace(' ', '')
-    if not s[0].isnumeric():
+    if not s[0].isdigit():
         s = '1' + s
 
     for i in range(len(s) - 1, -1, -1):
