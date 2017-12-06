@@ -404,9 +404,9 @@ def test_gc(s, a, b):
 
     x = c.submit(inc, 10)
     yield x
-    assert s.who_has[x.key]
+    assert s.tasks[x.key].who_has
     x.__del__()
-    yield async_wait_for(lambda: x.key not in s.who_has, timeout=0.3)
+    yield async_wait_for(lambda: x.key not in s.tasks or not s.tasks[x.key].who_has, timeout=0.3)
 
     yield c.close()
 
@@ -642,14 +642,15 @@ def test_garbage_collection_with_scatter(c, s, a, b):
     assert future.status == 'finished'
     assert s.who_wants[future.key] == {c.id}
 
-    assert c.refcount[future.key] == 1
+    key = future.key
+    assert c.refcount[key] == 1
     future.__del__()
     yield gen.moment
-    assert c.refcount[future.key] == 0
+    assert c.refcount[key] == 0
 
     start = time()
     while True:
-        if future.key not in s.who_has:
+        if key not in s.tasks or not s.tasks[key].who_has:
             break
         else:
             assert time() < start + 3
@@ -668,7 +669,7 @@ def test_recompute_released_key(c, s, a, b):
     assert c.refcount[xkey] == 0
 
     # 1 second batching needs a second action to trigger
-    while xkey in s.who_has or xkey in a.data or xkey in b.data:
+    while xkey in s.tasks and s.tasks[xkey].who_has or xkey in a.data or xkey in b.data:
         yield gen.sleep(0.1)
 
     x = c.submit(inc, 100)
@@ -709,26 +710,6 @@ def test_missing_data_heals(c, s, a, b):
 
     result = yield w
     assert result == 3 + 4
-
-
-@pytest.mark.xfail(reason="Test creates inconsistent scheduler state")
-@slow
-@gen_cluster()
-def test_missing_worker(s, a, b):
-    bad = 'bad-host:8788'
-    s.ncores[bad] = 4
-    s.who_has['b'] = {bad}
-    s.has_what[bad] = {'b'}
-
-    c = yield Client((s.ip, s.port), asynchronous=True)
-
-    dsk = {'a': 1, 'b': (inc, 'a'), 'c': (inc, 'b')}
-
-    result = yield c.get(dsk, 'c', sync=False)
-    assert result == 3
-    assert bad not in s.ncores
-
-    yield c.close()
 
 
 @pytest.mark.skip
@@ -997,9 +978,9 @@ def test__scatter(c, s, a, b):
     assert a.data.get(x.key) == 10 or b.data.get(x.key) == 10
     xx = yield c.gather([x])
     x_who_has = s.get_who_has(keys=[x.key])[x.key]
-    assert s.who_has[x.key]
-    assert (a.address in s.who_has[x.key] or
-            b.address in s.who_has[x.key])
+    assert s.tasks[x.key].who_has
+    assert (s.workers[a.address] in s.tasks[x.key].who_has or
+            s.workers[b.address] in s.tasks[x.key].who_has)
     assert s.get_nbytes(summary=False) == {'y': sizeof(20), x.key: sizeof(10)}
     assert xx == [10]
 
@@ -1163,7 +1144,7 @@ def test_nbytes_determines_worker(c, s, a, b):
 
     z = c.submit(lambda x, y: None, x, y)
     yield z
-    assert s.who_has[z.key] == {b.address}
+    assert s.tasks[z.key].who_has == {s.workers[b.address]}
 
 
 @gen_cluster(client=True)
@@ -1175,7 +1156,7 @@ def test_if_intermediates_clear_on_error(c, s, a, b):
     with pytest.raises(ZeroDivisionError):
         yield f
     s.validate_state()
-    assert not s.who_has
+    assert not any(ts.who_has for ts in s.tasks.values())
 
 
 @gen_cluster(client=True)
@@ -1194,7 +1175,7 @@ def test_pragmatic_move_small_data_to_large_data(c, s, a, b):
 
     yield wait(results)
 
-    assert sum(s.who_has[r.key].issubset(s.who_has[l.key])
+    assert sum(s.tasks[r.key].who_has.issubset(s.tasks[l.key].who_has)
                for l, r in zip(lists, results)) >= 9
 
 
@@ -1352,7 +1333,7 @@ def test_iterator_gather(loop):
 def test_scatter_direct(c, s, a, b):
     future = yield c.scatter(123, direct=True)
     assert future.key in a.data or future.key in b.data
-    assert s.who_has[future.key]
+    assert s.tasks[future.key].who_has
     assert future.status == 'finished'
     result = yield future
     assert result == 123
@@ -1380,7 +1361,8 @@ def test_scatter_direct_broadcast(c, s, a, b):
     future2 = yield c.scatter(456, direct=True, broadcast=True)
     assert future2.key in a.data
     assert future2.key in b.data
-    assert s.who_has[future2.key] == {a.address, b.address}
+    assert s.tasks[future2.key].who_has == {s.workers[a.address],
+                                            s.workers[b.address]}
     result = yield future2
     assert result == 456
     assert not s.counters['op'].components[0]['scatter']
@@ -1401,7 +1383,7 @@ def test_scatter_direct_broadcast_target(c, s, *workers):
 
     futures = yield c.scatter([123, 456], direct=True, broadcast=True,
                               workers=[w.address for w in workers[:3]])
-    assert (f.key in w.data and w.address in s.who_has[f.key]
+    assert (f.key in w.data and w.address in s.tasks[f.key].who_has
             for f in futures
             for w in workers[:3])
 
@@ -1715,39 +1697,33 @@ def test_client_with_scheduler(c, s, a, b):
                     reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster([('127.0.0.1', 1), ('127.0.0.2', 2)], client=True)
 def test_allow_restrictions(c, s, a, b):
+    aws = s.workers[a.address]
+    bws = s.workers[a.address]
+
     x = c.submit(inc, 1, workers=a.ip)
     yield x
-    assert s.who_has[x.key] == {a.address}
+    assert s.tasks[x.key].who_has == {aws}
     assert not s.loose_restrictions
 
     x = c.submit(inc, 2, workers=a.ip, allow_other_workers=True)
     yield x
-    assert s.who_has[x.key] == {a.address}
+    assert s.tasks[x.key].who_has == {aws}
     assert x.key in s.loose_restrictions
 
     L = c.map(inc, range(3, 13), workers=a.ip, allow_other_workers=True)
     yield wait(L)
-    assert all(s.who_has[f.key] == {a.address} for f in L)
+    assert all(s.tasks[f.key].who_has == {aws} for f in L)
     assert {f.key for f in L}.issubset(s.loose_restrictions)
-
-    """
-    x = c.submit(inc, 14, workers='127.0.0.3')
-    with ignoring(gen.TimeoutError):
-        yield gen.with_timeout(timedelta(seconds=0.1), x
-        assert False
-    assert not s.who_has[x.key]
-    assert x.key not in s.loose_restrictions
-    """
 
     x = c.submit(inc, 15, workers='127.0.0.3', allow_other_workers=True)
 
     yield x
-    assert s.who_has[x.key]
+    assert s.tasks[x.key].who_has
     assert x.key in s.loose_restrictions
 
     L = c.map(inc, range(15, 25), workers='127.0.0.3', allow_other_workers=True)
     yield wait(L)
-    assert all(s.who_has[f.key] for f in L)
+    assert all(s.tasks[f.key].who_has for f in L)
     assert {f.key for f in L}.issubset(s.loose_restrictions)
 
     with pytest.raises(ValueError):
@@ -1915,7 +1891,7 @@ def test_forget_complex(e, s, A, B):
 
     s.client_releases_keys(keys=[acab.key], client=e.id)
     assert set(s.tasks) == {f.key for f in [ac, cd, a, c, d]}
-    assert b.key not in s.who_has
+    assert b.key not in s.tasks
 
     start = time()
     while b.key in A.data or b.key in B.data:
@@ -1947,8 +1923,6 @@ def test_forget_in_flight(e, s, A, B):
 
     for k in [acab.key, ab.key, b.key]:
         assert k not in s.tasks
-        assert k not in s.waiting
-        assert k not in s.who_has
 
 
 @gen_cluster(client=True)
@@ -2134,8 +2108,8 @@ def test__broadcast(c, s, a, b):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test__broadcast_integer(c, s, *workers):
     x, y = yield c.scatter([1, 2], broadcast=2)
-    assert len(s.who_has[x.key]) == 2
-    assert len(s.who_has[y.key]) == 2
+    assert len(s.tasks[x.key].who_has) == 2
+    assert len(s.tasks[y.key].who_has) == 2
 
 
 @gen_cluster(client=True)
@@ -2183,7 +2157,6 @@ def test__cancel(c, s, a, b):
         assert time() < start + 5
 
     assert not s.tasks
-    assert not s.who_has
     s.validate_state()
 
 
@@ -2238,7 +2211,6 @@ def test__cancel_collection(c, s, a, b):
     yield c.cancel([x])
     assert all(f.cancelled() for f in L)
     assert not s.tasks
-    assert not s.who_has
 
 
 def test_cancel(loop):
@@ -2866,6 +2838,9 @@ def test_badly_serialized_exceptions(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_rebalance(c, s, a, b):
+    aws = s.workers[a.address]
+    bws = s.workers[b.address]
+
     x, y = yield c.scatter([1, 2], workers=[a.address])
     assert len(a.data) == 2
     assert len(b.data) == 0
@@ -2875,13 +2850,13 @@ def test_rebalance(c, s, a, b):
     s.validate_state()
 
     assert len(b.data) == 1
-    assert s.has_what[b.address] == set(b.data)
-    assert b.address in s.who_has[x.key] or b.address in s.who_has[y.key]
+    assert {ts.key for ts in bws.has_what} == set(b.data)
+    assert bws in s.tasks[x.key].who_has or bws in s.tasks[y.key].who_has
 
     assert len(a.data) == 1
     assert s.has_what[a.address] == set(a.data)
-    assert (a.address not in s.who_has[x.key] or
-            a.address not in s.who_has[y.key])
+    assert (aws not in s.tasks[x.key].who_has or
+            aws not in s.tasks[y.key].who_has)
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 4, client=True)
@@ -2996,7 +2971,8 @@ def test_workers_register_indirect_data(c, s, a, b):
     y = c.submit(inc, x, workers=b.ip)
     yield y
     assert b.data[x.key] == 1
-    assert s.who_has[x.key] == {a.address, b.address}
+    assert s.tasks[x.key].who_has == {s.workers[a.address],
+                                      s.workers[b.address]}
     assert s.has_what[b.address] == {x.key, y.key}
     s.validate_state()
 
@@ -3018,8 +2994,8 @@ def test_replicate(c, s, *workers):
     yield s.replicate(keys=[a.key, b.key], n=5)
     s.validate_state()
 
-    assert len(s.who_has[a.key]) == 5
-    assert len(s.who_has[b.key]) == 5
+    assert len(s.tasks[a.key].who_has) == 5
+    assert len(s.tasks[b.key].who_has) == 5
 
     assert sum(a.key in w.data for w in workers) == 5
     assert sum(b.key in w.data for w in workers) == 5
@@ -3044,8 +3020,8 @@ def test_replicate_workers(c, s, *workers):
     yield s.replicate(keys=[a.key, b.key], n=5,
                       workers=[w.address for w in workers[:5]])
 
-    assert len(s.who_has[a.key]) == 5
-    assert len(s.who_has[b.key]) == 5
+    assert len(s.tasks[a.key].who_has) == 5
+    assert len(s.tasks[b.key].who_has) == 5
 
     assert sum(a.key in w.data for w in workers[:5]) == 5
     assert sum(b.key in w.data for w in workers[:5]) == 5
@@ -3054,16 +3030,16 @@ def test_replicate_workers(c, s, *workers):
 
     yield s.replicate(keys=[a.key, b.key], n=1)
 
-    assert len(s.who_has[a.key]) == 1
-    assert len(s.who_has[b.key]) == 1
+    assert len(s.tasks[a.key].who_has) == 1
+    assert len(s.tasks[b.key].who_has) == 1
     assert sum(a.key in w.data for w in workers) == 1
     assert sum(b.key in w.data for w in workers) == 1
 
     s.validate_state()
 
     yield s.replicate(keys=[a.key, b.key], n=None)  # all
-    assert len(s.who_has[a.key]) == 10
-    assert len(s.who_has[b.key]) == 10
+    assert len(s.tasks[a.key].who_has) == 10
+    assert len(s.tasks[b.key].who_has) == 10
     s.validate_state()
 
     yield s.replicate(keys=[a.key, b.key], n=1,
@@ -3102,19 +3078,19 @@ def test_client_replicate(c, s, *workers):
     y = c.submit(inc, 2)
     yield c.replicate([x, y], n=5)
 
-    assert len(s.who_has[x.key]) == 5
-    assert len(s.who_has[y.key]) == 5
+    assert len(s.tasks[x.key].who_has) == 5
+    assert len(s.tasks[y.key].who_has) == 5
 
     yield c.replicate([x, y], n=3)
 
-    assert len(s.who_has[x.key]) == 3
-    assert len(s.who_has[y.key]) == 3
+    assert len(s.tasks[x.key].who_has) == 3
+    assert len(s.tasks[y.key].who_has) == 3
 
     yield c.replicate([x, y])
     s.validate_state()
 
-    assert len(s.who_has[x.key]) == 10
-    assert len(s.who_has[y.key]) == 10
+    assert len(s.tasks[x.key].who_has) == 10
+    assert len(s.tasks[y.key].who_has) == 10
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'),
@@ -3122,17 +3098,21 @@ def test_client_replicate(c, s, *workers):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1),
                                   ('127.0.0.2', 1),
                                   ('127.0.0.2', 1)], timeout=None)
-def test_client_replicate_host(e, s, a, b, c):
-    x = e.submit(inc, 1, workers='127.0.0.2')
+def test_client_replicate_host(client, s, a, b, c):
+    aws = s.workers[a.address]
+    bws = s.workers[b.address]
+    cws = s.workers[c.address]
+
+    x = client.submit(inc, 1, workers='127.0.0.2')
     yield wait([x])
-    assert (s.who_has[x.key] == {b.address} or
-            s.who_has[x.key] == {c.address})
+    assert (s.tasks[x.key].who_has == {bws} or
+            s.tasks[x.key].who_has == {cws})
 
-    yield e.replicate([x], workers=['127.0.0.2'])
-    assert s.who_has[x.key] == {b.address, c.address}
+    yield client.replicate([x], workers=['127.0.0.2'])
+    assert s.tasks[x.key].who_has == {bws, cws}
 
-    yield e.replicate([x], workers=['127.0.0.1'])
-    assert s.who_has[x.key] == {a.address, b.address, c.address}
+    yield client.replicate([x], workers=['127.0.0.1'])
+    assert s.tasks[x.key].who_has == {aws, bws, cws}
 
 
 def test_client_replicate_sync(loop):
