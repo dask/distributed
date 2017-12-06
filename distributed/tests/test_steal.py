@@ -475,7 +475,8 @@ def test_balance(inp, expected):
     test()
 
 
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2, Worker=Nanny)
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2, Worker=Nanny,
+             timeout=20)
 def test_restart(c, s, a, b):
     futures = c.map(slowinc, range(100), delay=0.1, workers=a.address,
                     allow_other_workers=True)
@@ -486,7 +487,7 @@ def test_restart(c, s, a, b):
     assert any(st for st in steal.stealable_all)
     assert any(x for L in steal.stealable.values() for x in L)
 
-    yield c._restart()
+    yield c.restart(timeout=10)
 
     assert not any(x for x in steal.stealable_all)
     assert not any(x for L in steal.stealable.values() for x in L)
