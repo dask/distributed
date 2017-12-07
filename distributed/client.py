@@ -518,6 +518,9 @@ class Client(Node):
 
         if address is None and 'scheduler-address' in config:
             address = config['scheduler-address']
+            if address:
+                logger.info("Config value `scheduler-address` found: %s",
+                            address)
 
         if hasattr(address, "scheduler_address"):
             # It's a LocalCluster or LocalCluster-compatible object
