@@ -8,16 +8,17 @@ Overview
 
 The life of a computation with Dask can be described in the following stages:
 
-1.  The user authors a graph using some library, perhaps Dask.delayed or
+1.  The user authors a graph using some library, perhaps dask.delayed or
     dask.dataframe or the ``submit/map`` functions on the client.  They submit
     these tasks to the scheduler.
-2.  The schedulers assimilates these tasks into its graph of all tasks to track
-    and as their dependencies become available it asks workers to run each of
-    these tasks.
+2.  The schedulers assimilates these tasks into its graph of all tasks to
+    track, and as their dependencies become available it asks workers to run
+    each of these tasks in turn.
 3.  The worker receives information about how to run the task, communicates
-    with its peer workers to collect dependencies, and then runs the relevant
-    function on the appropriate data.  It reports back to the scheduler that it
-    has finished.
+    with its peer workers to collect data dependencies, and then runs the
+    relevant function on the appropriate data.  It reports back to the
+    scheduler that it has finished, keeping the result stored in the worker
+    where it was computed.
 4.  The scheduler reports back to the user that the task has completed.  If the
     user desires, it then fetches the data from the worker through the
     scheduler.
@@ -35,14 +36,14 @@ For more abstract information about the policies used by the scheduler, see
 The scheduler keeps internal state about several kinds of entities:
 
 * Individual tasks known to the scheduler
-* Workers connected to it
-* Clients connected to it
+* Workers connected to the scheduler
+* Clients connected to the scheduler
 
 
 .. note::
-   Everything listed in the page is an internal detail of how Dask operates.
-   It may change between versions and you should probably avoid relying
-   on it in user code (including on any APIs explained here).
+   Everything listed in this page is an internal detail of how Dask operates.
+   It may change between versions and you should probably avoid relying on it
+   in user code (including on any APIs explained here).
 
 
 Task State
