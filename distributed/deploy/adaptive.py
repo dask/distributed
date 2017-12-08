@@ -118,7 +118,8 @@ class Adaptive(object):
         needs_memory
         """
         with log_errors():
-            if self.scheduler.unrunnable and not self.scheduler.ncores:
+            if len(self.scheduler.ncores) < self.scheduler.min_workers or \
+                    (self.scheduler.unrunnable and not self.scheduler.ncores):
                 return True
 
             needs_cpu = self.needs_cpu()
@@ -177,7 +178,9 @@ class Adaptive(object):
         --------
         LocalCluster.scale_up
         """
-        instances = max(1, len(self.scheduler.ncores) * self.scale_factor)
+        instances = max(1, self.scheduler.min_workers,
+                        len(self.scheduler.ncores) * self.scale_factor)
+        instances = min(instances, self.scheduler.max_workers)
         logger.info("Scaling up to %d workers", instances)
         return {'n': instances}
 

@@ -217,6 +217,8 @@ class Scheduler(ServerNode):
             validate=False,
             scheduler_file=None,
             security=None,
+            min_workers=0,
+            max_workers=1e100,
             **kwargs):
 
         self._setup_logging()
@@ -295,6 +297,8 @@ class Scheduler(ServerNode):
         # Worker state
         self.ncores = dict()
         self.workers = SortedSet()
+        self.min_workers = min_workers
+        self.max_workers = max_workers
         self.total_ncores = 0
         self.total_occupancy = 0
         self.worker_info = dict()
@@ -1946,7 +1950,7 @@ class Scheduler(ServerNode):
 
             limit = sum(limit_bytes.values())
             total = sum(worker_bytes.values())
-            idle = sorted([worker for worker in self.idle if not self.processing[worker]], 
+            idle = sorted([worker for worker in self.idle if not self.processing[worker]],
                           key=worker_bytes.get, reverse=True)
             to_close = []
 
@@ -1957,6 +1961,11 @@ class Scheduler(ServerNode):
                     to_close.append(w)
                 else:
                     break
+
+            # Check whether this will bring us below our minimum
+            proposed_remaining = len(self.ncores) - len(to_close)
+            overshoot = max(0, self.min_workers - proposed_remaining)
+            to_close = to_close[overshoot+1:]
 
             return to_close
 
