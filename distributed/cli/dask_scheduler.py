@@ -61,10 +61,14 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="Directory to place scheduler files")
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process like "foo.bar" or "/path/to/foo.py"')
+@click.option('--min-workers', type=int, default=0,
+              help="Minimum number of workers required in an adaptive cluster")
+@click.option('--max-workers', type=int, default=1e100,
+              help="Maximum number of workers required in an adaptive cluster")
 def main(host, port, bokeh_port, show, _bokeh,
          bokeh_whitelist, bokeh_prefix, use_xheaders, pid_file, scheduler_file,
          interface, local_directory, preload, tls_ca_file, tls_cert,
-         tls_key):
+         tls_key, min_workers, max_workers):
     enable_proctitle_on_current()
     enable_proctitle_on_children()
 
@@ -118,7 +122,8 @@ def main(host, port, bokeh_port, show, _bokeh,
                                                       prefix=bokeh_prefix)
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file,
-                          security=sec)
+                          security=sec, min_workers=min_workers,
+                          max_workers=max_workers)
     scheduler.start(addr)
     preload_modules(preload, parameter=scheduler, file_dir=local_directory)
 
