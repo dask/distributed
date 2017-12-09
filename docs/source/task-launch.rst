@@ -17,7 +17,7 @@ downloads the data and converts it to a list on one of our worker machines:
 
 .. code-block:: python
 
-   future = e.submit(download_and_convert_to_list, uri)
+   future = client.submit(download_and_convert_to_list, uri)
 
 But now we need to submit new tasks for individual parts of this data.  We have
 three options.
@@ -58,14 +58,14 @@ on ``data`` remotely and then break up data into its various elements.
 
 .. code-block:: python
 
-   >>> n = e.submit(len, data)                 # compute number of elements
+   >>> n = client.submit(len, data)                 # compute number of elements
    >>> n = n.result()                          # gather n (small) locally
 
    >>> from operator import getitem
-   >>> elements = [e.submit(getitem, data, i) for i in range(n)]  # split data
+   >>> elements = [client.submit(getitem, data, i) for i in range(n)]  # split data
 
-   >>> futures = e.map(process_element, elements)
-   >>> analysis = e.submit(aggregate, futures)
+   >>> futures = client.map(process_element, elements)
+   >>> analysis = client.submit(aggregate, futures)
 
 We compute the length remotely, gather back this very small result, and then
 use it to submit more tasks to break up the data and process on the cluster.
@@ -82,20 +82,18 @@ of when the APIs below should be used.
 
 .. code-block:: python
 
-   In [1]: from distributed import Client, worker_client
+   In [1]: from distributed import Client
 
    In [2]: client = Client()
 
    In [3]: def fib(n):
       ...:     if n < 2:
       ...:         return n
-      ...:     else:
-      ...:         a = fib(n - 1)  # how to submit this to the client?
-      ...:         b = fib(n - 2)  # how to submit this to the client?
-      ...:         return a + b
-      ...:
+      ...:     a = fib(n - 1)  # we want to submit this function to the client
+      ...:     b = fib(n - 2)  # we want to submit this function to the client
+      ...:     return a + b
 
-   In [4]: future = e.submit(fib, 100)
+   In [4]: future = client.submit(fib, 100)
 
    In [5]: future
    Out[5]: <Future: status: finished, type: int, key: fib-7890e9f06d5f4e0a8fc7ec5c77590ace>
@@ -120,11 +118,79 @@ on worker nodes.
 To submit new tasks from a worker that worker must first create a new client
 object that connects to the scheduler. There are three options for this:
 
-1. ``dask.compute``
-2. ``get_client``
+1. ``dask.compute`` and ``dask.delayed``
+2. ``get_client`` with ``secede`` and ``rejoin``
 3. ``worker_client``
 
-We highlight all three examples below.
+We demonstrate the use of these functions below. But before we do, here's some
+design considerations for each function:
+
+* ``dask.compute``
+    * After jobs collected from cluster, computation continues on the
+      scheduling slot that submitted the jobs.
+    * If using Dask objects, will perform some graph merging to perform less
+      computation and communication. See "`The compute function`_" for more
+      detail.
+* ``get_client``
+    * Will continue to occupy a scheduling slot, unless ``secede`` and
+      ``rejoin`` are called (otherwise may deadlock the cluster!).
+    * The worker running the function will possibly transition to a different
+      scheduling slot (the worker that submitted the jobs is labeled as "maybe
+      long running").
+* ``worker_client``
+    * Intended to submit long running jobs (the worker is labeled as "long
+      running")
+    * Implemented as a context manager, which provides some ease of use.
+    * Will ``secede`` from the current worker, and likely transition to another
+      worker.
+    * Connection to the
+    * Establishing a connection to the scheduler takes roughly 10–20ms. It's
+      wise for the submitted jobs to be several times longer than this.
+
+Transitioning to another worker involves moving all of the functions internal
+state to another machine. The time cost of this will not be insignificant if a
+large array is present in memory.
+
+For more details on transitioning to different workers, see "`Scheduling
+Policies`_" and "`Scheduling State`_".
+
+.. _Scheduling Policies: https://distributed.readthedocs.io/en/latest/scheduling-policies.html
+.. _Scheduling State: https://distributed.readthedocs.io/en/latest/scheduling-state.html
+.. _The compute function: https://dask.pydata.org/en/latest/scheduler-overview.html#the-compute-function
+
+``dask.compute``
+~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    from distributed import Client
+    from dask import delayed, compute
+
+    @delayed
+    def fib(n):
+        if n < 2:
+            return n
+        a, b = compute(fib(n-1), fib(n-2))
+        return a + b
+
+
+``get_client``
+~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    from distributed import Client, get_client, secede, rejoin
+
+    def fib(n):
+        if n < 2:
+            return n
+        client = get_client()
+        jobs = client.map(fib, [n-1, n-2])
+        secede()
+        out = client.gather(jobs)
+        rejoin()
+        return sum(out)
+
 
 ``dask.worker_client``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -139,21 +205,18 @@ worker.
    from distributed import worker_client
 
    def process_all(data):
-       with worker_client() as e:
-           elements = e.scatter(data)
-           futures = e.map(process_element, elements)
-           analysis = e.submit(aggregate, futures)
+       with worker_client() as client:
+           elements = client.scatter(data)
+           futures = client.map(process_element, elements)
+           analysis = client.submit(aggregate, futures)
            result = analysis.result()
        return result
 
-    analysis = e.submit(process_all, data)  # spawns many tasks
+    analysis = client.submit(process_all, data)  # spawns many tasks
 
 This approach is somewhat complex but very powerful.  It allows you to spawn
 tasks that themselves act as potentially long-running clients, managing their
 own independent workloads.
-
-Technical details
-~~~~~~~~~~~~~~~~~
 
 Tasks that invoke ``worker_client`` are conservatively assumed to be *long
 running*.  They can take a long time blocking, waiting for other tasks to
