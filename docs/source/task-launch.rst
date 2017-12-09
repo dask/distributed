@@ -73,6 +73,40 @@ This is more complex because we had to go back and forth a couple of times
 between the cluster and the local process, but the data moved was very small,
 and so this only added a few milliseconds to our total processing time.
 
+Extended Example
+~~~~~~~~~~~~~~~~
+
+This example computing the Fibonacci numbers creates tasks that submit tasks
+that submit tasks that submit other tasks, etc. This example is a good example
+of when the APIs below should be used.
+
+.. code-block:: python
+
+   In [1]: from distributed import Client, worker_client
+
+   In [2]: client = Client()
+
+   In [3]: def fib(n):
+      ...:     if n < 2:
+      ...:         return n
+      ...:     else:
+      ...:         a = fib(n - 1)  # how to submit this to the client?
+      ...:         b = fib(n - 2)  # how to submit this to the client?
+      ...:         return a + b
+      ...:
+
+   In [4]: future = e.submit(fib, 100)
+
+   In [5]: future
+   Out[5]: <Future: status: finished, type: int, key: fib-7890e9f06d5f4e0a8fc7ec5c77590ace>
+
+   In [6]: future.result()
+   Out[6]: 354224848179261915075
+
+This example is a bit extreme and spends most of its time establishing client
+connections from the worker rather than doing actual work, but does demonstrate
+that even pathological cases function robustly.
+
 
 Submit tasks from worker
 ------------------------
@@ -84,10 +118,21 @@ We can submit tasks from other tasks.  This allows us to make decisions while
 on worker nodes.
 
 To submit new tasks from a worker that worker must first create a new client
-object that connects to the scheduler.  There is a convenience function to do
-this for you so that you don't have to pass around connection information.
-However you must use this function ``worker_client`` as a context manager to
-ensure proper cleanup on the worker.
+object that connects to the scheduler. There are three options for this:
+
+1. ``dask.compute``
+2. ``get_client``
+3. ``worker_client``
+
+We highlight all three examples below.
+
+``dask.worker_client``
+~~~~~~~~~~~~~~~~~~~~~~
+
+``worker_client`` is a convenience function to do this for you so that you
+don't have to pass around connection information.  However you must use this
+function ``worker_client`` as a context manager to ensure proper cleanup on the
+worker.
 
 .. code-block:: python
 
@@ -106,42 +151,6 @@ ensure proper cleanup on the worker.
 This approach is somewhat complex but very powerful.  It allows you to spawn
 tasks that themselves act as potentially long-running clients, managing their
 own independent workloads.
-
-Extended Example
-~~~~~~~~~~~~~~~~
-
-This example computing the Fibonacci numbers creates tasks that submit tasks
-that submit tasks that submit other tasks, etc..
-
-.. code-block:: python
-
-   In [1]: from distributed import Client, worker_client
-
-   In [2]: client = Client()
-
-   In [3]: def fib(n):
-      ...:     if n < 2:
-      ...:         return n
-      ...:     else:
-      ...:         with worker_client() as c
-      ...:             a = c.submit(fib, n - 1)
-      ...:             b = c.submit(fib, n - 2)
-      ...:             a, b = c.gather([a, b])
-      ...:             return a + b
-      ...:
-
-   In [4]: future = e.submit(fib, 100)
-
-   In [5]: future
-   Out[5]: <Future: status: finished, type: int, key: fib-7890e9f06d5f4e0a8fc7ec5c77590ace>
-
-   In [6]: future.result()
-   Out[6]: 354224848179261915075
-
-This example is a bit extreme and spends most of its time establishing client
-connections from the worker rather than doing actual work, but does demonstrate
-that even pathological cases function robustly.
-
 
 Technical details
 ~~~~~~~~~~~~~~~~~
