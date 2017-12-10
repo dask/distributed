@@ -2854,7 +2854,7 @@ def test_rebalance(c, s, a, b):
     assert bws in s.tasks[x.key].who_has or bws in s.tasks[y.key].who_has
 
     assert len(a.data) == 1
-    assert s.has_what[a.address] == set(a.data)
+    assert aws.has_what == set(a.data)
     assert (aws not in s.tasks[x.key].who_has or
             aws not in s.tasks[y.key].who_has)
 
@@ -2973,7 +2973,7 @@ def test_workers_register_indirect_data(c, s, a, b):
     assert b.data[x.key] == 1
     assert s.tasks[x.key].who_has == {s.workers[a.address],
                                       s.workers[b.address]}
-    assert s.has_what[b.address] == {x.key, y.key}
+    assert s.workers[b.address].has_what == {s.tasks[x.key], s.tasks[y.key]}
     s.validate_state()
 
 
@@ -3201,7 +3201,9 @@ def test_scheduler_saturates_cores(c, s, a, b):
         futures = c.map(slowinc, futures, delay=delay / 10)
         while not s.tasks:
             if s.tasks:
-                assert all(len(p) >= 20 for p in s.processing.values())
+                assert all(len(p) >= 20
+                           for w in s.workers.values()
+                           for p in w.processing.values())
             yield gen.sleep(0.01)
 
 
@@ -3211,7 +3213,9 @@ def test_scheduler_saturates_cores_random(c, s, a, b):
         futures = c.map(randominc, range(100), scale=0.1)
         while not s.tasks:
             if s.tasks:
-                assert all(len(p) >= 20 for p in s.processing.values())
+                assert all(len(p) >= 20
+                           for w in s.workers.values()
+                           for p in w.processing.values())
             yield gen.sleep(0.01)
 
 
@@ -3225,7 +3229,7 @@ def test_cancel_clears_processing(c, s, *workers):
     yield c.cancel(x)
 
     start = time()
-    while any(v for v in s.processing.values()):
+    while any(v for w in s.workers.values() for v in w.processing):
         assert time() < start + 0.2
         yield gen.sleep(0.01)
     s.validate_state()
@@ -4167,7 +4171,7 @@ def test_interleave_computations(c, s, a, b):
     y_keys = [y.key for y in ys]
     z_keys = [z.key for z in zs]
 
-    while not s.tasks or any(s.processing.values()):
+    while not s.tasks or any(w.processing for w in s.workers.values()):
         yield gen.sleep(0.05)
         x_done = sum(state in done
                      for state in s.get_task_status(keys=x_keys).values())
@@ -4196,7 +4200,7 @@ def test_interleave_computations_map(c, s, a, b):
     y_keys = [y.key for y in ys]
     z_keys = [z.key for z in zs]
 
-    while not s.tasks or any(s.processing.values()):
+    while not s.tasks or any(w.processing for w in s.workers.values()):
         yield gen.sleep(0.05)
         x_done = sum(state in done
                      for state in s.get_task_status(keys=x_keys).values())
