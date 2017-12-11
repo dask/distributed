@@ -733,8 +733,10 @@ class Scheduler(ServerNode):
         # Task state
         self.tasks = dict()
         for old_attr, new_attr, wrap in [
+                ('priority', 'priority', None),
                 ('dependencies', 'dependencies', _legacy_task_key_set),
                 ('dependents', 'dependents', _legacy_task_key_set),
+                ('retries', 'retries', None),
                 ]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
@@ -743,6 +745,7 @@ class Scheduler(ServerNode):
                     _StateLegacyMapping(self.tasks, func))
 
         for old_attr, new_attr, wrap in [
+                ('nbytes', 'nbytes', None),
                 ('who_wants', 'who_wants', _legacy_client_key_set),
                 ('who_has', 'who_has', _legacy_worker_key_set),
                 ('waiting', 'waiting_on', _legacy_task_key_set),
@@ -751,6 +754,7 @@ class Scheduler(ServerNode):
                 ('host_restrictions', 'host_restrictions', None),
                 ('worker_restrictions', 'worker_restrictions', None),
                 ('resource_restrictions', 'resource_restrictions', None),
+                ('suspicious_tasks', 'suspicious', None),
                 ('exceptions', 'exception', None),
                 ('tracebacks', 'traceback', None),
                 ('exceptions_blame', 'exception_blame', _task_key_or_none),
@@ -797,8 +801,10 @@ class Scheduler(ServerNode):
         self.workers = SortedDict()
         for old_attr, new_attr, wrap in [
                 ('ncores', 'ncores', None),
+                ('worker_bytes', 'nbytes', None),
                 ('worker_resources', 'resources', None),
                 ('used_resources', 'used_resources', None),
+                ('occupancy', 'occupancy', None),
                 ('processing', 'processing', _legacy_task_key_dict),
                 ('has_what', 'has_what', _legacy_task_key_set),
                 ]:
