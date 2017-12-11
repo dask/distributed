@@ -1,9 +1,26 @@
 #!/usr/bin/env python
 
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
+from setuptools.extension import Extension
 import sys
 import versioneer
+
+try:
+    from Cython.Build import cythonize
+
+    #extensions = [
+        #Extension("distributed._cy_schedulerstate",
+                  #["distributed/schedulerstate.py",
+                   #"distributed/_cy_schedulerstate.c"])
+    #]
+    extensions = [
+        Extension("distributed.schedulerstate",
+                  ["distributed/schedulerstate.py"])
+    ]
+    ext_modules = cythonize(extensions)
+except ImportError:
+    ext_modules = []
 
 requires = open('requirements.txt').read().strip().split('\n')
 install_requires = []
@@ -32,12 +49,8 @@ setup(name='distributed',
       include_package_data=True,
       install_requires=install_requires,
       extras_require=extras_require,
-      packages=['distributed',
-                'distributed.bokeh',
-                'distributed.cli',
-                'distributed.deploy',
-                'distributed.diagnostics',
-                'distributed.protocol'],
+      packages=find_packages(),
+      ext_modules=ext_modules,
       long_description=(open('README.rst').read() if os.path.exists('README.rst')
                         else ''),
       classifiers=[

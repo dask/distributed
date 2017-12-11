@@ -2,11 +2,11 @@ from __future__ import print_function, division, absolute_import
 
 from .config import config
 from .core import connect, rpc
-from .deploy import LocalCluster
-from .diagnostics import progress
 from .client import (Client, Executor, CompatibleExecutor,
                      wait, as_completed, default_client, fire_and_forget,
                      Future)
+from .deploy import LocalCluster
+from .diagnostics import progress
 from .lock import Lock
 from .nanny import Nanny
 from .queues import Queue
