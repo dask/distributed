@@ -2854,7 +2854,7 @@ def test_rebalance(c, s, a, b):
     assert bws in s.tasks[x.key].who_has or bws in s.tasks[y.key].who_has
 
     assert len(a.data) == 1
-    assert aws.has_what == set(a.data)
+    assert {ts.key for ts in aws.has_what} == set(a.data)
     assert (aws not in s.tasks[x.key].who_has or
             aws not in s.tasks[y.key].who_has)
 
