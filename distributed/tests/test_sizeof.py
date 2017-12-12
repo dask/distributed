@@ -13,6 +13,9 @@ def test_base():
 
 def test_containers():
     assert sizeof([1, 2, [3]]) > (getsizeof(3) * 3 + getsizeof([]))
+    b = b"x" * 100
+    assert sizeof({b}) >= (getsizeof(b) + getsizeof(set()))
+    assert sizeof({b: b + b'z'}) >= (2 * getsizeof(b) + getsizeof({}))
 
 
 def test_numpy():

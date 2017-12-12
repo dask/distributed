@@ -28,8 +28,13 @@ def sizeof_default(o):
 @sizeof.register(tuple)
 @sizeof.register(set)
 @sizeof.register(frozenset)
-def sizeof_python_collection(seq):
+def sizeof_python_container(seq):
     return getsizeof(seq) + sum(map(sizeof, seq))
+
+
+@sizeof.register(dict)
+def sizeof_python_mapping(dct):
+    return getsizeof(dct) + sum(map(sizeof, dct)) + sum(map(sizeof, dct.values()))
 
 
 @sizeof.register_lazy("numpy")
