@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import gc
 import logging
 
 from .metrics import thread_time
