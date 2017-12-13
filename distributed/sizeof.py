@@ -1,6 +1,8 @@
 from __future__ import print_function, division, absolute_import
 
+from functools import reduce
 import logging
+import operator
 import sys
 
 from dask.utils import Dispatch
@@ -35,6 +37,15 @@ def sizeof_python_container(seq):
 @sizeof.register(dict)
 def sizeof_python_mapping(dct):
     return getsizeof(dct) + sum(map(sizeof, dct)) + sum(map(sizeof, dct.values()))
+
+
+@sizeof.register(memoryview)
+def sizeof_memoryview(mem):
+    try:
+        return getsizeof(mem) + mem.nbytes
+    except AttributeError:
+        # Python 2
+        return getsizeof(mem) + reduce(operator.mul, mem.shape, mem.itemsize)
 
 
 @sizeof.register_lazy("numpy")

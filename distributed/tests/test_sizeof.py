@@ -18,6 +18,12 @@ def test_containers():
     assert sizeof({b: b + b'z'}) >= (2 * getsizeof(b) + getsizeof({}))
 
 
+def test_memoryview():
+    b = b"x" * 1000
+    m = memoryview(b)
+    assert 1000 < sizeof(m) <= 1500
+
+
 def test_numpy():
     np = pytest.importorskip('numpy')
     assert 8000 <= sizeof(np.empty(1000, dtype='f8')) <= 9000
