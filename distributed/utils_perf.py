@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+from collections import deque
 import gc
 import logging
 
@@ -56,3 +57,58 @@ class ThrottledGC(object):
             self.logger.debug("gc.collect() lasts %0.3fs but only %0.3fs "
                               "elapsed since last call: throttling.",
                               self.last_gc_duration, elapsed)
+
+
+class _MeasureRelativeRuntime(object):
+    """
+    """
+
+    MULT = 1e9  # convert to nanoseconds
+    N_SAMPLES = 30
+
+    def __init__(self, timer=thread_time, n_samples=None):
+        self._timer = timer
+        self._n_samples = n_samples or self.N_SAMPLES
+        self._start_stops = deque()
+        self._durations = deque()
+        self._cur_start = None
+        self._running_sum = None
+        self._running_fraction = None
+
+    def _add_measurement(self, start, stop):
+        start_stops = self._start_stops
+        durations = self._durations
+        if stop < start or start < start_stops[-1][1]:
+            # Ignore if non-monotonic
+            return
+
+        # Ensure exact running sum computation with integer arithmetic
+        duration = int((stop - start) * self.MULT)
+        start_stops.append((start, stop))
+        durations.append(duration)
+
+        n = len(durations)
+        assert n == len(start_stops)
+        if n >= self._n_samples:
+            if self._running_sum is None:
+                assert n == self._n_samples
+                self._running_sum = sum(durations)
+            else:
+                old_start, old_stop = start_stops.popleft()
+                old_duration = durations.popleft()
+                self._running_sum += duration - old_duration
+                if stop >= old_start:
+                    self._running_fraction = (
+                        self._running_sum / (stop - old_start) / self.MULT
+                    )
+
+    def start_timing(self):
+        assert self._cur_start is None
+        self._cur_start = self._timer()
+
+    def stop_timing(self):
+        stop = self._timer()
+        start = self._cur_start
+        self._cur_start = None
+        assert start is not None
+        self._add_measurement(start, stop)
