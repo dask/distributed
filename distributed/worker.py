@@ -1061,7 +1061,6 @@ class Worker(WorkerBase):
         self.long_running = set()
 
         self.batched_stream = None
-        self.recent_messages_log = deque(maxlen=10000)
         self.target_message_size = 50e6  # 50 MB
 
         self.log = deque(maxlen=100000)
@@ -1154,7 +1153,6 @@ class Worker(WorkerBase):
                 start = time()
 
                 for msg in msgs:
-                    self.recent_messages_log.append(msg)
                     op = msg.pop('op', None)
                     if 'key' in msg:
                         validate_key(msg['key'])
