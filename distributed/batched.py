@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import deque
 import logging
 
 from tornado import gen, locks
@@ -50,7 +49,6 @@ class BatchedSend(object):
         self.batch_count = 0
         self.byte_count = 0
         self.next_deadline = None
-        self.recent_message_log = deque(maxlen=100)
 
     def start(self, comm):
         self.comm = comm
@@ -80,10 +78,6 @@ class BatchedSend(object):
             self.next_deadline = self.loop.time() + self.interval
             try:
                 nbytes = yield self.comm.write(payload)
-                if nbytes < 1e6:
-                    self.recent_message_log.append(payload)
-                else:
-                    self.recent_message_log.append('large-message')
                 self.byte_count += nbytes
             except CommClosedError as e:
                 logger.info("Batched Comm Closed: %s", e)
