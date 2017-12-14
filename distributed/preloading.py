@@ -10,8 +10,8 @@ from .utils import import_file
 logger = logging.getLogger(__name__)
 
 
-def preload_modules(names, parameter=None, file_dir=None):
-    """ Imports modules, handles `dask_setup` and `dask_teardown` functions
+def preload_modules(names, parameter=None, file_dir=None, argv=None):
+    """ Imports modules, handles `dask_setup` and `dask_teardown` functions.
 
     Parameters
     ----------
@@ -19,6 +19,8 @@ def preload_modules(names, parameter=None, file_dir=None):
         Module names or file paths
     parameter: object
         Parameter passed to `dask_setup` and `dask_teardown`
+    argv: [string]
+        List of string arguments from the preload command line specification.
     file_dir: string
         Path of a directory where files should be copied
     """
@@ -46,6 +48,9 @@ def preload_modules(names, parameter=None, file_dir=None):
         dask_setup = getattr(module, 'dask_setup', None)
         dask_teardown = getattr(module, 'dask_teardown', None)
         if dask_setup is not None:
-            dask_setup(parameter)
+            if argv:
+                dask_setup(parameter, argv=argv)
+            else:
+                dask_setup(parameter)
         if dask_teardown is not None:
             atexit.register(dask_teardown, parameter)

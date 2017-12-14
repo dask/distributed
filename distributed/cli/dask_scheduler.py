@@ -60,9 +60,11 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="Directory to place scheduler files")
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process like "foo.bar" or "/path/to/foo.py"')
+@click.option('--preload_argv', type=str, multiple=True,
+              help='Command line arguments passed through to preload modules via `argv`.')
 def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
-         use_xheaders, pid_file, scheduler_file, interface,
-         local_directory, preload, tls_ca_file, tls_cert, tls_key):
+        use_xheaders, pid_file, scheduler_file, interface,
+        local_directory, preload, preload_argv, tls_ca_file, tls_cert, tls_key):
 
     enable_proctitle_on_current()
     enable_proctitle_on_children()
@@ -119,7 +121,7 @@ def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
                           scheduler_file=scheduler_file,
                           security=sec)
     scheduler.start(addr)
-    preload_modules(preload, parameter=scheduler, file_dir=local_directory)
+    preload_modules(preload, parameter=scheduler, file_dir=local_directory, argv=preload_argv)
 
     logger.info('Local Directory: %26s', local_directory)
     logger.info('-' * 47)
