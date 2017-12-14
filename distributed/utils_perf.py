@@ -215,6 +215,8 @@ def enable_gc_diagnosis():
     """
     Ask to enable global GC diagnosis.
     """
+    if PY2:
+        return
     global _gc_diagnosis_users
     with _gc_diagnosis_lock:
         if _gc_diagnosis_users == 0:
@@ -228,6 +230,8 @@ def disable_gc_diagnosis(force=False):
     """
     Ask to disable global GC diagnosis.
     """
+    if PY2:
+        return
     global _gc_diagnosis_users
     with _gc_diagnosis_lock:
         if _gc_diagnosis_users > 0:
