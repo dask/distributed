@@ -96,8 +96,9 @@ def test_gc_diagnosis_cpu_time():
         gc.collect()
         lines = sio.getvalue().splitlines()
         assert len(lines) == 1
-        # More than 80%
-        assert re.match(r"full garbage collections took [89][0-9]% CPU time recently", lines[0])
+        # Between 80% and 100%
+        assert re.match(r"full garbage collections took (100|[89][0-9])% "
+                        r"CPU time recently", lines[0])
 
     with enable_gc_diagnosis_and_log(diag) as sio:
         # Spend half the CPU time doing full GCs
