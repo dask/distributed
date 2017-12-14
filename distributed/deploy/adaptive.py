@@ -140,20 +140,41 @@ class Adaptive(object):
 
         Notes
         -----
-        ``Adaptive.should_scale_down`` always returns True, so we will always
-        attempt to remove workers as determined by
-        ``Scheduler.workers_to_close``.
+        ``Adaptive.should_scale_down`` defaults to dispatching to
+        ``Adaptive.workers_to_close``, returning True if any workers to close
+        are specified.
 
         See Also
         --------
         Scheduler.workers_to_close
         """
-        return len(self.scheduler.workers_to_close()) > 0
+        return len(self.workers_to_close()) > 0
+
+    def workers_to_close(self):
+        """
+        Determine which, if any, workers should potentially be removed from
+        the cluster.
+
+        Returns
+        -------
+        workers: [worker_name]
+
+        Notes
+        -----
+        ``Adaptive.workers_to_close`` dispatches to Scheduler.workers_to_close(),
+        but may be overridden in subclasses.
+
+        See Also
+        --------
+        Scheduler.workers_to_close
+        """
+        return self.scheduler.workers_to_close()
 
     @gen.coroutine
     def _retire_workers(self):
         with log_errors():
-            workers = yield self.scheduler.retire_workers(remove=True,
+            workers = yield self.scheduler.retire_workers(workers=self.workers_to_close(),
+                                                          remove=True,
                                                           close_workers=True)
 
             if workers:
