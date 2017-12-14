@@ -14,6 +14,7 @@ from distributed.security import Security
 from distributed.cli.utils import (check_python_3, uri_from_host_port,
                                    install_signal_handlers)
 from distributed.comm import get_address_host_port
+from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (enable_proctitle_on_children,
                                    enable_proctitle_on_current)
 
@@ -27,7 +28,7 @@ logger = logging.getLogger('distributed.dask_worker')
 pem_file_option_type = click.Path(exists=True, resolve_path=True)
 
 
-@click.command()
+@click.command(context_settings=dict(ignore_unknown_options=True))
 @click.argument('scheduler', type=str, required=False)
 @click.option('--tls-ca-file', type=pem_file_option_type, default=None,
               help="CA cert(s) file for TLS (in PEM format)")
@@ -92,8 +93,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process '
                    'like "foo.bar" or "/path/to/foo.py"')
-@click.option('--preload_argv', type=str, multiple=True,
-              help='Command line arguments passed through to preload modules via `argv`.')
+@click.argument('preload_argv', nargs=-1,
+                type=click.UNPROCESSED, callback=validate_preload_argv)
 def main(scheduler, host, worker_port, listen_address, contact_address,
          nanny_port, nthreads, nprocs, nanny, name,
          memory_limit, pid_file, reconnect, resources, bokeh,

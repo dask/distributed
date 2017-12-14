@@ -60,7 +60,7 @@ class Nanny(ServerNode):
         self.resources = resources
         self.death_timeout = death_timeout
         self.preload = preload
-        self.preload_arv = preload_argv
+        self.preload_argv = preload_argv
 
         self.contact_address = contact_address
         self.memory_terminate_fraction = config.get('worker-memory-terminate', 0.95)
