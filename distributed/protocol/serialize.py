@@ -17,7 +17,7 @@ from .utils import unpack_frames, pack_frames_prelude, frame_split_size
 
 
 serializers = {}
-deserializers = {None: lambda header, frames: pickle.loads(b''.join(frames))}
+deserializers = {None: lambda header, frames: pickle.load_bytelist(frames)}
 
 lazy_registrations = {}
 
@@ -132,7 +132,7 @@ def serialize(x):
     else:
         if _find_lazy_registration(name):
             return serialize(x)  # recurse
-        header, frames = {}, [pickle.dumps(x)]
+        header, frames = {}, pickle.dump_bytelist(x)
 
     return header, frames
 
