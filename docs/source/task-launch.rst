@@ -179,8 +179,7 @@ optimizes for less bandwidth/computation and gathers the results.
     client = Client()  # to change default dask scheduler
     assert fib(4).compute() == 3
 
-Computation of this function will continue on this node after completion of
-``dask.gather``.
+Look at the documentation of ``dask.compute`` for more detail.
 
 ``get_client``
 ~~~~~~~~~~~~~~
@@ -199,15 +198,16 @@ a node.
         client = get_client()
         jobs = client.map(fib, [n-1, n-2])
         secede()  # so we don't take up a scheduling slot
-        out = client.gather(jobs)
-        rejoin()
-        return sum(out)
+        return sum(client.gather(jobs))
 
     client = Client()
     assert fib(4) == 3
 
 Note that if all nodes submit jobs but none call ``secede`` this will lock the
 cluster and no computation will be performed.
+
+``rejoin`` is also available, and may be more advantageous if more work is done
+(and not just a ``return`` statement).
 
 ``dask.worker_client``
 ~~~~~~~~~~~~~~~~~~~~~~
