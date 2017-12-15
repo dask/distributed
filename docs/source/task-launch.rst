@@ -58,7 +58,7 @@ on ``data`` remotely and then break up data into its various elements.
 
 .. code-block:: python
 
-   >>> n = client.submit(len, data)                 # compute number of elements
+   >>> n = client.submit(len, data)            # compute number of elements
    >>> n = n.result()                          # gather n (small) locally
 
    >>> from operator import getitem
@@ -103,7 +103,8 @@ of when the APIs below should be used.
 
 This example is a bit extreme and spends most of its time establishing client
 connections from the worker rather than doing actual work, but does demonstrate
-that even pathological cases function robustly.
+that even pathological cases function robustly. We will use this example later
+on for the various interfaces.
 
 
 Submit tasks from worker
@@ -143,7 +144,6 @@ design considerations for each function:
     * Implemented as a context manager, which provides some ease of use.
     * Will ``secede`` from the current worker, and likely transition to another
       worker.
-    * Connection to the
     * Establishing a connection to the scheduler takes roughly 10–20ms. It's
       wise for the submitted jobs to be several times longer than this.
 
@@ -161,6 +161,9 @@ Policies`_" and "`Scheduling State`_".
 ``dask.compute``
 ~~~~~~~~~~~~~~~~
 
+``dask.compute`` behaves as normal: it submits the functions to the graph,
+optimizes for less bandwidth/computation and gathers the results.
+
 .. code-block:: python
 
     from distributed import Client
@@ -173,9 +176,18 @@ Policies`_" and "`Scheduling State`_".
         a, b = compute(fib(n-1), fib(n-2))
         return a + b
 
+    client = Client()  # to change default dask scheduler
+    assert fib(4).compute() == 3
+
+Computation of this function will continue on this node after completion of
+``dask.gather``.
 
 ``get_client``
 ~~~~~~~~~~~~~~
+
+``get_client`` is a lower-leve interface than ``worker_client``. It exposes
+controls to ``secede`` and ``rejoin`` which can manage the number of workers on
+a node.
 
 .. code-block:: python
 
@@ -186,11 +198,16 @@ Policies`_" and "`Scheduling State`_".
             return n
         client = get_client()
         jobs = client.map(fib, [n-1, n-2])
-        secede()
+        secede()  # so we don't take up a scheduling slot
         out = client.gather(jobs)
         rejoin()
         return sum(out)
 
+    client = Client()
+    assert fib(4) == 3
+
+Note that if all nodes submit jobs but none call ``secede`` this will lock the
+cluster and no computation will be performed.
 
 ``dask.worker_client``
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -203,20 +220,19 @@ worker.
 .. code-block:: python
 
    from distributed import worker_client
+   import time
 
-   def process_all(data):
-       with worker_client() as client:
-           elements = client.scatter(data)
-           futures = client.map(process_element, elements)
-           analysis = client.submit(aggregate, futures)
-           result = analysis.result()
-       return result
+   def fib(n):
+       time.sleep(1)  # tasks are assumed to be long running
+       if n < 2:
+           return n
+        with worker_client() as client:
+            jobs = client.map(fib, [n-2, n-1])
+            out = client.gather(jobs)
+        return sum(out)
 
-    analysis = client.submit(process_all, data)  # spawns many tasks
-
-This approach is somewhat complex but very powerful.  It allows you to spawn
-tasks that themselves act as potentially long-running clients, managing their
-own independent workloads.
+This allows you to spawn tasks that themselves act as potentially long-running
+clients, managing their own independent workloads.
 
 Tasks that invoke ``worker_client`` are conservatively assumed to be *long
 running*.  They can take a long time blocking, waiting for other tasks to
