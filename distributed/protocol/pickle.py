@@ -7,8 +7,10 @@ import cloudpickle
 
 if sys.version_info.major == 2:
     import cPickle as pickle
+    from pickle import load as pyload
 else:
     import pickle
+    from pickle import _load as pyload
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +146,10 @@ def load_bytelist(bytelist):
     try:
         reader = _BytelistFile(bytelist)
         reader.seek(0)
-        return pickle.load(reader)
+        # Use the Python-based Unpickler to avoid a memory-copy when loading
+        # large binary data buffers that back numpy arrays and pandas data
+        # frames.
+        return pyload(reader)
     except Exception:
         logger.info("Failed to deserialize %s", bytelist[0][:10000],
                     exc_info=True)
