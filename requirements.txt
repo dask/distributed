@@ -1,5 +1,5 @@
 click >= 6.6
-cloudpickle >= 0.2.2
+git+git://github.com/cloudpipe/cloudpickle@nocopy-memoryviews#egg=cloudpickle
 dask >= 0.16.0
 msgpack-python
 psutil
