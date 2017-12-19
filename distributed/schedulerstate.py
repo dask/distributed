@@ -27,6 +27,7 @@ BANDWIDTH = config.get('bandwidth', 100e6)
 LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
 
 
+@cython.final
 @cython.cclass
 class ClientState(object):
     """
@@ -67,6 +68,7 @@ class ClientState(object):
         return self.client_key
 
 
+@cython.final
 @cython.cclass
 class WorkerState(object):
     """
@@ -166,6 +168,7 @@ class WorkerState(object):
         return self.worker_key
 
 
+@cython.final
 @cython.cclass
 class TaskState(object):
     """
