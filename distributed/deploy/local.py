@@ -243,6 +243,8 @@ class LocalCluster(object):
             del self.workers[:]
             self._loop_runner.run_sync(self._close, callback_timeout=timeout)
             self._loop_runner.stop()
+        except RuntimeError as e:
+            logger.error("%s", e)
         finally:
             self.status = 'closed'
 
