@@ -18,6 +18,10 @@ from .utils import (All, ignoring, get_ip, get_fileno_limit, log_errors,
                     key_split, validate_key, no_default, DequeHandler)
 
 
+DEFAULT_DATA_SIZE = cython.declare(cython.Py_ssize_t, visibility='public')
+BANDWIDTH = cython.declare(cython.double, visibility='public')
+
+
 logger = logging.getLogger('distributed.scheduler')
 
 # XXX duplicate defs in distributed.scheduler
@@ -491,7 +495,9 @@ class TaskState(object):
         return nbytes if nbytes >= 0 else DEFAULT_DATA_SIZE
 
     @cython.ccall
-    @cython.locals(nbytes=cython.Py_ssize_t)
+    @cython.locals(nbytes=cython.Py_ssize_t,
+                   diff=cython.Py_ssize_t,
+                   ws=WorkerState)
     def set_nbytes(self, nbytes):
         old_nbytes = self.nbytes
         diff = nbytes - (old_nbytes or 0)
@@ -532,6 +538,8 @@ class BaseSchedulerState(object):
         saturated = cython.declare(set, visibility='public')
         total_occupancy = cython.declare(cython.double, visibility='public')
 
+        validate = cython.declare(cython.bint, visibility='public')
+
     def __init__(self):
         self.tasks = dict()
         self.unrunnable = set()
@@ -570,7 +578,8 @@ class BaseSchedulerState(object):
     #####################
 
     @cython.ccall
-    @cython.locals(ts=TaskState, ws=WorkerState)
+    @cython.locals(ts=TaskState, ws=WorkerState,
+                   duration=cython.double)
     def _remove_from_processing(self, ts, send_worker_msg=None):
         """
         Remove *ts* from the set of processing tasks.
@@ -657,7 +666,7 @@ class BaseSchedulerState(object):
             recommendations = OrderedDict()
 
             for dts in ts.dependencies:
-                if dts.exception_blame:
+                if dts.exception_blame is not None:
                     ts.exception_blame = dts.exception_blame
                     recommendations[key] = 'erred'
                     return recommendations
@@ -735,7 +744,8 @@ class BaseSchedulerState(object):
             raise
 
     @cython.ccall
-    @cython.locals(ts=TaskState, ws=WorkerState, dts=TaskState, cs=ClientState)
+    @cython.locals(ts=TaskState, ws=WorkerState, dts=TaskState, cs=ClientState,
+                   duration=cython.double, comm=cython.double)
     def transition_waiting_processing(self, key):
         try:
             ts = self.tasks[key]
@@ -857,6 +867,8 @@ class BaseSchedulerState(object):
             #############################
             if compute_start and ws.processing.get(ts, True):
                 cython.declare(avg_duration=cython.double,
+                               old_duration=cython.double,
+                               new_duration=cython.double,
                                old=cython.double,
                                comm=cython.double,
                                wws=WorkerState,
@@ -1023,7 +1035,7 @@ class BaseSchedulerState(object):
 
             if ts.has_lost_dependencies:
                 recommendations[key] = 'forgotten'
-            elif not ts.exception_blame and (ts.who_wants or ts.waiters):
+            elif ts.exception_blame is None and (ts.who_wants or ts.waiters):
                 recommendations[key] = 'waiting'
             else:
                 ts.waiters.clear()
@@ -1385,14 +1397,15 @@ class BaseSchedulerState(object):
     @cython.ccall
     @cython.returns(cython.double)
     @cython.locals(ts=TaskState, ws=WorkerState, dts=TaskState, cs=ClientState,
-                   total=cython.Py_ssize_t)
+                   total=cython.Py_ssize_t, missing_deps=set)
     def get_comm_cost(self, ts, ws):
         """
         Get the estimated communication cost (in s.) to compute the task
         on the given worker.
         """
         total = 0
-        for dts in ts.dependencies - ws.has_what:
+        missing_deps = ts.dependencies - ws.has_what
+        for dts in missing_deps:
             total += dts.nbytes
         return total / BANDWIDTH
 
