@@ -116,9 +116,9 @@ object that connects to the scheduler. There are three options for this:
 dask.delayed
 ~~~~~~~~~~~~
 
-`dask.delayed`_ behaves as normal: it submits the functions to the graph,
-optimizes for less bandwidth/computation and gathers the results.
-For more detail, see `dask.delayed`_.
+The Dask delayed behaves as normal: it submits the functions to the graph,
+optimizes for less bandwidth/computation and gathers the results.  For more
+detail, see `dask.delayed`_.
 
 .. code-block:: python
 
@@ -149,9 +149,9 @@ For more detail, see `dask.delayed`_.
 Getting the client on a worker
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The :py:func:`distributed.get_client` function provides a normal Client object that gives full
-access to the dask cluster, including the ability to submit, scatter, and
-gather results.
+The :py:func:`get_client <distributed.get_client>` function provides a normal
+Client object that gives full access to the dask cluster, including the ability
+to submit, scatter, and gather results.
 
 .. code-block:: python
 
@@ -177,9 +177,10 @@ once. Each task does not communicate to the scheduler that they are waiting on
 results and are free to compute other tasks. This can deadlock the cluster if
 every scheduling slot is running a task and they all request more tasks.
 
-To avoid this deadlocking issue we can use :py:func:`distributed.secede` and
-:py:func:`distributed.rejoin`. These functions will remove and rejoin the
-current task from the cluster respectively.
+To avoid this deadlocking issue we can use :py:func:`secede
+<distributed.secede>` and :py:func:`rejoin <distributed.rejoin>`. These
+functions will remove and rejoin the current task from the cluster
+respectively.
 
 .. code-block:: python
 
@@ -197,9 +198,10 @@ current task from the cluster respectively.
 Connection with context manager
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The :py:func:`distributed.worker_client` function performs the same task as
-:py:func:`distributed.get_client`, but is implemented as a context manager.
-Using ``worker_client`` as a context manager ensures proper cleanup on the
+The :py:func:`worker_client <distributed.worker_client>` function performs the
+same task as :py:func:`get_client <distributed.get_client>`, but is implemented
+as a context manager.  Using :py:func:`worker_client
+<distributed.worker_client>` as a context manager ensures proper cleanup on the
 worker.
 
 .. code-block:: python
@@ -222,11 +224,11 @@ worker.
         result = future.result()
         print(result)  # prints "55"
 
-Tasks that invoke ``worker_client`` are conservatively assumed to be *long
+Tasks that invoke :py:func:`worker_client <distributed.worker_client>` are conservatively assumed to be *long
 running*.  They can take a long time blocking, waiting for other tasks to
 finish, gathering results, etc. In order to avoid having them take up
 processing slots the following actions occur whenever a task invokes
-``worker_client``.
+:py:func:`worker_client <distributed.worker_client>`.
 
 1.  The thread on the worker running this function *secedes* from the thread
     pool and goes off on its own.  This allows the thread pool to populate that
