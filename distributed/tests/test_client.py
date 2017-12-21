@@ -271,11 +271,21 @@ def test_persist_retries(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_future_repr(c, s, a, b):
+    x = c.submit(inc, 10)
     for func in [repr, lambda x: x._repr_html_()]:
-        x = c.submit(inc, 10)
         assert str(x.key) in func(x)
         assert str(x.status) in func(x)
         assert str(x.status) in repr(c.futures[x.key])
+
+
+@gen_cluster(client=True)
+def test_future_tuple_repr(c, s, a, b):
+    da = pytest.importorskip('dask.array')
+    y = da.arange(10, chunks=(5,)).persist()
+    f = futures_of(y)[0]
+    for func in [repr, lambda x: x._repr_html_()]:
+        for k in f.key:
+            assert str(k) in func(f)
 
 
 @gen_cluster(client=True)
@@ -425,22 +435,19 @@ def test_thread(loop):
 
 def test_sync_exceptions(loop):
     with cluster() as (s, [a, b]):
-        c = Client(s['address'], loop=loop)
+        with Client(s['address'], loop=loop) as c:
+            x = c.submit(div, 10, 2)
+            assert x.result() == 5
 
-        x = c.submit(div, 10, 2)
-        assert x.result() == 5
+            y = c.submit(div, 10, 0)
+            try:
+                y.result()
+                assert False
+            except ZeroDivisionError:
+                pass
 
-        y = c.submit(div, 10, 0)
-        try:
-            y.result()
-            assert False
-        except ZeroDivisionError:
-            pass
-
-        z = c.submit(div, 10, 5)
-        assert z.result() == 2
-
-        c.close()
+            z = c.submit(div, 10, 5)
+            assert z.result() == 2
 
 
 @gen_cluster(client=True)
@@ -4847,17 +4854,17 @@ def test_quiet_quit_when_cluster_leaves(loop_in_thread):
     from distributed import LocalCluster
 
     loop = loop_in_thread
-    cluster = LocalCluster(loop=loop, scheduler_port=0, diagnostics_port=None,
-                           silence_logs=False)
-    with captured_logger('distributed.comm') as sio:
-        with Client(cluster, loop=loop) as client:
-            futures = client.map(lambda x: x + 1, range(10))
-            sleep(0.05)
-            cluster.close()
-            sleep(0.05)
+    with LocalCluster(loop=loop, scheduler_port=0, diagnostics_port=None,
+                      silence_logs=False) as cluster:
+        with captured_logger('distributed.comm') as sio:
+            with Client(cluster, loop=loop) as client:
+                futures = client.map(lambda x: x + 1, range(10))
+                sleep(0.05)
+                cluster.close()
+                sleep(0.05)
 
-    text = sio.getvalue()
-    assert not text
+        text = sio.getvalue()
+        assert not text
 
 
 def test_warn_executor(loop):
@@ -5093,6 +5100,27 @@ def test_config_scheduler_address(s, a, b):
 
     del config['scheduler-address']
     yield c.close()
+
+
+@gen_cluster(client=True)
+def test_warn_when_submitting_large_values(c, s, a, b):
+    with warnings.catch_warnings(record=True) as record:
+        future = c.submit(lambda x: x + 1, b'0' * 2000000)
+
+    text = str(record[0].message)
+    assert '2.00 MB' in text
+    assert 'large' in text
+    assert '...' in text
+    assert "'000" in text
+    assert "000'" in text
+    assert len(text) < 2000
+
+    with warnings.catch_warnings(record=True) as record:
+        data = b'0' * 2000000
+        for i in range(10):
+            future = c.submit(lambda x, y: x, data, i)
+
+    assert len(record) < 2
 
 
 if sys.version_info >= (3, 5):

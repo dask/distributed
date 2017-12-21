@@ -36,17 +36,17 @@ def test_simple(loop):
 
 
 def test_close_twice():
-    cluster = LocalCluster()
-    with Client(cluster.scheduler_address) as client:
-        f = client.map(inc, range(100))
-        client.gather(f)
-    with captured_logger('tornado.application') as log:
-        cluster.close()
-        cluster.close()
-        sleep(0.5)
-    log = log.getvalue()
-    print(log)
-    assert not log
+    with LocalCluster() as cluster:
+        with Client(cluster.scheduler_address) as client:
+            f = client.map(inc, range(100))
+            client.gather(f)
+        with captured_logger('tornado.application') as log:
+            cluster.close()
+            cluster.close()
+            sleep(0.5)
+        log = log.getvalue()
+        print(log)
+        assert not log
 
 
 @pytest.mark.skipif('sys.version_info[0] == 2', reason='multi-loop')
@@ -190,6 +190,14 @@ def test_worker_params():
     with LocalCluster(n_workers=2, scheduler_port=0, silence_logs=False,
                       diagnostics_port=None, memory_limit=500) as c:
         assert [w.memory_limit for w in c.workers] == [500] * 2
+
+
+def test_memory_limit_none():
+    with LocalCluster(n_workers=2, scheduler_port=0, silence_logs=False,
+                      processes=False,  diagnostics_port=None, memory_limit=None) as c:
+        w = c.workers[0]
+        assert type(w.data) is dict
+        assert w.memory_limit is None
 
 
 def test_cleanup():
