@@ -1089,6 +1089,9 @@ class Client(Node):
             may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if the task fails
+        priority: Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
 
         Examples
         --------
@@ -1110,6 +1113,7 @@ class Client(Node):
         workers = kwargs.pop('workers', None)
         resources = kwargs.pop('resources', None)
         retries = kwargs.pop('retries', None)
+        priority = kwargs.pop('priority', 0)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers not in (True, False, None):
@@ -1146,6 +1150,7 @@ class Client(Node):
 
         futures = self._graph_to_futures(dsk, [skey], restrictions,
                                          loose_restrictions, priority={skey: 0},
+                                         user_priority=priority,
                                          resources={skey: resources} if resources else None,
                                          retries={skey: retries} if retries else None)
 
@@ -1941,7 +1946,7 @@ class Client(Node):
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
                           loose_restrictions=None, priority=None,
-                          resources=None, retries=None):
+                          user_priority=0, resources=None, retries=None):
         with self._lock:
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
@@ -1986,6 +1991,7 @@ class Client(Node):
                                      'restrictions': restrictions or {},
                                      'loose_restrictions': loose_restrictions,
                                      'priority': priority,
+                                     'user_priority': user_priority,
                                      'resources': resources,
                                      'submitting_task': getattr(thread_state, 'key', None),
                                      'retries': retries,
