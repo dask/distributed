@@ -199,6 +199,10 @@ def _workspace_concurrency(base_dir, purged_q, err_q, stop_evt):
 
 
 def _test_workspace_concurrency(tmpdir, timeout, max_procs):
+    """
+    WorkSpace concurrency test.  We merely check that no exception or
+    deadlock happens.
+    """
     base_dir = str(tmpdir)
 
     err_q = mp_context.Queue()
@@ -244,6 +248,8 @@ def _test_workspace_concurrency(tmpdir, timeout, max_procs):
             n_purged += purged_q.get_nowait()
     except Empty:
         pass
+    # We attempted to purge all directories at some point
+    assert n_purged >= n_created > 0
     return n_created, n_purged
 
 
@@ -253,5 +259,5 @@ def test_workspace_concurrency(tmpdir):
 
 @slow
 def test_workspace_concurrency_intense(tmpdir):
-    n_purged, n_created = _test_workspace_concurrency(tmpdir, 8.0, 16)
-    assert n_purged >= n_created / 10 > 100
+    n_created, n_purged = _test_workspace_concurrency(tmpdir, 8.0, 16)
+    assert n_created >= 100
