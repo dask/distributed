@@ -90,9 +90,7 @@ submitting tasks from tasks.
        b = fib(n - 2)
        return a + b
 
-   if __name__ == "__main__":
-       result = fib(10)
-       print(result)  # prints "55"
+   print(fib(10))  # prints "55"
 
 We will use this example to show the different interfaces.
 
@@ -138,11 +136,11 @@ detail, see `dask.delayed`_.
         return a + b
 
     if __name__ == "__main__":
-        # these features require the newer dask.distributed scheduler
+        # these features require the dask.distributed scheduler
         client = Client()
 
         result = fib(10).compute()
-        print(result)  # print "55"
+        print(result)  # prints "55"
 
 .. _dask.delayed: https://dask.pydata.org/en/latest/delayed.html
 
@@ -206,7 +204,7 @@ worker.
 
 .. code-block:: python
 
-    from distributed import worker_client
+    from dask.distributed import worker_client
 
 
     def fib(n):
@@ -224,11 +222,11 @@ worker.
         result = future.result()
         print(result)  # prints "55"
 
-Tasks that invoke :py:func:`worker_client <distributed.worker_client>` are conservatively assumed to be *long
-running*.  They can take a long time blocking, waiting for other tasks to
-finish, gathering results, etc. In order to avoid having them take up
-processing slots the following actions occur whenever a task invokes
-:py:func:`worker_client <distributed.worker_client>`.
+Tasks that invoke :py:func:`worker_client <distributed.worker_client>` are
+conservatively assumed to be *long running*.  They can take a long time,
+waiting for other tasks to finish, gathering results, etc. In order to avoid
+having them take up processing slots the following actions occur whenever a
+task invokes :py:func:`worker_client <distributed.worker_client>`.
 
 1.  The thread on the worker running this function *secedes* from the thread
     pool and goes off on its own.  This allows the thread pool to populate that
@@ -238,6 +236,6 @@ processing slots the following actions occur whenever a task invokes
     allowed number of tasks by one.  This likewise lets the scheduler allocate
     more tasks to this worker, not counting this long running task against it.
 
-Establishing a connection to the scheduler takes on the order of 10—20 ms and
-so it is wise for computations that use this feature to be at least a few times
+Establishing a connection to the scheduler takes a few milliseconds and so it
+is wise for computations that use this feature to be at least a few times
 longer in duration than this.
