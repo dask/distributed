@@ -176,24 +176,40 @@ class WorkerState(object):
 
     __slots__ = (
         'address',
-        'ncores',
-        'resources',
-        'used_resources',
-        'nbytes',
         'has_what',
-        'processing',
+        'info',
+        'memory_limit',
+        'name',
+        'nbytes',
+        'ncores',
         'occupancy',
-        )
+        'processing',
+        'resources',
+        'time_delay',
+        'used_resources',
+    )
 
-    def __init__(self, worker, ncores):
+    def __init__(self, worker, ncores, memory_limit, name=None):
         self.address = worker
+        self.has_what = set()
+        self.memory_limit = memory_limit
+        self.name = name
+        self.nbytes = 0
         self.ncores = ncores
+        self.occupancy = 0
+        self.processing = dict()
         self.resources = {}
         self.used_resources = {}
-        self.nbytes = 0
-        self.occupancy = 0
-        self.processing = {}
-        self.has_what = set()
+
+        self.info = {'name': name,
+                     'memory_limit': memory_limit,
+                     'host': self.host,
+                     'resources': self.resources,
+                     'ncores': self.ncores}  # for backwards compatibility
+
+    @property
+    def host(self):
+        return get_address_host(self.address)
 
     def __repr__(self):
         return "<Worker %r>" % (self.address,)
@@ -668,8 +684,6 @@ class Scheduler(ServerNode):
     * **saturated:** ``{WorkerState}``:
         Set of workers that are not over-utilized
 
-    * **worker_info:** ``{worker: {str: data}}``:
-        Information about each worker
     * **host_info:** ``{hostname: dict}``:
         Information about each worker host
 
@@ -808,6 +822,7 @@ class Scheduler(ServerNode):
                 ('worker_resources', 'resources', None),
                 ('used_resources', 'used_resources', None),
                 ('occupancy', 'occupancy', None),
+                ('worker_info', 'info', None),
                 ('processing', 'processing', _legacy_task_key_dict),
                 ('has_what', 'has_what', _legacy_task_key_set),
                 ]:
@@ -822,15 +837,13 @@ class Scheduler(ServerNode):
 
         self.total_ncores = 0
         self.total_occupancy = 0
-        self.worker_info = dict()
         self.host_info = defaultdict(dict)
         self.resources = defaultdict(dict)
         self.aliases = dict()
 
         self._task_state_collections = [self.unrunnable]
 
-        self._worker_collections = [self.workers,
-                                    self.worker_info, self.host_info,
+        self._worker_collections = [self.workers, self.host_info,
                                     self.resources, self.aliases]
 
         self.extensions = {}
@@ -941,12 +954,12 @@ class Scheduler(ServerNode):
         Get the (host, port) address of the named service on the *worker*.
         Returns None if the service doesn't exist.
         """
-        info = self.worker_info[worker]
-        port = info['services'].get(service_name)
+        ws = self.workers[worker]
+        port = ws.info['services'].get(service_name)
         if port is None:
             return None
         else:
-            return info['host'], port
+            return ws.info['host'], port
 
     def get_versions(self, comm):
         """ Basic information about ourselves and our cluster """
@@ -1129,44 +1142,40 @@ class Scheduler(ServerNode):
 
     def add_worker(self, comm=None, address=None, keys=(), ncores=None,
                    name=None, resolve_address=True, nbytes=None, now=None,
-                   resources=None, host_info=None, **info):
+                   resources=None, host_info=None, memory_limit=None, **info):
         """ Add a new worker to the cluster """
         with log_errors():
             local_now = time()
             now = now or time()
             info = info or {}
             host_info = host_info or {}
+            info['last-seen'] = time()
 
             address = self.coerce_address(address, resolve_address)
             host = get_address_host(address)
             self.host_info[host]['last-seen'] = local_now
+            name = name or address
 
             address = normalize_address(address)
 
             ws = self.workers.get(address)
             if ws is None:
-                ws = self.workers[address] = WorkerState(address, ncores)
+                ws = WorkerState(address, ncores, memory_limit, name)
+                self.workers[address] = ws
                 existing = False
             else:
                 existing = True
 
-            if address not in self.worker_info:
-                self.worker_info[address] = dict()
-
             if info:
-                self.worker_info[address].update(info)
+                ws.info.update(info)
 
             if host_info:
                 self.host_info[host].update(host_info)
 
-            self.worker_info[address]['ncores'] = ncores
-
             delay = time() - now
-            self.worker_info[address]['time-delay'] = delay
-            self.worker_info[address]['last-seen'] = time()
+            ws.time_delay = delay
             if resources:
                 self.add_resources(worker=address, resources=resources)
-                self.worker_info[address]['resources'] = resources
 
             if existing:
                 self.log_event(address, merge({'action': 'heartbeat'}, info))
@@ -1174,7 +1183,6 @@ class Scheduler(ServerNode):
                         'time': time(),
                         'heartbeat-interval': heartbeat_interval(len(self.workers))}
 
-            name = name or address
             if name in self.aliases:
                 return {'status': 'error',
                         'message': 'name taken, %s' % name,
@@ -1188,8 +1196,7 @@ class Scheduler(ServerNode):
 
             self.total_ncores += ncores
             self.aliases[name] = address
-            self.worker_info[address]['name'] = name
-            self.worker_info[address]['host'] = host
+            ws.name = name
 
             # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot exist before this.
             self.check_idle_saturated(ws)
@@ -1530,8 +1537,7 @@ class Scheduler(ServerNode):
                 del self.host_info[host]
 
             del self.worker_comms[address]
-            del self.aliases[self.worker_info[address]['name']]
-            del self.worker_info[address]
+            del self.aliases[ws.name]
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
@@ -1734,7 +1740,6 @@ class Scheduler(ServerNode):
         validate_state(self.tasks, self.workers, self.clients)
 
         if not (set(self.workers) ==
-                set(self.worker_info) ==
                 set(self.worker_comms)):
             raise ValueError("Workers not the same in all collections")
 
@@ -2082,7 +2087,7 @@ class Scheduler(ServerNode):
                 if not isinstance(msgs, list):
                     msgs = [msgs]
 
-                if worker in self.worker_info and not comm.closed():
+                if worker in self.workers and not comm.closed():
                     self.counters['worker-message-length'].add(len(msgs))
                     for msg in msgs:
                         if msg == 'OK':  # from close
@@ -2571,8 +2576,8 @@ class Scheduler(ServerNode):
             if all(ws.processing for ws in self.workers.values()):
                 return []
 
-            limit_bytes = {w: self.worker_info[w]['memory_limit']
-                           for w in self.worker_info}
+            limit_bytes = {ws.address: ws.memory_limit
+                           for ws in self.workers.values()}
 
             limit = sum(limit_bytes.values())
             total = sum(ws.nbytes for ws in self.workers.values())
@@ -2670,7 +2675,7 @@ class Scheduler(ServerNode):
         This should not be used in practice and is mostly here for legacy
         reasons.  However, it is sent by workers from time to time.
         """
-        if worker not in self.worker_info:
+        if worker not in self.workers:
             return 'not found'
         ws = self.workers[worker]
         for key in keys:
@@ -3224,7 +3229,6 @@ class Scheduler(ServerNode):
             #############################
             if compute_start and ws.processing.get(ts, True):
                 # Update average task duration for worker
-                info = self.worker_info[worker]
                 prefix = ts.prefix
                 old_duration = self.task_duration.get(prefix, 0)
                 new_duration = compute_stop - compute_start
@@ -3244,8 +3248,6 @@ class Scheduler(ServerNode):
                         wws.processing[tts] = avg_duration + comm
                         wws.occupancy += avg_duration + comm - old
                         self.total_occupancy += avg_duration + comm - old
-
-                info['last-task'] = compute_stop
 
             ############################
             # Update State Information #
@@ -3780,8 +3782,7 @@ class Scheduler(ServerNode):
         s = True
 
         if ts.worker_restrictions:
-            s = {w for w in ts.worker_restrictions
-                 if w in self.worker_info}
+            s = {w for w in ts.worker_restrictions if w in self.workers}
 
         if ts.host_restrictions:
             # Resolve the alias here rather than early, for the worker
@@ -3829,7 +3830,8 @@ class Scheduler(ServerNode):
 
     def add_resources(self, stream=None, worker=None, resources=None):
         ws = self.workers[worker]
-        ws.resources = resources or {}
+        if resources:
+            ws.resources.update(resources)
         ws.used_resources = {}
         for resource, quantity in ws.resources.items():
             ws.used_resources[resource] = 0
@@ -3869,7 +3871,7 @@ class Scheduler(ServerNode):
         Coerce the hostname of a worker.
         """
         if host in self.aliases:
-            return self.worker_info[self.aliases[host]]['host']
+            return self.workers[self.aliases[host]].host
         else:
             return host
 
