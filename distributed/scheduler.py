@@ -2603,8 +2603,6 @@ class Scheduler(ServerNode):
 
             groups = groupby(key, self.workers.values())
 
-            logger.info("workers_by_group: %s", groups)
-
             limit_bytes = {k: sum(ws.memory_limit for ws in v)
                            for k, v in groups.items()}
             group_bytes = {k: sum(ws.nbytes for ws in v)
@@ -2625,7 +2623,11 @@ class Scheduler(ServerNode):
                 else:
                     break
 
-            return [ws.address for g in to_close for ws in groups[g]]
+            result = [ws.address for g in to_close for ws in groups[g]]
+            if result:
+                logger.info("Suggest closing workers: %s", result)
+
+            return result
 
     @gen.coroutine
     def retire_workers(self, comm=None, workers=None, remove=True, close=False,
