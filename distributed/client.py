@@ -1131,24 +1131,6 @@ class Client(Node):
 
         return futures[skey]
 
-    def _threaded_map(self, q_out, func, qs_in, **kwargs):
-        """ Internal function for mapping Queue """
-        if isqueue(qs_in[0]):
-            get = pyQueue.get
-        elif isinstance(qs_in[0], Iterator):
-            get = next
-        else:
-            raise NotImplementedError()
-
-        while True:
-            try:
-                args = [get(q) for q in qs_in]
-            except StopIteration as e:
-                q_out.put(e)
-                break
-            f = self.submit(func, *args, **kwargs)
-            q_out.put(f)
-
     def map(self, func, *iterables, **kwargs):
         """ Map a function on a sequence of arguments
 
@@ -1184,21 +1166,6 @@ class Client(Node):
         """
         if not callable(func):
             raise TypeError("First input to map must be a callable function")
-
-        if (all(map(isqueue, iterables)) or
-                all(isinstance(i, Iterator) for i in iterables)):
-            maxsize = kwargs.pop('maxsize', 0)
-            q_out = pyQueue(maxsize=maxsize)
-            t = threading.Thread(target=self._threaded_map,
-                                 name="Threaded map()",
-                                 args=(q_out, func, iterables),
-                                 kwargs=kwargs)
-            t.daemon = True
-            t.start()
-            if isqueue(iterables[0]):
-                return q_out
-            else:
-                return queue_to_iterator(q_out)
 
         key = kwargs.pop('key', None)
         key = key or funcname(func)
@@ -1367,19 +1334,6 @@ class Client(Node):
         result = pack_data(futures2, merge(data, bad_data))
         raise gen.Return(result)
 
-    def _threaded_gather(self, qin, qout, **kwargs):
-        """ Internal function for gathering Queue """
-        while True:
-            L = [qin.get()]
-            while qin.empty():
-                try:
-                    L.append(qin.get_nowait())
-                except Empty:
-                    break
-            results = self.gather(L, **kwargs)
-            for item in results:
-                qout.put(item)
-
     def gather(self, futures, errors='raise', maxsize=0, direct=None,
                asynchronous=None):
         """ Gather futures from distributed memory
@@ -1422,26 +1376,13 @@ class Client(Node):
         --------
         Client.scatter: Send data out to cluster
         """
-        if isqueue(futures):
-            qout = pyQueue(maxsize=maxsize)
-            t = threading.Thread(target=self._threaded_gather,
-                                 name="Threaded gather()",
-                                 args=(futures, qout),
-                                 kwargs={'errors': errors, 'direct': direct})
-            t.daemon = True
-            t.start()
-            return qout
-        elif isinstance(futures, Iterator):
-            return (self.gather(f, errors=errors, direct=direct)
-                    for f in futures)
+        if hasattr(thread_state, 'execution_state'):  # within worker task
+            local_worker = thread_state.execution_state['worker']
         else:
-            if hasattr(thread_state, 'execution_state'):  # within worker task
-                local_worker = thread_state.execution_state['worker']
-            else:
-                local_worker = None
-            return self.sync(self._gather, futures, errors=errors,
-                             direct=direct, local_worker=local_worker,
-                             asynchronous=asynchronous)
+            local_worker = None
+        return self.sync(self._gather, futures, errors=errors,
+                         direct=direct, local_worker=local_worker,
+                         asynchronous=asynchronous)
 
     @gen.coroutine
     def _scatter(self, data, workers=None, broadcast=False, direct=None,
@@ -1535,27 +1476,6 @@ class Client(Node):
             out = list(out.values())[0]
         raise gen.Return(out)
 
-    def _threaded_scatter(self, q_or_i, qout, **kwargs):
-        """ Internal function for scattering Iterable/Queue data """
-        while True:
-            if isqueue(q_or_i):
-                L = [q_or_i.get()]
-                while not q_or_i.empty():
-                    try:
-                        L.append(q_or_i.get_nowait())
-                    except Empty:
-                        break
-            else:
-                try:
-                    L = [next(q_or_i)]
-                except StopIteration as e:
-                    qout.put(e)
-                    break
-
-            futures = self.scatter(L, **kwargs)
-            for future in futures:
-                qout.put(future)
-
     def scatter(self, data, workers=None, broadcast=False, direct=None,
                 hash=True, maxsize=0, timeout=3, asynchronous=None):
         """ Scatter data into distributed memory
@@ -1623,31 +1543,14 @@ class Client(Node):
         --------
         Client.gather: Gather data back to local process
         """
-        if isqueue(data) or isinstance(data, Iterator):
-            logger.debug("Starting thread for streaming data")
-            qout = pyQueue(maxsize=maxsize)
-
-            t = threading.Thread(target=self._threaded_scatter,
-                                 name="Threaded scatter()",
-                                 args=(data, qout),
-                                 kwargs={'workers': workers,
-                                         'broadcast': broadcast})
-            t.daemon = True
-            t.start()
-
-            if isqueue(data):
-                return qout
-            else:
-                return queue_to_iterator(qout)
+        if hasattr(thread_state, 'execution_state'):  # within worker task
+            local_worker = thread_state.execution_state['worker']
         else:
-            if hasattr(thread_state, 'execution_state'):  # within worker task
-                local_worker = thread_state.execution_state['worker']
-            else:
-                local_worker = None
-            return self.sync(self._scatter, data, workers=workers,
-                             broadcast=broadcast, direct=direct,
-                             local_worker=local_worker, timeout=timeout,
-                             asynchronous=asynchronous, hash=hash)
+            local_worker = None
+        return self.sync(self._scatter, data, workers=workers,
+                         broadcast=broadcast, direct=direct,
+                         local_worker=local_worker, timeout=timeout,
+                         asynchronous=asynchronous, hash=hash)
 
     @gen.coroutine
     def _cancel(self, futures, force=False):
