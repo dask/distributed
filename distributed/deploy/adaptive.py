@@ -25,6 +25,8 @@ class Adaptive(object):
         Affects quickly to adapt to high tasks per worker loads
     scale_factor : int, default 2
         Factor to scale by when it's determined additional workers are needed
+    **kwargs:
+        Extra parameters to pass to Scheduler.workers_to_close
 
     Examples
     --------
@@ -47,7 +49,7 @@ class Adaptive(object):
     '''
 
     def __init__(self, scheduler, cluster, interval=1000, startup_cost=1,
-                 scale_factor=2):
+                 scale_factor=2, **kwargs):
         self.scheduler = scheduler
         self.cluster = cluster
         self.startup_cost = startup_cost
@@ -55,6 +57,7 @@ class Adaptive(object):
         self._adapt_callback = PeriodicCallback(self._adapt, interval)
         self.scheduler.loop.add_callback(self._adapt_callback.start)
         self._adapting = False
+        self._workers_to_close_kwargs = kwargs
 
     def needs_cpu(self):
         """
@@ -150,7 +153,7 @@ class Adaptive(object):
         """
         return len(self.workers_to_close()) > 0
 
-    def workers_to_close(self):
+    def workers_to_close(self, **kwargs):
         """
         Determine which, if any, workers should potentially be removed from
         the cluster.
@@ -168,7 +171,9 @@ class Adaptive(object):
         --------
         Scheduler.workers_to_close
         """
-        return self.scheduler.workers_to_close()
+        kw = dict(self._workers_to_close_kwargs)
+        kw.update(kwargs)
+        return self.scheduler.workers_to_close(**kw)
 
     @gen.coroutine
     def _retire_workers(self):

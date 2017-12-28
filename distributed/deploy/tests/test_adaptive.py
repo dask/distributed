@@ -26,6 +26,7 @@ def test_get_scale_up_kwargs(loop):
             assert c.ncores()
             assert alc.get_scale_up_kwargs() == {'n': 3}
 
+
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test_simultaneous_scale_up_and_down(c, s, *workers):
     class TestAdaptive(Adaptive):
