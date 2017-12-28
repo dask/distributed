@@ -1139,7 +1139,7 @@ class Client(Node):
         Parameters
         ----------
         func: callable
-        iterables: Iterables, Iterators, or Queues
+        iterables: Iterables or Iterators
         key: str, list
             Prefix for task names if string.  Explicit names if list.
         pure: bool (defaults to True)
@@ -1157,8 +1157,7 @@ class Client(Node):
 
         Returns
         -------
-        List, iterator, or Queue of futures, depending on the type of the
-        inputs.
+        List or iterator of futures, depending on the type of the inputs.
 
         See also
         --------
@@ -1345,7 +1344,7 @@ class Client(Node):
         ----------
         futures: Collection of futures
             This can be a possibly nested collection of Future objects.
-            Collections can be lists, sets, iterators, queues or dictionaries
+            Collections can be lists, sets or dictionaries.
         errors: string
             Either 'raise' or 'skip' if we should raise if a future has erred
             or skip its inclusion in the output collection
@@ -1367,10 +1366,6 @@ class Client(Node):
         3
         >>> c.gather([x, [x], x])  # support lists and dicts # doctest: +SKIP
         [3, [3], 3]
-
-        >>> seq = c.gather(iter([x, x]))  # support iterators # doctest: +SKIP
-        >>> next(seq)  # doctest: +SKIP
-        3
 
         See Also
         --------
@@ -1487,7 +1482,7 @@ class Client(Node):
 
         Parameters
         ----------
-        data: list, iterator, dict, Queue, or object
+        data: list, dict, or object
             Data to scatter out to workers.  Output type matches input type.
         workers: list of tuples (optional)
             Optionally constrain locations of data.
@@ -1507,7 +1502,7 @@ class Client(Node):
 
         Returns
         -------
-        List, dict, iterator, or queue of futures matching the type of input.
+        List, dict, or instance of future(s) matching the type of input.
 
         Examples
         --------
@@ -1528,12 +1523,6 @@ class Client(Node):
         Constrain location of data to subset of workers
 
         >>> c.scatter([1, 2, 3], workers=[('hostname', 8788)])   # doctest: +SKIP
-
-        Handle streaming sequences of data with iterators or queues
-
-        >>> seq = c.scatter(iter([1, 2, 3]))  # doctest: +SKIP
-        >>> next(seq)  # doctest: +SKIP
-        <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
 
         Broadcast data to all workers
 

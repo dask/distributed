@@ -1,3 +1,7 @@
+.. XXX:
+   page removed from ToC as the corresponding functionality was removed
+   (see https://github.com/dask/distributed/pull/1670)
+
 Data Streams with Queues
 ========================
 

@@ -111,7 +111,6 @@ Contents
    ipython
    joblib
    publish
-   queues
    resources
    submitting-applications
    task-launch
