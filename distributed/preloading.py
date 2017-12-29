@@ -13,6 +13,10 @@ logger = logging.getLogger(__name__)
 
 def validate_preload_argv(ctx, param, value):
     """Click option callback providing validation of preload subcommand arguments."""
+    if not value and not ctx.params.get("preload", None):
+        # No preload argv provided and no preload modules specified.
+        return value
+
     if value and not ctx.params.get("preload", None):
         raise click.UsageError("Additional preload arguments specified without --preload target.")
 
@@ -109,7 +113,7 @@ def preload_modules(names, parameter=None, file_dir=None, argv=None):
         # handle special functions
         if interface["dask_command"]:
             ctx = click.Context(interface["dask_command"], allow_extra_args=False)
-            interface["dask_command"].main(argv)
+            interface["dask_command"].main(argv, standalone_mode=False)
 
         if interface["dask_setup"]:
             interface["dask_setup"](parameter)

@@ -90,7 +90,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="Seconds to wait for a scheduler before closing")
 @click.option('--bokeh-prefix', type=str, default=None,
               help="Prefix for the bokeh app")
-@click.option('--preload', type=str, multiple=True,
+@click.option('--preload', type=str, multiple=True, is_eager=True,
               help='Module that should be loaded by each worker process '
                    'like "foo.bar" or "/path/to/foo.py"')
 @click.argument('preload_argv', nargs=-1,
