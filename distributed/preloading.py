@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 import sys
+import filecmp
 from importlib import import_module
 
 import click
@@ -10,6 +11,7 @@ import click
 from .utils import import_file
 
 logger = logging.getLogger(__name__)
+
 
 def validate_preload_argv(ctx, param, value):
     """Click option callback providing validation of preload subcommand arguments."""
@@ -47,8 +49,8 @@ def validate_preload_argv(ctx, param, value):
 
 def _import_modules(names, file_dir=None):
     """ Imports modules and extracts preload interface functions.
-    
-    Imports modules specified by names and extracts 'dask_command', 
+
+    Imports modules specified by names and extracts 'dask_command',
     'dask_setup' and 'dask_teardown' if present.
 
 
@@ -58,13 +60,13 @@ def _import_modules(names, file_dir=None):
         Module names or file paths
     file_dir: string
         Path of a directory where files should be copied
-    
+
     Returns
     -------
     Nest dict of names to extracted module interface components if present
     in imported module.
     """
-    result_modules =  {}
+    result_modules = {}
 
     for name in names:
         # import
@@ -93,6 +95,7 @@ def _import_modules(names, file_dir=None):
         }
 
     return result_modules
+
 
 def preload_modules(names, parameter=None, file_dir=None, argv=None):
     """ Imports modules, handles `dask_command`, `dask_setup` and `dask_teardown`.
