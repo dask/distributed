@@ -28,10 +28,12 @@ def validate_preload_argv(ctx, param, value):
     ]
 
     if len(preload_commands) > 1:
-        raise click.UsageError("Multiple --preload modules with command-line parsing specified.")
+        raise click.UsageError(
+            "Multiple --preload modules with 'dask_command': %s" % preload_commands)
 
     if value and not preload_commands:
-        raise click.UsageError("Additional preload arguments specified, but --preload target did not expose command.")
+        raise click.UsageError(
+            "Additional preload arguments specified, but --preload target did not expose 'dask_command'.")
     if not preload_commands:
         return value
     else:
