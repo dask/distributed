@@ -283,12 +283,18 @@ Customizing initialization
 --------------------------
 
 Both ``dask-scheduler`` and ``dask-worker`` support a ``--preload`` option that
-allows custom initialization of each scheduler/worker respectively. A module
-or python file passed as a ``--preload`` value is guaranteed to be imported
-before establishing any connection. A ``dask_setup(service)`` function is called
-if found, with a ``Scheduler`` or ``Worker`` instance as the argument. As the
-service stops, ``dask_teardown(service)`` is called if present.
+allows custom initialization of each scheduler/worker respectively. A module or
+python file passed as a ``--preload`` value is guaranteed to be imported before
+establishing any connection. A ``dask_setup(service)`` function is called if
+found, with a ``Scheduler`` or ``Worker`` instance as the argument. As the
+service stops, ``dask_teardown(service)`` is called if present. To support
+additional configuration a single ``--preload`` module may register additional
+command-line arguments by exposing a Click_ command with the name
+``dask_command``.  This command will be used to parse additional arguments
+provided to ``dask-worker`` or ``dask-scheduler`` and will be called before
+service initialization.
 
+.. _Click: http://click.pocoo.org/
 
 
 As an example, consider the following file that creates a
@@ -297,12 +303,24 @@ As an example, consider the following file that creates a
 .. code-block:: python
 
    # scheduler-setup.py
+   import click
+
    from distributed.diagnostics.plugin import SchedulerPlugin
 
    class MyPlugin(SchedulerPlugin):
+       print_count = False
+       
        def add_worker(self, scheduler=None, worker=None, **kwargs):
-           print("Added a new worker at", worker)
+           print("Added a new worker at:", worker)
+           if self.print_count and scheduler is not None
+               print("Total workers:", len(scheduler.workers))
+               
 
+   @click.command
+   @click.option("--print-count/--no-print-count", default=False)
+   def dask_command(print_count):
+       MyPlugin.print_count = print_count
+  
    def dask_setup(scheduler):
        plugin = MyPlugin()
        scheduler.add_plugin(plugin)
@@ -310,4 +328,4 @@ As an example, consider the following file that creates a
 We can then run this preload script by referring to its filename (or module name
 if it is on the path) when we start the scheduler::
 
-   dask-scheduler --preload scheduler-setup.py
+   dask-scheduler --preload scheduler-setup.py --print-count
