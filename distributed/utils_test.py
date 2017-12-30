@@ -287,7 +287,7 @@ def run_for(duration, timer=time):
 
 
 # This dict grows at every varying() invocation
-_varying_dict = collections.Counter()
+_varying_dict = collections.defaultdict(int)
 _varying_key_gen = itertools.count()
 
 
