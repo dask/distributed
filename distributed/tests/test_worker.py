@@ -1003,6 +1003,7 @@ def test_statistical_profiling_cycle(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.05)
     yield wait(futures)
     yield gen.sleep(0.01)
+    end = time()
     assert len(a.profile_history) > 3
 
     x = a.get_profile(start=time() + 10, stop=time() + 20)
@@ -1011,8 +1012,8 @@ def test_statistical_profiling_cycle(c, s, a, b):
     x = a.get_profile(start=0, stop=time())
     assert x['count'] == sum(p['count'] for _, p in a.profile_history) + a.profile_recent['count']
 
-    y = a.get_profile(start=time() - 0.300, stop=time())
-    assert 0 < y['count'] < x['count']
+    y = a.get_profile(start=end - 0.300, stop=time())
+    assert 0 < y['count'] <= x['count']
 
 
 @gen_cluster(client=True)
@@ -1067,6 +1068,23 @@ def test_avoid_memory_monitor_if_zero_limit(c, s):
     yield c.submit(inc, 2)  # worker doesn't pause
 
     yield worker._close()
+
+
+def test_get_worker_name(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            def f():
+                get_client().submit(inc, 1).result()
+
+            c.run(f)
+
+            def func(dask_scheduler):
+                return list(dask_scheduler.clients)
+
+            start = time()
+            while not any('worker' in n for n in c.run_on_scheduler(func)):
+                sleep(0.1)
+                assert time() < start + 10
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)],

@@ -26,6 +26,7 @@ def test_get_scale_up_kwargs(loop):
             assert c.ncores()
             assert alc.get_scale_up_kwargs() == {'n': 3}
 
+
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test_simultaneous_scale_up_and_down(c, s, *workers):
     class TestAdaptive(Adaptive):
@@ -87,34 +88,67 @@ def test_adaptive_local_cluster_multi_workers():
     loop = IOLoop.current()
     cluster = LocalCluster(0, scheduler_port=0, silence_logs=False, processes=False,
                            diagnostics_port=None, loop=loop, start=False)
-    cluster.scheduler.allowed_failures = 1000
-    alc = Adaptive(cluster.scheduler, cluster, interval=100)
-    c = yield Client(cluster, asynchronous=True, loop=loop)
+    try:
+        cluster.scheduler.allowed_failures = 1000
+        alc = Adaptive(cluster.scheduler, cluster, interval=100)
+        c = yield Client(cluster, asynchronous=True, loop=loop)
 
-    futures = c.map(slowinc, range(100), delay=0.01)
+        futures = c.map(slowinc, range(100), delay=0.01)
 
-    start = time()
-    while not cluster.scheduler.worker_info:
-        yield gen.sleep(0.01)
-        assert time() < start + 15
+        start = time()
+        while not cluster.scheduler.worker_info:
+            yield gen.sleep(0.01)
+            assert time() < start + 15
 
-    yield c._gather(futures)
-    del futures
+        yield c._gather(futures)
+        del futures
 
-    start = time()
-    while cluster.workers:
-        yield gen.sleep(0.01)
-        assert time() < start + 5
+        start = time()
+        while cluster.workers:
+            yield gen.sleep(0.01)
+            assert time() < start + 5
 
-    assert not cluster.workers
-    assert not cluster.scheduler.workers
-    yield gen.sleep(0.2)
-    assert not cluster.workers
-    assert not cluster.scheduler.workers
+        assert not cluster.workers
+        assert not cluster.scheduler.workers
+        yield gen.sleep(0.2)
+        assert not cluster.workers
+        assert not cluster.scheduler.workers
 
-    futures = c.map(slowinc, range(100), delay=0.01)
-    yield c._gather(futures)
+        futures = c.map(slowinc, range(100), delay=0.01)
+        yield c._gather(futures)
 
-    yield c._close()
-    yield cluster._close()
+    finally:
+        yield c._close()
+        yield cluster._close()
 
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
+def test_adaptive_scale_down_override(c, s, *workers):
+    class TestAdaptive(Adaptive):
+        def __init__(self, *args, **kwargs):
+            self.min_size = kwargs.pop("min_size", 0)
+            Adaptive.__init__(self, *args, **kwargs)
+
+        def workers_to_close(self):
+            num_workers = len(self.scheduler.workers)
+            to_close = self.scheduler.workers_to_close()
+            if num_workers - len(to_close) < self.min_size:
+                to_close = to_close[:num_workers - self.min_size]
+
+            return to_close
+
+    class TestCluster(object):
+        def scale_up(self, n, **kwargs):
+            assert False
+
+        def scale_down(self, workers):
+            assert False
+
+    assert len(s.workers) == 10
+
+    # Assert that adaptive cycle does not reduce cluster below minimum size
+    # as determined via override.
+    cluster = TestCluster()
+    ta = TestAdaptive(s, cluster, min_size=2, interval=.1, scale_factor=2)
+    yield gen.sleep(0.3)
+
+    assert len(s.workers) == 2

@@ -10,6 +10,7 @@ from pickle import PicklingError
 import random
 import threading
 import sys
+import warnings
 import weakref
 
 from dask.core import istask
@@ -47,7 +48,7 @@ from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     format_bytes, DequeHandler, PeriodicCallback,
                     parse_bytes)
 from .utils_comm import pack_data, gather_from_workers
-from .utils_perf import ThrottledGC
+from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 
 _ncores = mp_context.cpu_count()
 
@@ -307,6 +308,8 @@ class WorkerBase(ServerNode):
     def _start(self, addr_or_port=0):
         assert self.status is None
 
+        enable_gc_diagnosis()
+
         # XXX Factor this out
         if not addr_or_port:
             # Default address is the required one to reach the scheduler
@@ -380,6 +383,9 @@ class WorkerBase(ServerNode):
     def _close(self, report=True, timeout=10, nanny=True):
         if self.status in ('closed', 'closing'):
             return
+
+        disable_gc_diagnosis()
+
         logger.info("Stopping worker at %s", self.address)
         self.status = 'closing'
         setproctitle("dask-worker [closing]")
@@ -663,13 +669,15 @@ cache = dict()
 
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
-    if func not in cache:
-        b = pickle.dumps(func)
-        if len(b) < 100000:
-            cache[func] = b
-        else:
-            return b
-    return cache[func]
+    try:
+        result = cache[func]
+    except KeyError:
+        result = pickle.dumps(func)
+        if len(result) < 100000:
+            cache[func] = result
+    except TypeError:
+        result = pickle.dumps(func)
+    return result
 
 
 def dumps_task(task):
@@ -695,14 +703,37 @@ def dumps_task(task):
     if istask(task):
         if task[0] is apply and not any(map(_maybe_complex, task[2:])):
             d = {'function': dumps_function(task[1]),
-                 'args': pickle.dumps(task[2])}
+                 'args': warn_dumps(task[2])}
             if len(task) == 4:
-                d['kwargs'] = pickle.dumps(task[3])
+                d['kwargs'] = warn_dumps(task[3])
             return d
         elif not any(map(_maybe_complex, task[1:])):
             return {'function': dumps_function(task[0]),
-                    'args': pickle.dumps(task[1:])}
+                    'args': warn_dumps(task[1:])}
     return to_serialize(task)
+
+
+_warn_dumps_warned = [False]
+
+
+def warn_dumps(obj, dumps=pickle.dumps, limit=1e6):
+    """ Dump an object to bytes, warn if those bytes are large """
+    b = dumps(obj)
+    if not _warn_dumps_warned[0] and len(b) > limit:
+        _warn_dumps_warned[0] = True
+        s = str(obj)
+        if len(s) > 70:
+            s = s[:50] + ' ... ' + s[-15:]
+        warnings.warn("Large object of size %s detected in task graph: \n"
+                      "  %s\n"
+                      "Consider scattering large objects ahead of time\n"
+                      "with client.scatter to reduce scheduler burden and \n"
+                      "keep data on workers\n\n"
+                      "    future = client.submit(func, big_data)    # bad\n\n"
+                      "    big_future = client.scatter(big_data)     # good\n"
+                      "    future = client.submit(func, big_future)  # good"
+                      % (format_bytes(len(b)), s))
+    return b
 
 
 def apply_function(function, args, kwargs, execution_state, key,
@@ -2481,10 +2512,11 @@ class Worker(WorkerBase):
         if not self._client:
             from .client import Client
             asynchronous = self.loop is IOLoop.current()
-            self._client = Client(self.scheduler.address, loop=self.loop,
+            self._client = Client(self.scheduler, loop=self.loop,
                                   security=self.security,
                                   set_as_default=True,
                                   asynchronous=asynchronous,
+                                  name='worker',
                                   timeout=timeout)
             if not asynchronous:
                 assert self._client.status == 'running'
@@ -2628,6 +2660,8 @@ class Reschedule(Exception):
 
 
 def parse_memory_limit(memory_limit, ncores):
+    if memory_limit is None:
+        return None
     if memory_limit == 'auto':
         memory_limit = int(TOTAL_MEMORY * min(1, ncores / _ncores))
     with ignoring(ValueError, TypeError):
