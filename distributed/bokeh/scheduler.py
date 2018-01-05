@@ -982,13 +982,14 @@ def profile_doc(scheduler, extra, doc):
 class BokehScheduler(BokehServer):
     def __init__(self, scheduler, io_loop=None, prefix='', **kwargs):
         self.scheduler = scheduler
-        self.server_kwargs = kwargs
-        self.server_kwargs['prefix'] = prefix or None
         prefix = prefix or ''
         prefix = prefix.rstrip('/')
         if prefix and not prefix.startswith('/'):
             prefix = '/' + prefix
         self.prefix = prefix
+
+        self.server_kwargs = kwargs
+        self.server_kwargs['prefix'] = prefix or None
 
         systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc, scheduler, self.extra)))
         workers = Application(FunctionHandler(partial(workers_doc, scheduler, self.extra)))

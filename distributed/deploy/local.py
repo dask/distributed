@@ -63,7 +63,7 @@ class LocalCluster(object):
     def __init__(self, n_workers=None, threads_per_worker=None, processes=True,
                  loop=None, start=True, ip=None, scheduler_port=0,
                  silence_logs=logging.CRITICAL, diagnostics_port=8787,
-                 services={}, worker_services={}, service_kwargs={}, **worker_kwargs):
+                 services={}, worker_services={}, service_kwargs=None, **worker_kwargs):
         self.status = None
         self.processes = processes
         self.silence_logs = silence_logs
@@ -94,7 +94,7 @@ class LocalCluster(object):
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                services[('bokeh', diagnostics_port)] = (BokehScheduler, service_kwargs.get('bokeh', {}))
+                services[('bokeh', diagnostics_port)] = (BokehScheduler, (service_kwargs or {}).get('bokeh', {}))
                 worker_services[('bokeh', 0)] = BokehWorker
 
         self.scheduler = Scheduler(loop=self.loop,
