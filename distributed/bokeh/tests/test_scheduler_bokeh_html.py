@@ -43,8 +43,8 @@ def test_connect(c, s, a, b):
 
 @gen_cluster(client=True,
              scheduler_kwargs={'services': {('bokeh', 0):  (BokehScheduler,
-                 {'base_url': '/foo'})}})
-def test_base_url(c, s, a, b):
+                 {'prefix': '/foo'})}})
+def test_prefix(c, s, a, b):
     http_client = AsyncHTTPClient()
     for suffix in ['foo/info/workers.html',
                    'foo/json/index.html',

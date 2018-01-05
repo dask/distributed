@@ -48,8 +48,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="IP addresses to whitelist for bokeh.")
 @click.option('--bokeh-prefix', type=str, default=None,
               help="Prefix for the bokeh app")
-@click.option('--bokeh-base-url', type=str, default='/',
-              help="Base URL for the bokeh app")
 @click.option('--use-xheaders', type=bool, default=False, show_default=True,
               help="User xheaders in bokeh app for ssl termination in header")
 @click.option('--pid-file', type=str, default='',
@@ -63,7 +61,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--preload', type=str, multiple=True,
               help='Module that should be loaded by each worker process like "foo.bar" or "/path/to/foo.py"')
 def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
-         bokeh_base_url, use_xheaders, pid_file, scheduler_file, interface,
+         use_xheaders, pid_file, scheduler_file, interface,
          local_directory, preload, tls_ca_file, tls_cert, tls_key):
 
     enable_proctitle_on_current()
@@ -116,8 +114,7 @@ def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
         with ignoring(ImportError):
             from distributed.bokeh.scheduler import BokehScheduler
             services[('bokeh', bokeh_port)] = (BokehScheduler,
-                                               {'prefix': bokeh_prefix,
-                                                'base_url': bokeh_base_url})
+                                               {'prefix': bokeh_prefix})
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file,
                           security=sec)

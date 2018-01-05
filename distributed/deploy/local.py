@@ -58,7 +58,7 @@ class LocalCluster(object):
     >>> c.remove_worker(w)  # doctest: +SKIP
 
     Pass extra keyword arguments to Bokeh
-    >>> LocalCluster(service_kwargs={'bokeh': {'base_url': '/foo'}})  # doctest: +SKIP
+    >>> LocalCluster(service_kwargs={'bokeh': {'prefix': '/foo'}})  # doctest: +SKIP
     """
     def __init__(self, n_workers=None, threads_per_worker=None, processes=True,
                  loop=None, start=True, ip=None, scheduler_port=0,

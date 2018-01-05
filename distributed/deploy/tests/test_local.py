@@ -330,7 +330,7 @@ def test_bokeh_kwargs(loop):
     import requests
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
                       diagnostics_port=0,
-                      service_kwargs={'bokeh': {'base_url': '/foo'}}) as c:
+                      service_kwargs={'bokeh': {'prefix': '/foo'}}) as c:
 
         bs = c.scheduler.services['bokeh']
-        assert bs.base_url == '/foo/'
+        assert bs.prefix == '/foo'
