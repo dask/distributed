@@ -323,3 +323,14 @@ def test_death_timeout_raises(loop):
                           death_timeout=1e-10, diagnostics_port=None,
                           loop=loop) as cluster:
             pass
+
+
+def test_bokeh_kwargs(loop):
+    pytest.importorskip('bokeh')
+    import requests
+    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
+                      diagnostics_port=0,
+                      service_kwargs={'bokeh': {'base_url': '/foo'}}) as c:
+
+        bs = c.scheduler.services['bokeh']
+        assert bs.base_url == '/foo/'
