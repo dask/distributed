@@ -980,16 +980,21 @@ def profile_doc(scheduler, extra, doc):
 
 
 class BokehScheduler(BokehServer):
-    def __init__(self, scheduler, io_loop=None, prefix='', **kwargs):
+    def __init__(self, scheduler, io_loop=None, prefix='', base_url='/', **kwargs):
         self.scheduler = scheduler
         self.server_kwargs = kwargs
         self.server_kwargs['prefix'] = prefix or None
+        if not base_url.startswith('/'):
+            base_url = '/' + base_url
+        if not base_url.endswith('/'):
+            base_url = base_url + '/'
+        self.base_url = base_url
         prefix = prefix or ''
         prefix = prefix.rstrip('/')
         if prefix and not prefix.startswith('/'):
             prefix = '/' + prefix
 
-        extra = {'prefix': prefix}
+        self.extra = extra = {'prefix': prefix, 'base_url': base_url}
         extra.update(template_variables)
 
         systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc, scheduler, extra)))
@@ -1002,15 +1007,16 @@ class BokehScheduler(BokehServer):
         profile = Application(FunctionHandler(partial(profile_doc, scheduler, extra)))
 
         self.apps = {
-            '/system': systemmonitor,
-            '/stealing': stealing,
-            '/workers': workers,
-            '/events': events,
-            '/counters': counters,
-            '/tasks': tasks,
-            '/status': status,
-            '/profile': profile,
+            'system': systemmonitor,
+            'stealing': stealing,
+            'workers': workers,
+            'events': events,
+            'counters': counters,
+            'tasks': tasks,
+            'status': status,
+            'profile': profile,
         }
+        self.apps = {self.base_url + k: v for k, v in self.apps.items()}
 
         self.loop = io_loop or scheduler.loop
         self.server = None
@@ -1022,5 +1028,7 @@ class BokehScheduler(BokehServer):
     def listen(self, *args, **kwargs):
         super(BokehScheduler, self).listen(*args, **kwargs)
 
-        from .scheduler_html import get_handlers
-        self.server._tornado.add_handlers(r'.*', get_handlers(self.my_server))
+        from .scheduler_html import routes
+        handlers = [(self.base_url + url, cls, {'server': self.my_server, 'extra': self.extra})
+                    for url, cls in routes]
+        self.server._tornado.add_handlers(r'.*', handlers)
