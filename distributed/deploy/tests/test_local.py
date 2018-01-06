@@ -325,9 +325,9 @@ def test_death_timeout_raises(loop):
             pass
 
 
+@pytest.mark.skipif(sys.version_info < (3, 6), reason='Unknown')
 def test_bokeh_kwargs(loop):
     pytest.importorskip('bokeh')
-    import requests
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
                       diagnostics_port=0,
                       service_kwargs={'bokeh': {'prefix': '/foo'}}) as c:
