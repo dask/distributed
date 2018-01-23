@@ -3037,10 +3037,18 @@ class Client(Node):
         or retries dictionary.
         """
         if not isinstance(k, tuple):
+            if not dask.is_dask_collection(k):
+                raise TypeError("key should be a tuple of dask collection")
             k = (k,)
         for kk in k:
             if dask.is_dask_collection(kk):
-                for kkk in kk.__dask_keys__():
+
+                # flatten nested lists for multi-dim data
+                keys = kk.__dask_keys__()
+                while isinstance(keys[0], list):
+                    keys = keys[0]
+
+                for kkk in keys:
                     yield tokey(kkk)
             else:
                 yield tokey(kk)
@@ -3090,6 +3098,7 @@ class Client(Node):
         if global_reqs and per_key_reqs:
             raise ValueError("cannot have both per-key and all-key requirements "
                              "in resources dict %r" % (resources,))
+
         return global_reqs or per_key_reqs
 
 

@@ -79,7 +79,6 @@ In some cases (such as the case above) the keys for ``y`` may be optimized away
 before execution.  You can avoid that either by requiring them as an explicit
 output, or by passing the ``optimize_graph=False`` keyword.
 
-
 .. code-block:: python
 
     z.compute(resources={tuple(y.__dask_keys__()): {'GPU': 1}, optimize_graph=False)
