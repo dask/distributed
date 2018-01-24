@@ -3037,18 +3037,10 @@ class Client(Node):
         or retries dictionary.
         """
         if not isinstance(k, tuple):
-            if not dask.is_dask_collection(k):
-                raise TypeError("key should be a tuple of dask collection")
             k = (k,)
         for kk in k:
             if dask.is_dask_collection(kk):
-
-                # flatten nested lists for multi-dim data
-                keys = kk.__dask_keys__()
-                while isinstance(keys[0], list):
-                    keys = keys[0]
-
-                for kkk in keys:
+                for kkk in list(flatten([kk])):
                     yield tokey(kkk)
             else:
                 yield tokey(kk)
