@@ -190,6 +190,7 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
         try:
             rejoin()
         except AttributeError:
+            # We are not a worker, i.e. not in nested parallelism.
             pass
 
 

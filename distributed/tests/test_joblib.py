@@ -180,3 +180,42 @@ def test_errors(loop, joblib):
             pass
 
     assert "create a dask client" in str(info.value).lower()
+
+
+@pytest.mark.parametrize("joblib", joblibs)
+def test_correct_nested_backend(loop, joblib):
+    if joblib is None or LooseVersion(joblib.__version__) <= "0.11.0":
+        pytest.skip("Requires nested parallelism")
+
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as client:
+            # No requirement, should be us
+            with joblib.parallel_backend('dask') as (ba, _):
+                result = joblib.Parallel(n_jobs=2)(joblib.delayed(outer)(
+                    joblib, require=None) for _ in range(1))
+                assert isinstance(result[0][0][0],
+                                  distributed_joblib.DaskDistributedBackend)
+
+            # Require threads, should be threading
+            with joblib.parallel_backend('dask') as (ba, _):
+                result = joblib.Parallel(n_jobs=2)(joblib.delayed(outer)(
+                    joblib, require='sharedmem') for _ in range(1))
+                assert isinstance(result[0][0][0],
+                                  joblib.parallel.ThreadingBackend)
+
+
+
+
+def outer(joblib, require):
+    return joblib.Parallel(n_jobs=2, prefer='threads')(
+        joblib.delayed(middle)(joblib, require) for _ in range(1)
+    )
+
+def middle(joblib, require):
+    return joblib.Parallel(n_jobs=2, require=require)(
+        joblib.delayed(inner)(joblib) for _ in range(1)
+    )
+
+
+def inner(joblib):
+    return joblib.parallel.Parallel()._backend
