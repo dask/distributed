@@ -303,11 +303,8 @@ _config = {}
 
 @click.command()
 @click.option("--passthrough", type=str, default="default")
-def dask_command(passthrough):
+def dask_setup(scheduler, passthrough):
     _config["passthrough"] = passthrough
-
-def dask_setup(scheduler):
-    pass
 
 def get_passthrough():
     return _config["passthrough"]

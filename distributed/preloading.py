@@ -20,22 +20,30 @@ def validate_preload_argv(ctx, param, value):
         return value
 
     if value and not ctx.params.get("preload", None):
-        raise click.UsageError("Additional preload arguments specified without --preload target.")
+        # Report a usage error matching standard click error conventions.
+        unexpected_args = [v for v in value if v.startswith("-")]
+        for a in unexpected_args:
+            raise click.NoSuchOption(a)
+        raise click.UsageError(
+            "Got unexpected extra argument%s: (%s)" %
+            ("s" if len(value) > 1 else "", " ".join(value))
+        )
 
     preload_modules = _import_modules(ctx.params.get("preload"))
 
     preload_commands = [
-        m["dask_command"] for m in preload_modules.values()
-        if m["dask_command"] is not None
+        m["dask_setup"] for m in preload_modules.values()
+        if isinstance(m["dask_setup"], click.Command)
     ]
 
     if len(preload_commands) > 1:
         raise click.UsageError(
-            "Multiple --preload modules with 'dask_command': %s" % preload_commands)
+            "Multiple --preload modules with click-configurable setup: %s" %
+            list(preload_modules.keys()))
 
     if value and not preload_commands:
         raise click.UsageError(
-            "Additional preload arguments specified, but --preload target did not expose 'dask_command'.")
+            "Unknown argument specified: %r Was click-configurable --preload target provided?")
     if not preload_commands:
         return value
     else:
@@ -50,8 +58,8 @@ def validate_preload_argv(ctx, param, value):
 def _import_modules(names, file_dir=None):
     """ Imports modules and extracts preload interface functions.
 
-    Imports modules specified by names and extracts 'dask_command',
-    'dask_setup' and 'dask_teardown' if present.
+    Imports modules specified by names and extracts 'dask_setup'
+    and 'dask_teardown' if present.
 
 
     Parameters
@@ -91,14 +99,14 @@ def _import_modules(names, file_dir=None):
 
         result_modules[name] = {
             attrname : getattr(module, attrname, None)
-            for attrname in ("dask_setup", "dask_teardown", "dask_command")
+            for attrname in ("dask_setup", "dask_teardown")
         }
 
     return result_modules
 
 
 def preload_modules(names, parameter=None, file_dir=None, argv=None):
-    """ Imports modules, handles `dask_command`, `dask_setup` and `dask_teardown`.
+    """ Imports modules, handles `dask_setup` and `dask_teardown`.
 
     Parameters
     ----------
@@ -107,7 +115,7 @@ def preload_modules(names, parameter=None, file_dir=None, argv=None):
     parameter: object
         Parameter passed to `dask_setup` and `dask_teardown`
     argv: [string]
-        List of string arguments passed to `dask_command`.
+        List of string arguments passed to click-configurable `dask_setup`.
     file_dir: string
         Path of a directory where files should be copied
     """
@@ -115,13 +123,15 @@ def preload_modules(names, parameter=None, file_dir=None, argv=None):
     imported_modules = _import_modules(names, file_dir=file_dir)
 
     for name, interface in imported_modules.items():
-        # handle special functions
-        if interface["dask_command"]:
-            ctx = click.Context(interface["dask_command"], allow_extra_args=False)
-            interface["dask_command"].main(argv, standalone_mode=False)
+        dask_setup = interface.get("dask_setup", None)
+        dask_teardown = interface.get("dask_teardown", None)
 
-        if interface["dask_setup"]:
-            interface["dask_setup"](parameter)
+        if dask_setup:
+            if isinstance(dask_setup, click.Command):
+                context = dask_setup.make_context("dask_setup", list(argv), allow_extra_args=False)
+                dask_setup.callback(parameter, *context.args, **context.params)
+            else:
+                dask_setup(parameter)
 
         if interface["dask_teardown"]:
             atexit.register(interface["dask_teardown"], parameter)
