@@ -273,6 +273,8 @@ class WorkerBase(ServerNode):
                         **self.monitor.recent())
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
+                    if diff <= 0:
+                        raise Exception("Timeout when trying to register")
                     future = gen.with_timeout(timedelta(seconds=diff), future)
                 response = yield future
                 _end = time()
@@ -285,7 +287,7 @@ class WorkerBase(ServerNode):
                             str(self.scheduler.address))
                 yield gen.sleep(0.1)
             except gen.TimeoutError:
-                pass
+                logger.info("Timed out when connecting to scheduler")
         if response['status'] != 'OK':
             raise ValueError("Unexpected response from register: %r" %
                              (response,))
@@ -1161,20 +1163,25 @@ class Worker(WorkerBase):
             self.batched_stream = BatchedSend(interval=2, loop=self.loop)
             self.batched_stream.start(comm)
 
+            @gen.coroutine
             def on_closed():
                 if self.reconnect and self.status not in ('closed', 'closing'):
                     logger.info("Connection to scheduler broken. Reregistering")
-                    self._register_with_scheduler()
+                    yield self._register_with_scheduler()
                 else:
-                    self._close(report=False)
+                    yield self._close(report=False)
 
             closed = False
 
             while not closed:
                 try:
                     msgs = yield comm.read()
-                except CommClosedError:
-                    on_closed()
+                except CommClosedError as e:
+                    logger.error("Failed while reading from scheduler. "
+                                 "Number of messages received: %d",
+                                 self.batched_stream.message_count,
+                                 exc_info=True)
+                    yield on_closed()
                     break
                 except EnvironmentError as e:
                     break
@@ -1220,6 +1227,7 @@ class Worker(WorkerBase):
             logger.info('Close compute stream')
         except Exception as e:
             logger.exception(e)
+            yield self._close()
             raise
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
