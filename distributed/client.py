@@ -820,7 +820,8 @@ class Client(Node):
                 raise
 
     def _heartbeat(self):
-        self.scheduler_comm.send({'op': 'heartbeat'})
+        if self.scheduler_comm:
+            self.scheduler_comm.send({'op': 'heartbeat'})
 
     def __enter__(self):
         if not self._loop_runner.is_started():
@@ -1021,12 +1022,13 @@ class Client(Node):
                 future = gen.with_timeout(timedelta(seconds=timeout), future)
             return future
 
+        else:
+            sync(self.loop, self._close, fast=True)
+            assert self.status == 'closed'
+
         if self._start_arg is None:
             with ignoring(AttributeError):
                 self.cluster.close()
-
-        sync(self.loop, self._close, fast=True)
-        assert self.status == 'closed'
 
         if self._should_close_loop:
             self._loop_runner.stop()
