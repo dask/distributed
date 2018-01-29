@@ -5176,5 +5176,22 @@ def test_client_doesnt_close_given_loop(loop):
             assert c.submit(inc, 2).result() == 3
 
 
+@gen_cluster(ncores=[], client=True)
+def test_worker_attribute_async(c, s):
+    assert c.worker is None
+
+
+def test_worker_attribute(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            assert c.worker is None
+
+            def f():
+                return get_client().worker.address
+
+            result = c.submit(f).result()
+            assert result in (a['address'], b['address'])
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401

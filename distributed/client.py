@@ -456,6 +456,9 @@ class Client(Node):
         the scheduler for matters relating to this client
     heartbeat_interval: int
         Time in milliseconds between heartbeats to scheduler
+    check_versions: bool (True)
+        Whether or not to check versions of local environment against the
+        workers.  Good to ensure safety, but slightly delays startup time.
 
     Examples
     --------
@@ -484,7 +487,8 @@ class Client(Node):
     def __init__(self, address=None, loop=None, timeout=5,
                  set_as_default=True, scheduler_file=None,
                  security=None, asynchronous=False,
-                 name=None, heartbeat_interval=None, **kwargs):
+                 name=None, heartbeat_interval=None, check_versions=False,
+                 **kwargs):
 
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
@@ -561,7 +565,7 @@ class Client(Node):
         super(Client, self).__init__(connection_args=self.connection_args,
                                      io_loop=self.loop)
 
-        self.start(timeout=timeout)
+        self.start(timeout=timeout, check_versions=check_versions)
 
         from distributed.recreate_exceptions import ReplayExceptionClient
         ReplayExceptionClient(self)
@@ -695,7 +699,7 @@ class Client(Node):
                             "Message: %s" % (self.status, msg))
 
     @gen.coroutine
-    def _start(self, timeout=5, **kwargs):
+    def _start(self, timeout=5, check_versions=False, **kwargs):
         address = self._start_arg
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
@@ -753,7 +757,17 @@ class Client(Node):
 
         self.coroutines.append(self._handle_report())
 
+        if check_versions and not self.worker:
+            yield self.get_versions(check='warn')
+
         raise gen.Return(self)
+
+    @property
+    def worker(self):
+        try:
+            return get_worker()
+        except ValueError:
+            return None
 
     @gen.coroutine
     def _reconnect(self, timeout=0.1):
@@ -2849,13 +2863,14 @@ class Client(Node):
         --------
         >>> c.get_versions()  # doctest: +SKIP
         """
-        client = get_versions()
-        try:
-            scheduler = sync(self.loop, self.scheduler.versions)
-        except KeyError:
-            scheduler = None
+        return self.sync(self._get_versions, check=check)
 
-        workers = sync(self.loop, self._run, get_versions)
+    @gen.coroutine
+    def _get_versions(self, check=False):
+        client = get_versions()
+        scheduler, workers = yield [self.scheduler.versions(),
+                                    self._run(get_versions)]
+
         result = {'scheduler': scheduler, 'workers': workers, 'client': client}
 
         if check:
@@ -2881,11 +2896,19 @@ class Client(Node):
                     rows.extend(versions)
                     errs.append("%s\n%s" % (pkg, asciitable(['', 'version'], rows)))
 
-                raise ValueError("Mismatched versions found\n"
-                                 "\n"
-                                 "%s" % ('\n\n'.join(errs)))
+                msg = ("Mismatched versions found\n"
+                       "\n"
+                       "%s" % ('\n\n'.join(errs)))
 
-        return result
+                if check == 'warn':
+                    warnings.warn(msg)
+                elif check in ('err', 'error', True):
+                    raise ValueError(msg)
+                else:
+                    raise ValueError("Value for check keyword not recognized"
+                                     % check)
+
+        raise gen.Return(result)
 
     def futures_of(self, futures):
         return futures_of(futures, client=self)
