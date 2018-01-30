@@ -676,7 +676,7 @@ def iscoroutinefunction(f):
 
 
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
-                scheduler='127.0.0.1', timeout=10, security=None,
+                scheduler='127.0.0.1', timeout=20, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
                 worker_kwargs={}, active_rpc_timeout=1):
     from distributed import Client
