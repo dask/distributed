@@ -192,15 +192,19 @@ class WorkerBase(ServerNode):
                                          connection_args=self.connection_args,
                                          **kwargs)
 
-        pc = PeriodicCallback(self.heartbeat, 1000)
-        self.periodic_callbacks['heartbeat'] = pc
-        self._address = contact_address
+        def _():
+            pc = PeriodicCallback(self.heartbeat, 1000)
+            self.periodic_callbacks['heartbeat'] = pc
+            self._address = contact_address
 
-        if self.memory_limit:
-            self._memory_monitoring = False
-            pc = PeriodicCallback(self.memory_monitor,
-                                  self.memory_monitor_interval)
-            self.periodic_callbacks['memory'] = pc
+            if self.memory_limit:
+                self._memory_monitoring = False
+                pc = PeriodicCallback(self.memory_monitor,
+                                      self.memory_monitor_interval)
+                self.periodic_callbacks['memory'] = pc
+
+        self.loop.add_callback(_)
+
         self._throttled_gc = ThrottledGC(logger=logger)
 
         setproctitle("dask-worker [not started]")

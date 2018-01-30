@@ -115,12 +115,16 @@ class Server(object):
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500)
-        self.periodic_callbacks['monitor'] = pc
+        def _():
+            pc = PeriodicCallback(self.monitor.update, 500)
+            self.periodic_callbacks['monitor'] = pc
 
-        self._last_tick = time()
-        pc = PeriodicCallback(self._measure_tick, config.get('tick-time', 20))
-        self.periodic_callbacks['tick'] = pc
+            self._last_tick = time()
+            pc = PeriodicCallback(self._measure_tick, config.get('tick-time', 20))
+            self.periodic_callbacks['tick'] = pc
+            self.start_periodic_callbacks()
+
+        self.loop.add_callback(_)
 
         self.__stopped = False
 
