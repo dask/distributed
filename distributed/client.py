@@ -3040,7 +3040,7 @@ class Client(Node):
             k = (k,)
         for kk in k:
             if dask.is_dask_collection(kk):
-                for kkk in list(flatten([kk])):
+                for kkk in flatten(kk.__dask_keys__()):
                     yield tokey(kkk)
             else:
                 yield tokey(kk)
