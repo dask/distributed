@@ -422,7 +422,7 @@ def run_worker(q, scheduler_q, **kwargs):
 
     with log_errors():
         with pristine_loop() as loop:
-            scheduler_addr = scheduler_q.get()
+            scheduler_addr = scheduler_q.get(timeout=10)
             worker = Worker(scheduler_addr, validate=True, **kwargs)
             loop.run_sync(lambda: worker._start(0))
             q.put(worker.address)
@@ -441,7 +441,7 @@ def run_nanny(q, scheduler_q, **kwargs):
 
     with log_errors():
         with pristine_loop() as loop:
-            scheduler_addr = scheduler_q.get()
+            scheduler_addr = scheduler_q.get(timeout=10)
             worker = Nanny(scheduler_addr, validate=True, **kwargs)
             loop.run_sync(lambda: worker._start(0))
             q.put(worker.address)
@@ -524,9 +524,9 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
             for worker in workers:
                 worker['proc'].start()
             for worker in workers:
-                worker['address'] = worker['queue'].get()
+                worker['address'] = worker['queue'].get(timeout=10)
 
-            saddr = scheduler_q.get()
+            saddr = scheduler_q.get(timeout=10)
 
             start = time()
             try:
