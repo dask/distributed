@@ -1023,11 +1023,11 @@ class Client(Node):
                 future = gen.with_timeout(timedelta(seconds=timeout), future)
             return future
 
-        sync(self.loop, self._close, fast=True)
-
         if self._start_arg is None:
             with ignoring(AttributeError):
                 self.cluster.close()
+
+        sync(self.loop, self._close, fast=True)
 
         assert self.status == 'closed'
 
