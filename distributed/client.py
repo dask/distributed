@@ -518,11 +518,13 @@ class Client(Node):
 
         self._periodic_callbacks = dict()
         self._periodic_callbacks['scheduler-info'] = PeriodicCallback(
-                self._update_scheduler_info, 2000, io_loop=self.loop)
+                self._update_scheduler_info, 2000, io_loop=self.loop
+        )
         self._periodic_callbacks['heartbeat'] = PeriodicCallback(
                 self._heartbeat,
                 heartbeat_interval or config.get('client-heartbeat-interval', 5000),
-                io_loop=self.loop)
+                io_loop=self.loop
+        )
 
         if address is None and 'scheduler-address' in config:
             address = config['scheduler-address']

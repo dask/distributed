@@ -95,11 +95,8 @@ class Nanny(ServerNode):
                                     **kwargs)
 
         if self.memory_limit:
-            def _():
-                pc = PeriodicCallback(self.memory_monitor, 100)
-                self.periodic_callbacks['memory'] = pc
-                self.start_periodic_callbacks()
-            self.loop.add_callback(_)
+            pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
+            self.periodic_callbacks['memory'] = pc
 
         self._listen_address = listen_address
         self.status = 'init'
