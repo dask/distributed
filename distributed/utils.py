@@ -1277,6 +1277,16 @@ def fix_asyncio_event_loop_policy(asyncio):
     asyncio.set_event_loop_policy(PatchedDefaultEventLoopPolicy())
 
 
+def reset_logger_locks():
+    """ Python 2's logger's locks don't survive a fork event
+
+    https://github.com/dask/distributed/issues/1491
+    """
+    for name in logging.Logger.manager.loggerDict.keys():
+        for handler in logging.getLogger(name).handlers:
+            handler.createLock()
+
+
 # Only bother if asyncio has been loaded by Tornado
 if 'asyncio' in sys.modules:
     fix_asyncio_event_loop_policy(sys.modules['asyncio'])
