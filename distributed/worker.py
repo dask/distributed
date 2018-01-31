@@ -192,18 +192,16 @@ class WorkerBase(ServerNode):
                                          connection_args=self.connection_args,
                                          **kwargs)
 
-        def _():
-            pc = PeriodicCallback(self.heartbeat, 1000)
-            self.periodic_callbacks['heartbeat'] = pc
-            self._address = contact_address
+        pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
+        self.periodic_callbacks['heartbeat'] = pc
+        self._address = contact_address
 
-            if self.memory_limit:
-                self._memory_monitoring = False
-                pc = PeriodicCallback(self.memory_monitor,
-                                      self.memory_monitor_interval)
-                self.periodic_callbacks['memory'] = pc
-
-        self.loop.add_callback(_)
+        if self.memory_limit:
+            self._memory_monitoring = False
+            pc = PeriodicCallback(self.memory_monitor,
+                                  self.memory_monitor_interval,
+                                  io_loop=self.io_loop)
+            self.periodic_callbacks['memory'] = pc
 
         self._throttled_gc = ThrottledGC(logger=logger)
 
@@ -1139,11 +1137,13 @@ class Worker(WorkerBase):
         WorkerBase.__init__(self, *args, **kwargs)
 
         pc = PeriodicCallback(self.trigger_profile,
-                              config.get('profile-interval', 10))
+                              config.get('profile-interval', 10),
+                              io_loop=self.io_loop)
         self.periodic_callbacks['profile'] = pc
 
         pc = PeriodicCallback(self.cycle_profile,
-                              profile_cycle_interval)
+                              profile_cycle_interval,
+                              io_loop=self.io_loop)
         self.periodic_callbacks['profile-cycle'] = pc
 
         _global_workers.append(weakref.ref(self))
