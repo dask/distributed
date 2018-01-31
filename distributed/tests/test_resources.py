@@ -268,13 +268,10 @@ def test_dont_optimize_out(c, s, a, b):
 def test_compute_multidim(c, s, a, b):
     da = pytest.importorskip('dask.array')
     np = pytest.importorskip('numpy')
-    x = delayed(np.random.randint)(0, 1, (5,5))
-    y = da.from_delayed(x, (5,5), int)
+    x = delayed(np.random.randint)(0, 10, (5,5))
 
     xx = c.compute(x, resources={x: {'A': 1}},)
-    yy = c.compute(y, resources={y: {'A': 1}},)
 
-    yield wait([xx, yy])
+    yield wait([xx])
     
     assert all(tokey(key) in a.data for key in x.__dask_keys__())
-    assert all(tokey(key) in a.data for key in y.__dask_keys__())
