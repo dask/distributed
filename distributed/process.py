@@ -153,10 +153,9 @@ class AsyncProcess(object):
 
         https://github.com/dask/distributed/issues/1491
         """
-        if PY2:
-            for name in logging.Logger.manager.loggerDict.keys():
-                for handler in logging.getLogger(name).handlers:
-                    handler.createLock()
+        for name in logging.Logger.manager.loggerDict.keys():
+            for handler in logging.getLogger(name).handlers:
+                handler.createLock()
 
     @classmethod
     def _run(cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive):
