@@ -21,7 +21,7 @@ from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (get_ip, mp_context, silence_logging, json_load_robust,
-        PeriodicCallback, reset_logger_locks)
+        PeriodicCallback)
 from .worker import _ncores, run, parse_memory_limit
 
 

@@ -9,7 +9,7 @@ import sys
 import threading
 import weakref
 
-from .compatibility import finalize, Queue as PyQueue, PY2
+from .compatibility import finalize, Queue as PyQueue
 from .utils import mp_context
 
 from tornado import gen
