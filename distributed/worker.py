@@ -611,6 +611,8 @@ class WorkerBase(ServerNode):
         start = time()
         try:
             compressed = yield comm.write(msg, serializers=serializers)
+            response = yield comm.read(deserializers=serializers)
+            assert response == 'OK', response
         except EnvironmentError:
             logger.exception('failed during get data with %s -> %s',
                              self.address, who, exc_info=True)
@@ -1770,8 +1772,7 @@ class Worker(WorkerBase):
                 logger.debug("Request %d keys", len(deps))
 
                 start = time() + self.scheduler_delay
-                response = yield self.rpc(worker).get_data(keys=deps,
-                                                           who=self.address)
+                response = yield get_data_from_worker(self.rpc, deps, worker, self.address)
                 stop = time() + self.scheduler_delay
 
                 if cause:
@@ -2697,3 +2698,30 @@ def parse_memory_limit(memory_limit, ncores):
         return parse_bytes(memory_limit)
     else:
         return int(memory_limit)
+
+
+@gen.coroutine
+def get_data_from_worker(rpc, keys, worker, who=None, serializers=None):
+    """ Get keys from worker
+
+    The worker has a two step handshake to acknowledge when data has been fully
+    delivered.  This function implements that handshake.
+
+    See Also
+    --------
+    Worker.get_data
+    Worker.gather_deps
+    utils_comm.gather_data_from_workers
+    """
+    comm = yield rpc.connect(worker)
+    try:
+        yield comm.write({'op': 'get_data',
+                          'keys': keys,
+                          'who': who},
+                         serializers=serializers)
+        response = yield comm.read(deserializers=serializers)
+        yield comm.write('OK')
+    finally:
+        rpc.reuse(worker, comm)
+
+    raise gen.Return(response)
