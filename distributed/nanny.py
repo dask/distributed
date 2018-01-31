@@ -21,7 +21,7 @@ from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (get_ip, mp_context, silence_logging, json_load_robust,
-        PeriodicCallback)
+        PeriodicCallback, reset_logger_locks)
 from .worker import _ncores, run, parse_memory_limit
 
 
@@ -334,23 +334,32 @@ class WorkerProcess(object):
 
         self.init_result_q = mp_context.Queue()
         self.child_stop_q = mp_context.Queue()
-        self.process = AsyncProcess(
-            target=self._run,
-            kwargs=dict(worker_args=self.worker_args,
-                        worker_kwargs=self.worker_kwargs,
-                        worker_start_args=self.worker_start_args,
-                        silence_logs=self.silence_logs,
-                        init_result_q=self.init_result_q,
-                        child_stop_q=self.child_stop_q),
-        )
-        self.process.daemon = True
-        self.process.set_exit_callback(self._on_exit)
-        self.running = Event()
-        self.stopped = Event()
-        self.status = 'starting'
-        yield self.process.start()
-        if self.status == 'starting':
-            yield self._wait_until_running()
+        for i in range(5):
+            try:
+                self.process = AsyncProcess(
+                    target=self._run,
+                    kwargs=dict(worker_args=self.worker_args,
+                                worker_kwargs=self.worker_kwargs,
+                                worker_start_args=self.worker_start_args,
+                                silence_logs=self.silence_logs,
+                                init_result_q=self.init_result_q,
+                                child_stop_q=self.child_stop_q),
+                )
+                self.process.daemon = True
+                self.process.set_exit_callback(self._on_exit)
+                self.running = Event()
+                self.stopped = Event()
+                self.status = 'starting'
+                yield self.process.start()
+                if self.status == 'starting':
+                    yield gen.with_timeout(timedelta(seconds=5),
+                                           self._wait_until_running())
+            except gen.TimeoutError:
+                logger.info("Failed to start worker process.  Restarting")
+                yield gen.with_timeout(timedelta(seconds=1),
+                                       self.process.terminate())
+            else:
+                break
 
     def _on_exit(self, proc):
         if proc is not self.process:
