@@ -329,9 +329,12 @@ class WorkerProcess(object):
             yield self.running.wait()
             return
 
-        self.init_result_q = mp_context.Queue()
-        self.child_stop_q = mp_context.Queue()
-        for i in range(5):
+        while True:
+            # FIXME: this sometimes stalls in _wait_until_running
+            # our temporary solution is to retry a few times if the process
+            # doesn't start up in five seconds
+            self.init_result_q = mp_context.Queue()
+            self.child_stop_q = mp_context.Queue()
             try:
                 self.process = AsyncProcess(
                     target=self._run,
