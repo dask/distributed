@@ -1105,3 +1105,22 @@ def test_scheduler_address_config(c, s):
     finally:
         del config['scheduler-address']
     yield worker._close()
+
+
+@gen_cluster(client=True, timeout=100, worker_kwargs={'memory_limit': '5GB'})
+def test_avoid_sending_too_many_results(c, s, a, b):
+    np = pytest.importorskip('numpy')
+    arrays = [delayed(np.random.random)(10000000, pure=False, dask_key_name='x-%d' % i)
+              for i in range(1000)]
+    lens = [delayed(len)(a, dask_key_name='len-%d' % i) for i, a in enumerate(arrays)]
+    futures = c.compute(lens, workers={tuple(arrays): a.address, tuple(lens): b.address})
+    from distributed.utils import format_bytes
+    for i in range(20):
+        yield gen.sleep(0.5)
+        print('in flight b', len(b.in_flight_tasks))
+        print('a memory', len(a.data), '/', len(a.tasks), format_bytes(sum(a.nbytes.values())))
+        print('a outgoing', format_bytes(a.outgoing_bytes),
+                format_bytes(a.outgoing_compressed_bytes))
+        print('b memory', len(b.data))
+        assert not a.data.slow
+    import pdb; pdb.set_trace()
