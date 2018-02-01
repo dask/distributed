@@ -635,14 +635,14 @@ class TaskProgress(DashboardComponent):
         self.root.quad(
             source=self.source,
             top='top', bottom='bottom', left='memory-loc',
-            right='erred-loc', fill_color='black', line_color='#000000',
-            fill_alpha=0.5
+            right='erred-loc', fill_color='black',
+            fill_alpha=0.5, line_alpha=0,
         )
         self.root.quad(
             source=self.source,
             top='top', bottom='bottom', left='erred-loc',
-            right='processing-loc', fill_color='gray', line_color='#000000',
-            fill_alpha=0.3
+            right='processing-loc', fill_color='gray',
+            fill_alpha=0.35, line_alpha=0,
         )
         self.root.text(
             source=self.source,
