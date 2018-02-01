@@ -8,13 +8,13 @@ import weakref
 from bokeh.layouts import row, column
 from bokeh.models import ( ColumnDataSource, Plot, DataRange1d, LinearAxis,
         HoverTool, BoxZoomTool, ResetTool, PanTool, WheelZoomTool, Range1d,
-        Quad, Text, value, TapTool, OpenURL, Button, Select)
+        Quad, TapTool, OpenURL, Button, Select)
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 from tornado import gen
 
 from ..config import config
-from ..diagnostics.progress_stream import progress_quads, nbytes_bar
+from ..diagnostics.progress_stream import nbytes_bar
 from .. import profile
 from ..utils import log_errors
 
