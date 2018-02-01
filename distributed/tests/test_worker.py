@@ -671,6 +671,7 @@ def test_priorities(c, s, w):
     assert [t[0] for t in log[:5]] == ['a', 'b', 'a1', 'b1', 'a2']
 
 
+@pytest.mark.xfail(reason="Now trusting scheduler priorities entirely")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
 def test_priorities_2(c, s, w):
     values = []
