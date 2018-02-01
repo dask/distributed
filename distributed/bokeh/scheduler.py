@@ -615,7 +615,7 @@ class TaskProgress(DashboardComponent):
             x_range=x_range, y_range=y_range, toolbar_location=None, **kwargs
         )
         self.root.line(  # just to define early ranges
-            x=[0, 1], y=[-1, 0], line_color="#FFFFFF", alpha=0.0)
+            x=[0, 0.9], y=[-1, 0], line_color="#FFFFFF", alpha=0.0)
         self.root.quad(
             source=self.source,
             top='top', bottom='bottom', left='left', right='right',
