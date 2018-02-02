@@ -2809,7 +2809,10 @@ def test_client_num_fds(loop):
             during = proc.num_fds()
         after = proc.num_fds()
 
-        assert before >= after
+        start = time()
+        while before >= proc.num_fds():
+            sleep(0.1)
+            assert time() < start + 5
 
 
 @gen_cluster()
