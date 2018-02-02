@@ -2810,7 +2810,7 @@ def test_client_num_fds(loop):
         after = proc.num_fds()
 
         start = time()
-        while before >= proc.num_fds():
+        while proc.num_fds() > before:
             sleep(0.1)
             assert time() < start + 5
 
