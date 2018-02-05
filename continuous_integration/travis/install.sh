@@ -64,11 +64,6 @@ pip install -q git+https://github.com/dask/zict.git --upgrade
 pip install -q sortedcollections msgpack-python
 pip install -q keras --upgrade --no-deps
 
-if [[ $DEV == true ]]; then
-    conda install -c bokeh/channel/dev bokeh
-    pip install -q --pre tornado==5.0b1
-fi;
-
 if [[ $CRICK == true ]]; then
     conda install -q cython
     pip install -q git+https://github.com/jcrist/crick.git
