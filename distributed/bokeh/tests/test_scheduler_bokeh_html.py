@@ -16,7 +16,7 @@ from distributed.bokeh.scheduler import BokehScheduler
 @gen_cluster(client=True,
              scheduler_kwargs={'services': {('bokeh', 0):  BokehScheduler}})
 def test_connect(c, s, a, b):
-    future = c.submit(inc, 1)
+    future = c.submit(lambda x: x + 1, 1)
     x = c.submit(slowinc, 1, delay=1)
     yield future
     http_client = AsyncHTTPClient()
