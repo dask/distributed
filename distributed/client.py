@@ -2767,6 +2767,17 @@ class Client(Node):
         self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
+    def to_scheduler_file(self, scheduler_file):
+        """Dump the info in this file to a scheduler file"""
+
+        if self.scheduler_file:
+            raise ValueError('Scheduler file already set')
+        else:
+            self.scheduler_file = scheduler_file
+
+        with open(self.scheduler_file, 'w') as f:
+            json.dump(self.scheduler_info(), f, indent=2)
+
     def get_metadata(self, keys, default=no_default):
         """ Get arbitrary metadata from scheduler
 
