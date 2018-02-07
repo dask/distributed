@@ -30,6 +30,17 @@ def test_submit_after_failed_worker_sync(loop):
             assert total.result() == sum(map(inc, range(10)))
 
 
+def test_restart_sync_no_center(loop):
+    with cluster(nanny=True) as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x = c.submit(inc, 1)
+            c.restart()
+            assert x.cancelled()
+            y = c.submit(inc, 2)
+            assert y.result() == 3
+            assert len(c.ncores()) == 2
+
+
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 def test_submit_after_failed_worker_async(c, s, a, b):
     n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
@@ -165,17 +176,6 @@ def test_restart_cleared(c, s, a, b):
 
     for coll in [s.tasks, s.unrunnable]:
         assert not coll
-
-
-def test_restart_sync_no_center(loop):
-    with cluster(nanny=True) as (s, [a, b]):
-        with Client(s['address'], loop=loop) as c:
-            x = c.submit(inc, 1)
-            c.restart()
-            assert x.cancelled()
-            y = c.submit(inc, 2)
-            assert y.result() == 3
-            assert len(c.ncores()) == 2
 
 
 def test_restart_sync(loop):
