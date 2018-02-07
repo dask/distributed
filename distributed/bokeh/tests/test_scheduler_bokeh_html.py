@@ -9,7 +9,7 @@ pytest.importorskip('bokeh')
 from tornado.escape import url_escape
 from tornado.httpclient import AsyncHTTPClient
 
-from distributed.utils_test import gen_cluster, inc, slowinc
+from distributed.utils_test import gen_cluster, slowinc
 from distributed.bokeh.scheduler import BokehScheduler
 
 
