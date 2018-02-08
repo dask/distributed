@@ -1068,6 +1068,30 @@ def test_service_hosts_match_scheduler():
         yield s.close()
 
 
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Need 127.0.0.* to mean localhost")
+@gen_test(timeout=None)
+def test_service_custom_host():
+    pytest.importorskip('bokeh')
+    from distributed.bokeh.scheduler import BokehScheduler
+    services = {('bokeh', ('127.0.0.3', 0)): BokehScheduler}
+
+    s = Scheduler(services=services)
+    yield s.start('tcp://0.0.0.0')
+
+    sock = first(s.services['bokeh'].server._http._sockets.values())
+    assert sock.getsockname()[0] in ('::', '0.0.0.0')
+    yield s.close()
+
+    for host in ['tcp://127.0.0.2', 'tcp://127.0.0.2:38275']:
+        s = Scheduler(services=services)
+        yield s.start(host)
+
+        sock = first(s.services['bokeh'].server._http._sockets.values())
+        assert sock.getsockname()[0] == '127.0.0.3'
+        yield s.close()
+
+
 @gen_cluster(client=True, worker_kwargs={'profile_cycle_interval': 100})
 def test_profile_metadata(c, s, a, b):
     start = time() - 1
