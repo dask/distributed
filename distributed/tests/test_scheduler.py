@@ -1080,7 +1080,7 @@ def test_service_custom_host():
     yield s.start('tcp://0.0.0.0')
 
     sock = first(s.services['bokeh'].server._http._sockets.values())
-    assert sock.getsockname()[0] in ('::', '0.0.0.0')
+    assert sock.getsockname()[0] == '127.0.0.3'
     yield s.close()
 
     for host in ['tcp://127.0.0.2', 'tcp://127.0.0.2:38275']:
