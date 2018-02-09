@@ -95,7 +95,7 @@ class Nanny(ServerNode):
                                     **kwargs)
 
         if self.memory_limit:
-            pc = PeriodicCallback(self.memory_monitor, 100)
+            pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
             self.periodic_callbacks['memory'] = pc
 
         self._listen_address = listen_address
@@ -223,7 +223,7 @@ class Nanny(ServerNode):
         raise gen.Return('OK')
 
     @gen.coroutine
-    def restart(self, comm=None, timeout=2):
+    def restart(self, comm=None, timeout=2, executor_wait=True):
         start = time()
 
         @gen.coroutine
@@ -329,25 +329,37 @@ class WorkerProcess(object):
             yield self.running.wait()
             return
 
-        self.init_result_q = mp_context.Queue()
-        self.child_stop_q = mp_context.Queue()
-        self.process = AsyncProcess(
-            target=self._run,
-            kwargs=dict(worker_args=self.worker_args,
-                        worker_kwargs=self.worker_kwargs,
-                        worker_start_args=self.worker_start_args,
-                        silence_logs=self.silence_logs,
-                        init_result_q=self.init_result_q,
-                        child_stop_q=self.child_stop_q),
-        )
-        self.process.daemon = True
-        self.process.set_exit_callback(self._on_exit)
-        self.running = Event()
-        self.stopped = Event()
-        self.status = 'starting'
-        yield self.process.start()
-        if self.status == 'starting':
-            yield self._wait_until_running()
+        while True:
+            # FIXME: this sometimes stalls in _wait_until_running
+            # our temporary solution is to retry a few times if the process
+            # doesn't start up in five seconds
+            self.init_result_q = mp_context.Queue()
+            self.child_stop_q = mp_context.Queue()
+            try:
+                self.process = AsyncProcess(
+                    target=self._run,
+                    kwargs=dict(worker_args=self.worker_args,
+                                worker_kwargs=self.worker_kwargs,
+                                worker_start_args=self.worker_start_args,
+                                silence_logs=self.silence_logs,
+                                init_result_q=self.init_result_q,
+                                child_stop_q=self.child_stop_q),
+                )
+                self.process.daemon = True
+                self.process.set_exit_callback(self._on_exit)
+                self.running = Event()
+                self.stopped = Event()
+                self.status = 'starting'
+                yield self.process.start()
+                if self.status == 'starting':
+                    yield gen.with_timeout(timedelta(seconds=5),
+                                           self._wait_until_running())
+            except gen.TimeoutError:
+                logger.info("Failed to start worker process.  Restarting")
+                yield gen.with_timeout(timedelta(seconds=1),
+                                       self.process.terminate())
+            else:
+                break
 
     def _on_exit(self, proc):
         if proc is not self.process:
@@ -396,7 +408,7 @@ class WorkerProcess(object):
                 self.on_exit(r)
 
     @gen.coroutine
-    def kill(self, timeout=2):
+    def kill(self, timeout=2, executor_wait=True):
         """
         Ensure the worker process is stopped, waiting at most
         *timeout* seconds before terminating it abruptly.
@@ -415,6 +427,7 @@ class WorkerProcess(object):
         process = self.process
         self.child_stop_q.put({'op': 'stop',
                                'timeout': max(0, deadline - loop.time()) * 0.8,
+                               'executor_wait': executor_wait,
                                })
 
         while process.is_alive() and loop.time() < deadline:
@@ -472,9 +485,12 @@ class WorkerProcess(object):
         worker = Worker(*worker_args, **worker_kwargs)
 
         @gen.coroutine
-        def do_stop(timeout):
+        def do_stop(timeout=5, executor_wait=True):
             try:
-                yield worker._close(report=False, nanny=False)
+                yield worker._close(report=False,
+                                    nanny=False,
+                                    executor_wait=executor_wait,
+                                    timeout=timeout)
             finally:
                 loop.stop()
 
@@ -489,8 +505,8 @@ class WorkerProcess(object):
                 except Empty:
                     pass
                 else:
-                    assert msg['op'] == 'stop'
-                    loop.add_callback(do_stop, msg['timeout'])
+                    assert msg.pop('op') == 'stop'
+                    loop.add_callback(do_stop, **msg)
                     break
 
         t = threading.Thread(target=watch_stop_q, name="Nanny stop queue watch")

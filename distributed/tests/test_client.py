@@ -12,7 +12,7 @@ import pickle
 import random
 import sys
 import threading
-from threading import Thread, Semaphore
+from threading import Semaphore
 from time import sleep
 import traceback
 import warnings
@@ -46,7 +46,7 @@ from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     gen_cluster, gen_test, double, deep, popen,
                                     captured_logger, varying, map_varying,
                                     wait_for, async_wait_for)
-from distributed.utils_test import loop, loop_in_thread, nodebug  # flake8: noqa
+from distributed.utils_test import loop, loop_in_thread, nodebug  # noqa F401
 
 
 @gen_cluster(client=True, timeout=None)
@@ -370,7 +370,7 @@ def test_short_tracebacks(loop):
             tb = tblib.Traceback(tb).to_dict()
             n = 0
 
-            while tb != None:
+            while tb is not None:
                 n += 1
                 tb = tb['tb_next']
 
@@ -1592,7 +1592,7 @@ def test_upload_file_exception_sync(loop):
                     c.upload_file(fn)
 
 
-@pytest.mark.xfail
+@pytest.mark.skip
 @gen_cluster()
 def test_multiple_clients(s, a, b):
     a = yield Client((s.ip, s.port), asynchronous=True)
@@ -2562,7 +2562,7 @@ def test_fatally_serialized_input(c, s):
         yield gen.sleep(0.01)
 
 
-@pytest.mark.xfail(reason='Use fast random selection now')
+@pytest.mark.skip(reason='Use fast random selection now')
 @gen_cluster(client=True)
 def test_balance_tasks_by_stacks(c, s, a, b):
     x = c.submit(inc, 1)
@@ -2804,12 +2804,14 @@ def test_client_num_fds(loop):
     psutil = pytest.importorskip('psutil')
     with cluster() as (s, [a, b]):
         proc = psutil.Process()
-        before = proc.num_fds()
-        with Client(s['address'], loop=loop) as c:
-            during = proc.num_fds()
-        after = proc.num_fds()
+        with Client(s['address'], loop=loop) as c:  # first client to start loop
+            before = proc.num_fds()                 # measure
+            for i in range(4):
+                with Client(s['address'], loop=loop):   # start more clients
+                    pass
+            after = proc.num_fds()                  # measure
 
-        assert before >= after
+        assert before == after
 
 
 @gen_cluster()
@@ -3182,7 +3184,7 @@ def test_even_load_on_startup(c, s, a, b):
     assert len(a.data) == len(b.data) == 1
 
 
-@pytest.mark.xfail
+@pytest.mark.skip
 @gen_cluster(client=True, ncores=[('127.0.0.1', 2)] * 2)
 def test_contiguous_load(c, s, a, b):
     w, x, y, z = c.map(inc, [1, 2, 3, 4])
@@ -4203,7 +4205,7 @@ def test_interleave_computations(c, s, a, b):
     assert_no_data_loss(s)
 
 
-@pytest.mark.xfail(reason="Now prefer first-in-first-out")
+@pytest.mark.skip(reason="Now prefer first-in-first-out")
 @gen_cluster(client=True, timeout=None)
 def test_interleave_computations_map(c, s, a, b):
     xs = c.map(slowinc, range(30), delay=0.02)
@@ -4691,6 +4693,7 @@ def test_secede_simple(c, s, a):
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 2, timeout=60)
 def test_secede_balances(c, s, a, b):
     count = threading.active_count()
+
     def f(x):
         client = get_client()
         sleep(0.01)  # do some work
@@ -4990,6 +4993,7 @@ def test_future_defaults_to_default_client(c, s, a, b):
     future = Future(x.key)
     assert future.client is c
 
+
 @gen_cluster(client=True)
 def test_future_auto_inform(c, s, a, b):
     x = c.submit(inc, 1)
@@ -5175,4 +5179,4 @@ def test_client_doesnt_close_given_loop(loop):
 
 
 if sys.version_info >= (3, 5):
-    from distributed.tests.py3_test_client import *  # flake8: noqa
+    from distributed.tests.py3_test_client import *  # noqa F401

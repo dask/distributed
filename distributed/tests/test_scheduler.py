@@ -1,14 +1,14 @@
 from __future__ import print_function, division, absolute_import
 
 import cloudpickle
-from collections import defaultdict, deque
+from collections import defaultdict
 from datetime import timedelta
 import json
 from operator import add, mul
 import sys
 
 from dask import delayed
-from toolz import merge, concat, valmap, first, frequencies, pluck
+from toolz import merge, concat, valmap, first, frequencies
 from tornado import gen
 
 import pytest
@@ -24,7 +24,7 @@ from distributed.utils import tmpfile
 from distributed.utils_test import (inc, dec, gen_cluster, gen_test, readone,
                                     slowinc, slowadd, slowdec, cluster, div,
                                     varying, slow)
-from distributed.utils_test import loop, nodebug  # flake8: noqa
+from distributed.utils_test import loop, nodebug  # noqa: F401
 from dask.compatibility import apply
 
 
@@ -48,7 +48,6 @@ def test_respect_data_in_memory(c, s, a):
     y = delayed(inc)(x)
     f = c.persist(y)
     yield wait([f])
-
 
     assert s.tasks[y.key].who_has == {s.workers[a.address]}
 
@@ -622,7 +621,7 @@ def test_workers_to_close(cl, s, *workers):
     s.task_duration['b'] = 4
     s.task_duration['c'] = 1
 
-    cl.map(slowinc, [1, 1, 1], key=['a-4','b-4','c-1'])
+    futures = cl.map(slowinc, [1, 1, 1], key=['a-4','b-4','c-1'])
     while sum(len(w.processing) for w in s.workers.values()) < 3:
         yield gen.sleep(0.001)
 
@@ -1046,27 +1045,29 @@ def test_correct_bad_time_estimate(c, s, *workers):
 
 
 @pytest.mark.skipif(not sys.platform.startswith('linux'),
-                    reason="Need 127.0.0.2 to mean localhost")
-@gen_test(timeout=None)
-def test_service_hosts_match_scheduler():
+                    reason="Need 127.0.0.* to mean localhost")
+@gen_test()
+def test_service_hosts():
     pytest.importorskip('bokeh')
     from distributed.bokeh.scheduler import BokehScheduler
-    services = {('bokeh', 0): BokehScheduler}
 
-    s = Scheduler(services=services)
-    yield s.start('tcp://0.0.0.0')
+    for port in [0, ('127.0.0.3', 0)]:
+        for url, expected in [('tcp://0.0.0.0', ('::', '0.0.0.0')),
+                              ('tcp://127.0.0.2', '127.0.0.2'),
+                              ('tcp://127.0.0.2:38275', '127.0.0.2')]:
+            services = {('bokeh', port): BokehScheduler}
 
-    sock = first(s.services['bokeh'].server._http._sockets.values())
-    assert sock.getsockname()[0] in ('::', '0.0.0.0')
-    yield s.close()
+            s = Scheduler(services=services)
+            yield s.start(url)
 
-    for host in ['tcp://127.0.0.2', 'tcp://127.0.0.2:38275']:
-        s = Scheduler(services=services)
-        yield s.start(host)
-
-        sock = first(s.services['bokeh'].server._http._sockets.values())
-        assert sock.getsockname()[0] == '127.0.0.2'
-        yield s.close()
+            sock = first(s.services['bokeh'].server._http._sockets.values())
+            if isinstance(port, tuple):    # host explicitly overridden
+                assert sock.getsockname()[0] == port[0]
+            elif isinstance(expected, tuple):
+                assert sock.getsockname()[0] in expected
+            else:
+                assert sock.getsockname()[0] == expected
+            yield s.close()
 
 
 @gen_cluster(client=True, worker_kwargs={'profile_cycle_interval': 100})

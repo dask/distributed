@@ -6,6 +6,7 @@ from functools import partial
 import itertools
 import json
 import logging
+from numbers import Number
 import operator
 import os
 import pickle
@@ -17,12 +18,11 @@ try:
     from cytoolz import frequencies, merge, pluck, merge_sorted, first
 except ImportError:
     from toolz import frequencies, merge, pluck, merge_sorted, first
-from toolz import memoize, valmap, first, second, concat, compose, groupby
+from toolz import valmap, first, second, compose, groupby
 from tornado import gen
 from tornado.gen import Return
 from tornado.ioloop import IOLoop
 
-from dask.core import reverse_dict
 from dask.order import order
 
 from .batched import BatchedSend
@@ -30,7 +30,7 @@ from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
 from .compatibility import finalize, unicode
 from .config import config, log_format
-from .core import (rpc, connect, Server, send_recv,
+from .core import (rpc, connect, send_recv,
                    error_message, clean_exception, CommClosedError)
 from . import profile
 from .metrics import time
@@ -99,7 +99,7 @@ class ClientState(object):
         'client_key',
         'wants_what',
         'last_seen',
-        )
+    )
 
     def __init__(self, client):
         self.client_key = client
@@ -212,7 +212,8 @@ class WorkerState(object):
         return get_address_host(self.address)
 
     def __repr__(self):
-        return "<Worker %r>" % (self.address,)
+        return "<Worker %r, memory: %d, processing: %d>" % (self.address,
+                len(self.has_what), len(self.processing))
 
     def __str__(self):
         return self.address
@@ -480,7 +481,7 @@ class TaskState(object):
         'suspicious',
         'retries',
         'nbytes',
-        )
+    )
 
     def __init__(self, key, run_spec):
         self.key = key
@@ -753,8 +754,7 @@ class Scheduler(ServerNode):
                 ('priority', 'priority', None),
                 ('dependencies', 'dependencies', _legacy_task_key_set),
                 ('dependents', 'dependents', _legacy_task_key_set),
-                ('retries', 'retries', None),
-                ]:
+                ('retries', 'retries', None)]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
@@ -774,17 +774,14 @@ class Scheduler(ServerNode):
                 ('suspicious_tasks', 'suspicious', None),
                 ('exceptions', 'exception', None),
                 ('tracebacks', 'traceback', None),
-                ('exceptions_blame', 'exception_blame', _task_key_or_none),
-                ]:
+                ('exceptions_blame', 'exception_blame', _task_key_or_none)]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
             setattr(self, old_attr,
                     _OptionalStateLegacyMapping(self.tasks, func))
 
-        for old_attr, new_attr, wrap in [
-                ('loose_restrictions', 'loose_restrictions', None),
-                ]:
+        for old_attr, new_attr, wrap in [('loose_restrictions', 'loose_restrictions', None)]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
@@ -804,9 +801,7 @@ class Scheduler(ServerNode):
 
         # Client state
         self.clients = dict()
-        for old_attr, new_attr, wrap in [
-                ('wants_what', 'wants_what', _legacy_task_key_set),
-                ]:
+        for old_attr, new_attr, wrap in [('wants_what', 'wants_what', _legacy_task_key_set)]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
@@ -824,8 +819,7 @@ class Scheduler(ServerNode):
                 ('occupancy', 'occupancy', None),
                 ('worker_info', 'info', None),
                 ('processing', 'processing', _legacy_task_key_dict),
-                ('has_what', 'has_what', _legacy_task_key_set),
-                ]:
+                ('has_what', 'has_what', _legacy_task_key_set)]:
             func = operator.attrgetter(new_attr)
             if wrap is not None:
                 func = compose(wrap, func)
@@ -982,7 +976,10 @@ class Scheduler(ServerNode):
 
             try:
                 service = v(self, io_loop=self.loop, **kwargs)
-                service.listen((listen_ip, port))
+                if isinstance(port, tuple):
+                    service.listen(port)
+                else:
+                    service.listen((listen_ip, port))
                 self.services[k] = service
             except Exception as e:
                 logger.info("Could not launch service: %r", (k, port),
@@ -1077,6 +1074,10 @@ class Scheduler(ServerNode):
             return
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
+
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
+        self.periodic_callbacks.clear()
 
         self.stop_services()
         for ext in self.extensions:
@@ -1250,7 +1251,7 @@ class Scheduler(ServerNode):
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None, priority=None,
                      loose_restrictions=None, resources=None,
-                     submitting_task=None, retries=None):
+                     submitting_task=None, retries=None, user_priority=0):
         """
         Add new computations to the internal dask graph
 
@@ -1324,7 +1325,11 @@ class Scheduler(ServerNode):
                 dts.dependents.add(ts)
 
         # Compute priorities
+        if isinstance(user_priority, Number):
+            user_priority = {k: user_priority for k in tasks}
+
         new_priority = priority or order(tasks)  # TODO: define order wrt old graph
+
         if submitting_task:  # sub-tasks get better priority than parent tasks
             ts = self.tasks.get(submitting_task)
             if ts is not None:
@@ -1337,7 +1342,7 @@ class Scheduler(ServerNode):
         for key in set(new_priority) & touched_keys:
             ts = self.tasks[key]
             if ts.priority is None:
-                ts.priority = (generation, new_priority[key])  # prefer old
+                ts.priority = (-user_priority.get(key, 0), generation, new_priority[key])
 
         # Ensure all runnables have a priority
         runnables = [ts for ts in touched_tasks
@@ -1771,9 +1776,6 @@ class Scheduler(ServerNode):
 
         actual_total_occupancy = 0
         for worker, ws in self.workers.items():
-        #     for d in self.extensions['stealing'].in_flight.values():
-        #         if worker in (d['thief'], d['victim']):
-        #             continue
             assert abs(sum(ws.processing.values()) - ws.occupancy) < 1e-8
             actual_total_occupancy += ws.occupancy
 
@@ -2189,7 +2191,7 @@ class Scheduler(ServerNode):
         self.update_data(who_has=who_has, nbytes=nbytes, client=client)
 
         if broadcast:
-            if broadcast == True:  # flake8: noqa
+            if broadcast == True:  # noqa: E712
                 n = len(ncores)
             else:
                 n = broadcast
@@ -2291,10 +2293,13 @@ class Scheduler(ServerNode):
                        if nanny_address is not None]
 
             try:
-                resps = All([nanny.restart(close=True, timeout=timeout * 0.8)
+                resps = All([nanny.restart(close=True, timeout=timeout * 0.8,
+                                           executor_wait=False)
                              for nanny in nannies])
                 resps = yield gen.with_timeout(timedelta(seconds=timeout), resps)
-                assert all(resp == 'OK' for resp in resps)
+                if not all(resp == 'OK' for resp in resps):
+                    logger.error("Not all workers responded positively: %s",
+                                 resps, exc_info=True)
             except gen.TimeoutError:
                 logger.error("Nannies didn't report back restarted within "
                              "timeout.  Continuuing with restart process")
@@ -3143,9 +3148,7 @@ class Scheduler(ServerNode):
                 worker = min(self.workers.values(),
                              key=operator.attrgetter('occupancy'))
             else:  # dumb but fast in large case
-                worker = self.workers[
-                    self.workers.iloc[self.n_tasks % len(self.workers)]
-                    ]
+                worker = self.workers[self.workers.iloc[self.n_tasks % len(self.workers)]]
 
         assert worker is None or isinstance(worker, WorkerState), (type(worker), worker)
         return worker
@@ -4016,7 +4019,6 @@ class Scheduler(ServerNode):
             L = deque_handler.deque
             L = [L[-i] for i in range(min(n, len(L)))]
         return [(msg.levelname, deque_handler.format(msg)) for msg in L]
-
 
     @gen.coroutine
     def get_worker_logs(self, comm=None, n=None, workers=None):

@@ -192,15 +192,17 @@ class WorkerBase(ServerNode):
                                          connection_args=self.connection_args,
                                          **kwargs)
 
-        pc = PeriodicCallback(self.heartbeat, 1000)
+        pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
         self.periodic_callbacks['heartbeat'] = pc
         self._address = contact_address
 
         if self.memory_limit:
             self._memory_monitoring = False
             pc = PeriodicCallback(self.memory_monitor,
-                                  self.memory_monitor_interval)
+                                  self.memory_monitor_interval,
+                                  io_loop=self.io_loop)
             self.periodic_callbacks['memory'] = pc
+
         self._throttled_gc = ThrottledGC(logger=logger)
 
         setproctitle("dask-worker [not started]")
@@ -250,6 +252,7 @@ class WorkerBase(ServerNode):
         start = time()
         if self.contact_address is None:
             self.contact_address = self.address
+        logger.info('-' * 49)
         while True:
             if self.death_timeout and time() > start + self.death_timeout:
                 yield self._close(timeout=1)
@@ -273,6 +276,8 @@ class WorkerBase(ServerNode):
                         **self.monitor.recent())
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
+                    if diff < 0:
+                        continue
                     future = gen.with_timeout(timedelta(seconds=diff), future)
                 response = yield future
                 _end = time()
@@ -281,14 +286,16 @@ class WorkerBase(ServerNode):
                 self.status = 'running'
                 break
             except EnvironmentError:
-                logger.info("Trying to connect to scheduler: %s" %
-                            str(self.scheduler.address))
+                logger.info('Waiting to connect to: %26s', self.scheduler.address)
                 yield gen.sleep(0.1)
             except gen.TimeoutError:
-                pass
+                logger.info("Timed out when connecting to scheduler")
         if response['status'] != 'OK':
             raise ValueError("Unexpected response from register: %r" %
                              (response,))
+        else:
+            logger.info('        Registered to: %26s', self.scheduler.address)
+            logger.info('-' * 49)
         self.periodic_callbacks['heartbeat'].start()
 
     def start_services(self, listen_ip=''):
@@ -359,15 +366,10 @@ class WorkerBase(ServerNode):
         if self.memory_limit:
             logger.info('               Memory: %26s', format_bytes(self.memory_limit))
         logger.info('      Local Directory: %26s', self.local_dir)
-        logger.info('-' * 49)
 
         setproctitle("dask-worker [%s]" % self.address)
 
         yield self._register_with_scheduler()
-
-        if self.status == 'running':
-            logger.info('        Registered to: %26s', self.scheduler.address)
-            logger.info('-' * 49)
 
         self.start_periodic_callbacks()
 
@@ -382,7 +384,7 @@ class WorkerBase(ServerNode):
                 'memory_limit': self.memory_limit}
 
     @gen.coroutine
-    def _close(self, report=True, timeout=10, nanny=True):
+    def _close(self, report=True, timeout=10, nanny=True, executor_wait=True):
         if self.status in ('closed', 'closing'):
             return
 
@@ -401,7 +403,7 @@ class WorkerBase(ServerNode):
                                        self.scheduler.unregister(address=self.contact_address))
         self.scheduler.close_rpc()
         if isinstance(self.executor, ThreadPoolExecutor):
-            self.executor.shutdown(timeout=timeout)
+            self.executor.shutdown(wait=executor_wait, timeout=timeout)
         else:
             self.executor.shutdown(wait=False)
         self._workdir.release()
@@ -1082,7 +1084,6 @@ class Worker(WorkerBase):
         self.profile_history = deque(maxlen=3600)
 
         self.priorities = dict()
-        self.priority_counter = 0
         self.durations = dict()
         self.startstops = defaultdict(list)
         self.resource_restrictions = dict()
@@ -1135,11 +1136,13 @@ class Worker(WorkerBase):
         WorkerBase.__init__(self, *args, **kwargs)
 
         pc = PeriodicCallback(self.trigger_profile,
-                              config.get('profile-interval', 10))
+                              config.get('profile-interval', 10),
+                              io_loop=self.io_loop)
         self.periodic_callbacks['profile'] = pc
 
         pc = PeriodicCallback(self.cycle_profile,
-                              profile_cycle_interval)
+                              profile_cycle_interval,
+                              io_loop=self.io_loop)
         self.periodic_callbacks['profile-cycle'] = pc
 
         _global_workers.append(weakref.ref(self))
@@ -1161,20 +1164,19 @@ class Worker(WorkerBase):
             self.batched_stream = BatchedSend(interval=2, loop=self.loop)
             self.batched_stream.start(comm)
 
-            def on_closed():
-                if self.reconnect and self.status not in ('closed', 'closing'):
-                    logger.info("Connection to scheduler broken. Reregistering")
-                    self._register_with_scheduler()
-                else:
-                    self._close(report=False)
-
             closed = False
 
             while not closed:
                 try:
                     msgs = yield comm.read()
-                except CommClosedError:
-                    on_closed()
+                except CommClosedError as e:
+                    if self.reconnect and self.status not in ('closed', 'closing'):
+                        logger.info("Connection to scheduler broken. Reregistering")
+                        yield self._register_with_scheduler()
+                        return
+                    else:
+                        logger.info("Connection to scheduler broken. Closing")
+                        yield self._close(report=False)
                     break
                 except EnvironmentError as e:
                     break
@@ -1207,8 +1209,6 @@ class Worker(WorkerBase):
                     else:
                         logger.warning("Unknown operation %s, %s", op, msg)
 
-                self.priority_counter -= 1
-
                 self.ensure_communicating()
                 self.ensure_computing()
 
@@ -1216,17 +1216,17 @@ class Worker(WorkerBase):
                 if self.digests is not None:
                     self.digests['handle-messages-duration'].add(end - start)
 
-            yield self.batched_stream.close()
             logger.info('Close compute stream')
         except Exception as e:
             logger.exception(e)
+            yield self._close()
             raise
+        finally:
+            yield self.batched_stream.close()
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
                  who_has=None, nbytes=None, priority=None, duration=None,
                  resource_restrictions=None, **kwargs2):
-        if isinstance(priority, list):
-            priority.insert(1, self.priority_counter)
         try:
             if key in self.tasks:
                 state = self.task_state[key]
