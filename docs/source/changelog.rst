@@ -1,7 +1,11 @@
 Changelog
 =========
 
-1.21.0 - 2018-01-30
+1.21.1 - 2018-MM-DD
+-------------------
+
+
+1.21.0 - 2018-02-09
 -------------------
 
 -  Refactor scheduler to use TaskState objects rather than dictionaries (:pr:`1594`) `Antoine Pitrou`_
