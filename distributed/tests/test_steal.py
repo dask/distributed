@@ -17,8 +17,8 @@ from distributed.metrics import time
 from distributed.scheduler import BANDWIDTH, key_split
 from distributed.utils_test import (slowinc, slowadd, inc, gen_cluster,
                                     slowidentity)
-from distributed.utils_test import (loop, nodebug_setup_module,
-                                    nodebug_teardown_module)  # flake8: noqa
+from distributed.utils_test import (nodebug_setup_module,
+                                    nodebug_teardown_module)
 from distributed.worker import TOTAL_MEMORY
 
 import pytest
@@ -119,7 +119,7 @@ def test_eventually_steal_unknown_functions(c, s, a, b):
     assert len(b.data) >= 3
 
 
-@pytest.mark.xfail(reason='')
+@pytest.mark.skip(reason='')
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
 def test_steal_related_tasks(e, s, a, b, c):
     futures = e.map(slowinc, range(20), delay=0.05, workers=a.address,
@@ -254,7 +254,7 @@ def test_dont_steal_resource_restrictions(c, s, a, b):
     assert len(b.task_state) == 0
 
 
-@pytest.mark.xfail(reason='no stealing of resources')
+@pytest.mark.skip(reason='no stealing of resources')
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1, {'resources': {'A': 2}})],
              timeout=3)
 def test_steal_resource_restrictions(c, s, a):
@@ -393,7 +393,6 @@ def assert_balanced(inp, expected, c, s, *workers):
 
     while len(s.rprocessing) < len(futures):
         yield gen.sleep(0.001)
-
 
     for i in range(10):
         steal.balance()

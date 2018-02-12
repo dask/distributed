@@ -5,10 +5,8 @@ from collections import Iterable, deque
 from contextlib import contextmanager
 from datetime import timedelta
 import functools
-import gc
 import json
 import logging
-import math
 import multiprocessing
 import operator
 import os
@@ -211,7 +209,8 @@ def sync(loop, func, *args, **kwargs):
     Run coroutine in loop running in separate thread.
     """
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
-    if isinstance(loop, PollIOLoop) and getattr(loop, '_closing', False):
+    if ((isinstance(loop, PollIOLoop) and getattr(loop, '_closing', False)) or
+        (hasattr(loop, 'asyncio_loop') and loop.asyncio_loop._closed)):
         raise RuntimeError("IOLoop is closed")
 
     timeout = kwargs.pop('callback_timeout', None)
@@ -249,7 +248,7 @@ def sync(loop, func, *args, **kwargs):
             raise gen.TimeoutError("timed out after %s s." % (timeout,))
     else:
         while not e.is_set():
-            e.wait(1000000)
+            e.wait(10)
     if error[0]:
         six.reraise(*error[0])
     else:
@@ -277,9 +276,10 @@ class LoopRunner(object):
     _lock = threading.Lock()
 
     def __init__(self, loop=None, asynchronous=False):
+        current = IOLoop.current()
         if loop is None:
             if asynchronous:
-                self._loop = IOLoop.current()
+                self._loop = current
             else:
                 # We're expecting the loop to run in another thread,
                 # avoid re-using this thread's assigned loop
@@ -639,7 +639,7 @@ def silence_logging(level, root='distributed'):
     (or keep the existing level if less verbose).
     """
     if isinstance(level, str):
-        level = logging_names[level.upper()]
+        level = getattr(logging, level.upper())
 
     for name, logger in logging.root.manager.loggerDict.items():
         if (isinstance(logger, logging.Logger)
@@ -907,7 +907,7 @@ def ensure_bytes(s):
         return s
     if isinstance(s, memoryview):
         return s.tobytes()
-    if isinstance(s, bytearray) or PY2 and isinstance(s, buffer):  # flake8: noqa
+    if isinstance(s, bytearray) or PY2 and isinstance(s, buffer):  # noqa: F821
         return bytes(s)
     if hasattr(s, 'encode'):
         return s.encode()
@@ -1153,7 +1153,7 @@ def asciitable(columns, rows):
 
 
 if PY2:
-    def nbytes(frame, _bytes_like=(bytes, bytearray, buffer)):
+    def nbytes(frame, _bytes_like=(bytes, bytearray, buffer)):  # noqa: F821
         """ Number of bytes of a frame or memoryview """
         if isinstance(frame, _bytes_like):
             return len(frame)
@@ -1276,6 +1276,16 @@ def fix_asyncio_event_loop_policy(asyncio):
                 return loop
 
     asyncio.set_event_loop_policy(PatchedDefaultEventLoopPolicy())
+
+
+def reset_logger_locks():
+    """ Python 2's logger's locks don't survive a fork event
+
+    https://github.com/dask/distributed/issues/1491
+    """
+    for name in logging.Logger.manager.loggerDict.keys():
+        for handler in logging.getLogger(name).handlers:
+            handler.createLock()
 
 
 # Only bother if asyncio has been loaded by Tornado

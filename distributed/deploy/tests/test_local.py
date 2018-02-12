@@ -18,7 +18,7 @@ from distributed.utils_test import (inc, gen_test,
                                     assert_can_connect_locally_4,
                                     assert_can_connect_from_everywhere_4_6,
                                     captured_logger)
-from distributed.utils_test import loop  # flake8: noqa
+from distributed.utils_test import loop  # noqa: F401
 from distributed.utils import sync
 from distributed.worker import TOTAL_MEMORY
 
@@ -334,3 +334,13 @@ def test_bokeh_kwargs(loop):
 
         bs = c.scheduler.services['bokeh']
         assert bs.prefix == '/foo'
+
+
+def test_io_loop_periodic_callbacks(loop):
+    with LocalCluster(loop=loop) as cluster:
+        assert cluster.scheduler.loop is loop
+        for pc in cluster.scheduler.periodic_callbacks.values():
+            assert pc.io_loop is loop
+        for worker in cluster.workers:
+            for pc in worker.periodic_callbacks.values():
+                assert pc.io_loop is loop

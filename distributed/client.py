@@ -1,7 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from collections import Iterator, Mapping, defaultdict
+from collections import Iterator, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
 from contextlib import contextmanager
@@ -16,7 +16,6 @@ import logging
 from numbers import Number, Integral
 import os
 import sys
-from time import sleep
 import uuid
 import threading
 import six
@@ -47,8 +46,7 @@ from .batched import BatchedSend
 from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
                          scatter_to_workers, gather_from_workers)
 from .cfexecutor import ClientExecutor
-from .compatibility import (Queue as pyQueue, Empty, isqueue,
-                            get_thread_identity, html_escape)
+from .compatibility import Queue as pyQueue, Empty, isqueue, html_escape
 from .config import config
 from .core import connect, rpc, clean_exception, CommClosedError
 from .metrics import time
@@ -159,8 +157,8 @@ class Future(WrappedKey):
     def result(self, timeout=None):
         """ Wait until computation completes, gather result to local process.
 
-        If *timeout* seconds are elapsed before returning, a TimeoutError
-        is raised.
+        If *timeout* seconds are elapsed before returning, a
+        ``dask.distributed.TimeoutError`` is raised.
         """
         if self.client.asynchronous:
             return self.client.sync(self._result, callback_timeout=timeout)
@@ -206,8 +204,8 @@ class Future(WrappedKey):
     def exception(self, timeout=None, **kwargs):
         """ Return the exception of a failed task
 
-        If *timeout* seconds are elapsed before returning, a TimeoutError
-        is raised.
+        If *timeout* seconds are elapsed before returning, a
+        ``dask.distributed.TimeoutError`` is raised.
 
         See Also
         --------
@@ -267,8 +265,8 @@ class Future(WrappedKey):
         ``traceback`` module.  Alternatively if you call ``future.result()``
         this traceback will accompany the raised exception.
 
-        If *timeout* seconds are elapsed before returning, a TimeoutError
-        is raised.
+        If *timeout* seconds are elapsed before returning, a
+        ``dask.distributed.TimeoutError`` is raised.
 
         Examples
         --------
@@ -520,11 +518,13 @@ class Client(Node):
 
         self._periodic_callbacks = dict()
         self._periodic_callbacks['scheduler-info'] = PeriodicCallback(
-                self._update_scheduler_info, 2000, io_loop=self.loop)
+                self._update_scheduler_info, 2000, io_loop=self.loop
+        )
         self._periodic_callbacks['heartbeat'] = PeriodicCallback(
                 self._heartbeat,
                 heartbeat_interval or config.get('client-heartbeat-interval', 5000),
-                io_loop=self.loop)
+                io_loop=self.loop
+        )
 
         if address is None and 'scheduler-address' in config:
             address = config['scheduler-address']
@@ -636,10 +636,10 @@ class Client(Node):
             protocol, rest = self.scheduler.address.split('://')
             port = info['services']['bokeh']
             if protocol == 'inproc':
-                address = 'http://localhost:%d' % port
+                address = 'http://localhost:%d/status' % port
             else:
                 host = rest.split(':')[0]
-                address = 'http://%s:%d' % (host, port)
+                address = 'http://%s:%d/status' % (host, port)
             text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
 
         text += "</ul>\n"
@@ -822,7 +822,8 @@ class Client(Node):
                 raise
 
     def _heartbeat(self):
-        self.scheduler_comm.send({'op': 'heartbeat'})
+        if self.scheduler_comm:
+            self.scheduler_comm.send({'op': 'heartbeat'})
 
     def __enter__(self):
         if not self._loop_runner.is_started():
@@ -1028,6 +1029,7 @@ class Client(Node):
                 self.cluster.close()
 
         sync(self.loop, self._close, fast=True)
+
         assert self.status == 'closed'
 
         if self._should_close_loop:
@@ -1050,8 +1052,8 @@ class Client(Node):
         return self.close(*args, **kwargs)
 
     def get_executor(self, **kwargs):
-        """ Return a concurrent.futures Executor for submitting tasks
-        on this Client.
+        """
+        Return a concurrent.futures Executor for submitting tasks on this Client
 
         Parameters
         ----------
@@ -1087,6 +1089,9 @@ class Client(Node):
             may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if the task fails
+        priority: Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
 
         Examples
         --------
@@ -1108,6 +1113,7 @@ class Client(Node):
         workers = kwargs.pop('workers', None)
         resources = kwargs.pop('resources', None)
         retries = kwargs.pop('retries', None)
+        priority = kwargs.pop('priority', 0)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers not in (True, False, None):
@@ -1144,6 +1150,7 @@ class Client(Node):
 
         futures = self._graph_to_futures(dsk, [skey], restrictions,
                                          loose_restrictions, priority={skey: 0},
+                                         user_priority=priority,
                                          resources={skey: resources} if resources else None,
                                          retries={skey: retries} if retries else None)
 
@@ -1188,6 +1195,9 @@ class Client(Node):
             Leave empty to default to all workers (common case)
         retries: int (default to 0)
             Number of allowed automatic retries if a task fails
+        priority: Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
 
         Examples
         --------
@@ -1226,6 +1236,7 @@ class Client(Node):
         workers = kwargs.pop('workers', None)
         retries = kwargs.pop('retries', None)
         resources = kwargs.pop('resources', None)
+        user_priority = kwargs.pop('priority', 0)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers and workers is None:
@@ -1284,8 +1295,11 @@ class Client(Node):
             resources = None
 
         futures = self._graph_to_futures(dsk, keys, restrictions,
-                                         loose_restrictions, priority=priority,
-                                         resources=resources, retries=retries)
+                                         loose_restrictions,
+                                         priority=priority,
+                                         resources=resources,
+                                         retries=retries,
+                                         user_priority=user_priority)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(k)] for k in keys]
@@ -1939,7 +1953,7 @@ class Client(Node):
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
                           loose_restrictions=None, priority=None,
-                          resources=None, retries=None):
+                          user_priority=0, resources=None, retries=None):
         with self._lock:
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
@@ -1984,6 +1998,7 @@ class Client(Node):
                                      'restrictions': restrictions or {},
                                      'loose_restrictions': loose_restrictions,
                                      'priority': priority,
+                                     'user_priority': user_priority,
                                      'resources': resources,
                                      'submitting_task': getattr(thread_state, 'key', None),
                                      'retries': retries,
@@ -2090,7 +2105,7 @@ class Client(Node):
 
     def compute(self, collections, sync=False, optimize_graph=True,
                 workers=None, allow_other_workers=False, resources=None,
-                retries=0, **kwargs):
+                retries=0, priority=0, **kwargs):
         """ Compute dask collections on cluster
 
         Parameters
@@ -2112,6 +2127,9 @@ class Client(Node):
             If a list then only the keys for the listed collections are loose
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
+        priority: Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
         **kwargs:
             Options to pass to the graph optimize calls
 
@@ -2179,10 +2197,15 @@ class Client(Node):
         else:
             retries = None
 
+        if not isinstance(priority, Number):
+            priority = {k: p for c, p in priority.items()
+                             for k in self._expand_key(c)}
+
         futures_dict = self._graph_to_futures(merge(dsk2, dsk), names,
                                               restrictions, loose_restrictions,
                                               resources=resources,
-                                              retries=retries)
+                                              retries=retries,
+                                              user_priority=priority)
 
         i = 0
         futures = []
@@ -2205,7 +2228,7 @@ class Client(Node):
 
     def persist(self, collections, optimize_graph=True, workers=None,
                 allow_other_workers=None, resources=None, retries=None,
-                **kwargs):
+                priority=0, **kwargs):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -2229,6 +2252,9 @@ class Client(Node):
             If a list then only the keys for the listed collections are loose
         retries: int (default to 0)
             Number of allowed automatic retries if computing a result fails
+        priority: Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
         kwargs:
             Options to pass to the graph optimize calls
 
@@ -2270,9 +2296,15 @@ class Client(Node):
         else:
             retries = None
 
+        if not isinstance(priority, Number):
+            priority = {k: p for c, p in priority.items()
+                             for k in self._expand_key(c)}
+
         futures = self._graph_to_futures(dsk, names, restrictions,
                                          loose_restrictions,
-                                         resources=resources, retries=retries)
+                                         resources=resources,
+                                         retries=retries,
+                                         user_priority=priority)
 
         postpersists = [c.__dask_postpersist__() for c in collections]
         result = [func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
@@ -3083,8 +3115,8 @@ class Client(Node):
         # such as {'x': {'GPU': 1}, 'y': {'SSD': 4}} indicating
         # per-key requirements
         if not isinstance(resources, dict):
-            raise TypeError("`retries` should be a dict, got %r"
-                            % (type(retries,)))
+            raise TypeError("`resources` should be a dict, got %r"
+                            % (type(resources,)))
 
         per_key_reqs = {}
         global_reqs = {}
@@ -3101,7 +3133,6 @@ class Client(Node):
             raise ValueError("cannot have both per-key and all-key requirements "
                              "in resources dict %r" % (resources,))
         return global_reqs or per_key_reqs
-
 
     @classmethod
     def get_restrictions(cls, collections, workers, allow_other_workers):
@@ -3183,9 +3214,7 @@ def wait(fs, timeout=None, return_when='ALL_COMPLETED'):
     ----------
     fs: list of futures
     timeout: number, optional
-        Time in seconds after which to raise a gen.TimeoutError
-
-    Returns
+        Time in seconds after which to raise a ``dask.distributed.TimeoutError``
     -------
     Named tuple of completed, not completed
     """
@@ -3348,10 +3377,10 @@ class as_completed(object):
     @gen.coroutine
     def __anext__(self):
         if not self.futures and self.queue.empty():
-            raise StopAsyncIteration  # flake8: noqa
+            raise StopAsyncIteration
         while self.queue.empty():
             if not self.futures:
-                raise StopAsyncIteration  # flake8: noqa
+                raise StopAsyncIteration
             yield self.condition.wait()
 
         raise gen.Return(self.queue.get())

@@ -53,8 +53,7 @@ with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
 
 template = jinja2.Template(template_source)
 
-template_variables = {'pages': ['status', 'workers', 'tasks', 'system',
-                                'profile', 'counters']}
+template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'profile']}
 
 
 def update(source, data):
@@ -207,7 +206,7 @@ class NBytesHistogram(DashboardComponent):
                                             'right': [10, 10],
                                             'top': [0, 0]})
 
-            self.root = figure(title='NBytes Stored',
+            self.root = figure(title='Bytes Stored',
                                id='bk-nbytes-histogram-plot',
                                **kwargs)
             self.root.xaxis[0].formatter = NumeralTickFormatter(format='0.0 b')
@@ -321,7 +320,7 @@ class CurrentLoad(DashboardComponent):
                 else:
                     processing_color.append('blue')
 
-            nbytes = [ws.nbytes for ws in workers]
+            nbytes = [ws.info['memory'] for ws in workers]
             nbytes_text = [format_bytes(nb) for nb in nbytes]
             nbytes_color = []
             max_limit = 0
@@ -376,7 +375,7 @@ class StealingTimeSeries(DashboardComponent):
         fig.yaxis.minor_tick_line_color = None
 
         fig.add_tools(
-            ResetTool(reset_size=False),
+            ResetTool(),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width")
         )
@@ -421,7 +420,7 @@ class StealingEvents(DashboardComponent):
 
         fig.add_tools(
             hover,
-            ResetTool(reset_size=False),
+            ResetTool(),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width")
         )
@@ -490,7 +489,7 @@ class Events(DashboardComponent):
 
         fig.add_tools(
             hover,
-            ResetTool(reset_size=False),
+            ResetTool(),
             PanTool(dimensions="width"),
             WheelZoomTool(dimensions="width")
         )
@@ -604,7 +603,8 @@ class TaskProgress(DashboardComponent):
         else:
             self.plugin = AllProgress(scheduler)
 
-        data = progress_quads(dict(all={}, memory={}, erred={}, released={}))
+        data = progress_quads(dict(all={}, memory={}, erred={}, released={},
+                                   processing={}))
         self.source = ColumnDataSource(data=data)
 
         x_range = DataRange1d(range_padding=0)
@@ -615,11 +615,11 @@ class TaskProgress(DashboardComponent):
             x_range=x_range, y_range=y_range, toolbar_location=None, **kwargs
         )
         self.root.line(  # just to define early ranges
-            x=[0, 1], y=[-1, 0], line_color="#FFFFFF", alpha=0.0)
+            x=[0, 0.9], y=[-1, 0], line_color="#FFFFFF", alpha=0.0)
         self.root.quad(
             source=self.source,
             top='top', bottom='bottom', left='left', right='right',
-            fill_color="#aaaaaa", line_color="#aaaaaa", fill_alpha=0.2
+            fill_color="#aaaaaa", line_color="#aaaaaa", fill_alpha=0.1
         )
         self.root.quad(
             source=self.source,
@@ -634,9 +634,15 @@ class TaskProgress(DashboardComponent):
         )
         self.root.quad(
             source=self.source,
-            top='top', bottom='bottom', left='released-loc',
-            right='erred-loc', fill_color='black', line_color='#000000',
-            fill_alpha=0.5
+            top='top', bottom='bottom', left='memory-loc',
+            right='erred-loc', fill_color='black',
+            fill_alpha=0.5, line_alpha=0,
+        )
+        self.root.quad(
+            source=self.source,
+            top='top', bottom='bottom', left='erred-loc',
+            right='processing-loc', fill_color='gray',
+            fill_alpha=0.35, line_alpha=0,
         )
         self.root.text(
             source=self.source,
@@ -674,6 +680,10 @@ class TaskProgress(DashboardComponent):
                     <span style="font-size: 14px; font-weight: bold;">Erred:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@erred</span>
                 </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Ready:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@processing</span>
+                </div>
                 """
         )
         self.root.add_tools(hover)
@@ -682,7 +692,7 @@ class TaskProgress(DashboardComponent):
         with log_errors():
             state = {'all': valmap(len, self.plugin.all),
                      'nbytes': self.plugin.nbytes}
-            for k in ['memory', 'erred', 'released']:
+            for k in ['memory', 'erred', 'released', 'processing']:
                 state[k] = valmap(len, self.plugin.state[k])
             if not state['all'] and not len(self.source.data['all']):
                 return

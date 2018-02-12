@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from collections import defaultdict, deque
+from concurrent.futures import CancelledError
 from functools import partial
 import logging
 import six
@@ -102,6 +103,7 @@ class Server(object):
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
+        self.loop = io_loop
 
         # Statistics counters for various events
         with ignoring(ImportError):
@@ -115,11 +117,12 @@ class Server(object):
 
         self.periodic_callbacks = dict()
 
-        pc = PeriodicCallback(self.monitor.update, 500)
+        pc = PeriodicCallback(self.monitor.update, 500, io_loop=self.io_loop)
         self.periodic_callbacks['monitor'] = pc
 
         self._last_tick = time()
-        pc = PeriodicCallback(self._measure_tick, config.get('tick-time', 20))
+        pc = PeriodicCallback(self._measure_tick, config.get('tick-time', 20),
+                              io_loop=self.io_loop)
         self.periodic_callbacks['tick'] = pc
 
         self.__stopped = False
@@ -154,11 +157,11 @@ class Server(object):
         diff = now - self._last_tick
         self._last_tick = now
         if diff > config.get('tick-maximum-delay', 1000) / 1000:
-            logger.warning("Event loop was unresponsive for %.2fs.  "
+            logger.warning("Event loop was unresponsive in %s for %.2fs.  "
                            "This is often caused by long-running GIL-holding "
                            "functions or moving large chunks of data. "
                            "This can cause timeouts and instability.",
-                           diff)
+                           type(self).__name__, diff)
         if self.digests is not None:
             self.digests['tick-duration'].add(diff)
 
@@ -285,7 +288,7 @@ class Server(object):
                         if type(result) is gen.Future:
                             self._ongoing_coroutines.add(result)
                             result = yield result
-                    except CommClosedError as e:
+                    except (CommClosedError, CancelledError) as e:
                         logger.warning("Lost connection to %r: %s", address, e)
                         break
                     except Exception as e:
