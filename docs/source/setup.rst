@@ -287,10 +287,11 @@ allows custom initialization of each scheduler/worker respectively. A module or
 python file passed as a ``--preload`` value is guaranteed to be imported before
 establishing any connection. A ``dask_setup(service)`` function is called if
 found, with a ``Scheduler`` or ``Worker`` instance as the argument. As the
-service stops, ``dask_teardown(service)`` is called if present. To support
-additional configuration a single ``--preload`` module may register additional
-command-line arguments by exposing ``dask_setup`` as a  Click_ command.
-This command will be used to parse additional arguments provided to
+service stops, ``dask_teardown(service)`` is called if present.
+
+To support additional configuration a single ``--preload`` module may register
+additional command-line arguments by exposing ``dask_setup`` as a  Click_
+command.  This command will be used to parse additional arguments provided to
 ``dask-worker`` or ``dask-scheduler`` and will be called before service
 initialization.
 
@@ -311,12 +312,12 @@ As an example, consider the following file that creates a
        def __init__(self, print_count):
          self.print_count = print_count
          SchedulerPlugin.__init__(self)
-       
+
        def add_worker(self, scheduler=None, worker=None, **kwargs):
            print("Added a new worker at:", worker)
            if self.print_count and scheduler is not None
                print("Total workers:", len(scheduler.workers))
-               
+
    @click.command
    @click.option("--print-count/--no-print-count", default=False)
    def dask_setup(scheduler, print_count):
