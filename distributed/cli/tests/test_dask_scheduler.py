@@ -297,6 +297,7 @@ def test_preload_module(loop):
     finally:
         shutil.rmtree(tmpdir)
 
+
 PRELOAD_COMMAND_TEXT = """
 import click
 _config = {}
@@ -309,6 +310,7 @@ def dask_setup(scheduler, passthrough):
 def get_passthrough():
     return _config["passthrough"]
 """
+
 
 def test_preload_command(loop):
 
@@ -331,6 +333,7 @@ def test_preload_command(loop):
                         "foobar"
     finally:
         shutil.rmtree(tmpdir)
+
 
 def test_preload_command_default(loop):
 
