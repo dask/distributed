@@ -1,6 +1,13 @@
 from .plugin import SchedulerPlugin
 
 
+state_colors = {'waiting': 'gray',
+                'processing': 'green',
+                'memory': 'red',
+                'released': 'blue',
+                'erred': 'black',
+                'forgotten': 'white'}  # TODO: actually remove node
+
 class GraphLayout(SchedulerPlugin):
     def __init__(self, scheduler):
         self.x = {}
@@ -10,6 +17,7 @@ class GraphLayout(SchedulerPlugin):
         self.next_y = 0
         self.next_index = 0
         self.new = []
+        self.color_updates = []
 
         scheduler.add_plugin(self)
 
@@ -41,5 +49,11 @@ class GraphLayout(SchedulerPlugin):
             self.x[key] = x
             self.y[key] = y
             self.index[key] = self.next_index
-            self.next_index += 1
+            self.next_index = self.next_index + 1
             self.new.append(key)
+
+    def transition(self, key, start, finish, *args, **kwargs):
+        try:
+            self.color_updates.append((self.index[key], state_colors[finish]))
+        except KeyError:
+            assert finish == 'forgotten'

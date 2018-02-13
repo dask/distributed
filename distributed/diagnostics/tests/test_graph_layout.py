@@ -29,3 +29,15 @@ def test_construct_after_call(c, s, a, b):
     assert all(gl.x[f.key] == 0 for f in futures)
     assert gl.x[total.key] == 1
     assert min(gl.y.values()) < gl.y[total.key] < max(gl.y.values())
+
+
+@gen_cluster(client=True)
+def test_colors(c, s, a, b):
+    gl = GraphLayout(s)
+    futures = c.map(inc, range(5))
+    total = c.submit(sum, futures)
+    del futures
+
+    yield total
+
+    assert gl.color_updates

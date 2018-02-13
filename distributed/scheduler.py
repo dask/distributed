@@ -1408,8 +1408,6 @@ class Scheduler(ServerNode):
                     recommendations[key] = 'erred'
                     break
 
-        self.transitions(recommendations)
-
         for plugin in self.plugins[:]:
             try:
                 plugin.update_graph(self, client=client, tasks=tasks,
@@ -1419,6 +1417,8 @@ class Scheduler(ServerNode):
                                     loose_restrictions=loose_restrictions)
             except Exception as e:
                 logger.exception(e)
+
+        self.transitions(recommendations)
 
         for ts in touched_tasks:
             if ts.state in ('memory', 'erred'):

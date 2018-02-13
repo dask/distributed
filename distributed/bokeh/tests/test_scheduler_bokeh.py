@@ -301,6 +301,7 @@ def test_GraphPlot(c, s, a, b):
     yield wait(y)
 
     gp.update()
+    gp.update()
 
     yield c.compute((x + y).sum())
 
@@ -313,4 +314,7 @@ def test_GraphPlot(c, s, a, b):
     while key in s.tasks:
         yield gen.sleep(0.01)
 
+    assert 'red' in gp.node_source.data['color']
+
+    gp.update()
     gp.update()

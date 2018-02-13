@@ -34,6 +34,7 @@ from ..metrics import time
 from ..utils import log_errors, format_bytes, format_time
 from ..diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
 from ..diagnostics.progress import AllProgress
+from ..diagnostics.graph_layout import GraphLayout, state_colors
 from .task_stream import TaskStreamPlugin
 
 try:
@@ -597,15 +598,16 @@ class TaskStream(components.TaskStream):
 
 class GraphPlot(DashboardComponent):
     def __init__(self, scheduler, **kwargs):
-        from ..diagnostics import GraphLayout
         self.scheduler = scheduler
         self.layout = GraphLayout(scheduler)
 
-        self.node_source = ColumnDataSource({'x': [], 'y': [], 'name': []})
+        self.node_source = ColumnDataSource({'x': [], 'y': [], 'name': [],
+                                             'color': []})
         self.edge_source = ColumnDataSource({'x': [], 'y': []})
         self.root = figure(title='Task Graph', **kwargs)
         self.root.line(x='x', y='y', source=self.edge_source, line_width=1)
-        renderer = self.root.square(x='x', y='y', size=10, source=self.node_source)
+        renderer = self.root.square(x='x', y='y', size=10, color='color',
+                                    source=self.node_source)
 
         hover = HoverTool(point_policy="follow_mouse", tooltips="@name",
                           renderers=[renderer])
@@ -613,46 +615,58 @@ class GraphPlot(DashboardComponent):
 
     def update(self):
         import numpy as np
-        if not self.layout.new:
-            return
         with log_errors():
-            node_x = []
-            node_y = []
-            node_name = []
-            edge_x = []
-            edge_y = []
+            if self.layout.new:
+                node_x = []
+                node_y = []
+                node_color = []
+                node_name = []
+                edge_x = []
+                edge_y = []
 
-            x = self.layout.x
-            y = self.layout.y
-            tasks = self.scheduler.tasks
-            new, self.layout.new = self.layout.new, []
-            for key in new:
-                try:
-                    task = tasks[key]
-                except KeyError:
-                    continue
-                xx = x[key]
-                yy = y[key]
-                node_x.append(xx)
-                node_y.append(yy)
-                node_name.append(task.prefix)
+                x = self.layout.x
+                y = self.layout.y
+                tasks = self.scheduler.tasks
+                new, self.layout.new = self.layout.new, []
+                for key in new:
+                    try:
+                        task = tasks[key]
+                    except KeyError:
+                        continue
+                    xx = x[key]
+                    yy = y[key]
+                    node_x.append(xx)
+                    node_y.append(yy)
+                    node_color.append(state_colors[task.state])
+                    node_name.append(task.prefix)
 
-                for dep in task.dependencies:
-                    edge_x.extend((xx, x[dep.key], nan))
-                    edge_y.extend((yy, y[dep.key], nan))
+                    for dep in task.dependencies:
+                        edge_x.extend((xx, x[dep.key], nan))
+                        edge_y.extend((yy, y[dep.key], nan))
 
-            if len(node_x) > 100:
-                node_x = np.asarray(node_x)
-                node_y = np.asarray(node_y)
+                if len(node_x) > 100:
+                    node_x = np.asarray(node_x)
+                    node_y = np.asarray(node_y)
 
-            edge = {'x': np.asarray(edge_x), 'y': np.asarray(edge_y)}
-            if not self.node_source.data['x']:
-                # see https://github.com/bokeh/bokeh/issues/7523
-                self.node_source.data.update({'x': node_x, 'y': node_y, 'name': node_name})
-                self.edge_source.data.update(edge)
-            else:
-                self.node_source.stream({'x': node_x, 'y': node_y, 'name': node_name})
-                self.edge_source.stream(edge)
+                node = {'x': node_x, 'y': node_y, 'color': node_color, 'name':
+                        node_name}
+                edge = {'x': np.asarray(edge_x), 'y': np.asarray(edge_y)}
+                n = len(self.node_source.data['x'])
+                if not self.node_source.data['x']:
+                    # see https://github.com/bokeh/bokeh/issues/7523
+                    self.node_source.data.update(node)
+                    self.edge_source.data.update(edge)
+                else:
+                    self.node_source.stream(node)
+                    self.edge_source.stream(edge)
+                n2 = len(self.node_source.data['x'])
+
+            elif self.layout.color_updates:
+                color_updates = self.layout.color_updates
+                self.layout.color_updates = []
+                n = len(self.node_source.data['x'])
+                color_updates = [(i, c) for i, c in color_updates if i < n]
+                self.node_source.patch({'color': color_updates})
 
 
 class TaskProgress(DashboardComponent):
