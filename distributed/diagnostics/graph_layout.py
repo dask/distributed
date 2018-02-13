@@ -14,10 +14,15 @@ class GraphLayout(SchedulerPlugin):
         self.y = {}
         self.scheduler = scheduler
         self.index = {}
+        self.index_edge = {}
         self.next_y = 0
         self.next_index = 0
+        self.next_edge_index = 0
         self.new = []
+        self.new_edges = []
         self.color_updates = []
+        self.visible_updates = []
+        self.visible_edge_updates = []
 
         scheduler.add_plugin(self)
 
@@ -51,9 +56,19 @@ class GraphLayout(SchedulerPlugin):
             self.index[key] = self.next_index
             self.next_index = self.next_index + 1
             self.new.append(key)
+            for dep in deps:
+                edge = (dep, key)
+                self.index_edge[edge] = self.next_edge_index
+                self.next_edge_index += 1
+                self.new_edges.append(edge)
 
     def transition(self, key, start, finish, *args, **kwargs):
-        try:
+        if finish != 'forgotten':
             self.color_updates.append((self.index[key], state_colors[finish]))
-        except KeyError:
-            assert finish == 'forgotten'
+        else:
+            self.visible_updates.append((self.index[key], 'False'))
+            task = self.scheduler.tasks[key]
+            for dep in task.dependents:
+                self.visible_edge_updates.append((self.index_edge[(key, dep.key)], 'False'))
+            for dep in task.dependencies:
+                self.visible_edge_updates.append((self.index_edge[(dep.key, key)], 'False'))

@@ -1,5 +1,6 @@
 from distributed.utils_test import gen_cluster, inc
 from distributed.diagnostics import GraphLayout
+from tornado import gen
 
 
 @gen_cluster(client=True)
@@ -41,3 +42,18 @@ def test_colors(c, s, a, b):
     yield total
 
     assert gl.color_updates
+
+@gen_cluster(client=True)
+def test_release_tasks(c, s, a, b):
+    gl = GraphLayout(s)
+    futures = c.map(inc, range(5))
+    total = c.submit(sum, futures)
+
+    yield total
+    key = total.key
+    del total
+    while key in s.tasks:
+        yield gen.sleep(0.01)
+
+    assert len(gl.visible_updates) == 1
+    assert len(gl.visible_edge_updates) == 5

@@ -292,7 +292,7 @@ def test_GraphPlot(c, s, a, b):
 
     gp.update()
     assert set(map(len, gp.node_source.data.values())) == {6}
-    assert set(map(len, gp.edge_source.data.values())) == {3 * 5}
+    assert set(map(len, gp.edge_source.data.values())) == {5}
 
     da = pytest.importorskip('dask.array')
     x = da.random.random((20, 20), chunks=(10, 10)).persist()
@@ -308,9 +308,10 @@ def test_GraphPlot(c, s, a, b):
     gp.update()
 
     future = c.submit(inc, 10)
-    yield wait(future)
+    future2 = c.submit(inc, future)
+    yield wait(future2)
     key = future.key
-    del future
+    del future, future2
     while key in s.tasks:
         yield gen.sleep(0.01)
 
@@ -318,3 +319,5 @@ def test_GraphPlot(c, s, a, b):
 
     gp.update()
     gp.update()
+
+    assert not all(x == 'False' for x in gp.edge_source.data['visible'])

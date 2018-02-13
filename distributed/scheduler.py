@@ -3701,6 +3701,10 @@ class Scheduler(ServerNode):
             if start == finish:
                 return {}
 
+            if self.plugins and finish == 'forgotten':
+                dependents = set(ts.dependents)
+                dependencies = set(ts.dependencies)
+
             if (start, finish) in self._transitions:
                 func = self._transitions[start, finish]
                 recommendations = func(key, *args, **kwargs)
@@ -3728,6 +3732,8 @@ class Scheduler(ServerNode):
             if self.plugins:
                 # Temporarily put back forgotten key for plugin to retrieve it
                 if ts.state == 'forgotten':
+                    ts.dependents = dependents
+                    ts.dependencies = dependencies
                     self.tasks[ts.key] = ts
                 for plugin in self.plugins:
                     try:

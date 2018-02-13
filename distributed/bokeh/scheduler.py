@@ -14,7 +14,7 @@ from bokeh.layouts import column, row
 from bokeh.models import (ColumnDataSource, DataRange1d, HoverTool, ResetTool,
                           PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad,
                           value, LinearAxis, NumeralTickFormatter, BasicTicker, NumberFormatter,
-                          BoxSelectTool)
+                          BoxSelectTool, GroupFilter, CDSView)
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
@@ -602,19 +602,25 @@ class GraphPlot(DashboardComponent):
         self.layout = GraphLayout(scheduler)
 
         self.node_source = ColumnDataSource({'x': [], 'y': [], 'name': [],
-                                             'color': []})
-        self.edge_source = ColumnDataSource({'x': [], 'y': []})
+                                             'color': [], 'visible': []})
+        self.edge_source = ColumnDataSource({'x': [], 'y': [], 'visible': []})
+
+        node_view = CDSView(source=self.node_source,
+                            filters=[GroupFilter(column_name='visible', group='True')])
+        edge_view = CDSView(source=self.edge_source,
+                            filters=[GroupFilter(column_name='visible', group='True')])
+
         self.root = figure(title='Task Graph', **kwargs)
-        self.root.line(x='x', y='y', source=self.edge_source, line_width=1)
+        self.root.multi_line(xs='x', ys='y', source=self.edge_source,
+                             line_width=1, view=edge_view)
         renderer = self.root.square(x='x', y='y', size=10, color='color',
-                                    source=self.node_source)
+                                    source=self.node_source, view=node_view)
 
         hover = HoverTool(point_policy="follow_mouse", tooltips="@name",
                           renderers=[renderer])
         self.root.add_tools(hover)
 
     def update(self):
-        import numpy as np
         with log_errors():
             if self.layout.new:
                 node_x = []
@@ -626,6 +632,7 @@ class GraphPlot(DashboardComponent):
 
                 x = self.layout.x
                 y = self.layout.y
+
                 tasks = self.scheduler.tasks
                 new, self.layout.new = self.layout.new, []
                 for key in new:
@@ -640,19 +647,26 @@ class GraphPlot(DashboardComponent):
                     node_color.append(state_colors[task.state])
                     node_name.append(task.prefix)
 
-                    for dep in task.dependencies:
-                        edge_x.extend((xx, x[dep.key], nan))
-                        edge_y.extend((yy, y[dep.key], nan))
+                new_edges = self.layout.new_edges
+                self.layout.new_edges = []
+                for a, b in new_edges:
+                    try:
+                        edge_x.append([x[a], x[b]])
+                        edge_y.append([y[a], y[b]])
+                    except KeyError:
+                        pass
 
-                if len(node_x) > 100:
-                    node_x = np.asarray(node_x)
-                    node_y = np.asarray(node_y)
+                node = {'x': node_x,
+                        'y': node_y,
+                        'color': node_color,
+                        'name': node_name,
+                        'visible': ['True'] * len(node_x)}
+                edge = {'x': edge_x,
+                        'y': edge_y,
+                        'visible': ['True'] * len(edge_x)}
 
-                node = {'x': node_x, 'y': node_y, 'color': node_color, 'name':
-                        node_name}
-                edge = {'x': np.asarray(edge_x), 'y': np.asarray(edge_y)}
                 n = len(self.node_source.data['x'])
-                if not self.node_source.data['x']:
+                if not len(self.node_source.data['x']):
                     # see https://github.com/bokeh/bokeh/issues/7523
                     self.node_source.data.update(node)
                     self.edge_source.data.update(edge)
@@ -661,12 +675,26 @@ class GraphPlot(DashboardComponent):
                     self.edge_source.stream(edge)
                 n2 = len(self.node_source.data['x'])
 
-            elif self.layout.color_updates:
+            n = len(self.node_source.data['x'])
+            m = len(self.edge_source.data['x'])
+
+            if self.layout.color_updates:
                 color_updates = self.layout.color_updates
                 self.layout.color_updates = []
-                n = len(self.node_source.data['x'])
-                color_updates = [(i, c) for i, c in color_updates if i < n]
-                self.node_source.patch({'color': color_updates})
+                updates = [(i, c) for i, c in color_updates if i < n]
+                self.node_source.patch({'color': updates})
+
+            if self.layout.visible_updates:
+                updates = self.layout.visible_updates
+                updates = [(i, c) for i, c in updates if i < n]
+                self.visible_updates = []
+                self.node_source.patch({'visible': updates})
+
+            if self.layout.visible_edge_updates:
+                updates = self.layout.visible_edge_updates
+                updates = [(i, c) for i, c in updates if i < m]
+                self.visible_updates = []
+                self.edge_source.patch({'visible': updates})
 
 
 class TaskProgress(DashboardComponent):
