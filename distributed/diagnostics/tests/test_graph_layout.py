@@ -43,6 +43,7 @@ def test_colors(c, s, a, b):
 
     assert gl.color_updates
 
+
 @gen_cluster(client=True)
 def test_release_tasks(c, s, a, b):
     gl = GraphLayout(s)

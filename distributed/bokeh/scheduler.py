@@ -20,6 +20,7 @@ from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from bokeh.io import curdoc
 from toolz import pipe, merge
+from tornado import escape
 try:
     import numpy as np
 except ImportError:
@@ -602,7 +603,8 @@ class GraphPlot(DashboardComponent):
         self.layout = GraphLayout(scheduler)
 
         self.node_source = ColumnDataSource({'x': [], 'y': [], 'name': [],
-                                             'color': [], 'visible': []})
+                                             'color': [], 'visible': [],
+                                             'key': []})
         self.edge_source = ColumnDataSource({'x': [], 'y': [], 'visible': []})
 
         node_view = CDSView(source=self.node_source,
@@ -613,16 +615,20 @@ class GraphPlot(DashboardComponent):
         self.root = figure(title='Task Graph', **kwargs)
         self.root.multi_line(xs='x', ys='y', source=self.edge_source,
                              line_width=1, view=edge_view)
-        renderer = self.root.square(x='x', y='y', size=10, color='color',
+        rect = self.root.square(x='x', y='y', size=10, color='color',
                                     source=self.node_source, view=node_view)
 
         hover = HoverTool(point_policy="follow_mouse", tooltips="@name",
-                          renderers=[renderer])
-        self.root.add_tools(hover)
+                          renderers=[rect])
+        tap = TapTool(callback=OpenURL(url='info/task/@key.html'),
+                      renderers=[rect])
+        rect.nonselection_glyph = None
+        self.root.add_tools(hover, tap)
 
     def update(self):
         with log_errors():
             if self.layout.new:
+                node_key = []
                 node_x = []
                 node_y = []
                 node_color = []
@@ -642,6 +648,7 @@ class GraphPlot(DashboardComponent):
                         continue
                     xx = x[key]
                     yy = y[key]
+                    node_key.append(escape.url_escape(key))
                     node_x.append(xx)
                     node_y.append(yy)
                     node_color.append(state_colors[task.state])
@@ -660,6 +667,7 @@ class GraphPlot(DashboardComponent):
                         'y': node_y,
                         'color': node_color,
                         'name': node_name,
+                        'key': node_key,
                         'visible': ['True'] * len(node_x)}
                 edge = {'x': edge_x,
                         'y': edge_y,
