@@ -43,6 +43,3 @@ class GraphLayout(SchedulerPlugin):
             self.index[key] = self.next_index
             self.next_index += 1
             self.new.append(key)
-            if key not in scheduler.tasks:
-                import pdb; pdb.set_trace()
-                1 + 1

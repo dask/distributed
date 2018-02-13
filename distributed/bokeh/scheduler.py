@@ -641,9 +641,18 @@ class GraphPlot(DashboardComponent):
                     edge_x.extend((xx, x[dep.key], nan))
                     edge_y.extend((yy, y[dep.key], nan))
 
-            self.node_source.stream({'x': node_x, 'y': node_y, 'name': node_name})
-            self.edge_source.stream({'x': np.asarray(edge_x),
-                                     'y': np.asarray(edge_y)})
+            if len(node_x) > 100:
+                node_x = np.asarray(node_x)
+                node_y = np.asarray(node_y)
+
+            edge = {'x': np.asarray(edge_x), 'y': np.asarray(edge_y)}
+            if not self.node_source.data['x']:
+                # see https://github.com/bokeh/bokeh/issues/7523
+                self.node_source.data.update({'x': node_x, 'y': node_y, 'name': node_name})
+                self.edge_source.data.update(edge)
+            else:
+                self.node_source.stream({'x': node_x, 'y': node_y, 'name': node_name})
+                self.edge_source.stream(edge)
 
 
 class TaskProgress(DashboardComponent):
