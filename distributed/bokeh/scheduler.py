@@ -56,6 +56,9 @@ template = jinja2.Template(template_source)
 template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'profile']}
 
 
+nan = float('nan')
+
+
 def update(source, data):
     """ Update source with data
 
@@ -592,6 +595,57 @@ class TaskStream(components.TaskStream):
                 self.source.stream(rectangles, self.n_rectangles)
 
 
+class GraphPlot(DashboardComponent):
+    def __init__(self, scheduler, **kwargs):
+        from ..diagnostics import GraphLayout
+        self.scheduler = scheduler
+        self.layout = GraphLayout(scheduler)
+
+        self.node_source = ColumnDataSource({'x': [], 'y': [], 'name': []})
+        self.edge_source = ColumnDataSource({'x': [], 'y': []})
+        self.root = figure(title='Task Graph', **kwargs)
+        self.root.line(x='x', y='y', source=self.edge_source, line_width=1)
+        renderer = self.root.square(x='x', y='y', size=10, source=self.node_source)
+
+        hover = HoverTool(point_policy="follow_mouse", tooltips="@name",
+                          renderers=[renderer])
+        self.root.add_tools(hover)
+
+    def update(self):
+        import numpy as np
+        if not self.layout.new:
+            return
+        with log_errors():
+            node_x = []
+            node_y = []
+            node_name = []
+            edge_x = []
+            edge_y = []
+
+            x = self.layout.x
+            y = self.layout.y
+            tasks = self.scheduler.tasks
+            new, self.layout.new = self.layout.new, []
+            for key in new:
+                try:
+                    task = tasks[key]
+                except KeyError:
+                    continue
+                xx = x[key]
+                yy = y[key]
+                node_x.append(xx)
+                node_y.append(yy)
+                node_name.append(task.prefix)
+
+                for dep in task.dependencies:
+                    edge_x.extend((xx, x[dep.key], nan))
+                    edge_y.extend((yy, y[dep.key], nan))
+
+            self.node_source.stream({'x': node_x, 'y': node_y, 'name': node_name})
+            self.edge_source.stream({'x': np.asarray(edge_x),
+                                     'y': np.asarray(edge_y)})
+
+
 class TaskProgress(DashboardComponent):
     """ Progress bars per task type """
 
@@ -944,6 +998,18 @@ def tasks_doc(scheduler, extra, doc):
         doc.template_variables.update(extra)
 
 
+def graph_doc(scheduler, extra, doc):
+    with log_errors():
+        graph = GraphPlot(scheduler, sizing_mode='stretch_both')
+        graph.update()
+        doc.add_periodic_callback(graph.update, 200)
+        doc.add_root(graph.root)
+
+        doc.template = template
+        doc.template_variables['active_page'] = 'graph'
+        doc.template_variables.update(extra)
+
+
 def status_doc(scheduler, extra, doc):
     with log_errors():
         task_stream = TaskStream(scheduler, n_rectangles=1000, clear_interval=10000, height=350)
@@ -1012,6 +1078,7 @@ class BokehScheduler(BokehServer):
         tasks = Application(FunctionHandler(partial(tasks_doc, scheduler, self.extra)))
         status = Application(FunctionHandler(partial(status_doc, scheduler, self.extra)))
         profile = Application(FunctionHandler(partial(profile_doc, scheduler, self.extra)))
+        graph = Application(FunctionHandler(partial(graph_doc, scheduler, self.extra)))
 
         self.apps = {
             '/system': systemmonitor,
@@ -1022,6 +1089,7 @@ class BokehScheduler(BokehServer):
             '/tasks': tasks,
             '/status': status,
             '/profile': profile,
+            '/graph': graph,
         }
 
         self.loop = io_loop or scheduler.loop

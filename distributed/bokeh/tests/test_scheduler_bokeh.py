@@ -19,7 +19,8 @@ from distributed.bokeh.scheduler import (BokehScheduler, SystemMonitor,
                                          TaskStream, TaskProgress,
                                          MemoryUse, CurrentLoad,
                                          ProcessingHistogram,
-                                         NBytesHistogram, WorkerTable)
+                                         NBytesHistogram, WorkerTable,
+                                         GraphPlot)
 
 from distributed.bokeh import scheduler
 
@@ -37,7 +38,8 @@ def test_simple(c, s, a, b):
     yield gen.sleep(0.1)
 
     http_client = AsyncHTTPClient()
-    for suffix in ['system', 'counters', 'workers', 'status', 'tasks', 'stealing']:
+    for suffix in ['system', 'counters', 'workers', 'status', 'tasks',
+                   'stealing', 'graph']:
         response = yield http_client.fetch('http://localhost:%d/%s'
                                            % (s.services['bokeh'].port, suffix))
         assert 'bokeh' in response.body.decode().lower()
@@ -279,3 +281,36 @@ def test_WorkerTable(c, s, a, b):
     wt.update()
     assert all(wt.source.data.values())
     assert all(len(v) == 2 for v in wt.source.data.values())
+
+
+@gen_cluster(client=True)
+def test_GraphPlot(c, s, a, b):
+    gp = GraphPlot(s)
+    futures = c.map(inc, range(5))
+    total = c.submit(sum, futures)
+    yield total
+
+    gp.update()
+    assert set(map(len, gp.node_source.data.values())) == {6}
+    assert set(map(len, gp.edge_source.data.values())) == {3 * 5}
+
+    da = pytest.importorskip('dask.array')
+    x = da.random.random((20, 20), chunks=(10, 10)).persist()
+    y = (x + x.T) - x.mean(axis=0)
+    y = y.persist()
+    yield wait(y)
+
+    gp.update()
+
+    yield c.compute((x + y).sum())
+
+    gp.update()
+
+    future = c.submit(inc, 10)
+    yield wait(future)
+    key = future.key
+    del future
+    while key in s.tasks:
+        yield gen.sleep(0.01)
+
+    gp.update()
