@@ -10,10 +10,45 @@ jobs:
 
     steps:
       - checkout
+      - restore_cache:
+          keys:
+            - miniconda-v1-{{ checksum ".circleci/environment-3.6.yml" }}
       - run:
-          name: install
-          command: source continuous_integration/travis/install.sh
-      - run:
-          name: test
+          name: install miniconda
           command: |
-              /home/circleci/miniconda/envs/test-environment/bin/py.test -m "not avoid travis" distributed --verbose
+              if [ ! -d "/home/circleci/miniconda" ]; then
+                wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh
+                bash miniconda.sh -b -p $HOME/miniconda
+                export PATH="$HOME/miniconda/bin:$PATH"
+                conda config --set always_yes yes --set changeps1 no
+              fi
+              sudo chown -R $USER.$USER $HOME
+      - run:
+          name: configure conda
+          command: |
+              export PATH="$HOME/miniconda/bin:$PATH"
+              if [ ! -d "/home/circleci/miniconda/envs/test-dask" ]; then
+                conda update -q conda
+                conda env create -f .circleci/environment-3.6.yml --name=test-dask
+                source activate test-dask
+                pip install --no-deps --quiet -e .
+              fi
+              conda env list
+              conda list ${ENV_NAME}
+      - save_cache:
+          key: miniconda-v1-{{ checksum "ci/environment-3.6.yml" }}
+          paths:
+            - "/home/circleci/miniconda"
+
+      - run:
+          name: pip install co-dependencies
+          command: |
+              pip install -q git+https://github.com/dask/dask.git --no-deps --upgrade
+      - run:
+          name: py.test
+          command: |
+            /home/circleci/miniconda/envs/test-dask/bin/pytest distributed --verbose
+      - run:
+          name: flake8
+          command: |
+            /home/circleci/miniconda/envs/test-dask/bin/flake8 distributed

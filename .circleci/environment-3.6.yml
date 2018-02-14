@@ -1,0 +1,35 @@
+name: dask-3.6
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - bokeh
+  - click
+  - coverage
+  - crick
+  - dask
+  - flake8
+  - h5py
+  - ipykernel
+  - ipywidgets
+  - joblib
+  - jupyter_client
+  - lz4
+  - mock
+  - netcdf4
+  - paramiko
+  - psutil
+  - pytest=3.1
+  - pytest-faulthandler
+  - pytest-timeout
+  - python=3.6
+  - requests
+  - tblib
+  - toolz
+  - tornado=4.5
+  - python-blosc
+  - pip:
+      - pytest-repeat
+      - sortedcollections
+      - msgpack-python
+      - keras
