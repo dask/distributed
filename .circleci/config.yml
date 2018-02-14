@@ -16,4 +16,4 @@ jobs:
       - run:
           name: test
           command: |
-              /home/circleci/miniconda/envs/dask-test/bin/py.test -m "not avoid travis" distributed --verbose
+              /home/circleci/miniconda/envs/test-environment/bin/py.test -m "not avoid travis" distributed --verbose
