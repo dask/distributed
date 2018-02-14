@@ -2,6 +2,8 @@ version: 2
 
 jobs:
   build:
+    docker:
+      - image: circleci/python
     environment:
       PYTHON: "3.6"
       ENV_NAME: "dask-test"
