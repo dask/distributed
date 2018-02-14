@@ -317,7 +317,7 @@ def test_GraphPlot(c, s, a, b):
     while key in s.tasks:
         yield gen.sleep(0.01)
 
-    assert 'red' in gp.node_source.data['color']
+    assert 'memory' in gp.node_source.data['state']
 
     gp.update()
     gp.update()

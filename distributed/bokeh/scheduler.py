@@ -18,6 +18,7 @@ from bokeh.models import (ColumnDataSource, DataRange1d, HoverTool, ResetTool,
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
+from bokeh.transform import factor_cmap
 from bokeh.io import curdoc
 from toolz import pipe, merge
 from tornado import escape
@@ -610,7 +611,7 @@ class GraphPlot(DashboardComponent):
         self.invisible_count = 0  # number of invisible nodes
 
         self.node_source = ColumnDataSource({'x': [], 'y': [], 'name': [],
-                                             'color': [], 'visible': [],
+                                             'state': [], 'visible': [],
                                              'key': []})
         self.edge_source = ColumnDataSource({'x': [], 'y': [], 'visible': []})
 
@@ -619,13 +620,20 @@ class GraphPlot(DashboardComponent):
         edge_view = CDSView(source=self.edge_source,
                             filters=[GroupFilter(column_name='visible', group='True')])
 
+        states, colors = zip(*state_colors.items())
+        node_colors = factor_cmap('state', factors=states, palette=colors)
+
         self.root = figure(title='Task Graph', **kwargs)
         self.root.multi_line(xs='x', ys='y', source=self.edge_source,
-                             line_width=1, view=edge_view)
-        rect = self.root.square(x='x', y='y', size=10, color='color',
-                                    source=self.node_source, view=node_view)
+                             line_width=1, view=edge_view, color='black',
+                             alpha=0.3)
+        rect = self.root.square(x='x', y='y', size=10, color=node_colors,
+                                source=self.node_source, view=node_view,
+                                legend='state')
+        self.root.xgrid.grid_line_color= None
+        self.root.ygrid.grid_line_color= None
 
-        hover = HoverTool(point_policy="follow_mouse", tooltips="@name",
+        hover = HoverTool(point_policy="follow_mouse", tooltips="<b>@name</b>: @state",
                           renderers=[rect])
         tap = TapTool(callback=OpenURL(url='info/task/@key.html'),
                       renderers=[rect])
@@ -655,7 +663,7 @@ class GraphPlot(DashboardComponent):
             node_key = []
             node_x = []
             node_y = []
-            node_color = []
+            node_state = []
             node_name = []
             edge_x = []
             edge_y = []
@@ -674,7 +682,7 @@ class GraphPlot(DashboardComponent):
                 node_key.append(escape.url_escape(key))
                 node_x.append(xx)
                 node_y.append(yy)
-                node_color.append(state_colors[task.state])
+                node_state.append(task.state)
                 node_name.append(task.prefix)
 
             for a, b in new_edges:
@@ -686,7 +694,7 @@ class GraphPlot(DashboardComponent):
 
             node = {'x': node_x,
                     'y': node_y,
-                    'color': node_color,
+                    'state': node_state,
                     'name': node_name,
                     'key': node_key,
                     'visible': ['True'] * len(node_x)}
@@ -709,11 +717,11 @@ class GraphPlot(DashboardComponent):
         n = len(self.node_source.data['x'])
         m = len(self.edge_source.data['x'])
 
-        if self.layout.color_updates:
-            color_updates = self.layout.color_updates
-            self.layout.color_updates = []
-            updates = [(i, c) for i, c in color_updates if i < n]
-            self.node_source.patch({'color': updates})
+        if self.layout.state_updates:
+            state_updates = self.layout.state_updates
+            self.layout.state_updates = []
+            updates = [(i, c) for i, c in state_updates if i < n]
+            self.node_source.patch({'state': updates})
 
         if self.layout.visible_updates:
             updates = self.layout.visible_updates
