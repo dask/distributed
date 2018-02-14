@@ -3732,8 +3732,11 @@ class Scheduler(ServerNode):
             if self.plugins:
                 # Temporarily put back forgotten key for plugin to retrieve it
                 if ts.state == 'forgotten':
-                    ts.dependents = dependents
-                    ts.dependencies = dependencies
+                    try:
+                        ts.dependents = dependents
+                        ts.dependencies = dependencies
+                    except KeyError:
+                        pass
                     self.tasks[ts.key] = ts
                 for plugin in self.plugins:
                     try:
