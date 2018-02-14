@@ -55,7 +55,7 @@ with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
 
 template = jinja2.Template(template_source)
 
-template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'profile']}
+template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'profile', 'graph']}
 
 
 nan = float('nan')
@@ -598,9 +598,16 @@ class TaskStream(components.TaskStream):
 
 
 class GraphPlot(DashboardComponent):
+    """
+    A dynamic node-link diagram for the task graph on the scheduler
+
+    See also the GraphLayout diagnostic at
+    distributed/diagnostics/graph_layout.py
+    """
     def __init__(self, scheduler, **kwargs):
         self.scheduler = scheduler
         self.layout = GraphLayout(scheduler)
+        self.invisible_count = 0  # number of invisible nodes
 
         self.node_source = ColumnDataSource({'x': [], 'y': [], 'name': [],
                                              'color': [], 'visible': [],
@@ -627,82 +634,102 @@ class GraphPlot(DashboardComponent):
 
     def update(self):
         with log_errors():
-            if self.layout.new:
-                node_key = []
-                node_x = []
-                node_y = []
-                node_color = []
-                node_name = []
-                edge_x = []
-                edge_y = []
+            # occasionally reset the column data source to remove old nodes
+            if self.invisible_count > len(self.node_source.data['x']) / 2:
+                self.layout.reset_index()
+                self.invisible_count = 0
+                update = True
+            else:
+                update = False
 
-                x = self.layout.x
-                y = self.layout.y
+            new, self.layout.new = self.layout.new, []
+            new_edges = self.layout.new_edges
+            self.layout.new_edges = []
 
-                tasks = self.scheduler.tasks
-                new, self.layout.new = self.layout.new, []
-                for key in new:
-                    try:
-                        task = tasks[key]
-                    except KeyError:
-                        continue
-                    xx = x[key]
-                    yy = y[key]
-                    node_key.append(escape.url_escape(key))
-                    node_x.append(xx)
-                    node_y.append(yy)
-                    node_color.append(state_colors[task.state])
-                    node_name.append(task.prefix)
+            self.add_new_nodes_edges(new, new_edges, update=update)
 
-                new_edges = self.layout.new_edges
-                self.layout.new_edges = []
-                for a, b in new_edges:
-                    try:
-                        edge_x.append([x[a], x[b]])
-                        edge_y.append([y[a], y[b]])
-                    except KeyError:
-                        pass
+            self.patch_updates()
 
-                node = {'x': node_x,
-                        'y': node_y,
-                        'color': node_color,
-                        'name': node_name,
-                        'key': node_key,
-                        'visible': ['True'] * len(node_x)}
-                edge = {'x': edge_x,
-                        'y': edge_y,
-                        'visible': ['True'] * len(edge_x)}
+    def add_new_nodes_edges(self, new, new_edges, update=False):
+        if new or update:
+            node_key = []
+            node_x = []
+            node_y = []
+            node_color = []
+            node_name = []
+            edge_x = []
+            edge_y = []
 
-                n = len(self.node_source.data['x'])
-                if not len(self.node_source.data['x']):
-                    # see https://github.com/bokeh/bokeh/issues/7523
-                    self.node_source.data.update(node)
-                    self.edge_source.data.update(edge)
-                else:
-                    self.node_source.stream(node)
-                    self.edge_source.stream(edge)
-                n2 = len(self.node_source.data['x'])
+            x = self.layout.x
+            y = self.layout.y
 
-            n = len(self.node_source.data['x'])
-            m = len(self.edge_source.data['x'])
+            tasks = self.scheduler.tasks
+            for key in new:
+                try:
+                    task = tasks[key]
+                except KeyError:
+                    continue
+                xx = x[key]
+                yy = y[key]
+                node_key.append(escape.url_escape(key))
+                node_x.append(xx)
+                node_y.append(yy)
+                node_color.append(state_colors[task.state])
+                node_name.append(task.prefix)
 
-            if self.layout.color_updates:
-                color_updates = self.layout.color_updates
-                self.layout.color_updates = []
-                updates = [(i, c) for i, c in color_updates if i < n]
-                self.node_source.patch({'color': updates})
+            for a, b in new_edges:
+                try:
+                    edge_x.append([x[a], x[b]])
+                    edge_y.append([y[a], y[b]])
+                except KeyError:
+                    pass
 
-            if self.layout.visible_updates:
-                updates = self.layout.visible_updates
-                updates = [(i, c) for i, c in updates if i < n]
-                self.visible_updates = []
-                self.node_source.patch({'visible': updates})
+            node = {'x': node_x,
+                    'y': node_y,
+                    'color': node_color,
+                    'name': node_name,
+                    'key': node_key,
+                    'visible': ['True'] * len(node_x)}
+            edge = {'x': edge_x,
+                    'y': edge_y,
+                    'visible': ['True'] * len(edge_x)}
 
-            if self.layout.visible_edge_updates:
-                updates = self.layout.visible_edge_updates
-                updates = [(i, c) for i, c in updates if i < m]
-                self.visible_updates = []
-                self.edge_source.patch({'visible': updates})
+            if update or not len(self.node_source.data['x']):
+                # see https://github.com/bokeh/bokeh/issues/7523
+                self.node_source.data.update(node)
+                self.edge_source.data.update(edge)
+            else:
+                self.node_source.stream(node)
+                self.edge_source.stream(edge)
+
+    def patch_updates(self):
+        """
+        Small updates like color changes or lost nodes from task transitions
+        """
+        n = len(self.node_source.data['x'])
+        m = len(self.edge_source.data['x'])
+
+        if self.layout.color_updates:
+            color_updates = self.layout.color_updates
+            self.layout.color_updates = []
+            updates = [(i, c) for i, c in color_updates if i < n]
+            self.node_source.patch({'color': updates})
+
+        if self.layout.visible_updates:
+            updates = self.layout.visible_updates
+            updates = [(i, c) for i, c in updates if i < n]
+            self.visible_updates = []
+            self.node_source.patch({'visible': updates})
+            self.invisible_count += len(updates)
+
+        if self.layout.visible_edge_updates:
+            updates = self.layout.visible_edge_updates
+            updates = [(i, c) for i, c in updates if i < m]
+            self.visible_updates = []
+            self.edge_source.patch({'visible': updates})
+
+    def __del__(self):
+        self.scheduler.remove_plugin(self.layout)
 
 
 class TaskProgress(DashboardComponent):

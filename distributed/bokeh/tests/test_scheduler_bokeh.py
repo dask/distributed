@@ -9,9 +9,11 @@ from toolz import first
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient
 
+from dask.core import flatten
+from distributed.utils import tokey
 from distributed.client import wait
 from distributed.metrics import time
-from distributed.utils_test import gen_cluster, inc, dec, slowinc
+from distributed.utils_test import gen_cluster, inc, dec, slowinc, div
 from distributed.bokeh.worker import Counters, BokehWorker
 from distributed.bokeh.scheduler import (BokehScheduler, SystemMonitor,
                                          Occupancy, StealingTimeSeries,
@@ -321,3 +323,68 @@ def test_GraphPlot(c, s, a, b):
     gp.update()
 
     assert not all(x == 'False' for x in gp.edge_source.data['visible'])
+
+
+@gen_cluster(client=True)
+def test_GraphPlot_clear(c, s, a, b):
+    gp = GraphPlot(s)
+    futures = c.map(inc, range(5))
+    total = c.submit(sum, futures)
+    yield total
+
+    gp.update()
+
+    del total, futures
+
+    while s.tasks:
+        yield gen.sleep(0.01)
+
+    gp.update()
+    gp.update()
+
+    start = time()
+    while any(gp.node_source.data.values()) or any(gp.edge_source.data.values()):
+        yield gen.sleep(0.1)
+        gp.update()
+        assert time() < start + 5
+
+
+@gen_cluster(client=True)
+def test_GraphPlot_complex(c, s, a, b):
+    da = pytest.importorskip('dask.array')
+    gp = GraphPlot(s)
+    x = da.random.random((2000, 2000), chunks=(1000, 1000))
+    y = ((x + x.T) - x.mean(axis=0)).persist()
+    yield wait(y)
+    gp.update()
+    assert len(gp.layout.index) == len(gp.node_source.data['x'])
+    assert len(gp.layout.index) == len(s.tasks)
+    z = (x - y).sum().persist()
+    yield wait(z)
+    gp.update()
+    assert len(gp.layout.index) == len(gp.node_source.data['x'])
+    assert len(gp.layout.index) == len(s.tasks)
+    del z
+    yield gen.sleep(0.2)
+    gp.update()
+    assert len(gp.layout.index) == sum(v == 'True' for v in gp.node_source.data['visible'])
+    assert len(gp.layout.index) == len(s.tasks)
+    assert max(gp.layout.index.values()) < len(gp.node_source.data['visible'])
+    assert gp.layout.next_index == len(gp.node_source.data['visible'])
+    gp.update()
+    assert set(gp.layout.index.values()) == set(range(len(gp.layout.index)))
+    visible = gp.node_source.data['visible']
+    keys = list(map(tokey, flatten(y.__dask_keys__())))
+    assert all(visible[gp.layout.index[key]] == 'True' for key in keys)
+
+
+@gen_cluster(client=True)
+def test_GraphPlot_order(c, s, a, b):
+    x = c.submit(inc, 1)
+    y = c.submit(div, 1, 0)
+    yield wait(y)
+
+    gp = GraphPlot(s)
+    gp.update()
+
+    assert gp.node_source.data['color'][gp.layout.index[y.key]] == 'black'
