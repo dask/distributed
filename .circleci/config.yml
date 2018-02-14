@@ -1,0 +1,16 @@
+version: 2
+
+jobs:
+  build:
+    environment:
+      PYTHON: "3.6"
+      ENV_NAME: "dask-test"
+
+    steps:
+      - checkout
+      - run:
+          name: install
+          command: source continuous_integration/travis/install.sh
+      - run:
+          name: test
+          command: source continuous_integration/travis/run_tests.sh
