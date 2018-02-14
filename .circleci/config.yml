@@ -1,6 +1,7 @@
 version: 2
 
-jobs: build:
+jobs:
+  build:
     docker:
       - image: circleci/python
     environment:
