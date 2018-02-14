@@ -16,5 +16,4 @@ jobs:
       - run:
           name: test
           command: |
-              export PATH=/home/circleci/miniconda/envs/$ENV_NAME/bin:$PATH
-              source continuous_integration/travis/run_tests.sh
+              /home/circleci/miniconda/envs/dask-test/bin/py.test -m "not avoid travis" distributed --verbose
