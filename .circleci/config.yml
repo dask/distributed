@@ -1,7 +1,6 @@
 version: 2
 
-jobs:
-  build:
+jobs: build:
     docker:
       - image: circleci/python
     environment:
@@ -16,5 +15,5 @@ jobs:
       - run:
           name: test
           command: |
-              export PATH=/home/circleci/miniconda/bin:$PATH
+              export PATH=/home/circleci/miniconda/envs/$ENV_NAME/bin:$PATH
               source continuous_integration/travis/run_tests.sh
