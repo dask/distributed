@@ -36,18 +36,18 @@ jobs:
               conda env list
               conda list ${ENV_NAME}
       - save_cache:
-          key: miniconda-v1-{{ checksum "ci/environment-3.6.yml" }}
+          key: miniconda-v1-{{ checksum ".circleci/environment-3.6.yml" }}
           paths:
             - "/home/circleci/miniconda"
 
       - run:
           name: pip install co-dependencies
           command: |
-              pip install -q git+https://github.com/dask/dask.git --no-deps --upgrade
+            /home/circleci/miniconda/envs/test-dask/bin/pip install -q git+https://github.com/dask/dask.git --no-deps --upgrade
       - run:
           name: py.test
           command: |
-            /home/circleci/miniconda/envs/test-dask/bin/pytest distributed --verbose
+            /home/circleci/miniconda/envs/test-dask/bin/py.test distributed --verbose
       - run:
           name: flake8
           command: |
