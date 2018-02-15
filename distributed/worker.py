@@ -523,24 +523,33 @@ class WorkerBase(ServerNode):
     @gen.coroutine
     def get_data(self, comm, keys=None, who=None):
         start = time()
-
         msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
         nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
+        total_bytes = sum(filter(None, nbytes.values()))
         stop = time()
+
         if self.digests is not None:
             self.digests['get-data-load-duration'].add(stop - start)
+
         start = time()
+        self.outgoing_bytes[who] += total_bytes
         try:
             compressed = yield comm.write(msg)
+            response = yield comm.read()
+            assert response == 'OK', response
         except EnvironmentError:
             logger.exception('failed during get data', exc_info=True)
             comm.abort()
             raise
+        self.outgoing_bytes[who] -= total_bytes
+        if not self.outgoing_bytes[who]:
+            del self.outgoing_bytes[who]
+        self._last_outgoing_communication = time()
         stop = time()
+
         if self.digests is not None:
             self.digests['get-data-send-duration'].add(stop - start)
 
-        total_bytes = sum(filter(None, nbytes.values()))
 
         self.outgoing_count += 1
         duration = (stop - start) or 0.5  # windows
@@ -1129,6 +1138,8 @@ class Worker(WorkerBase):
         self.incoming_count = 0
         self.outgoing_transfer_log = deque(maxlen=(100000))
         self.outgoing_count = 0
+        self.outgoing_bytes = defaultdict(lambda: 0)
+        self._last_outgoing_communication = 0
         self._client = None
 
         profile_cycle_interval = kwargs.pop('profile_cycle_interval',
@@ -1751,8 +1762,7 @@ class Worker(WorkerBase):
                 logger.debug("Request %d keys", len(deps))
 
                 start = time() + self.scheduler_delay
-                response = yield self.rpc(worker).get_data(keys=deps,
-                                                           who=self.address)
+                response = yield get_data_from_worker(self.rpc, deps, worker, self.address)
                 stop = time() + self.scheduler_delay
 
                 if cause:
@@ -2188,56 +2198,74 @@ class Worker(WorkerBase):
         proc = psutil.Process()
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
+        pause = False
+        was_paused = self.paused
 
         # Pause worker threads if above 80% memory use
         if self.memory_pause_fraction and frac > self.memory_pause_fraction:
             # Try to free some memory while in paused state
             self._throttled_gc.collect()
+            pause = True
             if not self.paused:
                 logger.warning("Worker is at %d%% memory usage. Pausing worker.  "
                                "Process memory: %s -- Worker memory limit: %s",
                                int(frac * 100),
                                format_bytes(proc.memory_info().rss),
                                format_bytes(self.memory_limit))
-                self.paused = True
-        elif self.paused:
+
+        # If above 70% either pause or dump, depending on communication history
+        if self.memory_spill_fraction and frac > self.memory_spill_fraction:
+            # Actively communicating with other workers?  Just pause
+            if self.outgoing_bytes or self._last_outgoing_communication > time() - 1:
+                if not self.paused and not pause:  # don't log twice
+                    logger.warning("Worker is at %d%% memory usage "
+                                   "and communicating heavily. "
+                                   "Pausing worker.  "
+                                   "Process memory: %s -- "
+                                   "Worker memory limit: %s",
+                                   int(frac * 100),
+                                   format_bytes(proc.memory_info().rss),
+                                   format_bytes(self.memory_limit))
+                pause = True
+            # Not actively communicating?  Dump data to disk
+            else:
+                target = self.memory_limit * self.memory_target_fraction
+                count = 0
+                need = memory - target
+                while memory > target:
+                    if not self.data.fast:
+                        if not pause:
+                            logger.warning("Memory use is high but worker has no data "
+                                           "to store to disk.  Perhaps some other process "
+                                           "is leaking memory?  Process memory: %s -- "
+                                           "Worker memory limit: %s",
+                                           format_bytes(proc.memory_info().rss),
+                                           format_bytes(self.memory_limit))
+                        break
+                    k, v, weight = self.data.fast.evict()
+                    del k, v
+                    total += weight
+                    count += 1
+                    yield gen.moment
+                    memory = proc.memory_info().rss
+                    if total > need and memory > target:
+                        # Issue a GC to ensure that the evicted data is actually
+                        # freed from memory and taken into account by the monitor
+                        # before trying to evict even more data.
+                        self._throttled_gc.collect()
+                        memory = proc.memory_info().rss
+                if count:
+                    logger.debug("Moved %d pieces of data data and %s to disk",
+                                 count, format_bytes(total))
+
+        self.paused = pause
+        if was_paused and not self.paused:
             logger.warning("Worker is at %d%% memory usage. Resuming worker. "
                            "Process memory: %s -- Worker memory limit: %s",
                            int(frac * 100),
                            format_bytes(proc.memory_info().rss),
                            format_bytes(self.memory_limit))
-            self.paused = False
             self.ensure_computing()
-
-        # Dump data to disk if above 70%
-        if self.memory_spill_fraction and frac > self.memory_spill_fraction:
-            target = self.memory_limit * self.memory_target_fraction
-            count = 0
-            need = memory - target
-            while memory > target:
-                if not self.data.fast:
-                    logger.warning("Memory use is high but worker has no data "
-                                   "to store to disk.  Perhaps some other process "
-                                   "is leaking memory?  Process memory: %s -- "
-                                   "Worker memory limit: %s",
-                                   format_bytes(proc.memory_info().rss),
-                                   format_bytes(self.memory_limit))
-                    break
-                k, v, weight = self.data.fast.evict()
-                del k, v
-                total += weight
-                count += 1
-                yield gen.moment
-                memory = proc.memory_info().rss
-                if total > need and memory > target:
-                    # Issue a GC to ensure that the evicted data is actually
-                    # freed from memory and taken into account by the monitor
-                    # before trying to evict even more data.
-                    self._throttled_gc.collect()
-                    memory = proc.memory_info().rss
-            if count:
-                logger.debug("Moved %d pieces of data data and %s to disk",
-                             count, format_bytes(total))
 
         self._memory_monitoring = False
         raise gen.Return(total)
@@ -2676,3 +2704,29 @@ def parse_memory_limit(memory_limit, ncores):
         return parse_bytes(memory_limit)
     else:
         return int(memory_limit)
+
+
+@gen.coroutine
+def get_data_from_worker(rpc, keys, worker, who=None):
+    """ Get keys from worker
+
+    The worker has a two step handshake to acknowledge when data has been fully
+    delivered.  This function implements that handshake.
+
+    See Also
+    --------
+    Worker.get_data
+    Worker.gather_deps
+    utils_comm.gather_data_from_workers
+    """
+    comm = yield rpc.connect(worker)
+    try:
+        yield comm.write({'op': 'get_data',
+                          'keys': keys,
+                          'who': who})
+        response = yield comm.read()
+        yield comm.write('OK')
+    finally:
+        rpc.reuse(worker, comm)
+
+    raise gen.Return(response)
