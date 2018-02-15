@@ -36,7 +36,7 @@ from ..metrics import time
 from ..utils import log_errors, format_bytes, format_time
 from ..diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
 from ..diagnostics.progress import AllProgress
-from ..diagnostics.graph_layout import GraphLayout, state_colors
+from ..diagnostics.graph_layout import GraphLayout
 from .task_stream import TaskStreamPlugin
 
 try:
@@ -620,8 +620,10 @@ class GraphPlot(DashboardComponent):
         edge_view = CDSView(source=self.edge_source,
                             filters=[GroupFilter(column_name='visible', group='True')])
 
-        states, colors = zip(*state_colors.items())
-        node_colors = factor_cmap('state', factors=states, palette=colors)
+        node_colors = factor_cmap('state',
+                factors=['waiting', 'processing', 'memory', 'released', 'erred'],
+                palette=['gray', 'green', 'red', 'blue', 'black']
+        )
 
         self.root = figure(title='Task Graph', **kwargs)
         self.root.multi_line(xs='x', ys='y', source=self.edge_source,
@@ -630,8 +632,8 @@ class GraphPlot(DashboardComponent):
         rect = self.root.square(x='x', y='y', size=10, color=node_colors,
                                 source=self.node_source, view=node_view,
                                 legend='state')
-        self.root.xgrid.grid_line_color= None
-        self.root.ygrid.grid_line_color= None
+        self.root.xgrid.grid_line_color = None
+        self.root.ygrid.grid_line_color = None
 
         hover = HoverTool(point_policy="follow_mouse", tooltips="<b>@name</b>: @state",
                           renderers=[rect])

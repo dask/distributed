@@ -387,4 +387,4 @@ def test_GraphPlot_order(c, s, a, b):
     gp = GraphPlot(s)
     gp.update()
 
-    assert gp.node_source.data['color'][gp.layout.index[y.key]] == 'black'
+    assert gp.node_source.data['state'][gp.layout.index[y.key]] == 'erred'

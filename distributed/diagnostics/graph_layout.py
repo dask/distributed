@@ -3,13 +3,6 @@ from __future__ import print_function, division, absolute_import
 from .plugin import SchedulerPlugin
 
 
-state_colors = {'waiting': 'gray',
-                'processing': 'green',
-                'memory': 'red',
-                'released': 'blue',
-                'erred': 'black'}
-
-
 class GraphLayout(SchedulerPlugin):
     """ Dynamic graph layout during computation
 
