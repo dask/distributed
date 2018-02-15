@@ -74,7 +74,7 @@ pip install --no-deps -e .
 
 # Update Tornado to desired version
 if [[ $TORNADO == "dev" ]]; then
-    pip install -U https://github.com/tornadoweb/tornado/archive/master.zip
+    pip install --pre tornado==5.0b1 --upgrade
 elif [[ ! -z $TORNADO ]]; then
     pip install -U tornado==$TORNADO
 fi
