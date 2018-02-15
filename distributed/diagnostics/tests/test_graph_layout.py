@@ -34,7 +34,7 @@ def test_construct_after_call(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_colors(c, s, a, b):
+def test_states(c, s, a, b):
     gl = GraphLayout(s)
     futures = c.map(inc, range(5))
     total = c.submit(sum, futures)
@@ -42,7 +42,10 @@ def test_colors(c, s, a, b):
 
     yield total
 
-    assert gl.color_updates
+    updates = {state for idx, state in gl.state_updates}
+    assert 'memory' in updates
+    assert 'processing' in updates
+    assert 'released' in updates
 
 
 @gen_cluster(client=True)
