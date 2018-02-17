@@ -1251,7 +1251,8 @@ class Scheduler(ServerNode):
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None, priority=None,
                      loose_restrictions=None, resources=None,
-                     submitting_task=None, retries=None, user_priority=0):
+                     submitting_task=None, retries=None, user_priority=0,
+                     priority_bump=True):
         """
         Add new computations to the internal dask graph
 
@@ -1337,7 +1338,8 @@ class Scheduler(ServerNode):
             else:  # super-task already cleaned up
                 generation = self.generation
         else:
-            self.generation += 1  # older graph generations take precedence
+            if priority_bump:
+                self.generation += 1  # older graph generations take precedence
             generation = self.generation
         for key in set(priority) & touched_keys:
             ts = self.tasks[key]

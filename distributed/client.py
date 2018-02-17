@@ -1092,6 +1092,8 @@ class Client(Node):
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        priority_bump: bool (defaults to False)
+            Future tasks should have lower priority
 
         Examples
         --------
@@ -1114,6 +1116,7 @@ class Client(Node):
         resources = kwargs.pop('resources', None)
         retries = kwargs.pop('retries', None)
         priority = kwargs.pop('priority', 0)
+        priority_bump = kwargs.pop('priority_bump', False)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers not in (True, False, None):
@@ -1152,7 +1155,8 @@ class Client(Node):
                                          loose_restrictions, priority={skey: 0},
                                          user_priority=priority,
                                          resources={skey: resources} if resources else None,
-                                         retries={skey: retries} if retries else None)
+                                         retries={skey: retries} if retries else None,
+                                         priority_bump=priority_bump)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -1198,6 +1202,8 @@ class Client(Node):
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        priority_bump: bool (defaults to False)
+            Future tasks should have lower priority
 
         Examples
         --------
@@ -1237,6 +1243,7 @@ class Client(Node):
         retries = kwargs.pop('retries', None)
         resources = kwargs.pop('resources', None)
         user_priority = kwargs.pop('priority', 0)
+        priority_bump = kwargs.pop('priority_bump', False)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers and workers is None:
@@ -1299,7 +1306,8 @@ class Client(Node):
                                          priority=priority,
                                          resources=resources,
                                          retries=retries,
-                                         user_priority=user_priority)
+                                         user_priority=user_priority,
+                                         priority_bump=priority_bump)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(k)] for k in keys]
@@ -1953,7 +1961,8 @@ class Client(Node):
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
                           loose_restrictions=None, priority=None,
-                          user_priority=0, resources=None, retries=None):
+                          user_priority=0, resources=None, retries=None,
+                          priority_bump=None):
         with self._lock:
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
@@ -2002,11 +2011,13 @@ class Client(Node):
                                      'resources': resources,
                                      'submitting_task': getattr(thread_state, 'key', None),
                                      'retries': retries,
+                                     'priority_bump': priority_bump,
                                      })
             return futures
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-            resources=None, sync=True, asynchronous=None, **kwargs):
+            resources=None, sync=True, asynchronous=None, priority_bump=True,
+            **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -2032,7 +2043,8 @@ class Client(Node):
         """
         futures = self._graph_to_futures(dsk, set(flatten([keys])),
                                          restrictions, loose_restrictions,
-                                         resources=resources)
+                                         resources=resources,
+                                         priority_bump=priority_bump)
         packed = pack_data(keys, futures)
         if sync:
             if getattr(thread_state, 'key', False):
@@ -2105,7 +2117,7 @@ class Client(Node):
 
     def compute(self, collections, sync=False, optimize_graph=True,
                 workers=None, allow_other_workers=False, resources=None,
-                retries=0, priority=0, **kwargs):
+                retries=0, priority=0, priority_bump=True, **kwargs):
         """ Compute dask collections on cluster
 
         Parameters
@@ -2130,6 +2142,8 @@ class Client(Node):
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        priority_bump: bool (defaults to True)
+            Future tasks should have lower priority
         **kwargs:
             Options to pass to the graph optimize calls
 
@@ -2205,7 +2219,8 @@ class Client(Node):
                                               restrictions, loose_restrictions,
                                               resources=resources,
                                               retries=retries,
-                                              user_priority=priority)
+                                              user_priority=priority,
+                                              priority_bump=priority_bump)
 
         i = 0
         futures = []
@@ -2228,7 +2243,7 @@ class Client(Node):
 
     def persist(self, collections, optimize_graph=True, workers=None,
                 allow_other_workers=None, resources=None, retries=None,
-                priority=0, **kwargs):
+                priority=0, priority_bump=True, **kwargs):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -2255,6 +2270,8 @@ class Client(Node):
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        priority_bump: bool (defaults to True)
+            Future tasks should have lower priority
         kwargs:
             Options to pass to the graph optimize calls
 
@@ -2304,7 +2321,8 @@ class Client(Node):
                                          loose_restrictions,
                                          resources=resources,
                                          retries=retries,
-                                         user_priority=priority)
+                                         user_priority=priority,
+                                         priority_bump=priority_bump)
 
         postpersists = [c.__dask_postpersist__() for c in collections]
         result = [func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
