@@ -77,3 +77,21 @@ def test_expand_persist(c, s, a, b):
     low, high, _, _, _, _ = persist(low, high, *many, priority={low: -1, high: 1})
     yield wait(high)
     assert s.tasks[low.key].state == 'processing'
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
+def test_submit_ordering(c, s, w):
+    L = [c.submit(slowinc, i, delay=0.01) for i in range(10)]
+    L2 = [c.submit(slowinc, x, delay=0.01) for x in L]
+
+    yield wait(L)
+    assert sum(future.done() for future in L2) > 5
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
+def test_map_ordering(c, s, w):
+    L = c.map(slowinc, range(10), delay=0.01)
+    L2 = c.map(slowinc, L, delay=0.01)
+
+    yield wait(L)
+    assert sum(future.done() for future in L2) > 5

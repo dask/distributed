@@ -1085,6 +1085,7 @@ class Worker(WorkerBase):
         self.profile_history = deque(maxlen=3600)
 
         self.priorities = dict()
+        self.generation = 0
         self.durations = dict()
         self.startstops = defaultdict(list)
         self.resource_restrictions = dict()
@@ -1229,6 +1230,8 @@ class Worker(WorkerBase):
                  who_has=None, nbytes=None, priority=None, duration=None,
                  resource_restrictions=None, **kwargs2):
         try:
+            priority = tuple(priority) + (self.generation,)
+            self.generation -= 1
             if key in self.tasks:
                 state = self.task_state[key]
                 if state in ('memory', 'error'):

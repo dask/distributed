@@ -116,7 +116,7 @@ class Future(WrappedKey):
     _cb_executor = None
     _cb_executor_pid = None
 
-    def __init__(self, key, client=None, inform=True, state=None):
+    def __init__(self, key, client=None, inform=True, state=None, priority=0):
         self.key = key
         self._cleared = False
         tkey = tokey(key)
@@ -128,6 +128,7 @@ class Future(WrappedKey):
             self._state = self.client.futures[tkey]
         else:
             self._state = self.client.futures[tkey] = FutureState()
+            self._state.priority = priority
 
         if inform:
             self.client._send_to_scheduler({'op': 'client-desires-keys',
@@ -149,6 +150,10 @@ class Future(WrappedKey):
     @property
     def status(self):
         return self._state.status
+
+    @property
+    def priority(self):
+        return self._state.priority
 
     def done(self):
         """ Is the computation complete? """
@@ -344,12 +349,13 @@ class FutureState(object):
 
     This is shared between all Futures with the same key and client.
     """
-    __slots__ = ('_event', 'status', 'type', 'exception', 'traceback')
+    __slots__ = ('_event', 'status', 'type', 'exception', 'traceback', 'priority')
 
     def __init__(self):
         self._event = None
         self.status = 'pending'
         self.type = None
+        self.priority = 0
 
     def _get_event(self):
         # Can't create Event eagerly in constructor as it can fetch
@@ -1966,7 +1972,6 @@ class Client(Node):
         with self._lock:
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
-            futures = {key: Future(key, self, inform=False) for key in keyset}
 
             values = {k for k, v in dsk.items() if isinstance(v, Future)
                       and k not in keyset}
@@ -1977,6 +1982,8 @@ class Client(Node):
             extra_keys = set.union(*[v[1] for v in d.values()]) if d else set()
             dsk2 = str_graph({k: v[0] for k, v in d.items()}, extra_keys)
             dsk3 = {k: v for k, v in dsk2.items() if k is not v}
+
+            futures = {key: Future(key, self, inform=False, priority=priority[key]) for key in keyset}
 
             if restrictions:
                 restrictions = keymap(tokey, restrictions)
