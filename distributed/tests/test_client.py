@@ -3727,6 +3727,11 @@ def test_to_scheduler_file(loop):
                     info2 = c2.scheduler_info()
                     assert info['address'] == info2['address']
 
+                # test that a ValueError is raised if the scheduler_file
+                # attribute is already set
+                with pytest.raises(ValueError):
+                    c.to_scheduler_file(scheduler_file)
+
 
 def test_get_versions(loop):
     with cluster() as (s, [a, b]):
