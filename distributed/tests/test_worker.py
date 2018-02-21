@@ -213,6 +213,37 @@ def test_upload_egg(c, s, a, b):
     bb.close_rpc()
     assert not os.path.exists(os.path.join(a.local_dir, eggname))
 
+@gen_cluster(client=True)
+def test_upload_pyz(c, s, a, b):
+    pyzname = 'mytest.pyz'
+    local_file = __file__.replace('test_worker.py', pyzname)
+    assert not os.path.exists(os.path.join(a.local_dir, pyzname))
+    assert not os.path.exists(os.path.join(b.local_dir, pyzname))
+    assert a.local_dir != b.local_dir
+
+    aa = rpc(a.address)
+    bb = rpc(b.address)
+    with open(local_file, 'rb') as f:
+        payload = f.read()
+    yield [aa.upload_file(filename=pyzname, data=payload),
+           bb.upload_file(filename=pyzname, data=payload)]
+
+    assert os.path.exists(os.path.join(a.local_dir, pyzname))
+    assert os.path.exists(os.path.join(b.local_dir, pyzname))
+
+    def g(x):
+        from mytest import mytest
+        return mytest.inc(x)
+
+    future = c.submit(g, 10, workers=a.address)
+    result = yield future
+    assert result == 10 + 1
+
+    yield a._close()
+    yield b._close()
+    aa.close_rpc()
+    bb.close_rpc()
+    assert not os.path.exists(os.path.join(a.local_dir, pyzname))
 
 @pytest.mark.xfail(reason='Still lose time to network I/O')
 @gen_cluster(client=True)
