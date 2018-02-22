@@ -3717,20 +3717,20 @@ def test_scheduler_info(loop):
             assert len(info['workers']) == 2
 
 
-def test_to_scheduler_file(loop):
+def test_write_scheduler_file(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
             info = c.scheduler_info()
             with tmpfile('json') as scheduler_file:
-                c.to_scheduler_file(scheduler_file)
+                c.write_scheduler_file(scheduler_file)
                 with Client(scheduler_file=scheduler_file) as c2:
                     info2 = c2.scheduler_info()
-                    assert info['address'] == info2['address']
+                    assert c.scheduler.address == c2.scheduler.address
 
                 # test that a ValueError is raised if the scheduler_file
                 # attribute is already set
                 with pytest.raises(ValueError):
-                    c.to_scheduler_file(scheduler_file)
+                    c.write_scheduler_file(scheduler_file)
 
 
 def test_get_versions(loop):

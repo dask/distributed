@@ -2767,8 +2767,25 @@ class Client(Node):
         self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
-    def to_scheduler_file(self, scheduler_file):
-        """Dump the info in this file to a scheduler file"""
+    def write_scheduler_file(self, scheduler_file):
+        """ Write the scheduler information to a json file.
+
+        This facilitates easy sharing of scheduler information using a file
+        system. The scheduler file can be used to instantiate a second Client
+        using the same scheduler.
+
+        Parameter
+        ---------
+        scheduler_file: str
+            Path to a write the scheduler file.
+
+        Examples
+        --------
+        >>> client = Client()
+        >>> client.to_scheduler_file('scheduler.json')
+        # connect to previous client's scheduler
+        >>> client2 = Client(scheduler_file='scheduler.json')
+        """
 
         if self.scheduler_file:
             raise ValueError('Scheduler file already set')
