@@ -150,6 +150,7 @@ Other
 .. autofunction:: as_completed
 .. autofunction:: distributed.diagnostics.progress
 .. autofunction:: wait
+.. autofunction:: fire_and_forget
 
 .. currentmodule:: distributed
 
