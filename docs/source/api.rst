@@ -91,6 +91,7 @@ API
    distributed.diagnostics.progress
    wait
    fire_and_forget
+   futures_of
 
 
 Asynchronous methods
@@ -151,6 +152,7 @@ Other
 .. autofunction:: distributed.diagnostics.progress
 .. autofunction:: wait
 .. autofunction:: fire_and_forget
+.. autofunction:: futures_of
 
 .. currentmodule:: distributed
 
