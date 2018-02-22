@@ -2782,11 +2782,10 @@ class Client(Node):
         Examples
         --------
         >>> client = Client()
-        >>> client.to_scheduler_file('scheduler.json')
+        >>> client.write_scheduler_file('scheduler.json')
         # connect to previous client's scheduler
         >>> client2 = Client(scheduler_file='scheduler.json')
         """
-
         if self.scheduler_file:
             raise ValueError('Scheduler file already set')
         else:
