@@ -201,6 +201,96 @@ See the :doc:`EC2 quickstart <ec2>` for information on the ``dask-ec2`` easy
 setup script to launch a canned cluster on EC2.
 
 
+Cloud
+-----
+
+It is easy to launch a Dask cluster and Jupyter notebook server on cloud
+resources using Kubernetes_ and Helm_.
+
+.. _Kubernetes: https://kubernetes.io/
+.. _Helm: https://helm.sh/
+
+
+Launch Kubernetes Cluster
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+First you will need to set up an account with one of Google, Amazon, or
+Microsoft Azure,  and launch a cluster running Kubernetes.  This is
+straightforward by following the instructions at `Zero to JupyterHub
+<http://zero-to-jupyterhub.readthedocs.io/en/latest/>`_ that focus on
+Kubernetes and Helm.  You do not need to follow all of these instructions.
+JupyterHub is not necessary to deploy Dask:
+
+- `Creating a Kubernetes Cluster <https://zero-to-jupyterhub.readthedocs.io/en/v0.4-doc/create-k8s-cluster.html>`_
+- `Setting up Helm <https://zero-to-jupyterhub.readthedocs.io/en/v0.4-doc/setup-helm.html>`_
+
+Detailed instructions are available for all major Cloud providers.
+
+Alternatively you may want to experiment with Kubernetes locally using
+`Minikube <https://kubernetes.io/docs/getting-started-guides/minikube/>`_.
+
+
+Helm Install Dask
+~~~~~~~~~~~~~~~~~
+
+Now, you can launch Dask on your cluster using the Dask Helm_ chart::
+
+   helm install stable/dask
+
+This will also deploy a Jupyter server that you can use to launch computations.
+This will deploy your application on the cluster and print out instructions to
+provide you with connection information both to the Jupyter server and the
+:doc:`Dask diagnostic dashboard <web>`.
+
+It may take a minute or two for your Dask cluster to be fully deployed on
+Kubernetes.
+
+
+Customize your Environment
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+You can install custom packages with pip or conda in your worker and jupyter
+environments by using the ``--set`` Helm keyword to either the install or
+upgrade commands.  For example when creating a new Dask installation that also
+pip installs the ``gcsfs`` and ``dask-ml`` packages on both the workers and
+Jupyter container we can run the following::
+
+   helm install stable/dask \
+     --set worker.pipPackages="gcsfs dask-ml" \
+     --set jupyter.pipPackages="gcsfs dask-ml"
+
+Note that this creates an entirely new deployment of Dask.  If you've already
+run ``helm install stable/dask`` as mentioned in the previous section then you
+want to ``upgrade`` rather than ``install``.  To do this you will first need to
+find the name of your dask deployment::
+
+   $ helm list
+   NAME         REVISION    UPDATED                     STATUS      CHART       NAMESPACE
+   iced-mule    1           Mon Dec  4 08:29:40 2017    DEPLOYED    dask-1.0.0  default
+
+Then you can upgrade your deployment, here called ``iced-mule``, as follows
+(your deployment will likely have a different name)::
+
+   helm upgrade iced-mule stable/dask \
+     --set worker.pipPackages="gcsfs dask-ml" \
+     --set jupyter.pipPackages="gcsfs dask-ml"
+
+You can also install conda packages alongside pip packages.  For example we
+might want to conda-install XArray and Arrow::
+
+   helm upgrade iced-mule stable/dask \
+     --set worker.pipPackages="gcsfs dask-ml" \
+     --set jupyter.pipPackages="gcsfs dask-ml"
+     --set worker.condaPackages="-c conda-forge xarray pyarrow" \
+     --set jupyter.condaPackages="-c conda-forge xarray pyarrow"
+
+Conda packages are installed before pip packages.  These values are appended
+directly to the ``conda install`` and ``pip install`` commands and so you can
+also include flags, such as specifying conda channels.  Currently conda
+installation is more robust, but does take a bit longer, and so can cause
+longer delays when starting new containers
+
+
 Using Google Cloud
 ------------------
 
