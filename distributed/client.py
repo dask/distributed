@@ -1962,7 +1962,7 @@ class Client(Node):
             values = {k for k, v in dsk.items() if isinstance(v, Future)
                       and k not in keyset}
             if values:
-                dsk = dask.optimize.inline(dsk, keys=values)
+                dsk = dask.optimization.inline(dsk, keys=values)
 
             d = {k: unpack_remotedata(v) for k, v in dsk.items()}
             extra_keys = set.union(*[v[1] for v in d.values()]) if d else set()
@@ -2066,7 +2066,7 @@ class Client(Node):
                 dsk[key] = Future(key, self, inform=False)
 
         if changed:
-            dsk, _ = dask.optimize.cull(dsk, keys)
+            dsk, _ = dask.optimization.cull(dsk, keys)
 
         return dsk
 
@@ -2767,6 +2767,33 @@ class Client(Node):
         self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
+    def write_scheduler_file(self, scheduler_file):
+        """ Write the scheduler information to a json file.
+
+        This facilitates easy sharing of scheduler information using a file
+        system. The scheduler file can be used to instantiate a second Client
+        using the same scheduler.
+
+        Parameter
+        ---------
+        scheduler_file: str
+            Path to a write the scheduler file.
+
+        Examples
+        --------
+        >>> client = Client()
+        >>> client.write_scheduler_file('scheduler.json')
+        # connect to previous client's scheduler
+        >>> client2 = Client(scheduler_file='scheduler.json')
+        """
+        if self.scheduler_file:
+            raise ValueError('Scheduler file already set')
+        else:
+            self.scheduler_file = scheduler_file
+
+        with open(self.scheduler_file, 'w') as f:
+            json.dump(self.scheduler_info(), f, indent=2)
+
     def get_metadata(self, keys, default=no_default):
         """ Get arbitrary metadata from scheduler
 
@@ -2889,7 +2916,7 @@ class Client(Node):
         except KeyError:
             scheduler = None
 
-        workers = sync(self.loop, self._run, get_versions)
+        workers = sync(self.loop, self.scheduler.broadcast, msg={'op': 'versions'})
         result = {'scheduler': scheduler, 'workers': workers, 'client': client}
 
         if check:

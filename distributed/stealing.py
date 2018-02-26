@@ -45,7 +45,8 @@ class WorkStealing(SchedulerPlugin):
             self.add_worker(worker=worker)
 
         pc = PeriodicCallback(callback=self.balance,
-                              callback_time=100)
+                              callback_time=100,
+                              io_loop=self.scheduler.loop)
         self._pc = pc
         self.scheduler.periodic_callbacks['stealing'] = pc
         self.scheduler.plugins.append(self)
@@ -194,7 +195,11 @@ class WorkStealing(SchedulerPlugin):
 
     def move_task_confirm(self, key=None, worker=None, state=None):
         try:
-            ts = self.scheduler.tasks[key]
+            try:
+                ts = self.scheduler.tasks[key]
+            except KeyError:
+                logger.debug("Key released between request and confirm: %s", key)
+                return
             try:
                 d = self.in_flight.pop(ts)
             except KeyError:
@@ -308,7 +313,7 @@ class WorkStealing(SchedulerPlugin):
                     for ts in list(stealable):
                         if (ts not in self.key_stealable or
                                 ts.processing_on is not sat):
-                            stealable.remove(ts)
+                            stealable.discard(ts)
                             continue
                         i += 1
                         if not idle:
@@ -317,7 +322,7 @@ class WorkStealing(SchedulerPlugin):
 
                         duration = sat.processing.get(ts)
                         if duration is None:
-                            stealable.remove(ts)
+                            stealable.discard(ts)
                             continue
 
                         maybe_move_task(level, ts, sat, idl,
@@ -329,12 +334,12 @@ class WorkStealing(SchedulerPlugin):
                         if not idle:
                             break
                         if ts not in self.key_stealable:
-                            stealable.remove(ts)
+                            stealable.discard(ts)
                             continue
 
                         sat = ts.processing_on
                         if sat is None:
-                            stealable.remove(ts)
+                            stealable.discard(ts)
                             continue
                         if combined_occupancy(sat) < 0.2:
                             continue
