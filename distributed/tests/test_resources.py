@@ -269,9 +269,12 @@ def test_compute_multidim(c, s, a, b):
     da = pytest.importorskip('dask.array')
     np = pytest.importorskip('numpy')
     x = delayed(np.random.randint)(0, 10, (5,5))
+    y = da.from_delayed(x, (5,5), int)
 
     xx = c.compute(x, resources={x: {'A': 1}},)
+    yy = c.compute(tupl(y.__dask_keys__()), resources={x: {'A': 1}},)
 
-    yield wait([xx])
+    yield wait([xx, yy])
     
     assert all(tokey(key) in a.data for key in x.__dask_keys__())
+    assert all(tokey(key) in a.data for key in y.__dask_keys__())
