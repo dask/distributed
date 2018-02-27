@@ -64,7 +64,7 @@ Resources with collections
 --------------------------
 
 You can also use resources with Dask collections, like arrays, dataframes, and
-delayed objects.  You can either pass the collection or a dictionary mapping keys 
+delayed objects.  You can either pass the a delayed function or a tuple of dictionary mapping keys 
 of the collection to resource requirements during compute or persist calls.
 
 .. code-block:: python
