@@ -3105,14 +3105,17 @@ class Client(Node):
         Expand a user-provided task key specification, e.g. in a resources
         or retries dictionary.
         """
-        if not isinstance(k, tuple):
-            k = (k,)
-        for kk in k:
-            if dask.is_dask_collection(kk):
-                for kkk in kk.__dask_keys__():
-                    yield tokey(kkk)
-            else:
-                yield tokey(kk)
+        if isinstance(k, tuple) or isinstance(k, str) or dask.is_dask_collection(k):
+            if not isinstance(k, tuple):
+                k = (k,)
+            for kk in k:
+                if dask.is_dask_collection(kk):
+                    for kkk in flatten(kk.__dask_keys__()):
+                        yield tokey(kkk)
+                else:
+                    yield tokey(kk)
+        else:
+            raise TypeError("key should be tuple, string, or dask collection")
 
     @classmethod
     def _expand_retries(cls, retries, all_keys):
@@ -3159,6 +3162,7 @@ class Client(Node):
         if global_reqs and per_key_reqs:
             raise ValueError("cannot have both per-key and all-key requirements "
                              "in resources dict %r" % (resources,))
+
         return global_reqs or per_key_reqs
 
     @classmethod

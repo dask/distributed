@@ -64,8 +64,8 @@ Resources with collections
 --------------------------
 
 You can also use resources with Dask collections, like arrays, dataframes, and
-delayed objects.  You can pass a dictionary mapping keys of the collection to
-resource requirements during compute or persist calls.
+delayed objects.  You can either pass the a delayed function or a tuple of dictionary mapping keys 
+of the collection to resource requirements during compute or persist calls.
 
 .. code-block:: python
 
@@ -78,7 +78,6 @@ resource requirements during compute or persist calls.
 In some cases (such as the case above) the keys for ``y`` may be optimized away
 before execution.  You can avoid that either by requiring them as an explicit
 output, or by passing the ``optimize_graph=False`` keyword.
-
 
 .. code-block:: python
 
