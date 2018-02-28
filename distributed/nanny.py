@@ -455,7 +455,7 @@ class WorkerProcess(object):
                 return
             try:
                 msg = self.init_result_q.get_nowait()
-                assert msg == 'started'
+                assert msg == 'started', msg
                 return
             except Empty:
                 yield gen.sleep(delay)
