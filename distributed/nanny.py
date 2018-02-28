@@ -461,7 +461,6 @@ class WorkerProcess(object):
                 yield gen.sleep(delay)
                 continue
 
-
     @gen.coroutine
     def _wait_until_connected(self):
         delay = 0.05
