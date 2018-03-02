@@ -194,4 +194,3 @@ def test_min_max():
     finally:
         yield c._close()
         yield cluster._close()
-
