@@ -204,21 +204,24 @@ def test_min_max():
 
 
 @gen_test()
-async def test_avoid_churn():
+def test_avoid_churn():
     """ We want to avoid creating and deleting workers frequently
 
     Instead we want to wait a few beats before removing a worker in case the
     user is taking a brief pause between work
     """
-    async with LocalCluster(0, asynchronous=True, processes=False,
-                            scheduler_port=0, silence_logs=False,
-                            diagnostics_port=None) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            adapt = Adaptive(cluster.scheduler, cluster, interval=20,
-                    wait_count=5)
+    cluster = yield LocalCluster(0, asynchronous=True, processes=False,
+                                 scheduler_port=0, silence_logs=False,
+                                 diagnostics_port=None)
+    client = yield Client(cluster, asynchronous=True)
+    try:
+        adapt = Adaptive(cluster.scheduler, cluster, interval=20, wait_count=5)
 
-            for i in range(10):
-                await client.submit(slowinc, i, delay=0.040)
-                await gen.sleep(0.040)
+        for i in range(10):
+            yield client.submit(slowinc, i, delay=0.040)
+            yield gen.sleep(0.040)
 
-            assert frequencies(pluck(1, adapt.log)) == {'up': 1}
+        assert frequencies(pluck(1, adapt.log)) == {'up': 1}
+    finally:
+        yield client._close()
+        yield cluster._close()
