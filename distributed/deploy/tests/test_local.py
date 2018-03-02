@@ -250,8 +250,9 @@ def test_blocks_until_full(loop):
 @gen_test()
 def test_scale_up_and_down():
     loop = IOLoop.current()
-    cluster = LocalCluster(0, scheduler_port=0, processes=False, silence_logs=False,
-                           diagnostics_port=None, loop=loop, start=False)
+    cluster = yield LocalCluster(0, scheduler_port=0, processes=False,
+                                 silence_logs=False, diagnostics_port=None,
+                                 loop=loop, asynchronous=True)
     c = yield Client(cluster, loop=loop, asynchronous=True)
 
     assert not cluster.workers
