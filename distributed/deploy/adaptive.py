@@ -197,7 +197,8 @@ class Adaptive(object):
         return L
 
     @gen.coroutine
-    def _retire_workers(self, workers):
+    def _retire_workers(self):
+        workers = self.workers_to_close()
         with log_errors():
             result = yield self.scheduler.retire_workers(workers=workers,
                                                          remove=True,
@@ -236,8 +237,8 @@ class Adaptive(object):
         self._adapting = True
         try:
             should_scale_up = self.should_scale_up()
-            workers_to_close = self.workers_to_close()
-            if should_scale_up and workers_to_close:
+            should_scale_down = self.should_scale_down()
+            if should_scale_up and should_scale_down:
                 logger.info("Attempting to scale up and scale down simultaneously.")
             else:
                 if should_scale_up:
@@ -246,8 +247,8 @@ class Adaptive(object):
                     if gen.is_future(f):
                         yield f
 
-                if workers_to_close:
-                    yield self._retire_workers(workers=workers_to_close)
+                if should_scale_down:
+                    yield self._retire_workers()
         finally:
             self._adapting = False
 
