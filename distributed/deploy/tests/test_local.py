@@ -345,3 +345,7 @@ def test_io_loop_periodic_callbacks(loop):
         for worker in cluster.workers:
             for pc in worker.periodic_callbacks.values():
                 assert pc.io_loop is loop
+
+
+if sys.version_info >= (3, 5):
+    from distributed.deploy.tests.py3_test_deploy import *  # noqa F401

@@ -309,6 +309,15 @@ class LocalCluster(object):
     def __exit__(self, *args):
         self.close()
 
+    @gen.coroutine
+    def __aenter__(self):
+        yield self._started
+        raise gen.Return(self)
+
+    @gen.coroutine
+    def __aexit__(self, typ, value, traceback):
+        yield self._close()
+
     @property
     def scheduler_address(self):
         try:
