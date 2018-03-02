@@ -25,6 +25,10 @@ class Adaptive(object):
         Affects quickly to adapt to high tasks per worker loads
     scale_factor : int, default 2
         Factor to scale by when it's determined additional workers are needed
+    minimum: int
+        Minimum number of workers to keep around
+    maximum: int
+        Maximum number of workers to keep around
     **kwargs:
         Extra parameters to pass to Scheduler.workers_to_close
 
@@ -49,7 +53,7 @@ class Adaptive(object):
     '''
 
     def __init__(self, scheduler, cluster, interval=1000, startup_cost=1,
-                 scale_factor=2, **kwargs):
+                 scale_factor=2, minimum=0, maximum=None, **kwargs):
         self.scheduler = scheduler
         self.cluster = cluster
         self.startup_cost = startup_cost
@@ -58,6 +62,8 @@ class Adaptive(object):
         self.scheduler.loop.add_callback(self._adapt_callback.start)
         self._adapting = False
         self._workers_to_close_kwargs = kwargs
+        self.minimum = minimum
+        self.maximum = maximum
 
     def needs_cpu(self):
         """
@@ -114,6 +120,7 @@ class Adaptive(object):
         1. There are unrunnable tasks and no workers
         2. The cluster is CPU constrained
         3. The cluster is RAM constrained
+        4. There are fewer workers than our minimum
 
         See Also
         --------
@@ -121,6 +128,9 @@ class Adaptive(object):
         needs_memory
         """
         with log_errors():
+            if len(self.scheduler.workers) < self.minimum:
+                return True
+
             if self.scheduler.unrunnable and not self.scheduler.workers:
                 return True
 
@@ -147,11 +157,15 @@ class Adaptive(object):
         ``Adaptive.workers_to_close``, returning True if any workers to close
         are specified.
 
+        Returns
+        -------
+        List of worker addresses to close, if any
+
         See Also
         --------
         Scheduler.workers_to_close
         """
-        return len(self.workers_to_close()) > 0
+        return self.workers_to_close()
 
     def workers_to_close(self, **kwargs):
         """
@@ -167,24 +181,31 @@ class Adaptive(object):
         ``Adaptive.workers_to_close`` dispatches to Scheduler.workers_to_close(),
         but may be overridden in subclasses.
 
+        Returns
+        -------
+        List of worker addresses to close, if any
+
         See Also
         --------
         Scheduler.workers_to_close
         """
         kw = dict(self._workers_to_close_kwargs)
         kw.update(kwargs)
-        return self.scheduler.workers_to_close(**kw)
+        L = self.scheduler.workers_to_close(**kw)
+        if len(self.scheduler.workers) - len(L) < self.minimum:
+            L = L[:len(self.scheduler.workers) - self.minimum]
+        return L
 
     @gen.coroutine
-    def _retire_workers(self):
+    def _retire_workers(self, workers):
         with log_errors():
-            workers = yield self.scheduler.retire_workers(workers=self.workers_to_close(),
-                                                          remove=True,
-                                                          close_workers=True)
+            result = yield self.scheduler.retire_workers(workers=workers,
+                                                         remove=True,
+                                                         close_workers=True)
 
-            if workers:
-                logger.info("Retiring workers %s", workers)
-                f = self.cluster.scale_down(workers)
+            if result:
+                logger.info("Retiring workers %s", result)
+                f = self.cluster.scale_down(result)
                 if gen.is_future(f):
                     yield f
 
@@ -215,8 +236,8 @@ class Adaptive(object):
         self._adapting = True
         try:
             should_scale_up = self.should_scale_up()
-            should_scale_down = self.should_scale_down()
-            if should_scale_up and should_scale_down:
+            workers_to_close = self.workers_to_close()
+            if should_scale_up and workers_to_close:
                 logger.info("Attempting to scale up and scale down simultaneously.")
             else:
                 if should_scale_up:
@@ -225,8 +246,8 @@ class Adaptive(object):
                     if gen.is_future(f):
                         yield f
 
-                if should_scale_down:
-                    yield self._retire_workers()
+                if workers_to_close:
+                    yield self._retire_workers(workers=workers_to_close)
         finally:
             self._adapting = False
 

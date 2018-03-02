@@ -154,3 +154,44 @@ def test_adaptive_scale_down_override(c, s, *workers):
     yield gen.sleep(0.3)
 
     assert len(s.workers) == 2
+
+
+@gen_test(timeout=30)
+def test_min_max():
+    loop = IOLoop.current()
+    cluster = LocalCluster(0, scheduler_port=0, silence_logs=False, processes=False,
+                           diagnostics_port=None, loop=loop, start=False)
+    yield cluster._start()
+    try:
+        adapt = Adaptive(cluster.scheduler, cluster, minimum=1, maximum=2,
+                         interval=20)
+        c = yield Client(cluster, asynchronous=True, loop=loop)
+
+        start = time()
+        while not cluster.scheduler.workers:
+            yield gen.sleep(0.01)
+            assert time() < start + 1
+
+        yield gen.sleep(0.2)
+        assert len(cluster.scheduler.workers) == 1
+
+        futures = c.map(slowinc, range(100), delay=0.1)
+
+        start = time()
+        while len(cluster.scheduler.workers) < 2:
+            yield gen.sleep(0.01)
+            assert time() < start + 1
+
+        yield gen.sleep(0.2)
+        assert len(cluster.scheduler.workers) == 2
+
+        del futures
+
+        start = time()
+        while len(cluster.scheduler.workers) != 1:
+            yield gen.sleep(0.01)
+            assert time() < start + 1
+    finally:
+        yield c._close()
+        yield cluster._close()
+
