@@ -22,9 +22,14 @@ class Adaptive(object):
     scheduler: distributed.Scheduler
     cluster: object
         Must have scale_up and scale_down methods/coroutines
-    startup_cost : int, default 1
-        Factor representing how costly it is to start an additional worker.
+    startup_cost : Number, default 1
+        Estimate of the number of seconds for nnFactor representing how costly it is to start an additional worker.
         Affects quickly to adapt to high tasks per worker loads
+    interval : Number, default 1000ms
+        Milliseconds between checks
+    wait_count: int, default 3
+        Number of consecutive times that a worker should be suggested for
+        removal before we remove it.
     scale_factor : int, default 2
         Factor to scale by when it's determined additional workers are needed
     minimum: int
@@ -55,7 +60,7 @@ class Adaptive(object):
     '''
 
     def __init__(self, scheduler, cluster, interval=1000, startup_cost=1,
-                 scale_factor=2, minimum=0, maximum=None, **kwargs):
+                 scale_factor=2, minimum=0, maximum=None, wait_count=3, **kwargs):
         self.scheduler = scheduler
         self.cluster = cluster
         self.startup_cost = startup_cost
@@ -67,6 +72,8 @@ class Adaptive(object):
         self.minimum = minimum
         self.maximum = maximum
         self.log = deque(maxlen=1000)
+        self.close_counts = {}
+        self.wait_count = wait_count
 
     def needs_cpu(self):
         """
@@ -134,7 +141,7 @@ class Adaptive(object):
             if len(self.scheduler.workers) < self.minimum:
                 return True
 
-            if len(self.scheduler.workers) >= self.maximum:
+            if self.maximum is not None and len(self.scheduler.workers) >= self.maximum:
                 return False
 
             if self.scheduler.unrunnable and not self.scheduler.workers:
@@ -209,8 +216,9 @@ class Adaptive(object):
         return L
 
     @gen.coroutine
-    def _retire_workers(self):
-        workers = self.workers_to_close()
+    def _retire_workers(self, workers=None):
+        if workers is None:
+            workers = self.workers_to_close()
         with log_errors():
             result = yield self.scheduler.retire_workers(workers=workers,
                                                          remove=True,
@@ -253,21 +261,35 @@ class Adaptive(object):
         self._adapting = True
         try:
             should_scale_up = self.should_scale_up()
-            should_scale_down = self.should_scale_down()
-            if should_scale_up and should_scale_down:
+            workers = set(self.workers_to_close())
+            if should_scale_up and workers:
                 logger.info("Attempting to scale up and scale down simultaneously.")
-            else:
-                if should_scale_up:
-                    kwargs = self.get_scale_up_kwargs()
-                    f = self.cluster.scale_up(**kwargs)
-                    self.log.append((time(), 'up', kwargs))
-                    if gen.is_future(f):
-                        yield f
+                return
 
-                if should_scale_down:
-                    import pdb; pdb.set_trace()
-                    workers = yield self._retire_workers()
-                    self.log.append((time(), 'down', workers))
+            if should_scale_up:
+                kwargs = self.get_scale_up_kwargs()
+                f = self.cluster.scale_up(**kwargs)
+                self.log.append((time(), 'up', kwargs))
+                if gen.is_future(f):
+                    yield f
+
+            d = {}
+            to_close = []
+            for w, c in self.close_counts.items():
+                if w in workers:
+                    if c >= self.wait_count:
+                        to_close.append(w)
+                    else:
+                        d[w] = c
+
+            for w in workers:
+                d[w] = d.get(w, 0) + 1
+
+            self.close_counts = d
+
+            if to_close:
+                self.log.append((time(), 'down', workers))
+                workers = yield self._retire_workers(workers=to_close)
         finally:
             self._adapting = False
 

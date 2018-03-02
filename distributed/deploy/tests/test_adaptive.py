@@ -8,7 +8,7 @@ from tornado.ioloop import IOLoop
 
 from distributed import Client
 from distributed.deploy import Adaptive, LocalCluster
-from distributed.utils_test import gen_cluster, gen_test, slowinc
+from distributed.utils_test import gen_cluster, gen_test, slowinc, inc
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from distributed.metrics import time
 
@@ -160,8 +160,9 @@ def test_adaptive_scale_down_override(c, s, *workers):
 @gen_test(timeout=30)
 def test_min_max():
     loop = IOLoop.current()
-    cluster = LocalCluster(0, scheduler_port=0, silence_logs=False, processes=False,
-                           diagnostics_port=None, loop=loop, start=False)
+    cluster = yield LocalCluster(0, scheduler_port=0, silence_logs=False,
+                                 processes=False, diagnostics_port=None,
+                                 loop=loop, asynchronous=True)
     yield cluster._start()
     try:
         adapt = Adaptive(cluster.scheduler, cluster, minimum=1, maximum=2,
@@ -200,3 +201,24 @@ def test_min_max():
     finally:
         yield c._close()
         yield cluster._close()
+
+
+@gen_test()
+async def test_avoid_churn():
+    """ We want to avoid creating and deleting workers frequently
+
+    Instead we want to wait a few beats before removing a worker in case the
+    user is taking a brief pause between work
+    """
+    async with LocalCluster(0, asynchronous=True, processes=False,
+                            scheduler_port=0, silence_logs=False,
+                            diagnostics_port=None) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            adapt = Adaptive(cluster.scheduler, cluster, interval=20,
+                    wait_count=5)
+
+            for i in range(10):
+                await client.submit(slowinc, i, delay=0.040)
+                await gen.sleep(0.040)
+
+            assert frequencies(pluck(1, adapt.log)) == {'up': 1}
