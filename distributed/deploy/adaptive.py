@@ -181,7 +181,6 @@ class Adaptive(object):
         workers = self.workers_to_close()
         if workers:
             self.scheduler.extensions['stealing'].balance()
-            workers = self.workers_to_close()
         return workers
 
     def workers_to_close(self, **kwargs):

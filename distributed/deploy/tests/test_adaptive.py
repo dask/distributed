@@ -8,7 +8,7 @@ from tornado.ioloop import IOLoop
 
 from distributed import Client
 from distributed.deploy import Adaptive, LocalCluster
-from distributed.utils_test import gen_cluster, gen_test, slowinc, inc
+from distributed.utils_test import gen_cluster, gen_test, slowinc
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from distributed.metrics import time
 
