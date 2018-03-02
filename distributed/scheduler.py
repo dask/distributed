@@ -1753,6 +1753,9 @@ class Scheduler(ServerNode):
             assert isinstance(w, (str, unicode)), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.address == w
+            if not ws.processing:
+                assert not ws.occupancy
+                assert ws in self.idle
 
         for k, ts in self.tasks.items():
             assert isinstance(ts, TaskState), (type(ts), ts)
@@ -2057,6 +2060,7 @@ class Scheduler(ServerNode):
         ws.occupancy -= ws.processing[ts]
         self.total_occupancy -= ws.processing[ts]
         ws.processing[ts] = 0
+        self.check_idle_saturated(ws)
 
     @gen.coroutine
     def handle_worker(self, worker):
