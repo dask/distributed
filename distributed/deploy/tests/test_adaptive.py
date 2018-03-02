@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from time import sleep
 
+from toolz import frequencies, pluck
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -174,6 +175,7 @@ def test_min_max():
 
         yield gen.sleep(0.2)
         assert len(cluster.scheduler.workers) == 1
+        assert frequencies(pluck(1, adapt.log)) == {'up': 1}
 
         futures = c.map(slowinc, range(100), delay=0.1)
 
@@ -182,8 +184,11 @@ def test_min_max():
             yield gen.sleep(0.01)
             assert time() < start + 1
 
-        yield gen.sleep(0.2)
         assert len(cluster.scheduler.workers) == 2
+        yield gen.sleep(0.5)
+        assert len(cluster.scheduler.workers) == 2
+        assert len(cluster.workers) == 2
+        assert frequencies(pluck(1, adapt.log)) == {'up': 2}
 
         del futures
 
@@ -191,6 +196,7 @@ def test_min_max():
         while len(cluster.scheduler.workers) != 1:
             yield gen.sleep(0.01)
             assert time() < start + 1
+        assert frequencies(pluck(1, adapt.log)) == {'up': 2, 'down': 1}
     finally:
         yield c._close()
         yield cluster._close()

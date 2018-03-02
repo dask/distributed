@@ -1,6 +1,8 @@
 from __future__ import print_function, division, absolute_import
 
+from collections import deque
 import logging
+from ..metrics import time
 
 from tornado import gen
 
@@ -64,6 +66,7 @@ class Adaptive(object):
         self._workers_to_close_kwargs = kwargs
         self.minimum = minimum
         self.maximum = maximum
+        self.log = deque(maxlen=1000)
 
     def needs_cpu(self):
         """
@@ -131,6 +134,9 @@ class Adaptive(object):
             if len(self.scheduler.workers) < self.minimum:
                 return True
 
+            if len(self.scheduler.workers) >= self.maximum:
+                return False
+
             if self.scheduler.unrunnable and not self.scheduler.workers:
                 return True
 
@@ -165,7 +171,11 @@ class Adaptive(object):
         --------
         Scheduler.workers_to_close
         """
-        return self.workers_to_close()
+        workers = self.workers_to_close()
+        if workers:
+            self.scheduler.extensions['stealing'].balance()
+            workers = self.workers_to_close()
+        return workers
 
     def workers_to_close(self, **kwargs):
         """
@@ -189,6 +199,8 @@ class Adaptive(object):
         --------
         Scheduler.workers_to_close
         """
+        if len(self.scheduler.workers) <= self.minimum:
+            return []
         kw = dict(self._workers_to_close_kwargs)
         kw.update(kwargs)
         L = self.scheduler.workers_to_close(**kw)
@@ -210,6 +222,8 @@ class Adaptive(object):
                 if gen.is_future(f):
                     yield f
 
+            raise gen.Return(result)
+
     def get_scale_up_kwargs(self):
         """
         Get the arguments to be passed to ``self.cluster.scale_up``.
@@ -227,6 +241,8 @@ class Adaptive(object):
         """
         instances = max(1, len(self.scheduler.workers) * self.scale_factor)
         logger.info("Scaling up to %d workers", instances)
+        if self.maximum:
+            instances = min(self.maximum, instances)
         return {'n': instances}
 
     @gen.coroutine
@@ -244,11 +260,14 @@ class Adaptive(object):
                 if should_scale_up:
                     kwargs = self.get_scale_up_kwargs()
                     f = self.cluster.scale_up(**kwargs)
+                    self.log.append((time(), 'up', kwargs))
                     if gen.is_future(f):
                         yield f
 
                 if should_scale_down:
-                    yield self._retire_workers()
+                    import pdb; pdb.set_trace()
+                    workers = yield self._retire_workers()
+                    self.log.append((time(), 'down', workers))
         finally:
             self._adapting = False
 
