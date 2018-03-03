@@ -50,7 +50,7 @@ class Adaptive(object):
     Notes
     -----
     Subclasses can override :meth:`Adaptive.should_scale_up` and
-    :meth:`Adaptive.should_scale_down` to control when the cluster should be
+    :meth:`Adaptive.workers_to_close` to control when the cluster should be
     resized. The default implementation checks if there are too many tasks
     per worker or too little memory available (see :meth:`Adaptive.needs_cpu`
     and :meth:`Adaptive.needs_memory`).
@@ -154,34 +154,6 @@ class Adaptive(object):
                 return True
 
             return False
-
-    def should_scale_down(self):
-        """
-        Determine whether any workers should potentially be removed from
-        the cluster.
-
-        Returns
-        -------
-        scale_down : bool
-
-        Notes
-        -----
-        ``Adaptive.should_scale_down`` defaults to dispatching to
-        ``Adaptive.workers_to_close``, returning True if any workers to close
-        are specified.
-
-        Returns
-        -------
-        List of worker addresses to close, if any
-
-        See Also
-        --------
-        Scheduler.workers_to_close
-        """
-        workers = self.workers_to_close()
-        if workers:
-            self.scheduler.extensions['stealing'].balance()
-        return workers
 
     def workers_to_close(self, **kwargs):
         """
