@@ -154,7 +154,7 @@ class Nanny(ServerNode):
         logger.info('        Start Nanny at: %r', self.address)
         response = yield self.instantiate()
         if response == 'OK':
-            assert self.worker_address
+            assert self.worker_address, self.worker_address
             self.status = 'running'
 
         self.start_periodic_callbacks()
