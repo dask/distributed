@@ -519,15 +519,21 @@ class TaskState(object):
         return "<Task %r %s>" % (self.key, self.state)
 
     def validate(self):
-        for cs in self.who_wants:
-            assert isinstance(cs, ClientState), (repr(cs), self.who_wants)
-        for ws in self.who_has:
-            assert isinstance(ws, WorkerState), (repr(ws), self.who_has)
-        for ts in self.dependencies:
-            assert isinstance(ts, TaskState), (repr(ts), self.dependencies)
-        for ts in self.dependents:
-            assert isinstance(ts, TaskState), (repr(ts), self.dependents)
-        validate_task_state(self)
+        try:
+            for cs in self.who_wants:
+                assert isinstance(cs, ClientState), (repr(cs), self.who_wants)
+            for ws in self.who_has:
+                assert isinstance(ws, WorkerState), (repr(ws), self.who_has)
+            for ts in self.dependencies:
+                assert isinstance(ts, TaskState), (repr(ts), self.dependencies)
+            for ts in self.dependents:
+                assert isinstance(ts, TaskState), (repr(ts), self.dependents)
+            validate_task_state(self)
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+                pdb.set_trace()
 
 
 class _StateLegacyMapping(Mapping):
@@ -1940,6 +1946,8 @@ class Scheduler(ServerNode):
 
     def send_task_to_worker(self, worker, key):
         """ Send a single computational task to a worker """
+        if worker not in self.workers:
+            return
         try:
             ts = self.tasks[key]
 
