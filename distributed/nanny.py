@@ -331,10 +331,10 @@ class WorkerProcess(object):
         """
         enable_proctitle_on_children()
         if self.status == 'running':
-            return self.status
+            raise gen.Return(self.status)
         if self.status == 'starting':
             yield self.running.wait()
-            return self.status
+            raise gen.Return(self.status)
 
         while True:
             # FIXME: this sometimes stalls in _wait_until_connected
@@ -371,14 +371,14 @@ class WorkerProcess(object):
         if self.status == 'starting':
             msg = yield self._wait_until_connected()
             if not msg:
-                return self.status
+                raise gen.Return(self.status)
             self.worker_address = msg['address']
             self.worker_dir = msg['dir']
             assert self.worker_address
             self.status = 'running'
             self.running.set()
 
-        return self.status
+        raise gen.Return(self.status)
 
     def _on_exit(self, proc):
         if proc is not self.process:

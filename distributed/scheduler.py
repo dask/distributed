@@ -170,6 +170,10 @@ class WorkerState(object):
        processing on this worker.  This is the sum of all the costs in
        this worker's :attr:`processing` dictionary.
 
+    .. attribute:: status: str
+
+       The current status of the worker, either ``'running'`` or ``'closed'``
+
     """
     # XXX need a state field to signal active/removed?
 
@@ -186,6 +190,7 @@ class WorkerState(object):
         'resources',
         'time_delay',
         'used_resources',
+        'status',
     )
 
     def __init__(self, worker, ncores, memory_limit, name=None):
@@ -1168,6 +1173,7 @@ class Scheduler(ServerNode):
             ws = self.workers.get(address)
             if ws is None:
                 ws = WorkerState(address, ncores, memory_limit, name)
+                ws.status = 'running'
                 self.workers[address] = ws
                 existing = False
             else:
@@ -1553,6 +1559,7 @@ class Scheduler(ServerNode):
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
+            ws.status = 'closed'
             self.total_occupancy -= ws.occupancy
 
             recommendations = OrderedDict()
@@ -1946,8 +1953,6 @@ class Scheduler(ServerNode):
 
     def send_task_to_worker(self, worker, key):
         """ Send a single computational task to a worker """
-        if worker not in self.workers:
-            return
         try:
             ts = self.tasks[key]
 
@@ -3158,7 +3163,10 @@ class Scheduler(ServerNode):
             else:  # dumb but fast in large case
                 worker = self.workers[self.workers.iloc[self.n_tasks % len(self.workers)]]
 
-        assert worker is None or isinstance(worker, WorkerState), (type(worker), worker)
+        if self.validate:
+            assert worker is None or isinstance(worker, WorkerState), (type(worker), worker)
+            assert worker.address in self.workers
+
         return worker
 
     def transition_waiting_processing(self, key):
@@ -3806,7 +3814,7 @@ class Scheduler(ServerNode):
     ##############################
 
     def check_idle_saturated(self, ws, occ=None):
-        if self.total_ncores == 0:
+        if self.total_ncores == 0 or ws.status == 'closed':
             return
         if occ is None:
             occ = ws.occupancy
