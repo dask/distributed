@@ -61,7 +61,7 @@ pip install -q git+https://github.com/dask/dask.git --upgrade
 pip install -q git+https://github.com/joblib/joblib.git --upgrade
 pip install -q git+https://github.com/dask/s3fs.git --upgrade
 pip install -q git+https://github.com/dask/zict.git --upgrade
-pip install -q sortedcollections msgpack-python
+pip install -q sortedcollections msgpack
 pip install -q keras --upgrade --no-deps
 
 if [[ $CRICK == true ]]; then
