@@ -82,6 +82,11 @@ class Adaptive(object):
         self.wait_count = wait_count
         self.target_duration = parse_timedelta(target_duration)
 
+    def stop(self):
+        self._adapt_callback.stop()
+        self._adapt_callback = None
+        del self._adapt_callback
+
     def needs_cpu(self):
         """
         Check if the cluster is CPU constrained (too many tasks per core)
