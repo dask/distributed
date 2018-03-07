@@ -18,7 +18,7 @@ from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 from .. import config
-from ..compatibility import finalize
+from ..compatibility import finalize, PY3
 from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes,
                     parse_timedelta)
 
@@ -183,7 +183,7 @@ class TCP(Comm):
 
             frames = []
             for length in lengths:
-                if self._iostream_has_read_into:
+                if PY3 and self._iostream_has_read_into:
                     frame = bytearray(length)
                     if length:
                         n = yield stream.read_into(frame)
