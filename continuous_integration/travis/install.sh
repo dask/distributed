@@ -27,7 +27,7 @@ conda create -q -n test-environment python=$PYTHON
 source activate test-environment
 
 # Install dependencies
-conda install -q -c conda-forge \
+conda install -q \
     bokeh \
     click \
     coverage \
@@ -45,7 +45,6 @@ conda install -q -c conda-forge \
     paramiko \
     psutil \
     pytest=3.1 \
-    pytest-faulthandler \
     pytest-timeout \
     python=$PYTHON \
     requests \
@@ -55,7 +54,7 @@ conda install -q -c conda-forge \
     tornado \
     $PACKAGES
 
-pip install -q pytest-repeat
+pip install -q pytest-repeat pytest-faulthandler
 
 pip install -q git+https://github.com/dask/dask.git --upgrade
 pip install -q git+https://github.com/joblib/joblib.git --upgrade
