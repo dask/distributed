@@ -1871,13 +1871,15 @@ class Scheduler(ServerNode):
             try:
                 yield self.client_comms[client].close()
                 del self.client_comms[client]
-                logger.info("Close client connection: %s", client)
+                if self.status == 'running':
+                    logger.info("Close client connection: %s", client)
             except TypeError:  # comm becomes None during GC
                 pass
 
     def remove_client(self, client=None):
         """ Remove client from network """
-        logger.info("Remove client %s", client)
+        if self.status == 'running':
+            logger.info("Remove client %s", client)
         self.log_event(['all', client], {'action': 'remove-client',
                                          'client': client})
         try:
@@ -1914,7 +1916,8 @@ class Scheduler(ServerNode):
                 try:
                     msgs = yield comm.read()
                 except (CommClosedError, AssertionError, GeneratorExit):
-                    logger.info("Connection to client %s broken", str(client))
+                    if self.status == 'running':
+                        logger.info("Connection to client %s broken", str(client))
                     break
                 except Exception as e:
                     logger.exception(e)
