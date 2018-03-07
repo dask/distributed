@@ -271,3 +271,33 @@ def test_adapt_quickly():
     finally:
         yield client._close()
         yield cluster._close()
+
+
+@gen_test(timeout=None)
+def test_adapt_down():
+    """ We want to avoid creating and deleting workers frequently
+
+    Instead we want to wait a few beats before removing a worker in case the
+    user is taking a brief pause between work
+    """
+    cluster = yield LocalCluster(0, asynchronous=True, processes=False,
+                                 scheduler_port=0, silence_logs=False,
+                                 diagnostics_port=None)
+    client = yield Client(cluster, asynchronous=True)
+    cluster.adapt(interval='20ms', maximum=5)
+
+    try:
+        futures = client.map(slowinc, range(1000), delay=0.1)
+        while len(cluster.scheduler.workers) < 5:
+            yield gen.sleep(0.1)
+
+        cluster.adapt(maximum=2)
+
+        start = time()
+        while len(cluster.scheduler.workers) != 2:
+            yield gen.sleep(0.1)
+            assert time() < start + 1
+
+    finally:
+        yield client._close()
+        yield cluster._close()

@@ -191,11 +191,17 @@ class Adaptive(object):
         """
         if len(self.scheduler.workers) <= self.minimum:
             return []
+
         kw = dict(self._workers_to_close_kwargs)
         kw.update(kwargs)
+
+        if self.maximum is not None and len(self.scheduler.workers) > self.maximum:
+            kw['n'] = len(self.scheduler.workers) - self.maximum
+
         L = self.scheduler.workers_to_close(**kw)
         if len(self.scheduler.workers) - len(L) < self.minimum:
             L = L[:len(self.scheduler.workers) - self.minimum]
+
         return L
 
     @gen.coroutine
