@@ -368,25 +368,7 @@ def test_ipywidgets(loop):
 
 
 def test_scale(loop):
-    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
-                      diagnostics_port=0, processes=False, n_workers=0) as cluster:
-        assert not cluster.scheduler.workers
-        cluster.scale(3)
-
-        start = time()
-        while len(cluster.scheduler.workers) != 3:
-            sleep(0.01)
-            assert time() < start + 5
-
-        cluster.scale(2)
-
-        start = time()
-        while len(cluster.scheduler.workers) != 2:
-            sleep(0.01)
-            assert time() < start + 5
-
-
-def test_scale(loop):
+    """ Directly calling scale both up and down works as expected """
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
                       diagnostics_port=0, processes=False, n_workers=0) as cluster:
         assert not cluster.scheduler.workers
@@ -417,6 +399,7 @@ def test_adapt(loop):
         assert cluster._adaptive.minimum == 1
         gc.collect()
 
+        # the old Adaptive class sticks around, not sure why
         # start = time()
         # while ref():
         #     sleep(0.01)
@@ -430,6 +413,7 @@ def test_adapt(loop):
 
 
 def test_adapt_then_manual(loop):
+    """ We can revert from adaptive, back to manual """
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
                       diagnostics_port=0, processes=False, n_workers=8) as cluster:
         sleep(0.1)

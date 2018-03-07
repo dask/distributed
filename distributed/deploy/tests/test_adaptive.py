@@ -275,11 +275,7 @@ def test_adapt_quickly():
 
 @gen_test(timeout=None)
 def test_adapt_down():
-    """ We want to avoid creating and deleting workers frequently
-
-    Instead we want to wait a few beats before removing a worker in case the
-    user is taking a brief pause between work
-    """
+    """ Ensure that redefining adapt with a lower maximum removes workers """
     cluster = yield LocalCluster(0, asynchronous=True, processes=False,
                                  scheduler_port=0, silence_logs=False,
                                  diagnostics_port=None)
