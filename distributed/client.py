@@ -823,10 +823,7 @@ class Client(Node):
         try:
             self._scheduler_identity = yield self.scheduler.identity()
         except EnvironmentError:
-            if self.status != 'running':
-                return
-            else:
-                raise
+            logger.debug("Not able to query scheduler for identity")
 
     def _heartbeat(self):
         if self.scheduler_comm:

@@ -1422,7 +1422,8 @@ class Scheduler(ServerNode):
         # Compute recommendations
         recommendations = OrderedDict()
 
-        for ts in sorted(runnables, key=operator.attrgetter('priority')):
+        for ts in sorted(runnables, key=operator.attrgetter('priority'),
+                reverse=True):
             if ts.state == 'released' and ts.run_spec:
                 recommendations[ts.key] = 'waiting'
 
