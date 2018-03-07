@@ -377,14 +377,14 @@ def test_scale(loop):
         start = time()
         while len(cluster.scheduler.workers) != 3:
             sleep(0.01)
-            assert time() < start + 5
+            assert time() < start + 5, len(cluster.scheduler.workers)
 
         cluster.scale(2)
 
         start = time()
         while len(cluster.scheduler.workers) != 2:
             sleep(0.01)
-            assert time() < start + 5
+            assert time() < start + 5, len(cluster.scheduler.workers)
 
 
 def test_adapt(loop):
@@ -420,7 +420,7 @@ def test_adapt_then_manual(loop):
         cluster.adapt(minimum=0, maximum=4, interval='10ms')
 
         start = time()
-        while len(cluster.scheduler.workers):
+        while cluster.scheduler.workers or cluster.workers:
             sleep(0.1)
             assert time() < start + 5
 
