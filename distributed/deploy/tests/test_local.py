@@ -379,6 +379,8 @@ def test_scale(loop):
             sleep(0.01)
             assert time() < start + 5, len(cluster.scheduler.workers)
 
+        sleep(0.2)  # let workers settle # TODO: remove need for this
+
         cluster.scale(2)
 
         start = time()
