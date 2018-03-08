@@ -165,7 +165,7 @@ def test_min_max():
     yield cluster._start()
     try:
         adapt = Adaptive(cluster.scheduler, cluster, minimum=1, maximum=2,
-                         interval=20)
+                         interval='20 ms')
         c = yield Client(cluster, asynchronous=True, loop=loop)
 
         start = time()
@@ -293,7 +293,28 @@ def test_adapt_down():
         while len(cluster.scheduler.workers) != 2:
             yield gen.sleep(0.1)
             assert time() < start + 1
+    finally:
+        yield client._close()
+        yield cluster._close()
 
+
+@pytest.mark.xfail(reason="we currently only judge occupancy, not ntasks")
+@gen_test(timeout=30)
+def test_no_more_workers_than_tasks():
+    loop = IOLoop.current()
+    cluster = yield LocalCluster(0, scheduler_port=0, silence_logs=False,
+                                 processes=False, diagnostics_port=None,
+                                 loop=loop, asynchronous=True)
+    yield cluster._start()
+    try:
+        adapt = Adaptive(cluster.scheduler, cluster, minimum=0, maximum=4,
+                         interval='10 ms')
+        client = yield Client(cluster, asynchronous=True, loop=loop)
+        cluster.scheduler.task_duration['slowinc'] = 1000
+
+        yield client.submit(slowinc, 1, delay=0.100)
+
+        assert len(cluster.scheduler.workers) <= 1
     finally:
         yield client._close()
         yield cluster._close()
