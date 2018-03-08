@@ -39,7 +39,7 @@ from .proctitle import setproctitle
 from .security import Security
 from .utils import (All, ignoring, get_ip, get_fileno_limit, log_errors,
                     key_split, validate_key, no_default, DequeHandler,
-                    parse_timedelta, PeriodicCallback)
+                    parse_timedelta, PeriodicCallback, shutting_down)
 from .utils_comm import (scatter_to_workers, gather_from_workers)
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
 
@@ -1869,10 +1869,11 @@ class Scheduler(ServerNode):
             if not comm.closed():
                 self.client_comms[client].send({'op': 'stream-closed'})
             try:
-                yield self.client_comms[client].close()
-                del self.client_comms[client]
-                if self.status == 'running':
-                    logger.info("Close client connection: %s", client)
+                if not shutting_down():
+                    yield self.client_comms[client].close()
+                    del self.client_comms[client]
+                    if self.status == 'running':
+                        logger.info("Close client connection: %s", client)
             except TypeError:  # comm becomes None during GC
                 pass
 
