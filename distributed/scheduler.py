@@ -810,6 +810,7 @@ class Scheduler(ServerNode):
                     _StateLegacySet(self.tasks, func))
 
         self.generation = 0
+        self._last_client = None
         self.unrunnable = set()
 
         self.n_tasks = 0
@@ -1361,9 +1362,13 @@ class Scheduler(ServerNode):
                 generation = ts.priority[0] - 0.01
             else:  # super-task already cleaned up
                 generation = self.generation
-        else:
+        elif client != self._last_client:
             self.generation += 1  # older graph generations take precedence
             generation = self.generation
+            self._last_client = client
+        else:
+            generation = self.generation
+
         for key in set(priority) & touched_keys:
             ts = self.tasks[key]
             if ts.priority is None:
