@@ -83,14 +83,14 @@ def test_expand_persist(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
 def test_repeated_persists_same_priority(c, s, w):
-    xs = [delayed(slowinc)(i, delay=0.05) for i in range(10)]
-    ys = [delayed(slowinc)(x, delay=0.05) for x in xs]
-    zs = [delayed(slowdec)(x, delay=0.05) for x in xs]
+    xs = [delayed(slowinc)(i, delay=0.05, dask_key_name='x-%d' % i) for i in range(10)]
+    ys = [delayed(slowinc)(x, delay=0.05, dask_key_name='y-%d' % i) for i, x in enumerate(xs)]
+    zs = [delayed(slowdec)(x, delay=0.05, dask_key_name='z-%d' % i) for i, x in enumerate(xs)]
 
     ys = dask.persist(*ys)
     zs = dask.persist(*zs)
 
-    while sum(t.state == 'memory' for t in s.tasks.values()) < 6:
+    while sum(t.state == 'memory' for t in s.tasks.values()) < 10:  # TODO: reduce this number
         yield gen.sleep(0.01)
 
     assert any(s.tasks[y.key].state == 'memory' for y in ys)
