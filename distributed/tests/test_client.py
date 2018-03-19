@@ -5234,11 +5234,11 @@ def test_diagnostics_link_env_variable(loop):
 
 
 @gen_test()
-def test_client_timeout():
+def test_client_timeout_2():
     with set_config({'connect-timeout': '10ms'}):
         start = time()
         c = Client('127.0.0.1:3755', asynchronous=True)
-        with pytest.raises((TimeoutError, OSError)):
+        with pytest.raises((TimeoutError, IOError)):
             yield c
         stop = time()
 
