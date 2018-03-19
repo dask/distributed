@@ -90,7 +90,7 @@ def test_repeated_persists_same_priority(c, s, w):
     ys = dask.persist(*ys)
     zs = dask.persist(*zs)
 
-    while sum(t.state == 'memory' for t in s.tasks.values()) < 10:  # TODO: reduce this number
+    while sum(t.state == 'memory' for t in s.tasks.values()) < 5:  # TODO: reduce this number
         yield gen.sleep(0.01)
 
     assert any(s.tasks[y.key].state == 'memory' for y in ys)
