@@ -319,3 +319,16 @@ def test_no_more_workers_than_tasks():
     finally:
         yield client._close()
         yield cluster._close()
+
+
+def test_basic_no_loop():
+    try:
+        with LocalCluster(0, scheduler_port=0, silence_logs=False,
+                          diagnostics_port=None) as cluster:
+            with Client(cluster) as client:
+                cluster.adapt()
+                future = client.submit(lambda x: x + 1, 1)
+                assert future.result() == 2
+            loop = cluster.loop
+    finally:
+        loop.add_callback(loop.stop)
