@@ -361,7 +361,7 @@ class WorkerProcess(object):
                 if self.status == 'starting':
                     yield gen.with_timeout(timedelta(seconds=5),
                                            self._wait_until_started())
-            except gen.TimeoutError:
+            except (gen.TimeoutError, AssertionError):
                 logger.info("Failed to start worker process.  Restarting")
                 yield gen.with_timeout(timedelta(seconds=1),
                                        self.process.terminate())
