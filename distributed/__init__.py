@@ -4,7 +4,7 @@ from .config import config
 from .core import connect, rpc
 from .deploy import LocalCluster, Adaptive
 from .diagnostics import progress
-from .client import (Client, Executor, CompatibleExecutor,
+from .client import (Client, Executor, CompatibleExecutor, temp_default_client,
                      wait, as_completed, default_client, fire_and_forget,
                      Future, futures_of)
 from .lock import Lock
