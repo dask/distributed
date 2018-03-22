@@ -3243,15 +3243,18 @@ def CompatibleExecutor(*args, **kwargs):
     raise Exception("This has been moved to the Client.get_executor() method")
 
 
+ALL_COMPLETED = 'ALL_COMPLETED'
+
+
 @gen.coroutine
-def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
+def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
     if timeout is not None and not isinstance(timeout, Number):
         raise TypeError("timeout= keyword received a non-numeric value.\n"
                         "Beware that wait expects a list of values\n"
                         "  Bad:  wait(x, y, z)\n"
                         "  Good: wait([x, y, z])")
     fs = futures_of(fs)
-    if return_when == 'ALL_COMPLETED':
+    if return_when == ALL_COMPLETED:
         future = All({f._state.wait() for f in fs})
         if timeout is not None:
             future = gen.with_timeout(timedelta(seconds=timeout), future)
@@ -3267,10 +3270,7 @@ def _wait(fs, timeout=None, return_when='ALL_COMPLETED'):
     raise gen.Return(DoneAndNotDoneFutures(done, not_done))
 
 
-ALL_COMPLETED = 'ALL_COMPLETED'
-
-
-def wait(fs, timeout=None, return_when='ALL_COMPLETED'):
+def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     """ Wait until all futures are complete
 
     Parameters
