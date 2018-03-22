@@ -46,6 +46,7 @@ API
 .. currentmodule:: distributed
 
 .. autosummary::
+   temp_default_client
    worker_client
    get_worker
    get_client
@@ -156,6 +157,7 @@ Other
 
 .. currentmodule:: distributed
 
+.. autofunction:: distributed.temp_default_client
 .. autofunction:: distributed.worker_client
 .. autofunction:: distributed.get_worker
 .. autofunction:: distributed.get_client
