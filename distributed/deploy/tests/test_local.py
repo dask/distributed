@@ -446,5 +446,17 @@ def test_adapt_then_manual(loop):
                 assert time() < start + 5
 
 
+def test_local_tls(loop):
+    from distributed.utils_test import tls_only_security
+    security = tls_only_security()
+    with LocalCluster(scheduler_port=0, silence_logs=False, security=security,
+                      diagnostics_port=None, ip='tls://0.0.0.0', loop=loop) as c:
+        sync(loop, assert_can_connect_from_everywhere_4_6, c.scheduler.port,
+             protocol='tls',
+             connection_args=security.get_connection_args('client'),
+             timeout=1,
+             )
+
+
 if sys.version_info >= (3, 5):
     from distributed.deploy.tests.py3_test_deploy import *  # noqa F401

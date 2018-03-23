@@ -940,19 +940,19 @@ def assert_cannot_connect(addr, timeout=None, connection_args=None):
 
 
 @gen.coroutine
-def assert_can_connect_from_everywhere_4_6(port, timeout=None, connection_args=None):
+def assert_can_connect_from_everywhere_4_6(port, timeout=None, connection_args=None, protocol='tcp'):
     """
     Check that the local *port* is reachable from all IPv4 and IPv6 addresses.
     """
     args = (timeout, connection_args)
     futures = [
-        assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
-        assert_can_connect('tcp://%s:%d' % (get_ip(), port), *args),
+        assert_can_connect('%s://127.0.0.1:%d' % (protocol, port), *args),
+        assert_can_connect('%s://%s:%d' % (protocol, get_ip(), port), *args),
     ]
     if has_ipv6():
         futures += [
-            assert_can_connect('tcp://[::1]:%d' % port, *args),
-            assert_can_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
+            assert_can_connect('%s://[::1]:%d' % (protocol, port), *args),
+            assert_can_connect('%s://[%s]:%d' % (protocol, get_ipv6(), port), *args),
         ]
     yield futures
 
