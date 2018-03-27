@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from functools import partial
 import gc
+import psutil
 import subprocess
 import sys
 from time import sleep
@@ -13,7 +14,7 @@ from tornado.ioloop import IOLoop
 from tornado import gen
 import pytest
 
-from distributed import Client, Worker, Nanny
+from distributed import Client, Worker, Nanny, wait
 from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
 from distributed.utils_test import (inc, gen_test, slowinc,
@@ -442,6 +443,41 @@ def test_adapt_then_manual(loop):
             while len(cluster.scheduler.workers) != 2:
                 sleep(0.1)
                 assert time() < start + 5
+
+
+def test_fds(loop):
+    start = psutil.Process().num_fds()
+    with LocalCluster(n_workers=0, scheduler_port=0, processes=True, silence_logs=False,
+                      diagnostics_port=None, loop=loop) as cluster:
+        count = []
+        count.append(psutil.Process().num_fds())
+        for i in range(10):
+            cluster.start_worker()
+            count.append(psutil.Process().num_fds())
+
+        for w in list(cluster.workers):
+            cluster.stop_worker(w)
+            count.append(psutil.Process().num_fds())
+
+    stop = psutil.Process().num_fds()
+
+    _start = time()
+    while start + 2 < psutil.Process().num_fds():
+        sleep(0.01)
+        assert time() < _start + 5
+
+
+def test_fds_hard(loop):
+    start = psutil.Process().num_fds()
+
+    for i in range(20):
+        with LocalCluster(n_workers=20, threads_per_worker=1,
+                          diagnostics_port=None, loop=loop) as cluster:
+            with Client(cluster) as client:
+                wait(client.map(inc, range(100)))
+    while start + 2 < psutil.Process().num_fds():
+        sleep(0.01)
+        assert time() < _start + 5
 
 
 if sys.version_info >= (3, 5):

@@ -360,8 +360,9 @@ class LoopRunner(object):
         Stop and close the loop if it was created by us.
         Otherwise, just mark this object "stopped".
         """
-        with self._lock:
-            self._stop_unlocked(timeout)
+        if self._should_close_loop:
+            with self._lock:
+                self._stop_unlocked(timeout)
 
     def _stop_unlocked(self, timeout):
         if not self._started:
