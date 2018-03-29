@@ -81,11 +81,14 @@ def _initialize_logging_old_style(config):
             }
         }
     """
-    loggers = config.get('logging', {})
-    loggers.setdefault('distributed', 'info')
-    # We could remove those lines and let the default config.yaml handle it
-    loggers.setdefault('tornado', 'critical')
-    loggers.setdefault('tornado.application', 'error')
+    loggers = {  # default values
+        'distributed': 'info',
+        'distributed.client': 'warning',
+        'bokeh': 'critical',
+        'tornado': 'critical',
+        'tornado.application': 'error',
+    }
+    loggers.update(config.get('logging', {}))
 
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(log_format))
