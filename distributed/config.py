@@ -60,7 +60,7 @@ def determine_config_file():
 def load_config_file(config, path):
     with open(path) as f:
         text = f.read()
-        config.update(yaml.load(text))
+        config.update(yaml.load(text) or {})
 
 
 def load_env_vars(config):
