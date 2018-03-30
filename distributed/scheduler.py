@@ -2698,7 +2698,7 @@ class Scheduler(ServerNode):
             return result
 
     @gen.coroutine
-    def retire_workers(self, comm=None, workers=None, remove=True, close=False,
+    def retire_workers(self, comm=None, workers=None, remove=True,
                        close_workers=False, **kwargs):
         """ Gracefully retire workers from cluster
 
@@ -2727,10 +2727,6 @@ class Scheduler(ServerNode):
         --------
         Scheduler.workers_to_close
         """
-        if close:
-            logger.warning("The keyword close= has been deprecated. "
-                           "Use close_workers= instead")
-        close_workers = close_workers or close
         with log_errors():
             if workers is None:
                 while True:
