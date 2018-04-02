@@ -75,7 +75,7 @@ class Datasets(MutableMapping):
         self.__client.unpublish_dataset(key)
 
     def __contains__(self, key):
-        return key in self.__client.list_datasets()
+        return self.__client.has_dataset(key)
 
     def __iter__(self):
         for key in self.__client.list_datasets():
