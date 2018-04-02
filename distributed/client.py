@@ -1826,6 +1826,18 @@ class Client(Node):
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
+    def has_dataset(self, name, **kwargs):
+        """
+        Checks for named dataset available on the scheduler
+
+        See Also
+        --------
+        Client.publish_dataset
+        Client.get_dataset
+        Client.list_datasets
+        """
+        return self.sync(self.scheduler.publish_has, name=name, **kwargs)
+
     @gen.coroutine
     def _get_dataset(self, name):
         out = yield self.scheduler.publish_get(name=name, client=self.id)

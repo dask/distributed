@@ -20,6 +20,7 @@ API
    Client.get_metadata
    Client.get_scheduler_logs
    Client.get_worker_logs
+   Client.has_dataset
    Client.has_what
    Client.list_datasets
    Client.map

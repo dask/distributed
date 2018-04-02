@@ -8,6 +8,7 @@ class PublishExtension(object):
     *  publish-list
     *  publish-put
     *  publish-get
+    *  publish-has
     *  publish-delete
     """
 
@@ -18,6 +19,7 @@ class PublishExtension(object):
         handlers = {'publish_list': self.list,
                     'publish_put': self.put,
                     'publish_get': self.get,
+                    'publish_has': self.has,
                     'publish_delete': self.delete}
 
         self.scheduler.handlers.update(handlers)
@@ -39,6 +41,10 @@ class PublishExtension(object):
     def list(self, *args):
         with log_errors():
             return list(sorted(self.datasets.keys()))
+
+    def has(self, stream, name=None, client=None):
+        with log_errors():
+            return (name in self.datasets)
 
     def get(self, stream, name=None, client=None):
         with log_errors():
@@ -69,7 +75,7 @@ class Datasets(MutableMapping):
         self.__client.unpublish_dataset(key)
 
     def __contains__(self, key):
-        return key in self.__client.list_datasets()
+        return self.__client.has_dataset(key)
 
     def __iter__(self):
         for key in self.__client.list_datasets():
