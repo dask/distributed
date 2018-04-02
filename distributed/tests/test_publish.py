@@ -119,8 +119,8 @@ def test_unpublish_multiple_datasets_sync(loop):
             with pytest.raises(KeyError) as exc_info:
                 result = c.get_dataset(name='x')
 
-            assert not c.has_datasets('x')
-            assert c.has_datasets('y')
+            assert not c.has_dataset('x')
+            assert c.has_dataset('y')
 
             datasets = c.list_datasets()
             assert set(datasets) == {'y'}
@@ -133,7 +133,7 @@ def test_unpublish_multiple_datasets_sync(loop):
             with pytest.raises(KeyError) as exc_info:
                 result = c.get_dataset(name='y')
 
-            assert not c.has_datasets('y')
+            assert not c.has_dataset('y')
 
             assert "not found" in str(exc_info.value)
             assert "y" in str(exc_info.value)
