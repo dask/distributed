@@ -1,6 +1,11 @@
 Changelog
 =========
 
+X.XX.X - YYYY-MM-DD
+-------------------
+
+-  Add ``has_dataset`` method to ``Client`` (:pr:`1882`) `John A Kirkham`_
+
 1.21.5 - 2018-03-31
 -------------------
 
