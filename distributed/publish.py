@@ -40,11 +40,11 @@ class PublishExtension(object):
         with log_errors():
             return list(sorted(self.datasets.keys()))
 
-    def get(self, stream, name=None, client=None):
+    def get(self, stream, name=None, client=None, error=True):
         with log_errors():
             if name in self.datasets:
                 return self.datasets[name]
-            else:
+            elif error:
                 raise KeyError("Dataset '%s' not found" % name)
 
 

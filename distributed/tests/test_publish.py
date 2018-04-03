@@ -53,6 +53,11 @@ def test_publish_roundtrip(s, a, b):
     with pytest.raises(KeyError) as exc_info:
         result = yield f.get_dataset(name='nonexistent')
 
+    try:
+        result = yield f.get_dataset(name='nonexistent', error=False)
+    except KeyError:
+        pytest.fail("`get_dataset` raised `KeyError` when it shouldn't.")
+
     assert "not found" in str(exc_info.value)
     assert "nonexistent" in str(exc_info.value)
 

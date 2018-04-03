@@ -1827,8 +1827,10 @@ class Client(Node):
         return self.sync(self.scheduler.publish_list, **kwargs)
 
     @gen.coroutine
-    def _get_dataset(self, name):
-        out = yield self.scheduler.publish_get(name=name, client=self.id)
+    def _get_dataset(self, name, **kwargs):
+        out = yield self.scheduler.publish_get(
+            name=name, client=self.id, **kwargs
+        )
 
         with temp_default_client(self):
             data = loads(out['data'])
