@@ -14,6 +14,7 @@ if sys.version_info[0] == 2:
 
     reload = reload
     unicode = unicode
+    intern = intern
     PY2 = True
     PY3 = False
     ConnectionRefusedError = OSError
@@ -63,6 +64,8 @@ if sys.version_info[0] == 3:
     from importlib.util import cache_from_source
     from inspect import getfullargspec as getargspec
     from html import escape as html_escape
+
+    intern = sys.intern
 
     PY2 = False
     PY3 = True

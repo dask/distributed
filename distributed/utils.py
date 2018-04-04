@@ -38,7 +38,8 @@ import tornado
 from tornado import gen
 from tornado.ioloop import IOLoop, PollIOLoop
 
-from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
+from .compatibility import (Queue, PY3, PY2, get_thread_identity, unicode,
+        intern)
 from .config import config
 from .metrics import time
 
@@ -517,7 +518,7 @@ def key_split(s):
         else:
             if result[0] == '<':
                 result = result.strip('<>').split()[0].split('.')[-1]
-            return result
+            return intern(result)
     except Exception:
         return 'Other'
 

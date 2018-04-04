@@ -21,7 +21,7 @@ from distributed.utils import (All, sync, is_kernel, ensure_ip, str_graph,
                                iterator_to_queue, _maybe_complex, read_block, seek_delimiter,
                                funcname, ensure_bytes, open_port, get_ip_interface, nbytes,
                                set_thread_state, thread_state, LoopRunner,
-                               parse_bytes, parse_timedelta)
+                               parse_bytes, parse_timedelta, key_split)
 from distributed.utils_test import loop, loop_in_thread  # noqa: F401
 from distributed.utils_test import div, has_ipv6, inc, throws, gen_test
 
@@ -513,3 +513,7 @@ def test_parse_timedelta():
     assert parse_timedelta('1', default='seconds') == 1
     assert parse_timedelta('1', default='ms') == 0.001
     assert parse_timedelta(1, default='ms') == 0.001
+
+
+def test_key_split_interns():
+    assert key_split('getitem-0') is key_split('getitem-1')
