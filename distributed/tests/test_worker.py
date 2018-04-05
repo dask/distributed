@@ -13,7 +13,7 @@ import traceback
 
 from dask import delayed
 import pytest
-from toolz import pluck, sliding_window, first
+from toolz import pluck, sliding_window, first, frequencies
 import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
@@ -943,6 +943,17 @@ def test_statistical_profiling_2(c, s, a, b):
     profile = a.get_profile()
     assert profile['count']
     assert 'sum' in str(profile) or 'random' in str(profile)
+
+
+@gen_cluster(client=True)
+def test_statistical_profiling_intern(c, s, a, b):
+    muppy = pytest.importorskip('pympler.muppy')
+    key = 'test-statistical-profiling-22594924'
+    futures = c.map(slowinc, range(100), delay=0.1, key=key)
+    yield wait(futures)
+    L = [s for s in muppy.get_objects() if type(s) is str and key in s]
+    counts = frequencies(L)
+    assert max(counts.values()) < 5
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)], client=True, worker_kwargs={'memory_monitor_interval': 10})

@@ -32,6 +32,7 @@ import itertools
 import toolz
 
 from .utils import format_time
+from .compatibility import intern
 
 
 def identifier(frame):
@@ -42,9 +43,9 @@ def identifier(frame):
     if frame is None:
         return 'None'
     else:
-        return ';'.join((frame.f_code.co_name,
-                         frame.f_code.co_filename,
-                         str(frame.f_code.co_firstlineno)))
+        return intern(';'.join((frame.f_code.co_name,
+                               frame.f_code.co_filename,
+                               str(frame.f_code.co_firstlineno))))
 
 
 def repr_frame(frame):
