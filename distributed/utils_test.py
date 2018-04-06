@@ -704,6 +704,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         end
     """
     config['nanny-start-timeout'] = '5s'
+    config['connect-timeout'] = '5s'
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY, 'death_timeout': 5},
                           worker_kwargs)
 
