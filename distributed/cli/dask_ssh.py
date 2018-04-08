@@ -37,9 +37,21 @@ from distributed.cli.utils import check_python_3
                     "dask-scheduler and dask-worker commands."))
 @click.option('--remote-python', default=None, type=str,
               help="Path to Python on remote nodes.")
+@click.option('--memory-limit', default='auto',
+              help="Bytes of memory that the worker can use. "
+                   "This can be an integer (bytes), "
+                   "float (fraction of total system memory), "
+                   "string (like 5GB or 5000M), "
+                   "'auto', or zero for no memory management")
+@click.option('--worker-port', type=int, default=0,
+              help="Serving computation port, defaults to random")
+@click.option('--nanny-port', type=int, default=0,
+              help="Serving nanny port, defaults to random")
+
 @click.pass_context
 def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
-         ssh_username, ssh_port, ssh_private_key, nohost, log_directory, remote_python):
+         ssh_username, ssh_port, ssh_private_key, nohost, log_directory, remote_python,
+         memory_limit, worker_port, nanny_port):
     try:
         hostnames = list(hostnames)
         if hostfile:
@@ -54,8 +66,11 @@ def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
         print(ctx.get_help())
         exit(1)
 
+    
+    
     c = SSHCluster(scheduler, scheduler_port, hostnames, nthreads, nprocs,
-                   ssh_username, ssh_port, ssh_private_key, nohost, log_directory, remote_python)
+                   ssh_username, ssh_port, ssh_private_key, nohost, log_directory, remote_python,
+                   memory_limit, worker_port, nanny_port)
 
     import distributed
     print('\n---------------------------------------------------------------')
