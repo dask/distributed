@@ -246,7 +246,6 @@ def start_worker(logdir, scheduler_addr, scheduler_port, worker_addr, nthreads, 
         worker_port=worker_port,
         nanny_port=nanny_port)
     
-    print(cmd)
 
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:
