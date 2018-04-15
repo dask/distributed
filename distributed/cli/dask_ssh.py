@@ -47,7 +47,6 @@ from distributed.cli.utils import check_python_3
               help="Serving computation port, defaults to random")
 @click.option('--nanny-port', type=int, default=0,
               help="Serving nanny port, defaults to random")
-
 @click.pass_context
 def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
          ssh_username, ssh_port, ssh_private_key, nohost, log_directory, remote_python,
@@ -66,8 +65,6 @@ def main(ctx, scheduler, scheduler_port, hostnames, hostfile, nthreads, nprocs,
         print(ctx.get_help())
         exit(1)
 
-    
-    
     c = SSHCluster(scheduler, scheduler_port, hostnames, nthreads, nprocs,
                    ssh_username, ssh_port, ssh_private_key, nohost, log_directory, remote_python,
                    memory_limit, worker_port, nanny_port)

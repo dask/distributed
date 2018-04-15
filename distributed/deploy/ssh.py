@@ -219,22 +219,19 @@ def start_worker(logdir, scheduler_addr, scheduler_port, worker_addr, nthreads, 
     cmd = ('{python} -m distributed.cli.dask_worker '
            '{scheduler_addr}:{scheduler_port} '
            '--nthreads {nthreads} --nprocs {nprocs} ')
-    
+
     if not nohost:
         cmd += ' --host {worker_addr} '
-        
+
     if memory_limit:
         cmd += '--memory-limit {memory_limit} '
-        
+
     if worker_port:
         cmd += '--worker-port {worker_port} '
-        
+
     if nanny_port:
         cmd += '--nanny-port {nanny_port} '
-    
-    
-        
-        
+
     cmd = cmd.format(
         python=remote_python or sys.executable,
         scheduler_addr=scheduler_addr,
@@ -245,7 +242,6 @@ def start_worker(logdir, scheduler_addr, scheduler_port, worker_addr, nthreads, 
         memory_limit=memory_limit,
         worker_port=worker_port,
         nanny_port=nanny_port)
-    
 
     # Optionally redirect stdout and stderr to a logfile
     if logdir is not None:
@@ -277,7 +273,7 @@ class SSHCluster(object):
     def __init__(self, scheduler_addr, scheduler_port, worker_addrs, nthreads=0, nprocs=1,
                  ssh_username=None, ssh_port=22, ssh_private_key=None,
                  nohost=False, logdir=None, remote_python=None,
-                 memory_limit=None, worker_port = None, nanny_port = None):
+                 memory_limit=None, worker_port=None, nanny_port=None):
 
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
@@ -291,13 +287,10 @@ class SSHCluster(object):
         self.nohost = nohost
 
         self.remote_python = remote_python
-        
+
         self.memory_limit = memory_limit
         self.worker_port = worker_port
         self.nanny_port = nanny_port
-        
-        
-    
 
         # Generate a universal timestamp to use for log files
         import datetime
