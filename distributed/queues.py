@@ -63,8 +63,10 @@ class QueueExtension(object):
             del self.client_refcount[name]
             futures = self.queues[name]._queue
             del self.queues[name]
-            self.scheduler.client_releases_keys(keys=[f.key for f in futures],
-                                                client='queue-%s' % name)
+            self.scheduler.client_releases_keys(
+                    keys=[d['value'] for d in futures if d['type'] == 'Future'],
+                    client='queue-%s' % name
+            )
 
     @gen.coroutine
     def put(self, stream=None, name=None, key=None, data=None, client=None, timeout=None):
@@ -240,13 +242,10 @@ class Queue(object):
         result = yield self.client.scheduler.queue_qsize(name=self.name)
         raise gen.Return(result)
 
-    def _release(self):
+    def close(self):
         if self.client.status == 'running':  # TODO: can leave zombie futures
             self.client._send_to_scheduler({'op': 'queue_release',
                                             'name': self.name})
-
-    def __del__(self):
-        self._release()
 
     def __getstate__(self):
         return (self.name, self.client.scheduler.address)

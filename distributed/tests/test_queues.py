@@ -243,14 +243,14 @@ def test_erred_future(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_cleanup(c, s, a, b):
+def test_close(c, s, a, b):
     q = Queue()
 
     while q.name not in s.extensions['queues'].queues:
         yield gen.sleep(0.01)
 
-    q._release()
-    q._release()
+    q.close()
+    q.close()
 
     while q.name in s.extensions['queues'].queues:
         yield gen.sleep(0.01)
