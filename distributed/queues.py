@@ -44,7 +44,6 @@ class QueueExtension(object):
             'queue_release': self.release,
         })
 
-
         self.scheduler.extensions['queues'] = self
 
     def create(self, stream=None, name=None, client=None, maxsize=0):
