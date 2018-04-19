@@ -30,7 +30,7 @@ call deactivate
     joblib ^
     jupyter_client ^
     mock ^
-    msgpack-python ^
+    msgpack ^
     psutil ^
     pytest=3.1 ^
     python=%PYTHON% ^
