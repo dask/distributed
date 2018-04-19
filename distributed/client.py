@@ -60,7 +60,8 @@ from .threadpoolexecutor import rejoin
 from .worker import dumps_task, get_client, get_worker, secede
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
                     tokey, log_errors, str_graph, key_split, format_bytes, asciitable,
-                    thread_state, no_default, PeriodicCallback, LoopRunner)
+                    thread_state, no_default, PeriodicCallback, LoopRunner,
+                    parse_timedelta, shutting_down)
 from .versions import get_versions
 
 
@@ -450,7 +451,9 @@ class Client(Node):
     security: (optional)
         Optional security information
     asynchronous: bool (False by default)
-        Set to True if this client will be used within a Tornado event loop
+        Set to True if using this client within async/await functions or within
+        Tornado gen.coroutines.  Otherwise this should remain False for normal
+        use.
     name: string (optional)
         Gives the client a name that will be included in logs generated on
         the scheduler for matters relating to this client
@@ -481,10 +484,15 @@ class Client(Node):
     --------
     distributed.scheduler.Scheduler: Internal scheduler
     """
-    def __init__(self, address=None, loop=None, timeout=5,
+    def __init__(self, address=None, loop=None, timeout=no_default,
                  set_as_default=True, scheduler_file=None,
                  security=None, asynchronous=False,
                  name=None, heartbeat_interval=None, **kwargs):
+        if timeout == no_default:
+            timeout = config.get('connect-timeout', '10s')
+        if timeout is not None:
+            timeout = parse_timedelta(timeout, 's')
+        self._timeout = timeout
 
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
@@ -516,13 +524,17 @@ class Client(Node):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
 
+        if heartbeat_interval is None:
+            heartbeat_interval = config.get('client-heartbeat-interval', 5000)
+        heartbeat_interval = parse_timedelta(heartbeat_interval, default='ms')
+
         self._periodic_callbacks = dict()
         self._periodic_callbacks['scheduler-info'] = PeriodicCallback(
                 self._update_scheduler_info, 2000, io_loop=self.loop
         )
         self._periodic_callbacks['heartbeat'] = PeriodicCallback(
                 self._heartbeat,
-                heartbeat_interval or config.get('client-heartbeat-interval', 5000),
+                heartbeat_interval * 1000,
                 io_loop=self.loop
         )
 
@@ -619,7 +631,11 @@ class Client(Node):
             return '<%s: not connected>' % (self.__class__.__name__,)
 
     def _repr_html_(self):
-        if self._loop_runner.is_started() and self.scheduler:
+        if self.cluster and hasattr(self.cluster, 'scheduler'):
+            info = self.cluster.scheduler.identity()
+        elif (self._loop_runner.is_started() and
+                self.scheduler and
+                not (self.asynchronous and self.loop is IOLoop.current())):
             info = sync(self.loop, self.scheduler.identity)
         else:
             info = False
@@ -636,10 +652,11 @@ class Client(Node):
             protocol, rest = self.scheduler.address.split('://')
             port = info['services']['bokeh']
             if protocol == 'inproc':
-                address = 'http://localhost:%d/status' % port
+                host = 'localhost'
             else:
                 host = rest.split(':')[0]
-                address = 'http://%s:%d/status' % (host, port)
+            template = config.get('diagnostics-link', 'http://{host}:{port}/status')
+            address = template.format(host=host, port=port, **os.environ)
             text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
 
         text += "</ul>\n"
@@ -685,7 +702,11 @@ class Client(Node):
 
     def _send_to_scheduler_safe(self, msg):
         if self.status in ('running', 'closing'):
-            self.scheduler_comm.send(msg)
+            try:
+                self.scheduler_comm.send(msg)
+            except CommClosedError:
+                if self.status == 'running':
+                    raise
         elif self.status in ('connecting', 'newly-created'):
             self._pending_msg_buffer.append(msg)
 
@@ -697,7 +718,12 @@ class Client(Node):
                             "Message: %s" % (self.status, msg))
 
     @gen.coroutine
-    def _start(self, timeout=5, **kwargs):
+    def _start(self, timeout=no_default, **kwargs):
+        if timeout == no_default:
+            timeout = self._timeout
+        if timeout is not None:
+            timeout = parse_timedelta(timeout, 's')
+
         address = self._start_arg
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
@@ -724,16 +750,17 @@ class Client(Node):
             from .deploy import LocalCluster
 
             try:
-                self.cluster = LocalCluster(loop=self.loop, start=False,
+                self.cluster = LocalCluster(loop=self.loop, asynchronous=True,
                                             **self._startup_kwargs)
-                yield self.cluster._start()
+                yield self.cluster
             except (OSError, socket.error) as e:
                 if e.errno != errno.EADDRINUSE:
                     raise
                 # The default port was taken, use a random one
                 self.cluster = LocalCluster(scheduler_port=0, loop=self.loop,
-                                            start=False, **self._startup_kwargs)
-                yield self.cluster._start()
+                                            asynchronous=True,
+                                            **self._startup_kwargs)
+                yield self.cluster
 
             # Wait for all workers to be ready
             # XXX should be a LocalCluster method instead
@@ -796,7 +823,7 @@ class Client(Node):
         assert len(msg) == 1
         assert msg[0]['op'] == 'stream-start'
 
-        bcomm = BatchedSend(interval=10, loop=self.loop)
+        bcomm = BatchedSend(interval='10ms', loop=self.loop)
         bcomm.start(comm)
         self.scheduler_comm = bcomm
 
@@ -816,10 +843,7 @@ class Client(Node):
         try:
             self._scheduler_identity = yield self.scheduler.identity()
         except EnvironmentError:
-            if self.status not in ('running', 'connecting'):
-                return
-            else:
-                raise
+            logger.debug("Not able to query scheduler for identity")
 
     def _heartbeat(self):
         if self.scheduler_comm:
@@ -879,7 +903,7 @@ class Client(Node):
                         msgs = yield self.scheduler_comm.comm.read()
                     except CommClosedError:
                         if self.status == 'running':
-                            logger.warning("Client report stream closed to scheduler")
+                            logger.info("Client report stream closed to scheduler")
                             logger.info("Reconnecting...")
                             self.status = 'connecting'
                             yield self._reconnect()
@@ -1001,7 +1025,7 @@ class Client(Node):
 
     _shutdown = _close
 
-    def close(self, timeout=10):
+    def close(self, timeout=no_default):
         """ Close this client
 
         Clients will also close automatically when your Python session ends
@@ -1013,6 +1037,8 @@ class Client(Node):
         --------
         Client.restart
         """
+        if timeout == no_default:
+            timeout = self._timeout * 2
         # XXX handling of self.status here is not thread-safe
         if self.status == 'closed':
             return
@@ -1032,7 +1058,7 @@ class Client(Node):
 
         assert self.status == 'closed'
 
-        if self._should_close_loop:
+        if self._should_close_loop and not shutting_down():
             self._loop_runner.stop()
 
         with ignoring(AttributeError):
@@ -1092,6 +1118,8 @@ class Client(Node):
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        fifo_timeout: str timedelta (default '100ms')
+            Allowed amount of time between calls to consider the same priority
 
         Examples
         --------
@@ -1114,6 +1142,7 @@ class Client(Node):
         resources = kwargs.pop('resources', None)
         retries = kwargs.pop('retries', None)
         priority = kwargs.pop('priority', 0)
+        fifo_timeout = kwargs.pop('fifo_timeout', '100ms')
         allow_other_workers = kwargs.pop('allow_other_workers', False)
 
         if allow_other_workers not in (True, False, None):
@@ -1152,7 +1181,8 @@ class Client(Node):
                                          loose_restrictions, priority={skey: 0},
                                          user_priority=priority,
                                          resources={skey: resources} if resources else None,
-                                         retries={skey: retries} if retries else None)
+                                         retries=retries,
+                                         fifo_timeout=fifo_timeout)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -1198,6 +1228,8 @@ class Client(Node):
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        fifo_timeout: str timedelta (default '100ms')
+            Allowed amount of time between calls to consider the same priority
 
         Examples
         --------
@@ -1238,6 +1270,7 @@ class Client(Node):
         resources = kwargs.pop('resources', None)
         user_priority = kwargs.pop('priority', 0)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
+        fifo_timeout = kwargs.pop('fifo_timeout', '100ms')
 
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
@@ -1282,11 +1315,6 @@ class Client(Node):
         else:
             loose_restrictions = set()
 
-        if retries:
-            retries = {k: retries for k in keys}
-        else:
-            retries = None
-
         priority = dict(zip(keys, range(len(keys))))
 
         if resources:
@@ -1299,7 +1327,8 @@ class Client(Node):
                                          priority=priority,
                                          resources=resources,
                                          retries=retries,
-                                         user_priority=user_priority)
+                                         user_priority=user_priority,
+                                         fifo_timeout=fifo_timeout)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(k)] for k in keys]
@@ -1479,7 +1508,9 @@ class Client(Node):
 
     @gen.coroutine
     def _scatter(self, data, workers=None, broadcast=False, direct=None,
-                 local_worker=None, timeout=3, hash=True):
+                 local_worker=None, timeout=no_default, hash=True):
+        if timeout == no_default:
+            timeout = self._timeout
         if isinstance(workers, six.string_types + (Number,)):
             workers = [workers]
         if isinstance(data, dict) and not all(isinstance(k, (bytes, unicode))
@@ -1591,7 +1622,7 @@ class Client(Node):
                 qout.put(future)
 
     def scatter(self, data, workers=None, broadcast=False, direct=None,
-                hash=True, maxsize=0, timeout=3, asynchronous=None):
+                hash=True, maxsize=0, timeout=no_default, asynchronous=None):
         """ Scatter data into distributed memory
 
         This moves data from the local client process into the workers of the
@@ -1657,6 +1688,8 @@ class Client(Node):
         --------
         Client.gather: Gather data back to local process
         """
+        if timeout == no_default:
+            timeout = self._timeout
         if isqueue(data) or isinstance(data, Iterator):
             logger.debug("Starting thread for streaming data")
             qout = pyQueue(maxsize=maxsize)
@@ -1795,6 +1828,8 @@ class Client(Node):
     @gen.coroutine
     def _get_dataset(self, name):
         out = yield self.scheduler.publish_get(name=name, client=self.id)
+        if out is None:
+            raise KeyError("Dataset '%s' not found" % name)
 
         with temp_default_client(self):
             data = loads(out['data'])
@@ -1953,7 +1988,8 @@ class Client(Node):
 
     def _graph_to_futures(self, dsk, keys, restrictions=None,
                           loose_restrictions=None, priority=None,
-                          user_priority=0, resources=None, retries=None):
+                          user_priority=0, resources=None, retries=None,
+                          fifo_timeout=0):
         with self._lock:
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
@@ -1991,6 +2027,9 @@ class Client(Node):
                                  for key, deps in dependencies.items()}
                 priority = dask.order.order(dsk3, dependencies2)
 
+            if isinstance(retries, Number) and retries > 0:
+                retries = {k: retries for k in dsk3}
+
             self._send_to_scheduler({'op': 'update-graph',
                                      'tasks': valmap(dumps_task, dsk3),
                                      'dependencies': valmap(list, dependencies),
@@ -2002,11 +2041,12 @@ class Client(Node):
                                      'resources': resources,
                                      'submitting_task': getattr(thread_state, 'key', None),
                                      'retries': retries,
-                                     })
+                                     'fifo_timeout': fifo_timeout})
             return futures
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
-            resources=None, sync=True, asynchronous=None, **kwargs):
+            resources=None, sync=True, asynchronous=None, direct=None,
+            retries=None, priority=0, fifo_timeout='60s', **kwargs):
         """ Compute dask graph
 
         Parameters
@@ -2016,8 +2056,15 @@ class Client(Node):
         restrictions: dict (optional)
             A mapping of {key: {set of worker hostnames}} that restricts where
             jobs can take place
+        retries: int (default to 0)
+            Number of allowed automatic retries if computing a result fails
+        priority: Number
+            Optional prioritization of task.  Zero is default.
+            Higher priorities take precedence
         sync: bool (optional)
             Returns Futures if False or concrete values if True (default).
+        direct: bool
+            Gather results directly from workers
 
         Examples
         --------
@@ -2032,17 +2079,26 @@ class Client(Node):
         """
         futures = self._graph_to_futures(dsk, set(flatten([keys])),
                                          restrictions, loose_restrictions,
-                                         resources=resources)
+                                         resources=resources,
+                                         fifo_timeout=fifo_timeout,
+                                         retries=retries,
+                                         user_priority=priority,
+                                         )
         packed = pack_data(keys, futures)
         if sync:
             if getattr(thread_state, 'key', False):
-                secede()
+                try:
+                    secede()
+                    should_rejoin = True
+                except Exception:
+                    should_rejoin = False
             try:
-                results = self.gather(packed, asynchronous=asynchronous)
+                results = self.gather(packed, asynchronous=asynchronous,
+                                      direct=direct)
             finally:
                 for f in futures.values():
                     f.release()
-                if getattr(thread_state, 'key', False):
+                if getattr(thread_state, 'key', False) and should_rejoin:
                     rejoin()
             return results
         return packed
@@ -2105,7 +2161,7 @@ class Client(Node):
 
     def compute(self, collections, sync=False, optimize_graph=True,
                 workers=None, allow_other_workers=False, resources=None,
-                retries=0, priority=0, **kwargs):
+                retries=0, priority=0, fifo_timeout='60s', **kwargs):
         """ Compute dask collections on cluster
 
         Parameters
@@ -2119,9 +2175,9 @@ class Client(Node):
         workers: str, list, dict
             Which workers can run which parts of the computation
             If a string a list then the output collections will run on the listed
-                workers, but other sub-computations can run anywhere
+            workers, but other sub-computations can run anywhere
             If a dict then keys should be (tuples of) collections and values
-                should be addresses or lists.
+            should be addresses or lists.
         allow_other_workers: bool, list
             If True then all restrictions in workers= are considered loose
             If a list then only the keys for the listed collections are loose
@@ -2130,6 +2186,8 @@ class Client(Node):
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        fifo_timeout: timedelta str (defaults to '60s')
+            Allowed amount of time between calls to consider the same priority
         **kwargs:
             Options to pass to the graph optimize calls
 
@@ -2205,7 +2263,8 @@ class Client(Node):
                                               restrictions, loose_restrictions,
                                               resources=resources,
                                               retries=retries,
-                                              user_priority=priority)
+                                              user_priority=priority,
+                                              fifo_timeout=fifo_timeout)
 
         i = 0
         futures = []
@@ -2228,7 +2287,7 @@ class Client(Node):
 
     def persist(self, collections, optimize_graph=True, workers=None,
                 allow_other_workers=None, resources=None, retries=None,
-                priority=0, **kwargs):
+                priority=0, fifo_timeout='60s', **kwargs):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -2244,9 +2303,9 @@ class Client(Node):
         workers: str, list, dict
             Which workers can run which parts of the computation
             If a string a list then the output collections will run on the listed
-                workers, but other sub-computations can run anywhere
+            workers, but other sub-computations can run anywhere
             If a dict then keys should be (tuples of) collections and values
-                should be addresses or lists.
+            should be addresses or lists.
         allow_other_workers: bool, list
             If True then all restrictions in workers= are considered loose
             If a list then only the keys for the listed collections are loose
@@ -2255,6 +2314,8 @@ class Client(Node):
         priority: Number
             Optional prioritization of task.  Zero is default.
             Higher priorities take precedence
+        fifo_timeout: timedelta str (defaults to '60s')
+            Allowed amount of time between calls to consider the same priority
         kwargs:
             Options to pass to the graph optimize calls
 
@@ -2304,7 +2365,8 @@ class Client(Node):
                                          loose_restrictions,
                                          resources=resources,
                                          retries=retries,
-                                         user_priority=priority)
+                                         user_priority=priority,
+                                         fifo_timeout=fifo_timeout)
 
         postpersists = [c.__dask_postpersist__() for c in collections]
         result = [func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)
@@ -2347,7 +2409,9 @@ class Client(Node):
         return self.sync(self._upload_environment, name, zipfile)
 
     @gen.coroutine
-    def _restart(self, timeout=5):
+    def _restart(self, timeout=no_default):
+        if timeout == no_default:
+            timeout = self._timeout * 2
         self._send_to_scheduler({'op': 'restart', 'timeout': timeout})
         self._restart_event = Event()
         try:
@@ -2418,13 +2482,13 @@ class Client(Node):
         """ Upload local package to workers
 
         This sends a local file up to all worker nodes.  This file is placed
-        into a temporary directory on Python's system path so any .py, .pyc, .egg
+        into a temporary directory on Python's system path so any .py,  .egg
         or .zip  files will be importable.
 
         Parameters
         ----------
         filename: string
-            Filename of .py, .pyc, .egg or .zip file to send to workers
+            Filename of .py, .egg or .zip file to send to workers
 
         Examples
         --------
@@ -2579,6 +2643,9 @@ class Client(Node):
     def has_what(self, workers=None, **kwargs):
         """ Which keys are held by which workers
 
+        This returns the keys of the data that are held in each worker's
+        memory.
+
         Parameters
         ----------
         workers: list (optional)
@@ -2597,6 +2664,7 @@ class Client(Node):
         --------
         Client.who_has
         Client.ncores
+        Client.processing
         """
         if (isinstance(workers, tuple)
                 and all(isinstance(i, (str, tuple)) for i in workers)):
@@ -2774,8 +2842,8 @@ class Client(Node):
         system. The scheduler file can be used to instantiate a second Client
         using the same scheduler.
 
-        Parameter
-        ---------
+        Parameters
+        ----------
         scheduler_file: str
             Path to a write the scheduler file.
 
@@ -2799,8 +2867,8 @@ class Client(Node):
 
         See set_metadata for the full docstring with examples
 
-        Parameter
-        ---------
+        Parameters
+        ----------
         keys: key or list
             Key to access.  If a list then gets within a nested collection
         default: optional
@@ -2849,6 +2917,26 @@ class Client(Node):
         Logs are returned in reversed order (newest first)
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers)
+
+    def retire_workers(self, workers=None, close_workers=True, **kwargs):
+        """ Retire certain workers on the scheduler
+
+        See dask.distributed.Scheduler.retire_workers for the full docstring.
+
+        Examples
+        --------
+        You can get information about active workers using the following:
+        >>> workers = client.scheduler_info()['workers']
+
+        From that list you may want to select some workers to close
+        >>> client.retire_workers(workers=['tcp://address:port', ...])
+
+        See Also
+        --------
+        dask.distributed.Scheduler.retire_workers
+        """
+        return self.sync(self.scheduler.retire_workers, workers=workers,
+                         close_workers=close_workers, **kwargs)
 
     def set_metadata(self, key, value):
         """ Set arbitrary metadata in the scheduler
@@ -3384,8 +3472,17 @@ class as_completed(object):
 
     def is_empty(self):
         """Return True if there no waiting futures, False otherwise"""
+        return not self.count()
+
+    def count(self):
+        """ Return the number of futures yet to be returned
+
+        This includes both the number of futures still computing, as well as
+        those that are finished, but have not yet been returned from this
+        iterator.
+        """
         with self.lock:
-            return not self.futures and self.queue.empty()
+            return len(self.futures) + len(self.queue.queue)
 
     def __iter__(self):
         return self
@@ -3579,6 +3676,7 @@ def _close_global_client():
     """
     c = _get_global_client()
     if c is not None:
+        c._should_close_loop = False
         c.close(timeout=2)
 
 

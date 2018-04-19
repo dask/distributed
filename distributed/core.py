@@ -24,7 +24,7 @@ from .config import config
 from .metrics import time
 from .system_monitor import SystemMonitor
 from .utils import (get_traceback, truncate_exception, ignoring, shutting_down,
-                    PeriodicCallback)
+                    PeriodicCallback, parse_timedelta)
 from . import protocol
 
 
@@ -44,6 +44,8 @@ def get_total_physical_memory():
 
 
 MAX_BUFFER_SIZE = get_total_physical_memory()
+
+tick_maximum_delay = parse_timedelta(config.get('tick-maximum-delay', 1000), default='ms')
 
 
 class Server(object):
@@ -121,8 +123,11 @@ class Server(object):
         self.periodic_callbacks['monitor'] = pc
 
         self._last_tick = time()
-        pc = PeriodicCallback(self._measure_tick, config.get('tick-time', 20),
-                              io_loop=self.io_loop)
+        pc = PeriodicCallback(
+                self._measure_tick,
+                parse_timedelta(config.get('tick-time', 20), default='ms') * 1000,
+                io_loop=self.io_loop
+        )
         self.periodic_callbacks['tick'] = pc
 
         self.__stopped = False
@@ -133,6 +138,8 @@ class Server(object):
         This starts all PeriodicCallbacks stored in self.periodic_callbacks if
         they are not yet running.  It does this safely on the IOLoop.
         """
+        self._last_tick = time()
+
         def start_pcs():
             for pc in self.periodic_callbacks.values():
                 if not pc.is_running():
@@ -156,12 +163,12 @@ class Server(object):
         now = time()
         diff = now - self._last_tick
         self._last_tick = now
-        if diff > config.get('tick-maximum-delay', 1000) / 1000:
-            logger.warning("Event loop was unresponsive in %s for %.2fs.  "
-                           "This is often caused by long-running GIL-holding "
-                           "functions or moving large chunks of data. "
-                           "This can cause timeouts and instability.",
-                           type(self).__name__, diff)
+        if diff > tick_maximum_delay:
+            logger.info("Event loop was unresponsive in %s for %.2fs.  "
+                        "This is often caused by long-running GIL-holding "
+                        "functions or moving large chunks of data. "
+                        "This can cause timeouts and instability.",
+                        type(self).__name__, diff)
         if self.digests is not None:
             self.digests['tick-duration'].add(diff)
 
@@ -279,8 +286,8 @@ class Server(object):
                 try:
                     handler = self.handlers[op]
                 except KeyError:
-                    result = "No handler found: %s" % op
-                    logger.warning(result, exc_info=True)
+                    logger.warning("No handler %s found in %s", op,
+                                   type(self).__name__, exc_info=True)
                 else:
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
@@ -289,7 +296,8 @@ class Server(object):
                             self._ongoing_coroutines.add(result)
                             result = yield result
                     except (CommClosedError, CancelledError) as e:
-                        logger.warning("Lost connection to %r: %s", address, e)
+                        if self.status == 'running':
+                            logger.info("Lost connection to %r: %s", address, e)
                         break
                     except Exception as e:
                         logger.exception(e)

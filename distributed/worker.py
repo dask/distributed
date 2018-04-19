@@ -46,7 +46,7 @@ from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, validate_key, mp_context, import_file,
                     silence_logging, thread_state, json_load_robust, key_split,
                     format_bytes, DequeHandler, PeriodicCallback,
-                    parse_bytes)
+                    parse_bytes, parse_timedelta)
 from .utils_comm import pack_data, gather_from_workers
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 
@@ -83,7 +83,7 @@ class WorkerBase(ServerNode):
                  reconnect=True, memory_limit='auto',
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
-                 contact_address=None, memory_monitor_interval=200, **kwargs):
+                 contact_address=None, memory_monitor_interval='200ms', **kwargs):
 
         self._setup_logging()
 
@@ -104,7 +104,7 @@ class WorkerBase(ServerNode):
         self.preload = preload
         self.preload_argv = preload_argv,
         self.contact_address = contact_address
-        self.memory_monitor_interval = memory_monitor_interval
+        self.memory_monitor_interval = parse_timedelta(memory_monitor_interval, default='ms')
         if silence_logs:
             silence_logging(level=silence_logs)
 
@@ -201,7 +201,7 @@ class WorkerBase(ServerNode):
         if self.memory_limit:
             self._memory_monitoring = False
             pc = PeriodicCallback(self.memory_monitor,
-                                  self.memory_monitor_interval,
+                                  self.memory_monitor_interval * 1000,
                                   io_loop=self.io_loop)
             self.periodic_callbacks['memory'] = pc
 
@@ -534,7 +534,8 @@ class WorkerBase(ServerNode):
         try:
             compressed = yield comm.write(msg)
         except EnvironmentError:
-            logger.exception('failed during get data', exc_info=True)
+            logger.exception('failed during get data with %s -> %s',
+                             self.address, who, exc_info=True)
             comm.abort()
             raise
         stop = time()
@@ -1086,6 +1087,7 @@ class Worker(WorkerBase):
         self.profile_history = deque(maxlen=3600)
 
         self.priorities = dict()
+        self.generation = 0
         self.durations = dict()
         self.startstops = defaultdict(list)
         self.resource_restrictions = dict()
@@ -1134,16 +1136,19 @@ class Worker(WorkerBase):
 
         profile_cycle_interval = kwargs.pop('profile_cycle_interval',
                                         config.get('profile-cycle-interval', 1000))
+        profile_cycle_interval = parse_timedelta(profile_cycle_interval, default='ms')
 
         WorkerBase.__init__(self, *args, **kwargs)
 
-        pc = PeriodicCallback(self.trigger_profile,
-                              config.get('profile-interval', 10),
-                              io_loop=self.io_loop)
+        pc = PeriodicCallback(
+                self.trigger_profile,
+                parse_timedelta(config.get('profile-interval', 10), default='ms') * 1000,
+                io_loop=self.io_loop
+        )
         self.periodic_callbacks['profile'] = pc
 
         pc = PeriodicCallback(self.cycle_profile,
-                              profile_cycle_interval,
+                              profile_cycle_interval * 1000,
                               io_loop=self.io_loop)
         self.periodic_callbacks['profile-cycle'] = pc
 
@@ -1163,7 +1168,7 @@ class Worker(WorkerBase):
     @gen.coroutine
     def compute_stream(self, comm):
         try:
-            self.batched_stream = BatchedSend(interval=2, loop=self.loop)
+            self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
             self.batched_stream.start(comm)
 
             closed = False
@@ -1241,6 +1246,10 @@ class Worker(WorkerBase):
                     return
                 if state in IN_PLAY:
                     return
+
+            if priority is not None:
+                priority = tuple(priority) + (self.generation,)
+                self.generation -= 1
 
             if self.dep_state.get(key) == 'memory':
                 self.task_state[key] = 'memory'

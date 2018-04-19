@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+from distutils.version import LooseVersion
 from functools import partial
 import logging
 import math
@@ -8,6 +9,7 @@ from numbers import Number
 from operator import add
 import os
 
+import bokeh
 from bokeh.application import Application
 from bokeh.application.handlers.function import FunctionHandler
 from bokeh.layouts import column, row
@@ -541,7 +543,7 @@ class Events(DashboardComponent):
 
 
 class TaskStream(components.TaskStream):
-    def __init__(self, scheduler, n_rectangles=1000, clear_interval=20000, **kwargs):
+    def __init__(self, scheduler, n_rectangles=1000, clear_interval='20s', **kwargs):
         self.scheduler = scheduler
         self.offset = 0
         es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
@@ -559,7 +561,7 @@ class TaskStream(components.TaskStream):
         if self.index == self.plugin.index:
             return
         with log_errors():
-            if self.index and self.source.data['start']:
+            if self.index and len(self.source.data['start']):
                 start = min(self.source.data['start'])
                 duration = max(self.source.data['duration'])
                 boundary = (self.offset + start - duration) / 1000
@@ -579,7 +581,7 @@ class TaskStream(components.TaskStream):
             if first_end > self.last:
                 last = self.last
                 self.last = first_end
-                if first_end > last + self.clear_interval:
+                if first_end > last + self.clear_interval * 1000:
                     self.offset = min(rectangles['start'])
                     self.source.data.update({k: [] for k in rectangles})
 
@@ -951,9 +953,14 @@ class WorkerTable(DashboardComponent):
                       'num_fds': NumberFormatter(format='0'),
                       'ncores': NumberFormatter(format='0')}
 
+        if LooseVersion(bokeh.__version__) < '0.12.15':
+            dt_kwargs = {'row_headers': False}
+        else:
+            dt_kwargs = {'index_position': None}
+
         table = DataTable(
             source=self.source, columns=[columns[n] for n in table_names],
-            row_headers=False, reorderable=True, sortable=True, width=width,
+            reorderable=True, sortable=True, width=width, **dt_kwargs
         )
 
         for name in table_names:
@@ -1029,7 +1036,7 @@ class WorkerTable(DashboardComponent):
 def systemmonitor_doc(scheduler, extra, doc):
     with log_errors():
         sysmon = SystemMonitor(scheduler, sizing_mode='scale_width')
-        doc.title = "Dask Scheduler Internal Monitor"
+        doc.title = "Dask: Scheduler System Monitor"
         doc.add_periodic_callback(sysmon.update, 500)
 
         doc.add_root(column(sysmon.root, sizing_mode='scale_width'))
@@ -1044,7 +1051,7 @@ def stealing_doc(scheduler, extra, doc):
         stealing_ts = StealingTimeSeries(scheduler, sizing_mode='scale_width')
         stealing_events = StealingEvents(scheduler, sizing_mode='scale_width')
         stealing_events.root.x_range = stealing_ts.root.x_range
-        doc.title = "Dask Workers Monitor"
+        doc.title = "Dask: Work Stealing"
         doc.add_periodic_callback(occupancy.update, 500)
         doc.add_periodic_callback(stealing_ts.update, 500)
         doc.add_periodic_callback(stealing_events.update, 500)
@@ -1063,7 +1070,7 @@ def events_doc(scheduler, extra, doc):
         events = Events(scheduler, 'all', height=250)
         events.update()
         doc.add_periodic_callback(events.update, 500)
-        doc.title = "Dask Scheduler Events"
+        doc.title = "Dask: Scheduler Events"
         doc.add_root(column(events.root, sizing_mode='scale_width'))
         doc.template = template
         doc.template_variables['active_page'] = 'events'
@@ -1075,7 +1082,7 @@ def workers_doc(scheduler, extra, doc):
         table = WorkerTable(scheduler)
         table.update()
         doc.add_periodic_callback(table.update, 500)
-        doc.title = "Dask Workers"
+        doc.title = "Dask: Workers"
         doc.add_root(table.root)
         doc.template = template
         doc.template_variables['active_page'] = 'workers'
@@ -1084,11 +1091,11 @@ def workers_doc(scheduler, extra, doc):
 
 def tasks_doc(scheduler, extra, doc):
     with log_errors():
-        ts = TaskStream(scheduler, n_rectangles=100000, clear_interval=60000,
+        ts = TaskStream(scheduler, n_rectangles=100000, clear_interval='60s',
                         sizing_mode='stretch_both')
         ts.update()
         doc.add_periodic_callback(ts.update, 5000)
-        doc.title = "Dask Task Stream"
+        doc.title = "Dask: Task Stream"
         doc.add_root(ts.root)
         doc.template = template
         doc.template_variables['active_page'] = 'tasks'
@@ -1098,6 +1105,7 @@ def tasks_doc(scheduler, extra, doc):
 def graph_doc(scheduler, extra, doc):
     with log_errors():
         graph = GraphPlot(scheduler, sizing_mode='stretch_both')
+        doc.title = "Dask: Task Graph"
         graph.update()
         doc.add_periodic_callback(graph.update, 200)
         doc.add_root(graph.root)
@@ -1109,7 +1117,8 @@ def graph_doc(scheduler, extra, doc):
 
 def status_doc(scheduler, extra, doc):
     with log_errors():
-        task_stream = TaskStream(scheduler, n_rectangles=1000, clear_interval=10000, height=350)
+        task_stream = TaskStream(scheduler, n_rectangles=1000,
+                                 clear_interval='10s', height=350)
         task_stream.update()
         doc.add_periodic_callback(task_stream.update, 100)
 
@@ -1133,7 +1142,7 @@ def status_doc(scheduler, extra, doc):
             current_load_fig = row(nbytes_hist.root, processing_hist.root,
                                    sizing_mode='scale_width')
 
-        doc.title = "Dask Status"
+        doc.title = "Dask: Status"
         doc.add_root(column(current_load_fig,
                             task_stream.root,
                             task_progress.root,
@@ -1145,7 +1154,7 @@ def status_doc(scheduler, extra, doc):
 
 def profile_doc(scheduler, extra, doc):
     with log_errors():
-        doc.title = "Dask Profile"
+        doc.title = "Dask: Profile"
         prof = ProfileTimePlot(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
         doc.template = template

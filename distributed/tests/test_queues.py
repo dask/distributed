@@ -141,7 +141,8 @@ def test_race(c, s, *workers):
 
     futures = c.map(f, range(5))
     results = yield c.gather(futures)
-    assert all(r > 80 for r in results)
+    assert all(r > 50 for r in results)
+    assert sum(results) == 510
     qsize = yield q.qsize()
     assert not qsize
 
@@ -239,3 +240,17 @@ def test_erred_future(c, s, a, b):
 
     exc = yield future2.exception()
     assert isinstance(exc, ZeroDivisionError)
+
+
+@gen_cluster(client=True)
+def test_close(c, s, a, b):
+    q = Queue()
+
+    while q.name not in s.extensions['queues'].queues:
+        yield gen.sleep(0.01)
+
+    q.close()
+    q.close()
+
+    while q.name in s.extensions['queues'].queues:
+        yield gen.sleep(0.01)

@@ -14,6 +14,7 @@ from tornado import gen
 import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
+from distributed.config import set_config
 from distributed.core import connect, rpc, CommClosedError
 from distributed.scheduler import Scheduler, BANDWIDTH
 from distributed.client import wait
@@ -477,36 +478,37 @@ def test_worker_name():
 
 @gen_test()
 def test_coerce_address():
-    s = Scheduler(validate=True)
-    s.start(0)
-    print("scheduler:", s.address, s.listen_address)
-    a = Worker(s.ip, s.port, name='alice')
-    b = Worker(s.ip, s.port, name=123)
-    c = Worker('127.0.0.1', s.port, name='charlie')
-    yield [a._start(), b._start(), c._start()]
+    with set_config({'connect-timeout': '100ms'}):
+        s = Scheduler(validate=True)
+        s.start(0)
+        print("scheduler:", s.address, s.listen_address)
+        a = Worker(s.ip, s.port, name='alice')
+        b = Worker(s.ip, s.port, name=123)
+        c = Worker('127.0.0.1', s.port, name='charlie')
+        yield [a._start(), b._start(), c._start()]
 
-    assert s.coerce_address('127.0.0.1:8000') == 'tcp://127.0.0.1:8000'
-    assert s.coerce_address('[::1]:8000') == 'tcp://[::1]:8000'
-    assert s.coerce_address('tcp://127.0.0.1:8000') == 'tcp://127.0.0.1:8000'
-    assert s.coerce_address('tcp://[::1]:8000') == 'tcp://[::1]:8000'
-    assert s.coerce_address('localhost:8000') in ('tcp://127.0.0.1:8000', 'tcp://[::1]:8000')
-    assert s.coerce_address(u'localhost:8000') in ('tcp://127.0.0.1:8000', 'tcp://[::1]:8000')
-    assert s.coerce_address(a.address) == a.address
-    # Aliases
-    assert s.coerce_address('alice') == a.address
-    assert s.coerce_address(123) == b.address
-    assert s.coerce_address('charlie') == c.address
+        assert s.coerce_address('127.0.0.1:8000') == 'tcp://127.0.0.1:8000'
+        assert s.coerce_address('[::1]:8000') == 'tcp://[::1]:8000'
+        assert s.coerce_address('tcp://127.0.0.1:8000') == 'tcp://127.0.0.1:8000'
+        assert s.coerce_address('tcp://[::1]:8000') == 'tcp://[::1]:8000'
+        assert s.coerce_address('localhost:8000') in ('tcp://127.0.0.1:8000', 'tcp://[::1]:8000')
+        assert s.coerce_address(u'localhost:8000') in ('tcp://127.0.0.1:8000', 'tcp://[::1]:8000')
+        assert s.coerce_address(a.address) == a.address
+        # Aliases
+        assert s.coerce_address('alice') == a.address
+        assert s.coerce_address(123) == b.address
+        assert s.coerce_address('charlie') == c.address
 
-    assert s.coerce_hostname('127.0.0.1') == '127.0.0.1'
-    assert s.coerce_hostname('alice') == a.ip
-    assert s.coerce_hostname(123) == b.ip
-    assert s.coerce_hostname('charlie') == c.ip
-    assert s.coerce_hostname('jimmy') == 'jimmy'
+        assert s.coerce_hostname('127.0.0.1') == '127.0.0.1'
+        assert s.coerce_hostname('alice') == a.ip
+        assert s.coerce_hostname(123) == b.ip
+        assert s.coerce_hostname('charlie') == c.ip
+        assert s.coerce_hostname('jimmy') == 'jimmy'
 
-    assert s.coerce_address('zzzt:8000', resolve=False) == 'tcp://zzzt:8000'
+        assert s.coerce_address('zzzt:8000', resolve=False) == 'tcp://zzzt:8000'
 
-    yield s.close()
-    yield [w._close() for w in [a, b, c]]
+        yield s.close()
+        yield [w._close() for w in [a, b, c]]
 
 
 @pytest.mark.skipif(sys.platform.startswith('win'),
@@ -615,6 +617,21 @@ def test_retire_workers(c, s, a, b):
     assert not workers
 
 
+@gen_cluster(client=True)
+def test_retire_workers_n(c, s, a, b):
+    yield s.retire_workers(n=1)
+    assert len(s.workers) == 1
+
+    yield s.retire_workers(n=0)
+    assert len(s.workers) == 1
+
+    yield s.retire_workers(n=1)
+    assert len(s.workers) == 0
+
+    yield s.retire_workers(n=0)
+    assert len(s.workers) == 0
+
+
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
 def test_workers_to_close(cl, s, *workers):
     s.task_duration['a'] = 4
@@ -721,7 +738,7 @@ def test_file_descriptors(c, s):
 @gen_cluster(client=True)
 def test_learn_occupancy(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.01)
-    while not any(ts.who_has for ts in s.tasks.values()):
+    while sum(len(ts.who_has) for ts in s.tasks.values()) < 10:
         yield gen.sleep(0.01)
 
     assert 1 < s.total_occupancy < 40
@@ -975,14 +992,14 @@ def test_close_nanny(c, s, a, b):
 
 @gen_cluster(client=True, timeout=20)
 def test_retire_workers_close(c, s, a, b):
-    yield s.retire_workers(close=True)
+    yield s.retire_workers(close_workers=True)
     assert not s.workers
 
 
 @gen_cluster(client=True, timeout=20, Worker=Nanny)
 def test_retire_nannies_close(c, s, a, b):
     nannies = [a, b]
-    yield s.retire_workers(close=True, remove=True)
+    yield s.retire_workers(close_workers=True, remove=True)
     assert not s.workers
 
     start = time()
@@ -999,9 +1016,10 @@ def test_retire_nannies_close(c, s, a, b):
 def test_fifo_submission(c, s, w):
     futures = []
     for i in range(20):
-        future = c.submit(slowinc, i, delay=0.1, key='inc-%02d' % i)
+        future = c.submit(slowinc, i, delay=0.1, key='inc-%02d' % i,
+                          fifo_timeout=0.01)
         futures.append(future)
-        yield gen.sleep(0.01)
+        yield gen.sleep(0.02)
     yield wait(futures[-1])
     assert futures[10].status == 'finished'
 
@@ -1019,14 +1037,14 @@ def test_scheduler_file():
     yield s.close()
 
 
-@slow
 @gen_cluster(client=True, ncores=[])
 def test_non_existent_worker(c, s):
-    s.add_worker(address='127.0.0.1:5738', ncores=2, nbytes={}, host_info={})
-    futures = c.map(inc, range(10))
-    yield gen.sleep(4)
-    assert not s.workers
-    assert all(ts.state == 'no-worker' for ts in s.tasks.values())
+    with set_config({'connect-timeout': '100ms'}):
+        s.add_worker(address='127.0.0.1:5738', ncores=2, nbytes={}, host_info={})
+        futures = c.map(inc, range(10))
+        yield gen.sleep(0.300)
+        assert not s.workers
+        assert all(ts.state == 'no-worker' for ts in s.tasks.values())
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
@@ -1184,3 +1202,20 @@ def test_retries(c, s, a, b):
     with pytest.raises(ZeroDivisionError) as exc_info:
         res = yield future
     exc_info.match("one")
+
+
+@pytest.mark.xfail(reason="second worker also errant for some reason")
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3, timeout=5)
+def test_mising_data_errant_worker(c, s, w1, w2, w3):
+    with set_config({'connect-timeout': '1s'}):
+        np = pytest.importorskip('numpy')
+
+        x = c.submit(np.random.random, 10000000, workers=w1.address)
+        yield wait(x)
+        yield c.replicate(x, workers=[w1.address, w2.address])
+
+        y = c.submit(len, x, workers=w3.address)
+        while not w3.tasks:
+            yield gen.sleep(0.001)
+        w1._close()
+        yield wait(y)

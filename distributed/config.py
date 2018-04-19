@@ -60,14 +60,31 @@ def determine_config_file():
 def load_config_file(config, path):
     with open(path) as f:
         text = f.read()
-        config.update(yaml.load(text))
+        config.update(yaml.load(text) or {})
 
 
 def load_env_vars(config):
     for name, value in os.environ.items():
         if name.startswith('DASK_'):
             varname = name[5:].lower().replace('_', '-')
-            config[varname] = value
+            config[varname] = _parse_env_value(value)
+
+
+def _parse_env_value(value):
+    """ Convert a string to an integer, float or boolean (in that order) if possible. """
+    bools = {
+        'true': True,
+        'false': False
+    }
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    return bools.get(value.lower(), value)
 
 
 def _initialize_logging_old_style(config):
@@ -81,11 +98,14 @@ def _initialize_logging_old_style(config):
             }
         }
     """
-    loggers = config.get('logging', {})
-    loggers.setdefault('distributed', 'info')
-    # We could remove those lines and let the default config.yaml handle it
-    loggers.setdefault('tornado', 'critical')
-    loggers.setdefault('tornado.application', 'error')
+    loggers = {  # default values
+        'distributed': 'info',
+        'distributed.client': 'warning',
+        'bokeh': 'critical',
+        'tornado': 'critical',
+        'tornado.application': 'error',
+    }
+    loggers.update(config.get('logging', {}))
 
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter(log_format))
@@ -131,7 +151,9 @@ def initialize_logging(config):
 
 
 @contextmanager
-def set_config(**kwargs):
+def set_config(arg=None, **kwargs):
+    if arg and not kwargs:
+        kwargs = arg
     old = {}
     for key in kwargs:
         if key in config:

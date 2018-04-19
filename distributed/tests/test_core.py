@@ -8,10 +8,11 @@ import weakref
 from tornado import gen
 import pytest
 
+import dask
 from distributed.compatibility import finalize
-from distributed.config import set_config
 from distributed.core import (pingpong, Server, rpc, connect, send_recv,
                                coerce_to_address, ConnectionPool)
+from distributed.protocol.compression import compressions
 
 from distributed.metrics import time
 from distributed.protocol import to_serialize
@@ -55,6 +56,10 @@ class CountedObject(object):
 
 def echo_serialize(comm, x):
     return {'result': to_serialize(x)}
+
+
+def echo_no_serialize(comm, x):
+    return {'result': x}
 
 
 def test_server(loop):
@@ -561,10 +566,35 @@ def test_ticks(s, a, b):
 @gen_cluster()
 def test_tick_logging(s, a, b):
     pytest.importorskip('crick')
-    with set_config(**{'tick-maximum-delay': 10}):
+    from distributed import core
+    old = core.tick_maximum_delay
+    core.tick_maximum_delay = 0.001
+    try:
         with captured_logger('distributed.core') as sio:
             yield gen.sleep(0.1)
 
-    text = sio.getvalue()
-    assert "unresponsive" in text
-    assert 'Scheduler' in text or 'Worker' in text
+        text = sio.getvalue()
+        assert "unresponsive" in text
+        assert 'Scheduler' in text or 'Worker' in text
+    finally:
+        core.tick_maximum_delay = old
+
+
+@pytest.mark.parametrize('compression', list(compressions))
+@pytest.mark.parametrize('serialize', [echo_serialize, echo_no_serialize])
+def test_compression(compression, serialize, loop):
+    with dask.set_options(compression=compression):
+
+        @gen.coroutine
+        def f():
+            server = Server({'echo': serialize})
+            server.listen('tcp://')
+
+            with rpc(server.address) as r:
+                data = b'1' * 1000000
+                result = yield r.echo(x=to_serialize(data))
+                assert result == {'result': data}
+
+            server.stop()
+
+        loop.run_sync(f)

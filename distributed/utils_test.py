@@ -38,7 +38,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .compatibility import PY3
+from .compatibility import PY3, iscoroutinefunction, Empty
 from .config import config, initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
@@ -529,8 +529,11 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
 
             for worker in workers:
                 worker['proc'].start()
-            for worker in workers:
-                worker['address'] = worker['queue'].get()
+            try:
+                for worker in workers:
+                    worker['address'] = worker['queue'].get(timeout=5)
+            except Empty:
+                raise pytest.xfail.Exception("Worker failed to start in test")
 
             saddr = scheduler_q.get()
 
@@ -621,7 +624,10 @@ def gen_test(timeout=10):
     def _(func):
         def test_func():
             with pristine_loop() as loop:
-                cor = gen.coroutine(func)
+                if iscoroutinefunction(func):
+                    cor = func
+                else:
+                    cor = gen.coroutine(func)
                 try:
                     loop.run_sync(cor, timeout=timeout)
                 finally:
@@ -652,7 +658,8 @@ def start_cluster(ncores, scheduler_addr, loop, security=None,
     yield [w._start(ncore[0]) for ncore, w in zip(ncores, workers)]
 
     start = time()
-    while len(s.workers) < len(ncores):
+    while (len(s.workers) < len(ncores) or
+           any(comm.comm is None for comm in s.worker_comms.values())):
         yield gen.sleep(0.01)
         if time() - start > 5:
             yield [w._close(timeout=1) for w in workers]
@@ -696,6 +703,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         start
         end
     """
+    config['nanny-start-timeout'] = '5s'
+    config['connect-timeout'] = '5s'
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY, 'death_timeout': 5},
                           worker_kwargs)
 
@@ -723,8 +732,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                                     ncores, scheduler, loop, security=security,
                                     Worker=Worker, scheduler_kwargs=scheduler_kwargs,
                                     worker_kwargs=worker_kwargs)
-                            except Exception:
-                                logger.error("Failed to start gen_cluster, retryng")
+                            except Exception as e:
+                                logger.error("Failed to start gen_cluster, retryng", exc_info=True)
                             else:
                                 break
                         workers[:] = ws
@@ -734,19 +743,23 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                                              asynchronous=True)
                             args = [c] + args
                         try:
-                            result = yield func(*args)
+                            future = func(*args)
+                            if timeout:
+                                future = gen.with_timeout(timedelta(seconds=timeout),
+                                                          future)
+                            result = yield future
                             if s.validate:
                                 s.validate_state()
                         finally:
                             if client:
-                                yield c._close()
+                                yield c._close(fast=s.status == 'closed')
                             yield end_cluster(s, workers)
                             _globals.clear()
                             _globals.update(old_globals)
 
                         raise gen.Return(result)
 
-                    result = loop.run_sync(coro, timeout=timeout)
+                    result = loop.run_sync(coro, timeout=timeout * 2 if timeout else timeout)
 
             for w in workers:
                 if getattr(w, 'data', None):
@@ -1059,6 +1072,17 @@ def new_config(new_config):
         config.clear()
         config.update(orig_config)
         initialize_logging(config)
+
+
+@contextmanager
+def new_environment(changes):
+    saved_environ = os.environ.copy()
+    os.environ.update(changes)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_environ)
 
 
 @contextmanager
