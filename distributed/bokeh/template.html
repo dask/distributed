@@ -44,10 +44,10 @@
         font-size: 0;
       }
       .navbar img {
-        height: 42px;
+        height: 36px;
         float: right;
-        margin-bottom: 0px;
-        padding: 0px 24px;
+        margin: 3px;
+        padding: 0px 25px;
       }
       .navbar ul {
           list-style-type: none;
@@ -100,8 +100,11 @@
   <body>
     <div class="navbar">
       <ul>
-          <li><a href="http://dask.pydata.org/en/latest/"
-                 style="padding:0px 0px;"><img src="static/dask_horizontal.svg"></img></a></li>
+          <li>
+            <a href="http://dask.pydata.org/en/latest/" style="padding: 0px 0px">
+              <img src="static/dask_horizontal.svg"></img>
+            </a>
+          </li>
           {% for page in pages %}
           <li{% if page == active_page %} class="active"{% endif %}><a href="{{ page }}">{{ page|title }}</a></li>
           {% endfor %}
