@@ -32,7 +32,7 @@ class BokehServer(object):
                                      **self.server_kwargs)
                 self.server.start()
 
-                handlers = [(self.prefix + r'/static/(.*)',
+                handlers = [(self.prefix + r'/statics/(.*)',
                              web.StaticFileHandler,
                              {'path': os.path.join(os.path.dirname(__file__), 'static')})]
 
