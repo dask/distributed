@@ -1326,8 +1326,8 @@ class Scheduler(ServerNode):
 
         # Avoid computation that is already finished
         already_in_memory = set()  # tasks that are already done
-        for k in dependencies:
-            if k in self.tasks and self.tasks[k].state in ('memory', 'erred'):
+        for k, v  in dependencies.items():
+            if v and k in self.tasks and self.tasks[k].state in ('memory', 'erred'):
                 already_in_memory.add(k)
 
         if already_in_memory:

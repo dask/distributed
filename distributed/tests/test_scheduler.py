@@ -1294,3 +1294,20 @@ def test_dont_recompute_if_persisted_4(c, s, a, b):
 
     new = s.story('x')
     assert len(new) > len(old)
+
+
+@gen_cluster(client=True)
+def test_dont_recompute_if_erred(c, s, a, b):
+    x = delayed(inc)(1, dask_key_name='x')
+    y = delayed(div)(x, 0, dask_key_name='y')
+
+    yy = y.persist()
+    yield wait(yy)
+
+    old = list(s.transition_log)
+
+    yyy = y.persist()
+    yield wait(yyy)
+
+    yield gen.sleep(0.100)
+    assert list(s.transition_log) == old
