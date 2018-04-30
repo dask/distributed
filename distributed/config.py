@@ -1,90 +1,28 @@
 from __future__ import print_function, division, absolute_import
 
-from contextlib import contextmanager
 import logging
 import logging.config
 import os
 import sys
-import warnings
 
-from .compatibility import FileExistsError, logging_names
+from dask.config import config, ensure_config_file, update
+import yaml
+
+from .compatibility import logging_names
+
+
+fn = os.path.join(os.path.dirname(__file__), 'config.yaml')
+ensure_config_file(source=fn)
+
+
+with open(fn) as f:
+    defaults = yaml.load(f)
+
+
+update(config, defaults, priority='old')
+
 
 logger = logging.getLogger(__name__)
-
-config = {}
-
-
-def ensure_config_file(source, destination):
-    if not os.path.exists(destination):
-        import shutil
-        if not os.path.exists(os.path.dirname(destination)):
-            try:
-                os.mkdir(os.path.dirname(destination))
-            except FileExistsError:
-                pass
-        # Atomically create destination.  Parallel testing discovered
-        # a race condition where a process can be busy creating the
-        # destination while another process reads an empty config file.
-        tmp = '%s.tmp.%d' % (destination, os.getpid())
-        shutil.copy(source, tmp)
-        try:
-            os.rename(tmp, destination)
-        except OSError:
-            os.remove(tmp)
-
-
-def determine_config_file():
-    path = os.environ.get('DASK_CONFIG')
-    if path:
-        if (os.path.exists(path) and
-                (os.path.isfile(path) or os.path.islink(path))):
-            return path
-        warnings.warn("DASK_CONFIG set to '%s' but file does not exist "
-                      "or is not a regular file" % (path,),
-                      UserWarning)
-
-    dirname = os.path.dirname(__file__)
-    default_path = os.path.join(dirname, 'config.yaml')
-    path = os.path.join(os.path.expanduser('~'), '.dask', 'config.yaml')
-
-    try:
-        ensure_config_file(default_path, path)
-    except EnvironmentError as e:
-        warnings.warn("Could not write default config file to '%s'. "
-                      "Received error %s" % (path, e),
-                      UserWarning)
-
-    return path if os.path.exists(path) else default_path
-
-
-def load_config_file(config, path):
-    with open(path) as f:
-        text = f.read()
-        config.update(yaml.load(text) or {})
-
-
-def load_env_vars(config):
-    for name, value in os.environ.items():
-        if name.startswith('DASK_'):
-            varname = name[5:].lower().replace('_', '-')
-            config[varname] = _parse_env_value(value)
-
-
-def _parse_env_value(value):
-    """ Convert a string to an integer, float or boolean (in that order) if possible. """
-    bools = {
-        'true': True,
-        'false': False
-    }
-    try:
-        return int(value)
-    except ValueError:
-        pass
-    try:
-        return float(value)
-    except ValueError:
-        pass
-    return bools.get(value.lower(), value)
 
 
 def _initialize_logging_old_style(config):
@@ -108,7 +46,7 @@ def _initialize_logging_old_style(config):
     loggers.update(config.get('logging', {}))
 
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter(log_format))
+    handler.setFormatter(logging.Formatter(config['log-format']))
     for name, level in loggers.items():
         if isinstance(level, str):
             level = logging_names[level.upper()]
@@ -149,39 +87,5 @@ def initialize_logging(config):
         else:
             _initialize_logging_old_style(config)
 
-
-@contextmanager
-def set_config(arg=None, **kwargs):
-    if arg and not kwargs:
-        kwargs = arg
-    old = {}
-    for key in kwargs:
-        if key in config:
-            old[key] = config[key]
-
-    for key, value in kwargs.items():
-        config[key] = value
-
-    try:
-        yield
-    finally:
-        for key in kwargs:
-            if key in old:
-                config[key] = old[key]
-            else:
-                del config[key]
-
-
-try:
-    import yaml
-except ImportError:
-    pass
-else:
-    path = determine_config_file()
-    load_config_file(config, path)
-
-load_env_vars(config)
-
-log_format = config.get('log-format', '%(name)s - %(levelname)s - %(message)s')
 
 initialize_logging(config)

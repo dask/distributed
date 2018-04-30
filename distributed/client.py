@@ -47,7 +47,6 @@ from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
                          scatter_to_workers, gather_from_workers)
 from .cfexecutor import ClientExecutor
 from .compatibility import Queue as pyQueue, Empty, isqueue, html_escape
-from .config import config
 from .core import connect, rpc, clean_exception, CommClosedError
 from .metrics import time
 from .node import Node
@@ -489,7 +488,7 @@ class Client(Node):
                  security=None, asynchronous=False,
                  name=None, heartbeat_interval=None, **kwargs):
         if timeout == no_default:
-            timeout = config.get('connect-timeout', '10s')
+            timeout = dask.config.get('connect-timeout')
         if timeout is not None:
             timeout = parse_timedelta(timeout, 's')
         self._timeout = timeout
@@ -497,8 +496,8 @@ class Client(Node):
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self.coroutines = []
-        if name is None and 'client-name' in config:
-            name = config['client-name']
+        if name is None:
+            name = dask.config.get('client-name', None)
         self.id = type(self).__name__ + ('-' + name + '-' if name else '-') + str(uuid.uuid1(clock_seq=os.getpid()))
         self.generation = 0
         self.status = 'newly-created'
@@ -525,7 +524,7 @@ class Client(Node):
         self.loop = self._loop_runner.loop
 
         if heartbeat_interval is None:
-            heartbeat_interval = config.get('client-heartbeat-interval', 5000)
+            heartbeat_interval = dask.config.get('client-heartbeat-interval')
         heartbeat_interval = parse_timedelta(heartbeat_interval, default='ms')
 
         self._periodic_callbacks = dict()
@@ -538,8 +537,8 @@ class Client(Node):
                 io_loop=self.loop
         )
 
-        if address is None and 'scheduler-address' in config:
-            address = config['scheduler-address']
+        if address is None:
+            address = dask.config.get('scheduler-address', None)
             if address:
                 logger.info("Config value `scheduler-address` found: %s",
                             address)
@@ -655,7 +654,7 @@ class Client(Node):
                 host = 'localhost'
             else:
                 host = rest.split(':')[0]
-            template = config.get('diagnostics-link', 'http://{host}:{port}/status')
+            template = dask.config.get('diagnostics-link')
             address = template.format(host=host, port=port, **os.environ)
             text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
 

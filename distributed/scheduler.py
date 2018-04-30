@@ -23,13 +23,12 @@ from tornado import gen
 from tornado.gen import Return
 from tornado.ioloop import IOLoop
 
-from dask.order import order
+import dask
 
 from .batched import BatchedSend
 from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
 from .compatibility import finalize, unicode
-from .config import config, log_format
 from .core import (rpc, connect, send_recv,
                    error_message, clean_exception, CommClosedError)
 from . import profile
@@ -54,11 +53,11 @@ from .variable import VariableExtension
 logger = logging.getLogger(__name__)
 
 
-BANDWIDTH = config.get('bandwidth', 100e6)
-ALLOWED_FAILURES = config.get('allowed-failures', 3)
+BANDWIDTH = dask.config.get('bandwidth')
+ALLOWED_FAILURES = dask.config.get('allowed-failures')
 
-LOG_PDB = config.get('pdb-on-err') or os.environ.get('DASK_ERROR_PDB', False)
-DEFAULT_DATA_SIZE = config.get('default-data-size', 1000)
+LOG_PDB = dask.config.get('pdb-on-err')
+DEFAULT_DATA_SIZE = dask.config.get('default-data-size')
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -68,7 +67,7 @@ DEFAULT_EXTENSIONS = [
     VariableExtension,
 ]
 
-if config.get('work-stealing', True):
+if dask.config.get('work-stealing'):
     DEFAULT_EXTENSIONS.append(WorkStealing)
 
 ALL_TASK_STATES = {'released', 'waiting', 'no-worker', 'processing', 'erred', 'memory'}
@@ -753,7 +752,7 @@ class Scheduler(ServerNode):
         self.service_specs = services or {}
         self.services = {}
         self.scheduler_file = scheduler_file
-        worker_ttl = worker_ttl or config.get('worker-ttl')
+        worker_ttl = worker_ttl or dask.config.get('worker-ttl')
         self.worker_ttl = parse_timedelta(worker_ttl) if worker_ttl else None
 
         self.security = security or Security()
@@ -865,9 +864,8 @@ class Scheduler(ServerNode):
 
         self.extensions = {}
         self.plugins = []
-        self.transition_log = deque(maxlen=config.get('transition-log-length',
-                                                      100000))
-        self.log = deque(maxlen=config.get('transition-log-length', 100000))
+        self.transition_log = deque(maxlen=dask.config.get('transition-log-length'))
+        self.log = deque(maxlen=dask.config.get('transition-log-length'))
 
         self.worker_handlers = {'task-finished': self.handle_task_finished,
                                 'task-erred': self.handle_task_erred,
@@ -1162,8 +1160,8 @@ class Scheduler(ServerNode):
             yield future
 
     def _setup_logging(self):
-        self._deque_handler = DequeHandler(n=config.get('log-length', 10000))
-        self._deque_handler.setFormatter(logging.Formatter(log_format))
+        self._deque_handler = DequeHandler(n=dask.config.get('log-length'))
+        self._deque_handler.setFormatter(logging.Formatter(dask.config.get('log-format')))
         logger.addHandler(self._deque_handler)
         finalize(self, logger.removeHandler, self._deque_handler)
 
@@ -1357,7 +1355,7 @@ class Scheduler(ServerNode):
         if isinstance(user_priority, Number):
             user_priority = {k: user_priority for k in tasks}
 
-        priority = priority or order(tasks)  # TODO: define order wrt old graph
+        priority = priority or dask.order.order(tasks)  # TODO: define order wrt old graph
 
         if submitting_task:  # sub-tasks get better priority than parent tasks
             ts = self.tasks.get(submitting_task)
