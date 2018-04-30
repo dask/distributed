@@ -32,6 +32,7 @@ except ImportError:
 import pytest
 import six
 
+import dask
 from dask.context import _globals
 from toolz import merge, memoize
 from tornado import gen, queues
@@ -1072,10 +1073,12 @@ def new_config(new_config):
     """
     Temporarily change configuration dictionary.
     """
+    from .config import defaults
     orig_config = config.copy()
     try:
         config.clear()
-        config.update(new_config)
+        config.update(defaults.copy())
+        dask.config.update(config, new_config)
         initialize_logging(config)
         yield
     finally:
