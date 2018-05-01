@@ -56,7 +56,7 @@ no_default = '__no_default__'
 
 def _initialize_mp_context():
     if PY3 and not sys.platform.startswith('win') and 'PyPy' not in sys.version:
-        method = dask.config.get('multiprocessing-method')
+        method = dask.config.get('worker.multiprocessing-method')
         ctx = multiprocessing.get_context(method)
         # Makes the test suite much faster
         preload = ['distributed']

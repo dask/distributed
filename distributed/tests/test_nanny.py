@@ -288,7 +288,7 @@ def test_avoid_memory_monitor_if_zero_limit(c, s):
 
 @gen_cluster(ncores=[], client=True)
 def test_scheduler_address_config(c, s):
-    with dask.config.set_config({'scheduler-address': s.address}):
+    with dask.config.set({'scheduler-address': s.address}):
         nanny = Nanny(loop=s.loop)
         yield nanny._start()
         assert nanny.scheduler.address == s.address

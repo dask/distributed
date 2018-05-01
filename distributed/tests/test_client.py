@@ -5181,7 +5181,7 @@ def test_avoid_delayed_finalize(c, s, a, b):
 
 @gen_cluster()
 def test_config_scheduler_address(s, a, b):
-    with dask.config.set_config({'scheduler-address': s.address}):
+    with dask.config.set({'scheduler-address': s.address}):
         with captured_logger('distributed.client') as sio:
             c = yield Client(asynchronous=True)
             assert c.scheduler.address == s.address
@@ -5237,7 +5237,7 @@ def test_unhashable_function(c, s, a, b):
 
 @gen_cluster()
 def test_client_name(s, a, b):
-    with dask.config.set_config({'client-name': 'hello-world'}):
+    with dask.config.set({'client-name': 'hello-world'}):
         c = yield Client(s.address, asynchronous=True)
         assert any("hello-world" in name for name in list(s.clients))
 
@@ -5268,7 +5268,7 @@ def test_diagnostics_link_env_variable(loop):
     from distributed.bokeh.scheduler import BokehScheduler
     with cluster(scheduler_kwargs={'services': {('bokeh', 12355): BokehScheduler}}) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            with dask.config.set_config({'diagnostics-link': 'http://foo-{USER}:{port}/status'}):
+            with dask.config.set({'dashboard.link': 'http://foo-{USER}:{port}/status'}):
                 text = c._repr_html_()
                 link = 'http://foo-' + os.environ['USER'] + ':12355/status'
                 assert link in text
@@ -5276,7 +5276,7 @@ def test_diagnostics_link_env_variable(loop):
 
 @gen_test()
 def test_client_timeout_2():
-    with dask.config.set_config({'connect-timeout': '10ms'}):
+    with dask.config.set({'comm.timeouts.connect': '10ms'}):
         start = time()
         c = Client('127.0.0.1:3755', asynchronous=True)
         with pytest.raises((TimeoutError, IOError)):
