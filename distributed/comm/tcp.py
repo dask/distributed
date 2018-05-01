@@ -50,7 +50,7 @@ def set_tcp_timeout(stream):
     if stream.closed():
         return
 
-    timeout = dask.config.get('tcp-timeout')
+    timeout = dask.config.get('comm.timeouts.tcp')
     timeout = int(parse_timedelta(timeout, default='seconds'))
 
     sock = stream.socket
@@ -363,7 +363,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE,
                                     **self.server_args)
         self.tcp_server.handle_stream = self._handle_stream
-        backlog = int(dask.config.get('socket-backlog'))
+        backlog = int(dask.config.get('comm.socket-backlog'))
         for i in range(5):
             try:
                 # When shuffling data between workers, there can

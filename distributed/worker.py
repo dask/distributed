@@ -54,7 +54,7 @@ _ncores = mp_context.cpu_count()
 
 logger = logging.getLogger(__name__)
 
-LOG_PDB = dask.config.get('pdb-on-err')
+LOG_PDB = dask.config.get('admin.pdb-on-err')
 
 no_value = '--no-value-sentinel--'
 
@@ -128,15 +128,15 @@ class WorkerBase(ServerNode):
         if 'memory_target_fraction' in kwargs:
             self.memory_target_fraction = kwargs.pop('memory_target_fraction')
         else:
-            self.memory_target_fraction = dask.config.get('worker-memory-target')
+            self.memory_target_fraction = dask.config.get('worker.memory.target')
         if 'memory_spill_fraction' in kwargs:
             self.memory_spill_fraction = kwargs.pop('memory_spill_fraction')
         else:
-            self.memory_spill_fraction = dask.config.get('worker-memory-spill')
+            self.memory_spill_fraction = dask.config.get('worker.memory.spill')
         if 'memory_pause_fraction' in kwargs:
             self.memory_pause_fraction = kwargs.pop('memory_pause_fraction')
         else:
-            self.memory_pause_fraction = dask.config.get('worker-memory-pause')
+            self.memory_pause_fraction = dask.config.get('worker.memory.pause')
 
         if self.memory_limit:
             try:
@@ -210,8 +210,8 @@ class WorkerBase(ServerNode):
         setproctitle("dask-worker [not started]")
 
     def _setup_logging(self):
-        self._deque_handler = DequeHandler(n=dask.config.get('log-length'))
-        self._deque_handler.setFormatter(logging.Formatter(dask.config.get('log-format')))
+        self._deque_handler = DequeHandler(n=dask.config.get('admin.log-length'))
+        self._deque_handler.setFormatter(logging.Formatter(dask.config.get('admin.log-format')))
         logger.addHandler(self._deque_handler)
         finalize(self, logger.removeHandler, self._deque_handler)
 
@@ -1099,7 +1099,7 @@ class Worker(WorkerBase):
         self.long_running = set()
 
         self.batched_stream = None
-        self.recent_messages_log = deque(maxlen=dask.config.get('recent-messages-log-length'))
+        self.recent_messages_log = deque(maxlen=dask.config.get('comm.recent-messages-log-length'))
         self.target_message_size = 50e6  # 50 MB
 
         self.log = deque(maxlen=100000)
@@ -1135,14 +1135,14 @@ class Worker(WorkerBase):
         self._client = None
 
         profile_cycle_interval = kwargs.pop('profile_cycle_interval',
-                                            dask.config.get('profile-cycle-interval'))
+                                            dask.config.get('worker.profile.cycle'))
         profile_cycle_interval = parse_timedelta(profile_cycle_interval, default='ms')
 
         WorkerBase.__init__(self, *args, **kwargs)
 
         pc = PeriodicCallback(
                 self.trigger_profile,
-                parse_timedelta(dask.config.get('profile-interval'), default='ms') * 1000,
+                parse_timedelta(dask.config.get('worker.profile.interval'), default='ms') * 1000,
                 io_loop=self.io_loop
         )
         self.periodic_callbacks['profile'] = pc

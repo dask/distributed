@@ -9,8 +9,8 @@ import os
 import pytest
 
 from distributed.utils_test import (captured_handler, captured_logger,
-                                    new_config, new_config_file, new_environment)
-from distributed.config import initialize_logging, config
+                                    new_config, new_config_file)
+from distributed.config import initialize_logging
 
 
 def dump_logger_list():
