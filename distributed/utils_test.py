@@ -40,7 +40,7 @@ from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
 from .compatibility import PY3, iscoroutinefunction, Empty
-from .config import config, initialize_logging
+from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
 from .proctitle import enable_proctitle_on_children
@@ -706,9 +706,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         start
         end
     """
-    config['nanny-start-timeout'] = '5s'
-    config['connect-timeout'] = '5s'
     del _global_workers[:]
+    dask.config.set({'comm.timeouts.connect': '5s'})
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY, 'death_timeout': 5},
                           worker_kwargs)
 
