@@ -11,7 +11,7 @@ import yaml
 from .compatibility import logging_names
 
 
-fn = os.path.join(os.path.dirname(__file__), 'config.yaml')
+fn = os.path.join(os.path.dirname(__file__), 'distributed.yaml')
 ensure_config_file(source=fn)
 
 
