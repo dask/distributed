@@ -1056,6 +1056,8 @@ class Scheduler(ServerNode):
             for k, v in self.services.items():
                 logger.info("%11s at: %25s", k, '%s:%d' % (listen_ip, v.port))
 
+            self.loop.add_callback(self.reevaluate_occupancy)
+
         if self.scheduler_file:
             with open(self.scheduler_file, 'w') as f:
                 json.dump(self.identity(), f, indent=2)
@@ -1068,7 +1070,6 @@ class Scheduler(ServerNode):
 
             finalize(self, del_scheduler_file)
 
-        self.loop.add_callback(self.reevaluate_occupancy)
         self.start_periodic_callbacks()
 
         setproctitle("dask-scheduler [%s]" % (self.address,))
