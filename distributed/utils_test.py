@@ -1073,6 +1073,7 @@ def new_config(new_config):
     Temporarily change configuration dictionary.
     """
     from .config import defaults
+    config = dask.config.config
     orig_config = config.copy()
     try:
         config.clear()

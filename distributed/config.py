@@ -10,6 +10,8 @@ import yaml
 
 from .compatibility import logging_names
 
+config = dask.config.config
+
 
 fn = os.path.join(os.path.dirname(__file__), 'distributed.yaml')
 dask.config.ensure_config_file(source=fn)

@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+from . import config
 from dask.config import config
 from .core import connect, rpc
 from .deploy import LocalCluster, Adaptive

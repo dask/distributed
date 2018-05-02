@@ -2,6 +2,8 @@ from __future__ import print_function, division, absolute_import
 
 import six
 
+import dask
+
 from . import registry
 
 
