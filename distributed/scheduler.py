@@ -4137,11 +4137,10 @@ class Scheduler(ServerNode):
                 return
 
             import psutil
-            proc = psutil.Process()
             last = time()
             next_time = timedelta(seconds=DELAY)
 
-            if proc.cpu_percent() < 50:
+            if psutil.cpu_percent() < 50:
                 workers = list(self.workers.values())
                 for i in range(len(workers)):
                     ws = workers[worker_index % len(workers)]
