@@ -13,6 +13,7 @@ import pickle
 import random
 import six
 
+import psutil
 from sortedcontainers import SortedSet, SortedDict
 try:
     from cytoolz import frequencies, merge, pluck, merge_sorted, first
@@ -747,6 +748,7 @@ class Scheduler(ServerNode):
         self.allowed_failures = allowed_failures
         self.validate = validate
         self.status = None
+        self.proc = psutil.Process()
         self.delete_interval = parse_timedelta(delete_interval, default='ms')
         self.synchronize_worker_interval = parse_timedelta(synchronize_worker_interval, default='ms')
         self.digests = None
@@ -4136,11 +4138,14 @@ class Scheduler(ServerNode):
             if self.status == 'closed':
                 return
 
-            import psutil
             last = time()
             next_time = timedelta(seconds=DELAY)
 
-            if psutil.cpu_percent() < 50:
+            # scheduler was somehow moved to another PID
+            if self.proc.pid != os.getpid():
+                self.proc = psutil.Process()
+
+            if self.proc.cpu_percent() < 50:
                 workers = list(self.workers.values())
                 for i in range(len(workers)):
                     ws = workers[worker_index % len(workers)]
