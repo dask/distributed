@@ -138,7 +138,7 @@ class Cluster(object):
         layout = Layout(width='150px')
 
         if 'bokeh' in self.scheduler.services:
-            template = dask.config.get('dashboard.link')
+            template = dask.config.get('distributed.dashboard.link')
 
             host = self.scheduler.address.split('://')[1].split(':')[0]
             port = self.scheduler.services['bokeh'].port

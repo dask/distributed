@@ -20,7 +20,7 @@ DIR_LOCK_EXT = '.dirlock'
 
 
 def is_locking_enabled():
-    return dask.config.get('worker.use-file-locking')
+    return dask.config.get('distributed.worker.use-file-locking')
 
 
 def safe_unlink(path):

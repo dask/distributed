@@ -22,7 +22,7 @@ log_2 = log(2)
 logger = logging.getLogger(__name__)
 
 
-LOG_PDB = dask.config.get('admin.pdb-on-err')
+LOG_PDB = dask.config.get('distributed.admin.pdb-on-err')
 
 
 class WorkStealing(SchedulerPlugin):

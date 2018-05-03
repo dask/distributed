@@ -51,7 +51,7 @@ class BatchedSend(object):
         self.batch_count = 0
         self.byte_count = 0
         self.next_deadline = None
-        self.recent_message_log = deque(maxlen=dask.config.get('comm.recent-messages-log-length'))
+        self.recent_message_log = deque(maxlen=dask.config.get('distributed.comm.recent-messages-log-length'))
 
     def start(self, comm):
         self.comm = comm

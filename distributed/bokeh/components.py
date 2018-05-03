@@ -18,13 +18,13 @@ from ..diagnostics.progress_stream import nbytes_bar
 from .. import profile
 from ..utils import log_errors, parse_timedelta
 
-if dask.config.get('dashboard.export-tool'):
+if dask.config.get('distributed.dashboard.export-tool'):
     from .export_tool import ExportTool
 else:
     ExportTool = None
 
 
-profile_interval = dask.config.get('worker.profile.interval')
+profile_interval = dask.config.get('distributed.worker.profile.interval')
 profile_interval = parse_timedelta(profile_interval, default='ms')
 
 

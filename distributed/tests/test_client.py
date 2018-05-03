@@ -5267,7 +5267,7 @@ def test_diagnostics_link_env_variable(loop):
     from distributed.bokeh.scheduler import BokehScheduler
     with cluster(scheduler_kwargs={'services': {('bokeh', 12355): BokehScheduler}}) as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            with dask.config.set({'dashboard.link': 'http://foo-{USER}:{port}/status'}):
+            with dask.config.set({'distributed.dashboard.link': 'http://foo-{USER}:{port}/status'}):
                 text = c._repr_html_()
                 link = 'http://foo-' + os.environ['USER'] + ':12355/status'
                 assert link in text
@@ -5275,7 +5275,7 @@ def test_diagnostics_link_env_variable(loop):
 
 @gen_test()
 def test_client_timeout_2():
-    with dask.config.set({'comm.timeouts.connect': '10ms'}):
+    with dask.config.set({'distributed.comm.timeouts.connect': '10ms'}):
         start = time()
         c = Client('127.0.0.1:3755', asynchronous=True)
         with pytest.raises((TimeoutError, IOError)):

@@ -14,7 +14,7 @@ config = dask.config.config
 
 
 fn = os.path.join(os.path.dirname(__file__), 'distributed.yaml')
-dask.config.ensure_config_file(source=fn)
+dask.config.ensure_file(source=fn)
 
 with open(fn) as f:
     defaults = yaml.load(f)
@@ -22,39 +22,39 @@ with open(fn) as f:
 dask.config.update(dask.config.config, defaults, priority='old')
 
 aliases = {
-    'allowed-failures': 'scheduler.allowed-failures',
-    'bandwidth': 'scheduler.bandwidth',
-    'default-data-size': 'scheduler.default-data-size',
-    'transition-log-length': 'scheduler.transition-log-length',
-    'work-stealing': 'scheduler.work-stealing',
-    'worker-ttl': 'scheduler.worker-ttl',
+    'allowed-failures': 'distributed.scheduler.allowed-failures',
+    'bandwidth': 'distributed.scheduler.bandwidth',
+    'default-data-size': 'distributed.scheduler.default-data-size',
+    'transition-log-length': 'distributed.scheduler.transition-log-length',
+    'work-stealing': 'distributed.scheduler.work-stealing',
+    'worker-ttl': 'distributed.scheduler.worker-ttl',
 
-    'multiprocessing-method': 'worker.multiprocessing-method',
-    'use-file-locking': 'worker.use-file-locking',
-    'profile-interval': 'worker.profile.interval',
-    'profile-cycle-interval': 'worker.profile.cycle',
-    'worker-memory-target': 'worker.memory.target',
-    'worker-memory-spill': 'worker.memory.spill',
-    'worker-memory-pause': 'worker.memory.pause',
-    'worker-memory-terminate': 'worker.memory.terminate',
+    'multiprocessing-method': 'distributed.worker.multiprocessing-method',
+    'use-file-locking': 'distributed.worker.use-file-locking',
+    'profile-interval': 'distributed.worker.profile.interval',
+    'profile-cycle-interval': 'distributed.worker.profile.cycle',
+    'worker-memory-target': 'distributed.worker.memory.target',
+    'worker-memory-spill': 'distributed.worker.memory.spill',
+    'worker-memory-pause': 'distributed.worker.memory.pause',
+    'worker-memory-terminate': 'distributed.worker.memory.terminate',
 
-    'heartbeat-interval': 'client.heartbeat',
+    'heartbeat-interval': 'distributed.client.heartbeat',
 
-    'compression': 'comm.compression',
-    'connect-timeout': 'comm.timeouts.connect',
-    'tcp-timeout': 'comm.timeouts.tcp',
-    'default-scheme': 'comm.default-scheme',
-    'socket-backlog': 'comm.socket-backlog',
-    'recent-messages-log-length': 'comm.recent-messages-log-length',
+    'compression': 'distributed.comm.compression',
+    'connect-timeout': 'distributed.comm.timeouts.connect',
+    'tcp-timeout': 'distributed.comm.timeouts.tcp',
+    'default-scheme': 'distributed.comm.default-scheme',
+    'socket-backlog': 'distributed.comm.socket-backlog',
+    'recent-messages-log-length': 'distributed.comm.recent-messages-log-length',
 
-    'diagnostics-link': 'dashboard.link',
-    'bokeh-export-tool': 'dashboard.export-tool',
+    'diagnostics-link': 'distributed.dashboard.link',
+    'bokeh-export-tool': 'distributed.dashboard.export-tool',
 
-    'tick-time': 'admin.tick.interval',
-    'tick-maximum-delay': 'admin.tick.limit',
-    'log-length': 'admin.log-length',
-    'log-format': 'admin.log-format',
-    'pdb-on-err': 'admin.pdb-on-err',
+    'tick-time': 'distributed.admin.tick.interval',
+    'tick-maximum-delay': 'distributed.admin.tick.limit',
+    'log-length': 'distributed.admin.log-length',
+    'log-format': 'distributed.admin.log-format',
+    'pdb-on-err': 'distributed.admin.pdb-on-err',
 }
 
 dask.config.rename(aliases)
@@ -90,7 +90,7 @@ def _initialize_logging_old_style(config):
     loggers.update(config.get('logging', {}))
 
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter(dask.config.get('admin.log-format',
+    handler.setFormatter(logging.Formatter(dask.config.get('distributed.admin.log-format',
                                                            config=config)))
     for name, level in loggers.items():
         if isinstance(level, str):
