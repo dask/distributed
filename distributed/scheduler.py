@@ -4141,10 +4141,6 @@ class Scheduler(ServerNode):
             last = time()
             next_time = timedelta(seconds=DELAY)
 
-            # scheduler was somehow moved to another PID
-            if self.proc.pid != os.getpid():
-                self.proc = psutil.Process()
-
             if self.proc.cpu_percent() < 50:
                 workers = list(self.workers.values())
                 for i in range(len(workers)):
