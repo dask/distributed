@@ -64,7 +64,7 @@ class Nanny(ServerNode):
         self.preload_argv = preload_argv
 
         self.contact_address = contact_address
-        self.memory_terminate_fraction = dask.config.get('worker.memory.terminate')
+        self.memory_terminate_fraction = dask.config.get('distributed.worker.memory.terminate')
 
         self.security = security or Security()
         assert isinstance(self.security, Security)

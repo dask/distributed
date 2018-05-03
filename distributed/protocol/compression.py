@@ -98,7 +98,7 @@ with ignoring(ImportError):
                              'decompress': blosc.decompress}
 
 
-default = dask.config.get('comm.compression')
+default = dask.config.get('distributed.comm.compression')
 if default != 'auto':
     if default in compressions:
         default_compression = default

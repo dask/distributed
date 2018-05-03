@@ -7,7 +7,7 @@ import dask
 from . import registry
 
 
-DEFAULT_SCHEME = dask.config.get('comm.default-scheme')
+DEFAULT_SCHEME = dask.config.get('distributed.comm.default-scheme')
 
 
 def parse_address(addr, strict=False):

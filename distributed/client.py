@@ -496,7 +496,7 @@ class Client(Node):
                  security=None, asynchronous=False,
                  name=None, heartbeat_interval=None, **kwargs):
         if timeout == no_default:
-            timeout = dask.config.get('comm.timeouts.connect')
+            timeout = dask.config.get('distributed.comm.timeouts.connect')
         if timeout is not None:
             timeout = parse_timedelta(timeout, 's')
         self._timeout = timeout
@@ -532,7 +532,7 @@ class Client(Node):
         self.loop = self._loop_runner.loop
 
         if heartbeat_interval is None:
-            heartbeat_interval = dask.config.get('client.heartbeat')
+            heartbeat_interval = dask.config.get('distributed.client.heartbeat')
         heartbeat_interval = parse_timedelta(heartbeat_interval, default='ms')
 
         self._periodic_callbacks = dict()
@@ -663,7 +663,7 @@ class Client(Node):
                 host = 'localhost'
             else:
                 host = rest.split(':')[0]
-            template = dask.config.get('dashboard.link')
+            template = dask.config.get('distributed.dashboard.link')
             address = template.format(host=host, port=port, **os.environ)
             text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
 

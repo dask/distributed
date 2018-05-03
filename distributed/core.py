@@ -43,7 +43,7 @@ def get_total_physical_memory():
 
 MAX_BUFFER_SIZE = get_total_physical_memory()
 
-tick_maximum_delay = parse_timedelta(dask.config.get('admin.tick.limit'), default='ms')
+tick_maximum_delay = parse_timedelta(dask.config.get('distributed.admin.tick.limit'), default='ms')
 
 
 class Server(object):
@@ -123,7 +123,7 @@ class Server(object):
         self._last_tick = time()
         pc = PeriodicCallback(
                 self._measure_tick,
-                parse_timedelta(dask.config.get('admin.tick.interval'), default='ms') * 1000,
+                parse_timedelta(dask.config.get('distributed.admin.tick.interval'), default='ms') * 1000,
                 io_loop=self.io_loop
         )
         self.periodic_callbacks['tick'] = pc

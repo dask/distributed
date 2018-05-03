@@ -707,7 +707,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         end
     """
     del _global_workers[:]
-    dask.config.set({'comm.timeouts.connect': '5s'})
+    dask.config.set({'distributed.comm.timeouts.connect': '5s'})
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY, 'death_timeout': 5},
                           worker_kwargs)
 

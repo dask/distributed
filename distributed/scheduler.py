@@ -54,11 +54,11 @@ from .variable import VariableExtension
 logger = logging.getLogger(__name__)
 
 
-BANDWIDTH = dask.config.get('scheduler.bandwidth')
-ALLOWED_FAILURES = dask.config.get('scheduler.allowed-failures')
+BANDWIDTH = dask.config.get('distributed.scheduler.bandwidth')
+ALLOWED_FAILURES = dask.config.get('distributed.scheduler.allowed-failures')
 
-LOG_PDB = dask.config.get('admin.pdb-on-err')
-DEFAULT_DATA_SIZE = dask.config.get('scheduler.default-data-size')
+LOG_PDB = dask.config.get('distributed.admin.pdb-on-err')
+DEFAULT_DATA_SIZE = dask.config.get('distributed.scheduler.default-data-size')
 
 DEFAULT_EXTENSIONS = [
     LockExtension,
@@ -68,7 +68,7 @@ DEFAULT_EXTENSIONS = [
     VariableExtension,
 ]
 
-if dask.config.get('scheduler.work-stealing'):
+if dask.config.get('distributed.scheduler.work-stealing'):
     DEFAULT_EXTENSIONS.append(WorkStealing)
 
 ALL_TASK_STATES = {'released', 'waiting', 'no-worker', 'processing', 'erred', 'memory'}
@@ -754,7 +754,7 @@ class Scheduler(ServerNode):
         self.service_specs = services or {}
         self.services = {}
         self.scheduler_file = scheduler_file
-        worker_ttl = worker_ttl or dask.config.get('scheduler.worker-ttl')
+        worker_ttl = worker_ttl or dask.config.get('distributed.scheduler.worker-ttl')
         self.worker_ttl = parse_timedelta(worker_ttl) if worker_ttl else None
 
         self.security = security or Security()
@@ -866,8 +866,8 @@ class Scheduler(ServerNode):
 
         self.extensions = {}
         self.plugins = []
-        self.transition_log = deque(maxlen=dask.config.get('scheduler.transition-log-length'))
-        self.log = deque(maxlen=dask.config.get('scheduler.transition-log-length'))
+        self.transition_log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
+        self.log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
 
         self.worker_handlers = {'task-finished': self.handle_task_finished,
                                 'task-erred': self.handle_task_erred,
@@ -1163,8 +1163,8 @@ class Scheduler(ServerNode):
             yield future
 
     def _setup_logging(self):
-        self._deque_handler = DequeHandler(n=dask.config.get('admin.log-length'))
-        self._deque_handler.setFormatter(logging.Formatter(dask.config.get('admin.log-format')))
+        self._deque_handler = DequeHandler(n=dask.config.get('distributed.admin.log-length'))
+        self._deque_handler.setFormatter(logging.Formatter(dask.config.get('distributed.admin.log-format')))
         logger.addHandler(self._deque_handler)
         finalize(self, logger.removeHandler, self._deque_handler)
 
@@ -4082,7 +4082,7 @@ class Scheduler(ServerNode):
     @gen.coroutine
     def get_profile_metadata(self, comm=None, workers=None, merge_workers=True,
                              start=None, stop=None, profile_cycle_interval=None):
-        dt = profile_cycle_interval or dask.config.get('worker.profile.cycle')
+        dt = profile_cycle_interval or dask.config.get('distributed.worker.profile.cycle')
         dt = parse_timedelta(dt, default='ms')
 
         if workers is None:
