@@ -8,8 +8,6 @@ Changelog
 -  Only add reevaluate_occupancy callback once (#1953) `Tony Lorenzo`_
 
 
-
-
 1.21.7 - 2018-05-02
 -------------------
 
