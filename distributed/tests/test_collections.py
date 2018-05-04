@@ -5,7 +5,6 @@ import pytest
 pytest.importorskip('numpy')
 pytest.importorskip('pandas')
 
-import dask
 import dask.dataframe as dd
 import dask.bag as db
 from distributed import Client
