@@ -134,7 +134,7 @@ def test_sync(loop):
 
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            assert delayed(mysum)().compute(get=c.get) == 9900
+            assert delayed(mysum)().compute() == 9900
 
 
 @gen_cluster(client=True)

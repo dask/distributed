@@ -588,7 +588,7 @@ def test_get_sync_optimize_graph_passes_through(loop):
     bag = db.range(10, npartitions=3).map(inc)
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            dask.compute(bag.sum(), optimize_graph=False, get=c.get)
+            dask.compute(bag.sum(), optimize_graph=False)
 
 
 @gen_cluster(client=True)
@@ -2504,8 +2504,8 @@ def test_persist(loop):
             assert all(isinstance(v, Future) for v in yy.dask.values())
             assert yy.__dask_keys__() == y.__dask_keys__()
 
-            zz = yy.compute(get=c.get)
-            z = y.compute(get=c.get)
+            zz = yy.compute()
+            z = y.compute()
             assert (zz == z).all()
 
 
@@ -2817,7 +2817,7 @@ def test_persist_get_sync(loop):
             xxyy2 = c.persist(xxyy)
             xxyy3 = delayed(add)(xxyy2, 10)
 
-            assert xxyy3.compute(get=c.get) == ((1 + 1) + (2 + 2)) + 10
+            assert xxyy3.compute() == ((1 + 1) + (2 + 2)) + 10
 
 
 @gen_cluster(client=True)
