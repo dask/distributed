@@ -199,11 +199,11 @@ def test_dont_override_default_get(loop):
     b2 = b.map(f)
 
     with Client(loop=loop, processes=False, set_as_default=True) as c:
-        assert dask.context._globals['get'] == c.get
+        assert dask.base.get_scheduler() == c.get
         for i in range(2):
             b2.compute()
 
-        assert dask.context._globals['get'] == c.get
+        assert dask.base.get_scheduler() == c.get
 
 
 @gen_cluster(client=True)

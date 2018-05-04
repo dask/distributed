@@ -35,7 +35,7 @@ from distributed.config import set_config
 from distributed.comm import CommClosedError
 from distributed.client import (Client, Future, wait, as_completed, tokenize,
                                 _get_global_client, default_client,
-                                ensure_default_get, futures_of,
+                                futures_of,
                                 temp_default_client)
 from distributed.compatibility import PY3
 
@@ -2429,11 +2429,7 @@ def test_map_differnet_lengths(c, s, a, b):
 def test_Future_exception_sync_2(loop, capsys):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            ensure_default_get(c)
-            ensure_default_get(c)
-            ensure_default_get(c)
-            ensure_default_get(c)
-            assert _globals['get'] == c.get
+            assert dask.base.get_scheduler() == c.get
 
     out, err = capsys.readouterr()
     assert len(out.strip().split('\n')) == 1
@@ -3307,35 +3303,40 @@ def test_cancel_clears_processing(c, s, *workers):
 
 def test_default_get():
     with cluster() as (s, [a, b]):
-        pre_get = _globals.get('get')
+        pre_get = dask.base.get_scheduler()
         pre_shuffle = _globals.get('shuffle')
         with Client(s['address'], set_as_default=True) as c:
-            assert _globals['get'] == c.get
+            assert dask.base.get_scheduler() == c.get
             assert _globals['shuffle'] == 'tasks'
 
-        assert _globals['get'] is pre_get
+        assert dask.base.get_scheduler() == pre_get
         assert _globals['shuffle'] == pre_shuffle
 
         c = Client(s['address'], set_as_default=False)
-        assert _globals['get'] is pre_get
+        assert dask.base.get_scheduler() == pre_get
         assert _globals['shuffle'] == pre_shuffle
         c.close()
 
         c = Client(s['address'], set_as_default=True)
         assert _globals['shuffle'] == 'tasks'
-        assert _globals['get'] == c.get
+        assert dask.base.get_scheduler() == c.get
         c.close()
-        assert _globals['get'] is pre_get
+        assert dask.base.get_scheduler() == pre_get
         assert _globals['shuffle'] == pre_shuffle
 
         with Client(s['address']) as c:
-            assert _globals['get'] == c.get
+            assert dask.base.get_scheduler() == c.get
 
         with Client(s['address'], set_as_default=False) as c:
-            assert _globals['get'] != c.get
-            dask.set_options(get=c.get)
-            assert _globals['get'] == c.get
-        assert _globals['get'] != c.get
+            assert dask.base.get_scheduler() != c.get
+        assert dask.base.get_scheduler() != c.get
+
+        with Client(s['address'], set_as_default=True) as c1:
+            assert dask.base.get_scheduler() == c1.get
+            with Client(s['address'], set_as_default=True) as c2:
+                assert dask.base.get_scheduler() == c2.get
+            assert dask.base.get_scheduler() == c1.get
+        assert dask.base.get_scheduler() == pre_get
 
 
 @gen_cluster(client=True)
