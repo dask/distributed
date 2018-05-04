@@ -2434,7 +2434,7 @@ def test_Future_exception_sync_2(loop, capsys):
     out, err = capsys.readouterr()
     assert len(out.strip().split('\n')) == 1
 
-    assert _globals.get('get') != c.get
+    assert dask.base.get_scheduler() != c.get
 
 
 @gen_cluster(timeout=60, client=True)

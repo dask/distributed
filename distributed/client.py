@@ -562,6 +562,7 @@ class Client(Node):
         if set_as_default:
             self._previous_scheduler = _globals.get('scheduler')
             dask.set_options(scheduler='dask.distributed')
+
             self._previous_shuffle = _globals.get('shuffle')
             dask.set_options(shuffle='tasks')
 
@@ -998,6 +999,8 @@ class Client(Node):
                 dask.set_options(scheduler=self._previous_scheduler)
             with ignoring(AttributeError):
                 dask.set_options(shuffle=self._previous_shuffle)
+            if self.get == _globals.get('get'):
+                del _globals['get']
             if self.status == 'closed':
                 raise gen.Return()
             if self.scheduler_comm and self.scheduler_comm.comm and not self.scheduler_comm.comm.closed():
@@ -1071,6 +1074,8 @@ class Client(Node):
             dask.set_options(scheduler=self._previous_scheduler)
         with ignoring(AttributeError):
             dask.set_options(shuffle=self._previous_shuffle)
+        if self.get == _globals.get('get'):
+            del _globals['get']
 
     def shutdown(self, *args, **kwargs):
         """ Deprecated, see close instead
