@@ -494,7 +494,8 @@ class Client(Node):
     def __init__(self, address=None, loop=None, timeout=no_default,
                  set_as_default=True, scheduler_file=None,
                  security=None, asynchronous=False,
-                 name=None, heartbeat_interval=None, **kwargs):
+                 name=None, heartbeat_interval=None,
+                 serializers=None, deserializers=None, **kwargs):
         if timeout == no_default:
             timeout = dask.config.get('distributed.comm.timeouts.connect')
         if timeout is not None:
@@ -519,6 +520,10 @@ class Client(Node):
         self._lock = threading.Lock()
         self._refcount_lock = threading.Lock()
         self.datasets = Datasets(self)
+        self._serializers = serializers
+        if deserializers is None:
+            deserializers = serializers
+        self._deserializers = deserializers
 
         # Communication
         self.security = security or Security()
@@ -581,7 +586,9 @@ class Client(Node):
         }
 
         super(Client, self).__init__(connection_args=self.connection_args,
-                                     io_loop=self.loop)
+                                     io_loop=self.loop,
+                                     serializers=serializers,
+                                     deserializers=deserializers)
 
         self.start(timeout=timeout)
 
@@ -780,7 +787,9 @@ class Client(Node):
 
         if self.scheduler is None:
             self.scheduler = rpc(address, timeout=timeout,
-                                 connection_args=self.connection_args)
+                                 connection_args=self.connection_args,
+                                 serializers=self._serializers,
+                                 deserializers=self._deserializers)
         self.scheduler_comm = None
 
         yield self._ensure_connected(timeout=timeout)
