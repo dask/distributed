@@ -3354,6 +3354,12 @@ def test_get_processing(c, s, a, b):
     x = yield c.scheduler.processing(workers=[a.address])
     assert isinstance(x[a.address], list)
 
+    x = yield c.processing()
+    assert set(x) == {a.address, b.address}
+
+    x = yield c.processing(workers=[a.address])
+    assert isinstance(x[a.address], list)
+
 
 @gen_cluster(client=True)
 def test_get_foo(c, s, a, b):

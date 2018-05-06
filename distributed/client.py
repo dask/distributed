@@ -2749,8 +2749,7 @@ class Client(Node):
             workers = list(workers)
         if workers is not None and not isinstance(workers, (list, set)):
             workers = [workers]
-        return valmap(set, sync(self.loop, self.scheduler.processing,
-                                workers=workers))
+        return self.sync(self.scheduler.processing, workers=workers)
 
     def nbytes(self, keys=None, summary=True, **kwargs):
         """ The bytes taken up by each key on the cluster
