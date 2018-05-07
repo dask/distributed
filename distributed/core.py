@@ -47,6 +47,8 @@ MAX_BUFFER_SIZE = get_total_physical_memory()
 
 tick_maximum_delay = parse_timedelta(dask.config.get('distributed.admin.tick.limit'), default='ms')
 
+LOG_PDB = dask.config.get('distributed.admin.pdb-on-err')
+
 
 class Server(object):
     """ Distributed TCP Server
@@ -320,7 +322,7 @@ class Server(object):
                 if reply and result != 'dont-reply':
                     try:
                         yield comm.write(result, serializers=serializers)
-                    except EnvironmentError as e:
+                    except (EnvironmentError, TypeError) as e:
                         logger.debug("Lost connection to %r while sending result for op %r: %s",
                                      address, op, e)
                         break
@@ -340,9 +342,9 @@ class Server(object):
                                  address, e)
 
     @gen.coroutine
-    def handle_stream(self, comm, extra=None):
+    def handle_stream(self, comm, extra=None, every_cycle=[]):
         extra = extra or {}
-        yield comm.write({'op': 'established-connection', 'reply': False})
+        # yield comm.write({'op': 'established-connection', 'reply': False})
         logger.info("Starting established connection")
 
         io_error = None
@@ -365,10 +367,13 @@ class Server(object):
                         op = msg.pop('op')
                         if op:
                             handler = self.stream_handlers[op]
-                            handler(worker=worker, **msg)
+                            handler(**extra, **msg)
                         else:
                             import pdb; pdb.set_trace()
                             logger.error("odd message %s", msg)
+                for func in every_cycle:
+                    func()
+
         except (CommClosedError, EnvironmentError) as e:
             io_error = e
         except Exception as e:

@@ -869,14 +869,14 @@ class Scheduler(ServerNode):
         self.transition_log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
         self.log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
 
-        self.worker_handlers = {'task-finished': self.handle_task_finished,
-                                'task-erred': self.handle_task_erred,
-                                'release': self.handle_release_data,
-                                'release-worker-data': self.release_worker_data,
-                                'add-keys': self.add_keys,
-                                'missing-data': self.handle_missing_data,
-                                'long-running': self.handle_long_running,
-                                'reschedule': self.reschedule}
+        worker_handlers = {'task-finished': self.handle_task_finished,
+                           'task-erred': self.handle_task_erred,
+                           'release': self.handle_release_data,
+                           'release-worker-data': self.release_worker_data,
+                           'add-keys': self.add_keys,
+                           'missing-data': self.handle_missing_data,
+                           'long-running': self.handle_long_running,
+                           'reschedule': self.reschedule}
 
         self.client_handlers = {'update-graph': self.update_graph,
                                 'client-desires-keys': self.client_desires_keys,
@@ -888,7 +888,7 @@ class Scheduler(ServerNode):
 
         self.handlers = {'register-client': self.add_client,
                          'scatter': self.scatter,
-                         'register': self.add_worker,
+                         'register-worker': self.add_worker,
                          'unregister': self.remove_worker,
                          'gather': self.gather,
                          'cancel': self.stimulus_cancel,
@@ -937,7 +937,9 @@ class Scheduler(ServerNode):
         connection_limit = get_fileno_limit() / 2
 
         super(Scheduler, self).__init__(
-            handlers=self.handlers, io_loop=self.loop,
+            handlers=self.handlers,
+            stream_handlers=worker_handlers,
+            io_loop=self.loop,
             connection_limit=connection_limit, deserialize=False,
             connection_args=self.connection_args,
             **kwargs)
@@ -1172,11 +1174,12 @@ class Scheduler(ServerNode):
     # Stimuli #
     ###########
 
+    @gen.coroutine
     def add_worker(self, comm=None, address=None, keys=(), ncores=None,
                    name=None, resolve_address=True, nbytes=None, now=None,
                    resources=None, host_info=None, memory_limit=None, **info):
         """ Add a new worker to the cluster """
-        with log_errors():
+        with log_errors(pdb=True):
             local_now = time()
             now = now or time()
             info = info or {}
@@ -1239,7 +1242,6 @@ class Scheduler(ServerNode):
             #     self.mark_key_in_memory(key, [address])
 
             self.worker_comms[address] = BatchedSend(interval='5ms', loop=self.loop)
-            self._worker_coroutines.append(self.handle_worker(address))
 
             if ws.ncores > len(ws.processing):
                 self.idle.add(ws)
@@ -1272,9 +1274,10 @@ class Scheduler(ServerNode):
             self.log_event('all', {'action': 'add-worker',
                                    'worker': address})
             logger.info("Register %s", str(address))
-            return {'status': 'OK',
-                    'time': time(),
-                    'heartbeat-interval': heartbeat_interval(len(self.workers))}
+            yield comm.write({'status': 'OK',
+                              'time': time(),
+                              'heartbeat-interval': heartbeat_interval(len(self.workers))})
+            yield self.handle_worker(comm=comm, worker=address)
 
     def update_graph(self, client=None, tasks=None, keys=None,
                      dependencies=None, restrictions=None, priority=None,
@@ -2147,10 +2150,10 @@ class Scheduler(ServerNode):
             yield self.handle_stream(comm=comm, extra={'worker': worker})
         finally:
             if worker in self.worker_comms:
-                # Worker didn't send us a close message
-                if io_error:
-                    logger.info("Worker %r failed from closed comm: %s",
-                                worker, io_error)
+                # # Worker didn't send us a close message
+                # if io_error:
+                #     logger.info("Worker %r failed from closed comm: %s",
+                #                 worker, io_error)
                 worker_comm.abort()
                 self.remove_worker(address=worker)
 

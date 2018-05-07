@@ -27,7 +27,7 @@ from tornado.locks import Event
 
 from . import profile
 from .batched import BatchedSend
-from .comm import get_address_host, get_local_address_for
+from .comm import get_address_host, get_local_address_for, connect
 from .comm.utils import offload
 from .compatibility import unicode, get_thread_identity, finalize
 from .core import (error_message, CommClosedError,
@@ -174,7 +174,6 @@ class WorkerBase(ServerNode):
 
         handlers = {
             'gather': self.gather,
-            'compute-stream': self.compute_stream,
             'run': self.run,
             'run_coroutine': self.run_coroutine,
             'get_data': self.get_data,
@@ -235,6 +234,7 @@ class WorkerBase(ServerNode):
 
     @gen.coroutine
     def heartbeat(self):
+        return
         if not self.heartbeat_active:
             self.heartbeat_active = True
             logger.debug("Heartbeat: %s" % self.address)
@@ -263,6 +263,8 @@ class WorkerBase(ServerNode):
 
     @gen.coroutine
     def _register_with_scheduler(self):
+        if self.batched_stream:  # TODO: remove, make nicer heartbeat mechanism
+            return
         self.periodic_callbacks['heartbeat'].stop()
         start = time()
         if self.contact_address is None:
@@ -276,19 +278,24 @@ class WorkerBase(ServerNode):
                 raise gen.Return
             try:
                 _start = time()
-                future = self.scheduler.register(
-                        ncores=self.ncores,
-                        address=self.contact_address,
-                        keys=list(self.data),
-                        name=self.name,
-                        nbytes=self.nbytes,
-                        now=time(),
-                        services=self.service_ports,
-                        memory_limit=self.memory_limit,
-                        local_directory=self.local_dir,
-                        resources=self.total_resources,
-                        pid=os.getpid(),
-                        **self.monitor.recent())
+                comm = yield connect(self.scheduler.address,
+                                     connection_args=self.connection_args)
+                yield comm.write(dict(op='register-worker',
+                                         ncores=self.ncores,
+                                         address=self.contact_address,
+                                         keys=list(self.data),
+                                         name=self.name,
+                                         nbytes=self.nbytes,
+                                         now=time(),
+                                         services=self.service_ports,
+                                         memory_limit=self.memory_limit,
+                                         local_directory=self.local_dir,
+                                         resources=self.total_resources,
+                                         pid=os.getpid(),
+                                         reply=False,
+                                         **self.monitor.recent()),
+                                         serializers=['msgpack'])
+                future = comm.read(deserializers=['msgpack'])
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
                     if diff < 0:
@@ -311,7 +318,12 @@ class WorkerBase(ServerNode):
         else:
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
+
+        self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
+        self.batched_stream.start(comm)
         self.periodic_callbacks['heartbeat'].start()
+        self.handle_stream(comm, every_cycle=[self.ensure_communicating,
+                                              self.ensure_computing])
 
     def start_services(self, listen_ip=''):
         for k, v in self.service_specs.items():
@@ -1177,73 +1189,6 @@ class Worker(WorkerBase):
     ################
     # Update Graph #
     ################
-
-    @gen.coroutine
-    def compute_stream(self, comm):
-        try:
-            self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
-            self.batched_stream.start(comm)
-
-            closed = False
-
-            while not closed:
-                try:
-                    msgs = yield comm.read()
-                except CommClosedError as e:
-                    if self.reconnect and self.status not in ('closed', 'closing'):
-                        logger.info("Connection to scheduler broken. Reregistering")
-                        yield self._register_with_scheduler()
-                        return
-                    else:
-                        logger.info("Connection to scheduler broken. Closing")
-                        yield self._close(report=False)
-                    break
-                except EnvironmentError as e:
-                    break
-                except Exception as e:
-                    logger.error("Worker failed to read message. "
-                                 "This will likely cause the cluster to fail.",
-                                 exc_info=True)
-                    raise
-
-                start = time()
-
-
-                for msg in msgs:
-                    self.recent_messages_log.append(msg)
-                    op = msg.pop('op', None)
-                    if 'key' in msg:
-                        validate_key(msg['key'])
-                    if op == 'close':
-                        closed = True
-                        self._close()
-                        break
-                    elif op == 'compute-task':
-                        self.add_task(**msg)
-                    elif op == 'release-task':
-                        self.log.append((msg['key'], 'release-task', msg.get('reason')))
-                        self.release_key(report=False, **msg)
-                    elif op == 'delete-data':
-                        self.delete_data(**msg)
-                    elif op == 'steal-request':
-                        self.steal_request(**msg)
-                    else:
-                        logger.warning("Unknown operation %s, %s", op, msg)
-
-                self.ensure_communicating()
-                self.ensure_computing()
-
-                end = time()
-                if self.digests is not None:
-                    self.digests['handle-messages-duration'].add(end - start)
-
-            logger.info('Close compute stream')
-        except Exception as e:
-            logger.exception(e)
-            yield self._close()
-            raise
-        finally:
-            yield self.batched_stream.close()
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
                  who_has=None, nbytes=None, priority=None, duration=None,
