@@ -87,9 +87,16 @@ class Server(object):
     default_ip = ''
     default_port = 0
 
-    def __init__(self, handlers, connection_limit=512, deserialize=True,
-                 io_loop=None):
-        self.handlers = assoc(handlers, 'identity', self.identity)
+    def __init__(self, handlers, stream_handlers=None, connection_limit=512,
+                 deserialize=True, io_loop=None):
+        self.handlers = {
+            'identity': self.identity,
+            'connection_stream': self.handle_stream,
+        }
+        self.handlers.update(handlers)
+        self.stream_handlers = {}
+        self.stream_handlers.update(stream_handlers or {})
+
         self.id = type(self).__name__ + '-' + str(uuid.uuid4())
         self._address = None
         self._listen_address = None
@@ -331,6 +338,47 @@ class Server(object):
                 except Exception as e:
                     logger.error("Failed while closing connection to %r: %s",
                                  address, e)
+
+    @gen.coroutine
+    def handle_stream(self, comm, extra=None):
+        extra = extra or {}
+        yield comm.write({'op': 'established-connection', 'reply': False})
+        logger.info("Starting established connection")
+
+        io_error = None
+        try:
+            while True:
+                msgs = yield comm.read()
+                if not isinstance(msgs, list):
+                    msgs = [msgs]
+
+                if not comm.closed():
+                    for msg in msgs:
+                        if msg == 'OK':  # from close
+                            break
+                        # if 'status' in msg and 'error' in msg['status'] and msg.get('op') != 'task-erred':
+                        #     try:
+                        #         logger.error("error from worker %s: %s",
+                        #                  worker, clean_exception(**msg)[1])
+                        #     except Exception:
+                        #         logger.error("error from worker %s", worker)
+                        op = msg.pop('op')
+                        if op:
+                            handler = self.stream_handlers[op]
+                            handler(worker=worker, **msg)
+                        else:
+                            import pdb; pdb.set_trace()
+                            logger.error("odd message %s", msg)
+        except (CommClosedError, EnvironmentError) as e:
+            io_error = e
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+                pdb.set_trace()
+            raise
+        finally:
+            assert comm.closed()
 
     @gen.coroutine
     def close(self):

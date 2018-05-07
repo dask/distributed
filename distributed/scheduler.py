@@ -2130,7 +2130,7 @@ class Scheduler(ServerNode):
         self.check_idle_saturated(ws)
 
     @gen.coroutine
-    def handle_worker(self, worker):
+    def handle_worker(self, comm=None, worker=None):
         """
         Listen to responses from a single worker
 
@@ -2140,55 +2140,11 @@ class Scheduler(ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
-        try:
-            comm = yield connect(worker, connection_args=self.connection_args)
-        except Exception as e:
-            logger.error("Failed to connect to worker %r: %s",
-                         worker, e)
-            self.remove_worker(address=worker)
-            return
-        yield comm.write({'op': 'compute-stream', 'reply': False})
         worker_comm = self.worker_comms[worker]
         worker_comm.start(comm)
         logger.info("Starting worker compute stream, %s", worker)
-
-        io_error = None
         try:
-            while True:
-                msgs = yield comm.read()
-                start = time()
-
-                if not isinstance(msgs, list):
-                    msgs = [msgs]
-
-                if worker in self.workers and not comm.closed():
-                    self.counters['worker-message-length'].add(len(msgs))
-                    for msg in msgs:
-                        if msg == 'OK':  # from close
-                            break
-                        if 'status' in msg and 'error' in msg['status'] and msg.get('op') != 'task-erred':
-                            try:
-                                logger.error("error from worker %s: %s",
-                                         worker, clean_exception(**msg)[1])
-                            except Exception:
-                                logger.error("error from worker %s", worker)
-                        op = msg.pop('op')
-                        if op:
-                            handler = self.worker_handlers[op]
-                            handler(worker=worker, **msg)
-
-                end = time()
-                if self.digests is not None:
-                    self.digests['handle-worker-duration'].add(end - start)
-
-        except (CommClosedError, EnvironmentError) as e:
-            io_error = e
-        except Exception as e:
-            logger.exception(e)
-            if LOG_PDB:
-                import pdb
-                pdb.set_trace()
-            raise
+            yield self.handle_stream(comm=comm, extra={'worker': worker})
         finally:
             if worker in self.worker_comms:
                 # Worker didn't send us a close message
@@ -2197,9 +2153,6 @@ class Scheduler(ServerNode):
                                 worker, io_error)
                 worker_comm.abort()
                 self.remove_worker(address=worker)
-            else:
-                assert comm.closed()
-                worker_comm.abort()
 
     def add_plugin(self, plugin):
         """

@@ -192,9 +192,20 @@ class WorkerBase(ServerNode):
             'versions': self.versions,
         }
 
-        super(WorkerBase, self).__init__(handlers, io_loop=self.loop,
-                                         connection_args=self.connection_args,
-                                         **kwargs)
+        stream_handlers = {
+            'close': self._close,
+            'compute-task': self.add_task,
+            'release-task': partial(self.release_key, report=False),
+            'delete-data': self.delete_data,
+            'steal-request': self.steal_request,
+        }
+
+        super(WorkerBase, self).__init__(
+                handlers=handlers,
+                stream_handlers=stream_handlers,
+                io_loop=self.loop,
+                connection_args=self.connection_args,
+                **kwargs)
 
         pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
         self.periodic_callbacks['heartbeat'] = pc
@@ -1196,6 +1207,7 @@ class Worker(WorkerBase):
                     raise
 
                 start = time()
+
 
                 for msg in msgs:
                     self.recent_messages_log.append(msg)
