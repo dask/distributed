@@ -186,7 +186,7 @@ def test_remove_worker_from_scheduler(s, a, b):
     s.update_graph(tasks=valmap(dumps_task, dsk), keys=list(dsk),
                    dependencies={k: set() for k in dsk})
 
-    assert a.address in s.worker_comms
+    assert a.address in s.stream_comms
     s.remove_worker(address=a.address)
     assert a.address not in s.ncores
     assert len(s.workers[b.address].processing) == len(dsk)  # b owns everything
