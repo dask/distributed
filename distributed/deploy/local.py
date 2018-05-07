@@ -159,11 +159,11 @@ class LocalCluster(Cluster):
         """
         if self.status == 'running':
             return
-        if ip is None and not self.scheduler_port and not self.processes:
+        if (ip is None) and (not self.scheduler_port) and (not self.processes):
             # Use inproc transport for optimization
             scheduler_address = 'inproc://'
-        if ip is not None and  ip.startswith('tls://'):
-            scheduler_address = ip
+        elif ip is not None and ip.startswith('tls://'):
+            scheduler_address = ('%s:%d' % (ip, self.scheduler_port))
         else:
             if ip is None:
                 ip = '127.0.0.1'
