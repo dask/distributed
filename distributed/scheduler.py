@@ -878,13 +878,13 @@ class Scheduler(ServerNode):
                            'long-running': self.handle_long_running,
                            'reschedule': self.reschedule}
 
-        self.client_handlers = {'update-graph': self.update_graph,
-                                'client-desires-keys': self.client_desires_keys,
-                                'update-data': self.update_data,
-                                'report-key': self.report_on_key,
-                                'client-releases-keys': self.client_releases_keys,
-                                'heartbeat': self.client_heartbeat,
-                                'restart': self.restart}
+        client_handlers = {'update-graph': self.update_graph,
+                           'client-desires-keys': self.client_desires_keys,
+                           'update-data': self.update_data,
+                           'report-key': self.report_on_key,
+                           'client-releases-keys': self.client_releases_keys,
+                           'heartbeat-client': self.client_heartbeat,
+                           'restart': self.restart}
 
         self.handlers = {'register-client': self.add_client,
                          'scatter': self.scatter,
@@ -938,7 +938,7 @@ class Scheduler(ServerNode):
 
         super(Scheduler, self).__init__(
             handlers=self.handlers,
-            stream_handlers=worker_handlers,
+            stream_handlers=merge(worker_handlers, client_handlers),
             io_loop=self.loop,
             connection_limit=connection_limit, deserialize=False,
             connection_args=self.connection_args,
@@ -1179,7 +1179,7 @@ class Scheduler(ServerNode):
                    name=None, resolve_address=True, nbytes=None, now=None,
                    resources=None, host_info=None, memory_limit=None, **info):
         """ Add a new worker to the cluster """
-        with log_errors(pdb=True):
+        with log_errors():
             local_now = time()
             now = now or time()
             info = info or {}
@@ -1897,7 +1897,16 @@ class Scheduler(ServerNode):
                                          'client': client})
         self.clients[client] = ClientState(client)
         try:
-            yield self.handle_client(comm, client=client)
+            bcomm = BatchedSend(interval='2ms', loop=self.loop)
+            bcomm.start(comm)
+            self.client_comms[client] = bcomm
+            bcomm.send({'op': 'stream-start'})
+
+            try:
+                yield self.handle_stream(comm=comm, extra={'client': client})
+            finally:
+                self.remove_client(client=client)
+                logger.debug('Finished handling client %s', client)
         finally:
             if not comm.closed():
                 self.client_comms[client].send({'op': 'stream-closed'})
@@ -1925,87 +1934,6 @@ class Scheduler(ServerNode):
             self.client_releases_keys(keys=[ts.key for ts in cs.wants_what],
                                       client=cs.client_key)
             del self.clients[client]
-
-    @gen.coroutine
-    def handle_client(self, comm, client=None):
-        """
-        Listen and respond to messages from clients
-
-        This runs once per Client Comm or Queue.
-
-        See Also
-        --------
-        Scheduler.worker_stream: The equivalent function for workers
-        """
-        bcomm = BatchedSend(interval='2ms', loop=self.loop)
-        bcomm.start(comm)
-        self.client_comms[client] = bcomm
-
-        try:
-            bcomm.send({'op': 'stream-start'})
-
-            breakout = False
-
-            while True:
-                try:
-                    msgs = yield comm.read()
-                except (CommClosedError, AssertionError, GeneratorExit):
-                    if self.status == 'running':
-                        logger.info("Connection to client %s broken", str(client))
-                    break
-                except Exception as e:
-                    logger.exception(e)
-                    bcomm.send(error_message(e, status='scheduler-error'))
-                    continue
-
-                if self.status == 'closed':
-                    return
-
-                if not isinstance(msgs, list):
-                    msgs = [msgs]
-
-                for msg in msgs:
-                    # logger.debug("scheduler receives message %s", msg)
-                    try:
-                        op = msg.pop('op')
-                    except Exception as e:
-                        logger.exception(e)
-                        bcomm.end(error_message(e, status='scheduler-error'))
-
-                    if op == 'close-stream':
-                        breakout = True
-                        break
-                    elif op == 'close':
-                        breakout = True
-                        self.close()
-                        break
-                    elif op in self.client_handlers:
-                        try:
-                            handler = self.client_handlers[op]
-                            if 'client' not in msg:
-                                msg['client'] = client
-                            result = handler(**msg)
-                            if isinstance(result, gen.Future):
-                                yield result
-                        except Exception as e:
-                            logger.exception(e)
-                            raise
-                    else:
-                        logger.warning("Bad message: op=%s, %s", op, msg, exc_info=True)
-
-                    if op == 'close':
-                        breakout = True
-                        break
-                if breakout:
-                    break
-
-            self.remove_client(client=client)
-            logger.debug('Finished handle_client coroutine')
-        except Exception:
-            try:
-                logger.error("Exception in handle_client", exc_info=True)
-            except TypeError:
-                pass
 
     def send_task_to_worker(self, worker, key):
         """ Send a single computational task to a worker """

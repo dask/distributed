@@ -12,7 +12,7 @@ import weakref
 
 import dask
 from six import string_types
-from toolz import assoc
+from toolz import assoc, merge
 from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
@@ -364,10 +364,16 @@ class Server(object):
                         #                  worker, clean_exception(**msg)[1])
                         #     except Exception:
                         #         logger.error("error from worker %s", worker)
-                        op = msg.pop('op')
+                        try:
+                            op = msg.pop('op')
+                        except KeyError:
+                            if op == 'close-stream':
+                                return
+                            else:
+                                raise
                         if op:
                             handler = self.stream_handlers[op]
-                            handler(**extra, **msg)
+                            handler(**merge(extra, msg))
                         else:
                             import pdb; pdb.set_trace()
                             logger.error("odd message %s", msg)
