@@ -867,7 +867,7 @@ class Client(Node):
 
     def _heartbeat(self):
         if self.scheduler_comm:
-            self.scheduler_comm.send({'op': 'heartbeat'})
+            self.scheduler_comm.send({'op': 'heartbeat-client'})
 
     def __enter__(self):
         if not self._loop_runner.is_started():
@@ -1015,6 +1015,7 @@ class Client(Node):
             if self.status == 'closed':
                 raise gen.Return()
             if self.scheduler_comm and self.scheduler_comm.comm and not self.scheduler_comm.comm.closed():
+                self._send_to_scheduler({'op': 'close-client'})
                 self._send_to_scheduler({'op': 'close-stream'})
                 yield self.scheduler_comm.close()
             for key in list(self.futures):

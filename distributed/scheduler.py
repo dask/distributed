@@ -884,6 +884,7 @@ class Scheduler(ServerNode):
                            'report-key': self.report_on_key,
                            'client-releases-keys': self.client_releases_keys,
                            'heartbeat-client': self.client_heartbeat,
+                           'close-client': self.remove_client,
                            'restart': self.restart}
 
         self.handlers = {'register-client': self.add_client,

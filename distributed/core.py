@@ -299,6 +299,7 @@ class Server(object):
                 try:
                     handler = self.handlers[op]
                 except KeyError:
+                    import pdb; pdb.set_trace()
                     logger.warning("No handler %s found in %s", op,
                                    type(self).__name__, exc_info=True)
                 else:
@@ -364,14 +365,10 @@ class Server(object):
                         #                  worker, clean_exception(**msg)[1])
                         #     except Exception:
                         #         logger.error("error from worker %s", worker)
-                        try:
-                            op = msg.pop('op')
-                        except KeyError:
+                        op = msg.pop('op')
+                        if op:
                             if op == 'close-stream':
                                 return
-                            else:
-                                raise
-                        if op:
                             handler = self.stream_handlers[op]
                             handler(**merge(extra, msg))
                         else:
@@ -389,6 +386,7 @@ class Server(object):
                 pdb.set_trace()
             raise
         finally:
+            comm.close()  # TODO: why do we need this now?
             assert comm.closed()
 
     @gen.coroutine
