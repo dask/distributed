@@ -15,14 +15,14 @@ from tornado import gen
 import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
-from distributed.core import connect, rpc, CommClosedError
+from distributed.core import connect, rpc
 from distributed.scheduler import Scheduler, BANDWIDTH
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils import tmpfile
-from distributed.utils_test import (inc, dec, gen_cluster, gen_test, readone,
+from distributed.utils_test import (inc, dec, gen_cluster, gen_test,
                                     slowinc, slowadd, slowdec, cluster, div,
                                     varying, slow)
 from distributed.utils_test import loop, nodebug  # noqa: F401

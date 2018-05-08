@@ -31,7 +31,7 @@ from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
 from .compatibility import finalize, unicode
 from .core import (rpc, connect, send_recv,
-                   error_message, clean_exception, CommClosedError)
+                   clean_exception, CommClosedError)
 from . import profile
 from .metrics import time
 from .node import ServerNode

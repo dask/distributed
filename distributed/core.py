@@ -12,7 +12,7 @@ import weakref
 
 import dask
 from six import string_types
-from toolz import assoc, merge
+from toolz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
