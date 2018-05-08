@@ -1233,9 +1233,11 @@ class Scheduler(ServerNode):
             self.workers[address] = ws
 
             if name in self.aliases:
-                return {'status': 'error',
-                        'message': 'name taken, %s' % name,
-                        'time': time()}
+                msg = {'status': 'error',
+                       'message': 'name taken, %s' % name,
+                       'time': time()}
+                yield comm.write(msg)
+                return
 
             if 'addresses' not in self.host_info[host]:
                 self.host_info[host].update({'addresses': set(), 'cores': 0})
@@ -1991,9 +1993,11 @@ class Scheduler(ServerNode):
     def handle_uncaught_error(self, **msg):
         logger.exception(clean_exception(**msg)[1])
 
-    def handle_task_finished(self, key=None, **msg):
+    def handle_task_finished(self, key=None, worker=None, **msg):
+        if worker not in self.workers:
+            return
         validate_key(key)
-        r = self.stimulus_task_finished(key=key, **msg)
+        r = self.stimulus_task_finished(key=key, worker=worker, **msg)
         self.transitions(r)
 
     def handle_task_erred(self, key=None, **msg):

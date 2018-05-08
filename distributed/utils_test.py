@@ -478,7 +478,7 @@ def check_active_rpc(loop, active_rpc_timeout=1):
 
     def fail():
         pytest.fail("some RPCs left active by test: %s"
-                    % (sorted(set(rpc.active) - active_before)))
+                    % (set(rpc.active) - active_before))
 
     @gen.coroutine
     def wait():

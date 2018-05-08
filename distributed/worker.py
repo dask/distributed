@@ -442,6 +442,11 @@ class WorkerBase(ServerNode):
             with self.rpc((self.ip, self.service_ports['nanny'])) as r:
                 yield r.terminate()
 
+        if self.batched_stream and not self.batched_stream.comm.closed():
+            self.batched_stream.send({'op': 'close-stream'})
+
+        self.batched_stream.close()
+
         self.rpc.close()
         self._closed.set()
         self._remove_from_global_workers()

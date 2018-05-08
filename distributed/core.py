@@ -368,7 +368,7 @@ class Server(object):
                         op = msg.pop('op')
                         if op:
                             if op == 'close-stream':
-                                return
+                                break
                             handler = self.stream_handlers[op]
                             handler(**merge(extra, msg))
                         else:

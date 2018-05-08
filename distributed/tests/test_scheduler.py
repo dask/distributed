@@ -619,17 +619,20 @@ def test_retire_workers(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_retire_workers_n(c, s, a, b):
-    yield s.retire_workers(n=1)
+    yield s.retire_workers(n=1, close_workers=True)
     assert len(s.workers) == 1
 
-    yield s.retire_workers(n=0)
+    yield s.retire_workers(n=0, close_workers=True)
     assert len(s.workers) == 1
 
-    yield s.retire_workers(n=1)
+    yield s.retire_workers(n=1, close_workers=True)
     assert len(s.workers) == 0
 
-    yield s.retire_workers(n=0)
+    yield s.retire_workers(n=0, close_workers=True)
     assert len(s.workers) == 0
+
+    assert a.status.startswith('clos')
+    assert b.status.startswith('clos')
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
