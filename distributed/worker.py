@@ -320,8 +320,18 @@ class WorkerBase(ServerNode):
         self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
         self.batched_stream.start(comm)
         self.periodic_callbacks['heartbeat'].start()
-        self.handle_stream(comm, every_cycle=[self.ensure_communicating,
-                                              self.ensure_computing])
+        self.loop.add_callback(self.handle_scheduler, comm)
+
+    @gen.coroutine
+    def handle_scheduler(self, comm):
+        try:
+            yield self.handle_stream(comm, every_cycle=[self.ensure_communicating,
+                                                        self.ensure_computing])
+        except Exception as e:
+            logger.exception(e)
+            raise
+        finally:
+            yield self._close(report=False)
 
     def start_services(self, listen_ip=''):
         for k, v in self.service_specs.items():

@@ -349,8 +349,9 @@ class Server(object):
         logger.info("Starting established connection")
 
         io_error = None
+        closed = False
         try:
-            while True:
+            while not closed:
                 msgs = yield comm.read()
                 if not isinstance(msgs, list):
                     msgs = [msgs]
@@ -368,6 +369,7 @@ class Server(object):
                         op = msg.pop('op')
                         if op:
                             if op == 'close-stream':
+                                closed = True
                                 break
                             handler = self.stream_handlers[op]
                             handler(**merge(extra, msg))

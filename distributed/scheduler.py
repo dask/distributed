@@ -1086,12 +1086,6 @@ class Scheduler(ServerNode):
         while any(not c.done() for c in self.coroutines):
             yield All(self.coroutines)
 
-    def close_comms(self):
-        """ Close all active Comms."""
-        for comm in self.client_comms.values():
-            comm.abort()
-        self.rpc.close()
-
     @gen.coroutine
     def close(self, comm=None, fast=False):
         """ Send cleanup signal to all coroutines then wait until finished
@@ -1117,7 +1111,12 @@ class Scheduler(ServerNode):
         yield self.cleanup()
         if not fast:
             yield self.finished()
-        self.close_comms()
+
+        for comm in self.client_comms.values():
+            comm.abort()
+
+        self.rpc.close()
+
         self.status = 'closed'
         self.stop()
         yield super(Scheduler, self).close()
@@ -1160,6 +1159,8 @@ class Scheduler(ServerNode):
 
         futures = []
         for w, comm in list(self.worker_comms.items()):
+            if not comm.comm.closed():
+                comm.send({'op': 'close-stream'})
             with ignoring(AttributeError):
                 futures.append(comm.close())
 
@@ -1249,6 +1250,11 @@ class Scheduler(ServerNode):
             self.aliases[name] = address
             ws.name = name
 
+            response = self.heartbeat_worker(address=address,
+                                             resolve_address=resolve_address,
+                                             now=now, resources=resources,
+                                             host_info=host_info, **info)
+
             # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot exist before this.
             self.check_idle_saturated(ws)
 
@@ -1288,11 +1294,6 @@ class Scheduler(ServerNode):
             self.log_event('all', {'action': 'add-worker',
                                    'worker': address})
             logger.info("Register %s", str(address))
-
-            response = self.heartbeat_worker(address=address,
-                                             resolve_address=resolve_address,
-                                             now=now, resources=resources,
-                                             host_info=host_info, **info)
 
             yield comm.write({'status': 'OK',
                               'time': time(),
