@@ -916,6 +916,7 @@ class Scheduler(ServerNode):
                          'retire_workers': self.retire_workers,
                          'get_metadata': self.get_metadata,
                          'set_metadata': self.set_metadata,
+                         'heartbeat_worker': self.heartbeat_worker,
                          'get_task_status': self.get_task_status}
 
         self._transitions = {
@@ -1176,31 +1177,22 @@ class Scheduler(ServerNode):
     ###########
 
     @gen.coroutine
-    def add_worker(self, comm=None, address=None, keys=(), ncores=None,
-                   name=None, resolve_address=True, nbytes=None, now=None,
-                   resources=None, host_info=None, memory_limit=None, **info):
-        """ Add a new worker to the cluster """
-        with log_errors():
+    def heartbeat_worker(self, comm=None, address=None, resolve_address=True,
+                          now=None, resources=None, host_info=None, **info):
+            address = self.coerce_address(address, resolve_address)
+            address = normalize_address(address)
+            host = get_address_host(address)
+
             local_now = time()
             now = now or time()
             info = info or {}
             host_info = host_info or {}
 
-            address = self.coerce_address(address, resolve_address)
-            host = get_address_host(address)
             self.host_info[host]['last-seen'] = local_now
-            name = name or address
-
-            address = normalize_address(address)
 
             ws = self.workers.get(address)
-            if ws is None:
-                ws = WorkerState(address, ncores, memory_limit, name)
-                ws.status = 'running'
-                self.workers[address] = ws
-                existing = False
-            else:
-                existing = True
+            if not ws:
+                return {'status': 'missing'}
 
             ws.last_seen = time()
 
@@ -1212,14 +1204,33 @@ class Scheduler(ServerNode):
 
             delay = time() - now
             ws.time_delay = delay
+
             if resources:
                 self.add_resources(worker=address, resources=resources)
 
-            if existing:
-                self.log_event(address, merge({'action': 'heartbeat'}, info))
-                return {'status': 'OK',
-                        'time': time(),
-                        'heartbeat-interval': heartbeat_interval(len(self.workers))}
+            self.log_event(address, merge({'action': 'heartbeat'}, info))
+
+            return {'status': 'OK',
+                    'time': time(),
+                    'heartbeat-interval': heartbeat_interval(len(self.workers))}
+
+    @gen.coroutine
+    def add_worker(self, comm=None, address=None, keys=(), ncores=None,
+                   name=None, resolve_address=True, nbytes=None, now=None,
+                   resources=None, host_info=None, memory_limit=None, **info):
+        """ Add a new worker to the cluster """
+        with log_errors():
+            address = self.coerce_address(address, resolve_address)
+            address = normalize_address(address)
+            host = get_address_host(address)
+
+            ws = self.workers.get(address)
+            if ws is not None:
+                raise ValueError("Worker already exists %s" % address)
+
+            ws = WorkerState(address, ncores, memory_limit, name)
+            ws.status = 'running'
+            self.workers[address] = ws
 
             if name in self.aliases:
                 return {'status': 'error',
@@ -1275,6 +1286,12 @@ class Scheduler(ServerNode):
             self.log_event('all', {'action': 'add-worker',
                                    'worker': address})
             logger.info("Register %s", str(address))
+
+            response = self.heartbeat_worker(address=address,
+                                             resolve_address=resolve_address,
+                                             now=now, resources=resources,
+                                             host_info=host_info, **info)
+
             yield comm.write({'status': 'OK',
                               'time': time(),
                               'heartbeat-interval': heartbeat_interval(len(self.workers))})

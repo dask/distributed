@@ -860,7 +860,7 @@ def test_worker_breaks_and_returns(c, s, a):
 
     yield gen.sleep(0.1)
     start = time()
-    yield wait(future)
+    yield wait(future, timeout=10)
     end = time()
 
     assert end - start < 1

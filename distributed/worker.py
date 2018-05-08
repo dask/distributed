@@ -234,18 +234,15 @@ class WorkerBase(ServerNode):
 
     @gen.coroutine
     def heartbeat(self):
-        return
         if not self.heartbeat_active:
             self.heartbeat_active = True
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                response = yield self.scheduler.register(
+                response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
                     name=self.name,
-                    ncores=self.ncores,
                     now=time(),
-                    services=self.service_ports,
                     memory_limit=self.memory_limit,
                     executing=len(self.executing),
                     in_memory=len(self.data),
@@ -254,6 +251,9 @@ class WorkerBase(ServerNode):
                     **self.monitor.recent())
                 end = time()
                 middle = (start + end) / 2
+                if response['status'] == 'missing':
+                    yield self._register_with_scheduler()
+                    return
                 self.scheduler_delay = response['time'] - middle
                 self.periodic_callbacks['heartbeat'].callback_time = response['heartbeat-interval'] * 1000
             finally:
@@ -263,8 +263,6 @@ class WorkerBase(ServerNode):
 
     @gen.coroutine
     def _register_with_scheduler(self):
-        if self.batched_stream:  # TODO: remove, make nicer heartbeat mechanism
-            return
         self.periodic_callbacks['heartbeat'].stop()
         start = time()
         if self.contact_address is None:
