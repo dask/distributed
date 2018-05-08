@@ -214,17 +214,21 @@ def test_datasets_iter(loop):
                 assert key == str(n)
 
 
-@gen_cluster()
-def test_pickle_safe(s, a, b):
-    import numpy as np
-    c = yield Client(s.address, asynchronous=True,
+@gen_cluster(client=True)
+def test_pickle_safe(c, s, a, b):
+    c2 = yield Client(s.address, asynchronous=True,
                      serializers=['msgpack'])
     try:
-        yield c.publish_dataset(x=[1, 2, 3])
-        result = yield c.get_dataset('x')
+        yield c2.publish_dataset(x=[1, 2, 3])
+        result = yield c2.get_dataset('x')
         assert result == [1, 2, 3]
 
         with pytest.raises(TypeError):
-            yield c.publish_dataset(y=lambda x: x)
+            yield c2.publish_dataset(y=lambda x: x)
+
+        yield c.publish_dataset(z=lambda x: x)  # this can use pickle
+
+        with pytest.raises(TypeError):
+            yield c2.get_dataset('z')
     finally:
-        yield c.close()
+        yield c2.close()
