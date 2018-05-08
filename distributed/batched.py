@@ -82,7 +82,8 @@ class BatchedSend(object):
             self.next_deadline = self.loop.time() + self.interval
             try:
                 nbytes = yield self.comm.write(payload,
-                                               serializers=self.serializers)
+                                               serializers=self.serializers,
+                                               on_error='raise')
                 if nbytes < 1e6:
                     self.recent_message_log.append(payload)
                 else:
@@ -125,7 +126,9 @@ class BatchedSend(object):
             try:
                 if self.buffer:
                     self.buffer, payload = [], self.buffer
-                    yield self.comm.write(payload, serializers=self.serializers)
+                    yield self.comm.write(payload,
+                                          serializers=self.serializers,
+                                          on_error='raise')
             except CommClosedError:
                 pass
             yield self.comm.close()
