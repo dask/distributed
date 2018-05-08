@@ -458,7 +458,8 @@ class WorkerBase(ServerNode):
         if self.batched_stream and not self.batched_stream.comm.closed():
             self.batched_stream.send({'op': 'close-stream'})
 
-        self.batched_stream.close()
+        if self.batched_stream:
+            self.batched_stream.close()
 
         self.rpc.close()
         self._closed.set()

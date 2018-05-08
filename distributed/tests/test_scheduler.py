@@ -685,6 +685,7 @@ def test_file_descriptors(c, s):
 
     while len(s.ncores) < N:
         yield gen.sleep(0.1)
+    yield gen.sleep(0.1)
 
     num_fds_2 = proc.num_fds()
 
@@ -698,7 +699,7 @@ def test_file_descriptors(c, s):
     yield wait(x)
 
     num_fds_4 = proc.num_fds()
-    assert num_fds_4 < num_fds_3 + N
+    assert num_fds_4 <= num_fds_3 + N
 
     y = c.persist(x + x.T)
     yield wait(y)
@@ -712,6 +713,9 @@ def test_file_descriptors(c, s):
     assert num_fds_6 < num_fds_5 + N
 
     yield [n._close() for n in nannies]
+    num_fds_7 = proc.num_fds()
+
+    assert num_fds_7 <= num_fds_1 + N
 
 
 @nodebug
