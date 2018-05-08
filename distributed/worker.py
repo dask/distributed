@@ -331,7 +331,10 @@ class WorkerBase(ServerNode):
             logger.exception(e)
             raise
         finally:
-            yield self._close(report=False)
+            if self.reconnect:
+                self.loop.add_callback(self._register_with_scheduler)
+            else:
+                yield self._close(report=False)
 
     def start_services(self, listen_ip=''):
         for k, v in self.service_specs.items():
@@ -1054,8 +1057,6 @@ class Worker(WorkerBase):
     local_dir: str, optional
         Directory where we place local resources
     name: str, optional
-    heartbeat_interval: int
-        Milliseconds between heartbeats to scheduler
     memory_limit: int, float, string
         Number of bytes of memory that this worker should use.
         Set to zero for no limit.  Set to 'auto' for 60% of memory use.
