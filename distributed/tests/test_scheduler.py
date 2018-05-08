@@ -156,30 +156,6 @@ def test_retire_workers_empty(s):
 
 
 @gen_cluster()
-def test_server(s, a, b):
-    comm = yield connect(s.address)
-    yield comm.write({'op': 'register-client', 'client': 'ident'})
-    yield comm.write({'op': 'update-graph',
-                      'tasks': {'x': dumps_task((inc, 1)),
-                                'y': dumps_task((inc, 'x'))},
-                      'dependencies': {'x': [], 'y': ['x']},
-                      'keys': ['y'],
-                      'client': 'ident'})
-
-    while True:
-        msg = yield readone(comm)
-        if msg['op'] == 'key-in-memory' and msg['key'] == 'y':
-            break
-
-    yield comm.write({'op': 'close-stream'})
-    msg = yield readone(comm)
-    assert msg == {'op': 'stream-closed'}
-    with pytest.raises(CommClosedError):
-        yield readone(comm)
-    yield comm.close()
-
-
-@gen_cluster()
 def test_remove_client(s, a, b):
     s.update_graph(tasks={'x': dumps_task((inc, 1)),
                           'y': dumps_task((inc, 'x'))},
@@ -469,8 +445,9 @@ def test_worker_name():
     assert s.aliases['alice'] == w.address
 
     with pytest.raises(ValueError):
-        w = Worker(s.ip, s.port, name='alice')
-        yield w._start()
+        w2 = Worker(s.ip, s.port, name='alice')
+        yield w2._start()
+        yield w2._close()
 
     yield s.close()
     yield w._close()
@@ -1040,6 +1017,7 @@ def test_scheduler_file():
     yield s.close()
 
 
+@pytest.mark.xfail(reason='')
 @gen_cluster(client=True, ncores=[])
 def test_non_existent_worker(c, s):
     with dask.config.set({'distributed.comm.timeouts.connect': '100ms'}):

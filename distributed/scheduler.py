@@ -1094,8 +1094,10 @@ class Scheduler(ServerNode):
         --------
         Scheduler.cleanup
         """
-        if self.status == 'closed':
+        if self.status.startswith('clos'):
             return
+        self.status = 'closing'
+
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
 
@@ -1108,7 +1110,17 @@ class Scheduler(ServerNode):
             with ignoring(AttributeError):
                 ext.teardown()
         logger.info("Scheduler closing all comms")
-        yield self.cleanup()
+
+        futures = []
+        for w, comm in list(self.worker_comms.items()):
+            if not comm.closed():
+                comm.send({'op': 'close-stream'})
+            with ignoring(AttributeError):
+                futures.append(comm.close())
+
+        for future in futures:
+            yield future
+
         if not fast:
             yield self.finished()
 
@@ -1147,25 +1159,6 @@ class Scheduler(ServerNode):
                     logger.info("Exception from worker while closing: %s", e)
 
             self.remove_worker(address=worker, safe=safe)
-
-    @gen.coroutine
-    def cleanup(self):
-        """ Clean up queues and coroutines, prepare to stop """
-        if self.status == 'closing':
-            raise gen.Return()
-
-        self.status = 'closing'
-        logger.debug("Cleaning up coroutines")
-
-        futures = []
-        for w, comm in list(self.worker_comms.items()):
-            if not comm.comm.closed():
-                comm.send({'op': 'close-stream'})
-            with ignoring(AttributeError):
-                futures.append(comm.close())
-
-        for future in futures:
-            yield future
 
     def _setup_logging(self):
         self._deque_handler = DequeHandler(n=dask.config.get('distributed.admin.log-length'))
