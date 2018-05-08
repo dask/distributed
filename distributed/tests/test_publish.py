@@ -7,6 +7,7 @@ from distributed.client import futures_of
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, cluster
 from distributed.utils_test import loop  # noqa F401
+from distributed.protocol import Serialized
 from tornado import gen
 
 
@@ -18,6 +19,7 @@ def test_publish_simple(s, a, b):
     data = yield c.scatter(range(3))
     out = yield c.publish_dataset(data=data)
     assert 'data' in s.extensions['publish'].datasets
+    assert isinstance(s.extensions['publish'].datasets['data']['data'], Serialized)
 
     with pytest.raises(KeyError) as exc_info:
         out = yield c.publish_dataset(data=data)
@@ -210,3 +212,19 @@ def test_datasets_iter(loop):
             client.publish_dataset(**{str(key): key for key in keys})
             for n, key in enumerate(client.datasets):
                 assert key == str(n)
+
+
+@gen_cluster()
+def test_pickle_safe(s, a, b):
+    import numpy as np
+    c = yield Client(s.address, asynchronous=True,
+                     serializers=['msgpack'])
+    try:
+        yield c.publish_dataset(x=[1, 2, 3])
+        result = yield c.get_dataset('x')
+        assert result == [1, 2, 3]
+
+        with pytest.raises(TypeError):
+            yield c.publish_dataset(y=lambda x: x)
+    finally:
+        yield c.close()
