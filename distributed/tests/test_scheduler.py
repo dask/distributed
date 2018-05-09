@@ -674,6 +674,7 @@ def test_retire_workers_no_suspicious_tasks(c, s, a, b):
                     reason="file descriptors not really a thing")
 @gen_cluster(client=True, ncores=[], timeout=240)
 def test_file_descriptors(c, s):
+    yield gen.sleep(0.1)
     psutil = pytest.importorskip('psutil')
     da = pytest.importorskip('dask.array')
     proc = psutil.Process()
@@ -713,9 +714,10 @@ def test_file_descriptors(c, s):
     assert num_fds_6 < num_fds_5 + N
 
     yield [n._close() for n in nannies]
-    num_fds_7 = proc.num_fds()
 
-    assert num_fds_7 <= num_fds_1 + N
+    while proc.num_fds() > num_fds_1 + N:
+        yield gen.sleep(0.01)
+        assert time() < start + 1
 
 
 @nodebug
