@@ -715,6 +715,7 @@ def test_file_descriptors(c, s):
 
     yield [n._close() for n in nannies]
 
+    start = time()
     while proc.num_fds() > num_fds_1 + N:
         yield gen.sleep(0.01)
         assert time() < start + 1
