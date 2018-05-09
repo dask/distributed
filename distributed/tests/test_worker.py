@@ -898,12 +898,17 @@ def test_global_workers(s, a, b):
 @gen_cluster(ncores=[])
 def test_worker_fds(s):
     psutil = pytest.importorskip('psutil')
+    yield gen.sleep(0.05)
     start = psutil.Process().num_fds()
 
     worker = Worker(s.address, loop=s.loop)
     yield worker._start()
+    yield gen.sleep(0.1)
     middle = psutil.Process().num_fds()
-    assert middle > start
+    start = time()
+    while middle > start:
+        yield gen.sleep(0.01)
+        assert time() < start + 1
 
     yield worker._close()
 
