@@ -86,6 +86,15 @@ def _set_global_client(c):
         _global_client_index[0] += 1
 
 
+def _del_global_client(c):
+    for k in list(_global_clients):
+        try:
+            if _global_clients[k] is c:
+                del _global_clients[k]
+        except KeyError:
+            pass
+
+
 class Future(WrappedKey):
     """ A remotely running computation
 
@@ -1006,6 +1015,7 @@ class Client(Node):
         self.status = 'closing'
 
         with log_errors():
+            _del_global_client(self)
             for pc in self._periodic_callbacks.values():
                 pc.stop()
             self._scheduler_identity = {}
