@@ -770,7 +770,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                             if client:
                                 yield c._close(fast=s.status == 'closed')
                             yield end_cluster(s, workers)
-                            yield cleanup_global_workers()
+                            yield gen.with_timeout(timedelta(seconds=1),
+                                                   cleanup_global_workers())
                             _globals.clear()
                             _globals.update(old_globals)
 
