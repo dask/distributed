@@ -103,12 +103,12 @@ class ProgressBar(object):
 
 class TextProgressBar(ProgressBar):
     def __init__(self, keys, scheduler=None, interval='100ms', width=40,
-                 loop=None, complete=True, start=True, no_newline=False):
+                 loop=None, complete=True, start=True, newline=True):
         super(TextProgressBar, self).__init__(keys, scheduler, interval,
                                               complete)
         self.width = width
         self.loop = loop or IOLoop()
-        self.no_newline = no_newline
+        self.newline = newline
 
         if start:
             loop_runner = LoopRunner(self.loop)
@@ -126,10 +126,9 @@ class TextProgressBar(ProgressBar):
             sys.stdout.flush()
 
     def _draw_stop(self):
-        if self.no_newline:
-            return
-        sys.stdout.write('\n')
-        sys.stdout.flush()
+        if self.newline:
+            sys.stdout.write('\n')
+            sys.stdout.flush()
 
 
 class ProgressWidget(ProgressBar):
@@ -351,9 +350,9 @@ def progress(*futures, **kwargs):
     complete: bool (optional)
         Track all keys (True) or only keys that have not yet run (False)
         (defaults to True)
-    no_newline: bool (optional)
-        Do not insert a newline after the progress bar. Ignored in notebooks.
-        (defaults to False)
+    newline: bool (optional)
+        Insert a newline after the progress bar. Ignored in notebooks.
+        (defaults to True)
 
     Notes
     -----
@@ -369,7 +368,7 @@ def progress(*futures, **kwargs):
     notebook = kwargs.pop('notebook', None)
     multi = kwargs.pop('multi', True)
     complete = kwargs.pop('complete', True)
-    no_newline = kwargs.pop('no_newline', False)
+    newline = kwargs.pop('newline', True)
     assert not kwargs
 
     futures = futures_of(futures)
@@ -384,4 +383,4 @@ def progress(*futures, **kwargs):
             bar = ProgressWidget(futures, complete=complete)
         return bar
     else:
-        TextProgressBar(futures, complete=complete, no_newline=no_newline)
+        TextProgressBar(futures, complete=complete, newline=newline)
