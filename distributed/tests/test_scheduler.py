@@ -686,14 +686,13 @@ def test_file_descriptors(c, s):
 
     while len(s.ncores) < N:
         yield gen.sleep(0.1)
-    yield gen.sleep(0.1)
 
     num_fds_2 = proc.num_fds()
 
     yield gen.sleep(0.2)
 
     num_fds_3 = proc.num_fds()
-    assert num_fds_3 == num_fds_2
+    assert num_fds_3 <= num_fds_2 + N  # add some heartbeats
 
     x = da.random.random(size=(1000, 1000), chunks=(25, 25))
     x = c.persist(x)
