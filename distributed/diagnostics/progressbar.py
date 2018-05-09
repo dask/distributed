@@ -124,7 +124,7 @@ class TextProgressBar(ProgressBar):
             sys.stdout.write(msg)
             sys.stdout.flush()
 
-    def _draw_stop(self):
+    def _draw_stop(self, **kwargs):
         sys.stdout.write('\n')
         sys.stdout.flush()
 
