@@ -299,7 +299,10 @@ class Future(WrappedKey):
         # (see e.g. Client.get() or Future.__del__())
         if not self._cleared and self.client.generation == self._generation:
             self._cleared = True
-            self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+            try:
+                self.client.loop.add_callback(self.client._dec_ref, tokey(self.key))
+            except TypeError:
+                pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
         return (self.key, self.client.scheduler.address)
