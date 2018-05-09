@@ -608,8 +608,8 @@ def test_retire_workers_n(c, s, a, b):
     yield s.retire_workers(n=0, close_workers=True)
     assert len(s.workers) == 0
 
-    assert a.status.startswith('clos')
-    assert b.status.startswith('clos')
+    while not (a.status.startswith('clos') and b.status.startswith('clos')):
+        yield gen.sleep(0.01)
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 4)
@@ -981,6 +981,8 @@ def test_close_nanny(c, s, a, b):
 def test_retire_workers_close(c, s, a, b):
     yield s.retire_workers(close_workers=True)
     assert not s.workers
+    while a.status != 'closed' and b.status != 'closed':
+        yield gen.sleep(0.01)
 
 
 @gen_cluster(client=True, timeout=20, Worker=Nanny)

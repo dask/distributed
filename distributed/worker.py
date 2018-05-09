@@ -423,50 +423,51 @@ class WorkerBase(ServerNode):
 
     @gen.coroutine
     def _close(self, report=True, timeout=10, nanny=True, executor_wait=True):
-        if self.status in ('closed', 'closing'):
-            return
+        with log_errors():
+            if self.status in ('closed', 'closing'):
+                return
 
-        disable_gc_diagnosis()
+            disable_gc_diagnosis()
 
-        logger.info("Stopping worker at %s", self.address)
-        self.status = 'closing'
-        setproctitle("dask-worker [closing]")
+            logger.info("Stopping worker at %s", self.address)
+            self.status = 'closing'
+            setproctitle("dask-worker [closing]")
 
-        self.stop()
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-        with ignoring(EnvironmentError, gen.TimeoutError):
-            if report:
-                yield gen.with_timeout(timedelta(seconds=timeout),
-                                       self.scheduler.unregister(address=self.contact_address))
-        self.scheduler.close_rpc()
-        if isinstance(self.executor, ThreadPoolExecutor):
-            self.executor.shutdown(wait=executor_wait, timeout=timeout)
-        else:
-            self.executor.shutdown(wait=False)
-        self._workdir.release()
+            self.stop()
+            for pc in self.periodic_callbacks.values():
+                pc.stop()
+            with ignoring(EnvironmentError, gen.TimeoutError):
+                if report:
+                    yield gen.with_timeout(timedelta(seconds=timeout),
+                                           self.scheduler.unregister(address=self.contact_address))
+            self.scheduler.close_rpc()
+            if isinstance(self.executor, ThreadPoolExecutor):
+                self.executor.shutdown(wait=executor_wait, timeout=timeout)
+            else:
+                self.executor.shutdown(wait=False)
+            self._workdir.release()
 
-        for k, v in self.services.items():
-            v.stop()
+            for k, v in self.services.items():
+                v.stop()
 
-        self.status = 'closed'
+            self.status = 'closed'
 
-        if nanny and 'nanny' in self.service_ports:
-            with self.rpc((self.ip, self.service_ports['nanny'])) as r:
-                yield r.terminate()
+            if nanny and 'nanny' in self.service_ports:
+                with self.rpc((self.ip, self.service_ports['nanny'])) as r:
+                    yield r.terminate()
 
-        if self.batched_stream and not self.batched_stream.comm.closed():
-            self.batched_stream.send({'op': 'close-stream'})
+            if self.batched_stream and not self.batched_stream.comm.closed():
+                self.batched_stream.send({'op': 'close-stream'})
 
-        if self.batched_stream:
-            self.batched_stream.close()
+            if self.batched_stream:
+                self.batched_stream.close()
 
-        self.rpc.close()
-        self._closed.set()
-        self._remove_from_global_workers()
-        yield super(WorkerBase, self).close()
+            self.rpc.close()
+            self._closed.set()
+            self._remove_from_global_workers()
+            yield super(WorkerBase, self).close()
 
-        setproctitle("dask-worker [closed]")
+            setproctitle("dask-worker [closed]")
 
     def __del__(self):
         self._remove_from_global_workers()

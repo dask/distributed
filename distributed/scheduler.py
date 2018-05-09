@@ -1150,13 +1150,14 @@ class Scheduler(ServerNode):
             nanny_addr = self.get_worker_service_addr(worker, 'nanny')
             address = nanny_addr or worker
 
+            self.worker_send(worker, {'op': 'close'})
             self.remove_worker(address=worker, safe=safe)
 
-            with rpc(address, connection_args=self.connection_args) as r:
-                try:
-                    yield r.terminate(report=False)
-                except EnvironmentError as e:
-                    logger.info("Exception from worker while closing: %s", e)
+            # with rpc(address, connection_args=self.connection_args) as r:
+            #     try:
+            #         yield r.terminate(report=False)
+            #     except EnvironmentError as e:
+            #         logger.info("Exception from worker while closing: %s", e)
 
             self.remove_worker(address=worker, safe=safe)
 
