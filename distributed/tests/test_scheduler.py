@@ -963,7 +963,12 @@ def test_close_nanny(c, s, a, b):
 
     assert len(s.workers) == 1
     assert a_worker_address not in s.workers
-    assert not a.is_alive()
+
+    start = time()
+    while a.is_alive():
+        yield gen.sleep(0.1)
+        assert time() < start + 5
+
     assert a.pid is None
 
     for i in range(10):
