@@ -869,55 +869,61 @@ class Scheduler(ServerNode):
         self.transition_log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
         self.log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
 
-        worker_handlers = {'task-finished': self.handle_task_finished,
-                           'task-erred': self.handle_task_erred,
-                           'release': self.handle_release_data,
-                           'release-worker-data': self.release_worker_data,
-                           'add-keys': self.add_keys,
-                           'missing-data': self.handle_missing_data,
-                           'long-running': self.handle_long_running,
-                           'reschedule': self.reschedule}
+        worker_handlers = {
+            'task-finished': self.handle_task_finished,
+            'task-erred': self.handle_task_erred,
+            'release': self.handle_release_data,
+            'release-worker-data': self.release_worker_data,
+            'add-keys': self.add_keys,
+            'missing-data': self.handle_missing_data,
+            'long-running': self.handle_long_running,
+            'reschedule': self.reschedule
+        }
 
-        client_handlers = {'update-graph': self.update_graph,
-                           'client-desires-keys': self.client_desires_keys,
-                           'update-data': self.update_data,
-                           'report-key': self.report_on_key,
-                           'client-releases-keys': self.client_releases_keys,
-                           'heartbeat-client': self.client_heartbeat,
-                           'close-client': self.remove_client,
-                           'restart': self.restart}
+        client_handlers = {
+            'update-graph': self.update_graph,
+            'client-desires-keys': self.client_desires_keys,
+            'update-data': self.update_data,
+            'report-key': self.report_on_key,
+            'client-releases-keys': self.client_releases_keys,
+            'heartbeat-client': self.client_heartbeat,
+            'close-client': self.remove_client,
+            'restart': self.restart
+        }
 
-        self.handlers = {'register-client': self.add_client,
-                         'scatter': self.scatter,
-                         'register-worker': self.add_worker,
-                         'unregister': self.remove_worker,
-                         'gather': self.gather,
-                         'cancel': self.stimulus_cancel,
-                         'feed': self.feed,
-                         'terminate': self.close,
-                         'broadcast': self.broadcast,
-                         'ncores': self.get_ncores,
-                         'has_what': self.get_has_what,
-                         'who_has': self.get_who_has,
-                         'processing': self.get_processing,
-                         'call_stack': self.get_call_stack,
-                         'profile': self.get_profile,
-                         'logs': self.get_logs,
-                         'worker_logs': self.get_worker_logs,
-                         'nbytes': self.get_nbytes,
-                         'versions': self.versions,
-                         'add_keys': self.add_keys,
-                         'rebalance': self.rebalance,
-                         'replicate': self.replicate,
-                         'start_ipython': self.start_ipython,
-                         'run_function': self.run_function,
-                         'update_data': self.update_data,
-                         'set_resources': self.add_resources,
-                         'retire_workers': self.retire_workers,
-                         'get_metadata': self.get_metadata,
-                         'set_metadata': self.set_metadata,
-                         'heartbeat_worker': self.heartbeat_worker,
-                         'get_task_status': self.get_task_status}
+        self.handlers = {
+            'register-client': self.add_client,
+            'scatter': self.scatter,
+            'register-worker': self.add_worker,
+            'unregister': self.remove_worker,
+            'gather': self.gather,
+            'cancel': self.stimulus_cancel,
+            'feed': self.feed,
+            'terminate': self.close,
+            'broadcast': self.broadcast,
+            'ncores': self.get_ncores,
+            'has_what': self.get_has_what,
+            'who_has': self.get_who_has,
+            'processing': self.get_processing,
+            'call_stack': self.get_call_stack,
+            'profile': self.get_profile,
+            'logs': self.get_logs,
+            'worker_logs': self.get_worker_logs,
+            'nbytes': self.get_nbytes,
+            'versions': self.versions,
+            'add_keys': self.add_keys,
+            'rebalance': self.rebalance,
+            'replicate': self.replicate,
+            'start_ipython': self.start_ipython,
+            'run_function': self.run_function,
+            'update_data': self.update_data,
+            'set_resources': self.add_resources,
+            'retire_workers': self.retire_workers,
+            'get_metadata': self.get_metadata,
+            'set_metadata': self.set_metadata,
+            'heartbeat_worker': self.heartbeat_worker,
+            'get_task_status': self.get_task_status
+        }
 
         self._transitions = {
             ('released', 'waiting'): self.transition_released_waiting,
@@ -1151,14 +1157,6 @@ class Scheduler(ServerNode):
             address = nanny_addr or worker
 
             self.worker_send(worker, {'op': 'close'})
-            self.remove_worker(address=worker, safe=safe)
-
-            # with rpc(address, connection_args=self.connection_args) as r:
-            #     try:
-            #         yield r.terminate(report=False)
-            #     except EnvironmentError as e:
-            #         logger.info("Exception from worker while closing: %s", e)
-
             self.remove_worker(address=worker, safe=safe)
 
     def _setup_logging(self):
@@ -2095,10 +2093,6 @@ class Scheduler(ServerNode):
             yield self.handle_stream(comm=comm, extra={'worker': worker})
         finally:
             if worker in self.worker_comms:
-                # # Worker didn't send us a close message
-                # if io_error:
-                #     logger.info("Worker %r failed from closed comm: %s",
-                #                 worker, io_error)
                 worker_comm.abort()
                 self.remove_worker(address=worker)
 

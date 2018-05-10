@@ -83,8 +83,6 @@ def invalid_python_script(tmpdir_factory):
 
 @gen.coroutine
 def cleanup_global_workers():
-    # yield [w()._close(report=False, executor_wait=False)
-    #        for w in _global_workers]
     for w in _global_workers:
         w = w()
         w._close(report=False, executor_wait=False)

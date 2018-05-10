@@ -299,7 +299,6 @@ class Server(object):
                 try:
                     handler = self.handlers[op]
                 except KeyError:
-                    import pdb; pdb.set_trace()
                     logger.warning("No handler %s found in %s", op,
                                    type(self).__name__, exc_info=True)
                 else:
@@ -345,7 +344,6 @@ class Server(object):
     @gen.coroutine
     def handle_stream(self, comm, extra=None, every_cycle=[]):
         extra = extra or {}
-        # yield comm.write({'op': 'established-connection', 'reply': False})
         logger.info("Starting established connection")
 
         io_error = None
@@ -360,12 +358,6 @@ class Server(object):
                     for msg in msgs:
                         if msg == 'OK':  # from close
                             break
-                        # if 'status' in msg and 'error' in msg['status'] and msg.get('op') != 'task-erred':
-                        #     try:
-                        #         logger.error("error from worker %s: %s",
-                        #                  worker, clean_exception(**msg)[1])
-                        #     except Exception:
-                        #         logger.error("error from worker %s", worker)
                         op = msg.pop('op')
                         if op:
                             if op == 'close-stream':
@@ -374,7 +366,6 @@ class Server(object):
                             handler = self.stream_handlers[op]
                             handler(**merge(extra, msg))
                         else:
-                            import pdb; pdb.set_trace()
                             logger.error("odd message %s", msg)
                 for func in every_cycle:
                     func()
