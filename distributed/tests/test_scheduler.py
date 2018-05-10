@@ -699,7 +699,7 @@ def test_file_descriptors(c, s):
     yield wait(x)
 
     num_fds_4 = proc.num_fds()
-    assert num_fds_4 <= num_fds_3 + N
+    assert num_fds_4 <= num_fds_2 + 2 * N
 
     y = c.persist(x + x.T)
     yield wait(y)
