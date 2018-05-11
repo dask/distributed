@@ -747,6 +747,25 @@ class ConnectionPool(object):
         if self.open < self.limit:
             self.event.set()
 
+    def remove(self, addr):
+        """
+        Remove all Comms to a given address.
+        """
+        logger.info("Removing comms to %s", addr)
+        if addr in self.available:
+            comms = self.available.pop(addr)
+            for comm in comms:
+                comm.close()
+                self.open -= 1
+        if addr in self.occupied:
+            comms = self.occupied.pop(addr)
+            for comm in comms:
+                comm.close()
+                self.open -= 1
+                self.active -= 1
+        if self.open < self.limit:
+            self.event.set()
+
     def close(self):
         """
         Close all communications abruptly.
