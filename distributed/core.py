@@ -724,14 +724,18 @@ class ConnectionPool(object):
         """
         Reuse an open communication to the given address.  For internal use.
         """
-        self.occupied[addr].remove(comm)
-        self.active -= 1
-        if comm.closed():
-            self.open -= 1
-            if self.open < self.limit:
-                self.event.set()
+        try:
+            self.occupied[addr].remove(comm)
+        except KeyError:
+            pass
         else:
-            self.available[addr].add(comm)
+            self.active -= 1
+            if comm.closed():
+                self.open -= 1
+                if self.open < self.limit:
+                    self.event.set()
+            else:
+                self.available[addr].add(comm)
 
     def collect(self):
         """
