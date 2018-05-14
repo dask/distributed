@@ -552,27 +552,27 @@ def test_connection_pool_remove():
         server.listen(0)
 
     rpc = ConnectionPool(limit=10)
-    s = servers.pop()
+    serv = servers.pop()
     yield [rpc(s.address).ping() for s in servers]
-    yield [rpc(s.address).ping() for i in range(3)]
-    yield rpc.connect(s.address)
+    yield [rpc(serv.address).ping() for i in range(3)]
+    yield rpc.connect(serv.address)
     assert sum(map(len, rpc.available.values())) == 6
     assert sum(map(len, rpc.occupied.values())) == 1
     assert rpc.active == 1
     assert rpc.open == 7
 
-    rpc.remove(s.address)
-    assert s.address not in rpc.available
-    assert s.address not in rpc.occupied
+    rpc.remove(serv.address)
+    assert serv.address not in rpc.available
+    assert serv.address not in rpc.occupied
     assert sum(map(len, rpc.available.values())) == 4
     assert sum(map(len, rpc.occupied.values())) == 0
     assert rpc.active == 0
     assert rpc.open == 4
 
     rpc.collect()
-    comm = yield rpc.connect(s.address)
-    rpc.remove(s.address)
-    rpc.reuse(s.address, comm)
+    comm = yield rpc.connect(serv.address)
+    rpc.remove(serv.address)
+    rpc.reuse(serv.address, comm)
 
     rpc.close()
 
