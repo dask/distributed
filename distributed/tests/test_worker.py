@@ -189,7 +189,7 @@ def test_upload_egg(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_dir, eggname))
     assert a.local_dir != b.local_dir
 
-    yield c.upload_file(filename=eggname)
+    yield c.upload_file(filename=local_file)
 
     assert os.path.exists(os.path.join(a.local_dir, eggname))
     assert os.path.exists(os.path.join(b.local_dir, eggname))
@@ -206,6 +206,7 @@ def test_upload_egg(c, s, a, b):
     yield b._close()
     assert not os.path.exists(os.path.join(a.local_dir, eggname))
 
+
 @gen_cluster(client=True)
 def test_upload_pyz(c, s, a, b):
     pyzname = 'mytest.pyz'
@@ -214,7 +215,7 @@ def test_upload_pyz(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_dir, pyzname))
     assert a.local_dir != b.local_dir
 
-    yield c.upload_file(filename=pyzname)
+    yield c.upload_file(filename=local_file)
 
     assert os.path.exists(os.path.join(a.local_dir, pyzname))
     assert os.path.exists(os.path.join(b.local_dir, pyzname))
@@ -230,6 +231,7 @@ def test_upload_pyz(c, s, a, b):
     yield a._close()
     yield b._close()
     assert not os.path.exists(os.path.join(a.local_dir, pyzname))
+
 
 @pytest.mark.xfail(reason='Still lose time to network I/O')
 @gen_cluster(client=True)
