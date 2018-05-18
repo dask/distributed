@@ -1112,7 +1112,11 @@ def parse_bytes(s):
     1000000000
     >>> parse_bytes('MB')
     1000000
+    >>> parse_bytes(123)  # pass through integers
+    123
     """
+    if isinstance(s, Number):
+        return s
     s = s.replace(' ', '')
     if not s[0].isdigit():
         s = '1' + s

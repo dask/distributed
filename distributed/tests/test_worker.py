@@ -1154,3 +1154,48 @@ def test_scheduler_address_config(c, s):
         yield worker._start()
         assert worker.scheduler.address == s.address
     yield worker._close()
+
+
+@pytest.mark.slow
+@gen_cluster(client=True,
+             config={'distributed.worker.memory.communicating': 0.0,
+                     'distributed.comm.offload': 0},
+             ncores=[('127.0.0.1', 1)] * 2)
+def test_worker_communication_saturation(c, s, a, b):
+    class Foo(object):
+        def __init__(self, x):
+            sleep(0.01)
+            self.state = x
+
+        def __getstate__(self):
+            return self.state
+
+        def __setstate__(self, state):
+            sleep(0.1)  # simulate a long communication time
+            self.state = state
+
+    def slow_nothing(a, b):
+        sleep(0.01)
+        return None
+
+    # make sure that we do serialization in a separate thread
+    import distributed
+    old = distributed.comm.utils.FRAME_OFFLOAD_THRESHOLD
+    distributed.comm.utils.FRAME_OFFLOAD_THRESHOLD = 0
+
+    try:
+        A = [delayed(Foo)(i) for i in range(100)]
+        B = [delayed(Foo)(-i) for i in range(100)]
+
+        C = [delayed(slow_nothing)(a, b) for a, b in zip(A, B)]
+        final = delayed(lambda x: None)(C)
+
+        future = c.compute(final,
+                           workers={tuple(A): a.address,  # force communication
+                                    tuple(B): b.address}) # between workers
+        while not future.done():
+            assert len([d for d in a.data.values() if type(d).__name__ == 'Foo']) < 30
+            assert len([d for d in b.data.values() if type(d).__name__ == 'Foo']) < 30
+            yield gen.sleep(0.01)
+    finally:
+        distributed.comm.utils.FRAME_OFFLOAD_THRESHOLD = old

@@ -123,7 +123,7 @@ class WorkerBase(ServerNode):
 
         self.memory_limit = parse_memory_limit(memory_limit, self.ncores)
 
-        self.paused = False
+        self.paused = set()
 
         if 'memory_target_fraction' in kwargs:
             self.memory_target_fraction = kwargs.pop('memory_target_fraction')
@@ -1129,6 +1129,7 @@ class Worker(WorkerBase):
         self.profile_keys_history = deque(maxlen=3600)
         self.profile_recent = profile.create()
         self.profile_history = deque(maxlen=3600)
+        self.proc = psutil.Process()
 
         self.priorities = dict()
         self.generation = 0
@@ -1738,6 +1739,12 @@ class Worker(WorkerBase):
                 self.log.append(('request-dep', dep, worker, deps))
                 logger.debug("Request %d keys", len(deps))
 
+                memory = self.proc.memory_info().rss
+                frac = memory / self.memory_limit
+
+                if not self.paused and frac > dask.config.get('distributed.worker.memory.communicating'):
+                    self.paused.add('communicating')
+
                 start = time() + self.scheduler_delay
                 response = yield self.rpc(worker).get_data(keys=deps,
                                                            who=self.address)
@@ -1798,6 +1805,9 @@ class Worker(WorkerBase):
                         self.batched_stream.send({'op': 'missing-data',
                                                   'errant_worker': worker,
                                                   'key': d})
+
+                if not self.in_flight_workers:
+                    self.paused.discard('communicating')
 
                 if self.validate:
                     self.validate_state()
@@ -2175,28 +2185,27 @@ class Worker(WorkerBase):
         self._memory_monitoring = True
         total = 0
 
-        proc = psutil.Process()
-        memory = proc.memory_info().rss
+        memory = self.proc.memory_info().rss
         frac = memory / self.memory_limit
 
         # Pause worker threads if above 80% memory use
         if self.memory_pause_fraction and frac > self.memory_pause_fraction:
             # Try to free some memory while in paused state
             self._throttled_gc.collect()
-            if not self.paused:
+            if 'memory' not in self.paused:
                 logger.warning("Worker is at %d%% memory usage. Pausing worker.  "
                                "Process memory: %s -- Worker memory limit: %s",
                                int(frac * 100),
-                               format_bytes(proc.memory_info().rss),
+                               format_bytes(self.proc.memory_info().rss),
                                format_bytes(self.memory_limit))
-                self.paused = True
-        elif self.paused:
+                self.paused.add('memory')
+        elif 'memory' in self.paused:
             logger.warning("Worker is at %d%% memory usage. Resuming worker. "
                            "Process memory: %s -- Worker memory limit: %s",
                            int(frac * 100),
-                           format_bytes(proc.memory_info().rss),
+                           format_bytes(self.proc.memory_info().rss),
                            format_bytes(self.memory_limit))
-            self.paused = False
+            self.paused.discard('memory')
             self.ensure_computing()
 
         # Dump data to disk if above 70%
@@ -2210,7 +2219,7 @@ class Worker(WorkerBase):
                                    "to store to disk.  Perhaps some other process "
                                    "is leaking memory?  Process memory: %s -- "
                                    "Worker memory limit: %s",
-                                   format_bytes(proc.memory_info().rss),
+                                   format_bytes(self.proc.memory_info().rss),
                                    format_bytes(self.memory_limit))
                     break
                 k, v, weight = self.data.fast.evict()
@@ -2218,13 +2227,13 @@ class Worker(WorkerBase):
                 total += weight
                 count += 1
                 yield gen.moment
-                memory = proc.memory_info().rss
+                memory = self.proc.memory_info().rss
                 if total > need and memory > target:
                     # Issue a GC to ensure that the evicted data is actually
                     # freed from memory and taken into account by the monitor
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
-                    memory = proc.memory_info().rss
+                    memory = self.proc.memory_info().rss
             if count:
                 logger.debug("Moved %d pieces of data data and %s to disk",
                              count, format_bytes(total))
