@@ -706,7 +706,7 @@ def iscoroutinefunction(f):
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
-                worker_kwargs={}, active_rpc_timeout=1):
+                worker_kwargs={}, active_rpc_timeout=1, config={}):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -741,38 +741,39 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 with check_active_rpc(loop, active_rpc_timeout):
                     @gen.coroutine
                     def coro():
-                        for i in range(5):
-                            try:
-                                s, ws = yield start_cluster(
-                                    ncores, scheduler, loop, security=security,
-                                    Worker=Worker, scheduler_kwargs=scheduler_kwargs,
-                                    worker_kwargs=worker_kwargs)
-                            except Exception as e:
-                                logger.error("Failed to start gen_cluster, retryng", exc_info=True)
-                            else:
-                                break
-                        workers[:] = ws
-                        args = [s] + workers
-                        if client:
-                            c = yield Client(s.address, loop=loop, security=security,
-                                             asynchronous=True)
-                            args = [c] + args
-                        try:
-                            future = func(*args)
-                            if timeout:
-                                future = gen.with_timeout(timedelta(seconds=timeout),
-                                                          future)
-                            result = yield future
-                            if s.validate:
-                                s.validate_state()
-                        finally:
+                        with dask.config.set(config):
+                            for i in range(5):
+                                try:
+                                    s, ws = yield start_cluster(
+                                        ncores, scheduler, loop, security=security,
+                                        Worker=Worker, scheduler_kwargs=scheduler_kwargs,
+                                        worker_kwargs=worker_kwargs)
+                                except Exception as e:
+                                    logger.error("Failed to start gen_cluster, retryng", exc_info=True)
+                                else:
+                                    break
+                            workers[:] = ws
+                            args = [s] + workers
                             if client:
-                                yield c._close(fast=s.status == 'closed')
-                            yield end_cluster(s, workers)
-                            yield gen.with_timeout(timedelta(seconds=1),
-                                                   cleanup_global_workers())
-                            _globals.clear()
-                            _globals.update(old_globals)
+                                c = yield Client(s.address, loop=loop, security=security,
+                                                 asynchronous=True)
+                                args = [c] + args
+                            try:
+                                future = func(*args)
+                                if timeout:
+                                    future = gen.with_timeout(timedelta(seconds=timeout),
+                                                              future)
+                                result = yield future
+                                if s.validate:
+                                    s.validate_state()
+                            finally:
+                                if client:
+                                    yield c._close(fast=s.status == 'closed')
+                                yield end_cluster(s, workers)
+                                yield gen.with_timeout(timedelta(seconds=1),
+                                                       cleanup_global_workers())
+                                _globals.clear()
+                                _globals.update(old_globals)
 
                         raise gen.Return(result)
 
