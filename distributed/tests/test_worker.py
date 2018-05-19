@@ -1164,7 +1164,7 @@ def test_scheduler_address_config(c, s):
 def test_worker_communication_saturation(c, s, a, b):
     class Foo(object):
         def __init__(self, x):
-            sleep(0.01)
+            sleep(0.03)
             self.state = x
 
         def __getstate__(self):
@@ -1184,8 +1184,8 @@ def test_worker_communication_saturation(c, s, a, b):
     distributed.comm.utils.FRAME_OFFLOAD_THRESHOLD = 0
 
     try:
-        A = [delayed(Foo)(i) for i in range(100)]
-        B = [delayed(Foo)(-i) for i in range(100)]
+        A = [delayed(Foo)(i) for i in range(50)]
+        B = [delayed(Foo)(-i) for i in range(50)]
 
         C = [delayed(slow_nothing)(aa, bb) for aa, bb in zip(A, B)]
         final = delayed(lambda x: None)(C)
@@ -1194,8 +1194,11 @@ def test_worker_communication_saturation(c, s, a, b):
                            workers={tuple(A): a.address,  # force communication
                                     tuple(B): b.address}) # between workers
         while not future.done():
-            assert len([d for d in a.data.values() if type(d).__name__ == 'Foo']) < 30
-            assert len([d for d in b.data.values() if type(d).__name__ == 'Foo']) < 30
+            na = len([d for d in a.data.values() if type(d).__name__ == 'Foo'])
+            nb = len([d for d in b.data.values() if type(d).__name__ == 'Foo'])
+            # print(na, nb)
+            assert na < 20
+            assert nb < 20
             yield gen.sleep(0.01)
     finally:
         distributed.comm.utils.FRAME_OFFLOAD_THRESHOLD = old
