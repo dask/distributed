@@ -1187,7 +1187,7 @@ def test_worker_communication_saturation(c, s, a, b):
         A = [delayed(Foo)(i) for i in range(100)]
         B = [delayed(Foo)(-i) for i in range(100)]
 
-        C = [delayed(slow_nothing)(a, b) for a, b in zip(A, B)]
+        C = [delayed(slow_nothing)(aa, bb) for aa, bb in zip(A, B)]
         final = delayed(lambda x: None)(C)
 
         future = c.compute(final,
