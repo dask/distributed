@@ -557,10 +557,10 @@ def test_scatter_no_workers(c, s):
         yield s.scatter(data={'x': 1}, client='alice', timeout=0.1)
 
     w = Worker(s.ip, s.port, ncores=3)
-    yield [c._scatter(data={'x': 1}),
+    yield [c._scatter(data={'y': 2}),
            w._start()]
 
-    assert w.data['x'] == 1
+    assert w.data['y'] == 2
     yield w._close()
 
 
@@ -714,10 +714,14 @@ def test_file_descriptors(c, s):
 
     yield [n._close() for n in nannies]
 
+    assert not s.rpc.open
+    assert not c.rpc.open
+    assert not s.worker_comms
+
     start = time()
     while proc.num_fds() > num_fds_1 + N:
         yield gen.sleep(0.01)
-        assert time() < start + 1
+        assert time() < start + 3
 
 
 @nodebug
