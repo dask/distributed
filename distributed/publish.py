@@ -60,7 +60,7 @@ class Datasets(MutableMapping):
         return self.__client.get_dataset(key)
 
     def __setitem__(self, key, value):
-        self.__client.publish_dataset(**{key: value})
+        self.__client.publish_dataset(value, name=key)
 
     def __delitem__(self, key):
         self.__client.unpublish_dataset(key)
