@@ -1799,20 +1799,23 @@ class Client(Node):
                          force=force)
 
     @gen.coroutine
-    def _publish_dataset(self, *args, name=None, **kwargs):
+    def _publish_dataset(self, *args, **kwargs):
         with log_errors():
             coroutines = []
 
             def add_coro(name, data):
                 keys = [tokey(f.key) for f in futures_of(data)]
                 coroutines.append(self.scheduler.publish_put(keys=keys,
-                                                             name=tokey(name),
+                                                             name=dumps(name),
                                                              data=to_serialize(data),
                                                              client=self.id))
 
+            name = kwargs.pop('name', None)
             if name:
                 if len(args) == 0:
-                    raise ValueError("If name is provided, data must be provided as args not keyword args")
+                    raise ValueError(
+                        "If name is provided, expecting call signature like"
+                        " publish_dataset(df, name='ds')")
                 # in case this is a singleton, collapse it
                 elif len(args) == 1:
                     args = args[0]
@@ -1823,7 +1826,7 @@ class Client(Node):
 
             yield coroutines
 
-    def publish_dataset(self, *args, name=None, **kwargs):
+    def publish_dataset(self, *args, **kwargs):
         """
         Publish named datasets to scheduler
 
@@ -1869,7 +1872,7 @@ class Client(Node):
         Client.unpublish_dataset
         Client.persist
         """
-        return self.sync(self._publish_dataset, *args, name=name, **kwargs)
+        return self.sync(self._publish_dataset, *args, **kwargs)
 
     def unpublish_dataset(self, name, **kwargs):
         """
@@ -1887,7 +1890,7 @@ class Client(Node):
         --------
         Client.publish_dataset
         """
-        return self.sync(self.scheduler.publish_delete, name=name, **kwargs)
+        return self.sync(self.scheduler.publish_delete, name=dumps(name), **kwargs)
 
     def list_datasets(self, **kwargs):
         """
@@ -1902,7 +1905,7 @@ class Client(Node):
 
     @gen.coroutine
     def _get_dataset(self, name):
-        out = yield self.scheduler.publish_get(name=name, client=self.id)
+        out = yield self.scheduler.publish_get(name=dumps(name), client=self.id)
         if out is None:
             raise KeyError("Dataset '%s' not found" % name)
 
@@ -1919,7 +1922,7 @@ class Client(Node):
         Client.publish_dataset
         Client.list_datasets
         """
-        return self.sync(self._get_dataset, tokey(name), **kwargs)
+        return self.sync(self._get_dataset, name, **kwargs)
 
     @gen.coroutine
     def _run_on_scheduler(self, function, *args, **kwargs):

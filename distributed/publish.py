@@ -1,5 +1,7 @@
 from collections import MutableMapping
-from distributed.utils import log_errors
+from distributed.utils import log_errors, tokey
+
+from .protocol.pickle import dumps, loads
 
 
 class PublishExtension(object):
@@ -25,16 +27,18 @@ class PublishExtension(object):
 
     def put(self, stream=None, keys=None, data=None, name=None, client=None):
         with log_errors():
+            name = loads(name)
             if name in self.datasets:
                 raise KeyError("Dataset %s already exists" % name)
-            self.scheduler.client_desires_keys(keys, 'published-%s' % name)
+            self.scheduler.client_desires_keys(keys, 'published-%s' % tokey(name))
             self.datasets[name] = {'data': data, 'keys': keys}
             return {'status':  'OK', 'name': name}
 
     def delete(self, stream=None, name=None):
         with log_errors():
+            name = loads(name)
             out = self.datasets.pop(name, {'keys': []})
-            self.scheduler.client_releases_keys(out['keys'], 'published-%s' % name)
+            self.scheduler.client_releases_keys(out['keys'], 'published-%s' % tokey(name))
 
     def list(self, *args):
         with log_errors():
@@ -42,6 +46,7 @@ class PublishExtension(object):
 
     def get(self, stream, name=None, client=None):
         with log_errors():
+            name = loads(name)
             return self.datasets.get(name, None)
 
 

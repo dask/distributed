@@ -1,5 +1,6 @@
 
 import pytest
+import datetime
 
 from dask import delayed
 from distributed import Client
@@ -32,6 +33,25 @@ def test_publish_simple(s, a, b):
 
     result = yield f.scheduler.publish_list()
     assert result == ('data',)
+
+    yield c.close()
+    yield f.close()
+
+
+@gen_cluster(client=False)
+def test_publish_non_string_key(s, a, b):
+    c = yield Client((s.ip, s.port), asynchronous=True)
+    f = yield Client((s.ip, s.port), asynchronous=True)
+
+    for name in [('a', 'b'), frozenset([1, 2]), datetime.datetime.now()]:
+        data = yield c.scatter(range(3))
+        out = yield c.publish_dataset(data, name=name)
+        assert name in s.extensions['publish'].datasets
+        assert isinstance(s.extensions['publish'].datasets[name]['data'], Serialized)
+
+        datasets = yield c.list_datasets()
+        #datasets = yield c.scheduler.publish_list()
+        assert name in datasets
 
     yield c.close()
     yield f.close()
