@@ -960,7 +960,7 @@ class Client(Node):
                             continue
                         else:
                             break
-                    if not isinstance(msgs, list):
+                    if not isinstance(msgs, (list, tuple)):
                         msgs = [msgs]
 
                     breakout = False
@@ -2665,7 +2665,7 @@ class Client(Node):
         if (isinstance(workers, tuple)
                 and all(isinstance(i, (str, tuple)) for i in workers)):
             workers = list(workers)
-        if workers is not None and not isinstance(workers, (list, set)):
+        if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
         return self.sync(self.scheduler.ncores, workers=workers, **kwargs)
 
@@ -2731,7 +2731,7 @@ class Client(Node):
         if (isinstance(workers, tuple)
                 and all(isinstance(i, (str, tuple)) for i in workers)):
             workers = list(workers)
-        if workers is not None and not isinstance(workers, (list, set)):
+        if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
         return self.sync(self.scheduler.has_what, workers=workers, **kwargs)
 
@@ -2760,7 +2760,7 @@ class Client(Node):
         if (isinstance(workers, tuple)
                 and all(isinstance(i, (str, tuple)) for i in workers)):
             workers = list(workers)
-        if workers is not None and not isinstance(workers, (list, set)):
+        if workers is not None and not isinstance(workers, (tuple, list, set)):
             workers = [workers]
         return self.sync(self.scheduler.processing, workers=workers)
 
@@ -2910,7 +2910,7 @@ class Client(Node):
         --------
         Client.set_metadata
         """
-        if not isinstance(keys, list):
+        if not isinstance(keys, (tuple, list)):
             keys = [keys]
         return self.sync(self.scheduler.get_metadata, keys=keys,
                          default=default)
@@ -3011,7 +3011,7 @@ class Client(Node):
         --------
         get_metadata
         """
-        if not isinstance(key, list):
+        if not isinstance(key, (tuple, list)):
             key = [key]
         return self.sync(self.scheduler.set_metadata, keys=key, value=value)
 

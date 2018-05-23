@@ -160,7 +160,7 @@ def loads_msgpack(header, payload):
         dumps_msgpack
     """
     if header:
-        header = msgpack.loads(header, encoding='utf8')
+        header = msgpack.loads(header, encoding='utf8', use_list=False)
     else:
         header = {}
 
@@ -172,4 +172,4 @@ def loads_msgpack(header, payload):
             raise ValueError("Data is compressed as %s but we don't have this"
                              " installed" % str(header['compression']))
 
-    return msgpack.loads(payload, encoding='utf8')
+    return msgpack.loads(payload, encoding='utf8', use_list=False)
