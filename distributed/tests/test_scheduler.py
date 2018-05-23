@@ -723,7 +723,7 @@ def test_file_descriptors(c, s):
 
     assert not s.rpc.open
     assert not c.rpc.open
-    assert not s.worker_comms
+    assert not s.stream_comms
 
     start = time()
     while proc.num_fds() > num_fds_1 + N:

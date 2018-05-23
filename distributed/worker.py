@@ -369,7 +369,7 @@ class WorkerBase(ServerNode):
 
     def send_to_worker(self, address, msg):
         if address not in self.stream_comms:
-            bcomm = BatchedSend(interval='2ms', loop=self.loop)
+            bcomm = BatchedSend(interval='1ms', loop=self.loop)
             self.stream_comms[address] = bcomm
 
             @gen.coroutine
