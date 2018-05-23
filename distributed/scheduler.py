@@ -1120,8 +1120,7 @@ class Scheduler(ServerNode):
         logger.info("Scheduler closing all comms")
 
         futures = []
-        for w in self.workers:
-            comm = self.stream_comms[w]
+        for w, comm in list(self.stream_comms.items()):
             if not comm.closed():
                 comm.send({'op': 'close', 'report': False})
                 comm.send({'op': 'close-stream'})
