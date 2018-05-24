@@ -426,7 +426,7 @@ def serialize_bytelist(x, **kwargs):
     header['compression'] = compression
     header['count'] = len(frames)
 
-    header = msgpack.dumps(header, use_bin_type=True)
+    header = msgpack.dumps(header, use_bin_type=True, default=core.msgpack_default)
     frames2 = [header] + list(frames)
     return [pack_frames_prelude(frames2)] + frames2
 
@@ -442,7 +442,7 @@ def deserialize_bytes(b):
     frames = unpack_frames(b)
     header, frames = frames[0], frames[1:]
     if header:
-        header = msgpack.loads(header, encoding='utf8')
+        header = msgpack.loads(header, encoding='utf8', ext_hook=core.msgpack_ext_hook)
     else:
         header = {}
     frames = decompress(header, frames)

@@ -81,7 +81,7 @@ def dumps(msg, serializers=None, on_error='message'):
                 out_frames[i] = frame
 
         return [small_header, small_payload,
-                msgpack.dumps(header, use_bin_type=True)] + out_frames
+                msgpack.dumps(header, use_bin_type=True, default=msgpack_default)] + out_frames
     except Exception:
         logger.critical("Failed to Serialize", exc_info=True)
         raise
@@ -100,7 +100,7 @@ def loads(frames, deserialize=True, deserializers=None):
             return msg
 
         header = frames.pop()
-        header = msgpack.loads(header, encoding='utf8', use_list=False)
+        header = msgpack.loads(header, encoding='utf8', use_list=False, ext_hook=msgpack_ext_hook)
         keys = header['keys']
         headers = header['headers']
         bytestrings = set(header['bytestrings'])
