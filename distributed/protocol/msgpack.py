@@ -41,5 +41,6 @@ def _msgpack_ext_hook(code, payload):
     raise ValueError("Unknown Ext code %s, payload: %s" % (code, payload))
 
 
-dumps = partial(msgpack.dumps, default=_msgpack_default)
+# msgpack's non-strict mode automatically treats tuple as a list which bypasses our default
+dumps = partial(msgpack.dumps, default=_msgpack_default, strict_types=True)
 loads = partial(msgpack.loads, ext_hook=_msgpack_ext_hook)

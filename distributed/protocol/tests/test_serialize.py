@@ -179,10 +179,9 @@ def test_serialize_bytes():
 
 
 @pytest.mark.parametrize('val', [tuple([1, 2]), set([1,2]), frozenset([1,2])])
-def test_serialize_tuple(val):
-    from distributed.protocol import loads, dumps
-    reslist = loads(dumps([to_serialize(val)]))
-    res = reslist[0]
+def test_serialize_msgpack(val):
+    from distributed.protocol.msgpack import loads, dumps
+    res = loads(dumps(val))
     assert type(res) == type(val)
     assert res == val
 
