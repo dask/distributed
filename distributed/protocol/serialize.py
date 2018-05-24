@@ -3,14 +3,13 @@ from functools import partial
 import traceback
 
 from dask.base import normalize_token
+
 try:
     from cytoolz import valmap, get_in
 except ImportError:
     from toolz import valmap, get_in
 
-import msgpack
-
-from . import core
+from . import msgpack
 from . import pickle
 from ..compatibility import PY2
 from .compression import maybe_compress, decompress
@@ -60,11 +59,11 @@ def pickle_loads(header, frames):
 
 
 def msgpack_dumps(x):
-    return {'serializer': 'msgpack'}, [msgpack.dumps(x, use_bin_type=True, default=core.msgpack_default)]
+    return {'serializer': 'msgpack'}, [msgpack.dumps(x, use_bin_type=True)]
 
 
 def msgpack_loads(header, frames):
-    return msgpack.loads(b''.join(frames), encoding='utf8', ext_hook=core.msgpack_ext_hook)
+    return msgpack.loads(b''.join(frames), encoding='utf8')
 
 
 def serialization_error_loads(header, frames):
@@ -426,7 +425,7 @@ def serialize_bytelist(x, **kwargs):
     header['compression'] = compression
     header['count'] = len(frames)
 
-    header = msgpack.dumps(header, use_bin_type=True, default=core.msgpack_default)
+    header = msgpack.dumps(header, use_bin_type=True)
     frames2 = [header] + list(frames)
     return [pack_frames_prelude(frames2)] + frames2
 
@@ -442,7 +441,7 @@ def deserialize_bytes(b):
     frames = unpack_frames(b)
     header, frames = frames[0], frames[1:]
     if header:
-        header = msgpack.loads(header, encoding='utf8', ext_hook=core.msgpack_ext_hook)
+        header = msgpack.loads(header, encoding='utf8')
     else:
         header = {}
     frames = decompress(header, frames)
