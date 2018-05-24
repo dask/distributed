@@ -10,6 +10,7 @@ except ImportError:
 
 import msgpack
 
+from . import core
 from . import pickle
 from ..compatibility import PY2
 from .compression import maybe_compress, decompress
@@ -59,11 +60,11 @@ def pickle_loads(header, frames):
 
 
 def msgpack_dumps(x):
-    return {'serializer': 'msgpack'}, [msgpack.dumps(x, use_bin_type=True)]
+    return {'serializer': 'msgpack'}, [msgpack.dumps(x, use_bin_type=True, default=core.msgpack_default)]
 
 
 def msgpack_loads(header, frames):
-    return msgpack.loads(b''.join(frames), encoding='utf8')
+    return msgpack.loads(b''.join(frames), encoding='utf8', ext_hook=core.msgpack_ext_hook)
 
 
 def serialization_error_loads(header, frames):

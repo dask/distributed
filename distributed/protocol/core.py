@@ -130,6 +130,43 @@ def loads(frames, deserialize=True, deserializers=None):
         raise
 
 
+_MSGPACK_EXT_TUPLE = 0
+_MSGPACK_EXT_SET = 1
+_MSGPACK_EXT_FROZENSET = 2
+
+
+def msgpack_default(o):
+    """ Default handler to allow encoding some other collection types correctly
+
+    """
+    if isinstance(o, (tuple, set, frozenset)):
+        payload = msgpack.packb(
+            list(o), strict_types=True, use_bin_type=True, default=msgpack_default)
+        if isinstance(o, tuple):
+            ext_type = _MSGPACK_EXT_TUPLE
+        elif isinstance(o, frozenset):
+            ext_type = _MSGPACK_EXT_FROZENSET
+        elif isinstance(o, set):
+            ext_type = _MSGPACK_EXT_SET
+        else:
+            raise TypeError("Unknown type %s" % type(o))
+        return msgpack.ExtType(ext_type, payload)
+    else:
+        raise TypeError("Unknown type %s for %s" % (repr(o), type(o)))
+
+
+def msgpack_ext_hook(code, payload):
+    if code in {_MSGPACK_EXT_TUPLE, _MSGPACK_EXT_SET, _MSGPACK_EXT_FROZENSET}:
+        l = msgpack.unpackb(payload, encoding='utf-8', ext_hook=msgpack_ext_hook)
+        if code == _MSGPACK_EXT_TUPLE:
+            return tuple(l)
+        elif code == _MSGPACK_EXT_SET:
+            return set(l)
+        elif code == _MSGPACK_EXT_FROZENSET:
+            return frozenset(l)
+    raise ValueError("Unknown Ext code %s, payload: %s" % (code, payload))
+
+
 def dumps_msgpack(msg):
     """ Dump msg into header and payload, both bytestrings
 
@@ -139,14 +176,14 @@ def dumps_msgpack(msg):
         loads_msgpack
     """
     header = {}
-    payload = msgpack.dumps(msg, use_bin_type=True)
+    payload = msgpack.dumps(msg, use_bin_type=True, default=msgpack_default)
 
     fmt, payload = maybe_compress(payload)
     if fmt:
         header['compression'] = fmt
 
     if header:
-        header_bytes = msgpack.dumps(header, use_bin_type=True)
+        header_bytes = msgpack.dumps(header, use_bin_type=True, default=msgpack_default)
     else:
         header_bytes = b''
 
@@ -160,7 +197,7 @@ def loads_msgpack(header, payload):
         dumps_msgpack
     """
     if header:
-        header = msgpack.loads(header, encoding='utf8')
+        header = msgpack.loads(header, encoding='utf8', ext_hook=msgpack_ext_hook)
     else:
         header = {}
 
@@ -172,4 +209,4 @@ def loads_msgpack(header, payload):
             raise ValueError("Data is compressed as %s but we don't have this"
                              " installed" % str(header['compression']))
 
-    return msgpack.loads(payload, encoding='utf8')
+    return msgpack.loads(payload, encoding='utf8', ext_hook=msgpack_ext_hook)
