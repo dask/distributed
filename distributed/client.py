@@ -1392,8 +1392,9 @@ class Client(Node):
         while True:
             logger.debug("Waiting on futures to clear before gather")
 
+            futures = [wait(key) for key in keys if key in self.futures]
             with ignoring(AllExit):
-                yield All([wait(key) for key in keys if key in self.futures])
+                yield All(futures, quiet_exceptions=AllExit)
 
             failed = ('error', 'cancelled')
 
