@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+import datetime
 import weakref
 
 import tornado.locks
@@ -221,7 +222,7 @@ class Pub(object):
             self.put(msg)
         del self._buffer[:]
 
-    def put(self, msg):
+    def _put(self, msg):
         if not self._started:
             self._buffer.append(msg)
             return
@@ -236,6 +237,9 @@ class Pub(object):
                 self.worker.batched_stream.send(data)
         elif self.client:
             self.client.scheduler_comm.send(data)
+
+    def put(self, msg):
+        self.loop.add_callback(self._put, msg)
 
 
 class Sub(object):
@@ -265,32 +269,42 @@ class Sub(object):
 
         msg = {'op': 'pubsub-add-subscriber', 'name': self.name}
         if self.worker:
-            self.worker.batched_stream.send(msg)
+            self.loop.add_callback(self.worker.batched_stream.send, msg)
         elif self.client:
-            self.client.scheduler_comm.send(msg)
+            self.loop.add_callback(self.client.scheduler_comm.send, msg)
+        else:
+            raise Exception()
 
         finalize(self, pubsub.trigger_cleanup)
 
     @gen.coroutine
-    def __anext__(self):
+    def _get(self, timeout=None):
+        if timeout is not None:
+            timeout = datetime.timedelta(seconds=timeout)
+        start = datetime.datetime.now()
         while not self.buffer:
-            yield self.condition.wait()
+            if timeout is not None:
+                timeout2 = timeout - (datetime.datetime.now() - start)
+                if timeout2.total_seconds() < 0:
+                    raise gen.TimeoutError()
+            else:
+                timeout2 = None
+            yield self.condition.wait(timeout=timeout2)
 
         raise gen.Return(self.buffer.popleft())
 
-    _get = __anext__
+    __anext__ = _get
 
-    def get(self):
-        if self.client:
-            return self.client.sync(self._get)
-        else:
-            raise NotImplementedError()
-
-    def __next__(self):
+    def get(self, timeout=None):
         if self.buffer:  # fastpath
             return self.buffer.popleft()
+
+        if self.client:
+            return self.client.sync(self._get, timeout=timeout)
         else:
-            return sync(self.loop, self.__anext__)
+            return sync(self.loop, self._get, timeout=timeout)
+
+    next = __next__ = get
 
     def __iter__(self):
         return self

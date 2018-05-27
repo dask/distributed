@@ -1,40 +1,12 @@
-from distributed import Pub, Sub, wait, get_worker
+import sys
+from time import sleep
+
+from distributed import Pub, Sub, wait, get_worker, TimeoutError
 from distributed.utils_test import gen_cluster
 from distributed.metrics import time
 
 import pytest
-import toolz
 from tornado import gen
-
-
-@gen_cluster(client=True)
-def test_basic(c, s, a, b):
-    async def publish():
-        pub = Pub('a')
-
-        i = 0
-        while True:
-            await gen.sleep(0.01)
-            pub.put(i)
-            i += 1
-
-    def f(_):
-        sub = Sub('a')
-        return list(toolz.take(5, sub))
-
-    c.run_coroutine(publish, workers=[a.address])
-
-    tasks = [c.submit(f, i) for i in range(4)]
-    results = yield c.gather(tasks)
-
-    for r in results:
-        x = r[0]
-        # race conditions and unintended (but correct) messages
-        # can make this test not true
-        # assert r == [x, x + 1, x + 2, x + 3, x + 4]
-
-        assert len(r) == 5
-        assert all(r[i] < r[i + 1] for i in range(0, 4))
 
 
 @gen_cluster(client=True, timeout=None)
@@ -48,23 +20,31 @@ def test_speed(c, s, a, b):
         sub = Sub(a)
         pub = Pub(b)
 
+        while not pub.subscribers:
+            sleep(0.01)
+
         if start:
-            pub.put(msg)
+            pub.put(msg)  # other sub may not have started yet
 
         for i in range(n):
-            msg = next(sub)
+            try:
+                msg = next(sub)
+            except TimeoutError:
+
+                raise TimeoutError((i, sub.buffer, pub.subscribers))
             pub.put(msg)
             if i % 100 == 0:
                 print(a, b, i)
+        return n
 
     import numpy as np
     x = np.random.random(1000)
 
-    x = c.submit(pingpong, 'a', 'b', start=True, msg=x)
-    y = c.submit(pingpong, 'b', 'a')
+    x = c.submit(pingpong, 'a', 'b', start=True, msg=x, n=100)
+    y = c.submit(pingpong, 'b', 'a', n=100)
 
     start = time()
-    yield wait([x, y])
+    yield c.gather([x, y])
     stop = time()
     print('duration', stop - start)  # I get around 3ms/roundtrip on my laptop
 
@@ -129,3 +109,17 @@ def test_client_worker(c, s, a, b):
            any(bps.publish_to_scheduler.values())):
         yield gen.sleep(0.01)
         assert time() < start + 3
+
+
+@gen_cluster(client=True)
+def test_timeouts(c, s, a, b):
+    sub = Sub('a', client=c, worker=None)
+    start = time()
+    with pytest.raises(TimeoutError):
+        yield sub.get(timeout=0.1)
+    stop = time()
+    assert stop - start < 1
+
+
+if sys.version_info >= (3, 5):
+    from distributed.tests.py3_test_pubsub import *  # noqa: F401, F403
