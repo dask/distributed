@@ -1,7 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from collections import Iterable, deque
+from collections import deque
 from contextlib import contextmanager
 from datetime import timedelta
 import functools
@@ -188,7 +188,7 @@ def ignore_exceptions(coroutines, *exceptions):
 
 
 @gen.coroutine
-def All(*args, quiet_exceptions=()):
+def All(args, quiet_exceptions=()):
     """ Wait on many tasks at the same time
 
     Err once any of the tasks err.
@@ -197,12 +197,10 @@ def All(*args, quiet_exceptions=()):
 
     Parameters
     ----------
-    *args: futures to wait for
+    args: futures to wait for
     quiet_exceptions: tuple, Exception
         Exception types to avoid logging if they fail
     """
-    if len(args) == 1 and isinstance(args[0], Iterable):
-        args = args[0]
     tasks = gen.WaitIterator(*args)
     results = [None for _ in args]
     while not tasks.done():

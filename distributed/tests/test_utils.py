@@ -43,7 +43,7 @@ def test_All(loop):
     @gen.coroutine
     def f():
 
-        results = yield All(*[inc(i) for i in range(10)])
+        results = yield All([inc(i) for i in range(10)])
         assert results == list(range(1, 11))
 
         start = time()
