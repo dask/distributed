@@ -186,12 +186,12 @@ class Pub(object):
 
     Pub objects, into which we put data:
 
-        >>> pub = Pub('topic-name')
+        >>> pub = Pub('my-topic')
         >>> pub.put(123)
 
     And Sub objects, from which we collect data:
 
-        >>> sub = Sub('topic-name')
+        >>> sub = Sub('my-topic')
         >>> sub.get()
         123
 

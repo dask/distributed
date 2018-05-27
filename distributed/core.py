@@ -114,7 +114,7 @@ class Server(object):
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
-        self.loop = io_loop
+        self.loop = self.io_loop
 
         # Statistics counters for various events
         with ignoring(ImportError):
@@ -145,7 +145,7 @@ class Server(object):
         def set_thread_ident():
             self.thread_id = get_thread_identity()
 
-        self.loop.add_callback(set_thread_ident)
+        self.io_loop.add_callback(set_thread_ident)
 
         self.__stopped = False
 
@@ -161,7 +161,7 @@ class Server(object):
             for pc in self.periodic_callbacks.values():
                 if not pc.is_running():
                     pc.start()
-        self.loop.add_callback(start_pcs)
+        self.io_loop.add_callback(start_pcs)
 
     def stop(self):
         if not self.__stopped:
