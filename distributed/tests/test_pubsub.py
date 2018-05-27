@@ -83,7 +83,7 @@ def test_client_worker(c, s, a, b):
 
     L = []
     for i in range(10):
-        result = yield sub.__anext__()
+        result = yield sub.get()
         L.append(result)
 
     assert set(L) == set(range(10))

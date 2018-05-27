@@ -5,13 +5,14 @@ import weakref
 import tornado.locks
 from tornado import gen
 
-from .compatibility import finalize
+from .compatibility import finalize, get_thread_identity
 from .core import CommClosedError
 from .utils import sync
 from .protocol.serialize import to_serialize
 
 
 class PubSubSchedulerExtension(object):
+    """ Extend Dask's scheduler with routes to handle PubSub machinery """
     def __init__(self, scheduler):
         self.scheduler = scheduler
         self.publishers = defaultdict(set)
@@ -95,6 +96,7 @@ class PubSubSchedulerExtension(object):
 
 
 class PubSubWorkerExtension(object):
+    """ Extend Dask's Worker with routes to handle PubSub machinery """
     def __init__(self, worker):
         self.worker = worker
         self.worker.stream_handlers.update({
@@ -146,6 +148,7 @@ class PubSubWorkerExtension(object):
 
 
 class PubSubClientExtension(object):
+    """ Extend Dask's Client with handlers to handle PubSub machinery """
     def __init__(self, client):
         self.client = client
         self.client._stream_handlers.update({
@@ -175,6 +178,82 @@ class PubSubClientExtension(object):
 
 
 class Pub(object):
+    """ Publish data with Publish-Subscribe pattern
+
+    This allows clients and workers to directly communicate data between each
+    other with a typical Publish-Subscribe pattern.  This involves two
+    components,
+
+    Pub objects, into which we put data:
+
+        >>> pub = Pub('topic-name')
+        >>> pub.put(123)
+
+    And Sub objects, from which we collect data:
+
+        >>> sub = Sub('topic-name')
+        >>> sub.get()
+        123
+
+    Many Pub and Sub objects can exist for the same topic.  All data sent from
+    any Pub will be sent to all Sub objects on that topic that are currently
+    connected.  Pub's and Sub's find each other using the scheduler, but they
+    communicate directly with each other without coordination from the
+    scheduler.
+
+    Pubs and Subs use the central scheduler to find each other, but not to
+    mediate the communication.  This means that there is very little additional
+    latency or overhead, and they are appropriate for very frequent data
+    transfers.  For context, most data transfer first checks with the scheduler to find which
+    workers should participate, and then does direct worker-to-worker
+    transfers.  This checking in with the scheduler provides some stability
+    guarnatees, but also adds in a few extra network hops.  PubSub doesn't do
+    this, and so is faster, but also can easily drop messages if Pubs or Subs
+    disappear without notice.
+
+    When using a Pub or Sub from a Client all communications will be routed
+    through the scheduler.  This can cause some performance degredation.  Pubs
+    an Subs only operate at top-speed when they are both on workers.
+
+    Parameters
+    ----------
+    name: object (msgpack serializable)
+        The name of the group of Pubs and Subs on which to participate
+
+    Examples
+    --------
+    >>> pub = Pub('my-topic')
+    >>> sub = Sub('my-topic')
+    >>> pub.put([1, 2, 3])
+    >>> sub.get()
+    [1, 2, 3]
+
+    You can also use sub within a for loop:
+
+    >>> for msg in sub:  # doctest: +SKIP
+    ...     print(msg)
+
+    or an async for loop
+
+    >>> async for msg in sub:  # doctest: +SKIP
+    ...     print(msg)
+
+    Similarly the ``.get`` method will return an awaitable if used by an async
+    client or within the IOLoop thread of a worker
+
+    >>> await sub.get()  # doctest: +SKIP
+
+    You can see the set of connected worker subscribers by looking at the
+    ``.subscribers`` attribute:
+
+    >>> pub.subscribers
+    {'tcp://...': {},
+     'tcp://...': {}}
+
+    See Also
+    --------
+    Sub
+    """
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
             from distributed import get_worker, get_client
@@ -243,6 +322,12 @@ class Pub(object):
 
 
 class Sub(object):
+    """ Subscribe to a Publish/Subscribe topic
+
+    See Also
+    --------
+    Pub: for full docstring
+    """
     def __init__(self, name, worker=None, client=None):
         if worker is None and client is None:
             from distributed.worker import get_worker, get_client
@@ -296,12 +381,13 @@ class Sub(object):
     __anext__ = _get
 
     def get(self, timeout=None):
-        if self.buffer:  # fastpath
-            return self.buffer.popleft()
-
         if self.client:
             return self.client.sync(self._get, timeout=timeout)
+        elif self.worker.thread_id == get_thread_identity():
+            return self._get()
         else:
+            if self.buffer:  # fastpath
+                return self.buffer.popleft()
             return sync(self.loop, self._get, timeout=timeout)
 
     next = __next__ = get
