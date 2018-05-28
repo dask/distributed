@@ -5288,6 +5288,22 @@ def test_client_timeout_2():
         assert stop - start < 1
 
 
+@gen_test()
+def test_client_active_bad_port():
+    import subprocess
+    import shlex
+    if PY3:
+        p = subprocess.Popen(shlex.split('python -m http.server 8000'))
+    else:
+        p = subprocess.Popen(shlex.split('python -m SimpleHTTPServer 8000'))
+    yield gen.sleep(1)  # or poll for server coming live?
+    with dask.config.set({'distributed.comm.timeouts.connect': '10ms'}):
+        c = Client('127.0.0.1:8000', asynchronous=True)
+        with pytest.raises((TimeoutError, IOError)):
+            yield c
+    p.terminate()
+
+
 @gen_cluster()
 def test_turn_off_pickle(s, a, b):
     import numpy as np
