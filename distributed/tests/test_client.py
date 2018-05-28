@@ -5290,18 +5290,15 @@ def test_client_timeout_2():
 
 @gen_test()
 def test_client_active_bad_port():
-    import subprocess
-    import shlex
-    if PY3:
-        p = subprocess.Popen(shlex.split('python -m http.server 8000'))
-    else:
-        p = subprocess.Popen(shlex.split('python -m SimpleHTTPServer 8000'))
-    yield gen.sleep(1)  # or poll for server coming live?
+    import tornado.web
+    application = tornado.web.Application([
+        (r"/", tornado.web.RequestHandler),
+    ])
+    application.listen(8000)
     with dask.config.set({'distributed.comm.timeouts.connect': '10ms'}):
         c = Client('127.0.0.1:8000', asynchronous=True)
         with pytest.raises((TimeoutError, IOError)):
             yield c
-    p.terminate()
 
 
 @gen_cluster()
