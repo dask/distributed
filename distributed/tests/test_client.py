@@ -5299,7 +5299,7 @@ def test_client_active_bad_port():
         c = Client('127.0.0.1:8000', asynchronous=True)
         with pytest.raises((TimeoutError, IOError)):
             yield c
-        yield c.close(fast=True)
+        yield c._close(fast=True)
 
 
 @gen_cluster()
