@@ -318,6 +318,7 @@ class Pub(object):
             self.client.scheduler_comm.send(data)
 
     def put(self, msg):
+        """ Publish a message to all subscribers of this topic """
         self.loop.add_callback(self._put, msg)
 
 
@@ -381,6 +382,7 @@ class Sub(object):
     __anext__ = _get
 
     def get(self, timeout=None):
+        """ Get a single message """
         if self.client:
             return self.client.sync(self._get, timeout=timeout)
         elif self.worker.thread_id == get_thread_identity():

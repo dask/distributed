@@ -14,7 +14,9 @@ def test_speed(c, s, a, b):
     """
     This tests how quickly we can move messages back and forth
 
-    This is mostly a test of latency
+    This is mostly a test of latency.
+
+    Interestingly this runs 10x slower on Python 2
     """
     def pingpong(a, b, start=False, n=1000, msg=1):
         sub = Sub(a)
@@ -27,14 +29,10 @@ def test_speed(c, s, a, b):
             pub.put(msg)  # other sub may not have started yet
 
         for i in range(n):
-            try:
-                msg = next(sub)
-            except TimeoutError:
-
-                raise TimeoutError((i, sub.buffer, pub.subscribers))
+            msg = next(sub)
             pub.put(msg)
-            if i % 100 == 0:
-                print(a, b, i)
+            # if i % 100 == 0:
+            #     print(a, b, i)
         return n
 
     import numpy as np
@@ -46,7 +44,7 @@ def test_speed(c, s, a, b):
     start = time()
     yield c.gather([x, y])
     stop = time()
-    print('duration', stop - start)  # I get around 3ms/roundtrip on my laptop
+    # print('duration', stop - start)  # I get around 3ms/roundtrip on my laptop
 
 
 @gen_cluster(client=True, ncores=[])
