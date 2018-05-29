@@ -208,7 +208,6 @@ def test_keywords(loop, joblib):
 
 
 def test_cleanup(loop, joblib):
-    from distributed.client import global_futures
     with Client(processes=False, loop=loop) as client:
         with joblib.parallel_backend('dask'):
             joblib.Parallel()(joblib.delayed(inc)(i) for i in range(10))
