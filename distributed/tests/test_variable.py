@@ -47,7 +47,7 @@ def test_queue_with_data(c, s, a, b):
     yield x.set([1, 'hello'])
     data = yield xx.get()
 
-    assert data == [1, 'hello']
+    assert list(data) == [1, 'hello']
 
 
 def test_sync(loop):

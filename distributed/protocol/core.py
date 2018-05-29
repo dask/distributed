@@ -122,7 +122,12 @@ def loads(frames, deserialize=True, deserializers=None):
             else:
                 value = Serialized(head, fs)
 
-            get_in(key[:-1], msg)[key[-1]] = value
+            # TODO: This is problematic with tuple assignment
+            val_holder = get_in(key[:-1], msg)
+            if isinstance(val_holder, tuple):
+                msg[key[0]] = list(val_holder)
+                val_holder = get_in(key[:-1], msg)
+            val_holder[key[-1]] = value
 
         return msg
     except Exception:

@@ -3340,7 +3340,7 @@ def test_default_get():
 @gen_cluster(client=True)
 def test_get_processing(c, s, a, b):
     processing = yield c.processing()
-    assert processing == valmap(list, s.processing)
+    assert processing == valmap(tuple, s.processing)
 
     futures = c.map(slowinc, range(10), delay=0.1, workers=[a.address],
                     allow_other_workers=True)
@@ -3351,7 +3351,7 @@ def test_get_processing(c, s, a, b):
     assert set(x) == {a.address, b.address}
 
     x = yield c.processing(workers=[a.address])
-    assert isinstance(x[a.address], list)
+    assert isinstance(x[a.address], (list, tuple))
 
 
 @gen_cluster(client=True)

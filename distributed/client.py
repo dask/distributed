@@ -3040,7 +3040,7 @@ class Client(Node):
         if check:
             # we care about the required & optional packages matching
             def to_packages(d):
-                return dict(sum(d['packages'].values(), []))
+                return dict(sum(map(list, d['packages'].values()), []))
             client_versions = to_packages(result['client'])
             versions = [('scheduler', to_packages(result['scheduler']))]
             versions.extend((w, to_packages(d))
