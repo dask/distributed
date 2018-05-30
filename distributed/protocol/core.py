@@ -122,14 +122,23 @@ def loads(frames, deserialize=True, deserializers=None):
             else:
                 value = Serialized(head, fs)
 
-            # TODO: This is problematic with tuple assignment
-            val_holder = get_in(key[:-1], msg)
-            if isinstance(val_holder, tuple):
-                if isinstance(msg, tuple):
-                    msg = list(msg)
-                msg[key[0]] = list(val_holder)
-                val_holder = get_in(key[:-1], msg)
-            val_holder[key[-1]] = value
+            from toolz import get_in
+
+            def put_in(keys, coll, val):
+                """Inverse of get_in, but does type promotion in the case of lists"""
+                from cytoolz import reduce
+                import operator
+                if len(keys) > 0:
+                    holder = reduce(operator.getitem, keys[:-1], coll)
+                    if isinstance(holder, tuple):
+                        holder = list(holder)
+                        coll = put_in(keys[:-1], coll, holder)
+                    holder[keys[-1]] = val
+                if len(keys) == 0:
+                    coll = val
+                return coll
+
+            msg = put_in(key, msg, value)
 
         return msg
     except Exception:
