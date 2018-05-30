@@ -125,6 +125,8 @@ def loads(frames, deserialize=True, deserializers=None):
             # TODO: This is problematic with tuple assignment
             val_holder = get_in(key[:-1], msg)
             if isinstance(val_holder, tuple):
+                if isinstance(msg, tuple):
+                    msg = list(msg)
                 msg[key[0]] = list(val_holder)
                 val_holder = get_in(key[:-1], msg)
             val_holder[key[-1]] = value
