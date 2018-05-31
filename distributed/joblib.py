@@ -24,7 +24,10 @@ with ignoring(ImportError):
         joblib = None
 with ignoring(ImportError):
     import sklearn.externals.joblib as sk_joblib
-    if LooseVersion(sk_joblib.__version__) < '0.10.2':
+    if joblib is not None and sk_joblib.Parallel is joblib.Parallel:
+        # joblib is unvendored in scikit-learn
+        sk_joblib = None
+    elif LooseVersion(sk_joblib.__version__) < '0.10.2':
         sk_joblib = None
 
 _bases = []
@@ -32,8 +35,13 @@ if joblib:
     from joblib.parallel import AutoBatchingMixin, ParallelBackendBase
     _bases.append(ParallelBackendBase)
 if sk_joblib:
-    from sklearn.externals.joblib.parallel import (AutoBatchingMixin,  # noqa
-            ParallelBackendBase)
+    # Follow changes in scikit-learn
+    try:
+        from sklearn.externals.joblib.parallel import (  # noqa
+            AutoBatchingMixin, ParallelBackendBase)
+    except ModuleNotFoundError:
+        from sklearn.externals._joblib.parallel import (  # noqa
+            AutoBatchingMixin, ParallelBackendBase)
     _bases.append(ParallelBackendBase)
 if not _bases:
     raise RuntimeError("Joblib backend requires either `joblib` >= '0.10.2' "
