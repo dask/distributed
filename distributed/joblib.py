@@ -83,12 +83,7 @@ class _WeakKeyDictionary:
             # as soon as the object used as key is garbage collected.
             def on_destroy(_):
                 del self._data[key]
-            try:
-                ref = weakref.ref(obj, on_destroy)
-            except TypeError:
-                # Some interned objects such as str cannot have a weakref:
-                # store the object directly
-                ref = obj
+            ref = weakref.ref(obj, on_destroy)
         self._data[key] = ref, value
 
     def __len__(self):
@@ -181,7 +176,6 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
         # The explicit call to clear is required to break a cycling reference
         # to the futures.
         self.call_data_futures.clear()
-        self.call_data_futures = None
 
     def effective_n_jobs(self, n_jobs):
         return sum(self.client.ncores().values())
@@ -205,13 +199,11 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
                 if f is None and arg_id in self.data_futures:
                     f = self.data_futures[arg_id]
 
-                if f is None and call_data_futures is not None:
+                elif f is None and call_data_futures is not None:
                     try:
                         f = call_data_futures[arg]
                     except KeyError:
-                        if (call_data_futures is not None
-                                and is_weakrefable(arg)
-                                and sizeof(arg) > 1e6):
+                        if is_weakrefable(arg) and sizeof(arg) > 1e6:
                             # Automatically scatter large objects to some of
                             # the workers to avoid duplicated data transfers.
                             # Rely on automated inter-worker data stealing if
