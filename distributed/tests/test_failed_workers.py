@@ -79,15 +79,12 @@ def test_gather_then_submit_after_failed_workers(c, s, w, x, y, z):
     total = c.submit(sum, L)
 
     for i in range(3):
-        print(i)
         yield wait(total)
         addr = first(s.tasks[total.key].who_has).address
         for worker in [x, y, z]:
             if worker.worker_address == addr:
                 worker.process.process._process.terminate()
                 break
-        else:
-            assert 0, "Could not find worker %r" % (addr,)
 
         result = yield c.gather([total])
         assert result == [sum(map(inc, range(20)))]
