@@ -183,7 +183,7 @@ def test_upload_file(c, s, a, b):
 
 @pytest.mark.xfail(reason="don't yet support uploading pyc files")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
-def dont_test_upload_file_pyc(c, s, w):
+def test_upload_file_pyc(c, s, w):
     with tmpfile() as dirname:
         os.mkdir(dirname)
         with open(os.path.join(dirname, 'foo.py'), mode='w') as f:

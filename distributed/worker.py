@@ -2017,7 +2017,6 @@ class Worker(WorkerBase):
                 self.in_flight_workers[worker].remove(dep)
 
             for key in self.dependents.pop(dep, ()):
-                # self.dependencies[key].remove(dep)
                 if self.task_state[key] != 'memory':
                     self.release_key(key, cause=dep)
 
