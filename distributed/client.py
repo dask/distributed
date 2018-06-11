@@ -961,7 +961,7 @@ class Client(Node):
                         else:
                             break
                     if not isinstance(msgs, (list, tuple)):
-                        msgs = [msgs]
+                        msgs = (msgs,)
 
                     breakout = False
                     for msg in msgs:
@@ -2910,8 +2910,8 @@ class Client(Node):
         --------
         Client.set_metadata
         """
-        if not isinstance(keys, (tuple, list)):
-            keys = [keys]
+        if not isinstance(keys, (list, tuple)):
+            keys = (keys,)
         return self.sync(self.scheduler.get_metadata, keys=keys,
                          default=default)
 
@@ -3011,8 +3011,8 @@ class Client(Node):
         --------
         get_metadata
         """
-        if not isinstance(key, (tuple, list)):
-            key = [key]
+        if not isinstance(key, list):
+            key = (key,)
         return self.sync(self.scheduler.set_metadata, keys=key, value=value)
 
     def get_versions(self, check=False):
@@ -3040,7 +3040,8 @@ class Client(Node):
         if check:
             # we care about the required & optional packages matching
             def to_packages(d):
-                return dict(sum(map(list, d['packages'].values()), []))
+                L = list(d['packages'].values())
+                return dict(sum(L, type(L[0])()))
             client_versions = to_packages(result['client'])
             versions = [('scheduler', to_packages(result['scheduler']))]
             versions.extend((w, to_packages(d))

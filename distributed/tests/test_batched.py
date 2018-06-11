@@ -69,9 +69,9 @@ def test_BatchedSend():
         b.send('HELLO')
 
         result = yield comm.read()
-        assert list(result) == ['hello', 'hello', 'world']
+        assert result == ('hello', 'hello', 'world')
         result = yield comm.read()
-        assert list(result) == ['HELLO', 'HELLO']
+        assert result == ('HELLO', 'HELLO')
 
         assert b.byte_count > 1
 
@@ -88,7 +88,7 @@ def test_send_before_start():
 
         b.start(comm)
         result = yield comm.read()
-        assert list(result) == ['hello', 'world']
+        assert result == ('hello', 'world')
 
 
 @gen_test()
@@ -104,7 +104,7 @@ def test_send_after_stream_start():
         result = yield comm.read()
         if len(result) < 2:
             result += yield comm.read()
-        assert list(result) == ['hello', 'world']
+        assert result == ('hello', 'world')
 
 
 @gen_test()

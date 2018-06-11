@@ -1,13 +1,14 @@
 from __future__ import print_function, division, absolute_import
 
 import logging
+import operator
 
 import msgpack
 
 try:
-    from cytoolz import get_in
+    from cytoolz import get_in, reduce
 except ImportError:
-    from toolz import get_in
+    from toolz import get_in, reduce
 
 from .compression import compressions, maybe_compress, decompress
 from .serialize import (serialize, deserialize, Serialize, Serialized,
@@ -122,19 +123,15 @@ def loads(frames, deserialize=True, deserializers=None):
             else:
                 value = Serialized(head, fs)
 
-            from toolz import get_in
-
             def put_in(keys, coll, val):
                 """Inverse of get_in, but does type promotion in the case of lists"""
-                from cytoolz import reduce
-                import operator
-                if len(keys) > 0:
+                if keys:
                     holder = reduce(operator.getitem, keys[:-1], coll)
                     if isinstance(holder, tuple):
                         holder = list(holder)
                         coll = put_in(keys[:-1], coll, holder)
                     holder[keys[-1]] = val
-                if len(keys) == 0:
+                else:
                     coll = val
                 return coll
 
