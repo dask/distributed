@@ -6,9 +6,9 @@ import operator
 import msgpack
 
 try:
-    from cytoolz import get_in, reduce
+    from cytoolz import reduce
 except ImportError:
-    from toolz import get_in, reduce
+    from toolz import reduce
 
 from .compression import compressions, maybe_compress, decompress
 from .serialize import (serialize, deserialize, Serialize, Serialized,
