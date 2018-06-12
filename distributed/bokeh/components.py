@@ -394,8 +394,10 @@ class ProfileTimePlot(DashboardComponent):
         self.source.on_change('selected', cb)
 
         self.profile_plot = figure(tools='tap', height=400, **kwargs)
-        self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
-                               line_color='black', source=self.source)
+        r = self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
+                                   line_color='black', source=self.source)
+        r.selection_glyph = None
+        r.nonselection_glyph = None
 
         hover = HoverTool(
             point_policy="follow_mouse",
