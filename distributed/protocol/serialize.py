@@ -12,6 +12,7 @@ import msgpack
 
 from . import pickle
 from ..compatibility import PY2
+from ..utils import has_keyword
 from .compression import maybe_compress, decompress
 from .utils import unpack_frames, pack_frames_prelude, frame_split_size
 
@@ -71,15 +72,20 @@ def serialization_error_loads(header, frames):
     raise TypeError(msg)
 
 
-families = {
- 'dask': (dask_dumps, dask_loads),
- 'pickle': (pickle_dumps, pickle_loads),
- 'msgpack': (msgpack_dumps, msgpack_loads),
- 'error': (None, serialization_error_loads),
-}
+families = {}
 
 
-def serialize(x, serializers=None, on_error='message'):
+def register_serialization_family(name, dumps, loads):
+    families[name] = (dumps, loads, dumps and has_keyword(dumps, 'context'))
+
+
+register_serialization_family('dask', dask_dumps, dask_loads)
+register_serialization_family('pickle', pickle_dumps, pickle_loads)
+register_serialization_family('msgpack', msgpack_dumps, msgpack_loads)
+register_serialization_family('error', None, serialization_error_loads)
+
+
+def serialize(x, serializers=None, on_error='message', context=None):
     r"""
     Convert object to a header and list of bytestrings
 
@@ -124,9 +130,9 @@ def serialize(x, serializers=None, on_error='message'):
     tb = ''
 
     for name in serializers:
-        dumps, loads = families[name]
+        dumps, loads, wants_context = families[name]
         try:
-            header, frames = dumps(x)
+            header, frames = dumps(x, context=context) if wants_context else dumps(x)
             header['serializer'] = name
             return header, frames
         except NotImplementedError:
@@ -165,7 +171,7 @@ def deserialize(header, frames, deserializers=None):
     if deserializers is not None and name not in deserializers:
         raise TypeError("Data serialized with %s but only able to deserialize "
                         "data with %s" % (name, str(list(deserializers))))
-    dumps, loads = families[name]
+    dumps, loads, wants_context = families[name]
     return loads(header, frames)
 
 

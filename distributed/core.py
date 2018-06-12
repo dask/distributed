@@ -3,7 +3,6 @@ from __future__ import print_function, division, absolute_import
 from collections import defaultdict, deque
 from concurrent.futures import CancelledError
 from functools import partial
-import inspect
 import logging
 import six
 import traceback
@@ -17,7 +16,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
-from .compatibility import PY3, get_thread_identity
+from .compatibility import get_thread_identity
 from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)
