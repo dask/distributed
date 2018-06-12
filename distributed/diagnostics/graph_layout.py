@@ -94,7 +94,10 @@ class GraphLayout(SchedulerPlugin):
             for dep in task.dependencies:
                 self.visible_edge_updates.append((self.index_edge.pop((dep.key, key)), 'False'))
 
-            del self.collision[(self.x[key], self.y[key])]
+            try:
+                del self.collision[(self.x[key], self.y[key])]
+            except KeyError:
+                pass
 
             for collection in [self.x, self.y, self.index]:
                 del collection[key]
