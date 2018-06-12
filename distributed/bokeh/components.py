@@ -373,7 +373,11 @@ class ProfileTimePlot(DashboardComponent):
         self.states = data.pop('states')
         self.source = ColumnDataSource(data=data)
 
+        changing = [False]  # avoid repeated changes from within callback
+
         def cb(attr, old, new):
+            if changing[0]:
+                return
             with log_errors():
                 try:
                     ind = new['1d']['indices'][0]
@@ -382,8 +386,10 @@ class ProfileTimePlot(DashboardComponent):
                 data = profile.plot_data(self.states[ind], profile_interval)
                 del self.states[:]
                 self.states.extend(data.pop('states'))
+                changing[0] = True  # don't recursively trigger callback
                 self.source.data.update(data)
                 self.source.selected = old
+                changing[0] = False
 
         self.source.on_change('selected', cb)
 
