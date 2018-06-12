@@ -79,73 +79,6 @@ families = {
 }
 
 
-def register_serialization(cls, serialize, deserialize):
-    """ Register a new class for dask-custom serialization
-
-    Parameters
-    ----------
-    cls: type
-    serialize: function
-    deserialize: function
-
-    Examples
-    --------
-    >>> class Human(object):
-    ...     def __init__(self, name):
-    ...         self.name = name
-
-    >>> def serialize(human):
-    ...     header = {}
-    ...     frames = [human.name.encode()]
-    ...     return header, frames
-
-    >>> def deserialize(header, frames):
-    ...     return Human(frames[0].decode())
-
-    >>> register_serialization(Human, serialize, deserialize)
-    >>> serialize(Human('Alice'))
-    ({}, [b'Alice'])
-
-    See Also
-    --------
-    serialize
-    deserialize
-    """
-    if isinstance(cls, type):
-        name = typename(cls)
-    elif isinstance(cls, str):
-        name = cls
-    class_serializers[name] = (serialize, deserialize)
-
-
-def register_serialization_lazy(toplevel, func):
-    """Register a registration function to be called if *toplevel*
-    module is ever loaded.
-    """
-    lazy_registrations[toplevel] = func
-
-
-def typename(typ):
-    """ Return name of type
-
-    Examples
-    --------
-    >>> from distributed import Scheduler
-    >>> typename(Scheduler)
-    'distributed.scheduler.Scheduler'
-    """
-    return typ.__module__ + '.' + typ.__name__
-
-
-def _find_lazy_registration(typename):
-    toplevel, _, _ = typename.partition('.')
-    if toplevel in lazy_registrations:
-        lazy_registrations.pop(toplevel)()
-        return True
-    else:
-        return False
-
-
 def serialize(x, serializers=None, on_error='message'):
     r"""
     Convert object to a header and list of bytestrings
@@ -394,29 +327,6 @@ def nested_deserialize(x):
     return replace_inner(x)
 
 
-@partial(normalize_token.register, Serialized)
-def normalize_Serialized(o):
-    return [o.header] + o.frames  # for dask.base.tokenize
-
-
-# Teach serialize how to handle bytestrings
-def _serialize_bytes(obj):
-    header = {}  # no special metadata
-    frames = [obj]
-    return header, frames
-
-
-def _deserialize_bytes(header, frames):
-    return frames[0]
-
-
-# NOTE: using the same exact serialization means a bytes object may be
-# deserialized as bytearray or vice-versa...  Not sure this is a problem
-# in practice.
-register_serialization(bytes, _serialize_bytes, _deserialize_bytes)
-register_serialization(bytearray, _serialize_bytes, _deserialize_bytes)
-
-
 def serialize_bytelist(x, **kwargs):
     header, frames = serialize(x, **kwargs)
     frames = frame_split_size(frames)
@@ -448,3 +358,98 @@ def deserialize_bytes(b):
         header = {}
     frames = decompress(header, frames)
     return deserialize(header, frames)
+
+
+################################
+# Class specific serialization #
+################################
+
+
+def register_serialization(cls, serialize, deserialize):
+    """ Register a new class for dask-custom serialization
+
+    Parameters
+    ----------
+    cls: type
+    serialize: function
+    deserialize: function
+
+    Examples
+    --------
+    >>> class Human(object):
+    ...     def __init__(self, name):
+    ...         self.name = name
+
+    >>> def serialize(human):
+    ...     header = {}
+    ...     frames = [human.name.encode()]
+    ...     return header, frames
+
+    >>> def deserialize(header, frames):
+    ...     return Human(frames[0].decode())
+
+    >>> register_serialization(Human, serialize, deserialize)
+    >>> serialize(Human('Alice'))
+    ({}, [b'Alice'])
+
+    See Also
+    --------
+    serialize
+    deserialize
+    """
+    if isinstance(cls, type):
+        name = typename(cls)
+    elif isinstance(cls, str):
+        name = cls
+    class_serializers[name] = (serialize, deserialize)
+
+
+def register_serialization_lazy(toplevel, func):
+    """Register a registration function to be called if *toplevel*
+    module is ever loaded.
+    """
+    lazy_registrations[toplevel] = func
+
+
+def typename(typ):
+    """ Return name of type
+
+    Examples
+    --------
+    >>> from distributed import Scheduler
+    >>> typename(Scheduler)
+    'distributed.scheduler.Scheduler'
+    """
+    return typ.__module__ + '.' + typ.__name__
+
+
+def _find_lazy_registration(typename):
+    toplevel, _, _ = typename.partition('.')
+    if toplevel in lazy_registrations:
+        lazy_registrations.pop(toplevel)()
+        return True
+    else:
+        return False
+
+
+@partial(normalize_token.register, Serialized)
+def normalize_Serialized(o):
+    return [o.header] + o.frames  # for dask.base.tokenize
+
+
+# Teach serialize how to handle bytestrings
+def _serialize_bytes(obj):
+    header = {}  # no special metadata
+    frames = [obj]
+    return header, frames
+
+
+def _deserialize_bytes(header, frames):
+    return frames[0]
+
+
+# NOTE: using the same exact serialization means a bytes object may be
+# deserialized as bytearray or vice-versa...  Not sure this is a problem
+# in practice.
+register_serialization(bytes, _serialize_bytes, _deserialize_bytes)
+register_serialization(bytearray, _serialize_bytes, _deserialize_bytes)
