@@ -56,8 +56,7 @@ def gather_from_workers(who_has, rpc, close=True, serializers=None):
 
         rpcs = {addr: rpc(addr) for addr in d}
         try:
-            coroutines = {address: get_data_from_worker(rpc, keys, address,
-                                                        serializers=serializers)
+            coroutines = {address: get_data_from_worker(rpc, keys, address)
                           for address, keys in d.items()}
             response = {}
             for worker, c in coroutines.items():

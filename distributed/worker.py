@@ -30,7 +30,7 @@ from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for, connect
 from .comm.utils import offload
 from .compatibility import unicode, get_thread_identity, finalize
-from .core import (error_message, CommClosedError,
+from .core import (error_message, CommClosedError, send_recv,
                    rpc, pingpong, coerce_to_address)
 from .diskutils import WorkSpace
 from .metrics import time
@@ -2701,7 +2701,7 @@ def parse_memory_limit(memory_limit, ncores):
 
 
 @gen.coroutine
-def get_data_from_worker(rpc, keys, worker, who=None, serializers=None):
+def get_data_from_worker(rpc, keys, worker, who=None):
     """ Get keys from worker
 
     The worker has a two step handshake to acknowledge when data has been fully
@@ -2715,11 +2715,11 @@ def get_data_from_worker(rpc, keys, worker, who=None, serializers=None):
     """
     comm = yield rpc.connect(worker)
     try:
-        yield comm.write({'op': 'get_data',
-                          'keys': keys,
-                          'who': who},
-                         serializers=serializers)
-        response = yield comm.read(deserializers=serializers)
+        response = yield send_recv(comm,
+                                   serializers=rpc.serializers,
+                                   deserializers=rpc.deserializers,
+                                   deserialize=rpc.deserialize,
+                                   op='get_data', keys=keys, who=who)
         yield comm.write('OK')
     finally:
         rpc.reuse(worker, comm)
