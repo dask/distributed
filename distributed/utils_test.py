@@ -779,7 +779,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                             args = [s] + workers
                             if client:
                                 c = yield Client(s.address, loop=loop, security=security,
-                                                 asynchronous=True, **client_kwargs)
+                                                 set_as_default=True, asynchronous=True,
+                                                 **client_kwargs)
                                 args = [c] + args
                             try:
                                 future = func(*args)
