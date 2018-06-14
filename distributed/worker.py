@@ -603,8 +603,9 @@ class WorkerBase(ServerNode):
     def get_data(self, comm, keys=None, who=None, serializers=None):
         start = time()
 
-        msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
-        nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
+        data = {k: self.data[k] for k in keys if k in self.data}
+        msg = {k: to_serialize(v) for k, v in data.items()}
+        nbytes = {k: self.nbytes.get(k) for k in data}
         stop = time()
         if self.digests is not None:
             self.digests['get-data-load-duration'].add(stop - start)
