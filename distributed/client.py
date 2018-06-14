@@ -1806,7 +1806,7 @@ class Client(Node):
             def add_coro(name, data):
                 keys = [tokey(f.key) for f in futures_of(data)]
                 coroutines.append(self.scheduler.publish_put(keys=keys,
-                                                             name=dumps(name),
+                                                             name=name,
                                                              data=to_serialize(data),
                                                              client=self.id))
 
@@ -1890,7 +1890,7 @@ class Client(Node):
         --------
         Client.publish_dataset
         """
-        return self.sync(self.scheduler.publish_delete, name=dumps(name), **kwargs)
+        return self.sync(self.scheduler.publish_delete, name=name, **kwargs)
 
     def list_datasets(self, **kwargs):
         """
@@ -1905,7 +1905,7 @@ class Client(Node):
 
     @gen.coroutine
     def _get_dataset(self, name):
-        out = yield self.scheduler.publish_get(name=dumps(name), client=self.id)
+        out = yield self.scheduler.publish_get(name=name, client=self.id)
         if out is None:
             raise KeyError("Dataset '%s' not found" % name)
 
