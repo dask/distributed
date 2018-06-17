@@ -19,8 +19,8 @@ import sys
 import uuid
 import threading
 import six
+from six.moves.urllib_parse import urlparse
 import socket
-from urllib.parse import urlparse
 import warnings
 import weakref
 
