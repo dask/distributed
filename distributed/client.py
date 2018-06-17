@@ -825,7 +825,7 @@ class Client(Node):
         info = yield self.scheduler.identity()
         if info and 'bokeh' in info['services']:
             self.bokeh_port = info['services']['bokeh']
-        
+
         for pc in self._periodic_callbacks.values():
             pc.start()
 
