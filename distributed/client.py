@@ -522,6 +522,7 @@ class Client(Node):
             timeout = parse_timedelta(timeout, 's')
         self._timeout = timeout
 
+        self._local_config = dict()
         self.futures = dict()
         self.refcount = defaultdict(lambda: 0)
         self.coroutines = []
@@ -536,8 +537,6 @@ class Client(Node):
         self._startup_kwargs = kwargs
         self.cluster = None
         self.scheduler = None
-        self.scheduler_address = None
-        self.bokeh_port = None
         self._scheduler_identity = {}
         self._lock = threading.Lock()
         self._refcount_lock = threading.Lock()
@@ -683,24 +682,30 @@ class Client(Node):
             info = False
             scheduler = self.scheduler
 
-        if scheduler is not None:
-            text = ("<h3>Client</h3>\n"
-                    "<ul>\n"
-                    "  <li><b>Scheduler: </b>%s\n") % scheduler.address
-        else:
+        if scheduler is None:
             text = ("<h3>Client</h3>\n"
                     "<ul>\n"
                     "  <li><b>Scheduler: not connected</b>\n")
-        if self.bokeh_port is not None:
-            urlparts = urlparse(self.scheduler_address)
-            if urlparts.scheme == 'inproc':
-                host = 'localhost'
-            else:
-                host = urlparts.hostname
-            port = self.bokeh_port
-            template = dask.config.get('distributed.dashboard.link')
-            address = template.format(host=host, port=port, self=self, **os.environ)
-            text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
+        else:
+            text = ("<h3>Client</h3>\n"
+                    "<ul>\n"
+                    "  <li><b>Scheduler: </b>%s\n") % scheduler.address
+
+            if info and 'bokeh' in info['services']:
+                urlparts = urlparse(scheduler.address)
+                if urlparts.scheme == 'inproc':
+                    host = 'localhost'
+                else:
+                    host = urlparts.hostname
+                port = info['services']['bokeh']
+                template = dask.config.get('distributed.dashboard.link')
+                ns = os.environ.copy()
+                ns['host'] = host
+                ns['port'] = port
+                ns.update(self._local_config)
+                address = template.format(**ns)
+                text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
+
         text += "</ul>\n"
 
         if info:
@@ -820,11 +825,6 @@ class Client(Node):
         self.scheduler_comm = None
 
         yield self._ensure_connected(timeout=timeout)
-
-        self.scheduler_address = self.scheduler.address
-        info = yield self.scheduler.identity()
-        if info and 'bokeh' in info['services']:
-            self.bokeh_port = info['services']['bokeh']
 
         for pc in self._periodic_callbacks.values():
             pc.start()
