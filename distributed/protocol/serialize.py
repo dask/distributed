@@ -22,12 +22,15 @@ class_serializers = {}
 lazy_registrations = {}
 
 
-def dask_dumps(x):
+def dask_dumps(x, context=None):
     """Serialise object using the class-based registry"""
     typ = typename(type(x))
     if typ in class_serializers:
-        dumps, loads = class_serializers[typ]
-        header, frames = dumps(x)
+        dumps, loads, has_context = class_serializers[typ]
+        if has_context:
+            header, frames = dumps(x, context=context)
+        else:
+            header, frames = dumps(x)
         header['type'] = typ
         header['serializer'] = 'dask'
         return header, frames
@@ -44,7 +47,7 @@ def dask_loads(header, frames):
         _find_lazy_registration(typ)
 
     try:
-        dumps, loads = class_serializers[typ]
+        dumps, loads, _ = class_serializers[typ]
     except KeyError:
         raise TypeError("Serialization for type %s not found" % typ)
     else:
@@ -407,7 +410,9 @@ def register_serialization(cls, serialize, deserialize):
         name = typename(cls)
     elif isinstance(cls, str):
         name = cls
-    class_serializers[name] = (serialize, deserialize)
+    class_serializers[name] = (serialize,
+                               deserialize,
+                               has_keyword(serialize, 'context'))
 
 
 def register_serialization_lazy(toplevel, func):
