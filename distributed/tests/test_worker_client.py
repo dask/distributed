@@ -297,3 +297,17 @@ def test_worker_client_rejoins(c, s, a, b):
 
     result = yield c.submit(f)
     assert result
+
+
+@gen_cluster(client=True)
+def test_submit_different_names(c, s, a, b):
+    # https://github.com/dask/distributed/issues/2058
+    da = pytest.importorskip('dask.array')
+    c = yield Client('localhost:' + s.address.split(":")[-1], loop=s.loop,
+                     asynchronous=True)
+    with c:
+        X = c.persist(da.random.uniform(size=(100, 10), chunks=50))
+        yield wait(X)
+
+        fut = yield c.submit(lambda x: x.sum().compute(), X)
+        assert fut > 0

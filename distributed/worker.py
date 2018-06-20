@@ -27,7 +27,8 @@ from tornado.locks import Event
 
 from . import profile
 from .batched import BatchedSend
-from .comm import get_address_host, get_local_address_for, connect
+from .comm import (get_address_host, get_local_address_for, connect,
+                   resolve_address)
 from .comm.utils import offload
 from .compatibility import unicode, get_thread_identity, finalize
 from .core import (error_message, CommClosedError,
@@ -2619,6 +2620,8 @@ def get_client(address=None, timeout=3):
     worker_client
     secede
     """
+    if address:
+        address = resolve_address(address)
     try:
         worker = get_worker()
     except ValueError:  # could not find worker
