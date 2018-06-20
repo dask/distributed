@@ -185,6 +185,14 @@ def test_serialize_bytes():
         assert str(x) == str(y)
 
 
+@pytest.mark.parametrize('val', [tuple([1, 2]), set([1,2]), frozenset([1,2])])
+def test_serialize_msgpack(val):
+    from distributed.protocol.msgpack import loads, dumps
+    res = loads(dumps(val))
+    assert type(res) == type(val)
+    assert res == val
+
+
 def test_serialize_list_compress():
     pytest.importorskip('lz4')
     x = np.ones(1000000)

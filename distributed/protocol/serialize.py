@@ -3,13 +3,13 @@ from functools import partial
 import traceback
 
 from dask.base import normalize_token
+
 try:
     from cytoolz import valmap, get_in
 except ImportError:
     from toolz import valmap, get_in
 
-import msgpack
-
+from . import msgpack
 from . import pickle
 from ..compatibility import PY2
 from .compression import maybe_compress, decompress
