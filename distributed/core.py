@@ -359,8 +359,8 @@ class Server(object):
         try:
             while not closed:
                 msgs = yield comm.read()
-                if not isinstance(msgs, list):
-                    msgs = [msgs]
+                if not isinstance(msgs, (tuple, list)):
+                    msgs = (msgs,)
 
                 if not comm.closed():
                     for msg in msgs:
@@ -597,6 +597,10 @@ class PooledRPCCall(object):
         self.pool = pool
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
+
+    @property
+    def address(self):
+        return self.addr
 
     def __getattr__(self, key):
         @gen.coroutine
