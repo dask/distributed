@@ -1,8 +1,6 @@
 from collections import MutableMapping
 from distributed.utils import log_errors, tokey
 
-from .protocol.pickle import dumps, loads
-
 
 class PublishExtension(object):
     """ An extension for the scheduler to manage collections
