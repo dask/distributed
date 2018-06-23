@@ -5,6 +5,7 @@ from collections import deque
 from contextlib import contextmanager
 from datetime import timedelta
 import functools
+import inspect
 import json
 import logging
 import multiprocessing
@@ -238,12 +239,17 @@ def sync(loop, func, *args, **kwargs):
 
     timeout = kwargs.pop('callback_timeout', None)
 
-    def make_coro():
-        coro = gen.maybe_future(func(*args, **kwargs))
+    def make_future():
+        future = func(*args, **kwargs)
+        if type(future) is not gen.Future and not inspect.iscoroutine(future):
+            @gen.coroutine
+            def _():
+                raise gen.Return(future)
+            future = _()
         if timeout is None:
-            return coro
+            return future
         else:
-            return gen.with_timeout(timedelta(seconds=timeout), coro)
+            return gen.with_timeout(timedelta(seconds=timeout), future)
 
     e = threading.Event()
     main_tid = get_thread_identity()
@@ -257,7 +263,7 @@ def sync(loop, func, *args, **kwargs):
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
             thread_state.asynchronous = True
-            result[0] = yield make_coro()
+            result[0] = yield make_future()
         except Exception as exc:
             error[0] = sys.exc_info()
         finally:
