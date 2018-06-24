@@ -190,7 +190,7 @@ def test_datasets_setitem(loop):
             for key in ['key', ('key', 'key'), 1]:
                 value = 'value'
                 client.datasets[key] = value
-                assert client.get_dataset('key') == value
+                assert client.get_dataset(key) == value
 
 
 def test_datasets_getitem(loop):
