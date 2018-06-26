@@ -96,6 +96,8 @@ After this the name ``'pickle'`` can be used in the ``serializers=`` and
 Communication Context
 +++++++++++++++++++++
 
+.. note:: This is an experimental feature and may change without notice
+
 Dask :doc:`Comms <communications>` can provide additional context to
 serialization family functions if they provide a ``context=`` keyword.
 This allows serialization to behave differently according to how it is being
