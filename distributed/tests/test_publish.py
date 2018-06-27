@@ -33,28 +33,20 @@ def test_publish_simple(s, a, b):
     result = yield f.scheduler.publish_list()
     assert result == ('data',)
 
-    yield c.close()
-    yield f.close()
-
 
 @gen_cluster(client=False)
 def test_publish_non_string_key(s, a, b):
     c = yield Client((s.ip, s.port), asynchronous=True)
     f = yield Client((s.ip, s.port), asynchronous=True)
 
-    try:
-        for name in [('a', 'b'), 9.0, 8]:
-            data = yield c.scatter(range(3))
-            out = yield c.publish_dataset(data, name=name)
-            assert name in s.extensions['publish'].datasets
-            assert isinstance(s.extensions['publish'].datasets[name]['data'], Serialized)
+    for name in [('a', 'b'), 9.0, 8]:
+        data = yield c.scatter(range(3))
+        out = yield c.publish_dataset(data, name=name)
+        assert name in s.extensions['publish'].datasets
+        assert isinstance(s.extensions['publish'].datasets[name]['data'], Serialized)
 
-            datasets = yield c.scheduler.publish_list()
-            assert name in datasets
-
-    finally:
-        c.close()
-        f.close()
+        datasets = yield c.scheduler.publish_list()
+        assert name in datasets
 
 
 @gen_cluster(client=False)
@@ -77,9 +69,6 @@ def test_publish_roundtrip(s, a, b):
 
     assert "not found" in str(exc_info.value)
     assert "nonexistent" in str(exc_info.value)
-
-    yield c.close()
-    yield f.close()
 
 
 @gen_cluster(client=True)
@@ -180,8 +169,6 @@ def test_publish_bag(s, a, b):
 
     out = yield f.compute(result)
     assert out == [0, 1, 2]
-    yield c.close()
-    yield f.close()
 
 
 def test_datasets_setitem(loop):

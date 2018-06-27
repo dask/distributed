@@ -216,8 +216,6 @@ def test_Future_knows_status_immediately(c, s, a, b):
             assert time() < start + 5
             yield gen.sleep(0.05)
 
-    yield c2.close()
-
 
 @gen_cluster(client=True)
 def test_erred_future(c, s, a, b):

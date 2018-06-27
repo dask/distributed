@@ -441,8 +441,6 @@ def test_gc(s, a, b):
     x.__del__()
     yield async_wait_for(lambda: x.key not in s.tasks or not s.tasks[x.key].who_has, timeout=0.3)
 
-    yield c.close()
-
 
 def test_thread(loop):
     with cluster() as (s, [a, b]):
@@ -970,9 +968,6 @@ def test_two_consecutive_clients_share_results(s, a, b):
     yy = yield y
 
     assert xx == yy
-
-    yield c.close()
-    yield f.close()
 
 
 @gen_cluster(client=True)
@@ -1907,7 +1902,6 @@ def test_repr_localcluster():
         text = client._repr_html_()
         assert cluster.scheduler.address in text
     finally:
-        yield client.close()
         yield cluster._close()
 
 
@@ -2159,9 +2153,6 @@ def test_multi_garbage_collection(s, a, b):
     assert not any(v for v in s.wants_what.values())
     assert not s.who_wants
 
-    yield c.close()
-    yield f.close()
-
 
 @gen_cluster(client=True)
 def test__broadcast(c, s, a, b):
@@ -2259,9 +2250,6 @@ def test__cancel_multi_client(s, a, b):
 
     with pytest.raises(CancelledError):
         yield x
-
-    yield c.close()
-    yield f.close()
 
 
 @gen_cluster(client=True)
@@ -2798,7 +2786,6 @@ def test_worker_aliases():
         result = yield c.submit(lambda x: x + 1, i, workers=alias)
         assert result == i + 1
 
-    yield c.close()
     yield [a._close(), b._close(), w._close()]
     yield s.close()
 
@@ -3763,9 +3750,6 @@ def test_idempotence(s, a, b):
 
     assert len(s.transition_log) == len_single_submit
 
-    yield c.close()
-    yield f.close()
-
 
 def test_scheduler_info(loop):
     with cluster() as (s, [a, b]):
@@ -3950,9 +3934,6 @@ def test_serialize_future(s, a, b):
         result2 = yield future2
         assert result == result2
 
-    yield c.close()
-    yield f.close()
-
 
 @gen_cluster(client=False)
 def test_temp_client(s, a, b):
@@ -3966,9 +3947,6 @@ def test_temp_client(s, a, b):
     with temp_default_client(f):
         assert default_client() is f
         assert default_client(c) is c
-
-    yield c.close()
-    yield f.close()
 
 
 @nodebug  # test timing is fragile
@@ -5097,8 +5075,6 @@ def test_future_auto_inform(c, s, a, b):
         yield gen.sleep(0.01)
         assert time() < start + 1
 
-    yield client.close()
-
 
 def test_client_async_before_loop_starts():
     loop = IOLoop()
@@ -5201,8 +5177,6 @@ def test_config_scheduler_address(s, a, b):
         text = sio.getvalue()
         assert s.address in text
 
-        yield c.close()
-
 
 @gen_cluster(client=True)
 def test_warn_when_submitting_large_values(c, s, a, b):
@@ -5236,8 +5210,6 @@ def test_scatter_direct(s, a, b):
         yield gen.sleep(0.10)
         assert time() < start + 5
 
-    yield c._close()
-
 
 @pytest.mark.skipif(sys.version_info[0] < 3, reason="cloudpickle Py27 issue")
 @gen_cluster(client=True)
@@ -5252,8 +5224,6 @@ def test_client_name(s, a, b):
     with dask.config.set({'client-name': 'hello-world'}):
         c = yield Client(s.address, asynchronous=True)
         assert any("hello-world" in name for name in list(s.clients))
-
-    yield c._close()
 
 
 def test_client_doesnt_close_given_loop(loop):
@@ -5322,36 +5292,33 @@ def test_turn_off_pickle(s, a, b):
     import numpy as np
     c = yield Client(s.address, asynchronous=True,
                      serializers=['dask', 'msgpack'])
-    try:
-        assert (yield c.submit(inc, 1)) == 2
-        yield c.submit(np.ones, 5)
-        yield c.scatter(1)
+    assert (yield c.submit(inc, 1)) == 2
+    yield c.submit(np.ones, 5)
+    yield c.scatter(1)
 
-        # Can't send complex data
-        with pytest.raises(TypeError):
-            future = yield c.scatter(inc)
+    # Can't send complex data
+    with pytest.raises(TypeError):
+        future = yield c.scatter(inc)
 
-        # can send complex tasks (this uses pickle regardless)
-        future = c.submit(lambda x: x, inc)
-        yield wait(future)
+    # can send complex tasks (this uses pickle regardless)
+    future = c.submit(lambda x: x, inc)
+    yield wait(future)
 
-        # but can't receive complex results
-        with pytest.raises(TypeError):
-            yield future
+    # but can't receive complex results
+    with pytest.raises(TypeError):
+        yield future
 
-        # Run works
-        result = yield c.run(lambda: 1)
-        assert list(result.values()) == [1, 1]
-        result = yield c.run_on_scheduler(lambda: 1)
-        assert result == 1
+    # Run works
+    result = yield c.run(lambda: 1)
+    assert list(result.values()) == [1, 1]
+    result = yield c.run_on_scheduler(lambda: 1)
+    assert result == 1
 
-        # But not with complex return values
-        with pytest.raises(TypeError):
-            yield c.run(lambda: inc)
-        with pytest.raises(TypeError):
-            yield c.run_on_scheduler(lambda: inc)
-    finally:
-        yield c._close()
+    # But not with complex return values
+    with pytest.raises(TypeError):
+        yield c.run(lambda: inc)
+    with pytest.raises(TypeError):
+        yield c.run_on_scheduler(lambda: inc)
 
 
 @gen_cluster()
@@ -5360,15 +5327,12 @@ def test_de_serialization(s, a, b):
     c = yield Client(s.address, asynchronous=True,
                      serializers=['msgpack', 'pickle'],
                      deserializers=['msgpack'])
-    try:
-        # Can send complex data
-        future = yield c.scatter(np.ones(5))
+    # Can send complex data
+    future = yield c.scatter(np.ones(5))
 
-        # But can not retrieve it
-        with pytest.raises(TypeError):
-            result = yield future
-    finally:
-        yield c._close()
+    # But can not retrieve it
+    with pytest.raises(TypeError):
+        result = yield future
 
 
 @gen_cluster()
@@ -5376,15 +5340,12 @@ def test_de_serialization_none(s, a, b):
     import numpy as np
     c = yield Client(s.address, asynchronous=True,
                      deserializers=['msgpack'])
-    try:
-        # Can send complex data
-        future = yield c.scatter(np.ones(5))
+    # Can send complex data
+    future = yield c.scatter(np.ones(5))
 
-        # But can not retrieve it
-        with pytest.raises(TypeError):
-            result = yield future
-    finally:
-        yield c._close()
+    # But can not retrieve it
+    with pytest.raises(TypeError):
+        result = yield future
 
 
 @gen_cluster()

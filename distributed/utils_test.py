@@ -39,7 +39,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .client import default_client
+from .client import default_client, _global_clients, _del_global_client
 from .compatibility import PY3, iscoroutinefunction, Empty
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
@@ -94,9 +94,19 @@ def cleanup_global_workers():
         w._close(report=False, executor_wait=False)
 
 
+@gen.coroutine
+def cleanup_global_clients():
+    for c in list(_global_clients.values()):
+        yield c._close()
+        _del_global_client(c)
+
+    _global_clients.clear()
+
+
 @pytest.fixture
 def loop():
     del _global_workers[:]
+    _global_clients.clear()
     with pristine_loop() as loop:
         # Monkey-patch IOLoop.start to wait for loop stop
         orig_start = loop.start
@@ -113,10 +123,10 @@ def loop():
 
         yield loop
 
-        # Stop the loop in case it's still running
         try:
             sync(loop, cleanup_global_workers, callback_timeout=0.500)
-            loop.add_callback(loop.stop)
+            sync(loop, cleanup_global_clients, callback_timeout=0.500)
+            loop.add_callback(loop.stop)  # Stop the loop in case it's still running
         except RuntimeError as e:
             if not re.match("IOLoop is clos(ed|ing)", str(e)):
                 raise
@@ -125,6 +135,7 @@ def loop():
         else:
             is_stopped.wait()
     del _global_workers[:]
+    assert not _global_clients
 
 
 @pytest.fixture
@@ -740,6 +751,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         end
     """
     del _global_workers[:]
+    _global_clients.clear()
 
     reset_config()
 
@@ -795,6 +807,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                                 yield end_cluster(s, workers)
                                 yield gen.with_timeout(timedelta(seconds=1),
                                                        cleanup_global_workers())
+                                yield gen.with_timeout(timedelta(seconds=1),
+                                                       cleanup_global_clients())
 
                             try:
                                 c = yield default_client()
@@ -823,6 +837,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 if w.status == 'running':
                     w.close()
             del _global_workers[:]
+            assert not _global_clients
             return result
 
         return test_func

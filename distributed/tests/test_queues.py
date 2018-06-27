@@ -88,7 +88,6 @@ def test_hold_futures(s, a, b):
     result = yield future2
 
     assert result == 11
-    yield c2.close()
 
 
 @pytest.mark.skip(reason='getting same client from main thread')
@@ -224,8 +223,6 @@ def test_Future_knows_status_immediately(c, s, a, b):
         except Exception:
             assert time() < start + 5
             yield gen.sleep(0.05)
-
-    yield c2.close()
 
 
 @gen_cluster(client=True)

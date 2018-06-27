@@ -540,7 +540,6 @@ def test_steal_twice(c, s, a, b):
                     % (len(empty_workers), len(has_what)))
     assert max(map(len, has_what.values())) < 30
 
-    yield c._close()
     yield [w._close() for w in workers]
 
 

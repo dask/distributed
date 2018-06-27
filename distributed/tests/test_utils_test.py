@@ -10,6 +10,7 @@ import pytest
 from tornado import gen
 
 from distributed import Scheduler, Worker, Client, config, default_client
+from distributed.client import _global_clients
 from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils_test import (cluster, gen_cluster, inc,
@@ -147,6 +148,8 @@ def test_lingering_client():
 
     with pytest.raises(ValueError):
         default_client()
+
+    assert not _global_clients
 
 
 def test_lingering_client(loop):
