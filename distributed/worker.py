@@ -1662,7 +1662,12 @@ class Worker(WorkerBase):
                     if not workers:
                         in_flight = True
                         continue
-                    worker = random.choice(list(workers))
+                    host = get_address_host(self.address)
+                    local = [w for w in workers if get_address_host(w) == host]
+                    if local:
+                        worker = random.choice(local)
+                    else:
+                        worker = random.choice(list(workers))
                     to_gather, total_nbytes = self.select_keys_for_gather(worker, dep)
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
