@@ -704,7 +704,7 @@ class WorkerBase(ServerNode):
                    for k, v in who_has.items()
                    if k not in self.data}
         result, missing_keys, missing_workers = yield gather_from_workers(
-            who_has, rpc=self.rpc)
+            who_has, rpc=self.rpc, who=self.address)
         if missing_keys:
             logger.warning("Could not find data: %s on workers: %s (who_has: %s)",
                            missing_keys, missing_workers, who_has)
@@ -1779,7 +1779,8 @@ class Worker(WorkerBase):
                 logger.debug("Request %d keys", len(deps))
 
                 start = time()
-                response = yield get_data_from_worker(self.rpc, deps, worker, self.address)
+                response = yield get_data_from_worker(self.rpc, deps, worker,
+                                                      who=self.address)
                 stop = time()
 
                 if cause:

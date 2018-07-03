@@ -1190,5 +1190,5 @@ def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
     y = c.submit(inc, x, workers=[w2.address])
     yield wait(y)
 
-    assert w1.outgoing_transfer_log
-    assert not w3.outgoing_transfer_log
+    assert any(d['who'] == w2.address for d in w1.outgoing_transfer_log)
+    assert not any(d['who'] == w2.address for d in w3.outgoing_transfer_log)
