@@ -1192,3 +1192,19 @@ def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
 
     assert any(d['who'] == w2.address for d in w1.outgoing_transfer_log)
     assert not any(d['who'] == w2.address for d in w3.outgoing_transfer_log)
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 20, timeout=30)
+def test_avoid_oversubscription(c, s, *workers):
+    np = pytest.importorskip('numpy')
+    x = c.submit(np.random.random, 1000000, workers=[workers[0].address])
+    yield wait(x)
+
+    with dask.config.set({'distributed.worker.max-connections': 1}):
+        futures = [c.submit(len, x, pure=False, workers=[w.address])
+                   for w in workers[1:]]
+
+        yield wait(futures)
+
+    assert len(workers[0].outgoing_transfer_log) < 18
+    assert sum(not not w.outgoing_transfer_log for w in workers) >= 3
