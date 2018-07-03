@@ -1206,5 +1206,8 @@ def test_avoid_oversubscription(c, s, *workers):
 
         yield wait(futures)
 
-    assert len(workers[0].outgoing_transfer_log) < 18
-    assert sum(not not w.outgoing_transfer_log for w in workers) >= 3
+    # Original worker not responsible for all transfers
+    assert len(workers[0].outgoing_transfer_log) < len(workers) - 2
+
+    # Some other workers did some work
+    assert len([w for w in workers if len(w.outgoing_transfer_log) > 0]) >= 3
