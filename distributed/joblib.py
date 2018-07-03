@@ -33,8 +33,12 @@ if joblib:
     from joblib.parallel import AutoBatchingMixin, ParallelBackendBase
     _bases.append(ParallelBackendBase)
 if sk_joblib:
-    from sklearn.externals.joblib.parallel import (AutoBatchingMixin,  # noqa
-            ParallelBackendBase)
+    try:
+        from sklearn.externals._joblib.parallel import (AutoBatchingMixin,  # noqa
+                ParallelBackendBase)
+    except ImportError:
+        from sklearn.externals.joblib.parallel import (AutoBatchingMixin,  # noqa
+                ParallelBackendBase)
     _bases.append(ParallelBackendBase)
 if not _bases:
     raise RuntimeError("Joblib backend requires either `joblib` >= '0.10.2' "
