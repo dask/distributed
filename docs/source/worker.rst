@@ -160,13 +160,15 @@ These values can be configured by modifying the ``~/.config/dask/distributed.yam
 
 .. code-block:: yaml
 
-   # Fractions of worker memory at which we take action to avoid memory blowup
-   # Set any of the lower three values to False to turn off the behavior entirely
-   memory:
-     target: 0.60  # target fraction to stay below
-     spill: 0.70  # fraction at which we spill to disk
-     pause: 0.80  # fraction at which we pause worker threads
-     terminate: 0.95  # fraction at which we terminate the worker
+   distributed:
+     worker:
+       # Fractions of worker memory at which we take action to avoid memory blowup
+       # Set any of the lower three values to False to turn off the behavior entirely
+       memory:
+         target: 0.60  # target fraction to stay below
+         spill: 0.70  # fraction at which we spill to disk
+         pause: 0.80  # fraction at which we pause worker threads
+         terminate: 0.95  # fraction at which we terminate the worker
 
 
 Spill data to Disk
