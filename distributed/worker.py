@@ -606,7 +606,7 @@ class WorkerBase(ServerNode):
         start = time()
 
         if max_connections is None:
-            max_connections = dask.config.get('distributed.worker.max-connections')
+            max_connections = self.total_in_connections
 
         # Allow same-host connections more liberally
         if max_connections and comm and get_address_host(comm.peer_address) == get_address_host(self.address):
@@ -1017,8 +1017,10 @@ class Worker(WorkerBase):
     * **services:** ``{str: Server}``:
         Auxiliary web servers running on this worker
     * **service_ports:** ``{str: port}``:
-    * **total_connections**: ``int``
-        The maximum number of concurrent connections we want to see
+    * **total_out_connections**: ``int``
+        The maximum number of concurrent outgoing requests for data
+    * **total_in_connections**: ``int``
+        The maximum number of concurrent incoming requests for data
     * **total_comm_nbytes**: ``int``
     * **batched_stream**: ``BatchedSend``
         A batched stream along which we communicate to the scheduler
@@ -1161,7 +1163,8 @@ class Worker(WorkerBase):
 
         self.in_flight_tasks = dict()
         self.in_flight_workers = dict()
-        self.total_connections = 50
+        self.total_out_connections = dask.config.get('distributed.worker.connections.outgoing')
+        self.total_in_connections = dask.config.get('distributed.worker.connections.incoming')
         self.total_comm_nbytes = 10e6
         self.comm_nbytes = 0
         self.suspicious_deps = defaultdict(lambda: 0)
@@ -1629,12 +1632,12 @@ class Worker(WorkerBase):
     def ensure_communicating(self):
         changed = True
         try:
-            while changed and self.data_needed and len(self.in_flight_workers) < self.total_connections:
+            while changed and self.data_needed and len(self.in_flight_workers) < self.total_out_connections:
                 changed = False
                 logger.debug("Ensure communicating.  Pending: %d.  Connections: %d/%d",
                              len(self.data_needed),
                              len(self.in_flight_workers),
-                             self.total_connections)
+                             self.total_out_connections)
 
                 key = self.data_needed[0]
 
@@ -1671,7 +1674,7 @@ class Worker(WorkerBase):
 
                 in_flight = False
 
-                while deps and (len(self.in_flight_workers) < self.total_connections
+                while deps and (len(self.in_flight_workers) < self.total_out_connections
                                 or self.comm_nbytes < self.total_comm_nbytes):
                     dep = deps.pop()
                     if self.dep_state[dep] != 'waiting':
