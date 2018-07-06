@@ -1,13 +1,5 @@
 distributed:
   version: 2
-  # logging:
-  #   distributed: info
-  #   distributed.client: warning
-  #   bokeh: critical
-  #   # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
-  #   tornado: critical
-  #   tornado.application: error
-
   scheduler:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
@@ -45,23 +37,6 @@ distributed:
       connect: 10s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
 
-  # require-encryption: False   # whether to require encryption on non-local comms
-  #
-  # tls:
-  #   ca-file: xxx.pem
-  #   scheduler:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   worker:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   client:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   ciphers:
-  #     ECDHE-ECDSA-AES128-GCM-SHA256
-
-
   ###################
   # Bokeh dashboard #
   ###################
@@ -82,3 +57,30 @@ distributed:
     log-length: 10000  # default length of logs to keep in memory
     log-format: '%(name)s - %(levelname)s - %(message)s'
     pdb-on-err: False       # enter debug mode on scheduling error
+
+# Not nested in distributed    
+# logging:
+#   distributed: info
+#   distributed.client: warning
+#   bokeh: critical
+#   # http://stackoverflow.com/questions/21234772/python-tornado-disable-logging-to-stderr
+#   tornado: critical
+#   tornado.application: error
+
+# require-encryption: False   # whether to require encryption on non-local comms
+#
+# tls:
+#   ca-file: xxx.pem
+#   scheduler:
+#     key: xxx.pem
+#     cert: xxx.pem
+#   worker:
+#     key: xxx.pem
+#     cert: xxx.pem
+#   client:
+#     key: xxx.pem
+#     cert: xxx.pem
+#   ciphers:
+#     ECDHE-ECDSA-AES128-GCM-SHA256
+
+    
