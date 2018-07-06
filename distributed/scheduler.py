@@ -3590,7 +3590,7 @@ class Scheduler(ServerNode):
             dts.dependents.remove(ts)
             s = dts.waiters
             s.discard(ts)
-            if not s and not dts.who_wants:
+            if not dts.dependents and not dts.who_wants:
                 # Task not needed anymore
                 assert dts is not ts
                 recommendations[dts.key] = 'forgotten'
@@ -3621,7 +3621,7 @@ class Scheduler(ServerNode):
                 elif ts.has_lost_dependencies:
                     # It's ok to forget a task with forgotten dependencies
                     pass
-                elif not ts.who_wants and not ts.waiters:
+                elif not ts.who_wants and not ts.waiters and not ts.dependents:
                     # It's ok to forget a task that nobody needs
                     pass
                 else:
@@ -3656,7 +3656,7 @@ class Scheduler(ServerNode):
                 elif ts.has_lost_dependencies:
                     # It's ok to forget a task with forgotten dependencies
                     pass
-                elif not ts.who_wants and not ts.waiters:
+                elif not ts.who_wants and not ts.waiters and not ts.dependents:
                     # It's ok to forget a task that nobody needs
                     pass
                 else:
