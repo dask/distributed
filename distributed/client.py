@@ -2094,6 +2094,7 @@ class Client(Node):
                       and k not in keyset}
             if values:
                 dsk = dask.optimization.inline(dsk, keys=values,
+                                               inline_constants=False,
                                                dependencies=dependencies)
 
             d = {k: unpack_remotedata(v) for k, v in dsk.items()}
