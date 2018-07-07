@@ -1401,13 +1401,13 @@ class Worker(WorkerBase):
                 pdb.set_trace()
             raise
 
-    def transition_dep_flight_waiting(self, dep, worker=None, busy=False):
+    def transition_dep_flight_waiting(self, dep, worker=None, remove=True):
         try:
             if self.validate:
                 assert dep in self.in_flight_tasks
 
             del self.in_flight_tasks[dep]
-            if not busy:
+            if remove:
                 try:
                     self.who_has[dep].remove(worker)
                 except KeyError:
@@ -1423,10 +1423,10 @@ class Worker(WorkerBase):
                     self.loop.add_callback(self.handle_missing_dep, dep)
             for key in self.dependents.get(dep, ()):
                 if self.task_state[key] == 'waiting':
-                    if busy:  # worker was probably busy, wait a while
-                        self.data_needed.append(key)
-                    else:  # try a new worker immediately
+                    if remove:  # try a new worker immediately
                         self.data_needed.appendleft(key)
+                    else:  # worker was probably busy, wait a while
+                        self.data_needed.append(key)
 
             if not self.dependents[dep]:
                 self.release_dep(dep)
@@ -1866,7 +1866,8 @@ class Worker(WorkerBase):
                     if not busy and d in response['data']:
                         self.transition_dep(d, 'memory', value=response['data'][d])
                     elif self.dep_state.get(d) != 'memory':
-                        self.transition_dep(d, 'waiting', worker=worker, busy=busy)
+                        self.transition_dep(d, 'waiting', worker=worker,
+                                            remove=not busy)
 
                     if not busy and d not in response['data'] and d in self.dependents:
                         self.log.append(('missing-dep', d))
