@@ -2075,8 +2075,12 @@ class Client(Node):
 
             values = {k for k, v in dsk.items() if isinstance(v, Future)
                       and k not in keyset}
+
+            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
+
             if values:
-                dsk = dask.optimization.inline(dsk, keys=values)
+                dsk = dask.optimization.inline(dsk, keys=values,
+                                               dependencies=dependencies)
 
             d = {k: unpack_remotedata(v) for k, v in dsk.items()}
             extra_keys = set.union(*[v[1] for v in d.values()]) if d else set()
@@ -2096,8 +2100,6 @@ class Client(Node):
                 for v in s:
                     if v not in self.futures:
                         raise CancelledError(v)
-
-            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
 
             if priority is None:
                 priority = dask.order.order(dsk, dependencies=dependencies)
