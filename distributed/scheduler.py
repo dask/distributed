@@ -3456,7 +3456,8 @@ class Scheduler(ServerNode):
                 recommendations[key] = 'forgotten'
             elif ts.waiters or ts.who_wants:
                 recommendations[key] = 'waiting'
-            else:
+
+            if recommendations.get(key) != 'waiting':
                 for dts in ts.dependencies:
                     if dts.state != 'released':
                         s = dts.waiters
