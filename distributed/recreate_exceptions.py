@@ -128,7 +128,8 @@ class ReplayExceptionClient(object):
         yield wait(future)
         out = yield self._get_futures_error(future)
         function, args, kwargs, deps = out
-        futures = self.client._graph_to_futures({}, deps)
+        futures = self.client._graph_to_futures({dep: dep for dep in deps},
+                                                list(deps))
         data = yield self.client._gather(futures)
         args = pack_data(args, data)
         kwargs = pack_data(kwargs, data)

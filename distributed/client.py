@@ -25,7 +25,7 @@ import weakref
 
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
-from dask.core import flatten, get_dependencies
+from dask.core import flatten
 from dask.compatibility import apply, unicode
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
@@ -2087,10 +2087,14 @@ class Client(Node):
             flatkeys = list(map(tokey, keys))
             futures = {key: Future(key, self, inform=False) for key in keyset}
 
+            dsk, dependencies = dask.optimization.cull(dsk, keys)
+            dependencies = valmap(set, dependencies)
+
             values = {k for k, v in dsk.items() if isinstance(v, Future)
                       and k not in keyset}
             if values:
-                dsk = dask.optimization.inline(dsk, keys=values)
+                dsk = dask.optimization.inline(dsk, keys=values,
+                                               dependencies=dependencies)
 
             d = {k: unpack_remotedata(v) for k, v in dsk.items()}
             extra_keys = set.union(*[v[1] for v in d.values()]) if d else set()
@@ -2110,8 +2114,6 @@ class Client(Node):
                 for v in s:
                     if v not in self.futures:
                         raise CancelledError(v)
-
-            dependencies = {k: get_dependencies(dsk, k) for k in dsk}
 
             if priority is None:
                 priority = dask.order.order(dsk, dependencies=dependencies)

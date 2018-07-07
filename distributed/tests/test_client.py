@@ -5440,5 +5440,31 @@ def test_no_threads_lingering():
     assert threading.active_count() < 30, list(active.values())
 
 
+@gen_cluster(client=True)
+def test_cull_before_send(c, s, a, b):
+    np = pytest.importorskip('numpy')
+    da = pytest.importorskip('dask.array')
+    big = np.random.random(100000)
+    big = da.from_array(big, chunks=(big.size,))
+    small = np.ones(5)
+    small = da.from_array(small, chunks=(small.size,))
+
+    x = da.concatenate([small, big])
+
+    future = c.compute(x[:5])
+    while not s.tasks:
+        yield gen.sleep(0.01)
+
+    assert c.scheduler_comm.byte_count < 2000
+
+    [x1, x2] = x.to_delayed()
+
+    future = c.compute(x1)
+    while tokey(future.key) not in s.tasks:
+        yield gen.sleep(0.01)
+
+    assert c.scheduler_comm.byte_count < 4000
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401
