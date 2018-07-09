@@ -1807,6 +1807,10 @@ class Worker(WorkerBase):
                                                       who=self.address)
                 stop = time()
 
+                if 'status' not in response:
+                    print(response)
+                    raise KeyError('status', response)
+
                 if response['status'] == 'busy':
                     self.log.append(('busy-gather', worker, deps))
                     for dep in deps:
