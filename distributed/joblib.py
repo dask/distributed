@@ -203,7 +203,7 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
                     try:
                         f = call_data_futures[arg]
                     except KeyError:
-                        if is_weakrefable(arg) and sizeof(arg) > 1e6:
+                        if is_weakrefable(arg) and sizeof(arg) > 1e3:
                             # Automatically scatter large objects to some of
                             # the workers to avoid duplicated data transfers.
                             # Rely on automated inter-worker data stealing if
