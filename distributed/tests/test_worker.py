@@ -11,6 +11,7 @@ import sys
 from time import sleep
 import traceback
 
+import dask
 from dask import delayed
 import pytest
 from toolz import pluck, sliding_window, first
@@ -20,14 +21,13 @@ from tornado.ioloop import TimeoutError
 
 from distributed import (Nanny, Client, get_client, wait, default_client,
         get_worker, Reschedule)
-from distributed.compatibility import WINDOWS
-from distributed.config import config
+from distributed.compatibility import WINDOWS, cache_from_source
 from distributed.core import rpc
 from distributed.client import wait
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
 from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
-from distributed.utils import tmpfile
+from distributed.utils import tmpfile, format_bytes
 from distributed.utils_test import (inc, mul, gen_cluster, div, dec,
                                     slow, slowinc, gen_test, cluster,
                                     captured_logger)
@@ -181,20 +181,42 @@ def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(a.local_dir, 'foobar.py'))
 
 
+@pytest.mark.xfail(reason="don't yet support uploading pyc files")
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
+def test_upload_file_pyc(c, s, w):
+    with tmpfile() as dirname:
+        os.mkdir(dirname)
+        with open(os.path.join(dirname, 'foo.py'), mode='w') as f:
+            f.write('def f():\n    return 123')
+
+        sys.path.append(dirname)
+        try:
+            import foo
+            assert foo.f() == 123
+            pyc = cache_from_source(os.path.join(dirname, 'foo.py'))
+            assert os.path.exists(pyc)
+            yield c.upload_file(pyc)
+
+            def g():
+                import foo
+                return foo.x
+
+            future = c.submit(g)
+            result = yield future
+            assert result == 123
+        finally:
+            sys.path.remove(dirname)
+
+
 @gen_cluster(client=True)
 def test_upload_egg(c, s, a, b):
-    eggname = 'mytestegg-1.0.0-py3.4.egg'
+    eggname = 'testegg-1.0.0-py3.4.egg'
     local_file = __file__.replace('test_worker.py', eggname)
     assert not os.path.exists(os.path.join(a.local_dir, eggname))
     assert not os.path.exists(os.path.join(b.local_dir, eggname))
     assert a.local_dir != b.local_dir
 
-    aa = rpc(a.address)
-    bb = rpc(b.address)
-    with open(local_file, 'rb') as f:
-        payload = f.read()
-    yield [aa.upload_file(filename=eggname, data=payload),
-           bb.upload_file(filename=eggname, data=payload)]
+    yield c.upload_file(filename=local_file)
 
     assert os.path.exists(os.path.join(a.local_dir, eggname))
     assert os.path.exists(os.path.join(b.local_dir, eggname))
@@ -209,9 +231,33 @@ def test_upload_egg(c, s, a, b):
 
     yield a._close()
     yield b._close()
-    aa.close_rpc()
-    bb.close_rpc()
     assert not os.path.exists(os.path.join(a.local_dir, eggname))
+
+
+@gen_cluster(client=True)
+def test_upload_pyz(c, s, a, b):
+    pyzname = 'mytest.pyz'
+    local_file = __file__.replace('test_worker.py', pyzname)
+    assert not os.path.exists(os.path.join(a.local_dir, pyzname))
+    assert not os.path.exists(os.path.join(b.local_dir, pyzname))
+    assert a.local_dir != b.local_dir
+
+    yield c.upload_file(filename=local_file)
+
+    assert os.path.exists(os.path.join(a.local_dir, pyzname))
+    assert os.path.exists(os.path.join(b.local_dir, pyzname))
+
+    def g(x):
+        from mytest import mytest
+        return mytest.inc(x)
+
+    future = c.submit(g, 10, workers=a.address)
+    result = yield future
+    assert result == 10 + 1
+
+    yield a._close()
+    yield b._close()
+    assert not os.path.exists(os.path.join(a.local_dir, pyzname))
 
 
 @pytest.mark.xfail(reason='Still lose time to network I/O')
@@ -518,7 +564,7 @@ def test_clean_nbytes(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 20)
 def test_gather_many_small(c, s, a, *workers):
-    a.total_connections = 2
+    a.total_out_connections = 2
     futures = yield c._scatter(list(range(100)))
 
     assert all(w.data for w in workers)
@@ -635,11 +681,12 @@ def test_hold_onto_dependents(c, s, a, b):
 @slow
 @gen_cluster(client=False, ncores=[])
 def test_worker_death_timeout(s):
-    yield s.close()
-    w = Worker(s.address, death_timeout=1)
-    yield w._start()
+    with dask.config.set({'distributed.comm.timeouts.connect': '1s'}):
+        yield s.close()
+        w = Worker(s.address, death_timeout=1)
+        yield w._start()
 
-    yield gen.sleep(3)
+    yield gen.sleep(2)
     assert w.status == 'closed'
 
 
@@ -696,9 +743,9 @@ def test_priorities_2(c, s, w):
 
 @gen_cluster(client=True)
 def test_heartbeats(c, s, a, b):
-    x = s.worker_info[a.address]['last-seen']
+    x = s.workers[a.address].last_seen
     yield gen.sleep(a.periodic_callbacks['heartbeat'].callback_time / 1000 + 0.1)
-    y = s.worker_info[a.address]['last-seen']
+    y = s.workers[a.address].last_seen
     assert x != y
     assert a.periodic_callbacks['heartbeat'].callback_time < 1000
 
@@ -871,12 +918,17 @@ def test_global_workers(s, a, b):
 @gen_cluster(ncores=[])
 def test_worker_fds(s):
     psutil = pytest.importorskip('psutil')
+    yield gen.sleep(0.05)
     start = psutil.Process().num_fds()
 
     worker = Worker(s.address, loop=s.loop)
     yield worker._start()
+    yield gen.sleep(0.1)
     middle = psutil.Process().num_fds()
-    assert middle > start
+    start = time()
+    while middle > start:
+        yield gen.sleep(0.01)
+        assert time() < start + 1
 
     yield worker._close()
 
@@ -917,8 +969,8 @@ def test_scheduler_file():
 @gen_cluster(client=True)
 def test_scheduler_delay(c, s, a, b):
     old = a.scheduler_delay
-    assert abs(a.scheduler_delay) < 0.1
-    assert abs(b.scheduler_delay) < 0.1
+    assert abs(a.scheduler_delay) < 0.3
+    assert abs(b.scheduler_delay) < 0.3
     yield gen.sleep(a.periodic_callbacks['heartbeat'].callback_time / 1000 + .3)
     assert a.scheduler_delay != old
 
@@ -989,7 +1041,8 @@ def test_pause_executor(c, s, a):
         futures = c.map(slowinc, range(10), delay=0.1)
 
         yield gen.sleep(0.3)
-        assert a.paused
+        assert a.paused, (format_bytes(psutil.Process().memory_info().rss),
+                          format_bytes(a.memory_limit))
         out = logger.getvalue()
         assert 'memory' in out.lower()
         assert 'pausing' in out.lower()
@@ -1072,6 +1125,13 @@ def test_avoid_memory_monitor_if_zero_limit(c, s):
     yield worker._close()
 
 
+@gen_cluster(ncores=[('127.0.0.1', 1)],
+             config={'distributed.worker.memory.spill': False,
+                     'distributed.worker.memory.target': False})
+def test_dict_data_if_no_spill_to_disk(s, w):
+    assert type(w.data) is dict
+
+
 def test_get_worker_name(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
@@ -1097,11 +1157,57 @@ def test_parse_memory_limit(s, w):
 
 @gen_cluster(ncores=[], client=True)
 def test_scheduler_address_config(c, s):
-    config['scheduler-address'] = s.address
-    try:
+    with dask.config.set({'scheduler-address': s.address}):
         worker = Worker(loop=s.loop)
         yield worker._start()
         assert worker.scheduler.address == s.address
-    finally:
-        del config['scheduler-address']
     yield worker._close()
+
+
+@slow
+@gen_cluster(client=True)
+def test_wait_for_outgoing(c, s, a, b):
+    np = pytest.importorskip('numpy')
+    x = np.random.random(10000000)
+    future = yield c.scatter(x, workers=a.address)
+
+    y = c.submit(inc, future, workers=b.address)
+    yield wait(y)
+
+    assert len(b.incoming_transfer_log) == len(a.outgoing_transfer_log) == 1
+    bb = b.incoming_transfer_log[0]['duration']
+    aa = a.outgoing_transfer_log[0]['duration']
+    ratio = aa / bb
+
+    assert 1 / 3 < ratio < 3
+
+
+@gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 1), ('127.0.0.2', 1)],
+             client=True)
+def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
+    x = yield c.scatter(123, workers=[w1.address, w3.address], broadcast=True)
+
+    y = c.submit(inc, x, workers=[w2.address])
+    yield wait(y)
+
+    assert any(d['who'] == w2.address for d in w1.outgoing_transfer_log)
+    assert not any(d['who'] == w2.address for d in w3.outgoing_transfer_log)
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 20, timeout=30,
+             config={'distributed.worker.connections.incoming': 1})
+def test_avoid_oversubscription(c, s, *workers):
+    np = pytest.importorskip('numpy')
+    x = c.submit(np.random.random, 1000000, workers=[workers[0].address])
+    yield wait(x)
+
+    futures = [c.submit(len, x, pure=False, workers=[w.address])
+               for w in workers[1:]]
+
+    yield wait(futures)
+
+    # Original worker not responsible for all transfers
+    assert len(workers[0].outgoing_transfer_log) < len(workers) - 2
+
+    # Some other workers did some work
+    assert len([w for w in workers if len(w.outgoing_transfer_log) > 0]) >= 3

@@ -15,6 +15,7 @@ class GraphLayout(SchedulerPlugin):
     def __init__(self, scheduler):
         self.x = {}
         self.y = {}
+        self.collision = {}
         self.scheduler = scheduler
         self.index = {}
         self.index_edge = {}
@@ -38,21 +39,37 @@ class GraphLayout(SchedulerPlugin):
 
     def update_graph(self, scheduler, dependencies=None, priority=None,
                      **kwargs):
-        for key in sorted(dependencies, key=priority.get):
-            deps = dependencies[key]
+        stack = sorted(dependencies, key=priority.get, reverse=True)
+        while stack:
+            key = stack.pop()
             if key in self.x or key not in scheduler.tasks:
                 continue
+            deps = dependencies[key]
             if deps:
-                total_deps = sum(len(scheduler.tasks[dep].dependents)
-                                 for dep in deps)
-                y = sum(self.y[dep] * len(scheduler.tasks[dep].dependents)
-                                      / total_deps
-                        for dep in deps)
-                x = max(self.x[dep] for dep in deps) + 1
+                if not all(dep in self.y for dep in deps):
+                    stack.append(key)
+                    stack.extend(sorted(deps, key=lambda k: priority.get(k, 0),
+                                        reverse=True))
+                    continue
+                else:
+                    total_deps = sum(len(scheduler.tasks[dep].dependents)
+                                     for dep in deps)
+                    y = sum(self.y[dep] * len(scheduler.tasks[dep].dependents)
+                                          / total_deps
+                            for dep in deps)
+                    x = max(self.x[dep] for dep in deps) + 1
             else:
                 x = 0
                 y = self.next_y
                 self.next_y += 1
+
+            if (x, y) in self.collision:
+                old_x, old_y = x, y
+                x, y = self.collision[(x, y)]
+                y += 0.1
+                self.collision[old_x, old_y] = (x, y)
+            else:
+                self.collision[(x, y)] = (x, y)
 
             self.x[key] = x
             self.y[key] = y
@@ -76,6 +93,11 @@ class GraphLayout(SchedulerPlugin):
                 self.visible_edge_updates.append((self.index_edge.pop((key, dep.key)), 'False'))
             for dep in task.dependencies:
                 self.visible_edge_updates.append((self.index_edge.pop((dep.key, key)), 'False'))
+
+            try:
+                del self.collision[(self.x[key], self.y[key])]
+            except KeyError:
+                pass
 
             for collection in [self.x, self.y, self.index]:
                 del collection[key]

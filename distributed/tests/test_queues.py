@@ -48,10 +48,10 @@ def test_queue_with_data(c, s, a, b):
     xx = yield Queue('x')
     assert x.client is c
 
-    yield x.put([1, 'hello'])
+    yield x.put((1, 'hello'))
     data = yield xx.get()
 
-    assert data == [1, 'hello']
+    assert data == (1, 'hello')
 
     with pytest.raises(gen.TimeoutError):
         yield x.get(timeout=0.1)
@@ -141,7 +141,8 @@ def test_race(c, s, *workers):
 
     futures = c.map(f, range(5))
     results = yield c.gather(futures)
-    assert all(r > 80 for r in results)
+    assert all(r > 50 for r in results)
+    assert sum(results) == 510
     qsize = yield q.qsize()
     assert not qsize
 
@@ -239,3 +240,36 @@ def test_erred_future(c, s, a, b):
 
     exc = yield future2.exception()
     assert isinstance(exc, ZeroDivisionError)
+
+
+@gen_cluster(client=True)
+def test_close(c, s, a, b):
+    q = Queue()
+
+    while q.name not in s.extensions['queues'].queues:
+        yield gen.sleep(0.01)
+
+    q.close()
+    q.close()
+
+    while q.name in s.extensions['queues'].queues:
+        yield gen.sleep(0.01)
+
+
+@gen_cluster(client=True)
+def test_timeout(c, s, a, b):
+    q = Queue('v', maxsize=1)
+
+    start = time()
+    with pytest.raises(gen.TimeoutError):
+        yield q.get(timeout=0.1)
+    stop = time()
+    assert 0.1 < stop - start < 2.0
+
+    yield q.put(1)
+
+    start = time()
+    with pytest.raises(gen.TimeoutError):
+        yield q.put(2, timeout=0.1)
+    stop = time()
+    assert 0.05 < stop - start < 2.0

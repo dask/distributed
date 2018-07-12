@@ -56,7 +56,7 @@ def test_small():
 
 
 def test_small_and_big():
-    d = {'x': [1, 2, 3], 'y': b'0' * 10000000}
+    d = {'x': (1, 2, 3), 'y': b'0' * 10000000}
     L = dumps(d)
     assert loads(L) == d
     # assert loads([small_header, small]) == {'x': [1, 2, 3]}
@@ -71,7 +71,7 @@ def test_maybe_compress():
 
     payload = b'123'
 
-    with dask.set_options(compression=None):
+    with dask.config.set({'distributed.comm.compression': None}):
         for f in try_converters:
             assert maybe_compress(f(payload)) == (None, payload)
 
@@ -81,7 +81,7 @@ def test_maybe_compress():
         except ImportError:
             continue
 
-        with dask.set_options(compression=compression):
+        with dask.config.set({'distributed.comm.compression': compression}):
             for f in try_converters:
                 payload = b'123'
                 assert maybe_compress(f(payload)) == (None, payload)
@@ -103,13 +103,14 @@ def test_maybe_compress_sample():
 
 
 def test_large_bytes():
-    msg = {'x': b'0' * 1000000, 'y': 1}
-    frames = dumps(msg)
-    assert loads(frames) == msg
-    assert len(frames[0]) < 1000
-    assert len(frames[1]) < 1000
+    for tp in (bytes, bytearray):
+        msg = {'x': tp(b'0' * 1000000), 'y': 1}
+        frames = dumps(msg)
+        assert loads(frames) == msg
+        assert len(frames[0]) < 1000
+        assert len(frames[1]) < 1000
 
-    assert loads(frames, deserialize=False) == msg
+        assert loads(frames, deserialize=False) == msg
 
 
 @slow

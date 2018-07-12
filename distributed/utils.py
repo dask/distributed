@@ -1,13 +1,15 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
-from collections import Iterable, deque
+from collections import deque
 from contextlib import contextmanager
 from datetime import timedelta
 import functools
+import inspect
 import json
 import logging
 import multiprocessing
+from numbers import Number
 import operator
 import os
 import re
@@ -31,14 +33,14 @@ try:
 except ImportError:
     resource = None
 
+import dask
 from dask import istask
-from toolz import memoize, valmap
+from toolz import memoize
 import tornado
 from tornado import gen
 from tornado.ioloop import IOLoop, PollIOLoop
 
 from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
-from .config import config
 from .metrics import time
 
 
@@ -55,7 +57,7 @@ no_default = '__no_default__'
 
 def _initialize_mp_context():
     if PY3 and not sys.platform.startswith('win') and 'PyPy' not in sys.version:
-        method = config.get('multiprocessing-method', 'forkserver')
+        method = dask.config.get('distributed.worker.multiprocessing-method')
         ctx = multiprocessing.get_context(method)
         # Makes the test suite much faster
         preload = ['distributed']
@@ -187,19 +189,41 @@ def ignore_exceptions(coroutines, *exceptions):
 
 
 @gen.coroutine
-def All(*args):
+def All(args, quiet_exceptions=()):
     """ Wait on many tasks at the same time
 
     Err once any of the tasks err.
 
     See https://github.com/tornadoweb/tornado/issues/1546
+
+    Parameters
+    ----------
+    args: futures to wait for
+    quiet_exceptions: tuple, Exception
+        Exception types to avoid logging if they fail
     """
-    if len(args) == 1 and isinstance(args[0], Iterable):
-        args = args[0]
     tasks = gen.WaitIterator(*args)
     results = [None for _ in args]
     while not tasks.done():
-        result = yield tasks.next()
+        try:
+            result = yield tasks.next()
+        except Exception:
+            @gen.coroutine
+            def quiet():
+                """ Watch unfinished tasks
+
+                Otherwise if they err they get logged in a way that is hard to
+                control.  They need some other task to watch them so that they
+                are not orphaned
+                """
+                for task in list(tasks._unfinished):
+                    try:
+                        yield task
+                    except quiet_exceptions:
+                        pass
+            quiet()
+            raise
+
         results[tasks.current_index] = result
     raise gen.Return(results)
 
@@ -215,13 +239,6 @@ def sync(loop, func, *args, **kwargs):
 
     timeout = kwargs.pop('callback_timeout', None)
 
-    def make_coro():
-        coro = gen.maybe_future(func(*args, **kwargs))
-        if timeout is None:
-            return coro
-        else:
-            return gen.with_timeout(timedelta(seconds=timeout), coro)
-
     e = threading.Event()
     main_tid = get_thread_identity()
     result = [None]
@@ -234,9 +251,11 @@ def sync(loop, func, *args, **kwargs):
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
             thread_state.asynchronous = True
-            result[0] = yield make_coro()
+            future = func(*args, **kwargs)
+            if timeout is not None:
+                future = gen.with_timeout(timedelta(seconds=timeout), future)
+            result[0] = yield future
         except Exception as exc:
-            logger.exception(exc)
             error[0] = sys.exc_info()
         finally:
             thread_state.asynchronous = False
@@ -641,11 +660,14 @@ def silence_logging(level, root='distributed'):
     if isinstance(level, str):
         level = getattr(logging, level.upper())
 
-    for name, logger in logging.root.manager.loggerDict.items():
-        if (isinstance(logger, logging.Logger)
-            and logger.name.startswith(root + '.')
-                and logger.level < level):
-            logger.setLevel(level)
+    old = None
+    logger = logging.getLogger(root)
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler):
+            old = handler.level
+            handler.setLevel(level)
+
+    return old
 
 
 @memoize
@@ -773,22 +795,23 @@ def _maybe_complex(task):
             type(task) is dict and any(map(_maybe_complex, task.values())))
 
 
-def str_graph(dsk, extra_values=()):
-    def convert(task):
-        if type(task) is list:
-            return [convert(v) for v in task]
-        if type(task) is dict:
-            return valmap(convert, task)
-        if istask(task):
-            return (task[0],) + tuple(map(convert, task[1:]))
-        try:
-            if task in dsk or task in extra_values:
-                return tokey(task)
-        except TypeError:
-            pass
-        return task
+def convert(task, dsk, extra_values):
+    if type(task) is list:
+        return [convert(v, dsk, extra_values) for v in task]
+    if type(task) is dict:
+        return {k: convert(v, dsk, extra_values) for k, v in task.items()}
+    if istask(task):
+        return (task[0],) + tuple(convert(x, dsk, extra_values) for x in task[1:])
+    try:
+        if task in dsk or task in extra_values:
+            return tokey(task)
+    except TypeError:
+        pass
+    return task
 
-    return {tokey(k): convert(v) for k, v in dsk.items()}
+
+def str_graph(dsk, extra_values=()):
+    return {tokey(k): convert(v, dsk, extra_values) for k, v in dsk.items()}
 
 
 def seek_delimiter(file, delimiter, blocksize):
@@ -984,21 +1007,21 @@ def open_port(host=''):
 
 
 def import_file(path):
-    """ Loads modules for a file (.py, .pyc, .zip, .egg) """
+    """ Loads modules for a file (.py, .zip, .egg) """
     directory, filename = os.path.split(path)
     name, ext = os.path.splitext(filename)
     names_to_import = []
     tmp_python_path = None
 
-    if ext in ('.py', '.pyc'):
+    if ext in ('.py'):  # , '.pyc'):
         if directory not in sys.path:
             tmp_python_path = directory
         names_to_import.append(name)
-        # Ensures that no pyc file will be reused
+    if ext == '.py':  # Ensure that no pyc file will be reused
         cache_file = cache_from_source(path)
-        if os.path.exists(cache_file):
+        with ignoring(OSError):
             os.remove(cache_file)
-    if ext in ('.egg', '.zip'):
+    if ext in ('.egg', '.zip', '.pyz'):
         if path not in sys.path:
             sys.path.insert(0, path)
         if ext == '.egg':
@@ -1006,7 +1029,7 @@ def import_file(path):
             pkgs = pkg_resources.find_distributions(path)
             for pkg in pkgs:
                 names_to_import.append(pkg.project_name)
-        elif ext == '.zip':
+        elif ext in ('.zip', '.pyz'):
             names_to_import.append(name)
 
     loaded = []
@@ -1059,7 +1082,15 @@ def format_bytes(n):
     '12.35 MB'
     >>> format_bytes(1234567890)
     '1.23 GB'
+    >>> format_bytes(1234567890000)
+    '1.23 TB'
+    >>> format_bytes(1234567890000000)
+    '1.23 PB'
     """
+    if n > 1e15:
+        return '%0.2f PB' % (n / 1e15)
+    if n > 1e12:
+        return '%0.2f TB' % (n / 1e12)
     if n > 1e9:
         return '%0.2f GB' % (n / 1e9)
     if n > 1e6:
@@ -1128,6 +1159,70 @@ def parse_bytes(s):
 
     result = n * multiplier
     return int(result)
+
+
+timedelta_sizes = {
+        's': 1,
+        'ms': 1e-3,
+        'us': 1e-6,
+        'ns': 1e-9,
+        'm': 60,
+        'h': 3600,
+        'd': 3600 * 24,
+}
+
+tds2 = {
+        'second': 1,
+        'minute': 60,
+        'hour': 60 * 60,
+        'day': 60 * 60 * 24,
+        'millisecond': 1e-3,
+        'microsecond': 1e-6,
+        'nanosecond': 1e-9,
+}
+tds2.update({k + 's': v for k, v in tds2.items()})
+timedelta_sizes.update(tds2)
+timedelta_sizes.update({k.upper(): v for k, v in timedelta_sizes.items()})
+
+
+def parse_timedelta(s, default='seconds'):
+    """ Parse timedelta string to number of seconds
+
+    Examples
+    --------
+    >>> parse_timedelta('3s')
+    3
+    >>> parse_timedelta('3.5 seconds')
+    3.5
+    >>> parse_timedelta('300ms')
+    0.3
+    >>> parse_timedelta(timedelta(seconds=3))  # also supports timedeltas
+    3
+    """
+    if isinstance(s, timedelta):
+        return s.total_seconds()
+    if isinstance(s, Number):
+        s = str(s)
+    s = s.replace(' ', '')
+    if not s[0].isdigit():
+        s = '1' + s
+
+    for i in range(len(s) - 1, -1, -1):
+        if not s[i].isalpha():
+            break
+    index = i + 1
+
+    prefix = s[:index]
+    suffix = s[index:] or default
+
+    n = float(prefix)
+
+    multiplier = timedelta_sizes[suffix.lower()]
+
+    result = n * multiplier
+    if int(result) == result:
+        result = int(result)
+    return result
 
 
 def asciitable(columns, rows):
@@ -1291,3 +1386,13 @@ def reset_logger_locks():
 # Only bother if asyncio has been loaded by Tornado
 if 'asyncio' in sys.modules:
     fix_asyncio_event_loop_policy(sys.modules['asyncio'])
+
+
+def has_keyword(func, keyword):
+    if PY3:
+        return keyword in inspect.signature(func).parameters
+    else:
+        # https://stackoverflow.com/questions/50100498/determine-keywords-of-a-tornado-coroutine
+        if gen.is_coroutine_function(func):
+            func = func.__wrapped__
+        return keyword in inspect.getargspec(func).args

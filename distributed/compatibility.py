@@ -18,6 +18,8 @@ if sys.version_info[0] == 2:
     PY3 = False
     ConnectionRefusedError = OSError
     FileExistsError = OSError
+    class StopAsyncIteration(Exception):
+        pass
 
     import gzip
 
@@ -51,7 +53,11 @@ if sys.version_info[0] == 2:
 
     logging_names = logging._levelNames
 
+    def iscoroutinefunction(func):
+        return False
+
 if sys.version_info[0] == 3:
+    from asyncio import iscoroutinefunction
     from queue import Queue, Empty
     from importlib import reload
     from threading import get_ident as get_thread_identity
@@ -67,6 +73,7 @@ if sys.version_info[0] == 3:
     from gzip import compress as gzip_compress
     ConnectionRefusedError = ConnectionRefusedError
     FileExistsError = FileExistsError
+    StopAsyncIteration = StopAsyncIteration
 
     def isqueue(o):
         return isinstance(o, Queue)
@@ -75,6 +82,8 @@ if sys.version_info[0] == 3:
     logging_names.update(logging._nameToLevel)
 
 
+import platform
+PYPY = platform.python_implementation().lower() == 'pypy'
 WINDOWS = sys.platform.startswith('win')
 
 

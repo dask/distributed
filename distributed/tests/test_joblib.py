@@ -8,8 +8,10 @@ from random import random
 from time import sleep
 
 from distributed import Client
+from distributed.metrics import time
 from distributed.utils_test import cluster, inc
 from distributed.utils_test import loop # noqa F401
+from toolz import identity
 
 distributed_joblib = pytest.importorskip('distributed.joblib')
 joblib_funcname = distributed_joblib.joblib_funcname
@@ -68,14 +70,18 @@ def test_dont_assume_function_purity(loop, joblib):
                 assert x != y
 
 
-def test_joblib_funcname(joblib):
-    BatchedCalls = joblib.parallel.BatchedCalls
-    if LooseVersion(joblib.__version__) <= "0.11.0":
-        func = BatchedCalls([(random2,), (random2,)])
-    else:
-        func = BatchedCalls([(random2,), (random2,)], None)
-    assert joblib_funcname(func) == 'random2'
-    assert joblib_funcname(random2) == 'random2'
+def test_joblib_funcname(loop, joblib):
+    Parallel = joblib.Parallel
+    delayed = joblib.delayed
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as client:
+            with joblib.parallel_backend('dask') as (ba, _):
+                x, y = Parallel()(delayed(inc)(i) for i in range(2))
+
+            def f(dask_scheduler):
+                return list(dask_scheduler.transition_log)
+            log = client.run_on_scheduler(f)
+            assert all(tup[0].startswith('inc-batch') for tup in log)
 
 
 def test_joblib_backend_subclass(joblib):
@@ -216,9 +222,83 @@ def inner(joblib):
 def test_secede_with_no_processes(loop, joblib):
     # https://github.com/dask/distributed/issues/1775
 
-    def f(x):
-        return x
-
     with Client(loop=loop, processes=False, set_as_default=True):
         with joblib.parallel_backend('dask'):
-            joblib.Parallel(n_jobs=4)(joblib.delayed(f)(i) for i in range(2))
+            joblib.Parallel(n_jobs=4)(joblib.delayed(identity)(i) for i in range(2))
+
+
+def _test_keywords_f(_):
+    from distributed import get_worker
+    return get_worker().address
+
+
+def test_keywords(loop, joblib):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as client:
+            with joblib.parallel_backend('dask', workers=a['address']) as (ba, _):
+                seq = joblib.Parallel()(joblib.delayed(_test_keywords_f)(i) for i in range(10))
+                assert seq == [a['address']] * 10
+
+            with joblib.parallel_backend('dask', workers=b['address']) as (ba, _):
+                seq = joblib.Parallel()(joblib.delayed(_test_keywords_f)(i) for i in range(10))
+                assert seq == [b['address']] * 10
+
+
+def test_cleanup(loop, joblib):
+    with Client(processes=False, loop=loop) as client:
+        with joblib.parallel_backend('dask'):
+            joblib.Parallel()(joblib.delayed(inc)(i) for i in range(10))
+
+        start = time()
+        while client.cluster.scheduler.tasks:
+            sleep(0.01)
+            assert time() < start + 5
+
+        assert not client.futures
+
+
+def test_auto_scatter(loop, joblib):
+    base_type = joblib._parallel_backends.ParallelBackendBase
+    if not hasattr(base_type, 'start_call'):
+        raise pytest.skip('joblib version does not support backend callbacks')
+
+    np = pytest.importorskip('numpy')
+    data = np.ones(int(1e7), dtype=np.uint8)
+
+    Parallel = joblib.Parallel
+    delayed = joblib.delayed
+
+    def noop(*args, **kwargs):
+        pass
+
+    def count_events(event_name, client):
+        worker_events = client.run(lambda dask_worker: dask_worker.log)
+        event_counts = {}
+        for w, events in worker_events.items():
+            event_counts[w] = len([event for event in list(events)
+                                   if event[1] == event_name])
+        return event_counts
+
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as client:
+            with joblib.parallel_backend('dask') as (ba, _):
+                # Passing the same data as arg and kwarg triggers a single
+                # scatter operation whose result is reused.
+                Parallel()(delayed(noop)(data, data, i, opt=data)
+                           for i in range(5))
+            # By default large array are automatically scattered with
+            # broadcast=3 which means that each worker can directly receive
+            # the data from the scatter operation once.
+            counts = count_events('receive-from-scatter', client)
+            assert counts[a['address']] == 1
+            assert counts[b['address']] == 1
+
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as client:
+            with joblib.parallel_backend('dask') as (ba, _):
+                Parallel()(delayed(noop)(data[:3], i) for i in range(5))
+            # Small arrays are passed within the task definition without going
+            # through a scatter operation.
+            counts = count_events('receive-from-scatter', client)
+            assert counts[a['address']] == 0
+            assert counts[b['address']] == 0

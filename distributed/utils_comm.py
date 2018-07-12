@@ -14,7 +14,7 @@ from .utils import All, tokey
 
 
 @gen.coroutine
-def gather_from_workers(who_has, rpc, close=True):
+def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
     """ Gather data directly from peers
 
     Parameters
@@ -30,6 +30,7 @@ def gather_from_workers(who_has, rpc, close=True):
     gather
     _gather
     """
+    from .worker import get_data_from_worker
     bad_addresses = set()
     missing_workers = set()
     original_who_has = who_has
@@ -55,7 +56,9 @@ def gather_from_workers(who_has, rpc, close=True):
 
         rpcs = {addr: rpc(addr) for addr in d}
         try:
-            coroutines = {address: rpcs[address].get_data(keys=keys, close=close)
+            coroutines = {address: get_data_from_worker(rpc, keys, address,
+                                                        who=who,
+                                                        max_connections=False)
                           for address, keys in d.items()}
             response = {}
             for worker, c in coroutines.items():
@@ -64,7 +67,7 @@ def gather_from_workers(who_has, rpc, close=True):
                 except EnvironmentError:
                     missing_workers.add(worker)
                 else:
-                    response.update(r)
+                    response.update(r['data'])
         finally:
             for r in rpcs.values():
                 r.close_rpc()
@@ -95,7 +98,7 @@ _round_robin_counter = [0]
 
 
 @gen.coroutine
-def scatter_to_workers(ncores, data, rpc=rpc, report=True):
+def scatter_to_workers(ncores, data, rpc=rpc, report=True, serializers=None):
     """ Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
@@ -120,11 +123,13 @@ def scatter_to_workers(ncores, data, rpc=rpc, report=True):
 
     rpcs = {addr: rpc(addr) for addr in d}
     try:
-        out = yield All([rpcs[address].update_data(data=v, report=report)
+        out = yield All([rpcs[address].update_data(data=v, report=report,
+                                                   serializers=serializers)
                          for address, v in d.items()])
     finally:
         for r in rpcs.values():
             r.close_rpc()
+
     nbytes = merge(o['nbytes'] for o in out)
 
     who_has = {k: [w for w, _, _ in v] for k, v in groupby(1, L).items()}

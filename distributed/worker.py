@@ -13,25 +13,25 @@ import sys
 import warnings
 import weakref
 
+import dask
 from dask.core import istask
 from dask.compatibility import apply
 try:
-    from cytoolz import pluck
+    from cytoolz import pluck, partial
 except ImportError:
-    from toolz import pluck
+    from toolz import pluck, partial
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
-from . import profile
+from . import profile, comm
 from .batched import BatchedSend
-from .comm import get_address_host, get_local_address_for
+from .comm import get_address_host, get_local_address_for, connect
 from .comm.utils import offload
-from .config import config, log_format
 from .compatibility import unicode, get_thread_identity, finalize
-from .core import (error_message, CommClosedError,
-                   rpc, pingpong, coerce_to_address)
+from .core import (error_message, CommClosedError, send_recv,
+                   pingpong, coerce_to_address)
 from .diskutils import WorkSpace
 from .metrics import time
 from .node import ServerNode
@@ -39,14 +39,15 @@ from .preloading import preload_modules
 from .proctitle import setproctitle
 from .protocol import (pickle, to_serialize, deserialize_bytes,
                        serialize_bytelist)
+from .pubsub import PubSubWorkerExtension
 from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
-                    ignoring, validate_key, mp_context, import_file,
+                    ignoring, mp_context, import_file,
                     silence_logging, thread_state, json_load_robust, key_split,
                     format_bytes, DequeHandler, PeriodicCallback,
-                    parse_bytes)
+                    parse_bytes, parse_timedelta)
 from .utils_comm import pack_data, gather_from_workers
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 
@@ -54,7 +55,7 @@ _ncores = mp_context.cpu_count()
 
 logger = logging.getLogger(__name__)
 
-LOG_PDB = config.get('pdb-on-err')
+LOG_PDB = dask.config.get('distributed.admin.pdb-on-err')
 
 no_value = '--no-value-sentinel--'
 
@@ -73,6 +74,10 @@ PROCESSING = ('waiting', 'ready', 'constrained', 'executing', 'long-running')
 READY = ('ready', 'constrained')
 
 
+DEFAULT_EXTENSIONS = [
+    PubSubWorkerExtension,
+]
+
 _global_workers = []
 
 
@@ -83,15 +88,16 @@ class WorkerBase(ServerNode):
                  reconnect=True, memory_limit='auto',
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
-                 contact_address=None, memory_monitor_interval=200, **kwargs):
+                 contact_address=None, memory_monitor_interval='200ms',
+                 extensions=None, **kwargs):
 
         self._setup_logging()
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
             scheduler_addr = cfg['address']
-        elif scheduler_ip is None and config.get('scheduler-address'):
-            scheduler_addr = config['scheduler-address']
+        elif scheduler_ip is None and dask.config.get('scheduler-address', None):
+            scheduler_addr = dask.config.get('scheduler-address')
         elif scheduler_port is None:
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
@@ -104,7 +110,8 @@ class WorkerBase(ServerNode):
         self.preload = preload
         self.preload_argv = preload_argv,
         self.contact_address = contact_address
-        self.memory_monitor_interval = memory_monitor_interval
+        self.memory_monitor_interval = parse_timedelta(memory_monitor_interval, default='ms')
+        self.extensions = dict()
         if silence_logs:
             silence_logging(level=silence_logs)
 
@@ -128,23 +135,27 @@ class WorkerBase(ServerNode):
         if 'memory_target_fraction' in kwargs:
             self.memory_target_fraction = kwargs.pop('memory_target_fraction')
         else:
-            self.memory_target_fraction = config.get('worker-memory-target', 0.6)
+            self.memory_target_fraction = dask.config.get('distributed.worker.memory.target')
         if 'memory_spill_fraction' in kwargs:
             self.memory_spill_fraction = kwargs.pop('memory_spill_fraction')
         else:
-            self.memory_spill_fraction = config.get('worker-memory-spill', 0.7)
+            self.memory_spill_fraction = dask.config.get('distributed.worker.memory.spill')
         if 'memory_pause_fraction' in kwargs:
             self.memory_pause_fraction = kwargs.pop('memory_pause_fraction')
         else:
-            self.memory_pause_fraction = config.get('worker-memory-pause', 0.8)
+            self.memory_pause_fraction = dask.config.get('distributed.worker.memory.pause')
 
-        if self.memory_limit:
+        if (self.memory_limit and
+                (self.memory_target_fraction or
+                 self.memory_spill_fraction)):
             try:
                 from zict import Buffer, File, Func
             except ImportError:
                 raise ImportError("Please `pip install zict` for spill-to-disk workers")
             path = os.path.join(self.local_dir, 'storage')
-            storage = Func(serialize_bytelist, deserialize_bytes, File(path))
+            storage = Func(partial(serialize_bytelist, on_error='raise'),
+                           deserialize_bytes,
+                           File(path))
             target = int(float(self.memory_limit) * self.memory_target_fraction)
             self.data = Buffer({}, storage, target, weight)
         else:
@@ -154,13 +165,10 @@ class WorkerBase(ServerNode):
         self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
-        self.scheduler = rpc(scheduler_addr, connection_args=self.connection_args)
         self.name = name
         self.scheduler_delay = 0
+        self.stream_comms = dict()
         self.heartbeat_active = False
-        self.execution_state = {'scheduler': self.scheduler.address,
-                                'ioloop': self.loop,
-                                'worker': self}
         self._ipython_kernel = None
 
         if self.local_dir not in sys.path:
@@ -172,7 +180,6 @@ class WorkerBase(ServerNode):
 
         handlers = {
             'gather': self.gather,
-            'compute-stream': self.compute_stream,
             'run': self.run,
             'run_coroutine': self.run_coroutine,
             'get_data': self.get_data,
@@ -190,9 +197,25 @@ class WorkerBase(ServerNode):
             'versions': self.versions,
         }
 
-        super(WorkerBase, self).__init__(handlers, io_loop=self.loop,
-                                         connection_args=self.connection_args,
-                                         **kwargs)
+        stream_handlers = {
+            'close': self._close,
+            'compute-task': self.add_task,
+            'release-task': partial(self.release_key, report=False),
+            'delete-data': self.delete_data,
+            'steal-request': self.steal_request,
+        }
+
+        super(WorkerBase, self).__init__(
+                handlers=handlers,
+                stream_handlers=stream_handlers,
+                io_loop=self.loop,
+                connection_args=self.connection_args,
+                **kwargs)
+
+        self.scheduler = self.rpc(scheduler_addr)
+        self.execution_state = {'scheduler': self.scheduler.address,
+                                'ioloop': self.loop,
+                                'worker': self}
 
         pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
         self.periodic_callbacks['heartbeat'] = pc
@@ -201,17 +224,22 @@ class WorkerBase(ServerNode):
         if self.memory_limit:
             self._memory_monitoring = False
             pc = PeriodicCallback(self.memory_monitor,
-                                  self.memory_monitor_interval,
+                                  self.memory_monitor_interval * 1000,
                                   io_loop=self.io_loop)
             self.periodic_callbacks['memory'] = pc
+
+        if extensions is None:
+            extensions = DEFAULT_EXTENSIONS
+        for ext in extensions:
+            ext(self)
 
         self._throttled_gc = ThrottledGC(logger=logger)
 
         setproctitle("dask-worker [not started]")
 
     def _setup_logging(self):
-        self._deque_handler = DequeHandler(n=config.get('log-length', 10000))
-        self._deque_handler.setFormatter(logging.Formatter(log_format))
+        self._deque_handler = DequeHandler(n=dask.config.get('distributed.admin.log-length'))
+        self._deque_handler.setFormatter(logging.Formatter(dask.config.get('distributed.admin.log-format')))
         logger.addHandler(self._deque_handler)
         finalize(self, logger.removeHandler, self._deque_handler)
 
@@ -227,12 +255,10 @@ class WorkerBase(ServerNode):
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                response = yield self.scheduler.register(
+                response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
                     name=self.name,
-                    ncores=self.ncores,
                     now=time(),
-                    services=self.service_ports,
                     memory_limit=self.memory_limit,
                     executing=len(self.executing),
                     in_memory=len(self.data),
@@ -241,8 +267,13 @@ class WorkerBase(ServerNode):
                     **self.monitor.recent())
                 end = time()
                 middle = (start + end) / 2
+                if response['status'] == 'missing':
+                    yield self._register_with_scheduler()
+                    return
                 self.scheduler_delay = response['time'] - middle
                 self.periodic_callbacks['heartbeat'].callback_time = response['heartbeat-interval'] * 1000
+            except CommClosedError:
+                logger.warn("Heartbeat to scheduler failed")
             finally:
                 self.heartbeat_active = False
         else:
@@ -263,19 +294,24 @@ class WorkerBase(ServerNode):
                 raise gen.Return
             try:
                 _start = time()
-                future = self.scheduler.register(
-                        ncores=self.ncores,
-                        address=self.contact_address,
-                        keys=list(self.data),
-                        name=self.name,
-                        nbytes=self.nbytes,
-                        now=time(),
-                        services=self.service_ports,
-                        memory_limit=self.memory_limit,
-                        local_directory=self.local_dir,
-                        resources=self.total_resources,
-                        pid=os.getpid(),
-                        **self.monitor.recent())
+                comm = yield connect(self.scheduler.address,
+                                     connection_args=self.connection_args)
+                yield comm.write(dict(op='register-worker',
+                                         ncores=self.ncores,
+                                         address=self.contact_address,
+                                         keys=list(self.data),
+                                         name=self.name,
+                                         nbytes=self.nbytes,
+                                         now=time(),
+                                         services=self.service_ports,
+                                         memory_limit=self.memory_limit,
+                                         local_directory=self.local_dir,
+                                         resources=self.total_resources,
+                                         pid=os.getpid(),
+                                         reply=False,
+                                         **self.monitor.recent()),
+                                         serializers=['msgpack'])
+                future = comm.read(deserializers=['msgpack'])
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
                     if diff < 0:
@@ -298,7 +334,26 @@ class WorkerBase(ServerNode):
         else:
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
+
+        self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
+        self.batched_stream.start(comm)
         self.periodic_callbacks['heartbeat'].start()
+        self.loop.add_callback(self.handle_scheduler, comm)
+
+    @gen.coroutine
+    def handle_scheduler(self, comm):
+        try:
+            yield self.handle_stream(comm, every_cycle=[self.ensure_communicating,
+                                                        self.ensure_computing])
+        except Exception as e:
+            logger.exception(e)
+            raise
+        finally:
+            if self.reconnect:
+                logger.info("Connection to scheduler broken.  Reconnecting...")
+                self.loop.add_callback(self._register_with_scheduler)
+            else:
+                yield self._close(report=False)
 
     def start_services(self, listen_ip=''):
         for k, v in self.service_specs.items():
@@ -314,6 +369,23 @@ class WorkerBase(ServerNode):
             self.services[k] = v(self, io_loop=self.loop, **kwargs)
             self.services[k].listen((listen_ip, port))
             self.service_ports[k] = self.services[k].port
+
+    def send_to_worker(self, address, msg):
+        if address not in self.stream_comms:
+            bcomm = BatchedSend(interval='1ms', loop=self.loop)
+            self.stream_comms[address] = bcomm
+
+            @gen.coroutine
+            def batched_send_connect():
+                comm = yield connect(address,  # TODO, serialization
+                                     connection_args=self.connection_args)
+                yield comm.write({'op': 'connection_stream'})
+
+                bcomm.start(comm)
+
+            self.loop.add_callback(batched_send_connect)
+
+        self.stream_comms[address].send(msg)
 
     @gen.coroutine
     def _start(self, addr_or_port=0):
@@ -387,44 +459,51 @@ class WorkerBase(ServerNode):
 
     @gen.coroutine
     def _close(self, report=True, timeout=10, nanny=True, executor_wait=True):
-        if self.status in ('closed', 'closing'):
-            return
+        with log_errors():
+            if self.status in ('closed', 'closing'):
+                return
 
-        disable_gc_diagnosis()
+            disable_gc_diagnosis()
 
-        logger.info("Stopping worker at %s", self.address)
-        self.status = 'closing'
-        setproctitle("dask-worker [closing]")
+            logger.info("Stopping worker at %s", self.address)
+            self.status = 'closing'
+            setproctitle("dask-worker [closing]")
 
-        self.stop()
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-        with ignoring(EnvironmentError, gen.TimeoutError):
-            if report:
-                yield gen.with_timeout(timedelta(seconds=timeout),
-                                       self.scheduler.unregister(address=self.contact_address))
-        self.scheduler.close_rpc()
-        if isinstance(self.executor, ThreadPoolExecutor):
-            self.executor.shutdown(wait=executor_wait, timeout=timeout)
-        else:
-            self.executor.shutdown(wait=False)
-        self._workdir.release()
+            self.stop()
+            for pc in self.periodic_callbacks.values():
+                pc.stop()
+            with ignoring(EnvironmentError, gen.TimeoutError):
+                if report:
+                    yield gen.with_timeout(timedelta(seconds=timeout),
+                                           self.scheduler.unregister(address=self.contact_address))
+            self.scheduler.close_rpc()
+            if isinstance(self.executor, ThreadPoolExecutor):
+                self.executor.shutdown(wait=executor_wait, timeout=timeout)
+            else:
+                self.executor.shutdown(wait=False)
+            self._workdir.release()
 
-        for k, v in self.services.items():
-            v.stop()
+            for k, v in self.services.items():
+                v.stop()
 
-        self.status = 'closed'
+            self.status = 'closed'
 
-        if nanny and 'nanny' in self.service_ports:
-            with self.rpc((self.ip, self.service_ports['nanny'])) as r:
-                yield r.terminate()
+            if nanny and 'nanny' in self.service_ports:
+                with self.rpc((self.ip, self.service_ports['nanny'])) as r:
+                    yield r.terminate()
 
-        self.rpc.close()
-        self._closed.set()
-        self._remove_from_global_workers()
-        yield super(WorkerBase, self).close()
+            if self.batched_stream and not self.batched_stream.comm.closed():
+                self.batched_stream.send({'op': 'close-stream'})
 
-        setproctitle("dask-worker [closed]")
+            if self.batched_stream:
+                self.batched_stream.close()
+
+            self.rpc.close()
+            self._closed.set()
+            self._remove_from_global_workers()
+            yield super(WorkerBase, self).close()
+
+            setproctitle("dask-worker [closed]")
 
     def __del__(self):
         self._remove_from_global_workers()
@@ -478,7 +557,7 @@ class WorkerBase(ServerNode):
         return run(self, comm, function=function, args=args, kwargs=kwargs,
                    is_coro=True, wait=wait)
 
-    def update_data(self, comm=None, data=None, report=True):
+    def update_data(self, comm=None, data=None, report=True, serializers=None):
         for key, value in data.items():
             if key in self.task_state:
                 self.transition(key, 'memory', value=value)
@@ -522,21 +601,40 @@ class WorkerBase(ServerNode):
         raise Return('OK')
 
     @gen.coroutine
-    def get_data(self, comm, keys=None, who=None):
+    def get_data(self, comm, keys=None, who=None, serializers=None,
+                 max_connections=None):
         start = time()
 
-        msg = {k: to_serialize(self.data[k]) for k in keys if k in self.data}
-        nbytes = {k: self.nbytes.get(k) for k in keys if k in self.data}
+        if max_connections is None:
+            max_connections = self.total_in_connections
+
+        # Allow same-host connections more liberally
+        if max_connections and comm and get_address_host(comm.peer_address) == get_address_host(self.address):
+            max_connections = max_connections * 2
+
+        if max_connections is not False and self.outgoing_current_count > max_connections:
+            raise gen.Return({'status': 'busy'})
+
+        self.outgoing_current_count += 1
+        data = {k: self.data[k] for k in keys if k in self.data}
+        msg = {'status': 'OK',
+               'data': {k: to_serialize(v) for k, v in data.items()}}
+        nbytes = {k: self.nbytes.get(k) for k in data}
         stop = time()
         if self.digests is not None:
             self.digests['get-data-load-duration'].add(stop - start)
         start = time()
         try:
-            compressed = yield comm.write(msg)
+            compressed = yield comm.write(msg, serializers=serializers)
+            response = yield comm.read(deserializers=serializers)
+            assert response == 'OK', response
         except EnvironmentError:
-            logger.exception('failed during get data', exc_info=True)
+            logger.exception('failed during get data with %s -> %s',
+                             self.address, who, exc_info=True)
             comm.abort()
             raise
+        finally:
+            self.outgoing_current_count -= 1
         stop = time()
         if self.digests is not None:
             self.digests['get-data-send-duration'].add(stop - start)
@@ -608,7 +706,7 @@ class WorkerBase(ServerNode):
             except Exception as e:
                 logger.exception(e)
                 raise gen.Return({'status': 'error',
-                                  'exception': pickle.dumps(e)})
+                                  'exception': to_serialize(e)})
 
         raise gen.Return({'status': 'OK', 'nbytes': len(data)})
 
@@ -621,7 +719,7 @@ class WorkerBase(ServerNode):
                    for k, v in who_has.items()
                    if k not in self.data}
         result, missing_keys, missing_workers = yield gather_from_workers(
-            who_has, rpc=self.rpc)
+            who_has, rpc=self.rpc, who=self.address)
         if missing_keys:
             logger.warning("Could not find data: %s on workers: %s (who_has: %s)",
                            missing_keys, missing_workers, who_has)
@@ -919,8 +1017,10 @@ class Worker(WorkerBase):
     * **services:** ``{str: Server}``:
         Auxiliary web servers running on this worker
     * **service_ports:** ``{str: port}``:
-    * **total_connections**: ``int``
-        The maximum number of concurrent connections we want to see
+    * **total_out_connections**: ``int``
+        The maximum number of concurrent outgoing requests for data
+    * **total_in_connections**: ``int``
+        The maximum number of concurrent incoming requests for data
     * **total_comm_nbytes**: ``int``
     * **batched_stream**: ``BatchedSend``
         A batched stream along which we communicate to the scheduler
@@ -1015,8 +1115,6 @@ class Worker(WorkerBase):
     local_dir: str, optional
         Directory where we place local resources
     name: str, optional
-    heartbeat_interval: int
-        Milliseconds between heartbeats to scheduler
     memory_limit: int, float, string
         Number of bytes of memory that this worker should use.
         Set to zero for no limit.  Set to 'auto' for 60% of memory use.
@@ -1059,14 +1157,14 @@ class Worker(WorkerBase):
         self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
-        self.extensions = {}
         self._lock = threading.Lock()
 
         self.data_needed = deque()  # TODO: replace with heap?
 
         self.in_flight_tasks = dict()
         self.in_flight_workers = dict()
-        self.total_connections = 50
+        self.total_out_connections = dask.config.get('distributed.worker.connections.outgoing')
+        self.total_in_connections = dask.config.get('distributed.worker.connections.incoming')
         self.total_comm_nbytes = 10e6
         self.comm_nbytes = 0
         self.suspicious_deps = defaultdict(lambda: 0)
@@ -1086,6 +1184,7 @@ class Worker(WorkerBase):
         self.profile_history = deque(maxlen=3600)
 
         self.priorities = dict()
+        self.generation = 0
         self.durations = dict()
         self.startstops = defaultdict(list)
         self.resource_restrictions = dict()
@@ -1097,7 +1196,7 @@ class Worker(WorkerBase):
         self.long_running = set()
 
         self.batched_stream = None
-        self.recent_messages_log = deque(maxlen=config.get('recent-messages-log-length', 0))
+        self.recent_messages_log = deque(maxlen=dask.config.get('distributed.comm.recent-messages-log-length'))
         self.target_message_size = 50e6  # 50 MB
 
         self.log = deque(maxlen=100000)
@@ -1130,20 +1229,25 @@ class Worker(WorkerBase):
         self.incoming_count = 0
         self.outgoing_transfer_log = deque(maxlen=(100000))
         self.outgoing_count = 0
+        self.outgoing_current_count = 0
+        self.repetitively_busy = 0
         self._client = None
 
         profile_cycle_interval = kwargs.pop('profile_cycle_interval',
-                                        config.get('profile-cycle-interval', 1000))
+                                            dask.config.get('distributed.worker.profile.cycle'))
+        profile_cycle_interval = parse_timedelta(profile_cycle_interval, default='ms')
 
         WorkerBase.__init__(self, *args, **kwargs)
 
-        pc = PeriodicCallback(self.trigger_profile,
-                              config.get('profile-interval', 10),
-                              io_loop=self.io_loop)
+        pc = PeriodicCallback(
+                self.trigger_profile,
+                parse_timedelta(dask.config.get('distributed.worker.profile.interval'), default='ms') * 1000,
+                io_loop=self.io_loop
+        )
         self.periodic_callbacks['profile'] = pc
 
         pc = PeriodicCallback(self.cycle_profile,
-                              profile_cycle_interval,
+                              profile_cycle_interval * 1000,
                               io_loop=self.io_loop)
         self.periodic_callbacks['profile-cycle'] = pc
 
@@ -1160,72 +1264,6 @@ class Worker(WorkerBase):
     # Update Graph #
     ################
 
-    @gen.coroutine
-    def compute_stream(self, comm):
-        try:
-            self.batched_stream = BatchedSend(interval=2, loop=self.loop)
-            self.batched_stream.start(comm)
-
-            closed = False
-
-            while not closed:
-                try:
-                    msgs = yield comm.read()
-                except CommClosedError as e:
-                    if self.reconnect and self.status not in ('closed', 'closing'):
-                        logger.info("Connection to scheduler broken. Reregistering")
-                        yield self._register_with_scheduler()
-                        return
-                    else:
-                        logger.info("Connection to scheduler broken. Closing")
-                        yield self._close(report=False)
-                    break
-                except EnvironmentError as e:
-                    break
-                except Exception as e:
-                    logger.error("Worker failed to read message. "
-                                 "This will likely cause the cluster to fail.",
-                                 exc_info=True)
-                    raise
-
-                start = time()
-
-                for msg in msgs:
-                    self.recent_messages_log.append(msg)
-                    op = msg.pop('op', None)
-                    if 'key' in msg:
-                        validate_key(msg['key'])
-                    if op == 'close':
-                        closed = True
-                        self._close()
-                        break
-                    elif op == 'compute-task':
-                        self.add_task(**msg)
-                    elif op == 'release-task':
-                        self.log.append((msg['key'], 'release-task', msg.get('reason')))
-                        self.release_key(report=False, **msg)
-                    elif op == 'delete-data':
-                        self.delete_data(**msg)
-                    elif op == 'steal-request':
-                        self.steal_request(**msg)
-                    else:
-                        logger.warning("Unknown operation %s, %s", op, msg)
-
-                self.ensure_communicating()
-                self.ensure_computing()
-
-                end = time()
-                if self.digests is not None:
-                    self.digests['handle-messages-duration'].add(end - start)
-
-            logger.info('Close compute stream')
-        except Exception as e:
-            logger.exception(e)
-            yield self._close()
-            raise
-        finally:
-            yield self.batched_stream.close()
-
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
                  who_has=None, nbytes=None, priority=None, duration=None,
                  resource_restrictions=None, **kwargs2):
@@ -1241,6 +1279,10 @@ class Worker(WorkerBase):
                     return
                 if state in IN_PLAY:
                     return
+
+            if priority is not None:
+                priority = tuple(priority) + (self.generation,)
+                self.generation -= 1
 
             if self.dep_state.get(key) == 'memory':
                 self.task_state[key] = 'memory'
@@ -1359,20 +1401,21 @@ class Worker(WorkerBase):
                 pdb.set_trace()
             raise
 
-    def transition_dep_flight_waiting(self, dep, worker=None):
+    def transition_dep_flight_waiting(self, dep, worker=None, remove=True):
         try:
             if self.validate:
                 assert dep in self.in_flight_tasks
 
             del self.in_flight_tasks[dep]
-            try:
-                self.who_has[dep].remove(worker)
-            except KeyError:
-                pass
-            try:
-                self.has_what[worker].remove(dep)
-            except KeyError:
-                pass
+            if remove:
+                try:
+                    self.who_has[dep].remove(worker)
+                except KeyError:
+                    pass
+                try:
+                    self.has_what[worker].remove(dep)
+                except KeyError:
+                    pass
 
             if not self.who_has.get(dep):
                 if dep not in self._missing_dep_flight:
@@ -1380,7 +1423,10 @@ class Worker(WorkerBase):
                     self.loop.add_callback(self.handle_missing_dep, dep)
             for key in self.dependents.get(dep, ()):
                 if self.task_state[key] == 'waiting':
-                    self.data_needed.appendleft(key)
+                    if remove:  # try a new worker immediately
+                        self.data_needed.appendleft(key)
+                    else:  # worker was probably busy, wait a while
+                        self.data_needed.append(key)
 
             if not self.dependents[dep]:
                 self.release_dep(dep)
@@ -1586,12 +1632,12 @@ class Worker(WorkerBase):
     def ensure_communicating(self):
         changed = True
         try:
-            while changed and self.data_needed and len(self.in_flight_workers) < self.total_connections:
+            while changed and self.data_needed and len(self.in_flight_workers) < self.total_out_connections:
                 changed = False
                 logger.debug("Ensure communicating.  Pending: %d.  Connections: %d/%d",
                              len(self.data_needed),
                              len(self.in_flight_workers),
-                             self.total_connections)
+                             self.total_out_connections)
 
                 key = self.data_needed[0]
 
@@ -1628,7 +1674,7 @@ class Worker(WorkerBase):
 
                 in_flight = False
 
-                while deps and (len(self.in_flight_workers) < self.total_connections
+                while deps and (len(self.in_flight_workers) < self.total_out_connections
                                 or self.comm_nbytes < self.total_comm_nbytes):
                     dep = deps.pop()
                     if self.dep_state[dep] != 'waiting':
@@ -1640,7 +1686,12 @@ class Worker(WorkerBase):
                     if not workers:
                         in_flight = True
                         continue
-                    worker = random.choice(list(workers))
+                    host = get_address_host(self.address)
+                    local = [w for w in workers if get_address_host(w) == host]
+                    if local:
+                        worker = random.choice(local)
+                    else:
+                        worker = random.choice(list(workers))
                     to_gather, total_nbytes = self.select_keys_for_gather(worker, dep)
                     self.comm_nbytes += total_nbytes
                     self.in_flight_workers[worker] = to_gather
@@ -1751,22 +1802,32 @@ class Worker(WorkerBase):
                 self.log.append(('request-dep', dep, worker, deps))
                 logger.debug("Request %d keys", len(deps))
 
-                start = time() + self.scheduler_delay
-                response = yield self.rpc(worker).get_data(keys=deps,
-                                                           who=self.address)
-                stop = time() + self.scheduler_delay
+                start = time()
+                response = yield get_data_from_worker(self.rpc, deps, worker,
+                                                      who=self.address)
+                stop = time()
+
+                if response['status'] == 'busy':
+                    self.log.append(('busy-gather', worker, deps))
+                    for dep in deps:
+                        self.transition_dep(dep, 'waiting')
+                    return
 
                 if cause:
-                    self.startstops[cause].append(('transfer', start, stop))
+                    self.startstops[cause].append((
+                        'transfer',
+                        start + self.scheduler_delay,
+                        stop + self.scheduler_delay
+                    ))
 
-                total_bytes = sum(self.nbytes.get(dep, 0) for dep in response)
+                total_bytes = sum(self.nbytes.get(dep, 0) for dep in response['data'])
                 duration = (stop - start) or 0.5
                 self.incoming_transfer_log.append({
-                    'start': start,
-                    'stop': stop,
-                    'middle': (start + stop) / 2.0,
+                    'start': start + self.scheduler_delay,
+                    'stop': stop + self.scheduler_delay,
+                    'middle': (start + stop) / 2.0 + self.scheduler_delay,
                     'duration': duration,
-                    'keys': {dep: self.nbytes.get(dep, None) for dep in response},
+                    'keys': {dep: self.nbytes.get(dep, None) for dep in response['data']},
                     'total': total_bytes,
                     'bandwidth': total_bytes / duration,
                     'who': worker
@@ -1774,14 +1835,14 @@ class Worker(WorkerBase):
                 if self.digests is not None:
                     self.digests['transfer-bandwidth'].add(total_bytes / duration)
                     self.digests['transfer-duration'].add(duration)
-                self.counters['transfer-count'].add(len(response))
+                self.counters['transfer-count'].add(len(response['data']))
                 self.incoming_count += 1
 
-                self.log.append(('receive-dep', worker, list(response)))
+                self.log.append(('receive-dep', worker, list(response['data'])))
 
-                if response:
+                if response['data']:
                     self.batched_stream.send({'op': 'add-keys',
-                                              'keys': list(response)})
+                                              'keys': list(response['data'])})
             except EnvironmentError as e:
                 logger.exception("Worker stream died during communication: %s",
                                  worker)
@@ -1799,14 +1860,16 @@ class Worker(WorkerBase):
                 raise
             finally:
                 self.comm_nbytes -= total_nbytes
+                busy = response.get('status', '') == 'busy'
 
                 for d in self.in_flight_workers.pop(worker):
-                    if d in response:
-                        self.transition_dep(d, 'memory', value=response[d])
+                    if not busy and d in response['data']:
+                        self.transition_dep(d, 'memory', value=response['data'][d])
                     elif self.dep_state.get(d) != 'memory':
-                        self.transition_dep(d, 'waiting', worker=worker)
+                        self.transition_dep(d, 'waiting', worker=worker,
+                                            remove=not busy)
 
-                    if d not in response and d in self.dependents:
+                    if not busy and d not in response['data'] and d in self.dependents:
                         self.log.append(('missing-dep', d))
                         self.batched_stream.send({'op': 'missing-data',
                                                   'errant_worker': worker,
@@ -1816,7 +1879,18 @@ class Worker(WorkerBase):
                     self.validate_state()
 
                 self.ensure_computing()
-                self.ensure_communicating()
+
+                if not busy:
+                    self.repetitively_busy = 0
+                    self.ensure_communicating()
+                else:
+                    # Exponential backoff to avoid hammering scheduler/worker
+                    self.repetitively_busy += 1
+                    yield gen.sleep(0.100 * 1.5 ** self.repetitively_busy)
+
+                    # See if anyone new has the data
+                    yield self.query_who_has(dep)
+                    self.ensure_communicating()
 
     def bad_dep(self, dep):
         exc = ValueError("Could not find dependent %s.  Check worker logs" % str(dep))
@@ -1937,9 +2011,10 @@ class Worker(WorkerBase):
                 del self.waiting_for_data[key]
 
             for dep in self.dependencies.pop(key, ()):
-                self.dependents[dep].remove(key)
-                if not self.dependents[dep] and self.dep_state[dep] in ('waiting', 'flight'):
-                    self.release_dep(dep)
+                if dep in self.dependents:
+                    self.dependents[dep].remove(key)
+                    if not self.dependents[dep] and self.dep_state[dep] in ('waiting', 'flight'):
+                        self.release_dep(dep)
 
             if key in self.threads:
                 del self.threads[key]
@@ -1998,7 +2073,6 @@ class Worker(WorkerBase):
                 self.in_flight_workers[worker].remove(dep)
 
             for key in self.dependents.pop(dep, ()):
-                self.dependencies[key].remove(dep)
                 if self.task_state[key] != 'memory':
                     self.release_key(key, cause=dep)
 
@@ -2146,7 +2220,7 @@ class Worker(WorkerBase):
                                    str(funcname(function))[:1000],
                                    convert_args_to_str(args2, max_len=1000),
                                    convert_kwargs_to_str(kwargs2, max_len=1000),
-                                   repr(pickle.loads(result['exception'])))
+                                   repr(result['exception'].data))
                     self.transition(key, 'error')
 
             logger.debug("Send compute response to scheduler: %s, %s", key,
@@ -2578,10 +2652,24 @@ def get_worker():
         raise ValueError("No workers found")
 
 
-def get_client(address=None, timeout=3):
-    """ Get a client while within a task
+def get_client(address=None, timeout=3, resolve_address=True):
+    """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
+
+    Parameters
+    ----------
+    address : str, optional
+        The address of the scheduler to connect to. Defaults to the scheduler
+        the worker is connected to.
+    timeout : int, default 3
+        Timeout (in seconds) for getting the Client
+    resolve_address : bool, default True
+        Whether to resolve `address` to its canonical form.
+
+    Returns
+    -------
+    Client
 
     Examples
     --------
@@ -2601,6 +2689,8 @@ def get_client(address=None, timeout=3):
     worker_client
     secede
     """
+    if address and resolve_address:
+        address = comm.resolve_address(address)
     try:
         worker = get_worker()
     except ValueError:  # could not find worker
@@ -2679,3 +2769,31 @@ def parse_memory_limit(memory_limit, ncores):
         return parse_bytes(memory_limit)
     else:
         return int(memory_limit)
+
+
+@gen.coroutine
+def get_data_from_worker(rpc, keys, worker, who=None, max_connections=None):
+    """ Get keys from worker
+
+    The worker has a two step handshake to acknowledge when data has been fully
+    delivered.  This function implements that handshake.
+
+    See Also
+    --------
+    Worker.get_data
+    Worker.gather_deps
+    utils_comm.gather_data_from_workers
+    """
+    comm = yield rpc.connect(worker)
+    try:
+        response = yield send_recv(comm,
+                                   serializers=rpc.serializers,
+                                   deserializers=rpc.deserializers,
+                                   op='get_data', keys=keys, who=who,
+                                   max_connections=max_connections)
+        if response['status'] == 'OK':
+            yield comm.write('OK')
+    finally:
+        rpc.reuse(worker, comm)
+
+    raise gen.Return(response)

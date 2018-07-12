@@ -1,15 +1,19 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
+from datetime import timedelta
 import logging
 import math
 from time import sleep
 import weakref
+import toolz
 
 from tornado import gen
 
+from .cluster import Cluster
 from ..core import CommClosedError
-from ..utils import sync, ignoring, All, silence_logging, LoopRunner
+from ..utils import (sync, ignoring, All, silence_logging, LoopRunner,
+        log_errors, thread_state)
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..worker import Worker, _ncores
@@ -17,7 +21,7 @@ from ..worker import Worker, _ncores
 logger = logging.getLogger(__name__)
 
 
-class LocalCluster(object):
+class LocalCluster(Cluster):
     """ Create local Scheduler and Workers
 
     This creates a "cluster" of a scheduler and workers running on the local
@@ -43,10 +47,14 @@ class LocalCluster(object):
         to choose a random port, ``None`` to disable it, or an
         :samp:`({ip}:{port})` tuple to listen on a different IP address than
         the scheduler.
+    asynchronous: bool (False by default)
+        Set to True if using this cluster within async/await functions or within
+        Tornado gen.coroutines.  This should remain False for normal use.
     kwargs: dict
         Extra worker arguments, will be passed to the Worker constructor.
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
+    security : Security
 
     Examples
     --------
@@ -57,23 +65,36 @@ class LocalCluster(object):
     >>> c = Client(c)  # connect to local cluster  # doctest: +SKIP
 
     Add a new worker to the cluster
+
     >>> w = c.start_worker(ncores=2)  # doctest: +SKIP
 
     Shut down the extra worker
-    >>> c.remove_worker(w)  # doctest: +SKIP
+
+    >>> c.stop_worker(w)  # doctest: +SKIP
 
     Pass extra keyword arguments to Bokeh
+
     >>> LocalCluster(service_kwargs={'bokeh': {'prefix': '/foo'}})  # doctest: +SKIP
     """
     def __init__(self, n_workers=None, threads_per_worker=None, processes=True,
-                 loop=None, start=True, ip=None, scheduler_port=0,
+                 loop=None, start=None, ip=None, scheduler_port=0,
                  silence_logs=logging.WARN, diagnostics_port=8787,
-                 services={}, worker_services={}, service_kwargs=None, **worker_kwargs):
+                 services={}, worker_services={}, service_kwargs=None,
+                 asynchronous=False, security=None, **worker_kwargs):
+        if start is not None:
+            msg = ("The start= parameter is deprecated. "
+                   "LocalCluster always starts. "
+                   "For asynchronous operation use the following: \n\n"
+                   "  cluster = yield LocalCluster(asynchronous=True)")
+            raise ValueError(msg)
+
         self.status = None
         self.processes = processes
         self.silence_logs = silence_logs
+        self._asynchronous = asynchronous
+        self.security = security
         if silence_logs:
-            silence_logging(level=silence_logs)
+            self._old_logging_level = silence_logging(level=silence_logs)
         if n_workers is None and threads_per_worker is None:
             if processes:
                 n_workers = _ncores
@@ -87,10 +108,13 @@ class LocalCluster(object):
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(_ncores / n_workers)))
 
-        self._loop_runner = LoopRunner(loop=loop)
+        worker_kwargs.update({
+            'ncores': threads_per_worker,
+            'services': worker_services,
+        })
+
+        self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
-        if start:
-            self._loop_runner.start()
 
         if diagnostics_port is not None:
             try:
@@ -103,17 +127,16 @@ class LocalCluster(object):
                 worker_services[('bokeh', 0)] = BokehWorker
 
         self.scheduler = Scheduler(loop=self.loop,
-                                   services=services)
+                                   services=services,
+                                   security=security)
         self.scheduler_port = scheduler_port
 
         self.workers = []
-        self.n_workers = n_workers
-        self.threads_per_worker = threads_per_worker
-        self.worker_services = worker_services
         self.worker_kwargs = worker_kwargs
+        if security:
+            self.worker_kwargs['security'] = security
 
-        if start:
-            sync(self.loop, self._start, ip)
+        self.start(ip=ip, n_workers=n_workers)
 
         clusters_to_close.add(self)
 
@@ -123,42 +146,54 @@ class LocalCluster(object):
                  sum(w.ncores for w in self.workers))
                 )
 
+    def __await__(self):
+        return self._started.__await__()
+
+    def sync(self, func, *args, **kwargs):
+        asynchronous = kwargs.pop('asynchronous', None)
+        if asynchronous or self._asynchronous or getattr(thread_state, 'asynchronous', False):
+            callback_timeout = kwargs.pop('callback_timeout', None)
+            future = func(*args, **kwargs)
+            if callback_timeout is not None:
+                future = gen.with_timeout(timedelta(seconds=callback_timeout),
+                                          future)
+            return future
+        else:
+            return sync(self.loop, func, *args, **kwargs)
+
+    def start(self, **kwargs):
+        self._loop_runner.start()
+        if self._asynchronous:
+            self._started = self._start(**kwargs)
+        else:
+            self.sync(self._start, **kwargs)
+
     @gen.coroutine
-    def _start(self, ip=None):
+    def _start(self, ip=None, n_workers=0):
         """
         Start all cluster services.
-        Wait on this if you passed `start=False` to the LocalCluster
-        constructor.
         """
         if self.status == 'running':
             return
-        if ip is None and not self.scheduler_port and not self.processes:
+        if (ip is None) and (not self.scheduler_port) and (not self.processes):
             # Use inproc transport for optimization
             scheduler_address = 'inproc://'
+        elif ip is not None and ip.startswith('tls://'):
+            scheduler_address = ('%s:%d' % (ip, self.scheduler_port))
         else:
             if ip is None:
                 ip = '127.0.0.1'
             scheduler_address = (ip, self.scheduler_port)
         self.scheduler.start(scheduler_address)
 
-        yield self._start_all_workers(
-            self.n_workers, ncores=self.threads_per_worker,
-            services=self.worker_services, **self.worker_kwargs)
+        yield [self._start_worker(**self.worker_kwargs) for i in range(n_workers)]
 
         self.status = 'running'
 
-    @gen.coroutine
-    def _start_all_workers(self, n_workers, **kwargs):
-        yield [self._start_worker(**kwargs) for i in range(n_workers)]
+        raise gen.Return(self)
 
     @gen.coroutine
-    def _start_worker(self, port=0, processes=None, death_timeout=60, **kwargs):
-        if processes is not None:
-            raise ValueError("overriding `processes` for individual workers "
-                             "in a LocalCluster is not supported anymore")
-        if port:
-            raise ValueError("overriding `port` for individual workers "
-                             "in a LocalCluster is not supported anymore")
+    def _start_worker(self, death_timeout=60, **kwargs):
         if self.processes:
             W = Nanny
             kwargs['quiet'] = True
@@ -175,13 +210,13 @@ class LocalCluster(object):
         while w.status != 'closed' and w.worker_address not in self.scheduler.worker_info:
             yield gen.sleep(0.01)
 
-        if w.status == 'closed':
+        if w.status == 'closed' and self.scheduler.status == 'running':
             self.workers.remove(w)
             raise gen.TimeoutError("Worker failed to start")
 
         raise gen.Return(w)
 
-    def start_worker(self, ncores=0, **kwargs):
+    def start_worker(self, **kwargs):
         """ Add a new worker to the running cluster
 
         Parameters
@@ -200,7 +235,7 @@ class LocalCluster(object):
         -------
         The created Worker or Nanny object.  Can be discarded.
         """
-        return sync(self.loop, self._start_worker, ncores=ncores, **kwargs)
+        return self.sync(self._start_worker, **kwargs)
 
     @gen.coroutine
     def _stop_worker(self, w):
@@ -217,7 +252,7 @@ class LocalCluster(object):
         >>> w = c.start_worker(ncores=2)  # doctest: +SKIP
         >>> c.stop_worker(w)  # doctest: +SKIP
         """
-        sync(self.loop, self._stop_worker, w)
+        self.sync(self._stop_worker, w)
 
     @gen.coroutine
     def _close(self):
@@ -254,6 +289,8 @@ class LocalCluster(object):
             self._loop_runner.stop()
         finally:
             self.status = 'closed'
+        with ignoring(AttributeError):
+            silence_logging(self._old_logging_level)
 
     @gen.coroutine
     def scale_up(self, n, **kwargs):
@@ -264,8 +301,13 @@ class LocalCluster(object):
 
         This can be implemented either as a function or as a Tornado coroutine.
         """
-        yield [self._start_worker(**kwargs)
-               for i in range(n - len(self.workers))]
+        with log_errors():
+            kwargs2 = toolz.merge(self.worker_kwargs, kwargs)
+            yield [self._start_worker(**kwargs2)
+                   for i in range(n - len(self.scheduler.workers))]
+
+            # clean up any closed worker
+            self.workers = [w for w in self.workers if w.status != 'closed']
 
     @gen.coroutine
     def scale_down(self, workers):
@@ -277,12 +319,17 @@ class LocalCluster(object):
 
         This can be implemented either as a function or as a Tornado coroutine.
         """
-        workers = set(workers)
-        yield [self._stop_worker(w)
-               for w in self.workers
-               if w.worker_address in workers]
-        while workers & set(self.workers):
-            yield gen.sleep(0.01)
+        with log_errors():
+            # clean up any closed worker
+            self.workers = [w for w in self.workers if w.status != 'closed']
+            workers = set(workers)
+
+            # we might be given addresses
+            if all(isinstance(w, str) for w in workers):
+                workers = {w for w in self.workers if w.worker_address in workers}
+
+            # stop the provided workers
+            yield [self._stop_worker(w) for w in workers]
 
     def __del__(self):
         self.close()
@@ -292,6 +339,15 @@ class LocalCluster(object):
 
     def __exit__(self, *args):
         self.close()
+
+    @gen.coroutine
+    def __aenter__(self):
+        yield self._started
+        raise gen.Return(self)
+
+    @gen.coroutine
+    def __aexit__(self, typ, value, traceback):
+        yield self._close()
 
     @property
     def scheduler_address(self):

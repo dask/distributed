@@ -9,22 +9,21 @@ import traceback
 import uuid
 import weakref
 
+import dask
 from six import string_types
-
-from toolz import assoc
-
+from toolz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
+from .compatibility import get_thread_identity
 from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)
-from .config import config
 from .metrics import time
 from .system_monitor import SystemMonitor
 from .utils import (get_traceback, truncate_exception, ignoring, shutting_down,
-                    PeriodicCallback)
+                    PeriodicCallback, parse_timedelta, has_keyword)
 from . import protocol
 
 
@@ -44,6 +43,10 @@ def get_total_physical_memory():
 
 
 MAX_BUFFER_SIZE = get_total_physical_memory()
+
+tick_maximum_delay = parse_timedelta(dask.config.get('distributed.admin.tick.limit'), default='ms')
+
+LOG_PDB = dask.config.get('distributed.admin.pdb-on-err')
 
 
 class Server(object):
@@ -85,9 +88,16 @@ class Server(object):
     default_ip = ''
     default_port = 0
 
-    def __init__(self, handlers, connection_limit=512, deserialize=True,
-                 io_loop=None):
-        self.handlers = assoc(handlers, 'identity', self.identity)
+    def __init__(self, handlers, stream_handlers=None, connection_limit=512,
+                 deserialize=True, io_loop=None):
+        self.handlers = {
+            'identity': self.identity,
+            'connection_stream': self.handle_stream,
+        }
+        self.handlers.update(handlers)
+        self.stream_handlers = {}
+        self.stream_handlers.update(stream_handlers or {})
+
         self.id = type(self).__name__ + '-' + str(uuid.uuid4())
         self._address = None
         self._listen_address = None
@@ -103,7 +113,7 @@ class Server(object):
 
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
-        self.loop = io_loop
+        self.loop = self.io_loop
 
         # Statistics counters for various events
         with ignoring(ImportError):
@@ -121,9 +131,20 @@ class Server(object):
         self.periodic_callbacks['monitor'] = pc
 
         self._last_tick = time()
-        pc = PeriodicCallback(self._measure_tick, config.get('tick-time', 20),
-                              io_loop=self.io_loop)
+        pc = PeriodicCallback(
+                self._measure_tick,
+                parse_timedelta(dask.config.get('distributed.admin.tick.interval'), default='ms') * 1000,
+                io_loop=self.io_loop
+        )
         self.periodic_callbacks['tick'] = pc
+
+        self.thread_id = 0
+
+        @gen.coroutine
+        def set_thread_ident():
+            self.thread_id = get_thread_identity()
+
+        self.io_loop.add_callback(set_thread_ident)
 
         self.__stopped = False
 
@@ -133,11 +154,13 @@ class Server(object):
         This starts all PeriodicCallbacks stored in self.periodic_callbacks if
         they are not yet running.  It does this safely on the IOLoop.
         """
+        self._last_tick = time()
+
         def start_pcs():
             for pc in self.periodic_callbacks.values():
                 if not pc.is_running():
                     pc.start()
-        self.loop.add_callback(start_pcs)
+        self.io_loop.add_callback(start_pcs)
 
     def stop(self):
         if not self.__stopped:
@@ -156,12 +179,12 @@ class Server(object):
         now = time()
         diff = now - self._last_tick
         self._last_tick = now
-        if diff > config.get('tick-maximum-delay', 1000) / 1000:
-            logger.warning("Event loop was unresponsive in %s for %.2fs.  "
-                           "This is often caused by long-running GIL-holding "
-                           "functions or moving large chunks of data. "
-                           "This can cause timeouts and instability.",
-                           type(self).__name__, diff)
+        if diff > tick_maximum_delay:
+            logger.info("Event loop was unresponsive in %s for %.2fs.  "
+                        "This is often caused by long-running GIL-holding "
+                        "functions or moving large chunks of data. "
+                        "This can cause timeouts and instability.",
+                        type(self).__name__, diff)
         if self.digests is not None:
             self.digests['tick-duration'].add(diff)
 
@@ -266,22 +289,29 @@ class Server(object):
                 if not isinstance(msg, dict):
                     raise TypeError("Bad message type.  Expected dict, got\n  "
                                     + str(msg))
+
                 op = msg.pop('op')
                 if self.counters is not None:
                     self.counters['op'].add(op)
                 self._comms[comm] = op
+                serializers = msg.pop('serializers', None)
                 close_desired = msg.pop('close', False)
                 reply = msg.pop('reply', True)
                 if op == 'close':
                     if reply:
                         yield comm.write('OK')
                     break
+
+                result = None
                 try:
                     handler = self.handlers[op]
                 except KeyError:
-                    result = "No handler found: %s" % op
-                    logger.warning(result, exc_info=True)
+                    logger.warning("No handler %s found in %s", op,
+                                   type(self).__name__, exc_info=True)
                 else:
+                    if serializers is not None and has_keyword(handler, 'serializers'):
+                        msg['serializers'] = serializers  # add back in
+
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
@@ -289,15 +319,17 @@ class Server(object):
                             self._ongoing_coroutines.add(result)
                             result = yield result
                     except (CommClosedError, CancelledError) as e:
-                        logger.warning("Lost connection to %r: %s", address, e)
+                        if self.status == 'running':
+                            logger.info("Lost connection to %r: %s", address, e)
                         break
                     except Exception as e:
                         logger.exception(e)
                         result = error_message(e, status='uncaught-error')
+
                 if reply and result != 'dont-reply':
                     try:
-                        yield comm.write(result)
-                    except EnvironmentError as e:
+                        yield comm.write(result, serializers=serializers)
+                    except (EnvironmentError, TypeError) as e:
                         logger.debug("Lost connection to %r while sending result for op %r: %s",
                                      address, op, e)
                         break
@@ -315,6 +347,47 @@ class Server(object):
                 except Exception as e:
                     logger.error("Failed while closing connection to %r: %s",
                                  address, e)
+
+    @gen.coroutine
+    def handle_stream(self, comm, extra=None, every_cycle=[]):
+        extra = extra or {}
+        logger.info("Starting established connection")
+
+        io_error = None
+        closed = False
+        try:
+            while not closed:
+                msgs = yield comm.read()
+                if not isinstance(msgs, (tuple, list)):
+                    msgs = (msgs,)
+
+                if not comm.closed():
+                    for msg in msgs:
+                        if msg == 'OK':  # from close
+                            break
+                        op = msg.pop('op')
+                        if op:
+                            if op == 'close-stream':
+                                closed = True
+                                break
+                            handler = self.stream_handlers[op]
+                            handler(**merge(extra, msg))
+                        else:
+                            logger.error("odd message %s", msg)
+                for func in every_cycle:
+                    func()
+
+        except (CommClosedError, EnvironmentError) as e:
+            io_error = e
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+                pdb.set_trace()
+            raise
+        finally:
+            comm.close()  # TODO: why do we need this now?
+            assert comm.closed()
 
     @gen.coroutine
     def close(self):
@@ -335,7 +408,8 @@ def pingpong(comm):
 
 
 @gen.coroutine
-def send_recv(comm, reply=True, deserialize=True, **kwargs):
+def send_recv(comm, reply=True, serializers=None, deserializers=None,
+              **kwargs):
     """ Send and recv with a Comm.
 
     Keyword arguments turn into the message
@@ -346,11 +420,15 @@ def send_recv(comm, reply=True, deserialize=True, **kwargs):
     msg['reply'] = reply
     please_close = kwargs.get('close')
     force_close = False
+    if deserializers is None:
+        deserializers = serializers
+    if deserializers is not None:
+        msg['serializers'] = deserializers
 
     try:
-        yield comm.write(msg)
+        yield comm.write(msg, serializers=serializers, on_error='raise')
         if reply:
-            response = yield comm.read()
+            response = yield comm.read(deserializers=deserializers)
         else:
             response = None
     except EnvironmentError:
@@ -364,7 +442,10 @@ def send_recv(comm, reply=True, deserialize=True, **kwargs):
             comm.abort()
 
     if isinstance(response, dict) and response.get('status') == 'uncaught-error':
-        six.reraise(*clean_exception(**response))
+        if comm.deserialize:
+            six.reraise(*clean_exception(**response))
+        else:
+            raise Exception(response['text'])
     raise gen.Return(response)
 
 
@@ -397,12 +478,14 @@ class rpc(object):
     address = None
 
     def __init__(self, arg=None, comm=None, deserialize=True, timeout=None,
-                 connection_args=None):
+                 connection_args=None, serializers=None, deserializers=None):
         self.comms = {}
         self.address = coerce_to_address(arg)
         self.timeout = timeout
         self.status = 'running'
         self.deserialize = deserialize
+        self.serializers = serializers
+        self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args
         rpc.active.add(self)
 
@@ -462,6 +545,10 @@ class rpc(object):
     def __getattr__(self, key):
         @gen.coroutine
         def send_recv_from_rpc(**kwargs):
+            if self.serializers is not None and kwargs.get('serializers') is None:
+                kwargs['serializers'] = self.serializers
+            if self.deserializers is not None and kwargs.get('deserializers') is None:
+                kwargs['deserializers'] = self.deserializers
             try:
                 comm = yield self.live_comm()
                 result = yield send_recv(comm=comm, op=key, **kwargs)
@@ -507,13 +594,23 @@ class PooledRPCCall(object):
         ConnectionPool
     """
 
-    def __init__(self, addr, pool):
+    def __init__(self, addr, pool, serializers=None, deserializers=None):
         self.addr = addr
         self.pool = pool
+        self.serializers = serializers
+        self.deserializers = deserializers if deserializers is not None else serializers
+
+    @property
+    def address(self):
+        return self.addr
 
     def __getattr__(self, key):
         @gen.coroutine
         def send_recv_from_rpc(**kwargs):
+            if self.serializers is not None and kwargs.get('serializers') is None:
+                kwargs['serializers'] = self.serializers
+            if self.deserializers is not None and kwargs.get('deserializers') is None:
+                kwargs['deserializers'] = self.deserializers
             comm = yield self.pool.connect(self.addr)
             try:
                 result = yield send_recv(comm=comm, op=key, **kwargs)
@@ -571,7 +668,11 @@ class ConnectionPool(object):
         Whether or not to deserialize data by default or pass it through
     """
 
-    def __init__(self, limit=512, deserialize=True, connection_args=None):
+    def __init__(self, limit=512,
+                 deserialize=True,
+                 serializers=None,
+                 deserializers=None,
+                 connection_args=None):
         self.open = 0          # Total number of open comms
         self.active = 0        # Number of comms currently in use
         self.limit = limit     # Max number of open comms
@@ -580,6 +681,8 @@ class ConnectionPool(object):
         # Invariant: len(occupied) == active
         self.occupied = defaultdict(set)
         self.deserialize = deserialize
+        self.serializers = serializers
+        self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args
         self.event = Event()
 
@@ -590,7 +693,9 @@ class ConnectionPool(object):
     def __call__(self, addr=None, ip=None, port=None):
         """ Cached rpc objects """
         addr = addr_from_args(addr=addr, ip=ip, port=port)
-        return PooledRPCCall(addr, self)
+        return PooledRPCCall(addr, self,
+                             serializers=self.serializers,
+                             deserializers=self.deserializers)
 
     @gen.coroutine
     def connect(self, addr, timeout=None):
@@ -633,14 +738,18 @@ class ConnectionPool(object):
         """
         Reuse an open communication to the given address.  For internal use.
         """
-        self.occupied[addr].remove(comm)
-        self.active -= 1
-        if comm.closed():
-            self.open -= 1
-            if self.open < self.limit:
-                self.event.set()
+        try:
+            self.occupied[addr].remove(comm)
+        except KeyError:
+            pass
         else:
-            self.available[addr].add(comm)
+            self.active -= 1
+            if comm.closed():
+                self.open -= 1
+                if self.open < self.limit:
+                    self.event.set()
+            else:
+                self.available[addr].add(comm)
 
     def collect(self):
         """
@@ -653,6 +762,25 @@ class ConnectionPool(object):
                 comm.close()
             comms.clear()
         self.open = self.active
+        if self.open < self.limit:
+            self.event.set()
+
+    def remove(self, addr):
+        """
+        Remove all Comms to a given address.
+        """
+        logger.info("Removing comms to %s", addr)
+        if addr in self.available:
+            comms = self.available.pop(addr)
+            for comm in comms:
+                comm.close()
+                self.open -= 1
+        if addr in self.occupied:
+            comms = self.occupied.pop(addr)
+            for comm in comms:
+                comm.close()
+                self.open -= 1
+                self.active -= 1
         if self.open < self.limit:
             self.event.set()
 
@@ -697,18 +825,22 @@ def error_message(e, status='error'):
         e3 = protocol.pickle.dumps(e2)
         protocol.pickle.loads(e3)
     except Exception:
-        e3 = Exception(str(e2))
-        e3 = protocol.pickle.dumps(e3)
+        e2 = Exception(str(e2))
+    e4 = protocol.to_serialize(e2)
     try:
         tb2 = protocol.pickle.dumps(tb)
     except Exception:
-        tb2 = ''.join(traceback.format_tb(tb))
-        tb2 = protocol.pickle.dumps(tb2)
+        tb = tb2 = ''.join(traceback.format_tb(tb))
 
     if len(tb2) > 10000:
-        tb2 = None
+        tb_result = None
+    else:
+        tb_result = protocol.to_serialize(tb)
 
-    return {'status': status, 'exception': e3, 'traceback': tb2}
+    return {'status': status,
+            'exception': e4,
+            'traceback': tb_result,
+            'text': str(e2)}
 
 
 def clean_exception(exception, traceback, **kwargs):

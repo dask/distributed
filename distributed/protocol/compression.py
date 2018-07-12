@@ -8,7 +8,7 @@ from __future__ import print_function, division, absolute_import
 import logging
 import random
 
-from dask.context import _globals
+import dask
 from toolz import identity, partial
 
 try:
@@ -19,7 +19,6 @@ try:
 except ImportError:
     blosc = False
 
-from ..config import config
 from ..utils import ignoring, ensure_bytes
 
 
@@ -45,8 +44,8 @@ with ignoring(ImportError):
 
     def _fixed_snappy_decompress(data):
         # snappy.decompress() doesn't accept memoryviews
-        if isinstance(data, memoryview):
-            data = data.tobytes()
+        if isinstance(data, (memoryview, bytearray)):
+            data = bytes(data)
         return snappy.decompress(data)
 
     compressions['snappy'] = {'compress': snappy.compress,
@@ -73,8 +72,8 @@ with ignoring(ImportError):
         try:
             return lz4_compress(data)
         except TypeError:
-            if isinstance(data, memoryview):
-                return lz4_compress(data.tobytes())
+            if isinstance(data, (memoryview, bytearray)):
+                return lz4_compress(bytes(data))
             else:
                 raise
 
@@ -82,8 +81,8 @@ with ignoring(ImportError):
         try:
             return lz4_decompress(data)
         except (ValueError, TypeError):
-            if isinstance(data, memoryview):
-                return lz4_decompress(data.tobytes())
+            if isinstance(data, (memoryview, bytearray)):
+                return lz4_decompress(bytes(data))
             else:
                 raise
 
@@ -98,7 +97,7 @@ with ignoring(ImportError):
                              'decompress': blosc.decompress}
 
 
-default = config.get('compression', 'auto')
+default = dask.config.get('distributed.comm.compression')
 if default != 'auto':
     if default in compressions:
         default_compression = default
@@ -140,7 +139,9 @@ def maybe_compress(payload, min_size=1e4, sample_size=1e4, nsamples=5):
         return the original
     4.  We return the compressed result
     """
-    compression = _globals.get('compression', default_compression)
+    compression = dask.config.get('distributed.comm.compression')
+    if compression == 'auto':
+        compression = default_compression
 
     if not compression:
         return None, payload

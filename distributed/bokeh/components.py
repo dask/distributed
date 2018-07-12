@@ -11,20 +11,21 @@ from bokeh.models import ( ColumnDataSource, Plot, DataRange1d, LinearAxis,
         Quad, TapTool, OpenURL, Button, Select)
 from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
+import dask
 from tornado import gen
 
-from ..config import config
 from ..diagnostics.progress_stream import nbytes_bar
 from .. import profile
-from ..utils import log_errors
+from ..utils import log_errors, parse_timedelta
 
-if config.get('bokeh-export-tool', False):
+if dask.config.get('distributed.dashboard.export-tool'):
     from .export_tool import ExportTool
 else:
     ExportTool = None
 
 
-profile_interval = config.get('profile-interval', 10) / 1000
+profile_interval = dask.config.get('distributed.worker.profile.interval')
+profile_interval = parse_timedelta(profile_interval, default='ms')
 
 
 class DashboardComponent(object):
@@ -53,10 +54,11 @@ class TaskStream(DashboardComponent):
     The start and stop time of tasks as they occur on each core of the cluster.
     """
 
-    def __init__(self, n_rectangles=1000, clear_interval=20000, **kwargs):
+    def __init__(self, n_rectangles=1000, clear_interval='20s', **kwargs):
         """
         kwargs are applied to the bokeh.models.plots.Plot constructor
         """
+        clear_interval = parse_timedelta(clear_interval, default='ms')
         self.n_rectangles = n_rectangles
         self.clear_interval = clear_interval
         self.last = 0
@@ -320,6 +322,10 @@ class ProfilePlot(DashboardComponent):
                     <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
                 </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@width</span>
+                </div>
                 """
         )
         self.root.add_tools(hover)
@@ -367,7 +373,11 @@ class ProfileTimePlot(DashboardComponent):
         self.states = data.pop('states')
         self.source = ColumnDataSource(data=data)
 
+        changing = [False]  # avoid repeated changes from within callback
+
         def cb(attr, old, new):
+            if changing[0]:
+                return
             with log_errors():
                 try:
                     ind = new['1d']['indices'][0]
@@ -376,14 +386,18 @@ class ProfileTimePlot(DashboardComponent):
                 data = profile.plot_data(self.states[ind], profile_interval)
                 del self.states[:]
                 self.states.extend(data.pop('states'))
+                changing[0] = True  # don't recursively trigger callback
                 self.source.data.update(data)
                 self.source.selected = old
+                changing[0] = False
 
         self.source.on_change('selected', cb)
 
         self.profile_plot = figure(tools='tap', height=400, **kwargs)
-        self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
-                               line_color='black', source=self.source)
+        r = self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
+                                   line_color='black', source=self.source)
+        r.selection_glyph = None
+        r.nonselection_glyph = None
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -407,6 +421,10 @@ class ProfileTimePlot(DashboardComponent):
                 <div>
                     <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
                     <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
+                </div>
+                <div>
+                    <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
+                    <span style="font-size: 10px; font-family: Monaco, monospace;">@percentage</span>
                 </div>
                 """
         )

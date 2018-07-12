@@ -10,11 +10,12 @@ from time import sleep
 
 import mock
 
+import dask
 from distributed.compatibility import Empty
 from distributed.diskutils import WorkSpace
 from distributed.metrics import time
 from distributed.utils import mp_context
-from distributed.utils_test import captured_logger, slow, new_config
+from distributed.utils_test import captured_logger, slow
 
 
 def assert_directory_contents(dir_path, expected):
@@ -125,7 +126,7 @@ def test_workspace_process_crash(tmpdir):
     assert p.wait()  # process returned with non-zero code
     assert_contents([a_path, a_path + '.dirlock', b_path, b_path + '.dirlock'])
 
-    with captured_logger('distributed.diskutils', 'WARNING', propagate=False) as sio:
+    with captured_logger('distributed.diskutils', 'INFO', propagate=False) as sio:
         ws._purge_leftovers()
     assert_contents([])
     # One log line per purged directory
@@ -153,7 +154,7 @@ def test_workspace_rmtree_failure(tmpdir):
 def test_locking_disabled(tmpdir):
     base_dir = str(tmpdir)
 
-    with new_config({'use-file-locking': False}):
+    with dask.config.set({'distributed.worker.use-file-locking': False}):
         with mock.patch('distributed.diskutils.locket.lock_file') as lock_file:
             assert_contents = functools.partial(assert_directory_contents, base_dir)
 

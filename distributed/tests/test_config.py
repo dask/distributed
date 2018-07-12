@@ -10,7 +10,7 @@ import pytest
 
 from distributed.utils_test import (captured_handler, captured_logger,
                                     new_config, new_config_file)
-from distributed.config import initialize_logging, set_config, config
+from distributed.config import initialize_logging
 
 
 def dump_logger_list():
@@ -53,6 +53,9 @@ def test_logging_default():
     root = logging.getLogger('')
     old_root_level = root.level
     root.setLevel('WARN')
+
+    for handler in d.handlers:
+        handler.setLevel('INFO')
 
     try:
         dfb = logging.getLogger('distributed.foo.bar')
@@ -117,6 +120,7 @@ def test_logging_simple():
     with new_config_file(c):
         code = """if 1:
             import logging
+            import dask
 
             from distributed.utils_test import captured_handler
 
@@ -136,7 +140,7 @@ def test_logging_simple():
             assert distributed_log == [
                 "distributed.foo - INFO - 1: info",
                 "distributed.foo.bar - ERROR - 3: error",
-                ]
+                ], (dask.config.config, distributed_log)
             """
 
         subprocess.check_call([sys.executable, "-c", code])
@@ -269,10 +273,3 @@ qualname=foo.bar
             """
         subprocess.check_call([sys.executable, "-c", code])
     os.remove(logging_config.name)
-
-
-def test_set_config():
-    assert 'foo' not in config
-    with set_config(foo=1):
-        assert config['foo'] == 1
-    assert 'foo' not in config

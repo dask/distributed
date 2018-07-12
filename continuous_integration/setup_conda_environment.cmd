@@ -32,7 +32,7 @@ call deactivate
     mock ^
     msgpack-python ^
     psutil ^
-    pytest=3.1 ^
+    pytest ^
     python=%PYTHON% ^
     requests ^
     toolz ^

@@ -11,15 +11,16 @@ try:
 except ImportError:
     ssl = None
 
+import dask
 import tornado
 from tornado import gen, netutil
-from tornado.iostream import StreamClosedError
+from tornado.iostream import StreamClosedError, IOStream
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
-from .. import config
-from ..compatibility import finalize
-from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes)
+from ..compatibility import finalize, PY3
+from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes,
+                     parse_timedelta, shutting_down)
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
@@ -41,8 +42,6 @@ def get_total_physical_memory():
 
 MAX_BUFFER_SIZE = get_total_physical_memory()
 
-DEFAULT_BACKLOG = 2048
-
 
 def set_tcp_timeout(stream):
     """
@@ -51,7 +50,8 @@ def set_tcp_timeout(stream):
     if stream.closed():
         return
 
-    timeout = int(config.get('tcp-timeout', 30))
+    timeout = dask.config.get('distributed.comm.timeouts.tcp')
+    timeout = int(parse_timedelta(timeout, default='seconds'))
 
     sock = stream.socket
 
@@ -131,6 +131,9 @@ class TCP(Comm):
     An established communication based on an underlying Tornado IOStream.
     """
     _iostream_allows_memoryview = tornado.version_info >= (4, 5)
+    # IOStream.read_into() currently proposed in
+    # https://github.com/tornadoweb/tornado/pull/2193
+    _iostream_has_read_into = hasattr(IOStream, "read_into")
 
     def __init__(self, stream, local_addr, peer_addr, deserialize=True):
         self._local_addr = local_addr
@@ -165,7 +168,7 @@ class TCP(Comm):
         return self._peer_addr
 
     @gen.coroutine
-    def read(self):
+    def read(self, deserializers=None):
         stream = self.stream
         if stream is None:
             raise CommClosedError
@@ -178,31 +181,44 @@ class TCP(Comm):
 
             frames = []
             for length in lengths:
-                if length:
-                    frame = yield stream.read_bytes(length)
+                if PY3 and self._iostream_has_read_into:
+                    frame = bytearray(length)
+                    if length:
+                        n = yield stream.read_into(frame)
+                        assert n == length, (n, length)
                 else:
-                    frame = b''
+                    if length:
+                        frame = yield stream.read_bytes(length)
+                    else:
+                        frame = b''
                 frames.append(frame)
         except StreamClosedError as e:
             self.stream = None
-            convert_stream_closed_error(self, e)
-
-        try:
-            msg = yield from_frames(frames, deserialize=self.deserialize)
-        except EOFError:
-            # Frames possibly garbled or truncated by communication error
-            self.abort()
-            raise CommClosedError("aborted stream on truncated data")
-        raise gen.Return(msg)
+            if not shutting_down():
+                convert_stream_closed_error(self, e)
+        else:
+            try:
+                msg = yield from_frames(frames,
+                                        deserialize=self.deserialize,
+                                        deserializers=deserializers)
+            except EOFError:
+                # Frames possibly garbled or truncated by communication error
+                self.abort()
+                raise CommClosedError("aborted stream on truncated data")
+            raise gen.Return(msg)
 
     @gen.coroutine
-    def write(self, msg):
+    def write(self, msg, serializers=None, on_error='message'):
         stream = self.stream
         bytes_since_last_yield = 0
         if stream is None:
             raise CommClosedError
 
-        frames = yield to_frames(msg)
+        frames = yield to_frames(msg,
+                                 serializers=serializers,
+                                 on_error=on_error,
+                                 context={'sender': self._local_addr,
+                                          'recipient': self._peer_addr})
 
         try:
             lengths = ([struct.pack('Q', len(frames))] +
@@ -353,7 +369,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE,
                                     **self.server_args)
         self.tcp_server.handle_stream = self._handle_stream
-        backlog = int(config.get('socket-backlog', DEFAULT_BACKLOG))
+        backlog = int(dask.config.get('distributed.comm.socket-backlog'))
         for i in range(5):
             try:
                 # When shuffling data between workers, there can

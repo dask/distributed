@@ -3,6 +3,7 @@ from __future__ import print_function, division, absolute_import
 import logging
 from timeit import default_timer
 import sys
+import weakref
 
 from toolz import valmap
 from tornado import gen
@@ -14,7 +15,8 @@ from ..compatibility import html_escape
 from ..core import connect, coerce_to_address, CommClosedError
 from ..client import default_client, futures_of
 from ..protocol.pickle import dumps
-from ..utils import ignoring, key_split, is_kernel, LoopRunner
+from ..utils import (ignoring, key_split, is_kernel, LoopRunner,
+        parse_timedelta)
 
 
 logger = logging.getLogger(__name__)
@@ -27,11 +29,17 @@ def get_scheduler(scheduler):
 
 
 class ProgressBar(object):
-    def __init__(self, keys, scheduler=None, interval=0.1, complete=True):
+    def __init__(self, keys, scheduler=None, interval='100ms', complete=True):
         self.scheduler = get_scheduler(scheduler)
 
+        self.client = None
+        for key in keys:
+            if hasattr(key, 'client'):
+                self.client = weakref.ref(key.client)
+                break
+
         self.keys = {k.key if hasattr(k, 'key') else k for k in keys}
-        self.interval = interval
+        self.interval = parse_timedelta(interval, default='s')
         self.complete = complete
         self._start_time = default_timer()
 
@@ -51,21 +59,28 @@ class ProgressBar(object):
             raise gen.Return(p)
 
         def function(scheduler, p):
-            return {'all': len(p.all_keys),
-                    'remaining': len(p.keys),
-                    'status': p.status}
+            result = {'all': len(p.all_keys),
+                      'remaining': len(p.keys),
+                      'status': p.status}
+            if p.status == 'error':
+                result.update(p.extra)
+            return result
 
-        self.comm = yield connect(self.scheduler)
+        self.comm = yield connect(self.scheduler,
+                                  connection_args=self.client().connection_args
+                                  if self.client else None)
         logger.debug("Progressbar Connected to scheduler")
 
         yield self.comm.write({'op': 'feed',
                                'setup': dumps(setup),
                                'function': dumps(function),
-                               'interval': self.interval})
+                               'interval': self.interval},
+                              serializers=self.client()._serializers if self.client else None)
 
         while True:
             try:
-                response = yield self.comm.read()
+                response = yield self.comm.read(deserializers=self.client()._deserializers
+                                                if self.client else None)
             except CommClosedError:
                 break
             self._last_response = response
@@ -87,7 +102,7 @@ class ProgressBar(object):
 
 
 class TextProgressBar(ProgressBar):
-    def __init__(self, keys, scheduler=None, interval=0.1, width=40,
+    def __init__(self, keys, scheduler=None, interval='100ms', width=40,
                  loop=None, complete=True, start=True):
         super(TextProgressBar, self).__init__(keys, scheduler, interval,
                                               complete)
@@ -119,7 +134,7 @@ class ProgressWidget(ProgressBar):
     TextProgressBar: Text version suitable for the console
     """
 
-    def __init__(self, keys, scheduler=None, interval=0.1,
+    def __init__(self, keys, scheduler=None, interval='100ms',
                  complete=False, loop=None):
         super(ProgressWidget, self).__init__(keys, scheduler, interval,
                                              complete)
@@ -136,11 +151,15 @@ class ProgressWidget(ProgressBar):
         IOLoop.current().add_callback(self.listen)
         return self.widget._ipython_display_(**kwargs)
 
-    def _draw_stop(self, remaining, status, **kwargs):
+    def _draw_stop(self, remaining, status, exception=None, **kwargs):
         if status == 'error':
             self.bar.bar_style = 'danger'
-            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Exception:</b> ' + \
-                format_time(self.elapsed) + '</div>'
+            self.elapsed_time.value = (
+                    '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> '
+                    '<tt>' + repr(exception) + '</tt>:' +
+                    format_time(self.elapsed) + ' ' +
+                    '</div>'
+            )
         elif not remaining:
             self.bar.bar_style = 'success'
             self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Finished:</b> ' + \
@@ -155,8 +174,14 @@ class ProgressWidget(ProgressBar):
 
 
 class MultiProgressBar(object):
-    def __init__(self, keys, scheduler=None, func=key_split, interval=0.1, complete=False):
+    def __init__(self, keys, scheduler=None, func=key_split, interval='100ms', complete=False):
         self.scheduler = get_scheduler(scheduler)
+
+        self.client = None
+        for key in keys:
+            if hasattr(key, 'client'):
+                self.client = weakref.ref(key.client)
+                break
 
         self.keys = {k.key if hasattr(k, 'key') else k for k in keys}
         self.func = func
@@ -181,11 +206,16 @@ class MultiProgressBar(object):
             raise gen.Return(p)
 
         def function(scheduler, p):
-            return {'all': valmap(len, p.all_keys),
-                    'remaining': valmap(len, p.keys),
-                    'status': p.status}
+            result = {'all': valmap(len, p.all_keys),
+                      'remaining': valmap(len, p.keys),
+                      'status': p.status}
+            if p.status == 'error':
+                result.update(p.extra)
+            return result
 
-        self.comm = yield connect(self.scheduler)
+        self.comm = yield connect(self.scheduler,
+                                  connection_args=self.client().connection_args
+                                  if self.client else None)
         logger.debug("Progressbar Connected to scheduler")
 
         yield self.comm.write({'op': 'feed',
@@ -194,7 +224,8 @@ class MultiProgressBar(object):
                                'interval': self.interval})
 
         while True:
-            response = yield self.comm.read()
+            response = yield self.comm.read(deserializers=self.client()._deserializers if
+                                            self.client else None)
             self._last_response = response
             self.status = response['status']
             self._draw_bar(**response)
@@ -272,8 +303,12 @@ class MultiProgressWidget(MultiProgressBar):
 
         if status == 'error':
             # self.bars[self.func(key)].bar_style = 'danger'  # TODO
-            self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Exception:</b> ' + \
-                format_time(self.elapsed) + '</div>'
+            self.elapsed_time.value = (
+                '<div style="padding: 0px 10px 5px 10px"><b>Exception</b> ' +
+                '<tt>' + repr(exception) + '</tt>:' +
+                format_time(self.elapsed) + ' ' +
+                '</div>'
+            )
         else:
             self.elapsed_time.value = '<div style="padding: 0px 10px 5px 10px"><b>Finished:</b> ' + \
                 format_time(self.elapsed) + '</div>'

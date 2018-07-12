@@ -21,7 +21,7 @@ from .utils import transpose
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..metrics import time
-from ..utils import log_errors, key_split, format_bytes, format_time
+from ..utils import (log_errors, key_split, format_bytes, format_time)
 
 
 logger = logging.getLogger(__name__)
@@ -159,7 +159,7 @@ class CommunicatingTimeSeries(DashboardComponent):
 
         fig = figure(title="Communication History",
                      x_axis_type='datetime',
-                     y_range=[-0.1, worker.total_connections + 0.5],
+                     y_range=[-0.1, worker.total_out_connections + 0.5],
                      height=150, tools='', x_range=x_range, **kwargs)
         fig.line(source=self.source, x='x', y='in', color='red')
         fig.line(source=self.source, x='x', y='out', color='blue')
@@ -625,6 +625,7 @@ class BokehWorker(BokehServer):
         prefix = prefix.rstrip('/')
         if prefix and not prefix.startswith('/'):
             prefix = '/' + prefix
+        self.prefix = prefix
 
         extra = {'prefix': prefix}
 

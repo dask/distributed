@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import random
+import threading
 from time import sleep
 import warnings
 
@@ -134,7 +135,7 @@ def test_sync(loop):
 
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            assert delayed(mysum)().compute(get=c.get) == 9900
+            assert delayed(mysum)().compute() == 9900
 
 
 @gen_cluster(client=True)
@@ -199,11 +200,11 @@ def test_dont_override_default_get(loop):
     b2 = b.map(f)
 
     with Client(loop=loop, processes=False, set_as_default=True) as c:
-        assert dask.context._globals['get'] == c.get
+        assert dask.base.get_scheduler() == c.get
         for i in range(2):
             b2.compute()
 
-        assert dask.context._globals['get'] == c.get
+        assert dask.base.get_scheduler() == c.get
 
 
 @gen_cluster(client=True)
@@ -272,3 +273,43 @@ def test_secede_without_stealing_issue_1262():
     assert f == 2
     # ensure no workers had errors
     assert all([f.exception() is None for f in s._worker_coroutines])
+
+
+@gen_cluster(client=True)
+def test_compute_within_worker_client(c, s, a, b):
+
+    @dask.delayed
+    def f():
+        with worker_client():
+            return dask.delayed(lambda x: x)(1).compute()
+
+    result = yield c.compute(f())
+    assert result == 1
+
+
+@gen_cluster(client=True)
+def test_worker_client_rejoins(c, s, a, b):
+    def f():
+        with worker_client():
+            pass
+
+        return threading.current_thread() in get_worker().executor._threads
+
+    result = yield c.submit(f)
+    assert result
+
+
+@gen_cluster()
+def test_submit_different_names(s, a, b):
+    # https://github.com/dask/distributed/issues/2058
+    da = pytest.importorskip('dask.array')
+    c = yield Client('localhost:' + s.address.split(":")[-1], loop=s.loop,
+                     asynchronous=True)
+    try:
+        X = c.persist(da.random.uniform(size=(100, 10), chunks=50))
+        yield wait(X)
+
+        fut = yield c.submit(lambda x: x.sum().compute(), X)
+        assert fut > 0
+    finally:
+        yield c.close()

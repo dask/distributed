@@ -1,11 +1,13 @@
 from __future__ import print_function, division, absolute_import
 
 from functools import partial
+import gc
 import subprocess
 import sys
 from time import sleep
 from threading import Lock
 import unittest
+import weakref
 
 from tornado.ioloop import IOLoop
 from tornado import gen
@@ -14,8 +16,10 @@ import pytest
 from distributed import Client, Worker, Nanny
 from distributed.deploy.local import LocalCluster
 from distributed.metrics import time
-from distributed.utils_test import (inc, gen_test,
+from distributed.utils_test import (inc, gen_test, slowinc,
+                                    assert_cannot_connect,
                                     assert_can_connect_locally_4,
+                                    assert_can_connect_from_everywhere_4,
                                     assert_can_connect_from_everywhere_4_6,
                                     captured_logger)
 from distributed.utils_test import loop  # noqa: F401
@@ -35,6 +39,7 @@ def test_simple(loop):
             assert any(w.data == {x.key: 2} for w in c.workers)
 
 
+@pytest.mark.skipif('sys.version_info[0] == 2', reason='fork issues')
 def test_close_twice():
     with LocalCluster() as cluster:
         with Client(cluster.scheduler_address) as client:
@@ -122,6 +127,7 @@ class LocalTest(ClusterTest, unittest.TestCase):
     Cluster = partial(LocalCluster, silence_logs=False, diagnostics_port=None)
 
 
+@pytest.mark.skipif('sys.version_info[0] == 2', reason='')
 def test_Client_with_local(loop):
     with LocalCluster(1, scheduler_port=0, silence_logs=False,
                       diagnostics_port=None, loop=loop) as c:
@@ -131,24 +137,25 @@ def test_Client_with_local(loop):
 
 
 def test_Client_solo(loop):
-    with Client(loop=loop) as c:
+    with Client(loop=loop, silence_logs=False) as c:
         pass
     assert c.cluster.status == 'closed'
 
 
 def test_Client_kwargs(loop):
-    with Client(loop=loop, processes=False, n_workers=2) as c:
+    with Client(loop=loop, processes=False, n_workers=2, silence_logs=False) as c:
         assert len(c.cluster.workers) == 2
         assert all(isinstance(w, Worker) for w in c.cluster.workers)
     assert c.cluster.status == 'closed'
 
 
 def test_Client_twice(loop):
-    with Client(loop=loop) as c:
-        with Client(loop=loop) as f:
+    with Client(loop=loop, silence_logs=False) as c:
+        with Client(loop=loop, silence_logs=False) as f:
             assert c.cluster.scheduler.port != f.cluster.scheduler.port
 
 
+@pytest.mark.skipif('sys.version_info[0] == 2', reason='fork issues')
 def test_defaults():
     from distributed.worker import _ncores
 
@@ -242,6 +249,7 @@ def test_bokeh(loop, processes):
         requests.get(url, timeout=0.2)
 
 
+@pytest.mark.skipif(sys.version_info < (3, 6), reason='Unknown')
 def test_blocks_until_full(loop):
     with Client(loop=loop) as c:
         assert len(c.ncores()) > 0
@@ -250,8 +258,9 @@ def test_blocks_until_full(loop):
 @gen_test()
 def test_scale_up_and_down():
     loop = IOLoop.current()
-    cluster = LocalCluster(0, scheduler_port=0, processes=False, silence_logs=False,
-                           diagnostics_port=None, loop=loop, start=False)
+    cluster = yield LocalCluster(0, scheduler_port=0, processes=False,
+                                 silence_logs=False, diagnostics_port=None,
+                                 loop=loop, asynchronous=True)
     c = yield Client(cluster, loop=loop, asynchronous=True)
 
     assert not cluster.workers
@@ -337,10 +346,158 @@ def test_bokeh_kwargs(loop):
 
 
 def test_io_loop_periodic_callbacks(loop):
-    with LocalCluster(loop=loop) as cluster:
+    with LocalCluster(loop=loop, silence_logs=False) as cluster:
         assert cluster.scheduler.loop is loop
         for pc in cluster.scheduler.periodic_callbacks.values():
             assert pc.io_loop is loop
         for worker in cluster.workers:
             for pc in worker.periodic_callbacks.values():
                 assert pc.io_loop is loop
+
+
+def test_logging():
+    """
+    Workers and scheduler have logs even when silenced
+    """
+    with LocalCluster(1, processes=False, diagnostics_port=None) as c:
+        assert c.scheduler._deque_handler.deque
+        assert c.workers[0]._deque_handler.deque
+
+
+def test_ipywidgets(loop):
+    ipywidgets = pytest.importorskip('ipywidgets')
+    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
+                      diagnostics_port=0, processes=False) as cluster:
+        cluster._ipython_display_()
+        box = cluster._cached_widget
+        assert isinstance(box, ipywidgets.Widget)
+
+
+def test_scale(loop):
+    """ Directly calling scale both up and down works as expected """
+    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
+                      diagnostics_port=0, processes=False, n_workers=0) as cluster:
+        assert not cluster.scheduler.workers
+        cluster.scale(3)
+
+        start = time()
+        while len(cluster.scheduler.workers) != 3:
+            sleep(0.01)
+            assert time() < start + 5, len(cluster.scheduler.workers)
+
+        sleep(0.2)  # let workers settle # TODO: remove need for this
+
+        cluster.scale(2)
+
+        start = time()
+        while len(cluster.scheduler.workers) != 2:
+            sleep(0.01)
+            assert time() < start + 5, len(cluster.scheduler.workers)
+
+
+def test_adapt(loop):
+    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
+                      diagnostics_port=0, processes=False, n_workers=0) as cluster:
+        cluster.adapt(minimum=0, maximum=2, interval='10ms')
+        assert cluster._adaptive.minimum == 0
+        assert cluster._adaptive.maximum == 2
+        ref = weakref.ref(cluster._adaptive)
+
+        cluster.adapt(minimum=1, maximum=2, interval='10ms')
+        assert cluster._adaptive.minimum == 1
+        gc.collect()
+
+        # the old Adaptive class sticks around, not sure why
+        # start = time()
+        # while ref():
+        #     sleep(0.01)
+        #     gc.collect()
+        #     assert time() < start + 5
+
+        start = time()
+        while len(cluster.scheduler.workers) != 1:
+            sleep(0.01)
+            assert time() < start + 5
+
+
+def test_adapt_then_manual(loop):
+    """ We can revert from adaptive, back to manual """
+    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
+                      diagnostics_port=0, processes=False, n_workers=8) as cluster:
+        sleep(0.1)
+        cluster.adapt(minimum=0, maximum=4, interval='10ms')
+
+        start = time()
+        while cluster.scheduler.workers or cluster.workers:
+            sleep(0.1)
+            assert time() < start + 5
+
+        assert not cluster.workers
+
+        with Client(cluster) as client:
+
+            futures = client.map(slowinc, range(1000), delay=0.1)
+            sleep(0.2)
+
+            cluster._adaptive.stop()
+            sleep(0.2)
+
+            cluster.scale(2)
+
+            start = time()
+            while len(cluster.scheduler.workers) != 2:
+                sleep(0.1)
+                assert time() < start + 5
+
+
+def test_local_tls(loop):
+    from distributed.utils_test import tls_only_security
+    security = tls_only_security()
+    with LocalCluster(scheduler_port=8786, silence_logs=False, security=security,
+                      diagnostics_port=0, ip='tls://0.0.0.0', loop=loop) as c:
+        sync(loop, assert_can_connect_from_everywhere_4, c.scheduler.port,
+             connection_args=security.get_connection_args('client'),
+             protocol='tls', timeout=3)
+
+        # If we connect to a TLS localculster without ssl information we should fail
+        sync(loop, assert_cannot_connect,
+             addr='tcp://127.0.0.1:%d' % c.scheduler.port,
+             connection_args=security.get_connection_args('client'),
+             exception_class=RuntimeError,
+             )
+
+
+@gen_test()
+def test_scale_retires_workers():
+    class MyCluster(LocalCluster):
+        def scale_down(self, *args, **kwargs):
+            pass
+
+    loop = IOLoop.current()
+    cluster = yield MyCluster(0, scheduler_port=0, processes=False,
+                              silence_logs=False, diagnostics_port=None,
+                              loop=loop, asynchronous=True)
+    c = yield Client(cluster, loop=loop, asynchronous=True)
+
+    assert not cluster.workers
+
+    yield cluster.scale(2)
+
+    start = time()
+    while len(cluster.scheduler.workers) != 2:
+        yield gen.sleep(0.01)
+        assert time() < start + 3
+
+    yield cluster.scale(1)
+
+    start = time()
+    while len(cluster.scheduler.workers) != 1:
+        yield gen.sleep(0.01)
+        assert time() < start + 3
+
+    yield c._close()
+    yield cluster._close()
+
+
+if sys.version_info >= (3, 5):
+    from distributed.deploy.tests.py3_test_deploy import *  # noqa F401

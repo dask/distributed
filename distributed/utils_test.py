@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 import collections
 from contextlib import contextmanager
+import copy
 from datetime import timedelta
 import functools
 import gc
@@ -32,21 +33,27 @@ except ImportError:
 import pytest
 import six
 
-from dask.context import _globals
+import dask
 from toolz import merge, memoize
 from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .compatibility import PY3
-from .config import config, initialize_logging
+from .client import default_client
+from .compatibility import PY3, iscoroutinefunction, Empty
+from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (ignoring, log_errors, mp_context, get_ip, get_ipv6,
-                    DequeHandler, reset_logger_locks)
-from .worker import Worker, TOTAL_MEMORY
+                    DequeHandler, reset_logger_locks, sync)
+from .worker import Worker, TOTAL_MEMORY, _global_workers
+
+try:
+    import dask.array  # register config
+except ImportError:
+    pass
 
 
 logger = logging.getLogger(__name__)
@@ -80,8 +87,16 @@ def invalid_python_script(tmpdir_factory):
     return local_file
 
 
+@gen.coroutine
+def cleanup_global_workers():
+    for w in _global_workers:
+        w = w()
+        w._close(report=False, executor_wait=False)
+
+
 @pytest.fixture
 def loop():
+    del _global_workers[:]
     with pristine_loop() as loop:
         # Monkey-patch IOLoop.start to wait for loop stop
         orig_start = loop.start
@@ -97,14 +112,19 @@ def loop():
         loop.start = start
 
         yield loop
+
         # Stop the loop in case it's still running
         try:
+            sync(loop, cleanup_global_workers, callback_timeout=0.500)
             loop.add_callback(loop.stop)
         except RuntimeError as e:
             if not re.match("IOLoop is clos(ed|ing)", str(e)):
                 raise
+        except gen.TimeoutError:
+            pass
         else:
             is_stopped.wait()
+    del _global_workers[:]
 
 
 @pytest.fixture
@@ -142,7 +162,7 @@ def pristine_loop():
     finally:
         try:
             loop.close(all_fds=True)
-        except ValueError:
+        except (KeyError, ValueError):
             pass
         IOLoop.clear_instance()
         IOLoop.clear_current()
@@ -166,6 +186,14 @@ def mock_ipython():
     for kc in remote_magic._clients.values():
         kc.stop_channels()
     remote_magic._clients.clear()
+
+
+original_config = copy.deepcopy(dask.config.config)
+
+
+def reset_config():
+    dask.config.config.clear()
+    dask.config.config.update(copy.deepcopy(original_config))
 
 
 def nodebug(func):
@@ -475,7 +503,7 @@ def check_active_rpc(loop, active_rpc_timeout=1):
 
     def fail():
         pytest.fail("some RPCs left active by test: %s"
-                    % (sorted(set(rpc.active) - active_before)))
+                    % (set(rpc.active) - active_before))
 
     @gen.coroutine
     def wait():
@@ -489,7 +517,8 @@ def check_active_rpc(loop, active_rpc_timeout=1):
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
             scheduler_kwargs={}):
     ws = weakref.WeakSet()
-    old_globals = _globals.copy()
+
+    reset_config()
 
     for name, level in logging_levels.items():
         logging.getLogger(name).setLevel(level)
@@ -529,8 +558,11 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
 
             for worker in workers:
                 worker['proc'].start()
-            for worker in workers:
-                worker['address'] = worker['queue'].get()
+            try:
+                for worker in workers:
+                    worker['address'] = worker['queue'].get(timeout=5)
+            except Empty:
+                raise pytest.xfail.Exception("Worker failed to start in test")
 
             saddr = scheduler_q.get()
 
@@ -576,10 +608,16 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
                 del workers[:]
 
                 for fn in glob('_test_worker-*'):
-                    shutil.rmtree(fn)
+                    with ignoring(OSError):
+                        shutil.rmtree(fn)
 
-                _globals.clear()
-                _globals.update(old_globals)
+            try:
+                client = default_client()
+            except ValueError:
+                pass
+            else:
+                client.close()
+
     assert not ws
 
 
@@ -621,7 +659,10 @@ def gen_test(timeout=10):
     def _(func):
         def test_func():
             with pristine_loop() as loop:
-                cor = gen.coroutine(func)
+                if iscoroutinefunction(func):
+                    cor = func
+                else:
+                    cor = gen.coroutine(func)
                 try:
                     loop.run_sync(cor, timeout=timeout)
                 finally:
@@ -652,7 +693,8 @@ def start_cluster(ncores, scheduler_addr, loop, security=None,
     yield [w._start(ncore[0]) for ncore, w in zip(ncores, workers)]
 
     start = time()
-    while len(s.workers) < len(ncores):
+    while (len(s.workers) < len(ncores) or
+           any(comm.comm is None for comm in s.stream_comms.values())):
         yield gen.sleep(0.01)
         if time() - start > 5:
             yield [w._close(timeout=1) for w in workers]
@@ -684,7 +726,8 @@ def iscoroutinefunction(f):
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
-                worker_kwargs={}, active_rpc_timeout=1):
+                worker_kwargs={}, client_kwargs={}, active_rpc_timeout=1,
+                config={}):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -696,6 +739,11 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         start
         end
     """
+    del _global_workers[:]
+
+    reset_config()
+
+    dask.config.set({'distributed.comm.timeouts.connect': '5s'})
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY, 'death_timeout': 5},
                           worker_kwargs)
 
@@ -709,7 +757,6 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
             for name, level in logging_levels.items():
                 logging.getLogger(name).setLevel(level)
 
-            old_globals = _globals.copy()
             result = None
             workers = []
 
@@ -717,36 +764,48 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 with check_active_rpc(loop, active_rpc_timeout):
                     @gen.coroutine
                     def coro():
-                        for i in range(5):
-                            try:
-                                s, ws = yield start_cluster(
-                                    ncores, scheduler, loop, security=security,
-                                    Worker=Worker, scheduler_kwargs=scheduler_kwargs,
-                                    worker_kwargs=worker_kwargs)
-                            except Exception:
-                                logger.error("Failed to start gen_cluster, retryng")
-                            else:
-                                break
-                        workers[:] = ws
-                        args = [s] + workers
-                        if client:
-                            c = yield Client(s.address, loop=loop, security=security,
-                                             asynchronous=True)
-                            args = [c] + args
-                        try:
-                            result = yield func(*args)
-                            if s.validate:
-                                s.validate_state()
-                        finally:
+                        with dask.config.set(config):
+                            for i in range(5):
+                                try:
+                                    s, ws = yield start_cluster(
+                                        ncores, scheduler, loop, security=security,
+                                        Worker=Worker, scheduler_kwargs=scheduler_kwargs,
+                                        worker_kwargs=worker_kwargs)
+                                except Exception as e:
+                                    logger.error("Failed to start gen_cluster, retryng", exc_info=True)
+                                else:
+                                    break
+                            workers[:] = ws
+                            args = [s] + workers
                             if client:
-                                yield c._close()
-                            yield end_cluster(s, workers)
-                            _globals.clear()
-                            _globals.update(old_globals)
+                                c = yield Client(s.address, loop=loop, security=security,
+                                                 asynchronous=True, **client_kwargs)
+                                args = [c] + args
+                            try:
+                                future = func(*args)
+                                if timeout:
+                                    future = gen.with_timeout(timedelta(seconds=timeout),
+                                                              future)
+                                result = yield future
+                                if s.validate:
+                                    s.validate_state()
+                            finally:
+                                if client:
+                                    yield c._close(fast=s.status == 'closed')
+                                yield end_cluster(s, workers)
+                                yield gen.with_timeout(timedelta(seconds=1),
+                                                       cleanup_global_workers())
 
-                        raise gen.Return(result)
+                            try:
+                                c = yield default_client()
+                            except ValueError:
+                                pass
+                            else:
+                                yield c._close(fast=True)
 
-                    result = loop.run_sync(coro, timeout=timeout)
+                            raise gen.Return(result)
+
+                    result = loop.run_sync(coro, timeout=timeout * 2 if timeout else timeout)
 
             for w in workers:
                 if getattr(w, 'data', None):
@@ -758,6 +817,12 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                         pass
                     del w.data
             DequeHandler.clear_all_instances()
+            for w in _global_workers:
+                w = w()
+                w._close(report=False, executor_wait=False)
+                if w.status == 'running':
+                    w.close()
+            del _global_workers[:]
             return result
 
         return test_func
@@ -792,14 +857,20 @@ def terminate_process(proc):
 
 
 @contextmanager
-def popen(*args, **kwargs):
+def popen(args, **kwargs):
     kwargs['stdout'] = subprocess.PIPE
     kwargs['stderr'] = subprocess.PIPE
     if sys.platform.startswith('win'):
         # Allow using CTRL_C_EVENT / CTRL_BREAK_EVENT
         kwargs['creationflags'] = subprocess.CREATE_NEW_PROCESS_GROUP
     dump_stdout = False
-    proc = subprocess.Popen(*args, **kwargs)
+
+    args = list(args)
+    if sys.platform.startswith('win'):
+        args[0] = os.path.join(sys.prefix, 'Scripts', args[0])
+    else:
+        args[0] = os.path.join(sys.prefix, 'bin', args[0])
+    proc = subprocess.Popen(args, **kwargs)
     try:
         yield proc
     except Exception:
@@ -903,51 +974,51 @@ def assert_can_connect(addr, timeout=None, connection_args=None):
 
 
 @gen.coroutine
-def assert_cannot_connect(addr, timeout=None, connection_args=None):
+def assert_cannot_connect(addr, timeout=None, connection_args=None, exception_class=EnvironmentError):
     """
     Check that it is impossible to connect to the distributed *addr*
     within the given *timeout*.
     """
     if timeout is None:
         timeout = 0.2
-    with pytest.raises(EnvironmentError):
+    with pytest.raises(exception_class):
         comm = yield connect(addr, timeout=timeout,
                              connection_args=connection_args)
         comm.abort()
 
 
 @gen.coroutine
-def assert_can_connect_from_everywhere_4_6(port, timeout=None, connection_args=None):
+def assert_can_connect_from_everywhere_4_6(port, timeout=None, connection_args=None, protocol='tcp'):
     """
     Check that the local *port* is reachable from all IPv4 and IPv6 addresses.
     """
     args = (timeout, connection_args)
     futures = [
-        assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
-        assert_can_connect('tcp://%s:%d' % (get_ip(), port), *args),
+        assert_can_connect('%s://127.0.0.1:%d' % (protocol, port), *args),
+        assert_can_connect('%s://%s:%d' % (protocol, get_ip(), port), *args),
     ]
     if has_ipv6():
         futures += [
-            assert_can_connect('tcp://[::1]:%d' % port, *args),
-            assert_can_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
+            assert_can_connect('%s://[::1]:%d' % (protocol, port), *args),
+            assert_can_connect('%s://[%s]:%d' % (protocol, get_ipv6(), port), *args),
         ]
     yield futures
 
 
 @gen.coroutine
-def assert_can_connect_from_everywhere_4(port, timeout=None, connection_args=None):
+def assert_can_connect_from_everywhere_4(port, timeout=None, connection_args=None, protocol='tcp'):
     """
     Check that the local *port* is reachable from all IPv4 addresses.
     """
     args = (timeout, connection_args)
     futures = [
-        assert_can_connect('tcp://127.0.0.1:%d' % port, *args),
-        assert_can_connect('tcp://%s:%d' % (get_ip(), port), *args),
+        assert_can_connect('%s://127.0.0.1:%d' % (protocol, port), *args),
+        assert_can_connect('%s://%s:%d' % (protocol, get_ip(), port), *args),
     ]
     if has_ipv6():
         futures += [
-            assert_cannot_connect('tcp://[::1]:%d' % port, *args),
-            assert_cannot_connect('tcp://[%s]:%d' % (get_ipv6(), port), *args),
+            assert_cannot_connect('%s://[::1]:%d' % (protocol, port), *args),
+            assert_cannot_connect('%s://[%s]:%d' % (protocol, get_ipv6(), port), *args),
         ]
     yield futures
 
@@ -1049,16 +1120,30 @@ def new_config(new_config):
     """
     Temporarily change configuration dictionary.
     """
+    from .config import defaults
+    config = dask.config.config
     orig_config = config.copy()
     try:
         config.clear()
-        config.update(new_config)
+        config.update(defaults.copy())
+        dask.config.update(config, new_config)
         initialize_logging(config)
         yield
     finally:
         config.clear()
         config.update(orig_config)
         initialize_logging(config)
+
+
+@contextmanager
+def new_environment(changes):
+    saved_environ = os.environ.copy()
+    os.environ.update(changes)
+    try:
+        yield
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_environ)
 
 
 @contextmanager
@@ -1181,3 +1266,9 @@ def bump_rlimit(limit, desired):
     except Exception as e:
         pytest.skip("rlimit too low (%s) and can't be increased: %s"
                     % (soft, e))
+
+
+def gen_tls_cluster(**kwargs):
+    kwargs.setdefault('ncores', [('tls://127.0.0.1', 1), ('tls://127.0.0.1', 2)])
+    return gen_cluster(scheduler='tls://127.0.0.1',
+                       security=tls_only_security(), **kwargs)

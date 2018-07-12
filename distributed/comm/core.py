@@ -4,12 +4,12 @@ from abc import ABCMeta, abstractmethod, abstractproperty
 from datetime import timedelta
 import logging
 
+import dask
 from six import with_metaclass
-
 from tornado import gen
 
-from ..config import config
 from ..metrics import time
+from ..utils import parse_timedelta
 from . import registry
 from .addressing import parse_address
 
@@ -160,7 +160,8 @@ def connect(addr, timeout=None, deserialize=True, connection_args=None):
     retried until the *timeout* is expired.
     """
     if timeout is None:
-        timeout = float(config.get('connect-timeout', 3))  # default 3 s.
+        timeout = dask.config.get('distributed.comm.timeouts.connect')
+    timeout = parse_timedelta(timeout, default='seconds')
 
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)

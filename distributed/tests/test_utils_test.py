@@ -9,7 +9,7 @@ from time import sleep
 import pytest
 from tornado import gen
 
-from distributed import Scheduler, Worker, Client, config
+from distributed import Scheduler, Worker, Client, config, default_client
 from distributed.core import rpc
 from distributed.metrics import time
 from distributed.utils_test import (cluster, gen_cluster, inc,
@@ -44,16 +44,16 @@ def test_gen_cluster(c, s, a, b):
 @pytest.mark.skip(reason="This hangs on travis")
 def test_gen_cluster_cleans_up_client(loop):
     import dask.context
-    assert not dask.context._globals.get('get')
+    assert not dask.config.get('get', None)
 
     @gen_cluster(client=True)
     def f(c, s, a, b):
-        assert dask.context._globals.get('get')
+        assert dask.config.get('get', None)
         yield c.submit(inc, 1)
 
     f()
 
-    assert not dask.context._globals.get('get')
+    assert not dask.config.get('get', None)
 
 
 @gen_cluster(client=False)
@@ -132,10 +132,26 @@ def test_wait_for_port():
 def test_new_config():
     c = config.copy()
     with new_config({'xyzzy': 5}):
-        assert config == {'xyzzy': 5}
+        config['xyzzy'] == 5
 
     assert config == c
     assert 'xyzzy' not in config
+
+
+def test_lingering_client():
+    @gen_cluster()
+    def f(s, a, b):
+        c = yield Client(s.address, asynchronous=True)
+
+    f()
+
+    with pytest.raises(ValueError):
+        default_client()
+
+
+def test_lingering_client(loop):
+    with cluster() as (s, [a, b]):
+        client = Client(s['address'], loop=loop)
 
 
 if sys.version_info >= (3, 5):

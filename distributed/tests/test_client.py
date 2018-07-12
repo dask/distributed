@@ -21,19 +21,19 @@ import zipfile
 
 import pytest
 from toolz import (identity, isdistinct, concat, pluck, valmap,
-                   partial, first)
+                   partial, first, merge)
 from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
-from dask.context import _globals
-from distributed import (Worker, Nanny, fire_and_forget, config,
-                         get_client, secede, get_worker, Executor, profile)
+from distributed import (Worker, Nanny, fire_and_forget, LocalCluster,
+                         get_client, secede, get_worker, Executor, profile,
+                         TimeoutError)
 from distributed.comm import CommClosedError
 from distributed.client import (Client, Future, wait, as_completed, tokenize,
                                 _get_global_client, default_client,
-                                ensure_default_get, futures_of,
+                                futures_of,
                                 temp_default_client)
 from distributed.compatibility import PY3
 
@@ -210,6 +210,19 @@ def test_compute_retries(c, s, a, b):
     exc_info.match("one")
     assert (yield y) == 70
     assert (yield z) == 80
+
+
+def test_retries_get(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
+            x = delayed(varying(args))()
+            assert x.compute(retries=5) == 3
+
+            args = [ZeroDivisionError("one"), ZeroDivisionError("two"), 3]
+            x = delayed(varying(args))()
+            with pytest.raises(ZeroDivisionError):
+                x.compute()
 
 
 @gen_cluster(client=True)
@@ -511,6 +524,20 @@ def test_gather_strict(c, s, a, b):
     assert xx == 2
 
 
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
+def test_gather_skip(c, s, a):
+    x = c.submit(div, 1, 0, priority=10)
+    y = c.submit(slowinc, 1, delay=0.5)
+
+    with captured_logger(logging.getLogger('distributed.scheduler')) as sched:
+        with captured_logger(logging.getLogger('distributed.client')) as client:
+            L = yield c.gather([x, y], errors='skip')
+            assert L == [2]
+
+    assert not client.getvalue()
+    assert not sched.getvalue()
+
+
 @gen_cluster(client=True, timeout=None)
 def test_get(c, s, a, b):
     future = c.get({'x': (inc, 1)}, 'x', sync=False)
@@ -559,7 +586,7 @@ def test_get_sync_optimize_graph_passes_through(loop):
     bag = db.range(10, npartitions=3).map(inc)
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            dask.compute(bag.sum(), optimize_graph=False, get=c.get)
+            dask.compute(bag.sum(), optimize_graph=False)
 
 
 @gen_cluster(client=True)
@@ -1430,6 +1457,8 @@ def test_scatter_gather_sync(loop, direct, broadcast):
             results = c.gather(futures, direct=direct)
             assert results == [1, 2, 3]
 
+            delayed(inc)(1).compute(direct=direct)
+
 
 @gen_cluster(client=True)
 def test_gather_direct(c, s, a, b):
@@ -1862,6 +1891,24 @@ def test_repr(loop):
         for func in funcs:
             text = func(c)
             assert 'not connected' in text
+
+
+@gen_cluster(client=True)
+def test_repr_async(c, s, a, b):
+    c._repr_html_()
+
+
+@gen_test()
+def test_repr_localcluster():
+    cluster = yield LocalCluster(processes=False, diagnostics_port=None,
+                                 asynchronous=True)
+    client = yield Client(cluster, asynchronous=True)
+    try:
+        text = client._repr_html_()
+        assert cluster.scheduler.address in text
+    finally:
+        yield client.close()
+        yield cluster._close()
 
 
 @gen_cluster(client=True)
@@ -2380,16 +2427,12 @@ def test_map_differnet_lengths(c, s, a, b):
 def test_Future_exception_sync_2(loop, capsys):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            ensure_default_get(c)
-            ensure_default_get(c)
-            ensure_default_get(c)
-            ensure_default_get(c)
-            assert _globals['get'] == c.get
+            assert dask.base.get_scheduler() == c.get
 
     out, err = capsys.readouterr()
     assert len(out.strip().split('\n')) == 1
 
-    assert _globals.get('get') != c.get
+    assert dask.base.get_scheduler() != c.get
 
 
 @gen_cluster(timeout=60, client=True)
@@ -2459,11 +2502,12 @@ def test_persist(loop):
             assert all(isinstance(v, Future) for v in yy.dask.values())
             assert yy.__dask_keys__() == y.__dask_keys__()
 
-            zz = yy.compute(get=c.get)
-            z = y.compute(get=c.get)
+            zz = yy.compute()
+            z = y.compute()
             assert (zz == z).all()
 
 
+@pytest.mark.avoid_travis  # This hangs intermittently.  We don't know why.
 @gen_cluster(timeout=60, client=True)
 def test_long_traceback(c, s, a, b):
     from distributed.protocol.pickle import dumps
@@ -2771,7 +2815,7 @@ def test_persist_get_sync(loop):
             xxyy2 = c.persist(xxyy)
             xxyy3 = delayed(add)(xxyy2, 10)
 
-            assert xxyy3.compute(get=c.get) == ((1 + 1) + (2 + 2)) + 10
+            assert xxyy3.compute() == ((1 + 1) + (2 + 2)) + 10
 
 
 @gen_cluster(client=True)
@@ -2810,9 +2854,10 @@ def test_client_num_fds(loop):
             for i in range(4):
                 with Client(s['address'], loop=loop):   # start more clients
                     pass
-            after = proc.num_fds()                  # measure
-
-        assert before == after
+            start = time()
+            while proc.num_fds() > before:
+                sleep(0.01)
+                assert time() < start + 4
 
 
 @gen_cluster()
@@ -3256,52 +3301,57 @@ def test_cancel_clears_processing(c, s, *workers):
 
 def test_default_get():
     with cluster() as (s, [a, b]):
-        pre_get = _globals.get('get')
-        pre_shuffle = _globals.get('shuffle')
+        pre_get = dask.base.get_scheduler()
+        pre_shuffle = dask.config.get('shuffle', None)
         with Client(s['address'], set_as_default=True) as c:
-            assert _globals['get'] == c.get
-            assert _globals['shuffle'] == 'tasks'
+            assert dask.base.get_scheduler() == c.get
+            assert dask.config.get('shuffle') == 'tasks'
 
-        assert _globals['get'] is pre_get
-        assert _globals['shuffle'] == pre_shuffle
+        assert dask.base.get_scheduler() == pre_get
+        assert dask.config.get('shuffle') == pre_shuffle
 
         c = Client(s['address'], set_as_default=False)
-        assert _globals['get'] is pre_get
-        assert _globals['shuffle'] == pre_shuffle
+        assert dask.base.get_scheduler() == pre_get
+        assert dask.config.get('shuffle') == pre_shuffle
         c.close()
 
         c = Client(s['address'], set_as_default=True)
-        assert _globals['shuffle'] == 'tasks'
-        assert _globals['get'] == c.get
+        assert dask.config.get('shuffle') == 'tasks'
+        assert dask.base.get_scheduler() == c.get
         c.close()
-        assert _globals['get'] is pre_get
-        assert _globals['shuffle'] == pre_shuffle
+        assert dask.base.get_scheduler() == pre_get
+        assert dask.config.get('shuffle') == pre_shuffle
 
         with Client(s['address']) as c:
-            assert _globals['get'] == c.get
+            assert dask.base.get_scheduler() == c.get
 
         with Client(s['address'], set_as_default=False) as c:
-            assert _globals['get'] != c.get
-            dask.set_options(get=c.get)
-            assert _globals['get'] == c.get
-        assert _globals['get'] != c.get
+            assert dask.base.get_scheduler() != c.get
+        assert dask.base.get_scheduler() != c.get
+
+        with Client(s['address'], set_as_default=True) as c1:
+            assert dask.base.get_scheduler() == c1.get
+            with Client(s['address'], set_as_default=True) as c2:
+                assert dask.base.get_scheduler() == c2.get
+            assert dask.base.get_scheduler() == c1.get
+        assert dask.base.get_scheduler() == pre_get
 
 
 @gen_cluster(client=True)
 def test_get_processing(c, s, a, b):
-    processing = yield c.scheduler.processing()
-    assert processing == valmap(list, s.processing)
+    processing = yield c.processing()
+    assert processing == valmap(tuple, s.processing)
 
     futures = c.map(slowinc, range(10), delay=0.1, workers=[a.address],
                     allow_other_workers=True)
 
     yield gen.sleep(0.2)
 
-    x = yield c.scheduler.processing()
+    x = yield c.processing()
     assert set(x) == {a.address, b.address}
 
-    x = yield c.scheduler.processing(workers=[a.address])
-    assert isinstance(x[a.address], list)
+    x = yield c.processing(workers=[a.address])
+    assert isinstance(x[a.address], (list, tuple))
 
 
 @gen_cluster(client=True)
@@ -3334,6 +3384,14 @@ def test_get_foo(c, s, a, b):
     assert valmap(sorted, x) == {futures[0].key: sorted(s.who_has[futures[0].key])}
 
 
+def assert_dict_key_equal(expected, actual):
+    assert set(expected.keys()) == set(actual.keys())
+    for k in actual.keys():
+        ev = expected[k]
+        av = actual[k]
+        assert list(ev) == list(av)
+
+
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
 def test_get_foo_lost_keys(c, s, u, v, w):
     x = c.submit(inc, 1, workers=[u.address])
@@ -3343,27 +3401,27 @@ def test_get_foo_lost_keys(c, s, u, v, w):
     ua, va, wa = u.address, v.address, w.address
 
     d = yield c.scheduler.has_what()
-    assert d == {ua: [x.key], va: [y.key], wa: []}
+    assert_dict_key_equal(d, {ua: [x.key], va: [y.key], wa: []})
     d = yield c.scheduler.has_what(workers=[ua, va])
-    assert d == {ua: [x.key], va: [y.key]}
+    assert_dict_key_equal(d, {ua: [x.key], va: [y.key]})
     d = yield c.scheduler.who_has()
-    assert d == {x.key: [ua], y.key: [va]}
+    assert_dict_key_equal(d,  {x.key: [ua], y.key: [va]})
     d = yield c.scheduler.who_has(keys=[x.key, y.key])
-    assert d == {x.key: [ua], y.key: [va]}
+    assert_dict_key_equal(d, {x.key: [ua], y.key: [va]})
 
     yield u._close()
     yield v._close()
 
     d = yield c.scheduler.has_what()
-    assert d == {wa: []}
+    assert_dict_key_equal(d, {wa: []})
     d = yield c.scheduler.has_what(workers=[ua, va])
-    assert d == {ua: [], va: []}
+    assert_dict_key_equal(d, {ua: [], va: []})
     # The scattered key cannot be recomputed so it is forgotten
     d = yield c.scheduler.who_has()
-    assert d == {x.key: []}
+    assert_dict_key_equal(d, {x.key: []})
     # ... but when passed explicitly, it is included in the result
     d = yield c.scheduler.who_has(keys=[x.key, y.key])
-    assert d == {x.key: [], y.key: []}
+    assert_dict_key_equal(d, {x.key: [], y.key: []})
 
 
 @slow
@@ -3544,7 +3602,7 @@ def test_persist_optimize_graph(c, s, a, b):
 @gen_cluster(client=True, ncores=[])
 def test_scatter_raises_if_no_workers(c, s):
     with pytest.raises(gen.TimeoutError):
-        yield c.scatter([1])
+        yield c.scatter(1, timeout=0.5)
 
 
 @slow
@@ -3619,7 +3677,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip('psutil')
     proc = psutil.Process()
 
-    with cluster(nworkers=0, active_rpc_timeout=20) as (s, []):
+    with cluster(nworkers=0, active_rpc_timeout=20) as (s, _):
         gc.collect()
         before = proc.num_fds()
         done = Semaphore(0)
@@ -3919,19 +3977,20 @@ def test_persist_workers(e, s, a, b, c):
     L1 = [delayed(inc)(i) for i in range(4)]
     total = delayed(sum)(L1)
     L2 = [delayed(add)(i, total) for i in L1]
+    total2 = delayed(sum)(L2)
 
-    out = e.persist(L1 + L2 + [total],
+    out = e.persist(L1 + L2 + [total, total2],
                     workers={tuple(L1): a.address,
                              total: b.address,
-                             tuple(L2): [c.address]},
-                    allow_other_workers=L1 + [total])
+                             tuple(L2): [c.address],
+                             total2: b.address},
+                    allow_other_workers=L2 + [total2])
 
     yield wait(out)
     assert all(v.key in a.data for v in L1)
     assert total.key in b.data
-    assert all(v.key in c.data for v in L2)
 
-    assert s.loose_restrictions == {total.key} | {v.key for v in L1}
+    assert s.loose_restrictions == {total2.key} | {v.key for v in L2}
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)] * 3, client=True)
@@ -4002,7 +4061,7 @@ def test_scatter_type(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_retire_workers(c, s, a, b):
+def test_retire_workers_2(c, s, a, b):
     [x] = yield c.scatter([1], workers=a.address)
 
     yield s.retire_workers(workers=[a.address])
@@ -4023,8 +4082,10 @@ def test_retire_many_workers(c, s, *workers):
     assert results == list(range(100))
 
     assert len(s.has_what) == len(s.ncores) == 3
+    assert all(future.done() for future in futures)
+    assert all(s.tasks[future.key].state == 'memory' for future in futures)
     for w, keys in s.has_what.items():
-        assert 20 < len(keys) < 50
+        assert 15 < len(keys) < 50
 
 
 @gen_cluster(client=True,
@@ -4142,7 +4203,7 @@ def test_auto_normalize_collection(c, s, a, b):
     x = da.ones(10, chunks=5)
     assert len(x.dask) == 2
 
-    with dask.set_options(optimizations=[c._optimize_insert_futures]):
+    with dask.config.set(optimizations=[c._optimize_insert_futures]):
         y = x.map_blocks(slowinc, delay=1, dtype=x.dtype)
         yy = c.persist(y)
 
@@ -4172,7 +4233,7 @@ def test_auto_normalize_collection_sync(loop):
 
             wait(yy)
 
-            with dask.set_options(optimizations=[c._optimize_insert_futures]):
+            with dask.config.set(optimizations=[c._optimize_insert_futures]):
                 start = time()
                 y.sum().compute()
                 end = time()
@@ -4303,13 +4364,15 @@ def test_map_list_kwargs(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_dont_clear_waiting_data(c, s, a, b):
-    [x] = yield c.scatter([1])
-    y = c.submit(slowinc, x, delay=0.2)
+    start = time()
+    x = yield c.scatter(1)
+    y = c.submit(slowinc, x, delay=0.5)
     while y.key not in s.tasks:
         yield gen.sleep(0.01)
-    [x] = yield c.scatter([1])
+    key = x.key
+    del x
     for i in range(5):
-        assert s.waiting_data[x.key]
+        assert s.waiting_data[key]
         yield gen.moment
 
 
@@ -4416,6 +4479,16 @@ def test_recreate_error_collection(c, s, a, b):
         function(*args, **kwargs)
 
 
+@gen_cluster(client=True)
+def test_recreate_error_array(c, s, a, b):
+    da = pytest.importorskip('dask.array')
+    pytest.importorskip('scipy')
+    z = (da.linalg.inv(da.zeros((10, 10), chunks=10)) + 1).sum()
+    zz = z.persist()
+    func, args, kwargs = yield c._recreate_error_locally(zz)
+    assert '0.,0.,0.' in str(args).replace(' ', '')  # args contain actual arrays
+
+
 def test_recreate_error_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
@@ -4443,7 +4516,7 @@ def test_recreate_error_not_error(loop):
 @gen_cluster(client=True)
 def test_retire_workers(c, s, a, b):
     assert set(s.workers) == {a.address, b.address}
-    yield c.scheduler.retire_workers(workers=[a.address], close_workers=True)
+    yield c.retire_workers(workers=[a.address], close_workers=True)
     assert set(s.workers) == {b.address}
 
     start = time()
@@ -4560,10 +4633,14 @@ def test_quiet_client_close(loop):
         with Client(loop=loop, processes=False, threads_per_worker=4) as c:
             futures = c.map(slowinc, range(1000), delay=0.01)
             sleep(0.200)  # stop part-way
-        sleep(0.5)  # let things settle
+        sleep(.1)  # let things settle
 
         out = logger.getvalue()
-        assert not out
+        lines = out.strip().split('\n')
+        assert len(lines) <= 2
+        for line in lines:
+            assert not line or 'Reconnecting' in line or set(line) == {'-'}
+        # assert not out
 
 
 @gen_cluster()
@@ -4880,8 +4957,6 @@ def test_use_synchronous_client_in_async_context(loop):
 
 
 def test_quiet_quit_when_cluster_leaves(loop_in_thread):
-    from distributed import LocalCluster
-
     loop = loop_in_thread
     with LocalCluster(loop=loop, scheduler_port=0, diagnostics_port=None,
                       silence_logs=False) as cluster:
@@ -5120,16 +5195,15 @@ def test_avoid_delayed_finalize(c, s, a, b):
 
 @gen_cluster()
 def test_config_scheduler_address(s, a, b):
-    config['scheduler-address'] = s.address
-    with captured_logger('distributed.client') as sio:
-        c = yield Client(asynchronous=True)
-        assert c.scheduler.address == s.address
+    with dask.config.set({'scheduler-address': s.address}):
+        with captured_logger('distributed.client') as sio:
+            c = yield Client(asynchronous=True)
+            assert c.scheduler.address == s.address
 
-    text = sio.getvalue()
-    assert s.address in text
+        text = sio.getvalue()
+        assert s.address in text
 
-    del config['scheduler-address']
-    yield c.close()
+        yield c.close()
 
 
 @gen_cluster(client=True)
@@ -5177,12 +5251,9 @@ def test_unhashable_function(c, s, a, b):
 
 @gen_cluster()
 def test_client_name(s, a, b):
-    config['client-name'] = 'hello-world'
-    try:
+    with dask.config.set({'client-name': 'hello-world'}):
         c = yield Client(s.address, asynchronous=True)
         assert any("hello-world" in name for name in list(s.clients))
-    finally:
-        del config['client-name']
 
     yield c._close()
 
@@ -5193,6 +5264,173 @@ def test_client_doesnt_close_given_loop(loop):
             assert c.submit(inc, 1).result() == 2
         with Client(s['address'], loop=loop) as c:
             assert c.submit(inc, 2).result() == 3
+
+
+@gen_cluster(client=True, ncores=[])
+def test_quiet_scheduler_loss(c, s):
+    c._periodic_callbacks['scheduler-info'].interval = 10
+    with captured_logger(logging.getLogger('distributed.client')) as logger:
+        yield s.close()
+        yield c._update_scheduler_info()
+    text = logger.getvalue()
+    assert "BrokenPipeError" not in text
+
+
+@pytest.mark.skipif('USER' not in os.environ, reason='no USER env variable')
+def test_diagnostics_link_env_variable(loop):
+    pytest.importorskip('bokeh')
+    from distributed.bokeh.scheduler import BokehScheduler
+    with cluster(scheduler_kwargs={'services': {('bokeh', 12355): BokehScheduler}}) as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            with dask.config.set({'distributed.dashboard.link': 'http://foo-{USER}:{port}/status'}):
+                text = c._repr_html_()
+                link = 'http://foo-' + os.environ['USER'] + ':12355/status'
+                assert link in text
+
+
+@gen_test()
+def test_client_timeout_2():
+    with dask.config.set({'distributed.comm.timeouts.connect': '10ms'}):
+        start = time()
+        c = Client('127.0.0.1:3755', asynchronous=True)
+        with pytest.raises((TimeoutError, IOError)):
+            yield c
+        stop = time()
+
+        yield c.close()
+
+        assert stop - start < 1
+
+
+@gen_test()
+def test_client_active_bad_port():
+    import tornado.web
+    import tornado.httpserver
+    application = tornado.web.Application([
+        (r"/", tornado.web.RequestHandler),
+    ])
+    http_server = tornado.httpserver.HTTPServer(application)
+    http_server.listen(8080)
+    with dask.config.set({'distributed.comm.timeouts.connect': '10ms'}):
+        c = Client('127.0.0.1:8080', asynchronous=True)
+        with pytest.raises((TimeoutError, IOError)):
+            yield c
+        yield c._close(fast=True)
+    http_server.stop()
+
+
+@gen_cluster()
+def test_turn_off_pickle(s, a, b):
+    import numpy as np
+    c = yield Client(s.address, asynchronous=True,
+                     serializers=['dask', 'msgpack'])
+    try:
+        assert (yield c.submit(inc, 1)) == 2
+        yield c.submit(np.ones, 5)
+        yield c.scatter(1)
+
+        # Can't send complex data
+        with pytest.raises(TypeError):
+            future = yield c.scatter(inc)
+
+        # can send complex tasks (this uses pickle regardless)
+        future = c.submit(lambda x: x, inc)
+        yield wait(future)
+
+        # but can't receive complex results
+        with pytest.raises(TypeError):
+            yield future
+
+        # Run works
+        result = yield c.run(lambda: 1)
+        assert list(result.values()) == [1, 1]
+        result = yield c.run_on_scheduler(lambda: 1)
+        assert result == 1
+
+        # But not with complex return values
+        with pytest.raises(TypeError):
+            yield c.run(lambda: inc)
+        with pytest.raises(TypeError):
+            yield c.run_on_scheduler(lambda: inc)
+    finally:
+        yield c._close()
+
+
+@gen_cluster()
+def test_de_serialization(s, a, b):
+    import numpy as np
+    c = yield Client(s.address, asynchronous=True,
+                     serializers=['msgpack', 'pickle'],
+                     deserializers=['msgpack'])
+    try:
+        # Can send complex data
+        future = yield c.scatter(np.ones(5))
+
+        # But can not retrieve it
+        with pytest.raises(TypeError):
+            result = yield future
+    finally:
+        yield c._close()
+
+
+@gen_cluster()
+def test_de_serialization_none(s, a, b):
+    import numpy as np
+    c = yield Client(s.address, asynchronous=True,
+                     deserializers=['msgpack'])
+    try:
+        # Can send complex data
+        future = yield c.scatter(np.ones(5))
+
+        # But can not retrieve it
+        with pytest.raises(TypeError):
+            result = yield future
+    finally:
+        yield c._close()
+
+
+@gen_cluster()
+def test_client_repr_closed(s, a, b):
+    c = yield Client(s.address, asynchronous=True)
+    yield c.close()
+    c._repr_html_()
+
+
+def test_client_repr_closed_sync(loop):
+    with Client(loop=loop, processes=False) as c:
+        c.close()
+        c._repr_html_()
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
+def test_nested_prioritization(c, s, w):
+    x = delayed(inc)(1, dask_key_name=('a', 2))
+    y = delayed(inc)(2, dask_key_name=('a', 10))
+
+    o = dask.order.order(merge(x.__dask_graph__(), y.__dask_graph__()))
+
+    fx, fy = c.compute([x, y])
+
+    yield wait([fx, fy])
+
+    assert ((o[x.key] < o[y.key]) ==
+            (s.tasks[tokey(fx.key)].priority < s.tasks[tokey(fy.key)].priority))
+
+
+@gen_cluster(client=True)
+def test_scatter_error_cancel(c, s, a, b):
+    # https://github.com/dask/distributed/issues/2038
+    def bad_fn(x):
+        raise Exception('lol')
+
+    x = yield c.scatter(1)
+    y = c.submit(bad_fn, x)
+    del x
+
+    yield wait(y)
+    assert y.status == 'error'
+    yield gen.sleep(0.1)
+    assert y.status == 'error'  # not cancelled
 
 
 if sys.version_info >= (3, 5):

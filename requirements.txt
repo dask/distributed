@@ -1,10 +1,10 @@
 click >= 6.6
 cloudpickle >= 0.2.2
-dask >= 0.17.0
-msgpack-python
+dask >= 0.18.0
+msgpack
 psutil
 six
-sortedcontainers
+sortedcontainers !=2.0.0, !=2.0.1
 tblib
 toolz >= 0.7.4
 tornado >= 4.5.1
@@ -12,3 +12,4 @@ zict >= 0.1.3
 # Compatibility packages
 futures; python_version < '3.0'
 singledispatch; python_version < '3.4'
+pyyaml

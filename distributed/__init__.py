@@ -1,14 +1,16 @@
 from __future__ import print_function, division, absolute_import
 
-from .config import config
+from . import config
+from dask.config import config
 from .core import connect, rpc
-from .deploy import LocalCluster
+from .deploy import LocalCluster, Adaptive
 from .diagnostics import progress
 from .client import (Client, Executor, CompatibleExecutor,
                      wait, as_completed, default_client, fire_and_forget,
                      Future, futures_of)
 from .lock import Lock
 from .nanny import Nanny
+from .pubsub import Pub, Sub
 from .queues import Queue
 from .scheduler import Scheduler
 from .threadpoolexecutor import rejoin

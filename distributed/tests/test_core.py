@@ -8,10 +8,11 @@ import weakref
 from tornado import gen
 import pytest
 
-from distributed.compatibility import finalize
-from distributed.config import set_config
+import dask
+from distributed.compatibility import finalize, get_thread_identity
 from distributed.core import (pingpong, Server, rpc, connect, send_recv,
                                coerce_to_address, ConnectionPool)
+from distributed.protocol.compression import compressions
 
 from distributed.metrics import time
 from distributed.protocol import to_serialize
@@ -22,7 +23,7 @@ from distributed.utils_test import (
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6, assert_can_connect_from_everywhere_6,
     assert_can_connect_locally_4, assert_can_connect_locally_6,
-    tls_security, captured_logger)
+    tls_security, captured_logger, inc, throws)
 from distributed.utils_test import loop  # noqa F401
 
 
@@ -55,6 +56,10 @@ class CountedObject(object):
 
 def echo_serialize(comm, x):
     return {'result': to_serialize(x)}
+
+
+def echo_no_serialize(comm, x):
+    return {'result': x}
 
 
 def test_server(loop):
@@ -535,6 +540,44 @@ def test_connection_pool_tls():
 
 
 @gen_test()
+def test_connection_pool_remove():
+
+    @gen.coroutine
+    def ping(comm, delay=0.01):
+        yield gen.sleep(delay)
+        raise gen.Return('pong')
+
+    servers = [Server({'ping': ping}) for i in range(5)]
+    for server in servers:
+        server.listen(0)
+
+    rpc = ConnectionPool(limit=10)
+    serv = servers.pop()
+    yield [rpc(s.address).ping() for s in servers]
+    yield [rpc(serv.address).ping() for i in range(3)]
+    yield rpc.connect(serv.address)
+    assert sum(map(len, rpc.available.values())) == 6
+    assert sum(map(len, rpc.occupied.values())) == 1
+    assert rpc.active == 1
+    assert rpc.open == 7
+
+    rpc.remove(serv.address)
+    assert serv.address not in rpc.available
+    assert serv.address not in rpc.occupied
+    assert sum(map(len, rpc.available.values())) == 4
+    assert sum(map(len, rpc.occupied.values())) == 0
+    assert rpc.active == 0
+    assert rpc.open == 4
+
+    rpc.collect()
+    comm = yield rpc.connect(serv.address)
+    rpc.remove(serv.address)
+    rpc.reuse(serv.address, comm)
+
+    rpc.close()
+
+
+@gen_test()
 def test_counters():
     server = Server({'div': stream_div})
     server.listen('tcp://')
@@ -561,10 +604,71 @@ def test_ticks(s, a, b):
 @gen_cluster()
 def test_tick_logging(s, a, b):
     pytest.importorskip('crick')
-    with set_config(**{'tick-maximum-delay': 10}):
+    from distributed import core
+    old = core.tick_maximum_delay
+    core.tick_maximum_delay = 0.001
+    try:
         with captured_logger('distributed.core') as sio:
             yield gen.sleep(0.1)
 
-    text = sio.getvalue()
-    assert "unresponsive" in text
-    assert 'Scheduler' in text or 'Worker' in text
+        text = sio.getvalue()
+        assert "unresponsive" in text
+        assert 'Scheduler' in text or 'Worker' in text
+    finally:
+        core.tick_maximum_delay = old
+
+
+@pytest.mark.parametrize('compression', list(compressions))
+@pytest.mark.parametrize('serialize', [echo_serialize, echo_no_serialize])
+def test_compression(compression, serialize, loop):
+    with dask.config.set(compression=compression):
+
+        @gen.coroutine
+        def f():
+            server = Server({'echo': serialize})
+            server.listen('tcp://')
+
+            with rpc(server.address) as r:
+                data = b'1' * 1000000
+                result = yield r.echo(x=to_serialize(data))
+                assert result == {'result': data}
+
+            server.stop()
+
+        loop.run_sync(f)
+
+
+def test_rpc_serialization(loop):
+    @gen.coroutine
+    def f():
+        server = Server({'echo': echo_serialize})
+        server.listen('tcp://')
+
+        with rpc(server.address, serializers=['msgpack']) as r:
+            with pytest.raises(TypeError):
+                yield r.echo(x=to_serialize(inc))
+
+        with rpc(server.address, serializers=['msgpack', 'pickle']) as r:
+            result = yield r.echo(x=to_serialize(inc))
+            assert result == {'result': inc}
+
+    loop.run_sync(f)
+
+
+@gen_cluster()
+def test_thread_id(s, a, b):
+    assert s.thread_id == a.thread_id == b.thread_id == get_thread_identity()
+
+
+@gen_test()
+def test_deserialize_error():
+    server = Server({'throws': throws})
+    server.listen(0)
+
+    comm = yield connect(server.address, deserialize=False)
+    with pytest.raises(Exception) as info:
+        yield send_recv(comm, op='throws')
+
+    assert type(info.value) == Exception
+    for c in str(info.value):
+        assert c.isalpha() or c in "(',!)"  # no crazy bytestrings

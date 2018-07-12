@@ -14,7 +14,8 @@ from distributed.batched import BatchedSend
 from distributed.core import listen, connect, CommClosedError
 from distributed.metrics import time
 from distributed.utils import All
-from distributed.utils_test import gen_test, slow, gen_cluster
+from distributed.utils_test import gen_test, slow, gen_cluster, captured_logger
+from distributed.protocol import to_serialize
 
 
 class EchoServer(object):
@@ -68,9 +69,9 @@ def test_BatchedSend():
         b.send('HELLO')
 
         result = yield comm.read()
-        assert result == ['hello', 'hello', 'world']
+        assert result == ('hello', 'hello', 'world')
         result = yield comm.read()
-        assert result == ['HELLO', 'HELLO']
+        assert result == ('HELLO', 'HELLO')
 
         assert b.byte_count > 1
 
@@ -87,7 +88,7 @@ def test_send_before_start():
 
         b.start(comm)
         result = yield comm.read()
-        assert result == ['hello', 'world']
+        assert result == ('hello', 'world')
 
 
 @gen_test()
@@ -103,7 +104,7 @@ def test_send_after_stream_start():
         result = yield comm.read()
         if len(result) < 2:
             result += yield comm.read()
-        assert result == ['hello', 'world']
+        assert result == ('hello', 'world')
 
 
 @gen_test()
@@ -140,6 +141,8 @@ def test_close_closed():
         comm.close()  # external closing
 
         yield b.close()
+        assert 'closed' in repr(b)
+        assert 'closed' in str(b)
 
 
 @gen_test()
@@ -237,6 +240,7 @@ def test_large_traffic_jam():
     yield run_traffic_jam(500, 1500000)
 
 
+@pytest.mark.skipif(sys.version_info[0] < 3, reason="intermittent failure")
 @gen_cluster(client=True)
 def test_dont_hold_on_to_large_messages(c, s, a, b):
     np = pytest.importorskip('numpy')
@@ -250,7 +254,7 @@ def test_dont_hold_on_to_large_messages(c, s, a, b):
 
     start = time()
     while xr() is not None:
-        if time() > start + 1:
+        if time() > start + 5:
             # Help diagnosing
             from types import FrameType
             x = xr()
@@ -266,3 +270,32 @@ def test_dont_hold_on_to_large_messages(c, s, a, b):
             pytest.fail("array should have been destroyed")
 
         yield gen.sleep(0.05)
+
+
+@gen_test()
+def test_serializers():
+    with echo_server() as e:
+        comm = yield connect(e.address)
+
+        b = BatchedSend(interval='10ms', serializers=['msgpack'])
+        b.start(comm)
+
+        b.send({'x': to_serialize(123)})
+        b.send({'x': to_serialize('hello')})
+        yield gen.sleep(0.100)
+
+        b.send({'x': to_serialize(lambda x: x + 1)})
+
+        with captured_logger('distributed.protocol') as sio:
+            yield gen.sleep(0.100)
+
+        value = sio.getvalue()
+        assert 'serialize' in value
+        assert 'type' in value
+        assert 'function' in value
+
+        msg = yield comm.read()
+        assert list(msg) == [{'x': 123}, {'x': 'hello'}]
+
+        with pytest.raises(gen.TimeoutError):
+            msg = yield gen.with_timeout(timedelta(milliseconds=100), comm.read())
