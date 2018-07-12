@@ -204,12 +204,13 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
                         f = call_data_futures[arg]
                     except KeyError:
                         if is_weakrefable(arg) and sizeof(arg) > 1e3:
-                            # Automatically scatter large objects to some of
-                            # the workers to avoid duplicated data transfers.
-                            # Rely on automated inter-worker data stealing if
-                            # more workers need to reuse this data concurrently
-                            # beyond the initial broadcast arity.
-                            [f] = self.client.scatter([arg], broadcast=3)
+                            # Automatically scatter large objects to one of the
+                            # workers to avoid duplicated data transfers. Rely
+                            # on automated inter-worker data stealing if more
+                            # workers need to reuse this data concurrently as
+                            # well as the ability of a worker to refuse data
+                            # requests with busy signal.
+                            [f] = self.client.scatter([arg], broadcast=1)
                             call_data_futures[arg] = f
 
                 if f is not None:
