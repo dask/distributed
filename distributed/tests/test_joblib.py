@@ -177,7 +177,7 @@ def test_errors(loop, joblib):
 
 
 def test_correct_nested_backend(loop, joblib):
-    if LooseVersion(joblib.__version__) <= "0.11.0":
+    if LooseVersion(joblib.__version__) <= LooseVersion("0.11.0"):
         pytest.skip("Requires nested parallelism")
 
     with cluster() as (s, [a, b]):
@@ -185,14 +185,14 @@ def test_correct_nested_backend(loop, joblib):
             # No requirement, should be us
             with joblib.parallel_backend('dask') as (ba, _):
                 result = joblib.Parallel(n_jobs=2)(joblib.delayed(outer)(
-                    joblib, require=None) for _ in range(1))
+                    joblib, nested_require=None) for _ in range(1))
                 assert isinstance(result[0][0][0],
                                   distributed_joblib.DaskDistributedBackend)
 
             # Require threads, should be threading
             with joblib.parallel_backend('dask') as (ba, _):
                 result = joblib.Parallel(n_jobs=2)(joblib.delayed(outer)(
-                    joblib, require='sharedmem') for _ in range(1))
+                    joblib, nested_require='sharedmem') for _ in range(1))
                 assert isinstance(result[0][0][0],
                                   joblib.parallel.ThreadingBackend)
 
