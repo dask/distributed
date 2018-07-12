@@ -279,6 +279,7 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
         if hasattr(thread_state, 'execution_state'):
             rejoin()
 
+
 for base in _bases:
     base.register(DaskDistributedBackend)
 
