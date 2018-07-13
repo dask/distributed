@@ -210,7 +210,7 @@ class DaskDistributedBackend(ParallelBackendBase, AutoBatchingMixin):
                             # workers need to reuse this data concurrently as
                             # well as the ability of a worker to refuse data
                             # requests with busy signal.
-                            [f] = self.client.scatter([arg], broadcast=1)
+                            [f] = self.client.scatter([arg])
                             call_data_futures[arg] = f
 
                 if f is not None:
