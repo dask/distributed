@@ -49,7 +49,7 @@ def test_submit(obj):
 def test_scatter(obj):
     @gen_cluster(client=True)
     def run_test(client, scheduler, worker1, worker2):
-        obj_fut = client.scatter(obj)
+        obj_fut = yield client.scatter(obj)
         fut = client.submit(echo, obj_fut)
         result = yield fut
         assert obj.equals(result)
