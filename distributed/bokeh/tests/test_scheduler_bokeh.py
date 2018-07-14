@@ -286,6 +286,41 @@ def test_WorkerTable(c, s, a, b):
     assert all(len(v) == 2 for v in wt.source.data.values())
 
 
+
+@gen_cluster(client=True)
+def test_WorkerTable_custom_metrics(c, s, a, b):
+    def metric_port(worker):
+        return worker.port
+
+    def metric_address(worker):
+        return worker.address
+
+    metrics = {'metric_port': metric_port,
+               'metric_address': metric_address}
+
+    for w in [a, b]:
+        for name, func in metrics.items():
+            w.custom_metrics[name] = func
+
+    while not all([name in s.workers[w.address].info
+                   for name in metrics
+                   for w in [a, b]]):
+        yield gen.sleep(0.01)
+
+    for w in [a, b]:
+        assert s.workers[w.address].info['metric_port'] == w.port
+        assert s.workers[w.address].info['metric_address'] == w.address
+
+    wt = WorkerTable(s)
+    wt.update()
+
+    for name in metrics:
+        assert name in wt.source.data
+
+    assert all(wt.source.data.values())
+    assert all(len(v) == 2 for v in wt.source.data.values())
+
+
 @gen_cluster(client=True)
 def test_GraphPlot(c, s, a, b):
     gp = GraphPlot(s)

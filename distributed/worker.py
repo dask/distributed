@@ -89,7 +89,7 @@ class WorkerBase(ServerNode):
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
                  contact_address=None, memory_monitor_interval='200ms',
-                 extensions=None, **kwargs):
+                 extensions=None, custom_metrics=None, **kwargs):
 
         self._setup_logging()
 
@@ -180,6 +180,10 @@ class WorkerBase(ServerNode):
         self.service_ports = service_ports or {}
         self.service_specs = services or {}
 
+        if custom_metrics is None:
+            self.custom_metrics = {}
+
+
         handlers = {
             'gather': self.gather,
             'run': self.run,
@@ -259,6 +263,7 @@ class WorkerBase(ServerNode):
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
+                custom_metrics = {k: func(self) for k, func in self.custom_metrics.items()}
                 response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
                     name=self.name,
@@ -268,7 +273,9 @@ class WorkerBase(ServerNode):
                     in_memory=len(self.data),
                     ready=len(self.ready),
                     in_flight=len(self.in_flight_tasks),
-                    **self.monitor.recent())
+                    custom_metrics_names=list(custom_metrics.keys()),
+                    **self.monitor.recent(),
+                    **custom_metrics)
                 end = time()
                 middle = (start + end) / 2
                 if response['status'] == 'missing':
