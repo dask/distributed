@@ -36,32 +36,11 @@ def echo(arg):
 
 
 @pytest.mark.parametrize('obj', [batch, tbl], ids=["RecordBatch", "Table"])
-def test_submit(obj):
-    @gen_cluster(client=True)
-    def run_test(client, scheduler, worker1, worker2):
-        fut = client.submit(echo, obj)
-        result = yield fut
-        assert obj.equals(result)
-    run_test()
-
-
-@pytest.mark.parametrize('obj', [batch, tbl], ids=["RecordBatch", "Table"])
 def test_scatter(obj):
     @gen_cluster(client=True)
     def run_test(client, scheduler, worker1, worker2):
         obj_fut = yield client.scatter(obj)
         fut = client.submit(echo, obj_fut)
-        result = yield fut
-        assert obj.equals(result)
-    run_test()
-
-
-@pytest.mark.parametrize('obj', [batch, tbl], ids=["RecordBatch", "Table"])
-def test_delayed(obj):
-    @gen_cluster(client=True)
-    def run_test(client, scheduler, worker1, worker2):
-        delayed_obj = delayed(obj)
-        fut = client.submit(echo, delayed_obj)
         result = yield fut
         assert obj.equals(result)
     run_test()
