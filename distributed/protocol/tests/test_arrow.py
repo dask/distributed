@@ -3,8 +3,6 @@ import pytest
 
 pa = pytest.importorskip('pyarrow')
 
-from dask import delayed
-from distributed.protocol import arrow
 from distributed.utils_test import gen_cluster
 from distributed.protocol import deserialize, serialize
 from distributed.protocol.serialize import class_serializers, typename
