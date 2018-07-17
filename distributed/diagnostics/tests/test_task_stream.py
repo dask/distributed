@@ -2,7 +2,9 @@ from __future__ import absolute_import, division, print_function
 
 from toolz import frequencies
 
-from distributed.utils_test import gen_cluster, div, inc, slowinc
+from distributed import Client, get_task_stream
+from distributed.utils_test import gen_cluster, div, inc, slowinc, cluster
+from distributed.utils_test import loop  # noqa F401
 from distributed.client import wait
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 from distributed.metrics import time
@@ -86,3 +88,13 @@ def test_client(c, s, a, b):
     tasks = [p for p in s.plugins if isinstance(p, TaskStreamPlugin)][0]
     L = yield c.get_task_stream()
     assert L == tuple(tasks.buffer)
+
+
+def test_client_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            with get_task_stream() as ts:
+                futures = c.map(inc, range(10))
+                wait(futures)
+
+            assert len(ts.data) == 10

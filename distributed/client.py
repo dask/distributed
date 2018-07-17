@@ -3349,8 +3349,8 @@ class Client(Node):
         start: Number or string
             When you want to start recording
             If a number it should be the result of calling time()
-            If a string then it should be a time difference before now, like
-            '60s' or `500 ms'
+            If a string then it should be a time difference before now,
+            like '60s' or '500 ms'
         stop: Number or string
             When you want to stop recording
         count: int
@@ -3360,16 +3360,28 @@ class Client(Node):
         Examples
         --------
         >>> client.get_task_stream()  # prime plugin if not already connected
-        >>> df.compute()  # do some work
+        >>> x.compute()  # do some work
         >>> client.get_task_stream()
         [{'task': ...,
           'type': ...,
           'thread': ...,
           ...}]
 
+        Alternatively consider the context manager
+
+        >>> from dask.distributed import get_task_stream
+        >>> with get_task_stream() as ts:
+        ...     x.compute()
+        >>> ts.data
+        [...]
+
         Returns
         -------
         L: List[Dict]
+
+        See Also
+        --------
+        get_task_stream: a dontext manager version of this method
         """
         return self.sync(self.scheduler.get_task_stream, start=start,
                          stop=stop, count=count)
@@ -3741,6 +3753,48 @@ def fire_and_forget(obj):
         future.client._send_to_scheduler({'op': 'client-desires-keys',
                                           'keys': [tokey(future.key)],
                                           'client': 'fire-and-forget'})
+
+
+class get_task_stream(object):
+    """
+    Collect task stream within a context block
+
+    This provides diagnostic information about every task that was run during
+    the time when this block was active.
+
+    This must be used as a context manager.
+
+    Examples
+    --------
+    >>> with get_task_stream() as ts:
+    ...     x.compute()
+    >>> ts.data
+    [...]
+
+    See Also
+    --------
+    Client.get_task_stream: Function version of this context manager
+    """
+    def __init__(self):
+        self.data = []
+        default_client().get_task_stream(start=0, stop=0)  # ensure plugin
+
+    def __enter__(self):
+        self.start = time()
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        L = default_client().get_task_stream(start=self.start)
+        self.data.extend(L)
+
+    @gen.coroutine
+    def __aenter__(self):
+        raise gen.Return(self)
+
+    @gen.coroutine
+    def __aexit__(self, typ, value, traceback):
+        L = yield default_client().get_task_stream(start=self.start)
+        self.data.extend(L)
 
 
 @contextmanager
