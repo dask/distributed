@@ -3333,6 +3333,47 @@ class Client(Node):
     def collections_to_dsk(collections, *args, **kwargs):
         return collections_to_dsk(collections, *args, **kwargs)
 
+    def get_task_stream(self, start=None, stop=None, count=None):
+        """ Get task stream data from scheduler
+
+        This collects the data present in the diagnostic "Task Stream" plot on
+        the dashboard.  It includes the start, stop, transfer, and
+        deserialization time of every task for a particular duration.
+
+        Note that the task stream diagnostic does not run by default.  You may
+        wish to call this function once before you start work to ensure that
+        things start recording, and then again after you have completed.
+
+        Parameters
+        ----------
+        start: Number or string
+            When you want to start recording
+            If a number it should be the result of calling time()
+            If a string then it should be a time difference before now, like
+            '60s' or `500 ms'
+        stop: Number or string
+            When you want to stop recording
+        count: int
+            The number of desired records, ignored if both start and stop are
+            specified
+
+        Examples
+        --------
+        >>> client.get_task_stream()  # prime plugin if not already connected
+        >>> df.compute()  # do some work
+        >>> client.get_task_stream()
+        [{'task': ...,
+          'type': ...,
+          'thread': ...,
+          ...}]
+
+        Returns
+        -------
+        L: List[Dict]
+        """
+        return self.sync(self.scheduler.get_task_stream, start=start,
+                         stop=stop, count=count)
+
 
 class Executor(Client):
     """ Deprecated: see Client """
