@@ -1,13 +1,10 @@
 from __future__ import absolute_import, division, print_function
 
-import pytest
-pytest.importorskip('bokeh')
-
 from toolz import frequencies
 
 from distributed.utils_test import gen_cluster, div
 from distributed.client import wait
-from distributed.bokeh.task_stream import TaskStreamPlugin
+from distributed.diagnostics.task_stream import TaskStreamPlugin
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)

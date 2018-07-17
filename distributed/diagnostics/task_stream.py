@@ -2,8 +2,8 @@ from __future__ import print_function, division, absolute_import
 
 import logging
 
-from ..diagnostics.progress_stream import color_of
-from ..diagnostics.plugin import SchedulerPlugin
+from .progress_stream import color_of
+from .plugin import SchedulerPlugin
 from ..utils import key_split, format_time
 
 
