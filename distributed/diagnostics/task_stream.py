@@ -83,7 +83,9 @@ class TaskStreamPlugin(SchedulerPlugin):
         L_y = []
 
         diff = self.index - len(self.buffer)
-        for i in range(istart - diff, istop - diff if istop else istop):
+        if istop is None:
+            istop = len(self.buffer)
+        for i in range((istart or 0) - diff, istop - diff if istop else istop):
             msg = self.buffer[i]
             key = msg['key']
             name = key_split(key)
