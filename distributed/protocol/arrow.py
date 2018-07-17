@@ -11,7 +11,7 @@ def serialize_batch(batch):
     writer.close()
     buf = sink.get_result()
     header = {}
-    frames = [buf.to_pybytes()]
+    frames = [buf]
     return header, frames
 
 
@@ -30,7 +30,7 @@ def serialize_table(tbl):
     writer.close()
     buf = sink.get_result()
     header = {}
-    frames = [buf.to_pybytes()]
+    frames = [buf]
     return header, frames
 
 
