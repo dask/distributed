@@ -3663,16 +3663,14 @@ def test_reconnect(loop):
     c.close()
 
 
-# On Python 2, heavy process spawning can deadlock (e.g. on a logging IO lock)
-_params = ([(Worker, 100, 5), (Nanny, 10, 20)]
-           if sys.version_info >= (3,)
-           else [(Worker, 100, 5)])
 
 
-@slow
 @pytest.mark.skipif(sys.platform.startswith('win'),
                     reason="num_fds not supported on windows")
-@pytest.mark.parametrize("worker,count,repeat", _params)
+@pytest.mark.parametrize("worker,count,repeat", [
+    pytest.mark.xfail((Worker, 100, 5))] +
+    # On Python 2, heavy process spawning can deadlock (e.g. on a logging IO lock)
+    ([(Nanny, 10, 20)] if sys.version_info[0] >= 3 else []))
 def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip('psutil')
     proc = psutil.Process()
