@@ -3666,10 +3666,12 @@ def test_reconnect(loop):
 @slow
 @pytest.mark.skipif(sys.platform.startswith('win'),
                     reason="num_fds not supported on windows")
+@pytest.mark.skipif(sys.version_info[0] == 2,
+                    reason="Semaphore.acquire doesn't support timeout option")
 @pytest.mark.parametrize("worker,count,repeat", [
-    pytest.mark.skip((Worker, 100, 5), reason='TODO: intermittent failures')] +
-    # On Python 2, heavy process spawning can deadlock (e.g. on a logging IO lock)
-    ([(Nanny, 10, 20)] if sys.version_info[0] >= 3 else []))
+    pytest.mark.xfail((Worker, 100, 5), reason='TODO: intermittent failures'),
+    (Nanny, 10, 20)
+])
 def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip('psutil')
     proc = psutil.Process()
@@ -3703,7 +3705,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
             sleep(1)
 
             for i in range(count):
-                done.acquire()
+                done.acquire(timeout=5)
                 gc.collect()
                 if not running:
                     break
