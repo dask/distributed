@@ -3663,8 +3663,6 @@ def test_reconnect(loop):
     c.close()
 
 
-
-
 @pytest.mark.skipif(sys.platform.startswith('win'),
                     reason="num_fds not supported on windows")
 @pytest.mark.parametrize("worker,count,repeat", [
