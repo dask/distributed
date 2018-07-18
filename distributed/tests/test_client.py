@@ -3668,8 +3668,9 @@ def test_reconnect(loop):
                     reason="num_fds not supported on windows")
 @pytest.mark.skipif(sys.version_info[0] == 2,
                     reason="Semaphore.acquire doesn't support timeout option")
+@pytest.mark.xfail(reason='TODO: intermittent failures')
 @pytest.mark.parametrize("worker,count,repeat", [
-    pytest.mark.xfail((Worker, 100, 5), reason='TODO: intermittent failures'),
+    (Worker, 100, 5),
     (Nanny, 10, 20)
 ])
 def test_open_close_many_workers(loop, worker, count, repeat):
