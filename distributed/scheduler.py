@@ -3152,8 +3152,6 @@ class Scheduler(ServerNode):
             assert worker is None or isinstance(worker, WorkerState), (type(worker), worker)
             assert worker.address in self.workers
 
-        print('task', ts.key, ts.resource_restrictions)
-
         return worker
 
     def transition_waiting_processing(self, key):
