@@ -116,8 +116,9 @@ class ThreadPoolExecutor(_base.Executor):
         self._threads = set()
         self._shutdown = False
         self._shutdown_lock = threading.Lock()
+        self._thread_number = next(self._counter)
         self._thread_name_prefix = (thread_name_prefix or
-                                    ("ThreadPoolExecutor-%d" % next(self._counter)))
+                                    ("ThreadPoolExecutor-%d" % self._thread_number))
 
     def submit(self, fn, *args, **kwargs):
         with self._shutdown_lock:
