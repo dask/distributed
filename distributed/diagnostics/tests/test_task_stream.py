@@ -1,5 +1,7 @@
 from __future__ import absolute_import, division, print_function
 
+from time import sleep
+
 from toolz import frequencies
 
 from distributed import Client, get_task_stream
@@ -93,7 +95,9 @@ def test_client(c, s, a, b):
 def test_client_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
-            with get_task_stream() as ts:
+            with get_task_stream(client=c) as ts:
+                sleep(0.1)  # to smooth over time differences on the scheduler
+                # to smooth over time differences on the scheduler
                 futures = c.map(inc, range(10))
                 wait(futures)
 

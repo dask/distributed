@@ -3775,16 +3775,17 @@ class get_task_stream(object):
     --------
     Client.get_task_stream: Function version of this context manager
     """
-    def __init__(self):
+    def __init__(self, client=None):
         self.data = []
-        default_client().get_task_stream(start=0, stop=0)  # ensure plugin
+        self.client = client or default_client()
+        self.client.get_task_stream(start=0, stop=0)  # ensure plugin
 
     def __enter__(self):
         self.start = time()
         return self
 
     def __exit__(self, typ, value, traceback):
-        L = default_client().get_task_stream(start=self.start)
+        L = self.client.get_task_stream(start=self.start)
         self.data.extend(L)
 
     @gen.coroutine
@@ -3793,7 +3794,7 @@ class get_task_stream(object):
 
     @gen.coroutine
     def __aexit__(self, typ, value, traceback):
-        L = yield default_client().get_task_stream(start=self.start)
+        L = yield self.client.get_task_stream(start=self.start)
         self.data.extend(L)
 
 
