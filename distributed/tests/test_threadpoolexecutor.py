@@ -125,4 +125,3 @@ def test_thread_name():
     with ThreadPoolExecutor(2) as e:
         e.map(id, range(10))
         assert len({thread.name for thread in e._threads}) == 2
-
