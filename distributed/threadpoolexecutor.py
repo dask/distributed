@@ -23,7 +23,6 @@ which is included as a comment at the end of this file:
 from __future__ import print_function, division, absolute_import
 
 from . import _concurrent_futures_thread as thread
-import os
 import logging
 import threading
 
@@ -71,7 +70,7 @@ class ThreadPoolExecutor(thread.ThreadPoolExecutor):
     def _adjust_thread_count(self):
         if len(self._threads) < self._max_workers:
             t = threading.Thread(target=_worker,
-                                 name="ThreadPoolExecutor-%d-%d" % (os.getpid(), self._thread_number),
+                                 name="ThreadPool worker %d" % len(self._threads,),
                                  args=(self, self._work_queue))
             t.daemon = True
             self._threads.add(t)
