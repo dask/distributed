@@ -831,7 +831,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                         w.close()
                 del _global_workers[:]
 
-            if check_new_threads:
+            if PY3 and check_new_threads:
                 start = time()
                 while any(t not in active_threads_start and
                           "Threaded" not in v.name and
