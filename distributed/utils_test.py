@@ -34,7 +34,7 @@ import pytest
 import six
 
 import dask
-from toolz import merge, memoize
+from toolz import first, merge, memoize
 from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
@@ -729,7 +729,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
                 worker_kwargs={}, client_kwargs={}, active_rpc_timeout=1,
-                config={}):
+                config={}, check_new_threads=True):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -814,22 +814,34 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
 
                     result = loop.run_sync(coro, timeout=timeout * 2 if timeout else timeout)
 
-            for w in workers:
-                if getattr(w, 'data', None):
-                    try:
-                        w.data.clear()
-                    except EnvironmentError:
-                        # zict backends can fail if their storage directory
-                        # was already removed
-                        pass
-                    del w.data
-            DequeHandler.clear_all_instances()
-            for w in _global_workers:
-                w = w()
-                w._close(report=False, executor_wait=False)
-                if w.status == 'running':
-                    w.close()
-            del _global_workers[:]
+                for w in workers:
+                    if getattr(w, 'data', None):
+                        try:
+                            w.data.clear()
+                        except EnvironmentError:
+                            # zict backends can fail if their storage directory
+                            # was already removed
+                            pass
+                        del w.data
+                DequeHandler.clear_all_instances()
+                for w in _global_workers:
+                    w = w()
+                    w._close(report=False, executor_wait=False)
+                    if w.status == 'running':
+                        w.close()
+                del _global_workers[:]
+
+            if check_new_threads:
+                start = time()
+                while any(t not in active_threads_start and "Threaded" not in v.name
+                          for t, v in threading._active.items()):
+                    sleep(0.01)
+                    if time() > start + 2:
+                        from distributed import profile
+                        tid = first(set(threading._active) - active_threads_start)
+                        thread = threading._active[tid]
+                        call_stacks = profile.call_stack(sys._current_frames()[tid])
+                        assert False, (thread, call_stacks)
             return result
 
         return test_func

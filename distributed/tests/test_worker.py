@@ -21,7 +21,7 @@ from tornado.ioloop import TimeoutError
 
 from distributed import (Nanny, Client, get_client, wait, default_client,
         get_worker, Reschedule)
-from distributed.compatibility import WINDOWS, cache_from_source
+from distributed.compatibility import WINDOWS, cache_from_source, PY3
 from distributed.core import rpc
 from distributed.client import wait
 from distributed.scheduler import Scheduler
@@ -181,7 +181,7 @@ def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(a.local_dir, 'foobar.py'))
 
 
-@pytest.mark.xfail(reason="don't yet support uploading pyc files")
+@pytest.mark.skip(reason="don't yet support uploading pyc files")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
 def test_upload_file_pyc(c, s, w):
     with tmpfile() as dirname:
@@ -596,7 +596,7 @@ def test_multiple_transfers(c, s, w1, w2, w3):
     assert len(transfers) == 2
 
 
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3)
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3, check_new_threads=PY3)
 def test_share_communication(c, s, w1, w2, w3):
     x = c.submit(mul, b'1', int(w3.target_message_size + 1), workers=w1.address)
     y = c.submit(mul, b'2', int(w3.target_message_size + 1), workers=w2.address)

@@ -478,6 +478,7 @@ class WorkerBase(ServerNode):
                                            self.scheduler.unregister(address=self.contact_address))
             self.scheduler.close_rpc()
             if isinstance(self.executor, ThreadPoolExecutor):
+                self.executor._work_queue.queue.clear()
                 self.executor.shutdown(wait=executor_wait, timeout=timeout)
             else:
                 self.executor.shutdown(wait=False)

@@ -27,7 +27,7 @@ from distributed.utils_test import (inc, dec, gen_cluster, gen_test,
                                     slowinc, slowadd, slowdec, cluster, div,
                                     varying, slow)
 from distributed.utils_test import loop, nodebug  # noqa: F401
-from dask.compatibility import apply
+from dask.compatibility import apply, PY3
 
 
 alice = 'alice:1234'
@@ -799,7 +799,7 @@ def test_learn_occupancy_multiple_workers(c, s, a, b):
     s.validate_state()
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, check_new_threads=PY3)
 def test_include_communication_in_occupancy(c, s, a, b):
     s.task_duration['slowadd'] = 0.001
     x = c.submit(mul, b'0', int(BANDWIDTH), workers=a.address)
