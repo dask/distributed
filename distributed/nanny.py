@@ -23,8 +23,7 @@ from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (get_ip, mp_context, silence_logging, json_load_robust,
         PeriodicCallback)
-from .worker import _ncores, run, parse_memory_limit
-
+from .worker import _ncores, run, parse_memory_limit, Worker
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +36,7 @@ class Nanny(ServerNode):
     """
     process = None
     status = None
+    Worker = Worker  # default class to call in WorkerProcess
 
     def __init__(self, scheduler_ip=None, scheduler_port=None,
                  scheduler_file=None, worker_port=0,
@@ -214,6 +214,7 @@ class Nanny(ServerNode):
                 worker_start_args=(start_arg,),
                 silence_logs=self.silence_logs,
                 on_exit=self._on_exit,
+                worker=self.Worker
             )
 
         self.auto_restart = True
@@ -320,7 +321,7 @@ class Nanny(ServerNode):
 class WorkerProcess(object):
 
     def __init__(self, worker_args, worker_kwargs, worker_start_args,
-                 silence_logs, on_exit):
+                 silence_logs, on_exit, worker):
         self.status = 'init'
         self.silence_logs = silence_logs
         self.worker_args = worker_args
@@ -328,6 +329,7 @@ class WorkerProcess(object):
         self.worker_start_args = worker_start_args
         self.on_exit = on_exit
         self.process = None
+        self.Worker = worker
 
         # Initialized when worker is ready
         self.worker_dir = None
@@ -486,8 +488,6 @@ class WorkerProcess(object):
     @classmethod
     def _run(cls, worker_args, worker_kwargs, worker_start_args,
              silence_logs, init_result_q, child_stop_q, uid):  # pragma: no cover
-        from distributed import Worker
-
         try:
             from dask.multiprocessing import initialize_worker_process
         except ImportError:   # old Dask version
@@ -501,7 +501,7 @@ class WorkerProcess(object):
         IOLoop.clear_instance()
         loop = IOLoop()
         loop.make_current()
-        worker = Worker(*worker_args, **worker_kwargs)
+        worker = self.Worker(*worker_args, **worker_kwargs)
 
         @gen.coroutine
         def do_stop(timeout=5, executor_wait=True):
