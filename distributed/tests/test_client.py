@@ -4627,6 +4627,7 @@ def test_fire_and_forget_err(c, s, a, b):
         assert time() < start + 1
 
 
+@pytest.mark.xfail(reason='Other tests bleed into the logs of this one')
 def test_quiet_client_close(loop):
     with captured_logger(logging.getLogger('distributed')) as logger:
         with Client(loop=loop, processes=False, threads_per_worker=4) as c:
