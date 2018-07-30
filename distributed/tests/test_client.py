@@ -5429,6 +5429,9 @@ def test_scatter_error_cancel(c, s, a, b):
     yield gen.sleep(0.1)
     assert y.status == 'error'  # not cancelled
 
+def test_no_threads_lingering():
+    active = dict(threading._active)
+    assert threading.active_count() < 30
 
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401
