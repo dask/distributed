@@ -2266,7 +2266,7 @@ class Worker(WorkerBase):
         self._memory_monitoring = True
         total = 0
 
-        proc = psutil.Process()
+        proc = self.monitor.proc
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
 
