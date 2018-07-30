@@ -13,7 +13,7 @@ from toolz import valmap, first
 from tornado import gen
 
 import dask
-from distributed import Nanny, rpc, Scheduler
+from distributed import Nanny, rpc, Scheduler, Worker
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -143,6 +143,31 @@ def test_close_on_disconnect(s, w):
     while w.status != 'closed':
         yield gen.sleep(0.05)
         assert time() < start + 9
+
+
+class Something(Worker):
+    # a subclass of Worker which is not Worker
+    pass
+
+
+class Nanny2(Nanny):
+    # a subclass with alternate Worker class to create
+    Worker = Something
+
+
+@gen_cluster(client=True, ncores=[])
+def test_nanny_worker_class(c, s):
+    w = Nanny(s.ip, s.port, ncores=1, loop=s.loop)
+    yield w._start()
+    out = yield c._run(lambda dask_worker=None: str(dask_worker.__class__))
+    assert 'Worker' in list(out.values())[0]
+    yield w._close()
+
+    w = Nanny2(s.ip, s.port, ncores=1, loop=s.loop)
+    yield w._start()
+    out = yield c._run(lambda dask_worker=None: str(dask_worker.__class__))
+    assert 'Something' in list(out.values())[0]
+    yield w._close()
 
 
 @slow

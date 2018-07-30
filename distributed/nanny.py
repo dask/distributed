@@ -359,7 +359,7 @@ class WorkerProcess(object):
                         silence_logs=self.silence_logs,
                         init_result_q=self.init_result_q,
                         child_stop_q=self.child_stop_q,
-                        uid=uid),
+                        uid=uid, Worker=self.Worker),
         )
         self.process.daemon = True
         self.process.set_exit_callback(self._on_exit)
@@ -487,7 +487,7 @@ class WorkerProcess(object):
 
     @classmethod
     def _run(cls, worker_args, worker_kwargs, worker_start_args,
-             silence_logs, init_result_q, child_stop_q, uid):  # pragma: no cover
+             silence_logs, init_result_q, child_stop_q, uid, Worker):  # pragma: no cover
         try:
             from dask.multiprocessing import initialize_worker_process
         except ImportError:   # old Dask version
@@ -501,7 +501,7 @@ class WorkerProcess(object):
         IOLoop.clear_instance()
         loop = IOLoop()
         loop.make_current()
-        worker = self.Worker(*worker_args, **worker_kwargs)
+        worker = Worker(*worker_args, **worker_kwargs)
 
         @gen.coroutine
         def do_stop(timeout=5, executor_wait=True):
