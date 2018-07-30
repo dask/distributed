@@ -46,7 +46,7 @@ from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     randominc, inc, dec, div, throws, geninc, asyncinc,
                                     gen_cluster, gen_test, double, deep, popen,
                                     captured_logger, varying, map_varying,
-                                    wait_for, async_wait_for)
+                                    wait_for, async_wait_for, pristine_loop)
 from distributed.utils_test import loop, loop_in_thread, nodebug  # noqa F401
 
 
@@ -2084,7 +2084,6 @@ def test_multi_client(s, a, b):
 
 
 def long_running_client_connection(address):
-    from distributed.utils_test import pristine_loop
     with pristine_loop():
         c = Client(address)
         x = c.submit(lambda x: x + 1, 10)
@@ -5103,12 +5102,10 @@ def test_future_auto_inform(c, s, a, b):
 
 
 def test_client_async_before_loop_starts():
-    loop = IOLoop()
-    client = Client(asynchronous=True, loop=loop)
-    assert client.asynchronous
-    client.close()
-    # Avoid long wait for cluster close at shutdown
-    loop.close()
+    with pristine_loop() as loop:
+        client = Client(asynchronous=True, loop=loop)
+        assert client.asynchronous
+        client.close()
 
 
 @slow
