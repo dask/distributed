@@ -39,7 +39,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .client import default_client
+from .client import default_client, _global_clients
 from .compatibility import PY3, iscoroutinefunction, Empty
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
@@ -97,6 +97,7 @@ def cleanup_global_workers():
 @pytest.fixture
 def loop():
     del _global_workers[:]
+    _global_clients.clear()
     with pristine_loop() as loop:
         # Monkey-patch IOLoop.start to wait for loop stop
         orig_start = loop.start
@@ -125,6 +126,7 @@ def loop():
         else:
             is_stopped.wait()
     del _global_workers[:]
+    _global_clients.clear()
 
 
 @pytest.fixture
@@ -739,11 +741,6 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         start
         end
     """
-    del _global_workers[:]
-
-    reset_config()
-
-    dask.config.set({'distributed.comm.timeouts.connect': '5s'})
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY, 'death_timeout': 5},
                           worker_kwargs)
 
@@ -752,6 +749,13 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
             func = gen.coroutine(func)
 
         def test_func():
+            del _global_workers[:]
+            _global_clients.clear()
+            active_threads_start = set(threading._active)
+
+            reset_config()
+
+            dask.config.set({'distributed.comm.timeouts.connect': '5s'})
             # Restore default logging levels
             # XXX use pytest hooks/fixtures instead?
             for name, level in logging_levels.items():
