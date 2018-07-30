@@ -833,7 +833,9 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
 
             if check_new_threads:
                 start = time()
-                while any(t not in active_threads_start and "Threaded" not in v.name
+                while any(t not in active_threads_start and
+                          "Threaded" not in v.name and
+                          "watch message queue" not in v.name
                           for t, v in threading._active.items()):
                     sleep(0.01)
                     if time() > start + 2:
