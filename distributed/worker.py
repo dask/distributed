@@ -2004,7 +2004,10 @@ class Worker(WorkerBase):
                 self.log.append((key, 'release-key'))
             del self.tasks[key]
             if key in self.data and key not in self.dep_state:
-                del self.data[key]
+                try:
+                    del self.data[key]
+                except FileNotFoundError:
+                    pass
                 del self.nbytes[key]
                 del self.types[key]
 
