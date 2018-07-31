@@ -40,7 +40,7 @@ from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
 from .client import default_client, _global_clients
-from .compatibility import PY3, iscoroutinefunction, Empty
+from .compatibility import PY3, iscoroutinefunction, Empty, WINDOWS
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
@@ -831,7 +831,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                         w.close()
                 del _global_workers[:]
 
-            if PY3 and check_new_threads:
+            if PY3 and not WINDOWS and check_new_threads:
                 start = time()
                 while True:
                     bad = [t for t, v in threading._active.items()
