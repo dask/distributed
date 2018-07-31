@@ -5433,7 +5433,7 @@ def test_scatter_error_cancel(c, s, a, b):
 
 def test_no_threads_lingering():
     active = dict(threading._active)
-    assert threading.active_count() < 30
+    assert threading.active_count() < 30, list(active.values())
 
 
 if sys.version_info >= (3, 5):
