@@ -78,7 +78,7 @@ run remotely in the background.
 Gather
 ~~~~~~
 
-The ``map/submit`` functions return ``Future`` objects: lightweight tokens that
+The ``map/submit`` functions return ``Future`` objects, lightweight tokens that
 refer to results on the cluster.  By default the results of computations
 *stay on the cluster*.
 
