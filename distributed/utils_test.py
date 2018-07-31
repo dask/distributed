@@ -34,7 +34,7 @@ import pytest
 import six
 
 import dask
-from toolz import first, merge, memoize
+from toolz import merge, memoize
 from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
@@ -833,14 +833,18 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
 
             if PY3 and check_new_threads:
                 start = time()
-                while any(t not in active_threads_start and
+                while True:
+                    bad = [t for t, v in threading._active.items()
+                           if t not in active_threads_start and
                           "Threaded" not in v.name and
-                          "watch message queue" not in v.name
-                          for t, v in threading._active.items()):
-                    sleep(0.01)
+                          "watch message queue" not in v.name]
+                    if not bad:
+                        break
+                    else:
+                        sleep(0.01)
                     if time() > start + 2:
                         from distributed import profile
-                        tid = first(set(threading._active) - active_threads_start)
+                        tid = bad[0]
                         thread = threading._active[tid]
                         call_stacks = profile.call_stack(sys._current_frames()[tid])
                         assert False, (thread, call_stacks)
