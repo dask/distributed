@@ -306,7 +306,9 @@ class CurrentLoad(DashboardComponent):
             self.nbytes_figure = nbytes
 
             processing.y_range = nbytes.y_range
-            self.root = row(nbytes, processing, sizing_mode='scale_width')
+            # self.root = row(nbytes, processing, sizing_mode='scale_width', name='current_load')
+            self.root_1 = nbytes
+            self.root_2 = processing
 
     def update(self):
         with log_errors():
@@ -841,6 +843,8 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+        self.root = row(self.root, sizing_mode='scale_width', name='task_progress')
+
     def update(self):
         with log_errors():
             state = {'all': valmap(len, self.plugin.all),
@@ -1130,7 +1134,7 @@ def status_doc(scheduler, extra, doc):
             current_load = CurrentLoad(scheduler, height=160)
             current_load.update()
             doc.add_periodic_callback(current_load.update, 100)
-            current_load_fig = current_load.root
+            # current_load_fig = current_load.root
         else:
             nbytes_hist = NBytesHistogram(scheduler, width=300, height=160)
             nbytes_hist.update()
@@ -1142,13 +1146,23 @@ def status_doc(scheduler, extra, doc):
             current_load_fig = row(nbytes_hist.root, processing_hist.root,
                                    sizing_mode='scale_width')
 
+        with open(os.path.join(os.path.dirname(__file__), 'templates', 'status.html')) as f:
+            template_source = f.read()
+
+        template = jinja2.Template(template_source)
+
+        #### here
         doc.title = "Dask: Status"
-        doc.add_root(column(current_load_fig,
-                            task_stream.root,
-                            task_progress.root,
-                            sizing_mode='scale_width'))
+        doc.add_root(row(current_load.root_1, name='nbytes_hist', sizing_mode='scale_width'))
+        doc.add_root(row(current_load.root_2, name='processing_hist', sizing_mode='scale_width'))
+        doc.add_root(task_progress.root)
+        doc.add_root(task_stream.root)
+        # doc.add_root(column(current_load_fig,
+        #                     task_stream.root,
+        #                     task_progress.root,
+        #                     sizing_mode='scale_width'))
         doc.template = template
-        doc.template_variables['active_page'] = 'status'
+        # doc.template_variables['active_page'] = 'status'
         doc.template_variables.update(extra)
 
 
