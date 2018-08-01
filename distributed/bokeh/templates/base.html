@@ -36,18 +36,18 @@
         </button>
         <a class="navbar-brand" href="http://dask.pydata.org/en/latest/">
           <img src="statics/dask_icon_no_pad.svg"></img>
-          <span>Dask</span>
+          Dask
         </a>
       </div>
       <div class="navbar-collapse collapse">
         <ul class="nav navbar-nav navbar-left">
           {% for page in pages %}
-          <li>
-            <a href="{{ page }}">{{ page|title }}</a>
+          <li {% if page == active_page %} class="nav-item active" {% else %} class="nav-item" {% endif %}>
+            <a class="nav-link" href="{{ page }}">{{ page|title }}</a>
           </li>
           {% endfor %}
-          <li>
-            <a href="info/main/workers.html">Info</a>
+          <li class="nav-item">
+            <a class="nav-link" href="info/main/workers.html">Info</a>
           </li>
         </ul>
       </div>
