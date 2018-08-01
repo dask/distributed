@@ -53,7 +53,7 @@ PROFILING = False
 
 import jinja2
 
-with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
+with open(os.path.join(os.path.dirname(__file__), 'templates', 'base.html')) as f:
     template_source = f.read()
 
 template = jinja2.Template(template_source)
