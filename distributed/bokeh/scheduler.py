@@ -51,12 +51,8 @@ logger = logging.getLogger(__name__)
 
 PROFILING = False
 
-import jinja2
-
-with open(os.path.join(os.path.dirname(__file__), 'templates', 'base.html')) as f:
-    template_source = f.read()
-
-template = jinja2.Template(template_source)
+from jinja2 import Environment, FileSystemLoader
+env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), 'templates')))
 
 template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'profile', 'graph']}
 
@@ -306,7 +302,9 @@ class CurrentLoad(DashboardComponent):
             self.nbytes_figure = nbytes
 
             processing.y_range = nbytes.y_range
-            self.root = row(nbytes, processing, sizing_mode='scale_width')
+
+            self.root_1 = nbytes
+            self.root_2 = processing
 
     def update(self):
         with log_errors():
@@ -841,6 +839,8 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+        self.root = row(self.root, sizing_mode='scale_width', name='task_progress')
+
     def update(self):
         with log_errors():
             state = {'all': valmap(len, self.plugin.all),
@@ -1040,7 +1040,7 @@ def systemmonitor_doc(scheduler, extra, doc):
         doc.add_periodic_callback(sysmon.update, 500)
 
         doc.add_root(column(sysmon.root, sizing_mode='scale_width'))
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'system'
         doc.template_variables.update(extra)
 
@@ -1060,7 +1060,7 @@ def stealing_doc(scheduler, extra, doc):
                             stealing_events.root,
                             sizing_mode='scale_width'))
 
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'stealing'
         doc.template_variables.update(extra)
 
@@ -1072,7 +1072,7 @@ def events_doc(scheduler, extra, doc):
         doc.add_periodic_callback(events.update, 500)
         doc.title = "Dask: Scheduler Events"
         doc.add_root(column(events.root, sizing_mode='scale_width'))
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'events'
         doc.template_variables.update(extra)
 
@@ -1084,7 +1084,7 @@ def workers_doc(scheduler, extra, doc):
         doc.add_periodic_callback(table.update, 500)
         doc.title = "Dask: Workers"
         doc.add_root(table.root)
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'workers'
         doc.template_variables.update(extra)
 
@@ -1097,7 +1097,7 @@ def tasks_doc(scheduler, extra, doc):
         doc.add_periodic_callback(ts.update, 5000)
         doc.title = "Dask: Task Stream"
         doc.add_root(ts.root)
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'tasks'
         doc.template_variables.update(extra)
 
@@ -1110,7 +1110,7 @@ def graph_doc(scheduler, extra, doc):
         doc.add_periodic_callback(graph.update, 200)
         doc.add_root(graph.root)
 
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'graph'
         doc.template_variables.update(extra)
 
@@ -1130,7 +1130,7 @@ def status_doc(scheduler, extra, doc):
             current_load = CurrentLoad(scheduler, height=160)
             current_load.update()
             doc.add_periodic_callback(current_load.update, 100)
-            current_load_fig = current_load.root
+            # current_load_fig = row(current_load.root
         else:
             nbytes_hist = NBytesHistogram(scheduler, width=300, height=160)
             nbytes_hist.update()
@@ -1143,12 +1143,12 @@ def status_doc(scheduler, extra, doc):
                                    sizing_mode='scale_width')
 
         doc.title = "Dask: Status"
-        doc.add_root(column(current_load_fig,
-                            task_stream.root,
-                            task_progress.root,
-                            sizing_mode='scale_width'))
-        doc.template = template
-        doc.template_variables['active_page'] = 'status'
+        doc.add_root(row(current_load.root_1, name='nbytes_hist', sizing_mode='scale_width'))
+        doc.add_root(row(current_load.root_2, name='processing_hist', sizing_mode='scale_width'))
+        doc.add_root(task_progress.root)
+        doc.add_root(task_stream.root)
+
+        doc.template = env.get_template('status.html')
         doc.template_variables.update(extra)
 
 
@@ -1157,7 +1157,7 @@ def profile_doc(scheduler, extra, doc):
         doc.title = "Dask: Profile"
         prof = ProfileTimePlot(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'profile'
         doc.template_variables.update(extra)
 

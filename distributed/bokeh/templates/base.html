@@ -30,7 +30,6 @@
       max-width: 1000px;
     }
   </style>
-  {% from macros import embed %}
 </head>
 
 <body class="keen-dashboard" style="padding-top: 80px;">
@@ -43,8 +42,8 @@
           <span class="icon-bar"></span>
           <span class="icon-bar"></span>
         </button>
-        <a class="navbar-brand" href="../">
-          <span class="glyphicon glyphicon-chevron-left"></span>
+        <a class="navbar-brand" href="http://dask.pydata.org/en/latest/">
+          <img src="statics/dask_horizontal.svg"></img>
         </a>
         <a class="navbar-brand" href="./">Dask Diagnostic UI</a>
       </div>
@@ -59,9 +58,9 @@
       </div>
     </div>
   </div>
-  <div class="dashboard">
-  {{ plot_div }}
+  <div>
+  {% block content %}
+  {% endblock %}
   </div>
-  {{ plot_script }}
 </body>
 </html>
