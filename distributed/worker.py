@@ -2008,7 +2008,8 @@ class Worker(WorkerBase):
                 try:
                     del self.data[key]
                 except FileNotFoundError:
-                    pass
+                    logger.error("Tried to delete %s but no file found",
+                                 exc_info=True)
                 del self.nbytes[key]
                 del self.types[key]
 
