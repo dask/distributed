@@ -150,24 +150,19 @@ class Something(Worker):
     pass
 
 
-class Nanny2(Nanny):
-    # a subclass with alternate Worker class to create
-    Worker = Something
-
-
-@gen_cluster(client=True, ncores=[])
-def test_nanny_worker_class(c, s):
-    w = Nanny(s.ip, s.port, ncores=1, loop=s.loop)
-    yield w._start()
+@gen_cluster(client=True, Worker=Nanny)
+def test_nanny_worker_class(c, s, w1, w2):
     out = yield c._run(lambda dask_worker=None: str(dask_worker.__class__))
     assert 'Worker' in list(out.values())[0]
-    yield w._close()
+    assert w1.Worker is Worker
 
-    w = Nanny2(s.ip, s.port, ncores=1, loop=s.loop)
-    yield w._start()
+
+@gen_cluster(client=True, Worker=Nanny,
+             worker_kwargs={'worker_class': Something})
+def test_nanny_alt_worker_class(c, s, w1, w2):
     out = yield c._run(lambda dask_worker=None: str(dask_worker.__class__))
     assert 'Something' in list(out.values())[0]
-    yield w._close()
+    assert w1.Worker is Something
 
 
 @slow
