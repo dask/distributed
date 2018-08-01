@@ -36,7 +36,6 @@ class Nanny(ServerNode):
     """
     process = None
     status = None
-    Worker = Worker  # default class to call in WorkerProcess
 
     def __init__(self, scheduler_ip=None, scheduler_port=None,
                  scheduler_file=None, worker_port=0,
@@ -44,7 +43,8 @@ class Nanny(ServerNode):
                  name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
-                 contact_address=None, listen_address=None, **kwargs):
+                 contact_address=None, listen_address=None, worker_class=None,
+                 **kwargs):
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
             self.scheduler_addr = cfg['address']
@@ -62,6 +62,7 @@ class Nanny(ServerNode):
         self.death_timeout = death_timeout
         self.preload = preload
         self.preload_argv = preload_argv
+        self.Worker = Worker if worker_class is None else worker_class
 
         self.contact_address = contact_address
         self.memory_terminate_fraction = dask.config.get('distributed.worker.memory.terminate')
