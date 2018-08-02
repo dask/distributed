@@ -1173,7 +1173,6 @@ class Scheduler(ServerNode):
     # Stimuli #
     ###########
 
-    @gen.coroutine
     def heartbeat_worker(self, comm=None, address=None, resolve_address=True,
                           now=None, resources=None, host_info=None, **info):
             address = self.coerce_address(address, resolve_address)

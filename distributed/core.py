@@ -114,6 +114,7 @@ class Server(object):
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
         self.loop = self.io_loop
+        self.op_diagnostics = defaultdict(lambda: defaultdict(lambda: 0))
 
         # Statistics counters for various events
         with ignoring(ImportError):
@@ -291,6 +292,10 @@ class Server(object):
                                     + str(msg))
 
                 op = msg.pop('op')
+                diagnostics = self.op_diagnostics[op]
+                diagnostics['count'] += 1
+                for k, v in getattr(comm, '_last_read_diagnostics', {}).items():
+                    diagnostics[k] += v
                 if self.counters is not None:
                     self.counters['op'].add(op)
                 self._comms[comm] = op
@@ -314,10 +319,13 @@ class Server(object):
 
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
+                        start = time()
                         result = handler(comm, **msg)
                         if type(result) is gen.Future:
                             self._ongoing_coroutines.add(result)
                             result = yield result
+                        stop = time()
+                        diagnostics['execution-time'] += stop - start
                     except (CommClosedError, CancelledError) as e:
                         if self.status == 'running':
                             logger.info("Lost connection to %r: %s", address, e)
@@ -333,6 +341,9 @@ class Server(object):
                         logger.debug("Lost connection to %r while sending result for op %r: %s",
                                      address, op, e)
                         break
+                    else:
+                        for k, v in getattr(comm, '_last_write_diagnostics', {}).items():
+                            diagnostics[k] += v
                 msg = result = None
                 if close_desired:
                     yield comm.close()
