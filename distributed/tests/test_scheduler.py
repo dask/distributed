@@ -1360,3 +1360,11 @@ def test_resources_reset_after_cancelled_task(c, s, w):
     assert w.available_resources == {'A': 1}
 
     yield c.submit(inc, 1, resources={'A': 1})
+
+
+@gen_cluster(client=True)
+def test_op_diagnostics(c, s, a, b):
+    da = pytest.importorskip('dask.array')
+    yield c.compute(da.random.random(1000, chunks=(100,)).sum())
+    assert s.op_diagnostics
+    assert a.op_diagnostics

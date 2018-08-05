@@ -21,6 +21,7 @@ from tornado.tcpserver import TCPServer
 from ..compatibility import finalize, PY3
 from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes,
                      parse_timedelta, shutting_down)
+from ..metrics import time
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
@@ -143,6 +144,8 @@ class TCP(Comm):
         self._finalizer = finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._extra = {}
+        self._last_read_diagnostics = {}
+        self._last_write_diagnostics = {}
 
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
@@ -175,6 +178,7 @@ class TCP(Comm):
 
         try:
             n_frames = yield stream.read_bytes(8)
+            start = time()
             n_frames = struct.unpack('Q', n_frames)[0]
             lengths = yield stream.read_bytes(8 * n_frames)
             lengths = struct.unpack('Q' * n_frames, lengths)
@@ -192,15 +196,22 @@ class TCP(Comm):
                     else:
                         frame = b''
                 frames.append(frame)
+            stop = time()
+
+            self._last_read_diagnostics['read-time'] = stop - start
+            self._last_read_diagnostics['read-nbytes'] = sum(lengths)
         except StreamClosedError as e:
             self.stream = None
             if not shutting_down():
                 convert_stream_closed_error(self, e)
         else:
             try:
+                start = time()
                 msg = yield from_frames(frames,
                                         deserialize=self.deserialize,
                                         deserializers=deserializers)
+                stop = time()
+                self._last_read_diagnostics['deserialization'] = stop - start
             except EOFError:
                 # Frames possibly garbled or truncated by communication error
                 self.abort()
@@ -214,13 +225,17 @@ class TCP(Comm):
         if stream is None:
             raise CommClosedError
 
+        start = time()
         frames = yield to_frames(msg,
                                  serializers=serializers,
                                  on_error=on_error,
                                  context={'sender': self._local_addr,
                                           'recipient': self._peer_addr})
+        stop = time()
+        self._last_write_diagnostics['deserialization'] = stop - start
 
         try:
+            start = time()
             lengths = ([struct.pack('Q', len(frames))] +
                        [struct.pack('Q', nbytes(frame)) for frame in frames])
             stream.write(b''.join(lengths))
@@ -236,6 +251,8 @@ class TCP(Comm):
                 if bytes_since_last_yield > 32e6:
                     yield future
                     bytes_since_last_yield = 0
+            stop = time()
+            self._last_write_diagnostics['write-time'] = stop - start
         except StreamClosedError as e:
             stream = None
             convert_stream_closed_error(self, e)
@@ -245,7 +262,10 @@ class TCP(Comm):
             else:
                 raise
 
-        raise gen.Return(sum(map(nbytes, frames)))
+        total_bytes = sum(map(nbytes, frames))
+        self._last_write_diagnostics['write-nbytes'] = total_bytes
+
+        raise gen.Return(total_bytes)
 
     @gen.coroutine
     def close(self):
