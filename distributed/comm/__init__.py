@@ -12,6 +12,7 @@ from .core import connect, listen, Comm, CommClosedError
 def _register_transports():
     from . import inproc
     from . import tcp
+    from . import asyncio
 
 
 _register_transports()

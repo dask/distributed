@@ -24,6 +24,7 @@ from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
                               parse_address, parse_host_port,
                               unparse_host_port, resolve_address,
                               get_address_host, get_local_address_for)
+from distributed.comm.asyncio import TCPListener, TCPConnector
 
 
 EXTERNAL_IP4 = get_ip()
@@ -204,13 +205,13 @@ def test_tcp_specific():
         yield comm.write(msg)
         yield comm.close()
 
-    listener = tcp.TCPListener('localhost', handle_comm)
+    listener = TCPListener('localhost', handle_comm)
     listener.start()
     host, port = listener.get_host_port()
     assert host in ('localhost', '127.0.0.1', '::1')
     assert port > 0
 
-    connector = tcp.TCPConnector()
+    connector = TCPConnector()
     l = []
 
     @gen.coroutine
