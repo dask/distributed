@@ -4,7 +4,7 @@ from toolz import first
 from threading import Thread
 
 from distributed.profile import (process, merge, create, call_stack,
-        identifier)
+        identifier, watch)
 from distributed.compatibility import get_thread_identity
 
 
@@ -113,3 +113,10 @@ def test_identifier():
     frame = sys._current_frames()[get_thread_identity()]
     assert identifier(frame) == identifier(frame)
     assert identifier(None) == identifier(None)
+
+
+def test_watch():
+    log, stop = watch(interval='10ms', cycle='50ms')
+    time.sleep(0.5)
+    assert 1 < len(log) < 10
+    stop()

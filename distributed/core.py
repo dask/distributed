@@ -16,11 +16,12 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
-from .compatibility import get_thread_identity
+from .compatibility import get_thread_identity, finalize
 from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)
 from .metrics import time
+from . import profile
 from .system_monitor import SystemMonitor
 from .utils import (get_traceback, truncate_exception, ignoring, shutting_down,
                     PeriodicCallback, parse_timedelta, has_keyword)
@@ -114,6 +115,15 @@ class Server(object):
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
         self.loop = self.io_loop
+
+        if not hasattr(self.io_loop, 'profile'):
+            self.io_loop.profile, stop = profile.watch(
+                    omit=('profile.py', 'selectors.py'),
+                    interval=dask.config.get('distributed.worker.profile.interval'),
+                    cycle=dask.config.get('distributed.worker.profile.cycle')
+            )
+            self.io_loop._profile_stop = stop
+            finalize(self.io_loop, stop)
 
         # Statistics counters for various events
         with ignoring(ImportError):
