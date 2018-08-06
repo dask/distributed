@@ -257,6 +257,7 @@ def watch(thread_id=None, interval='20ms', cycle='2s', maxlen=1000, omit=None):
     _stop = []
 
     thread = threading.Thread(target=_watch,
+                              name='Profile',
                               kwargs={'thread_id': thread_id,
                                       'interval': interval,
                                       'cycle': cycle,
