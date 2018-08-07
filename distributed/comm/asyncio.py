@@ -8,6 +8,7 @@ except ImportError:
     ssl = None
 
 import asyncio
+from tornado import gen
 
 from weakref import finalize
 from ..utils import (ensure_ip, get_ip, get_ipv6, nbytes,
@@ -158,30 +159,26 @@ class TCP(Comm):
                     # Can't wait for the write() Future as it may be lost
                     # ("If write is called again before that Future has resolved,
                     #   the previous future will be orphaned and will never resolve")
-                    future = writer.write(frame)
+                    writer.write(frame)
                     bytes_since_last_yield += nbytes(frame)
                     if bytes_since_last_yield > 32e6:
-                        await future
+                        await writer.drain()
                         bytes_since_last_yield = 0
             except asyncio.streams.IncompleteReadError as e:
                 self.reader = None
                 self.writer = None
                 raise CommClosedError()
                 # convert_stream_closed_error(self, e)
-            except TypeError as e:
-                if writer._buffer is None:
-                    logger.info("tried to write message %s on closed stream", msg)
-                else:
-                    raise
 
             return sum(map(nbytes, frames))
 
-    async def close(self):
+    @gen.coroutine
+    def close(self):
         writer, self.writer = self.writer, None
         if writer is not None and not writer._transport._closing:
             self._finalizer.detach()
             writer.close()
-            await writer.wait_closed()
+            yield writer.wait_closed()
 
     def abort(self):
         writer, self.writer = self.writer, None

@@ -406,14 +406,14 @@ class Server(object):
                 pdb.set_trace()
             raise
         finally:
-            comm.close()  # TODO: why do we need this now?
+            yield comm.close()  # TODO: why do we need this now?
             assert comm.closed()
 
     @gen.coroutine
     def close(self):
         self.listener.stop()
-        for comm in self._comms:
-            comm.close()
+        for comm in list(self._comms):
+            yield comm.close()
         for cb in self._ongoing_coroutines:
             cb.cancel()
         for i in range(10):
