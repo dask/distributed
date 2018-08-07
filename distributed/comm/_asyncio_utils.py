@@ -24,26 +24,30 @@ We also remove all sockets that aren't SOCK_STREAM type.
 
 import socket
 
-from asyncio.streams import _DEFAULT_LIMIT
+from asyncio.streams import _DEFAULT_LIMIT, StreamReader, StreamReaderProtocol
 from asyncio.base_events import Server
 from asyncio import events, coroutines, protocols
 import os
 import sys
 import itertools
 
-def create_server(self, protocol_factory, host=None, port=None,
-                  *,
-                  family=socket.AF_UNSPEC,
-                  flags=socket.AI_PASSIVE,
-                  sock=None,
-                  backlog=100,
-                  ssl=None,
-                  reuse_address=None,
-                  reuse_port=None):
+
+def create_server(
+        self, protocol_factory, host=None, port=None,
+        *,
+        family=socket.AF_UNSPEC,
+        flags=socket.AI_PASSIVE,
+        sock=None,
+        backlog=100,
+        ssl=None,
+        reuse_address=None,
+        reuse_port=None,
+        ssl_handshake_timeout=None,
+        start_serving=True):
     """Create a TCP server.
 
-    The host parameter can be a string, in that case the TCP server is bound
-    to host and port.
+    The host parameter can be a string, in that case the TCP server is
+    bound to host and port.
 
     The host parameter can also be a sequence of strings and in that case
     the TCP server is bound to all hosts of the sequence. If a host
@@ -57,6 +61,11 @@ def create_server(self, protocol_factory, host=None, port=None,
     """
     if isinstance(ssl, bool):
         raise TypeError('ssl argument must be an SSLContext or None')
+
+    if ssl_handshake_timeout is not None and ssl is None:
+        raise ValueError(
+            'ssl_handshake_timeout is only meaningful with ssl')
+
     if host is not None or port is not None:
         if sock is not None:
             raise ValueError(
@@ -69,7 +78,7 @@ def create_server(self, protocol_factory, host=None, port=None,
         if host == '':
             hosts = [None]
         elif (isinstance(host, str) or
-              not isinstance(host, collections.Iterable)):
+              not isinstance(host, collections.abc.Iterable)):
             hosts = [host]
         else:
             hosts = host
@@ -110,7 +119,7 @@ def create_server(self, protocol_factory, host=None, port=None,
                 except OSError as err:
                     raise OSError(err.errno, 'error while attempting '
                                   'to bind on address %r: %s'
-                                  % (sa, err.strerror.lower()))
+                                  % (sa, err.strerror.lower())) from None
             completed = True
         finally:
             if not completed:
@@ -119,16 +128,18 @@ def create_server(self, protocol_factory, host=None, port=None,
     else:
         if sock is None:
             raise ValueError('Neither host/port nor sock were specified')
-        if not _is_stream_socket(sock):
-            raise ValueError(
-                'A Stream Socket was expected, got {!r}'.format(sock))
+        if sock.type != socket.SOCK_STREAM:
+            raise ValueError(f'A Stream Socket was expected, got {sock!r}')
         sockets = [sock]
 
-    server = Server(self, sockets)
     for sock in sockets:
-        sock.listen(backlog)
         sock.setblocking(False)
-        self._start_serving(protocol_factory, sock, ssl, server, backlog)
+
+    server = Server(self, sockets, protocol_factory,
+                    ssl, backlog, ssl_handshake_timeout)
+    if start_serving:
+        server._start_serving()
+
     if self._debug:
         logger.info("%r is serving", server)
     return server

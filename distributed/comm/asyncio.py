@@ -19,7 +19,7 @@ from tornado.tcpserver import TCPServer
 
 from weakref import finalize
 from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes,
-                     parse_timedelta, shutting_down)
+                     parse_timedelta, shutting_down, log_errors)
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
@@ -109,85 +109,88 @@ class TCP(Comm):
     def peer_address(self):
         return self._peer_addr
 
-    @gen.coroutine
-    def read(self, deserializers=None):
-        reader = self.reader
-        if reader is None:
-            raise CommClosedError
+    async def read(self, deserializers=None):
+        with log_errors():
+            reader = self.reader
+            if reader is None:
+                raise CommClosedError
 
-        try:
-            n_frames = yield reader.readexactly(8)
-            n_frames = struct.unpack('Q', n_frames)[0]
-            lengths = yield reader.readexactly(8 * n_frames)
-            lengths = struct.unpack('Q' * n_frames, lengths)
-
-            frames = []
-            for length in lengths:
-                if length:
-                    frame = reader.read_into(length)
-                else:
-                    frame = b''
-                frames.append(frame)
-        except StreamClosedError as e:
-            self.reader = None
-            if not shutting_down():
-                convert_stream_closed_error(self, e)
-        else:
             try:
-                msg = yield from_frames(frames,
-                                        deserialize=self.deserialize,
-                                        deserializers=deserializers)
-            except EOFError:
-                # Frames possibly garbled or truncated by communication error
-                self.abort()
-                raise CommClosedError("aborted stream on truncated data")
-            raise gen.Return(msg)
+                n_frames = await reader.readexactly(8)
+                n_frames = struct.unpack('Q', n_frames)[0]
+                lengths = await reader.readexactly(8 * n_frames)
+                lengths = struct.unpack('Q' * n_frames, lengths)
 
-    @gen.coroutine
-    def write(self, msg, serializers=None, on_error='message'):
-        writer = self.writer
-        bytes_since_last_yield = 0
-        if writer is None:
-            raise CommClosedError
-
-        frames = yield to_frames(msg,
-                                 serializers=serializers,
-                                 on_error=on_error,
-                                 context={'sender': self._local_addr,
-                                          'recipient': self._peer_addr})
-
-        try:
-            lengths = ([struct.pack('Q', len(frames))] +
-                       [struct.pack('Q', nbytes(frame)) for frame in frames])
-            writer.write(b''.join(lengths))
-
-            for frame in frames:
-                # Can't wait for the write() Future as it may be lost
-                # ("If write is called again before that Future has resolved,
-                #   the previous future will be orphaned and will never resolve")
-                future = writer.write(frame)
-                bytes_since_last_yield += nbytes(frame)
-                if bytes_since_last_yield > 32e6:
-                    yield future
-                    bytes_since_last_yield = 0
-        except StreamClosedError as e:
-            writer = None
-            convert_stream_closed_error(self, e)
-        except TypeError as e:
-            if writer._buffer is None:
-                logger.info("tried to write message %s on closed stream", msg)
+                frames = []
+                for length in lengths:
+                    if length:
+                        frame = await reader.readexactly(length)
+                    else:
+                        frame = b''
+                    frames.append(frame)
+            except asyncio.streams.IncompleteReadError as e:
+                self.reader = None
+                self.writer = None
+                raise CommClosedError()
+                # if not shutting_down():
+                #     convert_stream_closed_error(self, e)
             else:
-                raise
+                try:
+                    msg = await from_frames(frames,
+                                            deserialize=self.deserialize,
+                                            deserializers=deserializers)
+                except EOFError:
+                    # Frames possibly garbled or truncated by communication error
+                    self.abort()
+                    raise CommClosedError("aborted stream on truncated data")
+                return msg
 
-        raise gen.Return(sum(map(nbytes, frames)))
+    async def write(self, msg, serializers=None, on_error='message'):
+        with log_errors():
+            writer = self.writer
+            bytes_since_last_yield = 0
+            if writer is None:
+                raise CommClosedError
 
-    @gen.coroutine
-    def close(self):
+            frames = await to_frames(msg,
+                                     serializers=serializers,
+                                     on_error=on_error,
+                                     context={'sender': self._local_addr,
+                                              'recipient': self._peer_addr})
+
+            try:
+                lengths = ([struct.pack('Q', len(frames))] +
+                           [struct.pack('Q', nbytes(frame)) for frame in frames])
+                writer.write(b''.join(lengths))
+
+                for frame in frames:
+                    # Can't wait for the write() Future as it may be lost
+                    # ("If write is called again before that Future has resolved,
+                    #   the previous future will be orphaned and will never resolve")
+                    future = writer.write(frame)
+                    bytes_since_last_yield += nbytes(frame)
+                    if bytes_since_last_yield > 32e6:
+                        await future
+                        bytes_since_last_yield = 0
+            except asyncio.streams.IncompleteReadError as e:
+                self.reader = None
+                self.writer = None
+                raise CommClosedError()
+                # convert_stream_closed_error(self, e)
+            except TypeError as e:
+                if writer._buffer is None:
+                    logger.info("tried to write message %s on closed stream", msg)
+                else:
+                    raise
+
+            return sum(map(nbytes, frames))
+
+    async def close(self):
         writer, self.writer = self.writer, None
         if writer is not None and not writer._transport._closing:
             self._finalizer.detach()
             writer.close()
-            yield writer.wait_closed()
+            await writer.wait_closed()
 
     def abort(self):
         writer, self.writer = self.writer, None
@@ -216,23 +219,26 @@ class RequireEncryptionMixin(object):
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
 
-    @gen.coroutine
-    def connect(self, address, deserialize=True, **connection_args):
+    async def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
         ip, port = parse_host_port(address)
         kwargs = self._get_connect_args(**connection_args)
 
         try:
-            reader, writer = yield asyncio.open_connection(ip, port, **kwargs)
+            reader, writer = await asyncio.open_connection(
+                    ip, port,
+                    family=socket.AF_INET,
+                    **kwargs
+            )
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
 
         local_address = self.prefix + get_stream_address(reader)
-        raise gen.Return(self.comm_class(reader, writer,
-                                         local_address,
-                                         self.prefix + address,
-                                         deserialize))
+        return self.comm_class(reader, writer,
+                               local_address,
+                               self.prefix + address,
+                               deserialize)
 
 
 class TCPConnector(BaseTCPConnector):
@@ -277,11 +283,10 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         if self.server is None:
             raise ValueError("invalid operation on non-started TCPListener")
 
-    @gen.coroutine
-    def _handle_stream(self, reader, writer):
+    async def _handle_stream(self, reader, writer, *args, **kwargs):
         host, ip = writer.get_extra_info('peername')
         address = self.prefix + unparse_host_port(host, ip)
-        reader, writer = yield self._prepare_stream(reader, writer, address)
+        reader, writer = await self._prepare_stream(reader, writer, address)
         # if stream is None:
         #     # Preparation failed
         #     return
@@ -289,7 +294,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
                      address, self.contact_address)
         local_address = self.prefix + get_stream_address(reader)
         comm = self.comm_class(reader, writer, local_address, address, self.deserialize)
-        self.comm_handler(comm)
+        await self.comm_handler(comm)
 
     def get_host_port(self):
         """
@@ -345,9 +350,8 @@ class TCPListener(BaseTCPListener):
     def _get_server_args(self, **connection_args):
         return {}
 
-    @gen.coroutine
-    def _prepare_stream(self, reader, writer, address):
-        raise gen.Return((reader, writer))
+    async def _prepare_stream(self, reader, writer, address):
+        return reader, writer
 
 
 class BaseTCPBackend(Backend):
