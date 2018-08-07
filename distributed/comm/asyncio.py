@@ -1,31 +1,22 @@
-import errno
 import logging
 import socket
 import struct
-import sys
 
 try:
     import ssl
 except ImportError:
     ssl = None
 
-import dask
 import asyncio
-import tornado
-from tornado import gen, netutil
-from tornado.iostream import StreamClosedError, IOStream
-from tornado.tcpclient import TCPClient
-from tornado.tcpserver import TCPServer
 
 from weakref import finalize
-from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes,
-                     parse_timedelta, shutting_down, log_errors)
+from ..utils import (ensure_ip, get_ip, get_ipv6, nbytes,
+                     shutting_down, log_errors)
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
-from .utils import (to_frames, from_frames,
-                    get_tcp_server_address, ensure_concrete_host)
+from .utils import to_frames, from_frames, ensure_concrete_host
 from ._asyncio_utils import start_server
 
 
@@ -93,11 +84,12 @@ class TCP(Comm):
         pass
 
     def _get_finalizer(self):
-        def finalize(reader=self.reader, r=repr(self)):
+        def finalize(reader=self.reader, writer=self.writer, r=repr(self)):
             return
             if not reader.closed():
                 logger.warning("Closing dangling stream in %s" % (r,))
-                stream.close()
+                reader.close()
+                writer.close()
 
         return finalize
 
@@ -131,9 +123,8 @@ class TCP(Comm):
             except asyncio.streams.IncompleteReadError as e:
                 self.reader = None
                 self.writer = None
-                raise CommClosedError()
-                # if not shutting_down():
-                #     convert_stream_closed_error(self, e)
+                if not shutting_down():
+                    raise CommClosedError()
             else:
                 try:
                     msg = await from_frames(frames,
@@ -224,15 +215,11 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         ip, port = parse_host_port(address)
         kwargs = self._get_connect_args(**connection_args)
 
-        try:
-            reader, writer = await asyncio.open_connection(
-                    ip, port,
-                    family=socket.AF_INET,
-                    **kwargs
-            )
-        except StreamClosedError as e:
-            # The socket connect() call failed
-            convert_stream_closed_error(self, e)
+        reader, writer = await asyncio.open_connection(
+                ip, port,
+                family=socket.AF_INET,
+                **kwargs
+        )
 
         local_address = self.prefix + get_stream_address(reader)
         return self.comm_class(reader, writer,
@@ -305,7 +292,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         if self.bound_address is None:
             sockets = self.server.sockets
             if not sockets:
-                raise RuntimeError("TCP Server %r not started yet?" % (server,))
+                raise RuntimeError("TCP Server %r not started yet?" % (self.server,))
 
             def _look_for_family(fam):
                 for sock in sockets:

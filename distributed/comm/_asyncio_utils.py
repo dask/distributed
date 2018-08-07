@@ -18,18 +18,24 @@ is to get a bit of information asynchronously::
 
 We replace this with socket.getaddrinfo and make the thing return immediately.
 We also remove all sockets that aren't SOCK_STREAM type.
+
+This is taken from asyncio/streams.py and asyncio/base_events.py from Python
+3.7
 """
 
 
-
+import collections
+import itertools
+import logging
+import os
 import socket
+import sys
 
 from asyncio.streams import _DEFAULT_LIMIT, StreamReader, StreamReaderProtocol
-from asyncio.base_events import Server
-from asyncio import events, coroutines, protocols
-import os
-import sys
-import itertools
+from asyncio.base_events import Server, _set_reuseport
+from asyncio import events
+
+logger = logging.getLogger(__name__)
 
 
 def create_server(
