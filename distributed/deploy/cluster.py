@@ -95,7 +95,7 @@ class Cluster(object):
             else:
                 to_close = self.scheduler.workers_to_close(
                     n=len(self.scheduler.workers) - n)
-                print("Closing workers: %s", to_close)
+                logger.debug("Closing workers: %s", to_close)
                 self.scheduler.loop.add_callback(self.scheduler.retire_workers, workers=to_close)
                 self.scheduler.loop.add_callback(self.scale_down, to_close)
 
