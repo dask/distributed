@@ -60,15 +60,15 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--interface', type=str, default=None,
               help="Network interface like 'eth0' or 'ib0'")
 @click.option('--nthreads', type=int, default=0,
-              help="Number of threads per process.")
+              help="Number of threads in the pool per process.")
 @click.option('--nprocs', type=int, default=1,
-              help="Number of worker processes.  Defaults to one.")
+              help="Number of worker processes to spawn.  Defaults to one.")
 @click.option('--name', type=str, default='',
               help="A unique name for this worker like 'worker-1'. "
                    "If used with --nprocs then the process number "
                    "will be appended like name-0, name-1, name-2, ...")
 @click.option('--memory-limit', default='auto',
-              help="Bytes of memory that the worker can use. "
+              help="Bytes of memory per process that the worker can use. "
                    "This can be an integer (bytes), "
                    "float (fraction of total system memory), "
                    "string (like 5GB or 5000M), "
