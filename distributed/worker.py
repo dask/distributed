@@ -179,10 +179,7 @@ class WorkerBase(ServerNode):
         self.services = {}
         self.service_ports = service_ports or {}
         self.service_specs = services or {}
-
-        if custom_metrics is None:
-            self.custom_metrics = {}
-
+        self.custom_metrics = custom_metrics or {}
 
         handlers = {
             'gather': self.gather,
@@ -264,6 +261,7 @@ class WorkerBase(ServerNode):
             try:
                 start = time()
                 custom_metrics = {k: func(self) for k, func in self.custom_metrics.items()}
+                print(f'custom_metrics: {custom_metrics}')
                 response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
                     name=self.name,

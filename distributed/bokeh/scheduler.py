@@ -934,7 +934,9 @@ class WorkerTable(DashboardComponent):
                       'memory_percent', 'num_fds', 'read_bytes', 'write_bytes',
                       'cpu_fraction']
         workers = self.scheduler.workers.values()
-        self.custom_metrics_names = list(workers[0].info.get('custom_metrics_names', []))
+        self.custom_metrics_names = sorted({
+            name for worker in workers
+            for name in worker.info.get('custom_metrics_names', [])})
         self.names.extend(self.custom_metrics_names)
 
         table_names = ['worker', 'ncores', 'cpu', 'memory', 'memory_limit',

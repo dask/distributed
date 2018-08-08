@@ -286,7 +286,6 @@ def test_WorkerTable(c, s, a, b):
     assert all(len(v) == 2 for v in wt.source.data.values())
 
 
-
 @gen_cluster(client=True)
 def test_WorkerTable_custom_metrics(c, s, a, b):
     def metric_port(worker):
@@ -319,6 +318,46 @@ def test_WorkerTable_custom_metrics(c, s, a, b):
 
     assert all(wt.source.data.values())
     assert all(len(v) == 2 for v in wt.source.data.values())
+
+
+@gen_cluster(client=True)
+def test_WorkerTable_custom_metrics_with_different_metrics(c, s, a, b):
+    def metric_port(worker):
+        return worker.port
+
+    a.custom_metrics['metric_a'] = metric_port
+    b.custom_metrics['metric_b'] = metric_port
+
+    while ('metric_a' not in s.workers[a.address].info or
+           'metric_b' not in s.workers[b.address].info):
+        yield gen.sleep(0.01)
+
+    assert s.workers[a.address].info['metric_a'] == a.port
+    assert s.workers[b.address].info['metric_b'] == b.port
+
+    wt = WorkerTable(s)
+    wt.update()
+
+    assert 'metric_a' in wt.source.data
+    assert 'metric_b' in wt.source.data
+
+    assert all(wt.source.data.values())
+    assert all(len(v) == 2 for v in wt.source.data.values())
+
+    del b.custom_metrics['metric_b']
+
+    # TODO: this times out. Understand why 'metrics_b' never disappear from .info
+    # while 'metric_b' in s.workers[b.address].info:
+    #     yield gen.sleep(0.01)
+
+    # wt = WorkerTable(s)
+    # wt.update()
+
+    # assert 'metric_a' in wt.source.data
+    # assert 'metric_b' not in wt.source.data
+
+    # assert all(wt.source.data.values())
+    # assert all(len(v) == 2 for v in wt.source.data.values())
 
 
 @gen_cluster(client=True)
