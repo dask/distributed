@@ -40,7 +40,7 @@ def get_stream_address(stream):
     Get a stream's local address.
     """
     try:
-        return unparse_host_port(*stream._transport._sock.getsockname()[:2])
+        return unparse_host_port(*stream._transport.get_extra_info('socket').getsockname()[:2])
     except EnvironmentError:
         # Probably EBADF
         return "<closed>"
@@ -78,7 +78,7 @@ class TCP(Comm):
         self._extra = {}
 
         # set_tcp_timeout(stream)
-        # self._read_extra()
+        self._read_extra()
 
     def _read_extra(self):
         pass
@@ -177,24 +177,54 @@ class TCP(Comm):
     @gen.coroutine
     def close(self):
         writer, self.writer = self.writer, None
-        if writer is not None and not writer._transport._closing:
+        if not is_closed(writer):
             self._finalizer.detach()
             writer.close()
             yield writer.wait_closed()
 
     def abort(self):
         writer, self.writer = self.writer, None
-        if writer is not None and not writer._transport._closing:
+        if not is_closed(writer):
             self._finalizer.detach()
             writer.close()
             yield writer.wait_closed()
 
     def closed(self):
-        return self.writer is None or self.writer._transport._closing
+        return is_closed(self.writer)
 
     @property
     def extra_info(self):
         return self._extra
+
+
+def is_closed(writer):
+    return (writer is None or
+            getattr(writer._transport, '_closing', False) or
+            getattr(writer._transport, '_closed', False))  # ssl
+
+
+class TLS(TCP):
+    """
+    A TLS-specific version of TCP.
+    """
+
+    def _read_extra(self):
+        TCP._read_extra(self)
+        sock = self.reader._transport.get_extra_info('socket')
+        if sock is not None:
+            self._extra.update(peercert=self.reader._transport.get_extra_info('peercert'),
+                               cipher=self.reader._transport.get_extra_info('cipher'),)
+            cipher, proto, bits = self._extra['cipher']
+            logger.debug("TLS connection with %r: protocol=%s, cipher=%s, bits=%d",
+                         self._peer_addr, proto, cipher, bits)
+
+
+def _expect_tls_context(connection_args):
+    ctx = connection_args.get('ssl_context')
+    if not isinstance(ctx, ssl.SSLContext):
+        raise TypeError("TLS expects a `ssl_context` argument of type "
+                        "ssl.SSLContext (perhaps check your TLS configuration?)")
+    return ctx
 
 
 class RequireEncryptionMixin(object):
@@ -234,6 +264,16 @@ class TCPConnector(BaseTCPConnector):
 
     def _get_connect_args(self, **connection_args):
         return {}
+
+
+class TLSConnector(BaseTCPConnector):
+    prefix = 'tls://'
+    comm_class = TLS
+    encrypted = True
+
+    def _get_connect_args(self, **connection_args):
+        ctx = _expect_tls_context(connection_args)
+        return {'ssl': ctx}
 
 
 class BaseTCPListener(Listener, RequireEncryptionMixin):
@@ -340,6 +380,19 @@ class TCPListener(BaseTCPListener):
         return reader, writer
 
 
+class TLSListener(BaseTCPListener):
+    prefix = 'tls://'
+    comm_class = TLS
+    encrypted = True
+
+    def _get_server_args(self, **connection_args):
+        ctx = _expect_tls_context(connection_args)
+        return {'ssl': ctx}
+
+    async def _prepare_stream(self, reader, writer, address):
+        return reader, writer
+
+
 class BaseTCPBackend(Backend):
 
     # I/O
@@ -377,4 +430,10 @@ class TCPBackend(BaseTCPBackend):
     _listener_class = TCPListener
 
 
+class TLSBackend(BaseTCPBackend):
+    _connector_class = TLSConnector
+    _listener_class = TLSListener
+
+
 backends['tcp'] = TCPBackend()
+backends['tls'] = TLSBackend()
