@@ -120,7 +120,7 @@ class TCP(Comm):
                     else:
                         frame = b''
                     frames.append(frame)
-            except asyncio.streams.IncompleteReadError as e:
+            except (asyncio.streams.IncompleteReadError, EnvironmentError) as e:
                 self.reader = None
                 self.writer = None
                 if not shutting_down():
@@ -169,8 +169,8 @@ class TCP(Comm):
             except asyncio.streams.IncompleteReadError as e:
                 self.reader = None
                 self.writer = None
-                raise CommClosedError()
-                # convert_stream_closed_error(self, e)
+                # raise CommClosedError()
+                convert_stream_closed_error(self, e)
 
             return sum(map(nbytes, frames))
 
@@ -178,16 +178,24 @@ class TCP(Comm):
     def close(self):
         writer, self.writer = self.writer, None
         if not is_closed(writer):
-            self._finalizer.detach()
-            writer.close()
-            yield writer.wait_closed()
+            try:
+                yield writer.drain()
+                sock = writer._transport.get_extra_info('socket')
+                if sock:
+                    sock.shutdown(socket.SHUT_RDWR)
+            except EnvironmentError:
+                pass
+            finally:
+                self._finalizer.detach()
+                writer.close()
+                # yield writer.wait_closed()
 
     def abort(self):
         writer, self.writer = self.writer, None
         if not is_closed(writer):
             self._finalizer.detach()
             writer.close()
-            yield writer.wait_closed()
+            # yield writer.wait_closed()
 
     def closed(self):
         return is_closed(self.writer)
@@ -309,10 +317,11 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         if self.server is None:
             raise ValueError("invalid operation on non-started TCPListener")
 
-    async def _handle_stream(self, reader, writer, *args, **kwargs):
+    @gen.coroutine
+    def _handle_stream(self, reader, writer, *args, **kwargs):
         host, ip = writer.get_extra_info('peername')
         address = self.prefix + unparse_host_port(host, ip)
-        reader, writer = await self._prepare_stream(reader, writer, address)
+        reader, writer = yield self._prepare_stream(reader, writer, address)
         # if stream is None:
         #     # Preparation failed
         #     return
@@ -320,7 +329,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
                      address, self.contact_address)
         local_address = self.prefix + get_stream_address(reader)
         comm = self.comm_class(reader, writer, local_address, address, self.deserialize)
-        await self.comm_handler(comm)
+        yield self.comm_handler(comm)
 
     def get_host_port(self):
         """
