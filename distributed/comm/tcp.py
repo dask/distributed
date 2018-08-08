@@ -224,7 +224,7 @@ class TCP(Comm):
             lengths = [nbytes(frame) for frame in frames]
             length_bytes = ([struct.pack('Q', len(frames))] +
                             [struct.pack('Q', x) for x in lengths])
-            if sum(lengths) < 2**17:  # 128kiB
+            if PY3 and sum(lengths) < 2**17:  # 128kiB
                 b = b''.join(length_bytes + frames)  # small enough, send in one go
                 stream.write(b)
             else:
