@@ -16,7 +16,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
-from .compatibility import get_thread_identity, finalize
+from .compatibility import get_thread_identity
 from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)
@@ -117,13 +117,18 @@ class Server(object):
         self.loop = self.io_loop
 
         if not hasattr(self.io_loop, 'profile'):
-            self.io_loop.profile, stop = profile.watch(
+            ref = weakref.ref(self.io_loop)
+
+            def stop():
+                loop = ref()
+                return loop is None or loop.closing
+
+            self.io_loop.profile = profile.watch(
                     omit=('profile.py', 'selectors.py'),
                     interval=dask.config.get('distributed.worker.profile.interval'),
-                    cycle=dask.config.get('distributed.worker.profile.cycle')
+                    cycle=dask.config.get('distributed.worker.profile.cycle'),
+                    stop=stop,
             )
-            self.io_loop._profile_stop = stop
-            finalize(self.io_loop, stop)
 
         # Statistics counters for various events
         with ignoring(ImportError):

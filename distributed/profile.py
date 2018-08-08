@@ -227,14 +227,15 @@ def plot_data(state, profile_interval=0.010):
             'percentage': percentages}
 
 
-def _watch(thread_id, log, interval='20ms', cycle='2s', omit=None, stop=None):
+def _watch(thread_id, log, interval='20ms', cycle='2s', omit=None,
+           stop=lambda: False):
     interval = parse_timedelta(interval)
     cycle = parse_timedelta(cycle)
 
     recent = create()
     last = time()
 
-    while not stop:
+    while not stop():
         if time() > last + cycle:
             log.append((time(), recent))
             recent = create()
@@ -248,13 +249,12 @@ def _watch(thread_id, log, interval='20ms', cycle='2s', omit=None, stop=None):
         sleep(interval)
 
 
-def watch(thread_id=None, interval='20ms', cycle='2s', maxlen=1000, omit=None):
+def watch(thread_id=None, interval='20ms', cycle='2s', maxlen=1000, omit=None,
+          stop=lambda: False):
     if thread_id is None:
         thread_id = get_thread_identity()
 
     log = deque(maxlen=maxlen)
-
-    _stop = []
 
     thread = threading.Thread(target=_watch,
                               name='Profile',
@@ -263,14 +263,11 @@ def watch(thread_id=None, interval='20ms', cycle='2s', maxlen=1000, omit=None):
                                       'cycle': cycle,
                                       'log': log,
                                       'omit': omit,
-                                      'stop': _stop})
+                                      'stop': stop})
     thread.daemon = True
     thread.start()
 
-    def stop():
-        _stop.append(True)
-
-    return log, stop
+    return log
 
 
 def get_profile(history, recent=None, start=None, stop=None, key=None):

@@ -1,11 +1,12 @@
 import sys
 import time
 from toolz import first
-from threading import Thread
+import threading
 
+from distributed.compatibility import get_thread_identity
+from distributed import metrics
 from distributed.profile import (process, merge, create, call_stack,
         identifier, watch)
-from distributed.compatibility import get_thread_identity
 
 
 def test_basic():
@@ -20,7 +21,7 @@ def test_basic():
             test_g()
             test_h()
 
-    thread = Thread(target=test_f)
+    thread = threading.Thread(target=test_f)
     thread.daemon = True
     thread.start()
 
@@ -116,7 +117,24 @@ def test_identifier():
 
 
 def test_watch():
-    log, stop = watch(interval='10ms', cycle='50ms')
+    start = metrics.time()
+
+    def stop():
+        return metrics.time() > start + 0.500
+
+    start_threads = threading.active_count()
+
+    log = watch(interval='10ms', cycle='50ms', stop=stop)
+
+    start = metrics.time()  # wait until thread starts up
+    while threading.active_count() <= start_threads:
+        assert metrics.time() < start + 2
+        time.sleep(0.01)
+
     time.sleep(0.5)
     assert 1 < len(log) < 10
-    stop()
+
+    start = metrics.time()
+    while threading.active_count() > start_threads:
+        assert metrics.time() < start + 2
+        time.sleep(0.01)

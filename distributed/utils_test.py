@@ -172,9 +172,6 @@ def pristine_loop():
         IOLoop.clear_instance()
         IOLoop.clear_current()
 
-        with ignoring(AttributeError):
-            loop._profile_stop()
-
 
 @contextmanager
 def mock_ipython():
@@ -816,8 +813,6 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                             raise gen.Return(result)
 
                     result = loop.run_sync(coro, timeout=timeout * 2 if timeout else timeout)
-                    with ignoring(AttributeError):
-                        loop._profile_stop()
 
                 for w in workers:
                     if getattr(w, 'data', None):
