@@ -77,7 +77,6 @@ class TCP(Comm):
         self._finalizer.atexit = False
         self._extra = {}
 
-        # stream.set_nodelay(True)
         # set_tcp_timeout(stream)
         # self._read_extra()
 
@@ -151,19 +150,22 @@ class TCP(Comm):
                                               'recipient': self._peer_addr})
 
             try:
-                lengths = ([struct.pack('Q', len(frames))] +
-                           [struct.pack('Q', nbytes(frame)) for frame in frames])
-                writer.write(b''.join(lengths))
-
-                for frame in frames:
-                    # Can't wait for the write() Future as it may be lost
-                    # ("If write is called again before that Future has resolved,
-                    #   the previous future will be orphaned and will never resolve")
-                    writer.write(frame)
-                    bytes_since_last_yield += nbytes(frame)
-                    if bytes_since_last_yield > 32e6:
-                        await writer.drain()
-                        bytes_since_last_yield = 0
+                lengths = [nbytes(frame) for frame in frames]
+                length_bytes = ([struct.pack('Q', len(frames))] +
+                                 [struct.pack('Q', length) for length in lengths])
+                if sum(lengths) < 2 ** 17:  # 127 kiB
+                    writer.write(b''.join(length_bytes + frames))
+                else:
+                    writer.write(b''.join(length_bytes))
+                    for frame in frames:
+                        # Can't wait for the write() Future as it may be lost
+                        # ("If write is called again before that Future has resolved,
+                        #   the previous future will be orphaned and will never resolve")
+                        writer.write(frame)
+                        bytes_since_last_yield += nbytes(frame)
+                        if bytes_since_last_yield > 32e6:
+                            await writer.drain()
+                            bytes_since_last_yield = 0
             except asyncio.streams.IncompleteReadError as e:
                 self.reader = None
                 self.writer = None
