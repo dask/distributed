@@ -119,9 +119,14 @@ class Server(object):
         if not hasattr(self.io_loop, 'profile'):
             ref = weakref.ref(self.io_loop)
 
-            def stop():
-                loop = ref()
-                return loop is None or loop.closing
+            if hasattr(self.io_loop, 'closing'):
+                def stop():
+                    loop = ref()
+                    return loop is None or loop.closing
+            else:
+                def stop():
+                    loop = ref()
+                    return loop is None or loop._closing
 
             self.io_loop.profile = profile.watch(
                     omit=('profile.py', 'selectors.py'),
