@@ -62,7 +62,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--nthreads', type=int, default=0,
               help="Number of threads in the pool per process.")
 @click.option('--nprocs', type=int, default=1,
-              help="Number of worker processes to spawn.  Defaults to one.")
+              help="Number of worker processes to launch.  Defaults to one.")
 @click.option('--name', type=str, default='',
               help="A unique name for this worker like 'worker-1'. "
                    "If used with --nprocs then the process number "
