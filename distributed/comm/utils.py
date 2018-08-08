@@ -8,7 +8,6 @@ from tornado import gen
 
 from .. import protocol
 from ..compatibility import finalize
-from ..sizeof import sizeof
 from ..utils import get_ip, get_ipv6, mp_context, nbytes
 
 
