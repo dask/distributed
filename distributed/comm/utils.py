@@ -44,10 +44,7 @@ def to_frames(msg, serializers=None, on_error='message', context=None):
             logger.exception(e)
             raise
 
-    if sizeof(msg) > FRAME_OFFLOAD_THRESHOLD:
-        res = yield offload(_to_frames)
-    else:
-        res = _to_frames()
+    res = yield offload(_to_frames)
 
     raise gen.Return(res)
 
