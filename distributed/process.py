@@ -5,7 +5,6 @@ from datetime import timedelta
 import logging
 import os
 import re
-import sys
 import threading
 import weakref
 
