@@ -60,7 +60,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--interface', type=str, default=None,
               help="Network interface like 'eth0' or 'ib0'")
 @click.option('--nthreads', type=int, default=0,
-              help="Number of threads in the pool per process.")
+              help="Number of threads per process.")
 @click.option('--nprocs', type=int, default=1,
               help="Number of worker processes to launch.  Defaults to one.")
 @click.option('--name', type=str, default='',
