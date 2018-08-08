@@ -64,7 +64,7 @@ logging_levels = {name: logger.level for name, logger in
                   if isinstance(logger, logging.Logger)}
 
 
-offload(lambda x: x)  # create thread during import
+offload(lambda: None).result()  # create thread during import
 
 
 @pytest.fixture(scope='session')
