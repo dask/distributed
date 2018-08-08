@@ -2802,7 +2802,13 @@ class Scheduler(ServerNode):
     def report_on_key(self, key=None, ts=None, client=None):
         assert (key is None) + (ts is None) == 1, (key, ts)
         if ts is None:
-            ts = self.tasks[key]
+            try:
+                ts = self.tasks[key]
+            except KeyError:
+                self.report({'op': 'cancelled-key',
+                             'key': key},
+                            client=client)
+                return
         else:
             key = ts.key
         if ts.state == 'forgotten':
