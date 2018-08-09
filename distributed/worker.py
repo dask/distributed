@@ -265,7 +265,7 @@ class WorkerBase(ServerNode):
                 custom_metrics_names = set(self.custom_metrics.keys())
                 custom_metrics_names_no_overlap = custom_metrics_names.difference(core_metrics_names)
                 custom_metrics = {k: self.custom_metrics[k](self) for k in custom_metrics_names_no_overlap}
-                metrics = dict(**core_metrics, **custom_metrics)
+                metrics = dict(core_metrics, **custom_metrics)
                 response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
                     name=self.name,
