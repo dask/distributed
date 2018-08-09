@@ -55,3 +55,11 @@ def _register_arrow():
 def _register_sklearn():
     import sklearn.base
     register_attributes(sklearn.base.BaseEstimator)
+
+
+@dask_serialize.register_lazy("torch")
+@dask_deserialize.register_lazy("torch")
+@dask_serialize.register_lazy("torchvision")
+@dask_deserialize.register_lazy("torchvision")
+def _register_torch():
+    from . import torch

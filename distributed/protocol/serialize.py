@@ -471,10 +471,11 @@ def serialize_object_with_dict(est):
         d = est.__dict__
 
     for k, v in d.items():
-        if (isinstance(v, basic) or
-                isinstance(v, dict) and all(isinstance(x, basic) for x in v.values())
-                                    and all(isinstance(x, basic) for x in v.keys()) or
-                isinstance(v, (list, tuple)) and all(isinstance(x, basic) for x in v)):
+        typ = type(v)
+        if (typ is str or typ is int or typ is float or
+                isinstance(v, dict) and all(typ is str or typ is int or typ is float for x in v.values())
+                                    and all(typ is str for x in v.keys()) or
+                isinstance(v, (list, tuple)) and all(typ is str or typ is int or typ is float for x in v)):
             header['simple'][k] = v
         else:
             if isinstance(v, dict):
