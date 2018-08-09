@@ -8,7 +8,7 @@ from tornado import gen
 
 from .. import protocol
 from ..compatibility import finalize, PY3
-from ..utils import get_ip, get_ipv6, mp_context, nbytes
+from ..utils import get_ip, get_ipv6, nbytes
 
 
 logger = logging.getLogger(__name__)
