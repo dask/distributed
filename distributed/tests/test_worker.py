@@ -1198,3 +1198,22 @@ def test_avoid_oversubscription(c, s, *workers):
 
     # Some other workers did some work
     assert len([w for w in workers if len(w.outgoing_transfer_log) > 0]) >= 3
+
+
+@gen_cluster(client=True)
+def test_startup_func(c, s, a, b):
+    def mystartup():
+        import matplotlib
+        return None
+
+    def test_import():
+        import sys
+        return 'matplotlib' in sys.modules.keys()
+
+    result = yield c.run(test_import)
+    assert list(result.values()) == [False] * 2
+
+    yield c.run(mystartup)
+
+    result = yield c.run(test_import)
+    assert list(result.values()) == [True] * 2
