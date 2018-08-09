@@ -7,7 +7,7 @@ import socket
 from tornado import gen
 
 from .. import protocol
-from ..compatibility import finalize
+from ..compatibility import finalize, PY3
 from ..utils import get_ip, get_ipv6, mp_context, nbytes
 
 
@@ -43,7 +43,10 @@ def to_frames(msg, serializers=None, on_error='message', context=None):
             logger.exception(e)
             raise
 
-    res = yield offload(_to_frames)
+    if PY3:
+        res = yield offload(_to_frames)
+    else:  # distributed/deploy/tests/test_adaptive.py::test_get_scale_up_kwargs fails on Py27.  Don't know why
+        res = _to_frames()
 
     raise gen.Return(res)
 
