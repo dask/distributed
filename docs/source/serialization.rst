@@ -150,25 +150,28 @@ register them with Dask.
         def __init__(self, name):
             self.name = name
 
+    from distributed.protocol import dask_serialize, dask_deserialize
+
+    @dask_serialize.register(Human)
     def serialize(human: Human) -> Tuple[Dict, List[bytes]]:
         header = {}
         frames = [human.name.encode()]
         return header, frames
 
+    @dask_deserialize.register(Human)
     def deserialize(header: Dict, frames: List[bytes]) -> Human:
         return Human(frames[0].decode())
 
-    from distributed.protocol.serialize import register_serialization
-    register_serialization(Human, serialize, deserialize)
 
 API
 ---
 
 .. currentmodule:: distributed.protocol.serialize
 
-.. autosummary:: register_serialization
-                 serialize
+.. autosummary:: serialize
                  deserialize
+                 dask_serialize
+                 dask_deserialize
 
 .. autofunction:: register_serialization
 .. autofunction:: serialize
