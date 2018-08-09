@@ -13,7 +13,7 @@ def test_basic(c, s, a, b):
         i = 0
         while True:
             await gen.sleep(0.01)
-            pub.put(i)
+            pub._put(i)
             i += 1
 
     def f(_):
