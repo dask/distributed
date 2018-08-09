@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 from functools import partial
+import numbers
 import traceback
 
 import dask
@@ -445,3 +446,99 @@ def _serialize_bytes(obj):
 @dask_deserialize.register((bytes, bytearray))
 def _deserialize_bytes(header, frames):
     return frames[0]
+
+
+#########################
+# Descend into __dict__ #
+#########################
+
+
+basic = (numbers.Number, str)
+
+
+def serialize_object_with_dict(est):
+    header = {
+        'serializer': 'dask',
+        'type-serialized': pickle.dumps(type(est)),
+        'simple': {},
+        'complex': {}
+    }
+    frames = []
+
+    if isinstance(est, dict):
+        d = est
+    else:
+        d = est.__dict__
+
+    for k, v in d.items():
+        if (isinstance(v, basic) or
+                isinstance(v, dict) and all(isinstance(x, basic) for x in v.values())
+                                    and all(isinstance(x, basic) for x in v.keys()) or
+                isinstance(v, (list, tuple)) and all(isinstance(x, basic) for x in v)):
+            header['simple'][k] = v
+        else:
+            if isinstance(v, dict):
+                h, f = serialize_object_with_dict(v)
+            else:
+                h, f = serialize(v)
+            header['complex'][k] = {'header': h,
+                                    'start': len(frames),
+                                    'stop': len(frames) + len(f)}
+            frames += f
+    return header, frames
+
+
+def deserialize_object_with_dict(header, frames):
+    cls = pickle.loads(header['type-serialized'])
+    if issubclass(cls, dict):
+        dd = obj = {}
+    else:
+        obj = object.__new__(cls)
+        dd = obj.__dict__
+    dd.update(header['simple'])
+    for k, d in header['complex'].items():
+        h = d['header']
+        f = frames[d['start']: d['stop']]
+        v = deserialize(h, f)
+        dd[k] = v
+
+    return obj
+
+
+dask_deserialize.register(dict)(deserialize_object_with_dict)
+
+
+def register_attributes(cls):
+    """ Register dask_(de)serialize to traverse through __dict__
+
+    Normally when registering new classes for Dask's custom serialization you
+    need to manage headers and frames, which can be tedious.  If all you want
+    to do is traverse through your object and apply serialize to all of your
+    object's attributes then this function may provide an easier path.
+
+    This registers a class for the custom Dask serialization family.  It
+    serializes it by traversing through its __dict__ of attributes and applying
+    ``serialize`` and ``deserialize`` recursively.  It collects a set of frames
+    and keeps small attributes in the header.  Deserialization reverses this
+    process.
+
+    This is a good idea if the following hold:
+
+    1.  Most of the bytes of your object are composed of data types that Dask's
+        custom serializtion already handles well, like Numpy arrays.
+    2.  Your object doesn't require any special constructor logic, other than
+        object.__new__(cls)
+
+    Examples
+    --------
+    >>> import sklearn.base
+    >>> from distributed.protocol import register_attributes
+    >>> register_attributes(sklearn.base.BaseEstimator)
+
+    See Also
+    --------
+    dask_serialize
+    dask_deserialize
+    """
+    dask_serialize.register(cls)(serialize_object_with_dict)
+    dask_deserialize.register(cls)(deserialize_object_with_dict)

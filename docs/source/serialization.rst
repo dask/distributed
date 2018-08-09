@@ -1,6 +1,8 @@
 Serialization
 =============
 
+.. currentmodule:: distributed.protocol.serialize
+
 When we communicate data between computers we first convert that data into a
 sequence of bytes that can be communicated across the network.  Choices made in
 serialization can affect performance and security.
@@ -138,6 +140,10 @@ pickle internally in some cases.  It should not be considered more secure.
 Extend
 ++++++
 
+.. autosummary::
+   dask_serialize
+   dask_deserialize
+
 As with serialization families in general, the Dask family in particular is
 *also* extensible.  This is a good way to support custom serialization of a
 single type of object.  The method is similar, you create serialize and
@@ -163,16 +169,31 @@ register them with Dask.
         return Human(frames[0].decode())
 
 
+Traverse attributes
++++++++++++++++++++
+
+.. autosummary::
+   register_attributes
+
+A common case is that your object just wraps Numpy arrays or other objects that
+Dask already serializes well.  For example, Scikit-Learn estimators mostly
+surround Numpy arrays with a bit of extra metadata.  In these cases you can
+register your class for custom Dask serialization with the
+``register_attributes``
+function.
+
 API
 ---
-
-.. currentmodule:: distributed.protocol.serialize
 
 .. autosummary:: serialize
                  deserialize
                  dask_serialize
                  dask_deserialize
+                 register_attributes
 
 .. autofunction:: register_serialization
 .. autofunction:: serialize
 .. autofunction:: deserialize
+.. autofunction:: dask_serialize
+.. autofunction:: dask_deserialize
+.. autofunction:: register_attributes
