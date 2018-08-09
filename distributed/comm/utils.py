@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 FRAME_OFFLOAD_THRESHOLD = 10 * 1024 ** 2   # 10 MB
 
-_offload_executor = ThreadPoolExecutor(max_workers=min(4, mp_context.cpu_count()))
+_offload_executor = ThreadPoolExecutor(max_workers=1)
 finalize(_offload_executor, _offload_executor.shutdown)
 
 
