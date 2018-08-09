@@ -260,8 +260,12 @@ class WorkerBase(ServerNode):
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                custom_metrics = {k: func(self) for k, func in self.custom_metrics.items()}
-                print(f'custom_metrics: {custom_metrics}')
+                core_metrics = self.monitor.recent()
+                core_metrics_names = set(core_metrics.keys())
+                custom_metrics_names = set(self.custom_metrics.keys())
+                custom_metrics_names_no_overlap = custom_metrics_names.difference(core_metrics_names)
+                custom_metrics = {k: self.custom_metrics[k](self) for k in custom_metrics_names_no_overlap}
+                metrics = dict(**core_metrics, **custom_metrics)
                 response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
                     name=self.name,
@@ -271,9 +275,8 @@ class WorkerBase(ServerNode):
                     in_memory=len(self.data),
                     ready=len(self.ready),
                     in_flight=len(self.in_flight_tasks),
-                    custom_metrics_names=list(custom_metrics.keys()),
-                    **self.monitor.recent(),
-                    **custom_metrics)
+                    custom_metrics_names=list(custom_metrics_names_no_overlap),
+                    **metrics)
                 end = time()
                 middle = (start + end) / 2
                 if response['status'] == 'missing':

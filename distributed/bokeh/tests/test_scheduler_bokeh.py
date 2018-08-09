@@ -301,23 +301,26 @@ def test_WorkerTable_custom_metrics(c, s, a, b):
         for name, func in metrics.items():
             w.custom_metrics[name] = func
 
-    while not all([name in s.workers[w.address].info
-                   for name in metrics
-                   for w in [a, b]]):
+    while not all('custom_metrics_names' in s.workers[w.address].info
+                   for w in [a, b]):
         yield gen.sleep(0.01)
 
     for w in [a, b]:
+        assert set(s.workers[w.address].info['custom_metrics_names']) == set(metrics.keys())
         assert s.workers[w.address].info['metric_port'] == w.port
         assert s.workers[w.address].info['metric_address'] == w.address
 
     wt = WorkerTable(s)
     wt.update()
+    data = wt.source.data
 
     for name in metrics:
-        assert name in wt.source.data
-
-    assert all(wt.source.data.values())
-    assert all(len(v) == 2 for v in wt.source.data.values())
+        assert name in data
+    assert all(data.values())
+    assert all(len(v) == 2 for v in data.values())
+    my_index = data['worker'].index(a.address), data['worker'].index(b.address)
+    assert [data['metric_port'][i] for i in my_index] == [a.port, b.port]
+    assert [data['metric_address'][i] for i in my_index] == [a.address, b.address]
 
 
 @gen_cluster(client=True)
@@ -328,36 +331,69 @@ def test_WorkerTable_custom_metrics_with_different_metrics(c, s, a, b):
     a.custom_metrics['metric_a'] = metric_port
     b.custom_metrics['metric_b'] = metric_port
 
-    while ('metric_a' not in s.workers[a.address].info or
-           'metric_b' not in s.workers[b.address].info):
+    while not all('custom_metrics_names' in s.workers[w.address].info
+                  for w in [a, b]):
         yield gen.sleep(0.01)
+
+    assert s.workers[a.address].info['custom_metrics_names'] == ('metric_a',)
+    assert s.workers[b.address].info['custom_metrics_names'] == ('metric_b',)
 
     assert s.workers[a.address].info['metric_a'] == a.port
     assert s.workers[b.address].info['metric_b'] == b.port
 
     wt = WorkerTable(s)
     wt.update()
+    data = wt.source.data
 
-    assert 'metric_a' in wt.source.data
-    assert 'metric_b' in wt.source.data
+    assert 'metric_a' in data
+    assert 'metric_b' in data
+    assert all(data.values())
+    assert all(len(v) == 2 for v in data.values())
+    my_index = data['worker'].index(a.address), data['worker'].index(b.address)
+    assert [data['metric_a'][i] for i in my_index] == [a.port, None]
+    assert [data['metric_b'][i] for i in my_index] == [None, b.port]
 
-    assert all(wt.source.data.values())
-    assert all(len(v) == 2 for v in wt.source.data.values())
 
-    del b.custom_metrics['metric_b']
+@gen_cluster(client=True)
+def test_WorkerTable_custom_metrics_with_different_metrics_2(c, s, a, b):
+    def metric_port(worker):
+        return worker.port
 
-    # TODO: this times out. Understand why 'metrics_b' never disappear from .info
-    # while 'metric_b' in s.workers[b.address].info:
-    #     yield gen.sleep(0.01)
+    a.custom_metrics['metric_a'] = metric_port
 
-    # wt = WorkerTable(s)
-    # wt.update()
+    while 'metric_a' not in s.workers[a.address].info:
+        yield gen.sleep(0.01)
 
-    # assert 'metric_a' in wt.source.data
-    # assert 'metric_b' not in wt.source.data
+    assert s.workers[a.address].info['custom_metrics_names'] == ('metric_a',)
+    assert s.workers[b.address].info['custom_metrics_names'] == ()
 
-    # assert all(wt.source.data.values())
-    # assert all(len(v) == 2 for v in wt.source.data.values())
+    wt = WorkerTable(s)
+    wt.update()
+    data = wt.source.data
+
+    assert 'metric_a' in data
+    assert all(data.values())
+    assert all(len(v) == 2 for v in data.values())
+    my_index = data['worker'].index(a.address), data['worker'].index(b.address)
+    assert [data['metric_a'][i] for i in my_index] == [a.port, None]
+
+
+@gen_cluster(client=True)
+def test_WorkerTable_custom_metrics_overlap_with_core_metrics(c, s, a, b):
+    def metric(worker):
+        return -999
+
+    a.custom_metrics['cpu'] = metric
+    a.custom_metrics['metric'] = metric
+
+    while 'metric' not in s.workers[a.address].info:
+        yield gen.sleep(0.01)
+
+    assert s.workers[a.address].info['custom_metrics_names'] == ('metric',)
+    assert s.workers[b.address].info['custom_metrics_names'] == ()
+
+    assert s.workers[a.address].info['metric'] == -999
+    assert s.workers[a.address].info['cpu'] != -999
 
 
 @gen_cluster(client=True)
