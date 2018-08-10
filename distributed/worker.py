@@ -260,23 +260,23 @@ class WorkerBase(ServerNode):
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                core_metrics = self.monitor.recent()
-                core_metrics_names = set(core_metrics.keys())
+                core_metrics = dict(name=self.name,
+                                    memory_limit=self.memory_limit,
+                                    executing=len(self.executing),
+                                    in_memory=len(self.data),
+                                    ready=len(self.ready),
+                                    in_flight=len(self.in_flight_tasks))
+                core_metrics.update(self.monitor.recent())
+                core_metrics_names = set(core_metrics.keys()).union(['custom_metrics_names'])
                 custom_metrics_names = set(self.custom_metrics.keys())
                 custom_metrics_names_no_overlap = custom_metrics_names.difference(core_metrics_names)
+                core_metrics['custom_metrics_names'] = list(custom_metrics_names_no_overlap)
                 custom_metrics = {k: self.custom_metrics[k](self) for k in custom_metrics_names_no_overlap}
                 metrics = dict(core_metrics, **custom_metrics)
                 response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
-                    name=self.name,
                     now=time(),
-                    memory_limit=self.memory_limit,
-                    executing=len(self.executing),
-                    in_memory=len(self.data),
-                    ready=len(self.ready),
-                    in_flight=len(self.in_flight_tasks),
-                    custom_metrics_names=list(custom_metrics_names_no_overlap),
-                    **metrics)
+                    info=metrics)
                 end = time()
                 middle = (start + end) / 2
                 if response['status'] == 'missing':
@@ -308,21 +308,22 @@ class WorkerBase(ServerNode):
                 _start = time()
                 comm = yield connect(self.scheduler.address,
                                      connection_args=self.connection_args)
+                metrics = dict(services=self.service_ports,
+                               local_directory=self.local_dir,
+                               pid=os.getpid(),
+                               reply=False,
+                               **self.monitor.recent())
                 yield comm.write(dict(op='register-worker',
-                                         ncores=self.ncores,
-                                         address=self.contact_address,
-                                         keys=list(self.data),
-                                         name=self.name,
-                                         nbytes=self.nbytes,
-                                         now=time(),
-                                         services=self.service_ports,
-                                         memory_limit=self.memory_limit,
-                                         local_directory=self.local_dir,
-                                         resources=self.total_resources,
-                                         pid=os.getpid(),
-                                         reply=False,
-                                         **self.monitor.recent()),
-                                         serializers=['msgpack'])
+                                      ncores=self.ncores,
+                                      address=self.contact_address,
+                                      keys=list(self.data),
+                                      name=self.name,
+                                      nbytes=self.nbytes,
+                                      now=time(),
+                                      resources=self.total_resources,
+                                      memory_limit=self.memory_limit,
+                                      info=metrics),
+                                 serializers=['msgpack'])
                 future = comm.read(deserializers=['msgpack'])
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)

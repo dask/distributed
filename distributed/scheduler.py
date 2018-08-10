@@ -1188,7 +1188,7 @@ class Scheduler(ServerNode):
 
     @gen.coroutine
     def heartbeat_worker(self, comm=None, address=None, resolve_address=True,
-                          now=None, resources=None, host_info=None, **info):
+                          now=None, resources=None, host_info=None, info=None):
             address = self.coerce_address(address, resolve_address)
             address = normalize_address(address)
             host = get_address_host(address)
@@ -1227,7 +1227,7 @@ class Scheduler(ServerNode):
     @gen.coroutine
     def add_worker(self, comm=None, address=None, keys=(), ncores=None,
                    name=None, resolve_address=True, nbytes=None, now=None,
-                   resources=None, host_info=None, memory_limit=None, **info):
+                   resources=None, host_info=None, memory_limit=None, info=None):
         """ Add a new worker to the cluster """
         with log_errors():
             address = self.coerce_address(address, resolve_address)
@@ -1262,7 +1262,7 @@ class Scheduler(ServerNode):
             response = self.heartbeat_worker(address=address,
                                              resolve_address=resolve_address,
                                              now=now, resources=resources,
-                                             host_info=host_info, **info)
+                                             host_info=host_info, info=info)
 
             # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot exist before this.
             self.check_idle_saturated(ws)
