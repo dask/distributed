@@ -180,6 +180,7 @@ class WorkerBase(ServerNode):
         self.service_ports = service_ports or {}
         self.service_specs = services or {}
         self.custom_metrics = custom_metrics or {}
+        self.sent_custom_metrics_names = set()
 
         handlers = {
             'gather': self.gather,
@@ -267,10 +268,14 @@ class WorkerBase(ServerNode):
                                     ready=len(self.ready),
                                     in_flight=len(self.in_flight_tasks))
                 core_metrics.update(self.monitor.recent())
-                core_metrics_names = set(core_metrics.keys()).union(['custom_metrics_names'])
+                core_metrics_names = set(core_metrics.keys()).union(['custom_metrics_names',
+                                                                     'stale_custom_metrics_names'])
                 custom_metrics_names = set(self.custom_metrics.keys())
                 custom_metrics_names_no_overlap = custom_metrics_names.difference(core_metrics_names)
+                self.sent_custom_metrics_names.update(custom_metrics_names_no_overlap)
+                stale_custom_metrics_names = self.sent_custom_metrics_names.difference(self.custom_metrics)
                 core_metrics['custom_metrics_names'] = list(custom_metrics_names_no_overlap)
+                core_metrics['stale_custom_metrics_names'] = list(stale_custom_metrics_names)
                 custom_metrics = {k: self.custom_metrics[k](self) for k in custom_metrics_names_no_overlap}
                 metrics = dict(core_metrics, **custom_metrics)
                 response = yield self.scheduler.heartbeat_worker(
@@ -279,7 +284,10 @@ class WorkerBase(ServerNode):
                     info=metrics)
                 end = time()
                 middle = (start + end) / 2
-                if response['status'] == 'missing':
+
+                if response['status'] == 'OK':
+                    self.sent_custom_metrics_names.difference_update(stale_custom_metrics_names)
+                elif response['status'] == 'missing':
                     yield self._register_with_scheduler()
                     return
                 self.scheduler_delay = response['time'] - middle

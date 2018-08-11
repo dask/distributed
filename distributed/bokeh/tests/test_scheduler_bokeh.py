@@ -379,6 +379,53 @@ def test_WorkerTable_custom_metrics_with_different_metrics_2(c, s, a, b):
 
 
 @gen_cluster(client=True)
+def test_WorkerTable_add_and_remove_custom_metrics(c, s, a, b):
+    def metric_port(worker):
+        return worker.port
+    a.custom_metrics['metric_a'] = metric_port
+    b.custom_metrics['metric_b'] = metric_port
+    while not all(['metric_a' in s.workers[a.address].info,
+                   'metric_b' in s.workers[b.address].info]):
+        yield gen.sleep(0.01)
+
+    assert s.workers[a.address].info['custom_metrics_names'] == ('metric_a',)
+    assert s.workers[b.address].info['custom_metrics_names'] == ('metric_b',)
+    wt = WorkerTable(s)
+    wt.update()
+    assert 'metric_a' in wt.source.data
+    assert 'metric_b' in wt.source.data
+
+    # Remove 'metric_b' from worker b
+    del b.custom_metrics['metric_b']
+
+    while 'metric_b' in s.workers[b.address].info:
+        yield gen.sleep(0.01)
+
+    assert s.workers[b.address].info['stale_custom_metrics_names'] == ('metric_b',)
+    assert s.workers[b.address].info['custom_metrics_names'] == ()
+
+    wt = WorkerTable(s)
+    wt.update()
+    assert 'metric_b' not in wt.source.data
+
+    while s.workers[b.address].info['stale_custom_metrics_names']:
+        yield gen.sleep(0.01)
+
+    # Add 'metric_b' to worker b
+    b.custom_metrics['metric_b'] = metric_port
+
+    while 'metric_b' not in s.workers[b.address].info:
+        yield gen.sleep(0.01)
+
+    assert s.workers[b.address].info['custom_metrics_names'] == ('metric_b',)
+    assert s.workers[b.address].info['stale_custom_metrics_names'] == ()
+
+    wt = WorkerTable(s)
+    wt.update()
+    assert 'metric_b' in wt.source.data
+
+
+@gen_cluster(client=True)
 def test_WorkerTable_custom_metrics_overlap_with_core_metrics(c, s, a, b):
     def metric(worker):
         return -999

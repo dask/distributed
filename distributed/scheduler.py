@@ -1209,6 +1209,10 @@ class Scheduler(ServerNode):
             if info:
                 ws.info.update(info)
 
+            stale_custom_metrics_names = ws.info.get('stale_custom_metrics_names', [])
+            for name in stale_custom_metrics_names:
+                del ws.info[name]
+
             if host_info:
                 self.host_info[host].update(host_info)
 
