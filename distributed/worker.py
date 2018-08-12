@@ -14,7 +14,7 @@ import warnings
 import weakref
 
 import dask
-from dask.core import istask
+from dask.core import (istask, split_task_annotations)
 from dask.compatibility import apply
 try:
     from cytoolz import pluck, partial, merge
@@ -866,16 +866,23 @@ def dumps_task(task):
     >>> dumps_task(1)  # doctest: +SKIP
     {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
     """
+
     if istask(task):
+        # Remove annotations from the task
+        task, annots = split_task_annotations(*task)
+
         if task[0] is apply and not any(map(_maybe_complex, task[2:])):
             d = {'function': dumps_function(task[1]),
-                 'args': warn_dumps(task[2])}
+                 'args': warn_dumps(task[2]),
+                 'annotations': warn_dumps(annots)}
             if len(task) == 4:
                 d['kwargs'] = warn_dumps(task[3])
             return d
         elif not any(map(_maybe_complex, task[1:])):
             return {'function': dumps_function(task[0]),
-                    'args': warn_dumps(task[1:])}
+                    'args': warn_dumps(task[1:]),
+                    'annotations': warn_dumps(annots)}
+
     return to_serialize(task)
 
 
