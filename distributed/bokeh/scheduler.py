@@ -934,10 +934,11 @@ class WorkerTable(DashboardComponent):
                       'memory_percent', 'num_fds', 'read_bytes', 'write_bytes',
                       'cpu_fraction']
         workers = self.scheduler.workers.values()
-        self.custom_metrics_names = sorted({
-            name for worker in workers
-            for name in worker.info.get('custom_metrics_names', [])})
-        self.names.extend(self.custom_metrics_names)
+        # Keep self.custom_info_names in the same order as one the workers (Python 3.6+ only)
+        self.custom_info_names = list({
+            name: None for worker in workers
+            for name in worker.info.get('custom_info_names', [])})
+        self.names.extend(self.custom_info_names)
 
         table_names = ['worker', 'ncores', 'cpu', 'memory', 'memory_limit',
                        'memory_percent', 'num_fds', 'read_bytes',
@@ -972,14 +973,14 @@ class WorkerTable(DashboardComponent):
             if name in formatters:
                 table.columns[table_names.index(name)].formatter = formatters[name]
 
-        custom_metrics_names = ['worker'] + self.custom_metrics_names
-        custom_metrics_columns = {name: TableColumn(field=name,
+        custom_info_names = ['worker'] + self.custom_info_names
+        custom_info_columns = {name: TableColumn(field=name,
                                                           title=name)
-                                        for name in custom_metrics_names}
+                                        for name in custom_info_names}
 
-        custom_metrics_table = DataTable(
-            source=self.source, columns=[custom_metrics_columns[n]
-                                         for n in custom_metrics_names],
+        custom_info_table = DataTable(
+            source=self.source, columns=[custom_info_columns[n]
+                                         for n in custom_info_names],
             reorderable=True, sortable=True, width=width, **dt_kwargs
         )
 
@@ -1032,8 +1033,8 @@ class WorkerTable(DashboardComponent):
             sizing_mode = {}
 
         components = [cpu_plot, mem_plot, table]
-        if self.custom_metrics_names:
-            components.append(custom_metrics_table)
+        if self.custom_info_names:
+            components.append(custom_info_table)
 
         self.root = column(*components, id='bk-worker-table', **sizing_mode)
 

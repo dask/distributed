@@ -89,7 +89,7 @@ class WorkerBase(ServerNode):
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
                  contact_address=None, memory_monitor_interval='200ms',
-                 extensions=None, custom_metrics=None, **kwargs):
+                 extensions=None, custom_info=None, **kwargs):
 
         self._setup_logging()
 
@@ -179,8 +179,8 @@ class WorkerBase(ServerNode):
         self.services = {}
         self.service_ports = service_ports or {}
         self.service_specs = services or {}
-        self.custom_metrics = custom_metrics or {}
-        self.sent_custom_metrics_names = set()
+        self.custom_info = custom_info or {}
+        self.sent_custom_info_names = set()
 
         handlers = {
             'gather': self.gather,
@@ -261,32 +261,35 @@ class WorkerBase(ServerNode):
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                core_metrics = dict(name=self.name,
+                core_info = dict(name=self.name,
                                     memory_limit=self.memory_limit,
                                     executing=len(self.executing),
                                     in_memory=len(self.data),
                                     ready=len(self.ready),
                                     in_flight=len(self.in_flight_tasks))
-                core_metrics.update(self.monitor.recent())
-                core_metrics_names = set(core_metrics.keys()).union(['custom_metrics_names',
-                                                                     'stale_custom_metrics_names'])
-                custom_metrics_names = set(self.custom_metrics.keys())
-                custom_metrics_names_no_overlap = custom_metrics_names.difference(core_metrics_names)
-                self.sent_custom_metrics_names.update(custom_metrics_names_no_overlap)
-                stale_custom_metrics_names = self.sent_custom_metrics_names.difference(self.custom_metrics)
-                core_metrics['custom_metrics_names'] = list(custom_metrics_names_no_overlap)
-                core_metrics['stale_custom_metrics_names'] = list(stale_custom_metrics_names)
-                custom_metrics = {k: self.custom_metrics[k](self) for k in custom_metrics_names_no_overlap}
-                metrics = dict(core_metrics, **custom_metrics)
+                core_info.update(self.monitor.recent())
+                core_info_names = set(core_info.keys()).union(['custom_info_names',
+                                                               'stale_custom_info_names'])
+                custom_info_names = set(self.custom_info.keys())
+                custom_info_names_not_overlapping = custom_info_names.difference(core_info_names)
+                custom_info_names_overlapping = custom_info_names.intersection(core_info_names)
+                self.sent_custom_info_names.update(custom_info_names_not_overlapping)
+                stale_custom_info_names = self.sent_custom_info_names.difference(self.custom_info)
+                core_info['stale_custom_info_names'] = list(stale_custom_info_names)
+                # Keep order consistent with self.custom_info for both core_info['custom_info_names'] and custom_info
+                core_info['custom_info_names'] = [name for name in self.custom_info
+                                                  if name in custom_info_names_not_overlapping]
+                custom_info = {name: self.custom_info[name](self) for name in core_info['custom_info_names']}
+                info = dict(core_info, **custom_info)
                 response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
                     now=time(),
-                    info=metrics)
+                    info=info)
                 end = time()
                 middle = (start + end) / 2
 
                 if response['status'] == 'OK':
-                    self.sent_custom_metrics_names.difference_update(stale_custom_metrics_names)
+                    self.sent_custom_info_names.difference_update(stale_custom_info_names)
                 elif response['status'] == 'missing':
                     yield self._register_with_scheduler()
                     return
@@ -316,7 +319,7 @@ class WorkerBase(ServerNode):
                 _start = time()
                 comm = yield connect(self.scheduler.address,
                                      connection_args=self.connection_args)
-                metrics = dict(services=self.service_ports,
+                info = dict(services=self.service_ports,
                                local_directory=self.local_dir,
                                pid=os.getpid(),
                                **self.monitor.recent())
@@ -330,7 +333,7 @@ class WorkerBase(ServerNode):
                                       now=time(),
                                       resources=self.total_resources,
                                       memory_limit=self.memory_limit,
-                                      info=metrics),
+                                      info=info),
                                  serializers=['msgpack'])
                 future = comm.read(deserializers=['msgpack'])
                 if self.death_timeout:
