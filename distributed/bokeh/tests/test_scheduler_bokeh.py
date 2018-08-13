@@ -297,13 +297,13 @@ def test_WorkerTable_custom_info(c, s, a, b):
         return worker.address
 
     info = {'info_port': info_port,
-               'info_address': info_address}
+            'info_address': info_address}
 
     for w in [a, b]:
         for name, func in info.items():
             w.custom_info[name] = func
 
-    while not all('custom_info_names' in s.workers[w.address].info
+    while not all(s.workers[w.address].info.get('custom_info_names')
                    for w in [a, b]):
         yield gen.sleep(0.01)
 
@@ -333,7 +333,7 @@ def test_WorkerTable_custom_info_with_different_info(c, s, a, b):
     a.custom_info['info_a'] = info_port
     b.custom_info['info_b'] = info_port
 
-    while not all('custom_info_names' in s.workers[w.address].info
+    while not all(s.workers[w.address].info.get('custom_info_names')
                   for w in [a, b]):
         yield gen.sleep(0.01)
 
@@ -363,7 +363,8 @@ def test_WorkerTable_custom_info_with_different_info_2(c, s, a, b):
 
     a.custom_info['info_a'] = info_port
 
-    while 'info_a' not in s.workers[a.address].info:
+    while ('info_a' not in s.workers[a.address].info and
+           'custom_metrics_names' not in s.workers[b.address].info):
         yield gen.sleep(0.01)
 
     assert s.workers[a.address].info['custom_info_names'] == ('info_a',)
@@ -384,10 +385,12 @@ def test_WorkerTable_custom_info_with_different_info_2(c, s, a, b):
 def test_WorkerTable_add_and_remove_custom_info(c, s, a, b):
     def info_port(worker):
         return worker.port
+
     a.custom_info['info_a'] = info_port
     b.custom_info['info_b'] = info_port
-    while not all(['info_a' in s.workers[a.address].info,
-                   'info_b' in s.workers[b.address].info]):
+
+    while not all(s.workers[w.address].info.get('custom_info_names')
+                  for w in [a, b]):
         yield gen.sleep(0.01)
 
     assert s.workers[a.address].info['custom_info_names'] == ('info_a',)
@@ -462,8 +465,8 @@ def test_WorkerTable_custom_info_columns_order(c, s, a, b):
         a.custom_info[name] = info
         b.custom_info[name] = info
 
-    while not all(name in s.workers[w.address].info
-                  for w in [a, b] for name in info_names):
+    while not all(s.workers[w.address].info.get('custom_info_names')
+                  for w in [a, b]):
         yield gen.sleep(0.01)
 
     # Check .info['custom_info_names'] ordering
