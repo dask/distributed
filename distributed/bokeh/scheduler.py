@@ -1154,21 +1154,21 @@ def status_doc(scheduler, extra, doc):
 
 def solo_task_stream_doc(scheduler, extra, doc):
     task_stream = TaskStream(scheduler, n_rectangles=1000,
-                             clear_interval='10s', sizing_mode='scale_both')
+                             clear_interval='10s', sizing_mode='stretch_both')
     task_stream.update()
     doc.add_periodic_callback(task_stream.update, 100)
     doc.add_root(task_stream.root)
 
 
 def solo_load_doc(scheduler, extra, doc):
-    current_load = CurrentLoad(scheduler, height=160)
+    current_load = CurrentLoad(scheduler, height=160, sizing_mode='stretch_both')
     current_load.update()
     doc.add_periodic_callback(current_load.update, 100)
     doc.add_root(current_load.root)
 
 
 def solo_progress_doc(scheduler, extra, doc):
-    task_progress = TaskProgress(scheduler, height=160, sizing_mode='scale_both')
+    task_progress = TaskProgress(scheduler, height=160, sizing_mode='stretch_both')
     task_progress.update()
     doc.add_periodic_callback(task_progress.update, 100)
     doc.add_root(task_progress.root)
