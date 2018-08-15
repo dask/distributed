@@ -152,6 +152,15 @@ class IndexJSON(RequestHandler):
             self.render('json-index.html', routes=r, title='Index of JSON routes', **self.extra)
 
 
+class SoloRoutes(RequestHandler):
+    def get(self):
+        self.write({'Task Stream': '/solo-task-stream',
+                    'Progress': '/solo-progress',
+                    'Task Graph': '/solo-graph',
+                    'Profile': '/solo-profile',
+                    'Resources': '/solo_load'})
+
+
 routes = [
         (r'info/main/workers.html', Workers),
         (r'info/worker/(.*).html', Worker),
@@ -163,6 +172,7 @@ routes = [
         (r'json/counts.json', CountsJSON),
         (r'json/identity.json', IdentityJSON),
         (r'json/index.html', IndexJSON),
+        (r'solo-routes.json', SoloRoutes),
 ]
 
 
