@@ -151,6 +151,7 @@ def test_duplicate_clients():
     assert any(all(word in str(msg.message).lower()
                    for word in ['9876', 'running', 'already in use'])
                for msg in info.list)
+    yield c1.close()
 
 
 def test_Client_kwargs(loop):
