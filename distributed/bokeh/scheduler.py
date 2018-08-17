@@ -1189,6 +1189,14 @@ def individual_profile_doc(scheduler, extra, doc):
         prof.trigger_update()
 
 
+def individual_workers_doc(scheduler, extra, doc):
+    with log_errors():
+        table = WorkerTable(scheduler)
+        table.update()
+        doc.add_periodic_callback(table.update, 500)
+        doc.add_root(table.root)
+
+
 def profile_doc(scheduler, extra, doc):
     with log_errors():
         doc.title = "Dask: Profile"
@@ -1241,6 +1249,7 @@ class BokehScheduler(BokehServer):
         individual_graph = Application(FunctionHandler(partial(individual_graph_doc, scheduler, self.extra)))
         individual_profile = Application(FunctionHandler(partial(individual_profile_doc, scheduler, self.extra)))
         individual_load = Application(FunctionHandler(partial(individual_load_doc, scheduler, self.extra)))
+        individual_workers = Application(FunctionHandler(partial(individual_workers_doc, scheduler, self.extra)))
 
         self.apps = {
             '/system': systemmonitor,
@@ -1259,6 +1268,7 @@ class BokehScheduler(BokehServer):
             '/individual-graph': individual_graph,
             '/individual-profile': individual_profile,
             '/individual-load': individual_load,
+            '/individual-workers': individual_workers,
         }
 
         self.loop = io_loop or scheduler.loop

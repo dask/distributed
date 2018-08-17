@@ -156,12 +156,10 @@ class IndividualPlots(RequestHandler):
     def get(self):
         bokeh_server = self.server.services['bokeh']
         result = {uri.strip('/').replace('-', ' ').title(): uri
-                  for uri in bokeh_server.apps}
-        self.write({'Task Stream': '/individual-task-stream',
-                    'Progress': '/individual-progress',
-                    'Task Graph': '/individual-graph',
-                    'Profile': '/individual-profile',
-                    'Resources': '/individual_load'})
+                  for uri in bokeh_server.apps
+                  if uri.lstrip('/').startswith('individual-')
+                  and not uri.endswith('.json')}
+        self.write(result)
 
 
 routes = [
