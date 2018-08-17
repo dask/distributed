@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 from functools import partial
-import numbers
 import traceback
 
 import dask
@@ -453,7 +452,12 @@ def _deserialize_bytes(header, frames):
 #########################
 
 
-basic = (numbers.Number, str)
+def _is_msgpack_serializable(v):
+    typ = type(v)
+    return (typ is str or typ is int or typ is float or
+            isinstance(v, dict) and all(map(_is_msgpack_serializable, v.values()))
+                                and all(typ is str for x in v.keys()) or
+            isinstance(v, (list, tuple)) and all(map(_is_msgpack_serializable, v)))
 
 
 def serialize_object_with_dict(est):
@@ -471,11 +475,7 @@ def serialize_object_with_dict(est):
         d = est.__dict__
 
     for k, v in d.items():
-        typ = type(v)
-        if (typ is str or typ is int or typ is float or
-                isinstance(v, dict) and all(typ is str or typ is int or typ is float for x in v.values())
-                                    and all(typ is str for x in v.keys()) or
-                isinstance(v, (list, tuple)) and all(typ is str or typ is int or typ is float for x in v)):
+        if _is_msgpack_serializable(v):
             header['simple'][k] = v
         else:
             if isinstance(v, dict):
@@ -509,7 +509,7 @@ def deserialize_object_with_dict(header, frames):
 dask_deserialize.register(dict)(deserialize_object_with_dict)
 
 
-def register_attributes(cls):
+def register_generic(cls):
     """ Register dask_(de)serialize to traverse through __dict__
 
     Normally when registering new classes for Dask's custom serialization you
@@ -533,8 +533,8 @@ def register_attributes(cls):
     Examples
     --------
     >>> import sklearn.base
-    >>> from distributed.protocol import register_attributes
-    >>> register_attributes(sklearn.base.BaseEstimator)
+    >>> from distributed.protocol import register_generic
+    >>> register_generic(sklearn.base.BaseEstimator)
 
     See Also
     --------

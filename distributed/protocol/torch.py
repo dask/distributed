@@ -1,5 +1,5 @@
 from .serialize import (serialize, dask_serialize, dask_deserialize,
-        register_attributes)
+        register_generic)
 
 import torch
 import numpy as np
@@ -53,4 +53,4 @@ def deserialize_torch_Parameters(header, frames):
     return torch.nn.Parameter(data=t, requires_grad=header['requires_grad'])
 
 
-register_attributes(torch.nn.Module)
+register_generic(torch.nn.Module)

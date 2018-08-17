@@ -173,13 +173,13 @@ Traverse attributes
 +++++++++++++++++++
 
 .. autosummary::
-   register_attributes
+   register_generic
 
 A common case is that your object just wraps Numpy arrays or other objects that
 Dask already serializes well.  For example, Scikit-Learn estimators mostly
 surround Numpy arrays with a bit of extra metadata.  In these cases you can
 register your class for custom Dask serialization with the
-``register_attributes``
+``register_generic``
 function.
 
 API
@@ -189,11 +189,10 @@ API
                  deserialize
                  dask_serialize
                  dask_deserialize
-                 register_attributes
+                 register_generic
 
-.. autofunction:: register_serialization
 .. autofunction:: serialize
 .. autofunction:: deserialize
 .. autofunction:: dask_serialize
 .. autofunction:: dask_deserialize
-.. autofunction:: register_attributes
+.. autofunction:: register_generic

@@ -8,7 +8,7 @@ from .serialize import (
     serialize, deserialize, nested_deserialize, Serialize, Serialized,
     to_serialize, register_serialization, dask_serialize, dask_deserialize,
     serialize_bytes, deserialize_bytes, serialize_bytelist,
-    register_serialization_family, register_attributes,
+    register_serialization_family, register_generic,
 )
 
 from ..utils import ignoring
@@ -54,7 +54,7 @@ def _register_arrow():
 @dask_deserialize.register_lazy("sklearn")
 def _register_sklearn():
     import sklearn.base
-    register_attributes(sklearn.base.BaseEstimator)
+    register_generic(sklearn.base.BaseEstimator)
 
 
 @dask_serialize.register_lazy("torch")
