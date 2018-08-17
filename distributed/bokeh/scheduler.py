@@ -1244,7 +1244,8 @@ class BokehScheduler(BokehServer):
         profile_server = Application(FunctionHandler(partial(profile_server_doc, scheduler, self.extra)))
         graph = Application(FunctionHandler(partial(graph_doc, scheduler, self.extra)))
 
-        individual_task_stream = Application(FunctionHandler(partial(individual_task_stream_doc, scheduler, self.extra)))
+        individual_task_stream = Application(FunctionHandler(partial(
+            individual_task_stream_doc, scheduler, self.extra)))
         individual_progress = Application(FunctionHandler(partial(individual_progress_doc, scheduler, self.extra)))
         individual_graph = Application(FunctionHandler(partial(individual_graph_doc, scheduler, self.extra)))
         individual_profile = Application(FunctionHandler(partial(individual_profile_doc, scheduler, self.extra)))

@@ -50,9 +50,8 @@ def test_simple(c, s, a, b):
         assert 'bokeh' in response.body.decode().lower()
 
     response = yield http_client.fetch('http://localhost:%d/individual-plots.json' % port)
-    response = json.loads(response.body)
+    response = json.loads(response.body.decode())
     assert response
-
 
 
 @gen_cluster(client=True, worker_kwargs=dict(services={'bokeh': BokehWorker}))
