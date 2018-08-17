@@ -1152,7 +1152,7 @@ def status_doc(scheduler, extra, doc):
         doc.template_variables.update(extra)
 
 
-def solo_task_stream_doc(scheduler, extra, doc):
+def individual_task_stream_doc(scheduler, extra, doc):
     task_stream = TaskStream(scheduler, n_rectangles=1000,
                              clear_interval='10s', sizing_mode='stretch_both')
     task_stream.update()
@@ -1160,21 +1160,21 @@ def solo_task_stream_doc(scheduler, extra, doc):
     doc.add_root(task_stream.root)
 
 
-def solo_load_doc(scheduler, extra, doc):
+def individual_load_doc(scheduler, extra, doc):
     current_load = CurrentLoad(scheduler, height=160, sizing_mode='stretch_both')
     current_load.update()
     doc.add_periodic_callback(current_load.update, 100)
     doc.add_root(current_load.root)
 
 
-def solo_progress_doc(scheduler, extra, doc):
+def individual_progress_doc(scheduler, extra, doc):
     task_progress = TaskProgress(scheduler, height=160, sizing_mode='stretch_both')
     task_progress.update()
     doc.add_periodic_callback(task_progress.update, 100)
     doc.add_root(task_progress.root)
 
 
-def solo_graph_doc(scheduler, extra, doc):
+def individual_graph_doc(scheduler, extra, doc):
     with log_errors():
         graph = GraphPlot(scheduler, sizing_mode='stretch_both')
         graph.update()
@@ -1182,7 +1182,7 @@ def solo_graph_doc(scheduler, extra, doc):
         doc.add_root(graph.root)
 
 
-def solo_profile_doc(scheduler, extra, doc):
+def individual_profile_doc(scheduler, extra, doc):
     with log_errors():
         prof = ProfileTimePlot(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
@@ -1236,11 +1236,11 @@ class BokehScheduler(BokehServer):
         profile_server = Application(FunctionHandler(partial(profile_server_doc, scheduler, self.extra)))
         graph = Application(FunctionHandler(partial(graph_doc, scheduler, self.extra)))
 
-        solo_task_stream = Application(FunctionHandler(partial(solo_task_stream_doc, scheduler, self.extra)))
-        solo_progress = Application(FunctionHandler(partial(solo_progress_doc, scheduler, self.extra)))
-        solo_graph = Application(FunctionHandler(partial(solo_graph_doc, scheduler, self.extra)))
-        solo_profile = Application(FunctionHandler(partial(solo_profile_doc, scheduler, self.extra)))
-        solo_load = Application(FunctionHandler(partial(solo_load_doc, scheduler, self.extra)))
+        individual_task_stream = Application(FunctionHandler(partial(individual_task_stream_doc, scheduler, self.extra)))
+        individual_progress = Application(FunctionHandler(partial(individual_progress_doc, scheduler, self.extra)))
+        individual_graph = Application(FunctionHandler(partial(individual_graph_doc, scheduler, self.extra)))
+        individual_profile = Application(FunctionHandler(partial(individual_profile_doc, scheduler, self.extra)))
+        individual_load = Application(FunctionHandler(partial(individual_load_doc, scheduler, self.extra)))
 
         self.apps = {
             '/system': systemmonitor,
@@ -1254,11 +1254,11 @@ class BokehScheduler(BokehServer):
             '/profile-server': profile_server,
             '/graph': graph,
 
-            '/solo-task-stream': solo_task_stream,
-            '/solo-progress': solo_progress,
-            '/solo-graph': solo_graph,
-            '/solo-profile': solo_profile,
-            '/solo-load': solo_load,
+            '/individual-task-stream': individual_task_stream,
+            '/individual-progress': individual_progress,
+            '/individual-graph': individual_graph,
+            '/individual-profile': individual_profile,
+            '/individual-load': individual_load,
         }
 
         self.loop = io_loop or scheduler.loop

@@ -152,13 +152,16 @@ class IndexJSON(RequestHandler):
             self.render('json-index.html', routes=r, title='Index of JSON routes', **self.extra)
 
 
-class SoloRoutes(RequestHandler):
+class IndividualPlots(RequestHandler):
     def get(self):
-        self.write({'Task Stream': '/solo-task-stream',
-                    'Progress': '/solo-progress',
-                    'Task Graph': '/solo-graph',
-                    'Profile': '/solo-profile',
-                    'Resources': '/solo_load'})
+        bokeh_server = self.server.services['bokeh']
+        result = {uri.strip('/').replace('-', ' ').title(): uri
+                  for uri in bokeh_server.apps}
+        self.write({'Task Stream': '/individual-task-stream',
+                    'Progress': '/individual-progress',
+                    'Task Graph': '/individual-graph',
+                    'Profile': '/individual-profile',
+                    'Resources': '/individual_load'})
 
 
 routes = [
@@ -172,7 +175,7 @@ routes = [
         (r'json/counts.json', CountsJSON),
         (r'json/identity.json', IdentityJSON),
         (r'json/index.html', IndexJSON),
-        (r'solo-routes.json', SoloRoutes),
+        (r'individual-plots.json', IndividualPlots),
 ]
 
 
