@@ -242,13 +242,19 @@ class WorkerState(object):
         return self.address
 
     def identity(self):
-        return {'type': 'Worker',
-                'id': self.name,
-                'ncores': self.ncores,
-                'memory_limit': self.memory_limit,
-                'last_seen': self.last_seen,
-                'services': self.services,
-                'metrics': self.metrics}
+        return {
+            'type': 'Worker',
+            'id': self.name,
+            'host': self.host,
+            'resources': self.resources,
+            'local_directory': self.local_directory,
+            'name': self.name,
+            'ncores': self.ncores,
+            'memory_limit': self.memory_limit,
+            'last_seen': self.last_seen,
+            'services': self.services,
+            'metrics': self.metrics
+        }
 
 
 class TaskState(object):
