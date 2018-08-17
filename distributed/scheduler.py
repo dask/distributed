@@ -195,15 +195,19 @@ class WorkerState(object):
         'address',
         'has_what',
         'info',
+        'local_directory',
         'memory_limit',
+        'metrics',
         'name',
         'nbytes',
         'ncores',
         'occupancy',
+        'pid',
         'processing',
         'resources',
         'time_delay',
         'used_resources',
+        'services',
         'status',
         'last_seen',
         'actors',
@@ -217,17 +221,14 @@ class WorkerState(object):
         self.nbytes = 0
         self.ncores = ncores
         self.occupancy = 0
+        self.pid = 0
         self.processing = dict()
         self.resources = {}
         self.used_resources = {}
         self.last_seen = 0
+        self.services = {}
         self.actors = set()
-
-        self.info = {'name': name,
-                     'memory_limit': memory_limit,
-                     'host': self.host,
-                     'resources': self.resources,
-                     'ncores': self.ncores}  # for backwards compatibility
+        self.metrics = {}
 
     @property
     def host(self):
@@ -239,6 +240,15 @@ class WorkerState(object):
 
     def __str__(self):
         return self.address
+
+    def identity(self):
+        return {'type': 'Worker',
+                'id': self.name,
+                'ncores': self.ncores,
+                'memory_limit': self.memory_limit,
+                'last_seen': self.last_seen,
+                'services': self.services,
+                'metrics': self.metrics}
 
 
 class TaskState(object):
@@ -855,7 +865,7 @@ class Scheduler(ServerNode):
                 ('worker_resources', 'resources', None),
                 ('used_resources', 'used_resources', None),
                 ('occupancy', 'occupancy', None),
-                ('worker_info', 'info', None),
+                ('worker_info', 'metrics', None),
                 ('processing', 'processing', _legacy_task_key_dict),
                 ('has_what', 'has_what', _legacy_task_key_set)]:
             func = operator.attrgetter(new_attr)
@@ -995,7 +1005,8 @@ class Scheduler(ServerNode):
              'id': str(self.id),
              'address': self.address,
              'services': {key: v.port for (key, v) in self.services.items()},
-             'workers': dict(self.worker_info)}
+             'workers': {worker.address: worker.identity()
+                         for worker in self.workers.values()}}
         return d
 
     def get_worker_service_addr(self, worker, service_name):
@@ -1004,11 +1015,11 @@ class Scheduler(ServerNode):
         Returns None if the service doesn't exist.
         """
         ws = self.workers[worker]
-        port = ws.info['services'].get(service_name)
+        port = ws.services.get(service_name)
         if port is None:
             return None
         else:
-            return ws.info['host'], port
+            return ws.host, port
 
     def start_services(self, listen_ip):
         for k, v in self.service_specs.items():
@@ -1188,14 +1199,14 @@ class Scheduler(ServerNode):
 
     @gen.coroutine
     def heartbeat_worker(self, comm=None, address=None, resolve_address=True,
-                          now=None, resources=None, host_info=None, info=None):
+                          now=None, resources=None, host_info=None, metrics=None):
             address = self.coerce_address(address, resolve_address)
             address = normalize_address(address)
             host = get_address_host(address)
 
             local_now = time()
             now = now or time()
-            info = info or {}
+            metrics = metrics or {}
             host_info = host_info or {}
 
             self.host_info[host]['last-seen'] = local_now
@@ -1206,12 +1217,8 @@ class Scheduler(ServerNode):
 
             ws.last_seen = time()
 
-            if info:
-                ws.info.update(info)
-
-            stale_custom_info_names = ws.info.get('stale_custom_info_names', [])
-            for name in stale_custom_info_names:
-                del ws.info[name]
+            if metrics:
+                ws.metrics = metrics
 
             if host_info:
                 self.host_info[host].update(host_info)
@@ -1222,7 +1229,7 @@ class Scheduler(ServerNode):
             if resources:
                 self.add_resources(worker=address, resources=resources)
 
-            self.log_event(address, merge({'action': 'heartbeat'}, info))
+            self.log_event(address, merge({'action': 'heartbeat'}, metrics))
 
             return {'status': 'OK',
                     'time': time(),
@@ -1231,7 +1238,8 @@ class Scheduler(ServerNode):
     @gen.coroutine
     def add_worker(self, comm=None, address=None, keys=(), ncores=None,
                    name=None, resolve_address=True, nbytes=None, now=None,
-                   resources=None, host_info=None, memory_limit=None, info=None):
+                   resources=None, host_info=None, memory_limit=None,
+                   metrics=None, pid=0, services=None, local_directory=None):
         """ Add a new worker to the cluster """
         with log_errors():
             address = self.coerce_address(address, resolve_address)
@@ -1262,11 +1270,15 @@ class Scheduler(ServerNode):
             self.total_ncores += ncores
             self.aliases[name] = address
             ws.name = name
+            ws.pid = pid
+            ws.services = services
+            ws.local_directory = local_directory
 
             response = self.heartbeat_worker(address=address,
                                              resolve_address=resolve_address,
                                              now=now, resources=resources,
-                                             host_info=host_info, info=info)
+                                             host_info=host_info,
+                                             metrics=metrics)
 
             # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot exist before this.
             self.check_idle_saturated(ws)
@@ -2730,7 +2742,7 @@ class Scheduler(ServerNode):
                 else:
                     raise gen.Return([])
 
-            worker_keys = {ws.address: ws.info for ws in workers}
+            worker_keys = {ws.address: ws.identity() for ws in workers}
             if close_workers and worker_keys:
                 yield [self.close_worker(worker=w, safe=True)
                        for w in worker_keys]

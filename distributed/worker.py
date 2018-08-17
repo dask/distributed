@@ -17,9 +17,9 @@ import dask
 from dask.core import istask
 from dask.compatibility import apply
 try:
-    from cytoolz import pluck, partial
+    from cytoolz import pluck, partial, merge
 except ImportError:
-    from toolz import pluck, partial
+    from toolz import pluck, partial, merge
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -89,7 +89,7 @@ class WorkerBase(ServerNode):
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
                  contact_address=None, memory_monitor_interval='200ms',
-                 extensions=None, custom_info=None, **kwargs):
+                 extensions=None, metrics=None, **kwargs):
 
         self._setup_logging()
 
@@ -179,8 +179,7 @@ class WorkerBase(ServerNode):
         self.services = {}
         self.service_ports = service_ports or {}
         self.service_specs = services or {}
-        self.custom_info = custom_info or {}
-        self.sent_custom_info_names = set()
+        self.metrics = metrics or {}
 
         handlers = {
             'gather': self.gather,
@@ -261,36 +260,15 @@ class WorkerBase(ServerNode):
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                core_info = dict(name=self.name,
-                                    memory_limit=self.memory_limit,
-                                    executing=len(self.executing),
-                                    in_memory=len(self.data),
-                                    ready=len(self.ready),
-                                    in_flight=len(self.in_flight_tasks))
-                core_info.update(self.monitor.recent())
-                core_info_names = set(core_info.keys()).union(['custom_info_names',
-                                                               'stale_custom_info_names'])
-                custom_info_names = set(self.custom_info.keys())
-                custom_info_names_not_overlapping = custom_info_names.difference(core_info_names)
-                custom_info_names_overlapping = custom_info_names.intersection(core_info_names)
-                self.sent_custom_info_names.update(custom_info_names_not_overlapping)
-                stale_custom_info_names = self.sent_custom_info_names.difference(self.custom_info)
-                core_info['stale_custom_info_names'] = list(stale_custom_info_names)
-                # Keep order consistent with self.custom_info for both core_info['custom_info_names'] and custom_info
-                core_info['custom_info_names'] = [name for name in self.custom_info
-                                                  if name in custom_info_names_not_overlapping]
-                custom_info = {name: self.custom_info[name](self) for name in core_info['custom_info_names']}
-                info = dict(core_info, **custom_info)
                 response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
                     now=time(),
-                    info=info)
+                    metrics=self.get_metrics()
+                )
                 end = time()
                 middle = (start + end) / 2
 
-                if response['status'] == 'OK':
-                    self.sent_custom_info_names.difference_update(stale_custom_info_names)
-                elif response['status'] == 'missing':
+                if response['status'] == 'missing':
                     yield self._register_with_scheduler()
                     return
                 self.scheduler_delay = response['time'] - middle
@@ -301,6 +279,15 @@ class WorkerBase(ServerNode):
                 self.heartbeat_active = False
         else:
             logger.debug("Heartbeat skipped: channel busy")
+
+    def get_metrics(self):
+        core = dict(executing=len(self.executing),
+                    in_memory=len(self.data),
+                    ready=len(self.ready),
+                    in_flight=len(self.in_flight_tasks))
+        custom = {k: metric(self) for k, metric in self.metrics.items()}
+
+        return merge(core, custom, self.monitor.recent())
 
     @gen.coroutine
     def _register_with_scheduler(self):
@@ -319,10 +306,6 @@ class WorkerBase(ServerNode):
                 _start = time()
                 comm = yield connect(self.scheduler.address,
                                      connection_args=self.connection_args)
-                info = dict(services=self.service_ports,
-                               local_directory=self.local_dir,
-                               pid=os.getpid(),
-                               **self.monitor.recent())
                 yield comm.write(dict(op='register-worker',
                                       reply=False,
                                       address=self.contact_address,
@@ -333,7 +316,10 @@ class WorkerBase(ServerNode):
                                       now=time(),
                                       resources=self.total_resources,
                                       memory_limit=self.memory_limit,
-                                      info=info),
+                                      local_directory=self.local_dir,
+                                      services=self.service_ports,
+                                      pid=os.getpid(),
+                                      metrics=self.get_metrics()),
                                  serializers=['msgpack'])
                 future = comm.read(deserializers=['msgpack'])
                 if self.death_timeout:

@@ -328,13 +328,13 @@ class CurrentLoad(DashboardComponent):
                 else:
                     processing_color.append('blue')
 
-            nbytes = [ws.info['memory'] for ws in workers]
+            nbytes = [ws.metrics['memory'] for ws in workers]
             nbytes_text = [format_bytes(nb) for nb in nbytes]
             nbytes_color = []
             max_limit = 0
             for ws, nb in zip(workers, nbytes):
                 try:
-                    limit = self.scheduler.worker_info[ws.address]['memory_limit']
+                    limit = self.scheduler.workers[ws.address].memory_limit
                 except KeyError:
                     limit = 16e9
                 if limit > max_limit:
@@ -927,6 +927,7 @@ class WorkerTable(DashboardComponent):
     This is two plots, a text-based table for each host and a thin horizontal
     plot laying out hosts by their current memory use.
     """
+    excluded_names = {'executing', 'in_flight', 'in_memory', 'ready', 'time'}
 
     def __init__(self, scheduler, width=800, **kwargs):
         self.scheduler = scheduler
@@ -935,10 +936,9 @@ class WorkerTable(DashboardComponent):
                       'cpu_fraction']
         workers = self.scheduler.workers.values()
         # Keep self.custom_info_names in the same order as one the workers (Python 3.6+ only)
-        self.custom_info_names = list({
-            name: None for worker in workers
-            for name in worker.info.get('custom_info_names', [])})
-        self.names.extend(self.custom_info_names)
+        self.extra_names = sorted({m for ws in workers
+                                   for m in ws.metrics
+                                   if m not in self.names} - self.excluded_names)
 
         table_names = ['worker', 'ncores', 'cpu', 'memory', 'memory_limit',
                        'memory_percent', 'num_fds', 'read_bytes',
@@ -973,14 +973,14 @@ class WorkerTable(DashboardComponent):
             if name in formatters:
                 table.columns[table_names.index(name)].formatter = formatters[name]
 
-        custom_info_names = ['worker'] + self.custom_info_names
-        custom_info_columns = {name: TableColumn(field=name,
-                                                          title=name)
-                                        for name in custom_info_names}
+        extra_names = ['worker'] + self.extra_names
+        extra_columns = {name: TableColumn(field=name,
+                                           title=name.replace('_percent', '%'))
+                         for name in extra_names}
 
-        custom_info_table = DataTable(
-            source=self.source, columns=[custom_info_columns[n]
-                                         for n in custom_info_names],
+        extra_table = DataTable(
+            source=self.source,
+            columns=[extra_columns[n] for n in extra_names],
             reorderable=True, sortable=True, width=width, **dt_kwargs
         )
 
@@ -1033,23 +1033,24 @@ class WorkerTable(DashboardComponent):
             sizing_mode = {}
 
         components = [cpu_plot, mem_plot, table]
-        if self.custom_info_names:
-            components.append(custom_info_table)
+        if self.extra_names:
+            components.append(extra_table)
 
         self.root = column(*components, id='bk-worker-table', **sizing_mode)
 
     def update(self):
-        data = {name: [] for name in self.names}
-        for worker, info in sorted(self.scheduler.worker_info.items()):
-            for name in self.names:
-                data[name].append(info.get(name, None))
-            data['worker'][-1] = worker
-            if info['memory_limit']:
-                data['memory_percent'][-1] = info['memory'] / info['memory_limit']
+        data = {name: [] for name in self.names + self.extra_names}
+        for addr, ws in sorted(self.scheduler.workers.items()):
+            for name in self.names + self.extra_names:
+                data[name].append(ws.metrics.get(name, None))
+            data['worker'][-1] = ws.address
+            if ws.memory_limit:
+                data['memory_percent'][-1] = ws.metrics['memory'] / ws.memory_limit
             else:
                 data['memory_percent'][-1] = ''
-            data['cpu'][-1] = info['cpu'] / 100.0
-            data['cpu_fraction'][-1] = info['cpu'] / 100.0 / info['ncores']
+            data['memory_limit'][-1] = ws.memory_limit
+            data['cpu'][-1] = ws.metrics['cpu'] / 100.0
+            data['cpu_fraction'][-1] = ws.metrics['cpu'] / 100.0 / ws.ncores
 
         self.source.data.update(data)
 
