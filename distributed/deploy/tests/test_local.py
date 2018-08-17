@@ -142,6 +142,17 @@ def test_Client_solo(loop):
     assert c.cluster.status == 'closed'
 
 
+@gen_test()
+def test_duplicate_clients():
+    c1 = yield Client(processes=False, silence_logs=False, diagnostics_port=9876)
+    with pytest.warns(Exception) as info:
+        yield Client(processes=False, silence_logs=False, diagnostics_port=9876)
+
+    assert any(all(word in str(msg.message).lower()
+                   for word in ['9876', 'running', 'already in use'])
+               for msg in info.list)
+
+
 def test_Client_kwargs(loop):
     with Client(loop=loop, processes=False, n_workers=2, silence_logs=False) as c:
         assert len(c.cluster.workers) == 2
