@@ -118,7 +118,7 @@ class LocalCluster(Cluster):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
 
-        if diagnostics_port not in (False, None):
+        if diagnostics_port is not False and diagnostics_port is not None:
             try:
                 from distributed.bokeh.scheduler import BokehScheduler
                 from distributed.bokeh.worker import BokehWorker
