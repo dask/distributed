@@ -1,3 +1,6 @@
+import pytest
+pytest.importorskip('sklearn')
+
 import sklearn.linear_model
 
 from distributed.protocol import serialize, deserialize
