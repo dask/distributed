@@ -1376,7 +1376,7 @@ class Scheduler(ServerNode):
                             stack.append(dep)
 
             for d in done:
-                del tasks[d]
+                tasks.pop(d, None)
                 del dependencies[d]
 
         # Get or create task states
