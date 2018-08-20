@@ -287,7 +287,7 @@ class WorkerBase(ServerNode):
                     in_flight=len(self.in_flight_tasks))
         custom = {k: metric(self) for k, metric in self.metrics.items()}
 
-        return merge(core, custom, self.monitor.recent())
+        return merge(custom, self.monitor.recent(), core)
 
     @gen.coroutine
     def _register_with_scheduler(self):
