@@ -935,7 +935,6 @@ class WorkerTable(DashboardComponent):
                       'memory_percent', 'num_fds', 'read_bytes', 'write_bytes',
                       'cpu_fraction']
         workers = self.scheduler.workers.values()
-        # Keep self.custom_info_names in the same order as one the workers (Python 3.6+ only)
         self.extra_names = sorted({m for ws in workers
                                    for m in ws.metrics
                                    if m not in self.names} - self.excluded_names)
