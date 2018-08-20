@@ -8,6 +8,7 @@ from tornado import gen
 
 from distributed import Worker, Client
 from distributed.client import wait
+from distributed.compatibility import WINDOWS
 from distributed.utils import tokey
 from distributed.utils_test import (inc, gen_cluster, cluster,
                                     slowinc, slowadd)
@@ -275,6 +276,7 @@ def test_full_collections(c, s, a, b):
     assert not b.log
 
 
+@pytest.mark.skipif(WINDOWS, reason='unknown')
 @pytest.mark.parametrize('optimize_graph', [
     pytest.mark.xfail(True, reason="don't track resources through optimization"),
     False
