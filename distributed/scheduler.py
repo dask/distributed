@@ -1368,8 +1368,7 @@ class Scheduler(ServerNode):
             done = set(already_in_memory)
             while stack:  # remove unnecessary dependencies
                 key = stack.pop()
-                ts = self.tasks[key]
-                for dep in dependencies[key]:
+                for dep in dependencies.get(key, []):
                     if all(d in done for d in dependents[dep]):
                         if dep in self.tasks:
                             done.add(dep)
