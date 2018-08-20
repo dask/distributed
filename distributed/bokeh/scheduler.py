@@ -1189,6 +1189,13 @@ def individual_profile_doc(scheduler, extra, doc):
         prof.trigger_update()
 
 
+def individual_profile_server_doc(scheduler, extra, doc):
+    with log_errors():
+        prof = ProfileServer(scheduler, sizing_mode='scale_width', doc=doc)
+        doc.add_root(prof.root)
+        prof.trigger_update()
+
+
 def individual_workers_doc(scheduler, extra, doc):
     with log_errors():
         table = WorkerTable(scheduler)
@@ -1249,6 +1256,8 @@ class BokehScheduler(BokehServer):
         individual_progress = Application(FunctionHandler(partial(individual_progress_doc, scheduler, self.extra)))
         individual_graph = Application(FunctionHandler(partial(individual_graph_doc, scheduler, self.extra)))
         individual_profile = Application(FunctionHandler(partial(individual_profile_doc, scheduler, self.extra)))
+        individual_profile_server = Application(FunctionHandler(partial(
+            individual_profile_server_doc, scheduler, self.extra)))
         individual_load = Application(FunctionHandler(partial(individual_load_doc, scheduler, self.extra)))
         individual_workers = Application(FunctionHandler(partial(individual_workers_doc, scheduler, self.extra)))
 
@@ -1268,6 +1277,7 @@ class BokehScheduler(BokehServer):
             '/individual-progress': individual_progress,
             '/individual-graph': individual_graph,
             '/individual-profile': individual_profile,
+            '/individual-profile-server': individual_profile_server,
             '/individual-load': individual_load,
             '/individual-workers': individual_workers,
         }
