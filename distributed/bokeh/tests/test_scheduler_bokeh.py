@@ -330,8 +330,8 @@ def test_WorkerTable_different_metrics(c, s, a, b):
     a.metrics['info_a'] = info_port
     b.metrics['info_b'] = info_port
 
-    while not all(any('info' in k for k in s.workers[w.address].metrics)
-                  for w in [a, b]):
+    while not ('info_a' in s.workers[a.address].metrics and
+               'info_b' in s.workers[b.address].metrics):
         yield gen.sleep(0.01)
 
     assert s.workers[a.address].metrics['info_a'] == a.port
@@ -379,8 +379,8 @@ def test_WorkerTable_add_and_remove_metrics(c, s, a, b):
     a.metrics['info_a'] = info_port
     a.metrics['info_b'] = info_port
 
-    while not all(any('info' in k for k in s.workers[w.address].metrics)
-                  for w in [a, b]):
+    while not ('info_a' in s.workers[a.address].metrics and
+               'info_b' in s.workers[b.address].metrics):
         yield gen.sleep(0.01)
 
     assert s.workers[a.address].metrics['info_a'] == a.port
