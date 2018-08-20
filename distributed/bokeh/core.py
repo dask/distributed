@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from distutils.version import LooseVersion
 import os
+import warnings
 
 import bokeh
 from bokeh.server.server import Server
@@ -48,7 +49,8 @@ class BokehServer(object):
                                % port)
                     else:
                         msg = "Failed to start diagnostics server on port %d. " % port + str(exc)
-                    raise type(exc)(msg)
+                    warnings.warn('\n' + msg)
+                    port = 0
                 if i == 4:
                     raise
 
