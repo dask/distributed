@@ -427,6 +427,7 @@ def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
     assert s.workers[a.address].metrics['cpu'] != -999
     assert s.workers[a.address].metrics['metric'] == -999
 
+
 @gen_cluster(client=True)
 def test_GraphPlot(c, s, a, b):
     gp = GraphPlot(s)
