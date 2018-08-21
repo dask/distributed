@@ -1202,18 +1202,68 @@ def test_avoid_oversubscription(c, s, *workers):
 
 @gen_cluster(client=True)
 def test_startup_func(c, s, a, b):
+    #preload function to run
     def mystartup():
         import matplotlib
-        return None
 
+    def mystartup2():
+        import bokeh
+        return "Import done."
+
+    #Check that preload function has been run
     def test_import():
         import sys
         return 'matplotlib' in sys.modules.keys()
 
+    def test_import2():
+        import sys
+        return 'bokeh' in sys.modules.keys()
+
+    # Nothing has been run yet
+    assert len(s.init_functions) == 0
     result = yield c.run(test_import)
     assert list(result.values()) == [False] * 2
+    result = yield c.run(test_import2)
+    assert list(result.values()) == [False] * 2
 
-    yield c.run(mystartup)
+    # Start a worker and check that startup is not run
+    worker = Worker(s.address, loop=s.loop)
+    yield worker._start()
+    result = yield c.run(test_import, workers=[worker.address])
+    assert list(result.values()) == [False]
+    yield worker._close()
 
+    # Add a preload function
+    response = yield c.add_preload_function(mystartup)
+    assert len(response) == 2
+    assert len(s.init_functions) == 1
+
+    # Check it has been ran on existing worker
     result = yield c.run(test_import)
     assert list(result.values()) == [True] * 2
+
+    # Start a worker and check it is ran on it
+    worker = Worker(s.address, loop=s.loop)
+    yield worker._start()
+    result = yield c.run(test_import, workers=[worker.address])
+    assert list(result.values()) == [True]
+    yield worker._close()
+
+    # Register another preload function
+    response = yield c.add_preload_function(mystartup2)
+    assert len(response) == 2
+    assert len(s.init_functions) == 2
+
+    # Check it has been run
+    result = yield c.run(test_import2)
+    assert list(result.values()) == [True] * 2
+
+    # Start a worker and check it is ran on it
+    worker = Worker(s.address, loop=s.loop)
+    yield worker._start()
+    result = yield c.run(test_import, workers=[worker.address])
+    assert list(result.values()) == [True]
+    result = yield c.run(test_import2, workers=[worker.address])
+    assert list(result.values()) == [True]
+    yield worker._close()
+

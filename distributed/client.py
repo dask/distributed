@@ -3387,6 +3387,26 @@ class Client(Node):
         return self.sync(self.scheduler.get_task_stream, start=start,
                          stop=stop, count=count)
 
+    @gen.coroutine
+    def _add_preload_function(self, function):
+        response = yield self.scheduler.add_preload_function(function=dumps(function))
+        raise gen.Return(response)
+
+    def add_preload_function(self, function, asynchronous=None):
+        """
+        Add a preload function
+
+        This registers a function to be called by every currently connected
+        workers, and that will be also called by any added worker after that.
+        Multiple functions can be added by multiple calls.
+
+        Parameters
+        ----------
+        function: Function to register and run
+        """
+        return self.sync(self._add_preload_function, function,
+                         asynchronous=asynchronous)
+
 
 class Executor(Client):
     """ Deprecated: see Client """

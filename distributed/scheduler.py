@@ -50,6 +50,7 @@ from .lock import LockExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
+from .protocol.pickle import dumps, loads
 
 
 logger = logging.getLogger(__name__)
@@ -882,6 +883,7 @@ class Scheduler(ServerNode):
         self.plugins = []
         self.transition_log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
         self.log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
+        self.init_functions = []
 
         worker_handlers = {
             'task-finished': self.handle_task_finished,
@@ -939,6 +941,7 @@ class Scheduler(ServerNode):
             'heartbeat_worker': self.heartbeat_worker,
             'get_task_status': self.get_task_status,
             'get_task_stream': self.get_task_stream,
+            'add_preload_function': self.register_preload_function
         }
 
         self._transitions = {
@@ -1306,7 +1309,8 @@ class Scheduler(ServerNode):
 
             yield comm.write({'status': 'OK',
                               'time': time(),
-                              'heartbeat-interval': heartbeat_interval(len(self.workers))})
+                              'heartbeat-interval': heartbeat_interval(len(self.workers)),
+                              'init-functions': dumps(self.init_functions)})
             yield self.handle_worker(comm=comm, worker=address)
 
     def update_graph(self, client=None, tasks=None, keys=None,
@@ -3000,6 +3004,24 @@ class Scheduler(ServerNode):
         self.add_plugin(TaskStreamPlugin, idempotent=True)
         ts = [p for p in self.plugins if isinstance(p, TaskStreamPlugin)][0]
         return ts.collect(start=start, stop=stop, count=count)
+
+    @gen.coroutine
+    def register_preload_function(self, comm, function=None):
+        """ Registers a preload function, and call it on every worker """
+        if function is None:
+            raise gen.Return({})
+
+        self.init_functions.append(loads(function))
+
+        responses = yield self.broadcast(msg=dict(op='run',
+                                                  function=function))
+        results = {}
+        for key, resp in responses.items():
+            if resp['status'] == 'OK':
+                results[key] = resp['result']
+            elif resp['status'] == 'error':
+                six.reraise(*clean_exception(**resp))
+        raise gen.Return(results)
 
     #####################
     # State Transitions #

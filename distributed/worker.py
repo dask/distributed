@@ -326,6 +326,11 @@ class WorkerBase(ServerNode):
                 middle = (_start + _end) / 2
                 self.scheduler_delay = response['time'] - middle
                 self.status = 'running'
+
+                # Retrieve eventual init functions and run them
+                for init_function in pickle.loads(response['init-functions']):
+                    result = init_function()
+                    logger.info('Init function %s ran: output=%s' % (init_function, result))
                 break
             except EnvironmentError:
                 logger.info('Waiting to connect to: %26s', self.scheduler.address)
