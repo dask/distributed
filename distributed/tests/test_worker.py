@@ -1203,3 +1203,41 @@ def test_avoid_oversubscription(c, s, *workers):
 def test_custom_metrics(c, s, a, b):
     assert s.workers[a.address].metrics['my_port'] == a.port
     assert s.workers[b.address].metrics['my_port'] == b.port
+
+
+@gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 3,
+        config={'distributed.worker.connections.outgoing': 1,
+                'distributed.worker.connections.incoming': 1})
+def test_move_cancel_move(c, s, w1, w2, w3):
+    """ This test forces a worker dep transition from waiting to memory
+
+    In order to keep something in the waiting state and not immediately flip to
+    flight, we need to have enough other transfers active.  Hence the config
+    values above set to one and the xx/yy transfer happening in the background.
+
+    We also need to have another active transfer in the background for this
+    task, so we submit something, then cancel it, then quickly submit it again.
+
+    1.  cause x->y transfer to start
+    2.  cause xx->yy transfer to start
+    3.  cancel y, and resubmit, it gets bumped back to waiting state
+    4.  original x->y transfer comes in, bumps directly to memory
+    """
+    np = pytest.importorskip('numpy')
+    xx = c.submit(np.random.random, 10000000, workers=[w1.address], pure=False)
+    yield wait(xx)
+
+    x = c.submit(np.random.random, 10000000, workers=[w1.address], pure=False)
+    yield wait(x)
+    yield c.replicate(x, n=2, workers=[w1.address, w2.address])
+
+    y = c.submit(len, x, workers=[w3.address])
+    yy = c.submit(len, xx, workers=[w3.address])
+    while x.key not in w3.dep_state:
+        yield gen.sleep(0.001)
+    assert w3.dep_state[x.key] == 'flight'
+
+    yield y.cancel()
+    yield gen.sleep(0.01)
+    y = c.submit(len, x, workers=[w3.address])
+    yield wait(y)

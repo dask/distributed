@@ -655,7 +655,7 @@ class WorkerBase(ServerNode):
         if max_connections and comm and get_address_host(comm.peer_address) == get_address_host(self.address):
             max_connections = max_connections * 2
 
-        if max_connections is not False and self.outgoing_current_count > max_connections:
+        if max_connections is not False and self.outgoing_current_count >= max_connections:
             raise gen.Return({'status': 'busy'})
 
         self.outgoing_current_count += 1
