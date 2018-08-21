@@ -1201,7 +1201,7 @@ def test_avoid_oversubscription(c, s, *workers):
 
 
 @gen_cluster(client=True)
-def test_startup_func(c, s, a, b):
+def test_register_init_func(c, s, a, b):
     #preload function to run
     def mystartup():
         import matplotlib.bezier
