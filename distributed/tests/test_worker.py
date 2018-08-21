@@ -1203,8 +1203,8 @@ def test_avoid_oversubscription(c, s, *workers):
 @gen_cluster(client=True)
 def test_register_init_func(c, s, a, b):
     #preload function to run
-    def mystartup():
-        import matplotlib.bezier
+    def mystartup(dask_worker):
+        dask_worker.init_variable = 1
 
     def mystartup2():
         import os
@@ -1212,9 +1212,9 @@ def test_register_init_func(c, s, a, b):
         return "Env set."
 
     #Check that preload function has been run
-    def test_import():
-        import sys
-        return 'matplotlib.bezier' in sys.modules.keys()
+    def test_import(dask_worker):
+        return hasattr(dask_worker, 'init_variable')
+        #       and dask_worker.init_variable == 1
 
     def test_startup2():
         import os
@@ -1267,4 +1267,8 @@ def test_register_init_func(c, s, a, b):
     result = yield c.run(test_startup2, workers=[worker.address])
     assert list(result.values()) == [True]
     yield worker._close()
+
+    # Final exception test
+    with pytest.raises(ZeroDivisionError):
+       yield c.register_init_func(lambda: 1 / 0)
 

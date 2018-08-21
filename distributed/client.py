@@ -3390,12 +3390,7 @@ class Client(Node):
         return self.sync(self.scheduler.get_task_stream, start=start,
                          stop=stop, count=count)
 
-    @gen.coroutine
-    def _register_init_func(self, function):
-        response = yield self.scheduler.register_init_func(function=dumps(function))
-        raise gen.Return(response)
-
-    def register_init_func(self, function, asynchronous=None):
+    def register_init_func(self, function, *args, **kwargs):
         """
         Registers and run an initialization for every worker
 
@@ -3405,10 +3400,11 @@ class Client(Node):
 
         Parameters
         ----------
-        function: Function to register and run
+        function : callable(dask_worker: Worker) -> None
+            Function to register and run on all workers
         """
-        return self.sync(self._register_init_func, function,
-                         asynchronous=asynchronous)
+        return self.sync(self.scheduler.register_init_func, function= dumps(function),
+                         args=dumps(args), kwargs=dumps(kwargs))
 
 
 class Executor(Client):

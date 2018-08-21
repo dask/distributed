@@ -328,8 +328,12 @@ class WorkerBase(ServerNode):
                 self.status = 'running'
 
                 # Retrieve eventual init functions and run them
-                for init_function in pickle.loads(response['init-functions']):
-                    result = init_function()
+                for init_function_bytes in response['init-functions']:
+                    init_function = pickle.loads(init_function_bytes)
+                    if has_arg(init_function, 'dask_worker'):
+                        result = init_function(dask_worker=self)
+                    else:
+                        result = init_function()
                     logger.info('Init function %s ran: output=%s' % (init_function, result))
                 break
             except EnvironmentError:

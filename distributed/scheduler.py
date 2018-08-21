@@ -51,7 +51,6 @@ from .lock import LockExtension
 from .pubsub import PubSubSchedulerExtension
 from .stealing import WorkStealing
 from .variable import VariableExtension
-from .protocol.pickle import dumps, loads
 
 
 logger = logging.getLogger(__name__)
@@ -1312,7 +1311,7 @@ class Scheduler(ServerNode):
             yield comm.write({'status': 'OK',
                               'time': time(),
                               'heartbeat-interval': heartbeat_interval(len(self.workers)),
-                              'init-functions': dumps(self.init_functions)})
+                              'init-functions': self.init_functions})
             yield self.handle_worker(comm=comm, worker=address)
 
     def update_graph(self, client=None, tasks=None, keys=None,
@@ -3018,15 +3017,17 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_init_func(self, comm, function=None):
+    def register_init_func(self, comm, function=None, args=None, kwargs=None):
         """ Registers a preload function, and call it on every worker """
         if function is None:
             raise gen.Return({})
 
-        self.init_functions.append(loads(function))
+        self.init_functions.append(function)
 
         responses = yield self.broadcast(msg=dict(op='run',
-                                                  function=function))
+                                                  function=function,
+                                                  args=args,
+                                                  kwargs=kwargs))
         results = {}
         for key, resp in responses.items():
             if resp['status'] == 'OK':
