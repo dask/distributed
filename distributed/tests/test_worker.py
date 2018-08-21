@@ -1198,10 +1198,12 @@ def test_avoid_oversubscription(c, s, *workers):
     # Some other workers did some work
     assert len([w for w in workers if len(w.outgoing_transfer_log) > 0]) >= 3
 
+
 @gen_cluster(client=True, worker_kwargs={'metrics': {'my_port': lambda w: w.port}})
 def test_custom_metrics(c, s, a, b):
     assert s.workers[a.address].metrics['my_port'] == a.port
     assert s.workers[b.address].metrics['my_port'] == b.port
+
 
 @gen_cluster(client=True)
 def test_register_init_func(c, s, a, b):
@@ -1273,4 +1275,4 @@ def test_register_init_func(c, s, a, b):
 
     # Final exception test
     with pytest.raises(ZeroDivisionError):
-       yield c.register_init_func(lambda: 1 / 0)
+        yield c.register_init_func(lambda: 1 / 0)

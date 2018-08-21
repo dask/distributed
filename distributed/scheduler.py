@@ -3050,13 +3050,7 @@ class Scheduler(ServerNode):
                                                   function=function,
                                                   args=args,
                                                   kwargs=kwargs))
-        results = {}
-        for key, resp in responses.items():
-            if resp['status'] == 'OK':
-                results[key] = resp['result']
-            elif resp['status'] == 'error':
-                six.reraise(*clean_exception(**resp))
-        raise gen.Return(results)
+        raise gen.Return(responses)
 
     #####################
     # State Transitions #
