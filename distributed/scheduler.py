@@ -12,6 +12,7 @@ import os
 import pickle
 import random
 import six
+import warnings
 
 import psutil
 import sortedcontainers
@@ -1036,8 +1037,9 @@ class Scheduler(ServerNode):
                     service.listen((listen_ip, port))
                 self.services[k] = service
             except Exception as e:
-                logger.info("Could not launch service: %r", (k, port),
-                            exc_info=True)
+                warnings.warn("\nCould not launch service '%s' on port %d. " % (k, port) +
+                              "Got the following message:\n\n" + str(e),
+                              stacklevel=3)
 
     def stop_services(self):
         for service in self.services.values():
@@ -1371,15 +1373,19 @@ class Scheduler(ServerNode):
             while stack:  # remove unnecessary dependencies
                 key = stack.pop()
                 ts = self.tasks[key]
-                for dep in dependencies[key]:
+                try:
+                    deps = dependencies[key]
+                except KeyError:
+                    deps = self.dependencies[key]
+                for dep in deps:
                     if all(d in done for d in dependents[dep]):
                         if dep in self.tasks:
                             done.add(dep)
                             stack.append(dep)
 
             for d in done:
-                del tasks[d]
-                del dependencies[d]
+                tasks.pop(d, None)
+                dependencies.pop(d, None)
 
         # Get or create task states
         stack = list(keys)
@@ -2806,7 +2812,13 @@ class Scheduler(ServerNode):
     def report_on_key(self, key=None, ts=None, client=None):
         assert (key is None) + (ts is None) == 1, (key, ts)
         if ts is None:
-            ts = self.tasks[key]
+            try:
+                ts = self.tasks[key]
+            except KeyError:
+                self.report({'op': 'cancelled-key',
+                             'key': key},
+                            client=client)
+                return
         else:
             key = ts.key
         if ts.state == 'forgotten':

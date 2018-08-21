@@ -11,6 +11,7 @@ import itertools
 import logging
 import logging.config
 import os
+import psutil
 import re
 import shutil
 import signal
@@ -39,10 +40,12 @@ from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
 from .client import default_client, _global_clients
-from .compatibility import PY3, Empty, WINDOWS
+from .compatibility import PY3, Empty, WINDOWS, PY2
+from .comm.utils import offload
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
+from .process import _cleanup_dangling
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (ignoring, log_errors, mp_context, get_ip, get_ipv6,
@@ -61,6 +64,9 @@ logger = logging.getLogger(__name__)
 logging_levels = {name: logger.level for name, logger in
                   logging.root.manager.loggerDict.items()
                   if isinstance(logger, logging.Logger)}
+
+
+offload(lambda: None).result()  # create thread during import
 
 
 @pytest.fixture(scope='session')
@@ -125,6 +131,18 @@ def loop():
         else:
             is_stopped.wait()
     del _global_workers[:]
+
+    start = time()
+    while set(_global_clients):
+        sleep(0.1)
+        assert time() < start + 5
+
+    _cleanup_dangling()
+
+    if PY2:  # no forkserver, so no extra procs
+        for child in psutil.Process().children(recursive=True):
+            child.terminate()
+
     _global_clients.clear()
 
 
@@ -619,7 +637,10 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
             else:
                 client.close()
 
-    assert not ws
+    start = time()
+    while list(ws):
+        sleep(0.01)
+        assert time() < start + 1, 'Workers still around after one second'
 
 
 @gen.coroutine
@@ -835,12 +856,13 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                         break
                     else:
                         sleep(0.01)
-                    if time() > start + 2:
+                    if time() > start + 5:
                         from distributed import profile
                         tid = bad[0]
                         thread = threading._active[tid]
                         call_stacks = profile.call_stack(sys._current_frames()[tid])
                         assert False, (thread, call_stacks)
+            _cleanup_dangling()
             return result
 
         return test_func
@@ -985,7 +1007,7 @@ def assert_can_connect(addr, timeout=None, connection_args=None):
     within the given *timeout*.
     """
     if timeout is None:
-        timeout = 0.2
+        timeout = 0.5
     comm = yield connect(addr, timeout=timeout,
                          connection_args=connection_args)
     comm.abort()
@@ -998,7 +1020,7 @@ def assert_cannot_connect(addr, timeout=None, connection_args=None, exception_cl
     within the given *timeout*.
     """
     if timeout is None:
-        timeout = 0.2
+        timeout = 0.5
     with pytest.raises(exception_class):
         comm = yield connect(addr, timeout=timeout,
                              connection_args=connection_args)

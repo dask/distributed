@@ -2049,7 +2049,6 @@ def test_waiting_data(c, s, a, b):
 @gen_cluster()
 def test_multi_client(s, a, b):
     c = yield Client((s.ip, s.port), asynchronous=True)
-
     f = yield Client((s.ip, s.port), asynchronous=True)
 
     assert set(s.client_comms) == {c.id, f.id}
@@ -2080,7 +2079,10 @@ def test_multi_client(s, a, b):
 
     yield f.close()
 
-    assert not s.tasks
+    start = time()
+    while s.tasks:
+        yield gen.sleep(0.01)
+        assert time() < start + 2, s.tasks
 
 
 def long_running_client_connection(address):
@@ -3858,12 +3860,12 @@ def test_scatter_compute_lose(c, s, a, b):
 
     yield a._close()
 
+    with pytest.raises(CancelledError):
+        yield wait(z)
+
     assert x.status == 'cancelled'
     assert y.status == 'finished'
     assert z.status == 'cancelled'
-
-    with pytest.raises(CancelledError):
-        yield wait(z)
 
 
 @gen_cluster(client=True)

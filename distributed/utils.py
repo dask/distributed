@@ -358,12 +358,11 @@ class LoopRunner(object):
             finally:
                 done_evt.set()
 
-        thread = threading.Thread(target=run_loop,
-                                  name="IO loop")
+        thread = threading.Thread(target=run_loop, name="IO loop")
         thread.daemon = True
         thread.start()
 
-        loop_evt.wait(timeout=1000)
+        loop_evt.wait(timeout=10)
         self._started = True
 
         actual_thread = in_thread[0]
@@ -549,6 +548,7 @@ def key_split(s):
 try:
     from functools import lru_cache
 except ImportError:
+    lru_cache = False
     pass
 else:
     key_split = lru_cache(100000)(key_split)
@@ -1404,6 +1404,10 @@ def has_keyword(func, keyword):
         if gen.is_coroutine_function(func):
             func = func.__wrapped__
         return keyword in inspect.getargspec(func).args
+
+
+if lru_cache:
+    has_keyword = lru_cache(1000)(has_keyword)
 
 
 # from bokeh.palettes import viridis
