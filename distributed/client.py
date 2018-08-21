@@ -3391,13 +3391,13 @@ class Client(Node):
                          stop=stop, count=count)
 
     @gen.coroutine
-    def _add_preload_function(self, function):
-        response = yield self.scheduler.add_preload_function(function=dumps(function))
+    def _register_init_func(self, function):
+        response = yield self.scheduler.register_init_func(function=dumps(function))
         raise gen.Return(response)
 
-    def add_preload_function(self, function, asynchronous=None):
+    def register_init_func(self, function, asynchronous=None):
         """
-        Add a preload function
+        Registers and run an initialization for every worker
 
         This registers a function to be called by every currently connected
         workers, and that will be also called by any added worker after that.
@@ -3407,7 +3407,7 @@ class Client(Node):
         ----------
         function: Function to register and run
         """
-        return self.sync(self._add_preload_function, function,
+        return self.sync(self._register_init_func, function,
                          asynchronous=asynchronous)
 
 

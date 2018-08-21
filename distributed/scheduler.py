@@ -942,7 +942,7 @@ class Scheduler(ServerNode):
             'heartbeat_worker': self.heartbeat_worker,
             'get_task_status': self.get_task_status,
             'get_task_stream': self.get_task_stream,
-            'add_preload_function': self.register_preload_function
+            'register_init_func': self.register_init_func
         }
 
         self._transitions = {
@@ -3018,7 +3018,7 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_preload_function(self, comm, function=None):
+    def register_init_func(self, comm, function=None):
         """ Registers a preload function, and call it on every worker """
         if function is None:
             raise gen.Return({})
