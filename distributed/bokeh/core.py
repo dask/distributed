@@ -45,7 +45,8 @@ class BokehServer(object):
                     if ("already in use" in str(exc) or  # Unix/Mac
                             "Only one usage of" in str(exc)):  # Windows
                         msg = ("Port %d is already in use. "
-                               "Perhaps you already have a cluster running?"
+                               "\nPerhaps you already have a cluster running?"
+                               "\nHosting the diagnostics dashboard on a random port instead."
                                % port)
                     else:
                         msg = "Failed to start diagnostics server on port %d. " % port + str(exc)
