@@ -332,15 +332,6 @@ class WorkerBase(ServerNode):
                 middle = (_start + _end) / 2
                 self.scheduler_delay = response['time'] - middle
                 self.status = 'running'
-
-                # Retrieve eventual init functions and run them
-                for init_function_bytes in response['init-functions']:
-                    init_function = pickle.loads(init_function_bytes)
-                    if has_arg(init_function, 'dask_worker'):
-                        result = init_function(dask_worker=self)
-                    else:
-                        result = init_function()
-                    logger.info('Init function %s ran: output=%s' % (init_function, result))
                 break
             except EnvironmentError:
                 logger.info('Waiting to connect to: %26s', self.scheduler.address)
@@ -351,6 +342,15 @@ class WorkerBase(ServerNode):
             raise ValueError("Unexpected response from register: %r" %
                              (response,))
         else:
+            # Retrieve eventual init functions and run them
+            for init_function_bytes in response['init-functions']:
+                init_function = pickle.loads(init_function_bytes)
+                if has_arg(init_function, 'dask_worker'):
+                    result = init_function(dask_worker=self)
+                else:
+                    result = init_function()
+                logger.info('Init function %s ran: output=%s' % (init_function, result))
+
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
 
