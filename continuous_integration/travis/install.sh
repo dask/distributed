@@ -39,7 +39,6 @@ conda install -q \
     ipywidgets \
     joblib \
     jupyter_client \
-    lz4 \
     mock \
     netcdf4 \
     paramiko \
@@ -47,7 +46,6 @@ conda install -q \
     pytest=3.1 \
     pytest-timeout \
     python=$PYTHON \
-    pyyaml \
     requests \
     scipy \
     tblib \
