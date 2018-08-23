@@ -1206,7 +1206,7 @@ def test_custom_metrics(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_register_init_func(c, s, a, b):
+def test_register_worker_setup(c, s, a, b):
     #preload function to run
     def mystartup(dask_worker):
         dask_worker.init_variable = 1
@@ -1226,7 +1226,7 @@ def test_register_init_func(c, s, a, b):
         return os.getenv('MY_ENV_VALUE', None) == 'WORKER_ENV_VALUE'
 
     # Nothing has been run yet
-    assert len(s.init_functions) == 0
+    assert len(s.worker_setups) == 0
     result = yield c.run(test_import)
     assert list(result.values()) == [False] * 2
     result = yield c.run(test_startup2)
@@ -1240,9 +1240,9 @@ def test_register_init_func(c, s, a, b):
     yield worker._close()
 
     # Add a preload function
-    response = yield c.register_init_func(mystartup)
+    response = yield c.register_worker_setup(mystartup)
     assert len(response) == 2
-    assert len(s.init_functions) == 1
+    assert len(s.worker_setups) == 1
 
     # Check it has been ran on existing worker
     result = yield c.run(test_import)
@@ -1256,9 +1256,9 @@ def test_register_init_func(c, s, a, b):
     yield worker._close()
 
     # Register another preload function
-    response = yield c.register_init_func(mystartup2)
+    response = yield c.register_worker_setup(mystartup2)
     assert len(response) == 2
-    assert len(s.init_functions) == 2
+    assert len(s.worker_setups) == 2
 
     # Check it has been run
     result = yield c.run(test_startup2)
@@ -1275,4 +1275,4 @@ def test_register_init_func(c, s, a, b):
 
     # Final exception test
     with pytest.raises(ZeroDivisionError):
-        yield c.register_init_func(lambda: 1 / 0)
+        yield c.register_worker_setup(lambda: 1 / 0)

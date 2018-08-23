@@ -343,13 +343,13 @@ class WorkerBase(ServerNode):
                              (response,))
         else:
             # Retrieve eventual init functions and run them
-            for init_function_bytes in response['init-functions']:
-                init_function = pickle.loads(init_function_bytes)
-                if has_arg(init_function, 'dask_worker'):
-                    result = init_function(dask_worker=self)
+            for function_bytes in response['worker-setups']:
+                setup_function = pickle.loads(function_bytes)
+                if has_arg(setup_function, 'dask_worker'):
+                    result = setup_function(dask_worker=self)
                 else:
-                    result = init_function()
-                logger.info('Init function %s ran: output=%s' % (init_function, result))
+                    result = setup_function()
+                logger.info('Init function %s ran: output=%s' % (setup_function, result))
 
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)

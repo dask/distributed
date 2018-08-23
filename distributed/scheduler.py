@@ -899,7 +899,7 @@ class Scheduler(ServerNode):
         self.plugins = []
         self.transition_log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
         self.log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
-        self.init_functions = []
+        self.worker_setups = []
 
         worker_handlers = {
             'task-finished': self.handle_task_finished,
@@ -957,7 +957,7 @@ class Scheduler(ServerNode):
             'heartbeat_worker': self.heartbeat_worker,
             'get_task_status': self.get_task_status,
             'get_task_stream': self.get_task_stream,
-            'register_init_func': self.register_init_func
+            'register_worker_setup': self.register_worker_setup
         }
 
         self._transitions = {
@@ -1333,7 +1333,7 @@ class Scheduler(ServerNode):
             yield comm.write({'status': 'OK',
                               'time': time(),
                               'heartbeat-interval': heartbeat_interval(len(self.workers)),
-                              'init-functions': self.init_functions})
+                              'worker-setups': self.worker_setups})
             yield self.handle_worker(comm=comm, worker=address)
 
     def update_graph(self, client=None, tasks=None, keys=None,
@@ -3039,12 +3039,12 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_init_func(self, comm, function=None, args=None, kwargs=None):
+    def register_worker_setup(self, comm, function=None, args=None, kwargs=None):
         """ Registers a preload function, and call it on every worker """
         if function is None:
             raise gen.Return({})
 
-        self.init_functions.append(function)
+        self.worker_setups.append(function)
 
         responses = yield self.broadcast(msg=dict(op='run',
                                                   function=function,

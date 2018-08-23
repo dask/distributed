@@ -3391,8 +3391,8 @@ class Client(Node):
                          stop=stop, count=count)
 
     @gen.coroutine
-    def _register_init_func(self, function, *args, **kwargs):
-        responses = yield self.scheduler.register_init_func(function=dumps(function),
+    def _register_worker_setup(self, function, *args, **kwargs):
+        responses = yield self.scheduler.register_worker_setup(function=dumps(function),
                                                            args=dumps(args),
                                                            kwargs=dumps(kwargs))
         results = {}
@@ -3403,9 +3403,9 @@ class Client(Node):
                 six.reraise(*clean_exception(**resp))
         raise gen.Return(results)
 
-    def register_init_func(self, function, *args, **kwargs):
+    def register_worker_setup(self, function, *args, **kwargs):
         """
-        Registers and run an initialization for every worker
+        Registers and run an setup function for every worker
 
         This registers a function to be called by every currently connected
         workers, and that will be also called by any added worker after that.
@@ -3416,7 +3416,7 @@ class Client(Node):
         function : callable(dask_worker: Worker) -> None
             Function to register and run on all workers
         """
-        return self.sync(self._register_init_func, function, *args, **kwargs)
+        return self.sync(self._register_worker_setup, function, *args, **kwargs)
 
 
 class Executor(Client):
