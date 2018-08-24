@@ -7,8 +7,8 @@ from toolz import frequencies, pluck
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from distributed import Client, wait, Adaptive, LocalCluster
-from distributed.utils_test import gen_cluster, gen_test, slowinc, inc
+from distributed import Client, LocalCluster
+from distributed.utils_test import gen_test, slowinc
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from distributed.metrics import time
 
@@ -81,6 +81,7 @@ def test_min_max():
         yield c._close()
         yield cluster._close()
 
+
 @gen_test(timeout=30)
 def test_min_max_cores():
     loop = IOLoop.current()
@@ -127,6 +128,7 @@ def test_min_max_cores():
         yield c._close()
         yield cluster._close()
 
+
 @gen_test(timeout=30)
 def test_scale_cores_and_memory():
     loop = IOLoop.current()
@@ -159,6 +161,7 @@ def test_scale_cores_and_memory():
         yield c._close()
         yield cluster._close()
 
+
 @gen_test(timeout=30)
 def test_scale_cores_error():
     loop = IOLoop.current()
@@ -177,4 +180,3 @@ def test_scale_cores_error():
 
     with pytest.raises(ValueError):
         cluster.scale(10, cores=20)
-
