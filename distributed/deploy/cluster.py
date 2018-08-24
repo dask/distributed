@@ -1,12 +1,14 @@
 import logging
 import os
+import math
 from weakref import ref
 
 import dask
 
 from .adaptive import Adaptive
 
-from ..utils import format_bytes, PeriodicCallback, log_errors, ignoring
+from ..utils import format_bytes, PeriodicCallback, log_errors, ignoring, \
+    parse_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,10 @@ class Cluster(object):
 
         def scale_down(self, workers: List[str]):
             ''' Close the workers with the given addresses '''
+    3.  worker_info dict attribute if scale(cores=...) or scale(memory=...)
+        can be used by users.
+
+        cluster.worker_info = {'cores':4 , 'memory':'16 GB'}
 
     This will provide a general ``scale`` method as well as an IPython widget
     for display.
@@ -42,28 +48,62 @@ class Cluster(object):
     ...     def scale_down(self, workers):
     ...         ''' Close the workers with the given addresses '''
     ...         pass
+    ...     worker_info = {'cores': 4, 'memory': '16 GB'}
 
     >>> cluster = MyCluster()
     >>> cluster.scale(5)                       # scale manually
     >>> cluster.adapt(minimum=1, maximum=100)  # scale automatically
+    >>> cluster.scale(cores=100)               # scale manually to cores nb
 
     See Also
     --------
     LocalCluster: a simple implementation with local workers
     """
-    def adapt(self, **kwargs):
+    def adapt(self, minimum_cores=None, maximum_cores=None,
+              minimum_memory=None, maximum_memory=None, **kwargs):
         """ Turn on adaptivity
 
         For keyword arguments see dask.distributed.Adaptive
 
+        Instead of minimum and maximum parameters which apply to the number of
+        worker, If Cluster object implements worker_info attribute, one can use
+        the following parameters:
+
+        Parameters
+        ----------
+        minimum_cores: int
+            Minimum number of cores for the cluster
+        maximum_cores: int
+            Maximum number of cores for the cluster
+        minimum_memory: str
+            Minimum amount of memory for the cluster
+        maximum_memory: str
+            Maximum amount of memory for the cluster
+
+
         Examples
         --------
         >>> cluster.adapt(minimum=0, maximum=10, interval='500ms')
+        >>> cluster.adapt(minimum_cores=24, maximum_cores=96)
+        >>> cluster.adapt(minimum_memory='60 GB', maximum_memory= '1 TB')
         """
         with ignoring(AttributeError):
             self._adaptive.stop()
         if not hasattr(self, '_adaptive_options'):
             self._adaptive_options = {}
+
+        if 'minimum' not in kwargs:
+            if minimum_cores is not None:
+                kwargs['minimum'] = self._get_nb_workers_from_cores(minimum_cores)
+            elif minimum_memory is not None:
+                kwargs['minimum'] = self._get_nb_workers_from_memory(minimum_memory)
+
+        if 'maximum' not in kwargs:
+            if maximum_cores is not None:
+                kwargs['maximum'] = self._get_nb_workers_from_cores(maximum_cores)
+            elif maximum_memory is not None:
+                kwargs['maximum'] = self._get_nb_workers_from_memory(maximum_memory)
+
         self._adaptive_options.update(kwargs)
         self._adaptive = Adaptive(self.scheduler, self, **self._adaptive_options)
         return self._adaptive
@@ -79,24 +119,46 @@ class Cluster(object):
         port = self.scheduler.services['bokeh'].port
         return template.format(host=host, port=port, **os.environ)
 
-    def scale(self, n):
-        """ Scale cluster to n workers
+    def scale(self, n=None, cores=None, memory=None):
+        """ Scale cluster to n workers or to the given number of cores or
+        memory
+
+        number of cores and memory are converted into number of workers using
+        worker_info attribute.
 
         Parameters
         ----------
         n: int
             Target number of workers
+        cores: int
+            Target number of cores
+        memory: str
+            Target amount of available memory
 
         Example
         -------
         >>> cluster.scale(10)  # scale cluster to ten workers
+        >>> cluster.scale(cores=100) # scale cluster to 100 cores
+        >>> cluster.scale(memory='1 TB') # scale cluster to 1 TB memory
 
         See Also
         --------
         Cluster.scale_up
         Cluster.scale_down
+        Cluster.worker_info
         """
         with log_errors():
+            if [n, cores, memory].count(None) != 2:
+                raise ValueError('One and only one of n, cores, memory kwargs'
+                                 ' should be used, n={}, cores={}, memory={}'
+                                 ' provided.'.format(n, cores, memory))
+
+            if n is None:
+                if cores is not None:
+                    n = self._get_nb_workers_from_cores(cores)
+                elif memory is not None:
+                    n = self._get_nb_workers_from_memory(memory)
+
             if n >= len(self.scheduler.workers):
                 self.scheduler.loop.add_callback(self.scale_up, n)
             else:
@@ -206,3 +268,18 @@ class Cluster(object):
 
     def _ipython_display_(self, **kwargs):
         return self._widget()._ipython_display_(**kwargs)
+
+    def _get_nb_workers_from_cores(self, cores):
+        self._raise_exception_if_not_worker_info()
+        return math.ceil(cores / self.worker_info['cores'])
+
+    def _get_nb_workers_from_memory(self, memory):
+        self._raise_exception_if_not_worker_info()
+        return math.ceil(parse_bytes(memory) / parse_bytes(self.worker_info['memory']))
+
+    def _raise_exception_if_not_worker_info(self):
+        if self.worker_info is None:
+            raise NotImplementedError('{} class does not provide worker_info '
+                                      'attribute, needed for scaling with '
+                                      'cores or memory kwargs.'
+                                      .format(self.__class__.__name__))
