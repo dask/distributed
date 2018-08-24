@@ -278,7 +278,7 @@ class Cluster(object):
         return math.ceil(parse_bytes(memory) / parse_bytes(self.worker_info['memory']))
 
     def _raise_exception_if_not_worker_info(self):
-        if self.worker_info is None:
+        if not hasattr(self, 'worker_info'):
             raise NotImplementedError('{} class does not provide worker_info '
                                       'attribute, needed for scaling with '
                                       'cores or memory kwargs.'
