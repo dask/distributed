@@ -191,7 +191,7 @@ class ProcessingHistogram(DashboardComponent):
                            left='left', right='right', bottom=0, top='top',
                            color='blue')
 
-            self.root = row(self.plot, name='processing_hist', sizing_mode='scale_width')
+            self.root = row(self.plot, name='processing_hist', sizing_mode='stretch_both')
 
     def update(self):
         L = [len(ws.processing) for ws in self.scheduler.workers.values()]
@@ -228,7 +228,7 @@ class NBytesHistogram(DashboardComponent):
                            left='left', right='right', bottom=0, top='top',
                            color='blue')
 
-            self.root = row(self.plot, name='nbytes_hist', sizing_mode='scale_width')
+            self.root = row(self.plot, name='nbytes_hist', sizing_mode='stretch_both')
 
     def update(self):
         nbytes = np.asarray([ws.nbytes for ws in self.scheduler.workers.values()])
@@ -307,8 +307,8 @@ class CurrentLoad(DashboardComponent):
 
             processing.y_range = nbytes.y_range
 
-            self.nbytes = row(nbytes, name='nbytes_hist', sizing_mode='scale_width')
-            self.processing = row(processing, name='processing_hist', sizing_mode='scale_width')
+            self.nbytes = row(nbytes, name='nbytes_hist', sizing_mode='stretch_both')
+            self.processing = row(processing, name='processing_hist', sizing_mode='stretch_both')
 
     def update(self):
         with log_errors():
@@ -843,7 +843,7 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_tools(hover)
 
-        self.root = row(self.root, sizing_mode='scale_width', name='task_progress')
+        self.root = row(self.root, sizing_mode='stretch_both', name='task_progress')
 
     def update(self):
         with log_errors():
@@ -1122,7 +1122,7 @@ def graph_doc(scheduler, extra, doc):
 def status_doc(scheduler, extra, doc):
     with log_errors():
         task_stream = TaskStream(scheduler, n_rectangles=1000,
-                                 clear_interval='10s', height=350)
+                                 clear_interval='10s', sizing_mode='stretch_both')
         task_stream.update()
         doc.add_periodic_callback(task_stream.update, 100)
 
@@ -1145,7 +1145,7 @@ def status_doc(scheduler, extra, doc):
             doc.add_periodic_callback(nbytes_hist.update, 100)
             doc.add_periodic_callback(processing_hist.update, 100)
             current_load_fig = row(nbytes_hist.root, processing_hist.root,
-                                   sizing_mode='scale_width')
+                                   sizing_mode='stretch_both')
 
             doc.add_root(nbytes_hist.root)
             doc.add_root(processing.root)

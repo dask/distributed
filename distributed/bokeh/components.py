@@ -112,7 +112,7 @@ class TaskStream(DashboardComponent):
             export.register_plot(self.root)
             self.root.add_tools(export)
 
-        self.root = row(self.root, name='task_stream', sizing_mode='scale_width')
+        self.root = row(self.root, name='task_stream', sizing_mode='stretch_both')
 
         # Required for update callback
         self.task_stream_index = [0]
