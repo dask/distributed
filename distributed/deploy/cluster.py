@@ -204,7 +204,7 @@ class Cluster(object):
         except AttributeError:
             pass
 
-        from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion
+        from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion, Text
 
         layout = Layout(width='150px')
 
@@ -222,13 +222,31 @@ class Cluster(object):
 
         request = IntText(0, description='Workers', layout=layout)
         scale = Button(description='Scale', layout=layout)
+        request_cores = IntText(0, description='Cores', layout=layout)
+        scale_cores = Button(description='Scale', layout=layout)
+        request_memory = Text('O GB', description='Memory', layout=layout)
+        scale_memory = Button(description='Scale', layout=layout)
 
         minimum = IntText(0, description='Minimum', layout=layout)
         maximum = IntText(0, description='Maximum', layout=layout)
         adapt = Button(description='Adapt', layout=layout)
+        minimum_cores = IntText(0, description='Min cores', layout=layout)
+        maximum_cores = IntText(0, description='Max cores', layout=layout)
+        adapt_cores = Button(description='Adapt', layout=layout)
+        minimum_mem = Text('0 GB', description='Min memory', layout=layout)
+        maximum_mem = Text('0 GB', description='Max memory', layout=layout)
+        adapt_mem = Button(description='Adapt', layout=layout)
 
-        accordion = Accordion([HBox([request, scale]),
-                               HBox([minimum, maximum, adapt])],
+        scale_hbox = [HBox([request, scale])]
+        adapt_hbox = [HBox([minimum, maximum, adapt])]
+        if hasattr(self, 'worker_info'):
+            scale_hbox.append(HBox([request_cores, scale_cores]))
+            scale_hbox.append(HBox([request_memory, scale_memory]))
+            adapt_hbox.append(HBox([minimum_cores, maximum_cores, adapt_cores]))
+            adapt_hbox.append(HBox([minimum_mem, maximum_mem, adapt_mem]))
+
+        accordion = Accordion([VBox(scale_hbox),
+                               VBox(adapt_hbox)],
                                layout=Layout(min_width='500px'))
         accordion.selected_index = None
         accordion.set_title(0, 'Manual Scaling')
@@ -244,16 +262,30 @@ class Cluster(object):
         def adapt_cb(b):
             self.adapt(minimum=minimum.value, maximum=maximum.value)
 
+        def adapt_cores_cb(b):
+            self.adapt(minimum_cores=minimum_cores.value, maximum_cores=maximum_cores.value)
+
+        def adapt_mem_cb(b):
+            self.adapt(minimum_memory=minimum_mem.value, maximum_memory=maximum_mem.value)
+
         adapt.on_click(adapt_cb)
+        adapt_cores.on_click(adapt_cores_cb)
+        adapt_mem.on_click(adapt_mem_cb)
 
-        def scale_cb(b):
-            with log_errors():
-                n = request.value
-                with ignoring(AttributeError):
-                    self._adaptive.stop()
-                self.scale(n)
+        def scale_cb(request, kwarg):
+            def request_cb(b):
+                with log_errors():
+                    arg = request.value
+                    with ignoring(AttributeError):
+                        self._adaptive.stop()
+                    local_kwargs = dict()
+                    local_kwargs[kwarg] = arg
+                    self.scale(**local_kwargs)
+            return request_cb
 
-        scale.on_click(scale_cb)
+        scale.on_click(scale_cb(request, 'n'))
+        scale_cores.on_click(scale_cb(request_cores, 'cores'))
+        scale_memory.on_click(scale_cb(request_memory, 'memory'))
 
         scheduler_ref = ref(self.scheduler)
 
