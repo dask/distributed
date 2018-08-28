@@ -17,9 +17,9 @@ import dask
 from dask.core import istask
 from dask.compatibility import apply
 try:
-    from cytoolz import pluck, partial
+    from cytoolz import pluck, partial, merge
 except ImportError:
-    from toolz import pluck, partial
+    from toolz import pluck, partial, merge
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -47,7 +47,7 @@ from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, mp_context, import_file,
                     silence_logging, thread_state, json_load_robust, key_split,
                     format_bytes, DequeHandler, PeriodicCallback,
-                    parse_bytes, parse_timedelta)
+                    parse_bytes, parse_timedelta, iscoroutinefunction)
 from .utils_comm import pack_data, gather_from_workers
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 
@@ -89,7 +89,7 @@ class WorkerBase(ServerNode):
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
                  contact_address=None, memory_monitor_interval='200ms',
-                 extensions=None, **kwargs):
+                 extensions=None, metrics=None, **kwargs):
 
         self._setup_logging()
 
@@ -160,11 +160,13 @@ class WorkerBase(ServerNode):
             self.data = Buffer({}, storage, target, weight)
         else:
             self.data = dict()
+        self.actors = {}
         self.loop = loop or IOLoop.current()
         self.status = None
         self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(self.ncores)
+        self.actor_executor = ThreadPoolExecutor(1)
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = dict()
@@ -177,6 +179,7 @@ class WorkerBase(ServerNode):
         self.services = {}
         self.service_ports = service_ports or {}
         self.service_specs = services or {}
+        self.metrics = dict(metrics) if metrics else {}
 
         handlers = {
             'gather': self.gather,
@@ -195,6 +198,8 @@ class WorkerBase(ServerNode):
             'get_logs': self.get_logs,
             'keys': self.keys,
             'versions': self.versions,
+            'actor_execute': self.actor_execute,
+            'actor_attribute': self.actor_attribute,
         }
 
         stream_handlers = {
@@ -257,16 +262,12 @@ class WorkerBase(ServerNode):
                 start = time()
                 response = yield self.scheduler.heartbeat_worker(
                     address=self.contact_address,
-                    name=self.name,
                     now=time(),
-                    memory_limit=self.memory_limit,
-                    executing=len(self.executing),
-                    in_memory=len(self.data),
-                    ready=len(self.ready),
-                    in_flight=len(self.in_flight_tasks),
-                    **self.monitor.recent())
+                    metrics=self.get_metrics()
+                )
                 end = time()
                 middle = (start + end) / 2
+
                 if response['status'] == 'missing':
                     yield self._register_with_scheduler()
                     return
@@ -278,6 +279,15 @@ class WorkerBase(ServerNode):
                 self.heartbeat_active = False
         else:
             logger.debug("Heartbeat skipped: channel busy")
+
+    def get_metrics(self):
+        core = dict(executing=len(self.executing),
+                    in_memory=len(self.data),
+                    ready=len(self.ready),
+                    in_flight=len(self.in_flight_tasks))
+        custom = {k: metric(self) for k, metric in self.metrics.items()}
+
+        return merge(custom, self.monitor.recent(), core)
 
     @gen.coroutine
     def _register_with_scheduler(self):
@@ -297,20 +307,20 @@ class WorkerBase(ServerNode):
                 comm = yield connect(self.scheduler.address,
                                      connection_args=self.connection_args)
                 yield comm.write(dict(op='register-worker',
-                                         ncores=self.ncores,
-                                         address=self.contact_address,
-                                         keys=list(self.data),
-                                         name=self.name,
-                                         nbytes=self.nbytes,
-                                         now=time(),
-                                         services=self.service_ports,
-                                         memory_limit=self.memory_limit,
-                                         local_directory=self.local_dir,
-                                         resources=self.total_resources,
-                                         pid=os.getpid(),
-                                         reply=False,
-                                         **self.monitor.recent()),
-                                         serializers=['msgpack'])
+                                      reply=False,
+                                      address=self.contact_address,
+                                      keys=list(self.data),
+                                      ncores=self.ncores,
+                                      name=self.name,
+                                      nbytes=self.nbytes,
+                                      now=time(),
+                                      resources=self.total_resources,
+                                      memory_limit=self.memory_limit,
+                                      local_directory=self.local_dir,
+                                      services=self.service_ports,
+                                      pid=os.getpid(),
+                                      metrics=self.get_metrics()),
+                                 serializers=['msgpack'])
                 future = comm.read(deserializers=['msgpack'])
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
@@ -450,7 +460,7 @@ class WorkerBase(ServerNode):
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
 
-    def identity(self, comm):
+    def identity(self, comm=None):
         return {'type': type(self).__name__,
                 'id': self.id,
                 'scheduler': self.scheduler.address,
@@ -477,10 +487,13 @@ class WorkerBase(ServerNode):
                     yield gen.with_timeout(timedelta(seconds=timeout),
                                            self.scheduler.unregister(address=self.contact_address))
             self.scheduler.close_rpc()
+            self.actor_executor._work_queue.queue.clear()
             if isinstance(self.executor, ThreadPoolExecutor):
+                self.executor._work_queue.queue.clear()
                 self.executor.shutdown(wait=executor_wait, timeout=timeout)
             else:
                 self.executor.shutdown(wait=False)
+            self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
             self._workdir.release()
 
             for k, v in self.services.items():
@@ -526,7 +539,8 @@ class WorkerBase(ServerNode):
         assert self.status == 'closed'
 
     @gen.coroutine
-    def executor_submit(self, key, function, *args, **kwargs):
+    def executor_submit(self, key, function, args=(), kwargs=None,
+                        executor=None):
         """ Safely run function in thread pool executor
 
         We've run into issues running concurrent.future futures within
@@ -534,9 +548,11 @@ class WorkerBase(ServerNode):
         callbacks to ensure things run smoothly.  This can get tricky, so we
         pull it off into an separate method.
         """
+        executor = executor or self.executor
         job_counter[0] += 1
         # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
-        future = self.executor.submit(function, *args, **kwargs)
+        kwargs = kwargs or {}
+        future = executor.submit(function, *args, **kwargs)
         pc = PeriodicCallback(lambda: logger.debug("future state: %s - %s",
                                                    key, future._state), 1000)
         pc.start()
@@ -556,6 +572,33 @@ class WorkerBase(ServerNode):
     def run_coroutine(self, comm, function, args=(), kwargs={}, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs,
                    is_coro=True, wait=wait)
+
+    @gen.coroutine
+    def actor_execute(self, comm=None, actor=None, function=None, args=(), kwargs={}):
+        separate_thread = kwargs.pop('separate_thread', True)
+        key = actor
+        actor = self.actors[key]
+        func = getattr(actor, function)
+        name = key_split(key) + '.' + function
+
+        if iscoroutinefunction(func):
+            result = yield func(*args, **kwargs)
+        elif separate_thread:
+            result = yield self.executor_submit(name,
+                                                apply_function_actor,
+                                                args=(func, args, kwargs,
+                                                      self.execution_state,
+                                                      name,
+                                                      self.active_threads,
+                                                      self.active_threads_lock),
+                                                executor=self.actor_executor)
+        else:
+            result = func(*args, **kwargs)
+        raise gen.Return({'status': 'OK', 'result': to_serialize(result)})
+
+    def actor_attribute(self, comm=None, actor=None, attribute=None):
+        value = getattr(self.actors[actor], attribute)
+        return {'status': 'OK', 'result': to_serialize(value)}
 
     def update_data(self, comm=None, data=None, report=True, serializers=None):
         for key, value in data.items():
@@ -617,6 +660,13 @@ class WorkerBase(ServerNode):
 
         self.outgoing_current_count += 1
         data = {k: self.data[k] for k in keys if k in self.data}
+
+        if len(data) < len(keys):
+            for k in set(keys) - set(data):
+                if k in self.actors:
+                    from .actor import Actor
+                    data[k] = Actor(type(self.actors[k]), self.address, k)
+
         msg = {'status': 'OK',
                'data': {k: to_serialize(v) for k, v in data.items()}}
         nbytes = {k: self.nbytes.get(k) for k in data}
@@ -624,6 +674,7 @@ class WorkerBase(ServerNode):
         if self.digests is not None:
             self.digests['get-data-load-duration'].add(stop - start)
         start = time()
+
         try:
             compressed = yield comm.write(msg, serializers=serializers)
             response = yield comm.read(deserializers=serializers)
@@ -875,6 +926,30 @@ def apply_function(function, args, kwargs, execution_state, key,
     with active_threads_lock:
         del active_threads[ident]
     return msg
+
+
+def apply_function_actor(function, args, kwargs, execution_state, key,
+                         active_threads, active_threads_lock):
+    """ Run a function, collect information
+
+    Returns
+    -------
+    msg: dictionary with status, result/error, timings, etc..
+    """
+    ident = get_thread_identity()
+
+    with active_threads_lock:
+        active_threads[ident] = key
+
+    thread_state.execution_state = execution_state
+    thread_state.key = key
+
+    result = function(*args, **kwargs)
+
+    with active_threads_lock:
+        del active_threads[ident]
+
+    return result
 
 
 def get_msg_safe_str(msg):
@@ -1266,13 +1341,13 @@ class Worker(WorkerBase):
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
                  who_has=None, nbytes=None, priority=None, duration=None,
-                 resource_restrictions=None, **kwargs2):
+                 resource_restrictions=None, actor=False, **kwargs2):
         try:
             if key in self.tasks:
                 state = self.task_state[key]
                 if state in ('memory', 'error'):
                     if state == 'memory':
-                        assert key in self.data
+                        assert key in self.data or key in self.actors
                     logger.debug("Asked to compute pre-existing result: %s: %s",
                                  key, state)
                     self.send_task_state_to_scheduler(key)
@@ -1297,6 +1372,8 @@ class Worker(WorkerBase):
             try:
                 start = time()
                 self.tasks[key] = _deserialize(function, args, kwargs, task)
+                if actor:
+                    self.actors[key] = None
                 stop = time()
 
                 if stop - start > 0.010:
@@ -1471,6 +1548,8 @@ class Worker(WorkerBase):
                 import pdb
                 pdb.set_trace()
             raise
+        if value is not no_value and dep not in self.data:
+            self.put_key_in_memory(dep, value, transition=False)
 
     def transition(self, key, finish, **kwargs):
         start = self.task_state[key]
@@ -1489,7 +1568,7 @@ class Worker(WorkerBase):
                 assert self.task_state[key] == 'waiting'
                 assert key in self.waiting_for_data
                 assert not self.waiting_for_data[key]
-                assert all(dep in self.data for dep in self.dependencies[key])
+                assert all(dep in self.data or dep in self.actors for dep in self.dependencies[key])
                 assert key not in self.executing
                 assert key not in self.ready
 
@@ -1531,7 +1610,7 @@ class Worker(WorkerBase):
                 # assert key not in self.data
                 assert self.task_state[key] in READY
                 assert key not in self.ready
-                assert all(dep in self.data for dep in self.dependencies[key])
+                assert all(dep in self.data or dep in self.actors for dep in self.dependencies[key])
 
             self.executing.add(key)
             self.loop.add_callback(self.execute, key)
@@ -1711,9 +1790,14 @@ class Worker(WorkerBase):
             raise
 
     def send_task_state_to_scheduler(self, key):
-        if key in self.data:
-            nbytes = self.nbytes[key] or sizeof(self.data[key])
-            typ = self.types.get(key) or type(self.data[key])
+        if key in self.data or self.actors.get(key):
+            try:
+                value = self.data[key]
+            except KeyError:
+                value = self.actors[key]
+            nbytes = self.nbytes[key] or sizeof(value)
+            typ = self.types.get(key) or type(value)
+            del value
             try:
                 typ = dumps_function(typ)
             except PicklingError:
@@ -1746,11 +1830,15 @@ class Worker(WorkerBase):
         if key in self.data:
             return
 
-        start = time()
-        self.data[key] = value
-        stop = time()
-        if stop - start > 0.020:
-            self.startstops[key].append(('disk-write', start, stop))
+        if key in self.actors:
+            self.actors[key] = value
+
+        else:
+            start = time()
+            self.data[key] = value
+            stop = time()
+            if stop - start > 0.020:
+                self.startstops[key].append(('disk-write', start, stop))
 
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
@@ -1810,7 +1898,8 @@ class Worker(WorkerBase):
                 if response['status'] == 'busy':
                     self.log.append(('busy-gather', worker, deps))
                     for dep in deps:
-                        self.transition_dep(dep, 'waiting')
+                        if self.dep_state[dep] == 'flight':
+                            self.transition_dep(dep, 'waiting')
                     return
 
                 if cause:
@@ -2004,7 +2093,15 @@ class Worker(WorkerBase):
                 self.log.append((key, 'release-key'))
             del self.tasks[key]
             if key in self.data and key not in self.dep_state:
-                del self.data[key]
+                try:
+                    del self.data[key]
+                except FileNotFoundError:
+                    logger.error("Tried to delete %s but no file found",
+                                 exc_info=True)
+                del self.nbytes[key]
+                del self.types[key]
+            if key in self.actors and key not in self.dep_state:
+                del self.actors[key]
                 del self.nbytes[key]
                 del self.types[key]
 
@@ -2069,6 +2166,9 @@ class Worker(WorkerBase):
             if dep not in self.task_state:
                 if dep in self.data:
                     del self.data[dep]
+                    del self.types[dep]
+                if dep in self.actors:
+                    del self.actors[dep]
                     del self.types[dep]
                 del self.nbytes[dep]
 
@@ -2171,7 +2271,13 @@ class Worker(WorkerBase):
             function, args, kwargs = self.tasks[key]
 
             start = time()
-            data = {k: self.data[k] for k in self.dependencies[key]}
+            data = {}
+            for k in self.dependencies[key]:
+                try:
+                    data[k] = self.data[k]
+                except KeyError:
+                    from .actor import Actor  # TODO: create local actor
+                    data[k] = Actor(type(self.actors[k]), self.address, k, self)
             args2 = pack_data(args, data, key_types=(bytes, unicode))
             kwargs2 = pack_data(kwargs, data, key_types=(bytes, unicode))
             stop = time()
@@ -2182,12 +2288,12 @@ class Worker(WorkerBase):
 
             logger.debug("Execute key: %s worker: %s", key, self.address)  # TODO: comment out?
             try:
-                result = yield self.executor_submit(key, apply_function, function,
-                                                    args2, kwargs2,
-                                                    self.execution_state, key,
-                                                    self.active_threads,
-                                                    self.active_threads_lock,
-                                                    self.scheduler_delay)
+                result = yield self.executor_submit(key, apply_function,
+                                                    args=(function, args2, kwargs2,
+                                                          self.execution_state, key,
+                                                          self.active_threads,
+                                                          self.active_threads_lock,
+                                                          self.scheduler_delay))
             except RuntimeError as e:
                 executor_error = e
                 raise
@@ -2266,7 +2372,7 @@ class Worker(WorkerBase):
         self._memory_monitoring = True
         total = 0
 
-        proc = psutil.Process()
+        proc = self.monitor.proc
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
 
@@ -2348,9 +2454,9 @@ class Worker(WorkerBase):
             if frame is not None:
                 key = key_split(active_threads[ident])
                 profile.process(frame, None, self.profile_recent,
-                                stop='_concurrent_futures_thread.py')
+                                stop='distributed/worker.py')
                 profile.process(frame, None, self.profile_keys[key],
-                                stop='_concurrent_futures_thread.py')
+                                stop='distributed/worker.py')
         stop = time()
         if self.digests is not None:
             self.digests['profile-duration'].add(stop - start)
@@ -2433,7 +2539,7 @@ class Worker(WorkerBase):
         return [(msg.levelname, deque_handler.format(msg)) for msg in L]
 
     def validate_key_memory(self, key):
-        assert key in self.data
+        assert key in self.data or key in self.actors
         assert key in self.nbytes
         assert key not in self.waiting_for_data
         assert key not in self.executing
@@ -2445,14 +2551,14 @@ class Worker(WorkerBase):
         assert key in self.executing
         assert key not in self.data
         assert key not in self.waiting_for_data
-        assert all(dep in self.data for dep in self.dependencies[key])
+        assert all(dep in self.data or dep in self.actors for dep in self.dependencies[key])
 
     def validate_key_ready(self, key):
         assert key in pluck(1, self.ready)
         assert key not in self.data
         assert key not in self.executing
         assert key not in self.waiting_for_data
-        assert all(dep in self.data for dep in self.dependencies[key])
+        assert all(dep in self.data or dep in self.actors for dep in self.dependencies[key])
 
     def validate_key_waiting(self, key):
         assert key not in self.data
@@ -2490,7 +2596,7 @@ class Worker(WorkerBase):
         assert dep in self.in_flight_workers[peer]
 
     def validate_dep_memory(self, dep):
-        assert dep in self.data
+        assert dep in self.data or dep in self.actors
         assert dep in self.nbytes
         assert dep in self.types
         if dep in self.task_state:
@@ -2543,7 +2649,7 @@ class Worker(WorkerBase):
                 if self.task_state[key] == 'memory':
                     assert isinstance(self.nbytes[key], int)
                     assert key not in self.waiting_for_data
-                    assert key in self.data
+                    assert key in self.data or key in self.actors
 
         except Exception as e:
             logger.exception(e)
@@ -2600,6 +2706,7 @@ class Worker(WorkerBase):
                                   security=self.security,
                                   set_as_default=True,
                                   asynchronous=asynchronous,
+                                  direct_to_workers=True,
                                   name='worker',
                                   timeout=timeout)
             if not asynchronous:
@@ -2776,7 +2883,8 @@ def parse_memory_limit(memory_limit, ncores):
 
 
 @gen.coroutine
-def get_data_from_worker(rpc, keys, worker, who=None, max_connections=None):
+def get_data_from_worker(rpc, keys, worker, who=None, max_connections=None,
+                         serializers=None, deserializers=None):
     """ Get keys from worker
 
     The worker has a two step handshake to acknowledge when data has been fully
@@ -2788,11 +2896,16 @@ def get_data_from_worker(rpc, keys, worker, who=None, max_connections=None):
     Worker.gather_deps
     utils_comm.gather_data_from_workers
     """
+    if serializers is None:
+        serializers = rpc.serializers
+    if deserializers is None:
+        deserializers = rpc.deserializers
+
     comm = yield rpc.connect(worker)
     try:
         response = yield send_recv(comm,
-                                   serializers=rpc.serializers,
-                                   deserializers=rpc.deserializers,
+                                   serializers=serializers,
+                                   deserializers=deserializers,
                                    op='get_data', keys=keys, who=who,
                                    max_connections=max_connections)
         if response['status'] == 'OK':

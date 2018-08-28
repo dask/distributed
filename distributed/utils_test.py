@@ -8,10 +8,10 @@ import functools
 import gc
 from glob import glob
 import itertools
-import inspect
 import logging
 import logging.config
 import os
+import psutil
 import re
 import shutil
 import signal
@@ -39,15 +39,17 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .client import default_client
-from .compatibility import PY3, iscoroutinefunction, Empty
+from .client import default_client, _global_clients
+from .compatibility import PY3, Empty, WINDOWS, PY2
+from .comm.utils import offload
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .metrics import time
+from .process import _cleanup_dangling
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (ignoring, log_errors, mp_context, get_ip, get_ipv6,
-                    DequeHandler, reset_logger_locks, sync)
+                    DequeHandler, reset_logger_locks, sync, iscoroutinefunction)
 from .worker import Worker, TOTAL_MEMORY, _global_workers
 
 try:
@@ -62,6 +64,9 @@ logger = logging.getLogger(__name__)
 logging_levels = {name: logger.level for name, logger in
                   logging.root.manager.loggerDict.items()
                   if isinstance(logger, logging.Logger)}
+
+
+offload(lambda: None).result()  # create thread during import
 
 
 @pytest.fixture(scope='session')
@@ -97,6 +102,7 @@ def cleanup_global_workers():
 @pytest.fixture
 def loop():
     del _global_workers[:]
+    _global_clients.clear()
     with pristine_loop() as loop:
         # Monkey-patch IOLoop.start to wait for loop stop
         orig_start = loop.start
@@ -125,6 +131,19 @@ def loop():
         else:
             is_stopped.wait()
     del _global_workers[:]
+
+    start = time()
+    while set(_global_clients):
+        sleep(0.1)
+        assert time() < start + 5
+
+    _cleanup_dangling()
+
+    if PY2:  # no forkserver, so no extra procs
+        for child in psutil.Process().children(recursive=True):
+            child.terminate()
+
+    _global_clients.clear()
 
 
 @pytest.fixture
@@ -618,7 +637,10 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
             else:
                 client.close()
 
-    assert not ws
+    start = time()
+    while list(ws):
+        sleep(0.01)
+        assert time() < start + 1, 'Workers still around after one second'
 
 
 @gen.coroutine
@@ -717,17 +739,11 @@ def end_cluster(s, workers):
     s.stop()
 
 
-def iscoroutinefunction(f):
-    if sys.version_info >= (3, 5) and inspect.iscoroutinefunction(f):
-        return True
-    return False
-
-
 def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                 scheduler='127.0.0.1', timeout=10, security=None,
                 Worker=Worker, client=False, scheduler_kwargs={},
                 worker_kwargs={}, client_kwargs={}, active_rpc_timeout=1,
-                config={}):
+                config={}, check_new_threads=True):
     from distributed import Client
     """ Coroutine test with small cluster
 
@@ -739,11 +755,6 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
         start
         end
     """
-    del _global_workers[:]
-
-    reset_config()
-
-    dask.config.set({'distributed.comm.timeouts.connect': '5s'})
     worker_kwargs = merge({'memory_limit': TOTAL_MEMORY, 'death_timeout': 5},
                           worker_kwargs)
 
@@ -752,6 +763,13 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
             func = gen.coroutine(func)
 
         def test_func():
+            del _global_workers[:]
+            _global_clients.clear()
+            active_threads_start = set(threading._active)
+
+            reset_config()
+
+            dask.config.set({'distributed.comm.timeouts.connect': '5s'})
             # Restore default logging levels
             # XXX use pytest hooks/fixtures instead?
             for name, level in logging_levels.items():
@@ -810,22 +828,41 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
 
                     result = loop.run_sync(coro, timeout=timeout * 2 if timeout else timeout)
 
-            for w in workers:
-                if getattr(w, 'data', None):
-                    try:
-                        w.data.clear()
-                    except EnvironmentError:
-                        # zict backends can fail if their storage directory
-                        # was already removed
-                        pass
-                    del w.data
-            DequeHandler.clear_all_instances()
-            for w in _global_workers:
-                w = w()
-                w._close(report=False, executor_wait=False)
-                if w.status == 'running':
-                    w.close()
-            del _global_workers[:]
+                for w in workers:
+                    if getattr(w, 'data', None):
+                        try:
+                            w.data.clear()
+                        except EnvironmentError:
+                            # zict backends can fail if their storage directory
+                            # was already removed
+                            pass
+                        del w.data
+                DequeHandler.clear_all_instances()
+                for w in _global_workers:
+                    w = w()
+                    w._close(report=False, executor_wait=False)
+                    if w.status == 'running':
+                        w.close()
+                del _global_workers[:]
+
+            if PY3 and not WINDOWS and check_new_threads:
+                start = time()
+                while True:
+                    bad = [t for t, v in threading._active.items()
+                           if t not in active_threads_start and
+                          "Threaded" not in v.name and
+                          "watch message" not in v.name]
+                    if not bad:
+                        break
+                    else:
+                        sleep(0.01)
+                    if time() > start + 5:
+                        from distributed import profile
+                        tid = bad[0]
+                        thread = threading._active[tid]
+                        call_stacks = profile.call_stack(sys._current_frames()[tid])
+                        assert False, (thread, call_stacks)
+            _cleanup_dangling()
             return result
 
         return test_func
@@ -970,7 +1007,7 @@ def assert_can_connect(addr, timeout=None, connection_args=None):
     within the given *timeout*.
     """
     if timeout is None:
-        timeout = 0.2
+        timeout = 0.5
     comm = yield connect(addr, timeout=timeout,
                          connection_args=connection_args)
     comm.abort()
@@ -983,7 +1020,7 @@ def assert_cannot_connect(addr, timeout=None, connection_args=None, exception_cl
     within the given *timeout*.
     """
     if timeout is None:
-        timeout = 0.2
+        timeout = 0.5
     with pytest.raises(exception_class):
         comm = yield connect(addr, timeout=timeout,
                              connection_args=connection_args)

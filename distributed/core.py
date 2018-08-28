@@ -21,6 +21,7 @@ from .comm import (connect, listen, CommClosedError,
                    normalize_address,
                    unparse_host_port, get_address_host_port)
 from .metrics import time
+from . import profile
 from .system_monitor import SystemMonitor
 from .utils import (get_traceback, truncate_exception, ignoring, shutting_down,
                     PeriodicCallback, parse_timedelta, has_keyword)
@@ -114,6 +115,25 @@ class Server(object):
         self.listener = None
         self.io_loop = io_loop or IOLoop.current()
         self.loop = self.io_loop
+
+        if not hasattr(self.io_loop, 'profile'):
+            ref = weakref.ref(self.io_loop)
+
+            if hasattr(self.io_loop, 'closing'):
+                def stop():
+                    loop = ref()
+                    return loop is None or loop.closing
+            else:
+                def stop():
+                    loop = ref()
+                    return loop is None or loop._closing
+
+            self.io_loop.profile = profile.watch(
+                    omit=('profile.py', 'selectors.py'),
+                    interval=dask.config.get('distributed.worker.profile.interval'),
+                    cycle=dask.config.get('distributed.worker.profile.cycle'),
+                    stop=stop,
+            )
 
         # Statistics counters for various events
         with ignoring(ImportError):
@@ -233,7 +253,7 @@ class Server(object):
             _, self._port = get_address_host_port(self.address)
         return self._port
 
-    def identity(self, comm):
+    def identity(self, comm=None):
         return {'type': type(self).__name__, 'id': self.id}
 
     def listen(self, port_or_addr=None, listen_args=None):
@@ -851,9 +871,17 @@ def clean_exception(exception, traceback, **kwargs):
     error_message: create and serialize errors into message
     """
     if isinstance(exception, bytes):
-        exception = protocol.pickle.loads(exception)
+        try:
+            exception = protocol.pickle.loads(exception)
+        except Exception:
+            exception = Exception(exception)
+    elif isinstance(exception, str):
+        exception = Exception(exception)
     if isinstance(traceback, bytes):
-        traceback = protocol.pickle.loads(traceback)
+        try:
+            traceback = protocol.pickle.loads(traceback)
+        except (TypeError, AttributeError):
+            traceback = None
     elif isinstance(traceback, string_types):
         traceback = None  # happens if the traceback failed serializing
     return type(exception), exception, traceback

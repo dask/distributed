@@ -181,7 +181,7 @@ def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(a.local_dir, 'foobar.py'))
 
 
-@pytest.mark.xfail(reason="don't yet support uploading pyc files")
+@pytest.mark.skip(reason="don't yet support uploading pyc files")
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
 def test_upload_file_pyc(c, s, w):
     with tmpfile() as dirname:
@@ -705,21 +705,6 @@ def test_stop_doing_unnecessary_work(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
 def test_priorities(c, s, w):
-    a = delayed(slowinc)(1, dask_key_name='a', delay=0.05)
-    b = delayed(slowinc)(2, dask_key_name='b', delay=0.05)
-    a1 = delayed(slowinc)(a, dask_key_name='a1', delay=0.05)
-    a2 = delayed(slowinc)(a1, dask_key_name='a2', delay=0.05)
-    b1 = delayed(slowinc)(b, dask_key_name='b1', delay=0.05)
-
-    z = delayed(add)(a2, b1)
-    future = yield c.compute(z)
-
-    log = [t for t in w.log if t[1] == 'executing' and t[2] == 'memory']
-    assert [t[0] for t in log[:5]] == ['a', 'b', 'a1', 'b1', 'a2']
-
-
-@gen_cluster(client=True, ncores=[('127.0.0.1', 1)])
-def test_priorities_2(c, s, w):
     values = []
     for i in range(10):
         a = delayed(slowinc)(i, dask_key_name='a-%d' % i, delay=0.01)
@@ -755,8 +740,7 @@ def test_worker_dir(worker):
     with tmpfile() as fn:
         @gen_cluster(client=True, worker_kwargs={'local_dir': fn})
         def test_worker_dir(c, s, a, b):
-            directories = [info['local_directory']
-                           for info in s.worker_info.values()]
+            directories = [w.local_directory for w in s.workers.values()]
             assert all(d.startswith(fn) for d in directories)
             assert len(set(directories)) == 2  # distinct
 
@@ -832,7 +816,7 @@ def test_fail_write_many_to_disk(c, s, a):
 
 @gen_cluster()
 def test_pid(s, a, b):
-    assert s.worker_info[a.address]['pid'] == os.getpid()
+    assert s.workers[a.address].pid == os.getpid()
 
 
 @gen_cluster(client=True)
@@ -1182,6 +1166,8 @@ def test_wait_for_outgoing(c, s, a, b):
     assert 1 / 3 < ratio < 3
 
 
+@pytest.mark.skipif(not sys.platform.startswith('linux'),
+                    reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 1), ('127.0.0.2', 1)],
              client=True)
 def test_prefer_gather_from_local_address(c, s, w1, w2, w3):
@@ -1211,3 +1197,9 @@ def test_avoid_oversubscription(c, s, *workers):
 
     # Some other workers did some work
     assert len([w for w in workers if len(w.outgoing_transfer_log) > 0]) >= 3
+
+
+@gen_cluster(client=True, worker_kwargs={'metrics': {'my_port': lambda w: w.port}})
+def test_custom_metrics(c, s, a, b):
+    assert s.workers[a.address].metrics['my_port'] == a.port
+    assert s.workers[b.address].metrics['my_port'] == b.port

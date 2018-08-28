@@ -13,7 +13,7 @@ from toolz import valmap, first
 from tornado import gen
 
 import dask
-from distributed import Nanny, rpc, Scheduler
+from distributed import Nanny, rpc, Scheduler, Worker
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -30,22 +30,22 @@ def test_nanny(s):
     with rpc(n.address) as nn:
         assert n.is_alive()
         assert s.ncores[n.worker_address] == 2
-        assert s.worker_info[n.worker_address]['services']['nanny'] > 1024
+        assert s.workers[n.worker_address].services['nanny'] > 1024
 
         yield nn.kill()
         assert not n.is_alive()
         assert n.worker_address not in s.ncores
-        assert n.worker_address not in s.worker_info
+        assert n.worker_address not in s.workers
 
         yield nn.kill()
         assert not n.is_alive()
         assert n.worker_address not in s.ncores
-        assert n.worker_address not in s.worker_info
+        assert n.worker_address not in s.workers
 
         yield nn.instantiate()
         assert n.is_alive()
         assert s.ncores[n.worker_address] == 2
-        assert s.worker_info[n.worker_address]['services']['nanny'] > 1024
+        assert s.workers[n.worker_address].services['nanny'] > 1024
 
         yield nn.terminate()
         assert not n.is_alive()
@@ -143,6 +143,26 @@ def test_close_on_disconnect(s, w):
     while w.status != 'closed':
         yield gen.sleep(0.05)
         assert time() < start + 9
+
+
+class Something(Worker):
+    # a subclass of Worker which is not Worker
+    pass
+
+
+@gen_cluster(client=True, Worker=Nanny)
+def test_nanny_worker_class(c, s, w1, w2):
+    out = yield c._run(lambda dask_worker=None: str(dask_worker.__class__))
+    assert 'Worker' in list(out.values())[0]
+    assert w1.Worker is Worker
+
+
+@gen_cluster(client=True, Worker=Nanny,
+             worker_kwargs={'worker_class': Something})
+def test_nanny_alt_worker_class(c, s, w1, w2):
+    out = yield c._run(lambda dask_worker=None: str(dask_worker.__class__))
+    assert 'Something' in list(out.values())[0]
+    assert w1.Worker is Something
 
 
 @slow
@@ -245,7 +265,8 @@ def test_nanny_timeout(c, s, a):
 
 
 @gen_cluster(ncores=[('127.0.0.1', 1)], client=True, Worker=Nanny,
-             worker_kwargs={'memory_limit': 1e8}, timeout=20)
+             worker_kwargs={'memory_limit': 1e8}, timeout=20,
+             check_new_threads=False)
 def test_nanny_terminate(c, s, a):
     from time import sleep
 

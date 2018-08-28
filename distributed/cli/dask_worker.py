@@ -40,8 +40,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="Serving computation port, defaults to random")
 @click.option('--nanny-port', type=int, default=0,
               help="Serving nanny port, defaults to random")
-@click.option('--bokeh-port', type=int, default=8789,
-              help="Bokeh port, defaults to 8789")
+@click.option('--bokeh-port', type=int, default=0,
+              help="Bokeh port, defaults to random port")
 @click.option('--bokeh/--no-bokeh', 'bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
 @click.option('--listen-address', type=str, default=None,
@@ -62,13 +62,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option('--nthreads', type=int, default=0,
               help="Number of threads per process.")
 @click.option('--nprocs', type=int, default=1,
-              help="Number of worker processes.  Defaults to one.")
+              help="Number of worker processes to launch.  Defaults to one.")
 @click.option('--name', type=str, default='',
               help="A unique name for this worker like 'worker-1'. "
                    "If used with --nprocs then the process number "
                    "will be appended like name-0, name-1, name-2, ...")
 @click.option('--memory-limit', default='auto',
-              help="Bytes of memory that the worker can use. "
+              help="Bytes of memory per process that the worker can use. "
                    "This can be an integer (bytes), "
                    "float (fraction of total system memory), "
                    "string (like 5GB or 5000M), "

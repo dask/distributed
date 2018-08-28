@@ -401,19 +401,7 @@ class FutureState(object):
         self._get_event().clear()
 
     def set_error(self, exception, traceback):
-        if isinstance(exception, bytes):
-            try:
-                exception = loads(exception)
-            except TypeError:
-                exception = Exception("Undeserializable exception", exception)
-        if traceback:
-            if isinstance(traceback, bytes):
-                try:
-                    traceback = loads(traceback)
-                except (TypeError, AttributeError):
-                    traceback = None
-        else:
-            traceback = None
+        _, exception, traceback = clean_exception(exception, traceback)
 
         self.status = 'error'
         self.exception = exception
@@ -482,6 +470,9 @@ class Client(Node):
     name: string (optional)
         Gives the client a name that will be included in logs generated on
         the scheduler for matters relating to this client
+    direct_to_workers: bool (optional)
+        Can this client connect directly to workers or should it proxy through
+        the scheduler?
     heartbeat_interval: int
         Time in milliseconds between heartbeats to scheduler
 
@@ -514,7 +505,7 @@ class Client(Node):
                  security=None, asynchronous=False,
                  name=None, heartbeat_interval=None,
                  serializers=None, deserializers=None,
-                 extensions=DEFAULT_EXTENSIONS,
+                 extensions=DEFAULT_EXTENSIONS, direct_to_workers=False,
                  **kwargs):
         if timeout == no_default:
             timeout = dask.config.get('distributed.comm.timeouts.connect')
@@ -544,6 +535,7 @@ class Client(Node):
         if deserializers is None:
             deserializers = serializers
         self._deserializers = deserializers
+        self.direct_to_workers = direct_to_workers
 
         # Communication
         self.security = security or Security()
@@ -739,7 +731,13 @@ class Client(Node):
             sync(self.loop, self._start, **kwargs)
 
     def __await__(self):
-        return self._started.__await__()
+        if hasattr(self, '_started'):
+            return self._started.__await__()
+        else:
+            @gen.coroutine
+            def _():
+                raise gen.Return(self)
+            return _().__await__()
 
     def _send_to_scheduler_safe(self, msg):
         if self.status in ('running', 'closing'):
@@ -1191,13 +1189,14 @@ class Client(Node):
             raise TypeError("First input to submit must be a callable function")
 
         key = kwargs.pop('key', None)
-        pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
         resources = kwargs.pop('resources', None)
         retries = kwargs.pop('retries', None)
         priority = kwargs.pop('priority', 0)
         fifo_timeout = kwargs.pop('fifo_timeout', '100ms')
         allow_other_workers = kwargs.pop('allow_other_workers', False)
+        actor = kwargs.pop('actor', kwargs.pop('actors', False))
+        pure = kwargs.pop('pure', not actor)
 
         if allow_other_workers not in (True, False, None):
             raise TypeError("allow_other_workers= must be True or False")
@@ -1236,7 +1235,8 @@ class Client(Node):
                                          user_priority=priority,
                                          resources={skey: resources} if resources else None,
                                          retries=retries,
-                                         fifo_timeout=fifo_timeout)
+                                         fifo_timeout=fifo_timeout,
+                                         actors=actor)
 
         logger.debug("Submit %s(...), %s", funcname(func), key)
 
@@ -1318,13 +1318,14 @@ class Client(Node):
 
         key = kwargs.pop('key', None)
         key = key or funcname(func)
-        pure = kwargs.pop('pure', True)
         workers = kwargs.pop('workers', None)
         retries = kwargs.pop('retries', None)
         resources = kwargs.pop('resources', None)
         user_priority = kwargs.pop('priority', 0)
         allow_other_workers = kwargs.pop('allow_other_workers', False)
         fifo_timeout = kwargs.pop('fifo_timeout', '100ms')
+        actor = kwargs.pop('actor', kwargs.pop('actors', False))
+        pure = kwargs.pop('pure', not actor)
 
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
@@ -1382,7 +1383,8 @@ class Client(Node):
                                          resources=resources,
                                          retries=retries,
                                          user_priority=user_priority,
-                                         fifo_timeout=fifo_timeout)
+                                         fifo_timeout=fifo_timeout,
+                                         actors=actor)
         logger.debug("map(%s, ...)", funcname(func))
 
         return [futures[tokey(k)] for k in keys]
@@ -1402,6 +1404,8 @@ class Client(Node):
             else:
                 if w.scheduler.address == self.scheduler.address:
                     direct = True
+        if direct is None:
+            direct = self.direct_to_workers
 
         @gen.coroutine
         def wait(k):
@@ -1474,7 +1478,10 @@ class Client(Node):
                     self._send_to_scheduler({'op': 'report-key',
                                              'key': key})
                 for key in response['keys']:
-                    self.futures[key].reset()
+                    try:
+                        self.futures[key].reset()
+                    except KeyError:  # TODO: verify that this is safe
+                        pass
             else:
                 break
 
@@ -1604,6 +1611,8 @@ class Client(Node):
             else:
                 if w.scheduler.address == self.scheduler.address:
                     direct = True
+        if direct is None:
+            direct = self.direct_to_workers
 
         if local_worker:  # running within task
             local_worker.update_data(data=data, report=False)
@@ -2067,7 +2076,7 @@ class Client(Node):
     def _graph_to_futures(self, dsk, keys, restrictions=None,
                           loose_restrictions=None, priority=None,
                           user_priority=0, resources=None, retries=None,
-                          fifo_timeout=0):
+                          fifo_timeout=0, actors=None):
         with self._lock:
             if resources:
                 resources = self._expand_resources(resources,
@@ -2076,6 +2085,9 @@ class Client(Node):
             if retries:
                 retries = self._expand_retries(retries,
                                                all_keys=itertools.chain(dsk, keys))
+
+            if actors is not None and actors is not True and actors is not False:
+                actors = list(self._expand_key(actors))
 
             keyset = set(keys)
             flatkeys = list(map(tokey, keys))
@@ -2131,7 +2143,8 @@ class Client(Node):
                                      'resources': resources,
                                      'submitting_task': getattr(thread_state, 'key', None),
                                      'retries': retries,
-                                     'fifo_timeout': fifo_timeout})
+                                     'fifo_timeout': fifo_timeout,
+                                     'actors': actors})
             return futures
 
     def get(self, dsk, keys, restrictions=None, loose_restrictions=None,
@@ -2251,7 +2264,8 @@ class Client(Node):
 
     def compute(self, collections, sync=False, optimize_graph=True,
                 workers=None, allow_other_workers=False, resources=None,
-                retries=0, priority=0, fifo_timeout='60s', **kwargs):
+                retries=0, priority=0, fifo_timeout='60s', actors=None,
+                **kwargs):
         """ Compute dask collections on cluster
 
         Parameters
@@ -2344,7 +2358,8 @@ class Client(Node):
                                               resources=resources,
                                               retries=retries,
                                               user_priority=priority,
-                                              fifo_timeout=fifo_timeout)
+                                              fifo_timeout=fifo_timeout,
+                                              actors=actors)
 
         i = 0
         futures = []
@@ -2367,7 +2382,7 @@ class Client(Node):
 
     def persist(self, collections, optimize_graph=True, workers=None,
                 allow_other_workers=None, resources=None, retries=None,
-                priority=0, fifo_timeout='60s', **kwargs):
+                priority=0, fifo_timeout='60s', actors=None, **kwargs):
         """ Persist dask collections on cluster
 
         Starts computation of the collection on the cluster in the background.
@@ -2436,7 +2451,8 @@ class Client(Node):
                                          resources=resources,
                                          retries=retries,
                                          user_priority=priority,
-                                         fifo_timeout=fifo_timeout)
+                                         fifo_timeout=fifo_timeout,
+                                         actors=actors)
 
         postpersists = [c.__dask_postpersist__() for c in collections]
         result = [func({k: futures[k] for k in flatten(c.__dask_keys__())}, *args)

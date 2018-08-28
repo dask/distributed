@@ -46,7 +46,7 @@ from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     randominc, inc, dec, div, throws, geninc, asyncinc,
                                     gen_cluster, gen_test, double, deep, popen,
                                     captured_logger, varying, map_varying,
-                                    wait_for, async_wait_for)
+                                    wait_for, async_wait_for, pristine_loop)
 from distributed.utils_test import loop, loop_in_thread, nodebug  # noqa F401
 
 
@@ -897,7 +897,7 @@ def test_remove_worker(c, s, a, b):
 
     yield b._close()
 
-    assert b.address not in s.worker_info
+    assert b.address not in s.workers
 
     result = yield c.gather(L)
     assert result == list(map(inc, range(20)))
@@ -2049,7 +2049,6 @@ def test_waiting_data(c, s, a, b):
 @gen_cluster()
 def test_multi_client(s, a, b):
     c = yield Client((s.ip, s.port), asynchronous=True)
-
     f = yield Client((s.ip, s.port), asynchronous=True)
 
     assert set(s.client_comms) == {c.id, f.id}
@@ -2080,11 +2079,13 @@ def test_multi_client(s, a, b):
 
     yield f.close()
 
-    assert not s.tasks
+    start = time()
+    while s.tasks:
+        yield gen.sleep(0.01)
+        assert time() < start + 2, s.tasks
 
 
 def long_running_client_connection(address):
-    from distributed.utils_test import pristine_loop
     with pristine_loop():
         c = Client(address)
         x = c.submit(lambda x: x + 1, 10)
@@ -2199,6 +2200,12 @@ def test_broadcast(loop):
             assert {k: set(v) for k, v in has_what.items()} == {
                 a['address']: {x.key, y.key, z.key},
                 b['address']: {x.key, y.key}}
+
+
+@gen_cluster(client=True)
+def test_proxy(c, s, a, b):
+    msg = yield c.scheduler.proxy(msg={'op': 'identity'}, worker=a.address)
+    assert msg['id'] == a.identity()['id']
 
 
 @gen_cluster(client=True)
@@ -3425,7 +3432,7 @@ def test_get_foo_lost_keys(c, s, u, v, w):
 
 
 @slow
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, check_new_threads=False)
 def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 1)
     with pytest.raises(KilledWorker):
@@ -3853,12 +3860,12 @@ def test_scatter_compute_lose(c, s, a, b):
 
     yield a._close()
 
+    with pytest.raises(CancelledError):
+        yield wait(z)
+
     assert x.status == 'cancelled'
     assert y.status == 'finished'
     assert z.status == 'cancelled'
-
-    with pytest.raises(CancelledError):
-        yield wait(z)
 
 
 @gen_cluster(client=True)
@@ -4069,7 +4076,7 @@ def test_retire_workers_2(c, s, a, b):
     assert s.who_has == {x.key: {b.address}}
     assert s.has_what == {b.address: {x.key}}
 
-    assert a.address not in s.worker_info
+    assert a.address not in s.workers
 
 
 @gen_cluster(client=True, ncores=[('127.0.0.1', 1)] * 10)
@@ -4128,7 +4135,7 @@ def test_distribute_tasks_by_ncores(c, s, a, b):
     assert len(b.data) > 2 * len(a.data)
 
 
-@gen_cluster(client=True)
+@gen_cluster(client=True, check_new_threads=False)
 def test_add_done_callback(c, s, a, b):
     S = set()
 
@@ -4628,6 +4635,7 @@ def test_fire_and_forget_err(c, s, a, b):
         assert time() < start + 1
 
 
+@pytest.mark.xfail(reason='Other tests bleed into the logs of this one')
 def test_quiet_client_close(loop):
     with captured_logger(logging.getLogger('distributed')) as logger:
         with Client(loop=loop, processes=False, threads_per_worker=4) as c:
@@ -5103,12 +5111,10 @@ def test_future_auto_inform(c, s, a, b):
 
 
 def test_client_async_before_loop_starts():
-    loop = IOLoop()
-    client = Client(asynchronous=True, loop=loop)
-    assert client.asynchronous
-    client.close()
-    # Avoid long wait for cluster close at shutdown
-    loop.close()
+    with pristine_loop() as loop:
+        client = Client(asynchronous=True, loop=loop)
+        assert client.asynchronous
+        client.close()
 
 
 @slow
@@ -5319,41 +5325,45 @@ def test_client_active_bad_port():
     http_server.stop()
 
 
-@gen_cluster()
-def test_turn_off_pickle(s, a, b):
-    import numpy as np
-    c = yield Client(s.address, asynchronous=True,
-                     serializers=['dask', 'msgpack'])
-    try:
-        assert (yield c.submit(inc, 1)) == 2
-        yield c.submit(np.ones, 5)
-        yield c.scatter(1)
+@pytest.mark.parametrize('direct', [True, False])
+def test_turn_off_pickle(direct):
+    @gen_cluster()
+    def test(s, a, b):
+        import numpy as np
+        c = yield Client(s.address, asynchronous=True,
+                         serializers=['dask', 'msgpack'])
+        try:
+            assert (yield c.submit(inc, 1)) == 2
+            yield c.submit(np.ones, 5)
+            yield c.scatter(1)
 
-        # Can't send complex data
-        with pytest.raises(TypeError):
-            future = yield c.scatter(inc)
+            # Can't send complex data
+            with pytest.raises(TypeError):
+                future = yield c.scatter(inc)
 
-        # can send complex tasks (this uses pickle regardless)
-        future = c.submit(lambda x: x, inc)
-        yield wait(future)
+            # can send complex tasks (this uses pickle regardless)
+            future = c.submit(lambda x: x, inc)
+            yield wait(future)
 
-        # but can't receive complex results
-        with pytest.raises(TypeError):
-            yield future
+            # but can't receive complex results
+            with pytest.raises(TypeError):
+                yield c.gather(future, direct=direct)
 
-        # Run works
-        result = yield c.run(lambda: 1)
-        assert list(result.values()) == [1, 1]
-        result = yield c.run_on_scheduler(lambda: 1)
-        assert result == 1
+            # Run works
+            result = yield c.run(lambda: 1)
+            assert list(result.values()) == [1, 1]
+            result = yield c.run_on_scheduler(lambda: 1)
+            assert result == 1
 
-        # But not with complex return values
-        with pytest.raises(TypeError):
-            yield c.run(lambda: inc)
-        with pytest.raises(TypeError):
-            yield c.run_on_scheduler(lambda: inc)
-    finally:
-        yield c._close()
+            # But not with complex return values
+            with pytest.raises(TypeError):
+                yield c.run(lambda: inc)
+            with pytest.raises(TypeError):
+                yield c.run_on_scheduler(lambda: inc)
+        finally:
+            yield c._close()
+
+    test()
 
 
 @gen_cluster()
@@ -5431,6 +5441,33 @@ def test_scatter_error_cancel(c, s, a, b):
     assert y.status == 'error'
     yield gen.sleep(0.1)
     assert y.status == 'error'  # not cancelled
+
+
+def test_no_threads_lingering():
+    active = dict(threading._active)
+    assert threading.active_count() < 30, list(active.values())
+
+
+@gen_cluster()
+def test_direct_async(s, a, b):
+    c = yield Client(s.address, asynchronous=True, direct_to_workers=True)
+    assert c.direct_to_workers
+    yield c.close()
+
+    c = yield Client(s.address, asynchronous=True, direct_to_workers=False)
+    assert not c.direct_to_workers
+    yield c.close()
+
+
+def test_direct_sync(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            assert not c.direct_to_workers
+
+            def f():
+                return get_client().direct_to_workers
+
+            assert c.submit(f).result()
 
 
 if sys.version_info >= (3, 5):

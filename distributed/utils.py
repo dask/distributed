@@ -39,7 +39,11 @@ from dask import istask
 import toolz
 import tornado
 from tornado import gen
-from tornado.ioloop import IOLoop, PollIOLoop
+from tornado.ioloop import IOLoop
+try:
+    from tornado.ioloop import PollIOLoop
+except ImportError:
+    PollIOLoop = None  # dropped in tornado 6.0
 
 from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
 from .metrics import time
@@ -234,8 +238,8 @@ def sync(loop, func, *args, **kwargs):
     Run coroutine in loop running in separate thread.
     """
     # Tornado's PollIOLoop doesn't raise when using closed, do it ourselves
-    if ((isinstance(loop, PollIOLoop) and getattr(loop, '_closing', False)) or
-        (hasattr(loop, 'asyncio_loop') and loop.asyncio_loop._closed)):
+    if PollIOLoop and ((isinstance(loop, PollIOLoop) and getattr(loop, '_closing', False)) or
+            (hasattr(loop, 'asyncio_loop') and loop.asyncio_loop._closed)):
         raise RuntimeError("IOLoop is closed")
 
     timeout = kwargs.pop('callback_timeout', None)
@@ -354,12 +358,11 @@ class LoopRunner(object):
             finally:
                 done_evt.set()
 
-        thread = threading.Thread(target=run_loop,
-                                  name="IO loop")
+        thread = threading.Thread(target=run_loop, name="IO loop")
         thread.daemon = True
         thread.start()
 
-        loop_evt.wait(timeout=1000)
+        loop_evt.wait(timeout=10)
         self._started = True
 
         actual_thread = in_thread[0]
@@ -545,6 +548,7 @@ def key_split(s):
 try:
     from functools import lru_cache
 except ImportError:
+    lru_cache = False
     pass
 else:
     key_split = lru_cache(100000)(key_split)
@@ -1402,6 +1406,10 @@ def has_keyword(func, keyword):
         return keyword in inspect.getargspec(func).args
 
 
+if lru_cache:
+    has_keyword = lru_cache(1000)(has_keyword)
+
+
 # from bokeh.palettes import viridis
 # palette = viridis(18)
 palette = ['#440154', '#471669', '#472A79', '#433C84', '#3C4D8A', '#355D8C',
@@ -1414,3 +1422,11 @@ def color_of(x, palette=palette):
     h = md5(str(x).encode())
     n = int(h.hexdigest()[:8], 16)
     return palette[n % len(palette)]
+
+
+def iscoroutinefunction(f):
+    if gen.is_coroutine_function(f):
+        return True
+    if sys.version_info >= (3, 5) and inspect.iscoroutinefunction(f):
+        return True
+    return False
