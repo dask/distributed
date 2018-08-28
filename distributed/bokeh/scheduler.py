@@ -177,21 +177,20 @@ class ProcessingHistogram(DashboardComponent):
                                             'right': [10, 10],
                                             'top': [0, 0]})
 
-            self.plot = figure(title='Tasks Processing',
+            self.root = figure(title='Tasks Processing',
                                id='bk-nprocessing-histogram-plot',
+                               name='processing_hist',
                                **kwargs)
 
-            self.plot.xaxis.minor_tick_line_alpha = 0
-            self.plot.ygrid.visible = False
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.ygrid.visible = False
 
-            self.plot.toolbar.logo = None
-            self.plot.toolbar_location = None
+            self.root.toolbar.logo = None
+            self.root.toolbar_location = None
 
-            self.plot.quad(source=self.source,
+            self.root.quad(source=self.source,
                            left='left', right='right', bottom=0, top='top',
                            color='blue')
-
-            self.root = row(self.plot, name='processing_hist', sizing_mode='stretch_both')
 
     def update(self):
         L = [len(ws.processing) for ws in self.scheduler.workers.values()]
@@ -765,7 +764,7 @@ class TaskProgress(DashboardComponent):
         y_range = Range1d(-8, 0)
 
         self.root = figure(
-            id='bk-task-progress-plot', title='Progress',
+            id='bk-task-progress-plot', title='Progress', name='task_progress',
             x_range=x_range, y_range=y_range, toolbar_location=None, **kwargs
         )
         self.root.line(  # just to define early ranges
@@ -842,8 +841,6 @@ class TaskProgress(DashboardComponent):
                 """
         )
         self.root.add_tools(hover)
-
-        self.root = row(self.root, sizing_mode='stretch_both', name='task_progress')
 
     def update(self):
         with log_errors():
@@ -1147,21 +1144,23 @@ def status_doc(scheduler, extra, doc):
         task_stream.update()
         doc.add_periodic_callback(task_stream.update, 100)
 
-        task_progress = TaskProgress(scheduler, height=160)
+        task_progress = TaskProgress(scheduler, sizing_mode='stretch_both')
         task_progress.update()
         doc.add_periodic_callback(task_progress.update, 100)
 
         if len(scheduler.workers) < 50:
-            current_load = CurrentLoad(scheduler, height=160)
+            current_load = CurrentLoad(scheduler, height=160,
+                                       sizing_mode='stretch_both')
             current_load.update()
             doc.add_periodic_callback(current_load.update, 100)
             doc.add_root(current_load.nbytes)
             doc.add_root(current_load.processing)
         else:
-            nbytes_hist = NBytesHistogram(scheduler, width=300, height=160)
+            nbytes_hist = NBytesHistogram(scheduler, width=300,
+                                          sizing_mode='stretch_both')
             nbytes_hist.update()
-            processing_hist = ProcessingHistogram(scheduler, width=300,
-                                                  height=160)
+            processing_hist = ProcessingHistogram(scheduler,
+                                                  sizing_mode='stretch_both')
             processing_hist.update()
             doc.add_periodic_callback(nbytes_hist.update, 100)
             doc.add_periodic_callback(processing_hist.update, 100)

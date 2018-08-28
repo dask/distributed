@@ -74,10 +74,17 @@ class TaskStream(DashboardComponent):
         y_range = DataRange1d(range_padding=0)
 
         self.root = figure(
-            title="Task Stream", id='bk-task-stream-plot',
-            x_range=x_range, y_range=y_range, toolbar_location="above",
-            x_axis_type='datetime', min_border_right=35, tools='', **kwargs)
-        self.root.yaxis.axis_label = 'Worker Core'
+            name='task_stream',
+            title="Task Stream",
+            id='bk-task-stream-plot',
+            x_range=x_range,
+            y_range=y_range,
+            toolbar_location="above",
+            x_axis_type='datetime',
+            min_border_right=35,
+            tools='',
+            **kwargs
+        )
 
         rect = self.root.rect(source=self.source, x="start", y="y",
             width="duration", height=0.4, fill_color="color",
@@ -112,8 +119,6 @@ class TaskStream(DashboardComponent):
             export = ExportTool()
             export.register_plot(self.root)
             self.root.add_tools(export)
-
-        self.root = row(self.root, name='task_stream', sizing_mode='stretch_both')
 
         # Required for update callback
         self.task_stream_index = [0]
