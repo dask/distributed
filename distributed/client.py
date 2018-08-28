@@ -3338,7 +3338,7 @@ class Client(Node):
         return collections_to_dsk(collections, *args, **kwargs)
 
     def get_task_stream(self, start=None, stop=None, count=None, plot=False,
-                        filename='task-stream.html', **kwargs):
+                        filename='task-stream.html'):
         """ Get task stream data from scheduler
 
         This collects the data present in the diagnostic "Task Stream" plot on
@@ -3366,8 +3366,6 @@ class Client(Node):
             If plot == 'save' then save the figure to a file
         filename: str (optional)
             The filename to save to if you set ``plot='save'``
-        **kwargs:
-            Extra arguments to pass to bokeh.plotting.save if called
 
         Examples
         --------
@@ -3401,11 +3399,11 @@ class Client(Node):
         get_task_stream: a context manager version of this method
         """
         return self.sync(self._get_task_stream, start=start, stop=stop,
-                         count=count, plot=plot, filename=filename, **kwargs)
+                         count=count, plot=plot, filename=filename)
 
     @gen.coroutine
     def _get_task_stream(self, start=None, stop=None, count=None, plot=False,
-                         filename='task-stream.html', **kwargs):
+                         filename='task-stream.html'):
         msgs = yield self.scheduler.get_task_stream(start=start,
                          stop=stop, count=count)
         if plot:
@@ -3414,15 +3412,9 @@ class Client(Node):
             from .bokeh.components import task_stream_figure
             source, figure = task_stream_figure(sizing_mode='stretch_both')
             source.data.update(rects)
-            if plot == 'show':
-                from bokeh.plotting import show
-                show(figure)
-            elif plot == 'save':
+            if plot == 'save':
                 from bokeh.plotting import save
-                save(figure, title=kwargs.pop('title', 'Dask Task Stream'),
-                     filename=filename, **kwargs)
-            else:
-                assert not kwargs
+                save(figure, title='Dask Task Stream', filename=filename)
             raise gen.Return((msgs, figure))
         else:
             raise gen.Return(msgs)
@@ -3812,8 +3804,6 @@ class get_task_stream(object):
         If plot == 'save' then save the figure to a file
     filename: str (optional)
         The filename to save to if you set ``plot='save'``
-    **kwargs:
-        Extra arguments to pass to bokeh.plotting.save if called
 
     Examples
     --------
@@ -3833,10 +3823,9 @@ class get_task_stream(object):
     --------
     Client.get_task_stream: Function version of this context manager
     """
-    def __init__(self, client=None, plot=False, filename='task-stream.html', **kwargs):
+    def __init__(self, client=None, plot=False, filename='task-stream.html'):
         self.data = []
         self._plot = plot
-        self._kwargs = kwargs
         self._filename = filename
         self.figure = None
         self.client = client or default_client()
@@ -3848,7 +3837,7 @@ class get_task_stream(object):
 
     def __exit__(self, typ, value, traceback):
         L = self.client.get_task_stream(start=self.start, plot=self._plot,
-                                        filename=self._filename, **self._kwargs)
+                                        filename=self._filename)
         if self._plot:
             L, self.figure = L
         self.data.extend(L)
@@ -3860,8 +3849,7 @@ class get_task_stream(object):
     @gen.coroutine
     def __aexit__(self, typ, value, traceback):
         L = yield self.client.get_task_stream(start=self.start, plot=self._plot,
-                                              filename=self._filename,
-                                              **self._kwargs)
+                                              filename=self._filename)
         if self._plot:
             L, self.figure = L
         self.data.extend(L)
