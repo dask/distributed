@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% from macros import embed %}
+<div class="container-fluid">
+
+    <div class="row body">
+        <div>
+            <div class="chart-wrapper">
+                <div class="chart-title"></div>
+                <div class="chart-stage">
+                    {{ embed(roots.task_stream) }}
+                </div>
+                <div class="chart-notes"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row body">
+        <!-- <div class="col-sm-6"> set max width? -->
+        <div>
+            <div class="chart-wrapper">
+                <div class="chart-title"></div>
+                <div class="chart-stage">
+                    {{ embed(roots.task_progress) }}
+                </div>
+                <div class="chart-notes"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row body">
+        <div class="col-sm-6 col-md-6">
+            <div class="chart-wrapper">
+                <div class="chart-title"></div>
+                <div class="chart-stage">
+                    {{ embed(roots.nbytes_hist) }}
+                </div>
+                <div class="chart-notes"></div>
+            </div>
+        </div>
+        <div class="col-sm-6 col-md-6">
+            <div class="chart-wrapper">
+                <div class="chart-title"></div>
+                <div class="chart-stage">
+                    {{ embed(roots.processing_hist) }}
+                </div>
+                <div class="chart-notes"></div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{{ plot_script }}
+
+{% endblock %}

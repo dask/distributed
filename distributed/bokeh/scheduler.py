@@ -51,12 +51,8 @@ logger = logging.getLogger(__name__)
 
 PROFILING = False
 
-import jinja2
-
-with open(os.path.join(os.path.dirname(__file__), 'template.html')) as f:
-    template_source = f.read()
-
-template = jinja2.Template(template_source)
+from jinja2 import Environment, FileSystemLoader
+env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), 'templates')))
 
 template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'profile', 'graph']}
 
@@ -181,19 +177,21 @@ class ProcessingHistogram(DashboardComponent):
                                             'right': [10, 10],
                                             'top': [0, 0]})
 
-            self.root = figure(title='Tasks Processing',
+            self.plot = figure(title='Tasks Processing',
                                id='bk-nprocessing-histogram-plot',
                                **kwargs)
 
-            self.root.xaxis.minor_tick_line_alpha = 0
-            self.root.ygrid.visible = False
+            self.plot.xaxis.minor_tick_line_alpha = 0
+            self.plot.ygrid.visible = False
 
-            self.root.toolbar.logo = None
-            self.root.toolbar_location = None
+            self.plot.toolbar.logo = None
+            self.plot.toolbar_location = None
 
-            self.root.quad(source=self.source,
+            self.plot.quad(source=self.source,
                            left='left', right='right', bottom=0, top='top',
                            color='blue')
+
+            self.root = row(self.plot, name='processing_hist', sizing_mode='scale_width')
 
     def update(self):
         L = [len(ws.processing) for ws in self.scheduler.workers.values()]
@@ -214,21 +212,23 @@ class NBytesHistogram(DashboardComponent):
                                             'right': [10, 10],
                                             'top': [0, 0]})
 
-            self.root = figure(title='Bytes Stored',
+            self.plot = figure(title='Bytes Stored',
                                id='bk-nbytes-histogram-plot',
                                **kwargs)
-            self.root.xaxis[0].formatter = NumeralTickFormatter(format='0.0 b')
-            self.root.xaxis.major_label_orientation = -math.pi / 12
+            self.plot.xaxis[0].formatter = NumeralTickFormatter(format='0.0 b')
+            self.plot.xaxis.major_label_orientation = -math.pi / 12
 
-            self.root.xaxis.minor_tick_line_alpha = 0
-            self.root.ygrid.visible = False
+            self.plot.xaxis.minor_tick_line_alpha = 0
+            self.plot.ygrid.visible = False
 
-            self.root.toolbar.logo = None
-            self.root.toolbar_location = None
+            self.plot.toolbar.logo = None
+            self.plot.toolbar_location = None
 
-            self.root.quad(source=self.source,
+            self.plot.quad(source=self.source,
                            left='left', right='right', bottom=0, top='top',
                            color='blue')
+
+            self.root = row(self.plot, name='nbytes_hist', sizing_mode='scale_width')
 
     def update(self):
         nbytes = np.asarray([ws.nbytes for ws in self.scheduler.workers.values()])
@@ -236,7 +236,7 @@ class NBytesHistogram(DashboardComponent):
         d = {'left': x[:-1], 'right': x[1:], 'top': counts}
         self.source.data.update(d)
 
-        self.root.title.text = 'Bytes stored: ' + format_bytes(nbytes.sum())
+        self.plot.title.text = 'Bytes stored: ' + format_bytes(nbytes.sum())
 
 
 class CurrentLoad(DashboardComponent):
@@ -306,7 +306,9 @@ class CurrentLoad(DashboardComponent):
             self.nbytes_figure = nbytes
 
             processing.y_range = nbytes.y_range
-            self.root = row(nbytes, processing, sizing_mode='scale_width')
+
+            self.nbytes = row(nbytes, name='nbytes_hist', sizing_mode='scale_width')
+            self.processing = row(processing, name='processing_hist', sizing_mode='scale_width')
 
     def update(self):
         with log_errors():
@@ -841,6 +843,8 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+        self.root = row(self.root, sizing_mode='scale_width', name='task_progress')
+
     def update(self):
         with log_errors():
             state = {'all': valmap(len, self.plugin.all),
@@ -1061,7 +1065,7 @@ def systemmonitor_doc(scheduler, extra, doc):
         doc.add_periodic_callback(sysmon.update, 500)
 
         doc.add_root(column(sysmon.root, sizing_mode='scale_width'))
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'system'
         doc.template_variables.update(extra)
 
@@ -1081,7 +1085,7 @@ def stealing_doc(scheduler, extra, doc):
                             stealing_events.root,
                             sizing_mode='scale_width'))
 
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'stealing'
         doc.template_variables.update(extra)
 
@@ -1093,7 +1097,7 @@ def events_doc(scheduler, extra, doc):
         doc.add_periodic_callback(events.update, 500)
         doc.title = "Dask: Scheduler Events"
         doc.add_root(column(events.root, sizing_mode='scale_width'))
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'events'
         doc.template_variables.update(extra)
 
@@ -1105,7 +1109,7 @@ def workers_doc(scheduler, extra, doc):
         doc.add_periodic_callback(table.update, 500)
         doc.title = "Dask: Workers"
         doc.add_root(table.root)
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'workers'
         doc.template_variables.update(extra)
 
@@ -1118,7 +1122,7 @@ def tasks_doc(scheduler, extra, doc):
         doc.add_periodic_callback(ts.update, 5000)
         doc.title = "Dask: Task Stream"
         doc.add_root(ts.root)
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'tasks'
         doc.template_variables.update(extra)
 
@@ -1131,7 +1135,7 @@ def graph_doc(scheduler, extra, doc):
         doc.add_periodic_callback(graph.update, 200)
         doc.add_root(graph.root)
 
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'graph'
         doc.template_variables.update(extra)
 
@@ -1151,7 +1155,8 @@ def status_doc(scheduler, extra, doc):
             current_load = CurrentLoad(scheduler, height=160)
             current_load.update()
             doc.add_periodic_callback(current_load.update, 100)
-            current_load_fig = current_load.root
+            doc.add_root(current_load.nbytes)
+            doc.add_root(current_load.processing)
         else:
             nbytes_hist = NBytesHistogram(scheduler, width=300, height=160)
             nbytes_hist.update()
@@ -1163,12 +1168,14 @@ def status_doc(scheduler, extra, doc):
             current_load_fig = row(nbytes_hist.root, processing_hist.root,
                                    sizing_mode='scale_width')
 
+            doc.add_root(nbytes_hist.root)
+            doc.add_root(processing.root)
+
         doc.title = "Dask: Status"
-        doc.add_root(column(current_load_fig,
-                            task_stream.root,
-                            task_progress.root,
-                            sizing_mode='scale_width'))
-        doc.template = template
+        doc.add_root(task_progress.root)
+        doc.add_root(task_stream.root)
+
+        doc.template = env.get_template('status.html')
         doc.template_variables['active_page'] = 'status'
         doc.template_variables.update(extra)
 
@@ -1178,7 +1185,7 @@ def profile_doc(scheduler, extra, doc):
         doc.title = "Dask: Profile"
         prof = ProfileTimePlot(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         doc.template_variables['active_page'] = 'profile'
         doc.template_variables.update(extra)
 
