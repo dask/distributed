@@ -442,7 +442,7 @@ def test_worker_name():
     s.start(0)
     w = Worker(s.ip, s.port, name='alice')
     yield w._start()
-    assert s.worker_info[w.address]['name'] == 'alice'
+    assert s.workers[w.address].name == 'alice'
     assert s.aliases['alice'] == w.address
 
     with pytest.raises(ValueError):
@@ -575,7 +575,7 @@ def test_scheduler_sees_memory_limits(s):
     w = Worker(s.ip, s.port, ncores=3, memory_limit=12345)
     yield w._start(0)
 
-    assert s.worker_info[w.address]['memory_limit'] == 12345
+    assert s.workers[w.address].memory_limit == 12345
     yield w._close()
 
 
@@ -1362,3 +1362,25 @@ def test_resources_reset_after_cancelled_task(c, s, w):
     assert w.available_resources == {'A': 1}
 
     yield c.submit(inc, 1, resources={'A': 1})
+
+
+@gen_cluster(client=True)
+def test_gh2187(c, s, a, b):
+    def foo():
+        return 'foo'
+
+    def bar(x):
+        return x + 'bar'
+
+    def baz(x):
+        sleep(0.1)
+        return x + 'baz'
+
+    x = c.submit(foo, key='x')
+    y = c.submit(bar, x, key='y')
+    yield y
+    z = c.submit(baz, y, key='z')
+    del y
+    yield gen.sleep(0.1)
+    f = c.submit(bar, x, key='y')
+    yield f
