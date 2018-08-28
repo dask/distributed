@@ -211,23 +211,22 @@ class NBytesHistogram(DashboardComponent):
                                             'right': [10, 10],
                                             'top': [0, 0]})
 
-            self.plot = figure(title='Bytes Stored',
+            self.root = figure(title='Bytes Stored',
+                               name='nbytes_hist',
                                id='bk-nbytes-histogram-plot',
                                **kwargs)
-            self.plot.xaxis[0].formatter = NumeralTickFormatter(format='0.0 b')
-            self.plot.xaxis.major_label_orientation = -math.pi / 12
+            self.root.xaxis[0].formatter = NumeralTickFormatter(format='0.0 b')
+            self.root.xaxis.major_label_orientation = -math.pi / 12
 
-            self.plot.xaxis.minor_tick_line_alpha = 0
-            self.plot.ygrid.visible = False
+            self.root.xaxis.minor_tick_line_alpha = 0
+            self.root.ygrid.visible = False
 
-            self.plot.toolbar.logo = None
-            self.plot.toolbar_location = None
+            self.root.toolbar.logo = None
+            self.root.toolbar_location = None
 
-            self.plot.quad(source=self.source,
+            self.root.quad(source=self.source,
                            left='left', right='right', bottom=0, top='top',
                            color='blue')
-
-            self.root = row(self.plot, name='nbytes_hist', sizing_mode='stretch_both')
 
     def update(self):
         nbytes = np.asarray([ws.nbytes for ws in self.scheduler.workers.values()])
@@ -235,7 +234,7 @@ class NBytesHistogram(DashboardComponent):
         d = {'left': x[:-1], 'right': x[1:], 'top': counts}
         self.source.data.update(d)
 
-        self.plot.title.text = 'Bytes stored: ' + format_bytes(nbytes.sum())
+        self.root.title.text = 'Bytes stored: ' + format_bytes(nbytes.sum())
 
 
 class CurrentLoad(DashboardComponent):
@@ -257,7 +256,7 @@ class CurrentLoad(DashboardComponent):
                                             'bokeh_address': ['', '']})
 
             processing = figure(title='Tasks Processing', tools='', id='bk-nprocessing-plot',
-                                width=int(width / 2), **kwargs)
+                                name='processing_hist', width=int(width / 2), **kwargs)
             rect = processing.rect(source=self.source,
                                    x='nprocessing-half', y='y',
                                    width='nprocessing', height=1,
@@ -267,7 +266,7 @@ class CurrentLoad(DashboardComponent):
 
             nbytes = figure(title='Bytes stored', tools='',
                             id='bk-nbytes-worker-plot', width=int(width / 2),
-                            **kwargs)
+                            name='nbytes_hist',  **kwargs)
             rect = nbytes.rect(source=self.source,
                                x='nbytes-half', y='y',
                                width='nbytes', height=1,
@@ -305,9 +304,6 @@ class CurrentLoad(DashboardComponent):
             self.nbytes_figure = nbytes
 
             processing.y_range = nbytes.y_range
-
-            self.nbytes = row(nbytes, name='nbytes_hist', sizing_mode='stretch_both')
-            self.processing = row(processing, name='processing_hist', sizing_mode='stretch_both')
 
     def update(self):
         with log_errors():
@@ -1149,18 +1145,15 @@ def status_doc(scheduler, extra, doc):
         doc.add_periodic_callback(task_progress.update, 100)
 
         if len(scheduler.workers) < 50:
-            current_load = CurrentLoad(scheduler, height=160,
-                                       sizing_mode='stretch_both')
+            current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
             current_load.update()
             doc.add_periodic_callback(current_load.update, 100)
-            doc.add_root(current_load.nbytes)
-            doc.add_root(current_load.processing)
+            doc.add_root(current_load.nbytes_figure)
+            doc.add_root(current_load.processing_figure)
         else:
-            nbytes_hist = NBytesHistogram(scheduler, width=300,
-                                          sizing_mode='stretch_both')
+            nbytes_hist = NBytesHistogram(scheduler, sizing_mode='stretch_both')
             nbytes_hist.update()
-            processing_hist = ProcessingHistogram(scheduler,
-                                                  sizing_mode='stretch_both')
+            processing_hist = ProcessingHistogram(scheduler, sizing_mode='stretch_both')
             processing_hist.update()
             doc.add_periodic_callback(nbytes_hist.update, 100)
             doc.add_periodic_callback(processing_hist.update, 100)
