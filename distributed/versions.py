@@ -21,6 +21,7 @@ optional_packages = [('numpy', lambda p: p.__version__),
                      ('pandas', lambda p: p.__version__),
                      ('bokeh', lambda p: p.__version__),
                      ('lz4', lambda p: p.__version__),
+                     ('dask_ml', lambda p: p.__version__),
                      ('blosc', lambda p: p.__version__)]
 
 
