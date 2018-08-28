@@ -94,6 +94,7 @@ class TaskStream(DashboardComponent):
 
         self.root.yaxis.major_label_text_alpha = 0
         self.root.yaxis.minor_tick_line_alpha = 0
+        self.root.yaxis.major_tick_line_alpha = 0
         self.root.xgrid.visible = False
 
         hover = HoverTool(
