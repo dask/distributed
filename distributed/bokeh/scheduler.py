@@ -10,8 +10,6 @@ from operator import add
 import os
 
 import bokeh
-from bokeh.application import Application
-from bokeh.application.handlers.function import FunctionHandler
 from bokeh.layouts import column, row
 from bokeh.models import (ColumnDataSource, DataRange1d, HoverTool, ResetTool,
                           PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad,
@@ -1267,49 +1265,30 @@ class BokehScheduler(BokehServer):
         self.server_kwargs = kwargs
         self.server_kwargs['prefix'] = prefix or None
 
-        systemmonitor = Application(FunctionHandler(partial(systemmonitor_doc, scheduler, self.extra)))
-        workers = Application(FunctionHandler(partial(workers_doc, scheduler, self.extra)))
-        stealing = Application(FunctionHandler(partial(stealing_doc, scheduler, self.extra)))
-        counters = Application(FunctionHandler(partial(counters_doc, scheduler, self.extra)))
-        events = Application(FunctionHandler(partial(events_doc, scheduler, self.extra)))
-        tasks = Application(FunctionHandler(partial(tasks_doc, scheduler, self.extra)))
-        status = Application(FunctionHandler(partial(status_doc, scheduler, self.extra)))
-        profile = Application(FunctionHandler(partial(profile_doc, scheduler, self.extra)))
-        profile_server = Application(FunctionHandler(partial(profile_server_doc, scheduler, self.extra)))
-        graph = Application(FunctionHandler(partial(graph_doc, scheduler, self.extra)))
-
-        individual_task_stream = Application(FunctionHandler(partial(
-            individual_task_stream_doc, scheduler, self.extra)))
-        individual_progress = Application(FunctionHandler(partial(individual_progress_doc, scheduler, self.extra)))
-        individual_graph = Application(FunctionHandler(partial(individual_graph_doc, scheduler, self.extra)))
-        individual_profile = Application(FunctionHandler(partial(individual_profile_doc, scheduler, self.extra)))
-        individual_profile_server = Application(FunctionHandler(partial(
-            individual_profile_server_doc, scheduler, self.extra)))
-        individual_nbytes = Application(FunctionHandler(partial(individual_nbytes_doc, scheduler, self.extra)))
-        individual_nprocessing = Application(FunctionHandler(partial(individual_nprocessing_doc, scheduler, self.extra)))
-        individual_workers = Application(FunctionHandler(partial(individual_workers_doc, scheduler, self.extra)))
-
         self.apps = {
-            '/system': systemmonitor,
-            '/stealing': stealing,
-            '/workers': workers,
-            '/events': events,
-            '/counters': counters,
-            '/tasks': tasks,
-            '/status': status,
-            '/profile': profile,
-            '/profile-server': profile_server,
-            '/graph': graph,
+            '/system': systemmonitor_doc,
+            '/stealing': stealing_doc,
+            '/workers': workers_doc,
+            '/events': events_doc,
+            '/counters': counters_doc,
+            '/tasks': tasks_doc,
+            '/status': status_doc,
+            '/profile': profile_doc,
+            '/profile-server': profile_server_doc,
+            '/graph': graph_doc,
 
-            '/individual-task-stream': individual_task_stream,
-            '/individual-progress': individual_progress,
-            '/individual-graph': individual_graph,
-            '/individual-profile': individual_profile,
-            '/individual-profile-server': individual_profile_server,
-            '/individual-nbytes': individual_nbytes,
-            '/individual-nprocessing': individual_nprocessing,
-            '/individual-workers': individual_workers,
+            '/individual-task-stream': individual_task_stream_doc,
+            '/individual-progress': individual_progress_doc,
+            '/individual-graph': individual_graph_doc,
+            '/individual-profile': individual_profile_doc,
+            '/individual-profile-server': individual_profile_server_doc,
+            '/individual-nbytes': individual_nbytes_doc,
+            '/individual-nprocessing': individual_nprocessing_doc,
+            '/individual-workers': individual_workers_doc,
         }
+
+        self.apps = {k: partial(v, scheduler, self.extra)
+                     for k, v in self.apps.items()}
 
         self.loop = io_loop or scheduler.loop
         self.server = None
