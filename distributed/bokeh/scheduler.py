@@ -1180,11 +1180,18 @@ def individual_task_stream_doc(scheduler, extra, doc):
     doc.add_root(task_stream.root)
 
 
-def individual_load_doc(scheduler, extra, doc):
-    current_load = CurrentLoad(scheduler, height=160, sizing_mode='stretch_both')
+def individual_nbytes_doc(scheduler, extra, doc):
+    current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
     current_load.update()
     doc.add_periodic_callback(current_load.update, 100)
-    doc.add_root(current_load.root)
+    doc.add_root(current_load.nbytes_figure)
+
+
+def individual_nprocessing_doc(scheduler, extra, doc):
+    current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
+    current_load.update()
+    doc.add_periodic_callback(current_load.update, 100)
+    doc.add_root(current_load.processing_figure)
 
 
 def individual_progress_doc(scheduler, extra, doc):
@@ -1278,7 +1285,8 @@ class BokehScheduler(BokehServer):
         individual_profile = Application(FunctionHandler(partial(individual_profile_doc, scheduler, self.extra)))
         individual_profile_server = Application(FunctionHandler(partial(
             individual_profile_server_doc, scheduler, self.extra)))
-        individual_load = Application(FunctionHandler(partial(individual_load_doc, scheduler, self.extra)))
+        individual_nbytes = Application(FunctionHandler(partial(individual_nbytes_doc, scheduler, self.extra)))
+        individual_nprocessing = Application(FunctionHandler(partial(individual_nprocessing_doc, scheduler, self.extra)))
         individual_workers = Application(FunctionHandler(partial(individual_workers_doc, scheduler, self.extra)))
 
         self.apps = {
@@ -1298,7 +1306,8 @@ class BokehScheduler(BokehServer):
             '/individual-graph': individual_graph,
             '/individual-profile': individual_profile,
             '/individual-profile-server': individual_profile_server,
-            '/individual-load': individual_load,
+            '/individual-nbytes': individual_nbytes,
+            '/individual-nprocessing': individual_nprocessing,
             '/individual-workers': individual_workers,
         }
 
