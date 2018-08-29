@@ -1161,7 +1161,7 @@ def status_doc(scheduler, extra, doc):
                                    sizing_mode='stretch_both')
 
             doc.add_root(nbytes_hist.root)
-            doc.add_root(processing.root)
+            doc.add_root(processing_hist.root)
 
         doc.title = "Dask: Status"
         doc.add_root(task_progress.root)
@@ -1189,7 +1189,7 @@ def profile_server_doc(scheduler, extra, doc):
         doc.title = "Dask: Profile of Event Loop"
         prof = ProfileServer(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
-        doc.template = template
+        doc.template = env.get_template('simple.html')
         # doc.template_variables['active_page'] = 'profile'
         doc.template_variables.update(extra)
 
