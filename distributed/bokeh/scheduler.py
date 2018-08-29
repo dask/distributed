@@ -18,6 +18,7 @@ from bokeh.models import (ColumnDataSource, DataRange1d, HoverTool, ResetTool,
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
+from bokeh.themes import Theme
 from bokeh.transform import factor_cmap
 from bokeh.io import curdoc
 from toolz import pipe, merge
@@ -54,6 +55,7 @@ env = Environment(loader=FileSystemLoader(os.path.join(os.path.dirname(__file__)
 
 template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'profile', 'graph']}
 
+BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), 'theme.yaml'))
 
 nan = float('nan')
 
@@ -1164,7 +1166,7 @@ def status_doc(scheduler, extra, doc):
         doc.title = "Dask: Status"
         doc.add_root(task_progress.root)
         doc.add_root(task_stream.root)
-
+        doc.theme = BOKEH_THEME
         doc.template = env.get_template('status.html')
         doc.template_variables['active_page'] = 'status'
         doc.template_variables.update(extra)
