@@ -1060,6 +1060,7 @@ def systemmonitor_doc(scheduler, extra, doc):
         doc.add_root(column(sysmon.root, sizing_mode='scale_width'))
         doc.template = env.get_template('simple.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
 
 def stealing_doc(scheduler, extra, doc):
@@ -1079,6 +1080,7 @@ def stealing_doc(scheduler, extra, doc):
 
         doc.template = env.get_template('simple.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
 
 def events_doc(scheduler, extra, doc):
@@ -1090,6 +1092,7 @@ def events_doc(scheduler, extra, doc):
         doc.add_root(column(events.root, sizing_mode='scale_width'))
         doc.template = env.get_template('simple.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
 
 def workers_doc(scheduler, extra, doc):
@@ -1101,6 +1104,7 @@ def workers_doc(scheduler, extra, doc):
         doc.add_root(table.root)
         doc.template = env.get_template('simple.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
 
 def tasks_doc(scheduler, extra, doc):
@@ -1113,6 +1117,7 @@ def tasks_doc(scheduler, extra, doc):
         doc.add_root(ts.root)
         doc.template = env.get_template('simple.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
 
 def graph_doc(scheduler, extra, doc):
@@ -1125,6 +1130,7 @@ def graph_doc(scheduler, extra, doc):
 
         doc.template = env.get_template('simple.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
 
 def status_doc(scheduler, extra, doc):
@@ -1163,6 +1169,7 @@ def status_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
         doc.template = env.get_template('status.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
 
 def individual_task_stream_doc(scheduler, extra, doc):
@@ -1171,6 +1178,7 @@ def individual_task_stream_doc(scheduler, extra, doc):
     task_stream.update()
     doc.add_periodic_callback(task_stream.update, 100)
     doc.add_root(task_stream.root)
+    doc.theme = BOKEH_THEME
 
 
 def individual_nbytes_doc(scheduler, extra, doc):
@@ -1178,6 +1186,7 @@ def individual_nbytes_doc(scheduler, extra, doc):
     current_load.update()
     doc.add_periodic_callback(current_load.update, 100)
     doc.add_root(current_load.nbytes_figure)
+    doc.theme = BOKEH_THEME
 
 
 def individual_nprocessing_doc(scheduler, extra, doc):
@@ -1185,6 +1194,7 @@ def individual_nprocessing_doc(scheduler, extra, doc):
     current_load.update()
     doc.add_periodic_callback(current_load.update, 100)
     doc.add_root(current_load.processing_figure)
+    doc.theme = BOKEH_THEME
 
 
 def individual_progress_doc(scheduler, extra, doc):
@@ -1192,6 +1202,7 @@ def individual_progress_doc(scheduler, extra, doc):
     task_progress.update()
     doc.add_periodic_callback(task_progress.update, 100)
     doc.add_root(task_progress.root)
+    doc.theme = BOKEH_THEME
 
 
 def individual_graph_doc(scheduler, extra, doc):
@@ -1200,6 +1211,7 @@ def individual_graph_doc(scheduler, extra, doc):
         graph.update()
         doc.add_periodic_callback(graph.update, 200)
         doc.add_root(graph.root)
+        doc.theme = BOKEH_THEME
 
 
 def individual_profile_doc(scheduler, extra, doc):
@@ -1207,6 +1219,7 @@ def individual_profile_doc(scheduler, extra, doc):
         prof = ProfileTimePlot(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
+        doc.theme = BOKEH_THEME
 
 
 def individual_profile_server_doc(scheduler, extra, doc):
@@ -1214,6 +1227,7 @@ def individual_profile_server_doc(scheduler, extra, doc):
         prof = ProfileServer(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
         prof.trigger_update()
+        doc.theme = BOKEH_THEME
 
 
 def individual_workers_doc(scheduler, extra, doc):
@@ -1222,6 +1236,7 @@ def individual_workers_doc(scheduler, extra, doc):
         table.update()
         doc.add_periodic_callback(table.update, 500)
         doc.add_root(table.root)
+        doc.theme = BOKEH_THEME
 
 
 def profile_doc(scheduler, extra, doc):
@@ -1231,6 +1246,7 @@ def profile_doc(scheduler, extra, doc):
         doc.add_root(prof.root)
         doc.template = env.get_template('simple.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
         prof.trigger_update()
 
@@ -1242,6 +1258,7 @@ def profile_server_doc(scheduler, extra, doc):
         doc.add_root(prof.root)
         doc.template = env.get_template('simple.html')
         doc.template_variables.update(extra)
+        doc.theme = BOKEH_THEME
 
         prof.trigger_update()
 
