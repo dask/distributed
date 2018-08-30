@@ -576,10 +576,11 @@ class WorkerBase(ServerNode):
         # logger.info("Finish job %d, %s", i, key)
         raise gen.Return(result)
 
-    def run(self, comm, function, args=(), kwargs={}):
+    def run(self, comm, function, args=(), kwargs=None):
+        kwargs = kwargs or {}
         return run(self, comm, function=function, args=args, kwargs=kwargs)
 
-    def run_coroutine(self, comm, function, args=(), kwargs={}, wait=True):
+    def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs,
                    is_coro=True, wait=wait)
 

@@ -3046,8 +3046,7 @@ class Scheduler(ServerNode):
 
         self.worker_setups.append(setup)
 
-        responses = yield self.broadcast(msg=dict(op='run', function=setup,
-                                                  args=(), kwargs={}))
+        responses = yield self.broadcast(msg=dict(op='run', function=setup))
         raise gen.Return(responses)
 
     #####################
