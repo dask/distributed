@@ -411,6 +411,7 @@ class WorkerBase(ServerNode):
         assert self.status is None
 
         enable_gc_diagnosis()
+        thread_state.on_event_loop_thread = True
 
         # XXX Factor this out
         if not addr_or_port:
@@ -1907,7 +1908,7 @@ class Worker(WorkerBase):
                 if response['status'] == 'busy':
                     self.log.append(('busy-gather', worker, deps))
                     for dep in deps:
-                        if self.dep_state[dep] == 'flight':
+                        if self.dep_state.get(dep, None) == 'flight':
                             self.transition_dep(dep, 'waiting')
                     return
 
