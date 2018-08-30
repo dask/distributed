@@ -6,11 +6,13 @@
     <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no' />
     <link rel="stylesheet" href="statics/css/base.css">
     {% block resources %}
-    {% block js_resources %}
+    {% block css_resources %}
     {{ bokeh_css | indent(8) if bokeh_css }}
     {% endblock %}
-    {% block css_resources%}
+    {% block js_resources%}
     {{ bokeh_js | indent(8) if bokeh_js }}
+    {% endblock %}
+    {% block extra_resources %}
     {% endblock %}
     {% endblock %}
   </head>
