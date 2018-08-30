@@ -23,8 +23,8 @@
           </a>
         </li>
         {% for page in pages %}
-        <li{% if page == active_page %} class="active"{% endif %}>
-          <a href="{{ page }}">{{ page|title }}</a>
+        <li>
+          <a href="/{{ page }}">{{ page|title }}</a>
         </li>
         {% endfor %}
         <li>
@@ -41,6 +41,22 @@
       {% block content %}
       {% endblock %}
     </div>
-    <script src="statics/js/base.js"></script>
+    <script>
+      /* Add the "active" class to the current navbar li element */
+      var active = document.querySelectorAll("a[href='" + location.pathname + "']");
+      if (active.length > 0) {
+        active[0].closest('li').classList.add('active')
+      }
+
+      /* Toggle between adding and removing the "responsive" class to navbar when the user clicks on the icon */
+      function myFunction() {
+        var x = document.getElementById("myTopnav");
+        if (x.className === "navbar") {
+          x.className += " responsive";
+        } else {
+          x.className = "navbar";
+        }
+      }
+    </script>
   </body>
 </html>

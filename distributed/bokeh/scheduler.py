@@ -1059,7 +1059,6 @@ def systemmonitor_doc(scheduler, extra, doc):
 
         doc.add_root(column(sysmon.root, sizing_mode='scale_width'))
         doc.template = env.get_template('simple.html')
-        doc.template_variables['active_page'] = 'system'
         doc.template_variables.update(extra)
 
 
@@ -1079,7 +1078,6 @@ def stealing_doc(scheduler, extra, doc):
                             sizing_mode='scale_width'))
 
         doc.template = env.get_template('simple.html')
-        doc.template_variables['active_page'] = 'stealing'
         doc.template_variables.update(extra)
 
 
@@ -1091,7 +1089,6 @@ def events_doc(scheduler, extra, doc):
         doc.title = "Dask: Scheduler Events"
         doc.add_root(column(events.root, sizing_mode='scale_width'))
         doc.template = env.get_template('simple.html')
-        doc.template_variables['active_page'] = 'events'
         doc.template_variables.update(extra)
 
 
@@ -1103,7 +1100,6 @@ def workers_doc(scheduler, extra, doc):
         doc.title = "Dask: Workers"
         doc.add_root(table.root)
         doc.template = env.get_template('simple.html')
-        doc.template_variables['active_page'] = 'workers'
         doc.template_variables.update(extra)
 
 
@@ -1116,7 +1112,6 @@ def tasks_doc(scheduler, extra, doc):
         doc.title = "Dask: Task Stream"
         doc.add_root(ts.root)
         doc.template = env.get_template('simple.html')
-        doc.template_variables['active_page'] = 'tasks'
         doc.template_variables.update(extra)
 
 
@@ -1129,7 +1124,6 @@ def graph_doc(scheduler, extra, doc):
         doc.add_root(graph.root)
 
         doc.template = env.get_template('simple.html')
-        doc.template_variables['active_page'] = 'graph'
         doc.template_variables.update(extra)
 
 
@@ -1168,7 +1162,6 @@ def status_doc(scheduler, extra, doc):
         doc.add_root(task_stream.root)
         doc.theme = BOKEH_THEME
         doc.template = env.get_template('status.html')
-        doc.template_variables['active_page'] = 'status'
         doc.template_variables.update(extra)
 
 
@@ -1237,7 +1230,6 @@ def profile_doc(scheduler, extra, doc):
         prof = ProfileTimePlot(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
         doc.template = env.get_template('simple.html')
-        doc.template_variables['active_page'] = 'profile'
         doc.template_variables.update(extra)
 
         prof.trigger_update()
@@ -1249,7 +1241,6 @@ def profile_server_doc(scheduler, extra, doc):
         prof = ProfileServer(scheduler, sizing_mode='scale_width', doc=doc)
         doc.add_root(prof.root)
         doc.template = env.get_template('simple.html')
-        # doc.template_variables['active_page'] = 'profile'
         doc.template_variables.update(extra)
 
         prof.trigger_update()
