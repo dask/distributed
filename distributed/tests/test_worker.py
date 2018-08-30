@@ -1206,7 +1206,7 @@ def test_custom_metrics(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_register_worker_setup(c, s, a, b):
+def test_register_worker_callbacks(c, s, a, b):
     #preload function to run
     def mystartup(dask_worker):
         dask_worker.init_variable = 1
@@ -1240,7 +1240,7 @@ def test_register_worker_setup(c, s, a, b):
     yield worker._close()
 
     # Add a preload function
-    response = yield c.register_worker_setup(mystartup)
+    response = yield c.register_worker_callbacks(setup=mystartup)
     assert len(response) == 2
     assert len(s.worker_setups) == 1
 
@@ -1256,7 +1256,7 @@ def test_register_worker_setup(c, s, a, b):
     yield worker._close()
 
     # Register another preload function
-    response = yield c.register_worker_setup(mystartup2)
+    response = yield c.register_worker_callbacks(setup=mystartup2)
     assert len(response) == 2
     assert len(s.worker_setups) == 2
 
@@ -1275,4 +1275,4 @@ def test_register_worker_setup(c, s, a, b):
 
     # Final exception test
     with pytest.raises(ZeroDivisionError):
-        yield c.register_worker_setup(lambda: 1 / 0)
+        yield c.register_worker_callbacks(setup=lambda: 1 / 0)

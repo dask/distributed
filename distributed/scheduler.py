@@ -957,7 +957,7 @@ class Scheduler(ServerNode):
             'heartbeat_worker': self.heartbeat_worker,
             'get_task_status': self.get_task_status,
             'get_task_stream': self.get_task_stream,
-            'register_worker_setup': self.register_worker_setup
+            'register_worker_callbacks': self.register_worker_callbacks
         }
 
         self._transitions = {
@@ -3039,17 +3039,15 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_worker_setup(self, comm, function=None, args=None, kwargs=None):
-        """ Registers a preload function, and call it on every worker """
-        if function is None:
+    def register_worker_callbacks(self, comm, setup=None):
+        """ Registers a setup function, and call it on every worker """
+        if setup is None:
             raise gen.Return({})
 
-        self.worker_setups.append(function)
+        self.worker_setups.append(setup)
 
-        responses = yield self.broadcast(msg=dict(op='run',
-                                                  function=function,
-                                                  args=args,
-                                                  kwargs=kwargs))
+        responses = yield self.broadcast(msg=dict(op='run', function=setup,
+                                                  args=(), kwargs={}))
         raise gen.Return(responses)
 
     #####################

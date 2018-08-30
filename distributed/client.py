@@ -3426,10 +3426,8 @@ class Client(Node):
             raise gen.Return(msgs)
 
     @gen.coroutine
-    def _register_worker_setup(self, function, *args, **kwargs):
-        responses = yield self.scheduler.register_worker_setup(function=dumps(function),
-                                                           args=dumps(args),
-                                                           kwargs=dumps(kwargs))
+    def _register_worker_callbacks(self, setup=None):
+        responses = yield self.scheduler.register_worker_callbacks(setup=dumps(setup))
         results = {}
         for key, resp in responses.items():
             if resp['status'] == 'OK':
@@ -3438,9 +3436,9 @@ class Client(Node):
                 six.reraise(*clean_exception(**resp))
         raise gen.Return(results)
 
-    def register_worker_setup(self, function, *args, **kwargs):
+    def register_worker_callbacks(self, setup=None):
         """
-        Registers a setup function for all current and future workers.
+        Registers a setup callback function for all current and future workers.
 
         This registers a new setup function for workers in this cluster. The
         function will run immediately on all currently connected workers. It
@@ -3453,10 +3451,10 @@ class Client(Node):
 
         Parameters
         ----------
-        function : callable(dask_worker: Worker) -> None
+        setup : callable(dask_worker: Worker) -> None
             Function to register and run on all workers
         """
-        return self.sync(self._register_worker_setup, function, *args, **kwargs)
+        return self.sync(self._register_worker_callbacks, setup=setup)
 
 
 class Executor(Client):
