@@ -1027,7 +1027,7 @@ def weight(k, v):
 
 
 @gen.coroutine
-def run(server, comm, function, args=None, kwargs=None, is_coro=False, wait=True):
+def run(server, comm, function, args=(), kwargs={}, is_coro=False, wait=True):
     assert wait or is_coro, "Combination not supported"
     function = pickle.loads(function)
     if args:
