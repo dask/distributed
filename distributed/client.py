@@ -3610,10 +3610,7 @@ class as_completed(object):
         try:
             yield _wait(future)
         except CancelledError:
-            del self.futures[future]
-            if not self.futures:
-                self._notify()
-            return
+            pass
         if self.with_results:
             result = yield future._result()
         with self.lock:

@@ -124,12 +124,13 @@ def test_as_completed_cancel(loop):
             ac = as_completed([x, y])
             x.cancel()
 
+            assert next(ac) is x
             assert next(ac) is y
 
             with pytest.raises(Empty):
                 ac.queue.get(timeout=0.1)
 
-            assert list(as_completed([x, y, x])) == [y]
+            assert list(as_completed([x, y, x])) == [x, y, x]
 
 
 def test_as_completed_cancel_last(loop):
@@ -150,7 +151,7 @@ def test_as_completed_cancel_last(loop):
             ac = as_completed([x, y])
             result = list(ac)
 
-            assert result == [x]
+            assert result == [x, y]
 
 
 @gen_cluster(client=True)
