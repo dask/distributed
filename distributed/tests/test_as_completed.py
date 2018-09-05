@@ -9,7 +9,7 @@ from tornado import gen
 from distributed import Client
 from distributed.client import _as_completed, as_completed, _first_completed
 from distributed.compatibility import Empty, StopAsyncIteration, Queue
-from distributed.utils_test import cluster, gen_cluster, inc
+from distributed.utils_test import cluster, gen_cluster, inc, throws
 from distributed.utils_test import loop  # noqa: F401
 
 
@@ -169,3 +169,17 @@ def test_async_for_py2_equivalent(c, s, a, b):
 
     with pytest.raises(StopAsyncIteration):
         yield seq.__anext__()
+
+
+def test_as_completed_error(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x = c.submit(throws, 1)
+            y = c.submit(sleep, 1)
+
+            ac = as_completed([x, y])
+            result = list(ac)
+
+            assert result == [x, y]
+            assert x.status == 'error'
+            assert y.status == 'finished'
