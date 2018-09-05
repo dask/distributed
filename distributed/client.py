@@ -3551,6 +3551,19 @@ class as_completed(object):
     Additionally, you can also add more futures to this object during
     computation with the ``.add`` method
 
+    Parameters
+    ----------
+    futures: Collection of futures
+        A list of Future objects to be iterated over in the order in which they
+        complete
+    with_results: bool (False)
+        Whether to wait and include results of futures as well;
+        in this case `as_completed` yields a tuple of (future, result)
+    raise_errors: bool (True)
+        Whether we should raise when the result of a future raises an exception
+        (and break from iteration), or return the exception as the result of
+        the future.  Only affects behavior when `with_results=True`.
+
     Examples
     --------
     >>> x, y, z = client.map(inc, [1, 2, 3])  # doctest: +SKIP
@@ -3586,7 +3599,7 @@ class as_completed(object):
     3
     """
 
-    def __init__(self, futures=None, loop=None, with_results=False):
+    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True):
         if futures is None:
             futures = []
         self.futures = defaultdict(lambda: 0)
@@ -3596,6 +3609,7 @@ class as_completed(object):
         self.condition = Condition()
         self.thread_condition = threading.Condition()
         self.with_results = with_results
+        self.raise_errors = raise_errors
 
         if futures:
             self.update(futures)
@@ -3612,7 +3626,7 @@ class as_completed(object):
         except CancelledError:
             pass
         if self.with_results:
-            result = yield future._result()
+            result = yield future._result(raiseit=False)
         with self.lock:
             self.futures[future] -= 1
             if not self.futures[future]:
@@ -3622,6 +3636,10 @@ class as_completed(object):
             else:
                 self.queue.put_nowait(future)
             self._notify()
+        if all([self.with_results, self.raise_errors,
+                future.status == 'error']):
+            self.futures.clear()
+            six.reraise(*result)
 
     def update(self, futures):
         """ Add multiple futures to the collection.
