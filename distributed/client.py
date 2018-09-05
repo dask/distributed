@@ -3631,13 +3631,10 @@ class as_completed(object):
             if not self.futures[future]:
                 del self.futures[future]
             if self.with_results:
-                self.queue.put_nowait((future, result))
+                self.queue.put_nowait((future, result, future.status == 'error'))
             else:
                 self.queue.put_nowait(future)
             self._notify()
-        if all([self.with_results, self.raise_errors,
-                future.status == 'error']):
-            six.reraise(*result)
 
     def update(self, futures):
         """ Add multiple futures to the collection.
@@ -3677,13 +3674,22 @@ class as_completed(object):
     def __aiter__(self):
         return self
 
+    def _get_and_raise(self):
+        if self.with_results:
+            future, result, erred = self.queue.get()
+            if self.raise_errors and erred:
+                six.reraise(*result)
+            else:
+                return future, result
+        return self.queue.get()
+
     def __next__(self):
         while self.queue.empty():
             if self.is_empty():
                 raise StopIteration()
             with self.thread_condition:
                 self.thread_condition.wait(timeout=0.100)
-        return self.queue.get()
+        return self._get_and_raise()
 
     @gen.coroutine
     def __anext__(self):
@@ -3694,7 +3700,7 @@ class as_completed(object):
                 raise StopAsyncIteration
             yield self.condition.wait()
 
-        raise gen.Return(self.queue.get())
+        raise gen.Return(self._get_and_raise())
 
     next = __next__
 
