@@ -3631,7 +3631,7 @@ class as_completed(object):
             if not self.futures[future]:
                 del self.futures[future]
             if self.with_results:
-                self.queue.put_nowait((future, result, future.status == 'error'))
+                self.queue.put_nowait((future, result))
             else:
                 self.queue.put_nowait(future)
             self._notify()
@@ -3675,13 +3675,12 @@ class as_completed(object):
         return self
 
     def _get_and_raise(self):
+        res = self.queue.get()
         if self.with_results:
-            future, result, erred = self.queue.get()
-            if self.raise_errors and erred:
+            future, result = res
+            if self.raise_errors and future.status == 'error':
                 six.reraise(*result)
-            else:
-                return future, result
-        return self.queue.get()
+        return res
 
     def __next__(self):
         while self.queue.empty():
