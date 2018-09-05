@@ -242,7 +242,7 @@ def test_as_completed_with_results_no_raise(loop):
             res = list(ac)
 
             dd = {r[0]: r[1:] for r in res}
-            assert dd.keys() == {y, x, z}
+            assert set(dd.keys()) == {y, x, z}
             assert x.status == 'error'
             assert y.status == 'cancelled'
             assert z.status == 'finished'
@@ -266,7 +266,7 @@ def test_as_completed_with_results_no_raise_async(c, s, a, b):
         res = [first, second, third]
 
         dd = {r[0]: r[1:] for r in res}
-        assert dd.keys() == {y, x, z}
+        assert set(dd.keys()) == {y, x, z}
         assert x.status == 'error'
         assert y.status == 'cancelled'
         assert z.status == 'finished'
