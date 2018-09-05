@@ -1,4 +1,5 @@
 from collections import Iterator
+from concurrent.futures._base import CancelledError
 from operator import add
 import random
 from time import sleep
@@ -183,3 +184,25 @@ def test_as_completed_error(loop):
             assert result == [x, y]
             assert x.status == 'error'
             assert y.status == 'finished'
+
+
+def test_as_completed_with_results(loop):
+    with cluster() as (s, [a, b]):
+        with Client(s['address'], loop=loop) as c:
+            x = c.submit(throws, 1)
+            y = c.submit(sleep, 1)
+            z = c.submit(inc, 1)
+
+            ac = as_completed([x, y, z], with_results=True)
+            y.cancel()
+            res = list(ac)
+
+            futs, results = zip(*res)
+            assert futs == (y, x, z)
+            assert x.status == 'error'
+            assert y.status == 'cancelled'
+            assert z.status == 'finished'
+
+            assert isinstance(results[0], CancelledError)
+            assert isinstance(results[1][1], RuntimeError)
+            assert results[2] == 2

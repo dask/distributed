@@ -3560,9 +3560,8 @@ class as_completed(object):
         Whether to wait and include results of futures as well;
         in this case `as_completed` yields a tuple of (future, result)
     raise_errors: bool (True)
-        Whether we should raise when the result of a future raises an exception
-        (and break from iteration), or return the exception as the result of
-        the future.  Only affects behavior when `with_results=True`.
+        Whether we should raise when the result of a future raises an exception;
+        only affects behavior when `with_results=True`.
 
     Examples
     --------
@@ -3638,7 +3637,6 @@ class as_completed(object):
             self._notify()
         if all([self.with_results, self.raise_errors,
                 future.status == 'error']):
-            self.futures.clear()
             six.reraise(*result)
 
     def update(self, futures):
