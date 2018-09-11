@@ -5499,5 +5499,14 @@ def test_tuple_keys(c, s, a, b):
     assert (yield future) == 3
 
 
+@gen_cluster(client=True)
+def test_multiple_scatter(c, s, a, b):
+    for i in range(5):
+        x = c.scatter(1, direct=True)
+
+    x = yield x
+    x = yield x
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401
