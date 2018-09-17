@@ -333,7 +333,10 @@ class CurrentLoad(DashboardComponent):
                 try:
                     limit = self.scheduler.workers[ws.address].memory_limit
                 except KeyError:
+                    limit = None
+                if limit is None:
                     limit = 16e9
+
                 if limit > max_limit:
                     max_limit = limit
 
