@@ -330,12 +330,7 @@ class CurrentLoad(DashboardComponent):
             nbytes_color = []
             max_limit = 0
             for ws, nb in zip(workers, nbytes):
-                try:
-                    limit = self.scheduler.workers[ws.address].memory_limit
-                except KeyError:
-                    limit = None
-                if limit is None:
-                    limit = 16e9
+                limit = getattr(self.scheduler.workers[ws.address], 'memory_limit', math.inf) or math.inf
 
                 if limit > max_limit:
                     max_limit = limit
