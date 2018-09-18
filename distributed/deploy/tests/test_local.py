@@ -515,5 +515,41 @@ def test_scale_retires_workers():
     yield cluster._close()
 
 
+def test_scale_grouped(loop):
+    """ Directly calling scale both up and down works as expected """
+    with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
+                      diagnostics_port=False, processes=False, n_workers=0) as cluster:
+        assert not cluster.scheduler.workers
+        cluster._worker_key = lambda ws: ws.resources['group']
+        cluster.worker_kwargs = {'resources': {'group': 1}}
+        cluster.scale(3)
+
+        start = time()
+        while len(cluster.scheduler.workers) != 3:
+            sleep(0.01)
+            assert time() < start + 5, len(cluster.scheduler.workers)
+
+        cluster.worker_kwargs = {'resources': {'group': 2}}
+        cluster.scale(6)
+
+        start = time()
+        while len(cluster.scheduler.workers) != 6:
+            sleep(0.01)
+            assert time() < start + 5, len(cluster.scheduler.workers)
+
+        sleep(0.2)  # let workers settle # TODO: remove need for this
+
+        # With grouped workers, we should keep the 3 workers from group 1
+        cluster.scale(1)
+
+        start = time()
+        while len(cluster.scheduler.workers) != 3:
+            sleep(0.01)
+            assert time() < start + 5, len(cluster.scheduler.workers)
+
+        sleep(0.2)
+        assert len(cluster.scheduler.workers) == 3
+
+
 if sys.version_info >= (3, 5):
     from distributed.deploy.tests.py3_test_deploy import *  # noqa F401

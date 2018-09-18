@@ -31,6 +31,14 @@ class Cluster(object):
     This will provide a general ``scale`` method as well as an IPython widget
     for display.
 
+    Clusters might also provide the following attributes:
+
+    -   _adaptive_options: dict
+        default options to use when using adaptive mode
+    -   _worker_key: Callable(WorkerState)
+        Callable mapping a WorkerState object to a group, see
+        Scheduler.workers_to_close
+
     Examples
     --------
 
@@ -64,6 +72,9 @@ class Cluster(object):
             self._adaptive.stop()
         if not hasattr(self, '_adaptive_options'):
             self._adaptive_options = {}
+        if hasattr(self, '_worker_key'):
+            self._adaptive_options.setdefault('worker_key', self._worker_key)
+
         self._adaptive_options.update(kwargs)
         self._adaptive = Adaptive(self.scheduler, self, **self._adaptive_options)
         return self._adaptive
@@ -100,8 +111,11 @@ class Cluster(object):
             if n >= len(self.scheduler.workers):
                 self.scheduler.loop.add_callback(self.scale_up, n)
             else:
+                if not hasattr(self, '_worker_key'):
+                    self._worker_key = lambda x: x
                 to_close = self.scheduler.workers_to_close(
-                    n=len(self.scheduler.workers) - n)
+                    n=len(self.scheduler.workers) - n, minimum=n,
+                    key=self._worker_key)
                 logger.debug("Closing workers: %s", to_close)
                 self.scheduler.loop.add_callback(self.scheduler.retire_workers, workers=to_close)
                 self.scheduler.loop.add_callback(self.scale_down, to_close)
