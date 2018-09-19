@@ -1360,6 +1360,12 @@ class Scheduler(ServerNode):
 
         dependencies = dependencies or {}
 
+        priority = priority or {}
+        restrictions = restrictions or {}
+        resources = resources or {}
+        retries = retries or {}
+        loose_restrictions = loose_restrictions or []
+
         n = 0
         while len(tasks) != n:  # walk through new tasks, cancel any bad deps
             n = len(tasks)
@@ -1373,6 +1379,46 @@ class Scheduler(ServerNode):
                         keys.remove(k)
                     self.report({'op': 'cancelled-key', 'key': k}, client=client)
                     self.client_releases_keys(keys=[k], client=client)
+
+        annotations = {}
+
+        # Extract any annotations relating to existing update_graph interfaces
+        for k, task in tasks.items():
+            try:
+                pickled_annotation = task['annotation']
+            except KeyError:
+                continue
+            else:
+                annotation = pickle.loads(pickled_annotation).annotation
+                annotations[k] = annotation
+
+            try:
+                priority[k] = annotation['priority']
+            except KeyError:
+                pass
+
+            try:
+                worker = annotation['worker']
+            except KeyError:
+                pass
+            else:
+                if not isinstance(worker, (list, tuple)):
+                    worker = [worker]
+
+                restrictions[k] = worker
+
+            if annotation.get('allow_other_workers', False):
+                loose_restrictions.append(k)
+
+            try:
+                retries[k] = annotation['retries']
+            except KeyError:
+                pass
+
+            try:
+                resources[k] = annotation['resources']
+            except KeyError:
+                pass
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
@@ -1538,6 +1584,7 @@ class Scheduler(ServerNode):
         for plugin in self.plugins[:]:
             try:
                 plugin.update_graph(self, client=client, tasks=tasks,
+                                    annotations=annotations,
                                     keys=keys, restrictions=restrictions or {},
                                     dependencies=dependencies,
                                     priority=priority,

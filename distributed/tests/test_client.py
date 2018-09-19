@@ -558,6 +558,31 @@ def test_get(c, s, a, b):
     assert result == 3
 
 
+@gen_cluster(client=True, timeout=None)
+def test_task_annotations(c, s, a, b):
+    from dask.core import TaskAnnotation as TA
+
+    #  Test priority
+    result = yield c.get({('x', 0): (inc, 1, TA({"priority":1}))},
+                         ('x', 0), sync=False)
+    assert result == 2
+
+    # Test specifying a worker
+    result = yield c.get({'x': (inc, 1, TA({'worker': a.address,
+                                            }))},
+                         'x', sync=False)
+
+    assert result == 2
+
+    # Test specifying a non-existent worker with loose restrictions
+    result = yield c.get({'x': (inc, 1, TA({'worker': 'tcp://2.2.2.2/',
+                                            'allow_other_workers': True
+                                            }))},
+                         'x', sync=False)
+
+    assert result == 2
+
+
 def test_get_sync(loop):
     with cluster() as (s, [a, b]):
         with Client(s['address'], loop=loop) as c:
