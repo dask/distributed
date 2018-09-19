@@ -8,6 +8,7 @@ from math import sqrt
 from numbers import Number
 from operator import add
 import os
+import weakref
 
 import bokeh
 from bokeh.layouts import column, row
@@ -29,7 +30,8 @@ except ImportError:
     np = False
 
 from . import components
-from .components import (DashboardComponent, ProfileTimePlot, ProfileServer)
+from .components import (DashboardComponent, ProfileTimePlot, ProfileServer,
+                         add_periodic_callback)
 from .core import BokehServer
 from .worker import SystemMonitor, counters_doc
 from .utils import transpose
@@ -1055,7 +1057,7 @@ def systemmonitor_doc(scheduler, extra, doc):
     with log_errors():
         sysmon = SystemMonitor(scheduler, sizing_mode='stretch_both')
         doc.title = "Dask: Scheduler System Monitor"
-        doc.add_periodic_callback(sysmon.update, 500)
+        add_periodic_callback(doc, sysmon, 500)
 
         for subdoc in sysmon.root.children:
             doc.add_root(subdoc)
@@ -1071,9 +1073,9 @@ def stealing_doc(scheduler, extra, doc):
         stealing_events = StealingEvents(scheduler, sizing_mode='scale_width')
         stealing_events.root.x_range = stealing_ts.root.x_range
         doc.title = "Dask: Work Stealing"
-        doc.add_periodic_callback(occupancy.update, 500)
-        doc.add_periodic_callback(stealing_ts.update, 500)
-        doc.add_periodic_callback(stealing_events.update, 500)
+        add_periodic_callback(doc, occupancy, 500)
+        add_periodic_callback(doc, stealing_ts, 500)
+        add_periodic_callback(doc, stealing_events, 500)
 
         doc.add_root(column(occupancy.root, stealing_ts.root,
                             stealing_events.root,
@@ -1088,7 +1090,7 @@ def events_doc(scheduler, extra, doc):
     with log_errors():
         events = Events(scheduler, 'all', height=250)
         events.update()
-        doc.add_periodic_callback(events.update, 500)
+        add_periodic_callback(doc, events, 500)
         doc.title = "Dask: Scheduler Events"
         doc.add_root(column(events.root, sizing_mode='scale_width'))
         doc.template = env.get_template('simple.html')
@@ -1100,7 +1102,7 @@ def workers_doc(scheduler, extra, doc):
     with log_errors():
         table = WorkerTable(scheduler)
         table.update()
-        doc.add_periodic_callback(table.update, 500)
+        add_periodic_callback(doc, table, 500)
         doc.title = "Dask: Workers"
         doc.add_root(table.root)
         doc.template = env.get_template('simple.html')
@@ -1113,7 +1115,7 @@ def tasks_doc(scheduler, extra, doc):
         ts = TaskStream(scheduler, n_rectangles=100000, clear_interval='60s',
                         sizing_mode='stretch_both')
         ts.update()
-        doc.add_periodic_callback(ts.update, 5000)
+        add_periodic_callback(doc, ts, 5000)
         doc.title = "Dask: Task Stream"
         doc.add_root(ts.root)
         doc.template = env.get_template('simple.html')
@@ -1126,7 +1128,7 @@ def graph_doc(scheduler, extra, doc):
         graph = GraphPlot(scheduler, sizing_mode='stretch_both')
         doc.title = "Dask: Task Graph"
         graph.update()
-        doc.add_periodic_callback(graph.update, 200)
+        add_periodic_callback(doc, graph, 200)
         doc.add_root(graph.root)
 
         doc.template = env.get_template('simple.html')
@@ -1139,16 +1141,16 @@ def status_doc(scheduler, extra, doc):
         task_stream = TaskStream(scheduler, n_rectangles=1000,
                                  clear_interval='10s', sizing_mode='stretch_both')
         task_stream.update()
-        doc.add_periodic_callback(task_stream.update, 100)
+        add_periodic_callback(doc, task_stream, 100)
 
         task_progress = TaskProgress(scheduler, sizing_mode='stretch_both')
         task_progress.update()
-        doc.add_periodic_callback(task_progress.update, 100)
+        add_periodic_callback(doc, task_progress, 100)
 
         if len(scheduler.workers) < 50:
             current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
             current_load.update()
-            doc.add_periodic_callback(current_load.update, 100)
+            add_periodic_callback(doc, current_load, 100)
             doc.add_root(current_load.nbytes_figure)
             doc.add_root(current_load.processing_figure)
         else:
@@ -1156,8 +1158,8 @@ def status_doc(scheduler, extra, doc):
             nbytes_hist.update()
             processing_hist = ProcessingHistogram(scheduler, sizing_mode='stretch_both')
             processing_hist.update()
-            doc.add_periodic_callback(nbytes_hist.update, 100)
-            doc.add_periodic_callback(processing_hist.update, 100)
+            add_periodic_callback(doc, nbytes_hist, 100)
+            add_periodic_callback(doc, processing_hist, 100)
             current_load_fig = row(nbytes_hist.root, processing_hist.root,
                                    sizing_mode='stretch_both')
 
@@ -1177,7 +1179,7 @@ def individual_task_stream_doc(scheduler, extra, doc):
     task_stream = TaskStream(scheduler, n_rectangles=1000,
                              clear_interval='10s', sizing_mode='stretch_both')
     task_stream.update()
-    doc.add_periodic_callback(task_stream.update, 100)
+    add_periodic_callback(doc, task_stream, 100)
     doc.add_root(task_stream.root)
     doc.theme = BOKEH_THEME
 
@@ -1185,7 +1187,7 @@ def individual_task_stream_doc(scheduler, extra, doc):
 def individual_nbytes_doc(scheduler, extra, doc):
     current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
     current_load.update()
-    doc.add_periodic_callback(current_load.update, 100)
+    add_periodic_callback(doc, current_load, 100)
     doc.add_root(current_load.nbytes_figure)
     doc.theme = BOKEH_THEME
 
@@ -1193,7 +1195,7 @@ def individual_nbytes_doc(scheduler, extra, doc):
 def individual_nprocessing_doc(scheduler, extra, doc):
     current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
     current_load.update()
-    doc.add_periodic_callback(current_load.update, 100)
+    add_periodic_callback(doc, current_load, 100)
     doc.add_root(current_load.processing_figure)
     doc.theme = BOKEH_THEME
 
@@ -1201,7 +1203,7 @@ def individual_nprocessing_doc(scheduler, extra, doc):
 def individual_progress_doc(scheduler, extra, doc):
     task_progress = TaskProgress(scheduler, height=160, sizing_mode='stretch_both')
     task_progress.update()
-    doc.add_periodic_callback(task_progress.update, 100)
+    add_periodic_callback(doc, task_progress, 100)
     doc.add_root(task_progress.root)
     doc.theme = BOKEH_THEME
 
@@ -1210,7 +1212,8 @@ def individual_graph_doc(scheduler, extra, doc):
     with log_errors():
         graph = GraphPlot(scheduler, sizing_mode='stretch_both')
         graph.update()
-        doc.add_periodic_callback(graph.update, 200)
+
+        add_periodic_callback(doc, graph, 200)
         doc.add_root(graph.root)
         doc.theme = BOKEH_THEME
 
@@ -1235,7 +1238,7 @@ def individual_workers_doc(scheduler, extra, doc):
     with log_errors():
         table = WorkerTable(scheduler)
         table.update()
-        doc.add_periodic_callback(table.update, 500)
+        add_periodic_callback(doc, table, 500)
         doc.add_root(table.root)
         doc.theme = BOKEH_THEME
 
