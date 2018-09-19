@@ -8,7 +8,6 @@ from math import sqrt
 from numbers import Number
 from operator import add
 import os
-import weakref
 
 import bokeh
 from bokeh.layouts import column, row
