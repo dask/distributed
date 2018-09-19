@@ -728,9 +728,11 @@ def test_priorities(c, s, w):
 @gen_cluster(client=True)
 def test_heartbeats(c, s, a, b):
     x = s.workers[a.address].last_seen
+    start = time()
     yield gen.sleep(a.periodic_callbacks['heartbeat'].callback_time / 1000 + 0.1)
-    y = s.workers[a.address].last_seen
-    assert x != y
+    while s.workers[a.address].last_seen == x:
+        yield gen.sleep(0.01)
+        assert time() < start + 2
     assert a.periodic_callbacks['heartbeat'].callback_time < 1000
 
 
