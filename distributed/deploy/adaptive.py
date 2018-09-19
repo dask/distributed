@@ -263,11 +263,10 @@ class Adaptive(object):
         --------
         LocalCluster.scale_up
         """
-        target = math.ceil(self.scheduler.total_occupancy /
-                           self.target_duration)
+        target = self.scheduler.target_workers(target_duration=self.target_duration)
         instances = max(1,
                         len(self.scheduler.workers) * self.scale_factor,
-                        target,
+                        target['cores'],
                         self.minimum)
 
         if self.maximum:

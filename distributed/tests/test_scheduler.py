@@ -1384,3 +1384,17 @@ def test_gh2187(c, s, a, b):
     yield gen.sleep(0.1)
     f = c.submit(bar, x, key='y')
     yield f
+
+
+@gen_cluster(client=True)
+def test_target_workers(c, s, a, b):
+    assert s.target_workers() == {'cores': 0, 'memory': 0}
+    future = c.submit(slowinc, 0, delay=0.05)  # learn rate
+    yield future
+    assert s.target_workers()['cores'] == 0
+    assert 0 < s.target_workers()['memory'] < 1e9
+
+    futures = c.map(slowinc, range(1000), delay=0.05)
+    while len(s.tasks) < 1000:
+        yield gen.sleep(0.01)
+    assert 5 < s.target_workers()['cores'] < 100

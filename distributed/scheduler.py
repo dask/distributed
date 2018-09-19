@@ -6,6 +6,7 @@ from functools import partial
 import itertools
 import json
 import logging
+import math
 from numbers import Number
 import operator
 import os
@@ -957,7 +958,8 @@ class Scheduler(ServerNode):
             'heartbeat_worker': self.heartbeat_worker,
             'get_task_status': self.get_task_status,
             'get_task_stream': self.get_task_stream,
-            'register_worker_callbacks': self.register_worker_callbacks
+            'register_worker_callbacks': self.register_worker_callbacks,
+            'target_workers': self.target_workers,
         }
 
         self._transitions = {
@@ -2588,6 +2590,16 @@ class Scheduler(ServerNode):
                                'workers': list(workers),
                                'key-count': len(keys),
                                'branching-factor': branching_factor})
+
+    def target_workers(self, comm=None, target_duration='5s'):
+        """ Target cores and memory """
+        target_duration = parse_timedelta(target_duration)
+
+        cores = math.ceil(self.total_occupancy / target_duration)
+        memory = 2 * sum(ws.metrics['memory'] if ws.nbytes else 0 for ws in self.workers.values())
+
+        return {'cores': cores, 'memory': memory}
+
 
     def workers_to_close(self, memory_ratio=None, n=None, key=None,
                          minimum=None):
