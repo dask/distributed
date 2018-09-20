@@ -589,11 +589,16 @@ def test_task_annotations(c, s, a, b):
     assert len(s.who_has['z'].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
+
+@pytest.mark.xfail
+@gen_cluster(client=True, timeout=None)
+def test_nested_task_annotations(c, s, a, b):
+    from dask.core import TaskAnnotation as TA
+
     dsk = {'v': (inc, (inc, 1, TA({"worker": a.address})),
                  TA({"worker": "tcp://2.2.2.2/"}))}
     result = yield c.get(dsk, 'v', sync=False)
-    if not s.who_has['v'] == set(["tcp://2.2.2.2/"]):
-        pytest.xfail("Can't yet handle nested tasks")
+    assert s.who_has['v'] == set(["tcp://2.2.2.2/"])
     assert result == 2
 
 
