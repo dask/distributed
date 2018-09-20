@@ -563,32 +563,37 @@ def test_task_annotations(c, s, a, b):
     from dask.core import TaskAnnotation as TA
 
     #  Test priority
-    result = yield c.get({'x': (inc, 1, TA({"priority":1}))},
-                         'x', sync=False)
+    dsk = {'x': (inc, 1, TA({"priority":1}))}
+    result = yield c.get(dsk, 'x', sync=False)
     assert result == 2
 
     # Test specifying a worker
-    result = yield c.get({'y': (inc, 1, TA({'worker': a.address}))},
-                         'y', sync=False)
+    dsk = {'y': (inc, 1, TA({'worker': a.address}))}
+    result = yield c.get(dsk, 'y', sync=False)
 
     assert s.who_has['y'] == set([a.address])
     assert result == 2
 
     # Test specifying multiple workers
-    result = yield c.get({'w': (inc, 1, TA({'worker': [a.address, b.address],
-                                            }))},
-                         'w', sync=False)
+    dsk = {'w': (inc, 1, TA({'worker': [a.address, b.address]}))}
+    result = yield c.get(dsk, 'w', sync=False)
 
     assert len(s.who_has['w'].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
     # Test specifying a non-existent worker with loose restrictions
-    result = yield c.get({'z': (inc, 1, TA({'worker': 'tcp://2.2.2.2/',
-                                            'allow_other_workers': True
-                                            }))},
-                         'z', sync=False)
+    dsk = {'z': (inc, 1, TA({'worker': 'tcp://2.2.2.2/',
+                            'allow_other_workers': True}))}
+    result = yield c.get(dsk, 'z', sync=False)
 
     assert len(s.who_has['z'].intersection(set([a.address, b.address]))) > 0
+    assert result == 2
+
+    dsk = {'v': (inc, (inc, 1, TA({"worker": a.address})),
+                 TA({"worker": "tcp://2.2.2.2/"}))}
+    result = yield c.get(dsk, 'v', sync=False)
+    if not s.who_has['v'] == set(["tcp://2.2.2.2/"]):
+        pytest.xfail("Can't yet handle nested tasks")
     assert result == 2
 
 

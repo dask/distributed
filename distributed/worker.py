@@ -827,7 +827,11 @@ def execute_task(task):
     7
     """
     if istask(task):
-        func, args = task[0], task[1:]
+        if type(task[-1]) == TaskAnnotation:
+            func, args, annot = task[0], task[1:-1], task[-1]
+        else:
+            func, args, annot = task[0], task[1:], None
+
         return func(*map(execute_task, args))
     elif isinstance(task, list):
         return list(map(execute_task, task))

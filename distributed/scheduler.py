@@ -1385,6 +1385,10 @@ class Scheduler(ServerNode):
         # Extract any annotations relating to existing update_graph interfaces
         # https://stackoverflow.com/a/20308657/1611416
         for k, task in tasks.items():
+            # This is probably a nested task
+            if not isinstance(task, dict):
+                continue
+
             if 'annotation' not in task:
                 continue
 
