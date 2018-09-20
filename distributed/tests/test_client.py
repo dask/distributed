@@ -574,6 +574,14 @@ def test_task_annotations(c, s, a, b):
     assert s.who_has['y'] == set([a.address])
     assert result == 2
 
+    # Test specifying multiple workers
+    result = yield c.get({'w': (inc, 1, TA({'worker': [a.address, b.address],
+                                            }))},
+                         'w', sync=False)
+
+    assert len(s.who_has['w'].intersection(set([a.address, b.address]))) > 0
+    assert result == 2
+
     # Test specifying a non-existent worker with loose restrictions
     result = yield c.get({'z': (inc, 1, TA({'worker': 'tcp://2.2.2.2/',
                                             'allow_other_workers': True
