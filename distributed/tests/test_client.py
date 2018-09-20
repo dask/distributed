@@ -563,23 +563,24 @@ def test_task_annotations(c, s, a, b):
     from dask.core import TaskAnnotation as TA
 
     #  Test priority
-    result = yield c.get({('x', 0): (inc, 1, TA({"priority":1}))},
-                         ('x', 0), sync=False)
+    result = yield c.get({'x': (inc, 1, TA({"priority":1}))},
+                         'x', sync=False)
     assert result == 2
 
     # Test specifying a worker
-    result = yield c.get({'x': (inc, 1, TA({'worker': a.address,
-                                            }))},
-                         'x', sync=False)
+    result = yield c.get({'y': (inc, 1, TA({'worker': a.address}))},
+                         'y', sync=False)
 
+    assert s.who_has['y'] == set([a.address])
     assert result == 2
 
     # Test specifying a non-existent worker with loose restrictions
-    result = yield c.get({'x': (inc, 1, TA({'worker': 'tcp://2.2.2.2/',
+    result = yield c.get({'z': (inc, 1, TA({'worker': 'tcp://2.2.2.2/',
                                             'allow_other_workers': True
                                             }))},
-                         'x', sync=False)
+                         'z', sync=False)
 
+    assert len(s.who_has['z'].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
 
