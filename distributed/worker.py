@@ -795,8 +795,7 @@ class WorkerBase(ServerNode):
 job_counter = [0]
 
 
-def _deserialize(function=None, args=None, kwargs=None,
-                 task=None, annotation=None):
+def _deserialize(function=None, args=None, kwargs=None, task=None):
     """ Deserialize task inputs and regularize
     to func, args, kwargs and annotation
     """
@@ -806,9 +805,18 @@ def _deserialize(function=None, args=None, kwargs=None,
         args = pickle.loads(args)
     if kwargs:
         kwargs = pickle.loads(kwargs)
-    if annotation:
-        annotations = pickle.loads(annotation)
 
+    # We have nested tasks and need to recurse
+    if args and any(map(_maybe_complex, args)):
+        if kwargs:
+            function = partial(function, **kwargs)
+            kwargs = {}
+
+        args = ((function,) + tuple(args),)
+        function = execute_task
+
+    # TODO(sjperkins)
+    # This may be removable, considering the nested task handling case above
     if task is not None:
         assert not function and not args and not kwargs
         function = execute_task
@@ -827,10 +835,12 @@ def execute_task(task):
     7
     """
     if istask(task):
+        print("execute_task", task)
+
         if type(task[-1]) == TaskAnnotation:
-            func, args, annot = task[0], task[1:-1], task[-1]
+            func, args = task[0], task[1:-1]
         else:
-            func, args, annot = task[0], task[1:], None
+            func, args = task[0], task[1:]
 
         return func(*map(execute_task, args))
     elif isinstance(task, list):
@@ -883,7 +893,7 @@ def dumps_task(task):
         else:
             annots = None
 
-        if task[0] is apply and not any(map(_maybe_complex, task[2:])):
+        if task[0] is apply:
             d = {'function': dumps_function(task[1]),
                  'args': warn_dumps(task[2]) }
 
@@ -895,7 +905,8 @@ def dumps_task(task):
 
             return d
 
-        elif not any(map(_maybe_complex, task[1:])):
+        #elif not any(map(_maybe_complex, task[1:])):
+        else:
             d = {'function': dumps_function(task[0]),
                  'args': warn_dumps(task[1:]) }
 
@@ -1380,8 +1391,7 @@ class Worker(WorkerBase):
 
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
                  who_has=None, nbytes=None, priority=None, duration=None,
-                 resource_restrictions=None, actor=False, annotation=None,
-                 **kwargs2):
+                 resource_restrictions=None, actor=False, **kwargs2):
         try:
             if key in self.tasks:
                 state = self.task_state[key]
@@ -1411,8 +1421,7 @@ class Worker(WorkerBase):
             self.log.append((key, 'new'))
             try:
                 start = time()
-                self.tasks[key] = _deserialize(function, args, kwargs,
-                                               task, annotation)
+                self.tasks[key] = _deserialize(function, args, kwargs, task)
                 if actor:
                     self.actors[key] = None
                 stop = time()

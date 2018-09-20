@@ -1358,7 +1358,7 @@ class Client(Node):
             dsk = {key: (func,) + args
                    for key, args in zip(keys, zip(*iterables))}
         else:
-            dsk = {key: (apply, func, (tuple, list(args)), kwargs)
+            dsk = {key: (apply, func, args, kwargs)
                    for key, args in zip(keys, zip(*iterables))}
 
         if isinstance(workers, six.string_types + (Number,)):
