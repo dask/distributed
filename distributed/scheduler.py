@@ -1383,25 +1383,20 @@ class Scheduler(ServerNode):
         annotations = {}
 
         # Extract any annotations relating to existing update_graph interfaces
+        # https://stackoverflow.com/a/20308657/1611416
         for k, task in tasks.items():
-            try:
-                pickled_annotation = task['annotation']
-            except KeyError:
+            if 'annotation' not in task:
                 continue
-            else:
-                annotation = pickle.loads(pickled_annotation).annotation
-                annotations[k] = annotation
 
-            try:
+            pickled_annotation = task['annotation']
+            annotation = pickle.loads(pickled_annotation).annotation
+            annotations[k] = annotation
+
+            if 'priority' in annotation:
                 priority[k] = annotation['priority']
-            except KeyError:
-                pass
 
-            try:
+            if 'worker' in annotation:
                 worker = annotation['worker']
-            except KeyError:
-                pass
-            else:
                 if not isinstance(worker, (list, tuple)):
                     worker = [worker]
 
@@ -1410,15 +1405,11 @@ class Scheduler(ServerNode):
             if annotation.get('allow_other_workers', False):
                 loose_restrictions.append(k)
 
-            try:
+            if 'retries' in annotation:
                 retries[k] = annotation['retries']
-            except KeyError:
-                pass
 
-            try:
+            if 'resources' in annotation:
                 resources[k] = annotation['resources']
-            except KeyError:
-                pass
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():
