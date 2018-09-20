@@ -590,7 +590,8 @@ def test_task_annotations(c, s, a, b):
     assert result == 2
 
 
-@pytest.mark.xfail
+@pytest.mark.xfail(reason="Nested tasks are serialised "
+                          "and annotations ignored")
 @gen_cluster(client=True, timeout=None)
 def test_nested_task_annotations(c, s, a, b):
     from dask.core import TaskAnnotation as TA
