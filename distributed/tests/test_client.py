@@ -560,7 +560,7 @@ def test_get(c, s, a, b):
 
 @gen_cluster(client=True, timeout=None)
 def test_task_annotations(c, s, a, b):
-    from dask.core import TaskAnnotation as TA
+    from distributed.core import TaskAnnotation as TA
 
     #  Test priority
     dsk = {'x': (inc, 1, TA({"priority":1}))}
@@ -594,7 +594,7 @@ def test_task_annotations(c, s, a, b):
 #                           "and annotations ignored")
 @gen_cluster(client=True, timeout=None)
 def test_nested_task_annotations(c, s, a, b):
-    from dask.core import TaskAnnotation as TA
+    from distributed.core import TaskAnnotation as TA
 
     dsk = {'v': (inc, (inc, 1, TA({"worker": a.address})),
                  TA({"worker": a.address}))}

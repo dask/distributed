@@ -14,7 +14,7 @@ import warnings
 import weakref
 
 import dask
-from dask.core import (istask, TaskAnnotation)
+from dask.core import istask
 from dask.compatibility import apply
 try:
     from cytoolz import pluck, partial, merge
@@ -31,7 +31,7 @@ from .comm import get_address_host, get_local_address_for, connect
 from .comm.utils import offload
 from .compatibility import unicode, get_thread_identity, finalize
 from .core import (error_message, CommClosedError, send_recv,
-                   pingpong, coerce_to_address)
+                   pingpong, coerce_to_address, TaskAnnotation)
 from .diskutils import WorkSpace
 from .metrics import time
 from .node import ServerNode

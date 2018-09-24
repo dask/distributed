@@ -1,6 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import defaultdict, deque
+from collections import defaultdict, deque, namedtuple
 from concurrent.futures import CancelledError
 from functools import partial
 import logging
@@ -26,6 +26,11 @@ from .system_monitor import SystemMonitor
 from .utils import (get_traceback, truncate_exception, ignoring, shutting_down,
                     PeriodicCallback, parse_timedelta, has_keyword)
 from . import protocol
+
+
+# TODO(sjperkins)
+# Depend on dask.core definition eventually
+TaskAnnotation = namedtuple("TaskAnnotation", ["annotation"])
 
 
 class RPCClosed(IOError):
