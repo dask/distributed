@@ -806,17 +806,22 @@ def _deserialize(function=None, args=None, kwargs=None, task=None):
     if kwargs:
         kwargs = pickle.loads(kwargs)
 
-    # We have nested tasks and need to recurse
-    if args and any(map(_maybe_complex, args)):
-        if kwargs:
-            function = partial(function, **kwargs)
-            kwargs = {}
+    args_complex = args is not None and any(map(_maybe_complex, args))
+    kwargs_complex = kwargs is not None and _maybe_complex(kwargs)
+    is_complex = args_complex or kwargs_complex
 
-        args = ((function,) + tuple(args),)
+    if is_complex:
+        if kwargs:
+            args = ((apply, function, args, kwargs),)
+            kwargs = {}
+        else:
+            args = ((function, ) + tuple(args),)
+
         function = execute_task
 
     # TODO(sjperkins)
-    # This may be removable, considering the nested task handling case above
+    # This may be removable, considering
+    # the nested task handling case above
     if task is not None:
         assert not function and not args and not kwargs
         function = execute_task
@@ -835,14 +840,18 @@ def execute_task(task):
     7
     """
     if istask(task):
-        print("execute_task", task)
-
-        if type(task[-1]) == TaskAnnotation:
-            func, args = task[0], task[1:-1]
+        if task[0] == apply:
+            func, args, kwargs = task[1:4]
+            args = map(execute_task, args)
+            kwargs = execute_task(kwargs)
+            return apply(func, args, kwargs)
         else:
-            func, args = task[0], task[1:]
+            if type(task[-1]) == TaskAnnotation:
+                func, args = task[0], task[1:-1]
+            else:
+                func, args = task[0], task[1:]
 
-        return func(*map(execute_task, args))
+            return func(*map(execute_task, args))
     elif isinstance(task, list):
         return list(map(execute_task, task))
     else:
@@ -905,7 +914,6 @@ def dumps_task(task):
 
             return d
 
-        #elif not any(map(_maybe_complex, task[1:])):
         else:
             d = {'function': dumps_function(task[0]),
                  'args': warn_dumps(task[1:]) }
@@ -1048,16 +1056,19 @@ def convert_kwargs_to_str(kwargs, max_len=None):
     """
     length = 0
     strs = ["" for i in range(len(kwargs))]
-    for i, (argname, arg) in enumerate(kwargs.items()):
-        try:
-            sarg = repr(arg)
-        except Exception:
-            sarg = "< could not convert arg to str >"
-        skwarg = repr(argname) + ": " + sarg
-        strs[i] = skwarg
-        length += len(skwarg) + 2
-        if max_len is not None and length > max_len:
-            return "{{{}".format(", ".join(strs[:i + 1]))[:max_len]
+    if isinstance(kwargs, dict):
+        for i, (argname, arg) in enumerate(kwargs.items()):
+            try:
+                sarg = repr(arg)
+            except Exception:
+                sarg = "< could not convert arg to str >"
+            skwarg = repr(argname) + ": " + sarg
+            strs[i] = skwarg
+            length += len(skwarg) + 2
+            if max_len is not None and length > max_len:
+                return "{{{}".format(", ".join(strs[:i + 1]))[:max_len]
+    elif isinstance(kwargs, (tuple, list)):
+        return convert_args_to_str(kwargs, max_len=max_len)
     else:
         return "{{{}}}".format(", ".join(strs))
 
