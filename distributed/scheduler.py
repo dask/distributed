@@ -1121,6 +1121,8 @@ class Scheduler(ServerNode):
 
         setproctitle("dask-scheduler [%s]" % (self.address,))
 
+        self.restart_plugins()
+
         return self.finished()
 
     @gen.coroutine
@@ -2167,6 +2169,12 @@ class Scheduler(ServerNode):
 
         self.plugins.append(plugin)
 
+        if self.status == "running":
+            try:
+                plugin.restart(self)
+            except Exception as e:
+                logger.exception(e)
+
     def remove_plugin(self, plugin):
         """ Remove external plugin from scheduler """
         self.plugins.remove(plugin)
@@ -2278,6 +2286,14 @@ class Scheduler(ServerNode):
         for collection in self._task_state_collections:
             collection.clear()
 
+    def restart_plugins(self):
+        """Restart all plugins, giving them a reference to this scheduler."""
+        for plugin in self.plugins[:]:
+            try:
+                plugin.restart(self)
+            except Exception as e:
+                logger.exception(e)
+
     @gen.coroutine
     def restart(self, client=None, timeout=3):
         """ Restart all workers.  Reset local state. """
@@ -2304,11 +2320,7 @@ class Scheduler(ServerNode):
 
             self.clear_task_state()
 
-            for plugin in self.plugins[:]:
-                try:
-                    plugin.restart(self)
-                except Exception as e:
-                    logger.exception(e)
+            self.restart_plugins()
 
             logger.debug("Send kill signal to nannies: %s", nannies)
 
