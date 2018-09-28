@@ -39,7 +39,7 @@ class Nanny(ServerNode):
 
     def __init__(self, scheduler_ip=None, scheduler_port=None,
                  scheduler_file=None, worker_port=0,
-                 ncores=None, loop=None, local_dir=None, services=None,
+                 ncores=None, loop=None, local_dir=None, change_dir=False, services=None,
                  name=None, memory_limit='auto', reconnect=True,
                  validate=False, quiet=False, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
@@ -73,6 +73,7 @@ class Nanny(ServerNode):
         self.listen_args = self.security.get_listen_args('worker')
 
         self.local_dir = local_dir
+        self.change_dir = change_dir
 
         self.loop = loop or IOLoop.current()
         self.scheduler = rpc(self.scheduler_addr, connection_args=self.connection_args)
@@ -199,6 +200,7 @@ class Nanny(ServerNode):
                 worker_args=(self.scheduler_addr,),
                 worker_kwargs=dict(ncores=self.ncores,
                                    local_dir=self.local_dir,
+                                   change_dir=self.change_dir,
                                    services=self.services,
                                    service_ports={'nanny': self.port},
                                    name=self.name,

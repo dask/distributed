@@ -81,6 +81,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="File to write the process PID")
 @click.option('--local-directory', default='', type=str,
               help="Directory to place worker files")
+@click.option('--change-directory/--keep-directory', default=False,
+              help="Change working directory to local directory")
 @click.option('--resources', type=str, default='',
               help='Resources for task constraints like "GPU=2 MEM=10e9"')
 @click.option('--scheduler-file', type=str, default='',
@@ -98,7 +100,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 def main(scheduler, host, worker_port, listen_address, contact_address,
          nanny_port, nthreads, nprocs, nanny, name,
          memory_limit, pid_file, reconnect, resources, bokeh,
-         bokeh_port, local_directory, scheduler_file, interface,
+         bokeh_port, local_directory, change_directory, scheduler_file, interface,
          death_timeout, preload, preload_argv, bokeh_prefix, tls_ca_file,
          tls_cert, tls_key):
     enable_proctitle_on_current()
@@ -217,7 +219,7 @@ def main(scheduler, host, worker_port, listen_address, contact_address,
     nannies = [t(scheduler, scheduler_file=scheduler_file, ncores=nthreads,
                  services=services, loop=loop, resources=resources,
                  memory_limit=memory_limit, reconnect=reconnect,
-                 local_dir=local_directory, death_timeout=death_timeout,
+                 local_dir=local_directory, change_dir=change_directory, death_timeout=death_timeout,
                  preload=preload, preload_argv=preload_argv,
                  security=sec, contact_address=contact_address,
                  name=name if nprocs == 1 or not name else name + '-' + str(i),

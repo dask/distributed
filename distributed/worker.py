@@ -83,14 +83,13 @@ _global_workers = []
 
 class WorkerBase(ServerNode):
     def __init__(self, scheduler_ip=None, scheduler_port=None,
-                 scheduler_file=None, ncores=None, loop=None, local_dir=None,
+                 scheduler_file=None, ncores=None, loop=None, local_dir=None, change_dir=False,
                  services=None, service_ports=None, name=None,
                  reconnect=True, memory_limit='auto',
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=(), preload_argv=[], security=None,
                  contact_address=None, memory_monitor_interval='200ms',
                  extensions=None, metrics=None, **kwargs):
-
         self._setup_logging()
 
         if scheduler_file:
@@ -122,6 +121,8 @@ class WorkerBase(ServerNode):
         self._workspace = WorkSpace(local_dir)
         self._workdir = self._workspace.new_work_dir(prefix='worker-')
         self.local_dir = self._workdir.dir_path
+        if change_dir:
+            os.chdir(self.local_dir)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
