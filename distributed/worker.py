@@ -2461,13 +2461,20 @@ class Worker(WorkerBase):
             active_threads = self.active_threads.copy()
         frames = sys._current_frames()
         frames = {ident: frames[ident] for ident in active_threads}
+        llframes = {ident: profile.ll_get_stack(ident) for ident in active_threads}
         for ident, frame in frames.items():
             if frame is not None:
                 key = key_split(active_threads[ident])
-                profile.process(frame, None, self.profile_recent,
+                init = profile.create()
+                llframe = llframes[ident]
+
+                state = profile.process(frame, True, self.profile_recent,
                                 stop='distributed/worker.py')
-                profile.process(frame, None, self.profile_keys[key],
-                                stop='distributed/worker.py')
+                profile.llprocess(llframe, None, state)
+                state = profile.process(frame, True, self.profile_keys[key],
+                                        stop='distributed/worker.py')
+                # profile.llprocess(llframe, None, state)
+
         stop = time()
         if self.digests is not None:
             self.digests['profile-duration'].add(stop - start)

@@ -299,3 +299,50 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
         prof = merge(prof, recent)
 
     return prof
+
+
+def _remove_py_stack(frames):
+    for entry in frames:
+        if entry.is_python:
+            break
+        yield entry
+
+
+def llprocess(frames, child, state):
+    if not frames:
+        return
+    frame = frames.pop()
+    if frames:
+        state = llprocess(frames, frame, state)
+
+    addr = hex(frame.addr - frame.offset)
+    ident = ';'.join(map(str, (frame.name, '<c>', addr)))
+    try:
+        d = state['children'][ident]
+    except KeyError:
+        d = {
+            'count': 0,
+            'description': {
+                'filename': '<c>',
+                'name': frame.name,
+                'line_number': 0,
+                'line': str(frame),
+            },
+            'children': {},
+            'identifier': ident,
+        }
+        state['children'][ident] = d
+
+    state['count'] += 1
+
+    if child is not None:
+        return d
+    else:
+        d['count'] += 1
+
+
+def ll_get_stack(tid):
+    from stacktrace import get_thread_stack, print_thread_stack
+    frames = get_thread_stack(tid, show_python=False)
+    llframes = list(_remove_py_stack(frames))[::-1]
+    return llframes
