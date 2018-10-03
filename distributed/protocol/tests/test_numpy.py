@@ -138,24 +138,6 @@ def test_itemsize(dt, size):
     assert itemsize(np.dtype(dt)) == size
 
 
-@pytest.mark.skipif(sys.version_info[0] < 3,
-                    reason='numpy doesnt use memoryviews')
-def test_compress_numpy():
-    pytest.importorskip('lz4')
-    x = np.ones(10000000, dtype='i4')
-    frames = dumps({'x': to_serialize(x)})
-    assert sum(map(nbytes, frames)) < x.nbytes
-
-    header = msgpack.loads(frames[2], encoding='utf8', use_list=False)
-    try:
-        import blosc  # noqa: F401
-    except ImportError:
-        pass
-    else:
-        assert all(c == 'blosc' for c in
-                   header['headers'][('x',)]['compression'])
-
-
 def test_compress_memoryview():
     mv = memoryview(b'0' * 1000000)
     compression, compressed = maybe_compress(mv)
