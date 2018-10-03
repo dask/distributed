@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from distributed.protocol import (serialize, deserialize, decompress, dumps,
-                                  loads, to_serialize, msgpack)
+                                  loads, to_serialize, )
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.utils import tmpfile, nbytes
 from distributed.utils_test import slow, gen_cluster
