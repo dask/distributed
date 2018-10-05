@@ -476,7 +476,10 @@ class ProfileTimePlot(DashboardComponent):
 
         def ts_change(attr, old, new):
             with log_errors():
-                selected = self.ts_source.selected['1d']['indices']
+                if bokeh.__version__ < '1.0':
+                    selected = self.ts_source.selected['1d']['indices']
+                else:
+                    selected = self.ts_source.selected.indices
                 if selected:
                     start = self.ts_source.data['time'][min(selected)] / 1000
                     stop = self.ts_source.data['time'][max(selected)] / 1000
@@ -636,7 +639,10 @@ class ProfileServer(DashboardComponent):
 
         def ts_change(attr, old, new):
             with log_errors():
-                selected = self.ts_source.selected['1d']['indices']
+                if bokeh.__version__ < '1.0':
+                    selected = self.ts_source.selected['1d']['indices']
+                else:
+                    selected = self.ts_source.selected.indices
                 if selected:
                     start = self.ts_source.data['time'][min(selected)] / 1000
                     stop = self.ts_source.data['time'][max(selected)] / 1000
