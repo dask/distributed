@@ -107,6 +107,23 @@ Python 3 with Tornado
    from tornado.ioloop import IOLoop
    IOLoop().run_sync(f)
 
+If you want to reuse an externally created client you need to run the async
+function using the clients loop which can be done with the ``Client.sync``
+function - e.g.
+
+.. code-block:: python
+
+   from dask.distributed import Client
+
+   client = Client()
+
+   async def f():
+       future = client.submit(lambda x: x + 1, 10)
+       return await client.gather(future, asynchronous=True)
+
+   client.sync(f)
+
+
 Python 2/3 with Tornado
 +++++++++++++++++++++++
 
