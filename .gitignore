@@ -7,5 +7,6 @@ continuous_integration/hdfs-initialized
 .cache
 .#*
 .idea/
+.vscode/
 .pytest_cache/
 dask-worker-space/
