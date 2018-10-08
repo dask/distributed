@@ -5407,11 +5407,8 @@ def test_retry_dependencies(c, s, a, b):
     def f():
         return dask.config.get('foo')
 
-    def g(x):
-        return x + 1
-
     x = c.submit(f)
-    y = c.submit(g, x)
+    y = c.submit(inc, x)
 
     with pytest.raises(KeyError):
         yield y
@@ -5423,6 +5420,24 @@ def test_retry_dependencies(c, s, a, b):
 
         yield y.retry()
         yield x.retry()
+        result = yield y
+        assert result == 101
+
+
+@gen_cluster(client=True)
+def test_released_dependencies(c, s, a, b):
+    def f(x):
+        return dask.config.get('foo') + 1
+
+    x = c.submit(inc, 1, key='x')
+    y = c.submit(f, x, key='y')
+    del x
+
+    with pytest.raises(KeyError):
+        yield y
+
+    with dask.config.set(foo=100):
+        yield y.retry()
         result = yield y
         assert result == 101
 

@@ -1645,14 +1645,27 @@ class Scheduler(ServerNode):
         if client:
             self.log_event(client, {'action': 'retry', 'count': len(keys)})
 
-        recommendations = {key: 'waiting' for key in keys if self.tasks[key].state == 'erred'}
+        stack = list(keys)
+        seen = set()
+        roots = []
+        while stack:
+            key = stack.pop()
+            seen.add(key)
+            erred_deps = [dts.key for dts in self.tasks[key].dependencies
+                          if dts.state == 'erred']
+            if erred_deps:
+                stack.extend(erred_deps)
+            else:
+                roots.append(key)
+
+        recommendations = {key: 'waiting' for key in roots}
         self.transitions(recommendations)
 
         if self.validate:
-            for key in keys:
+            for key in seen:
                 assert not self.tasks[key].exception_blame
 
-        return tuple(recommendations)
+        return tuple(seen)
 
     def remove_worker(self, comm=None, address=None, safe=False, close=True):
         """
@@ -3522,17 +3535,13 @@ class Scheduler(ServerNode):
 
             if self.validate:
                 with log_errors(pdb=LOG_PDB):
+                    assert all(dts.state != 'erred' for dts in ts.dependencies)
                     assert ts.exception_blame
                     assert not ts.who_has
                     assert not ts.waiting_on
                     assert not ts.waiters
 
             recommendations = OrderedDict()
-
-            blame = ts.exception_blame
-            if ts != blame and blame.state == 'erred':
-                return {blame.key: 'waiting'}
-                # recommendations[blame.key] = 'waiting'
 
             ts.exception = None
             ts.exception_blame = None
