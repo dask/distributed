@@ -930,6 +930,7 @@ class Scheduler(ServerNode):
             'unregister': self.remove_worker,
             'gather': self.gather,
             'cancel': self.stimulus_cancel,
+            'retry': self.stimulus_retry,
             'feed': self.feed,
             'terminate': self.close,
             'broadcast': self.broadcast,
@@ -973,6 +974,7 @@ class Scheduler(ServerNode):
             ('released', 'forgotten'): self.transition_released_forgotten,
             ('memory', 'forgotten'): self.transition_memory_forgotten,
             ('erred', 'forgotten'): self.transition_released_forgotten,
+            ('erred', 'released'): self.transition_erred_released,
             ('memory', 'released'): self.transition_memory_released,
             ('released', 'erred'): self.transition_released_erred
         }
@@ -1637,6 +1639,20 @@ class Scheduler(ServerNode):
                 assert cause not in self.who_has
 
             return {}
+
+    def stimulus_retry(self, comm=None, keys=None, client=None):
+        logger.info("Client %s requests to retry %d keys", client, len(keys))
+        if client:
+            self.log_event(client, {'action': 'retry', 'count': len(keys)})
+
+        recommendations = {key: 'waiting' for key in keys if self.tasks[key].state == 'erred'}
+        self.transitions(recommendations)
+
+        if self.validate:
+            for key in keys:
+                assert not self.tasks[key].exception_blame
+
+        return tuple(recommendations)
 
     def remove_worker(self, comm=None, address=None, safe=False, close=True):
         """
@@ -3492,6 +3508,43 @@ class Scheduler(ServerNode):
             ts.state = 'erred'
 
             # TODO: waiting data?
+            return recommendations
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+                pdb.set_trace()
+            raise
+
+    def transition_erred_released(self, key):
+        try:
+            ts = self.tasks[key]
+
+            if self.validate:
+                with log_errors(pdb=LOG_PDB):
+                    assert ts.exception_blame
+                    assert not ts.who_has
+                    assert not ts.waiting_on
+                    assert not ts.waiters
+
+            recommendations = OrderedDict()
+
+            blame = ts.exception_blame
+            if ts != blame and blame.state == 'erred':
+                return {blame.key: 'waiting'}
+                # recommendations[blame.key] = 'waiting'
+
+            ts.exception = None
+            ts.exception_blame = None
+            ts.traceback = None
+
+            for dep in ts.dependents:
+                if dep.state == 'erred':
+                    recommendations[dep.key] = 'waiting'
+
+            self.report({'op': 'task-retried', 'key': key})
+            ts.state = 'released'
+
             return recommendations
         except Exception as e:
             logger.exception(e)
