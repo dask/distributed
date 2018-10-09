@@ -211,7 +211,7 @@ def listen(addr, handle_comm, deserialize=True, connection_args=None):
     try:
         scheme, loc = parse_address(addr, strict=True)
     except ValueError:
-        if connection_args.get('ssl_context'):
+        if connection_args and connection_args.get('ssl_context'):
             addr = 'tls://' + addr
         else:
             addr = 'tcp://' + addr
