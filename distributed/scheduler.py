@@ -930,6 +930,7 @@ class Scheduler(ServerNode):
             'unregister': self.remove_worker,
             'gather': self.gather,
             'cancel': self.stimulus_cancel,
+            'retry': self.stimulus_retry,
             'feed': self.feed,
             'terminate': self.close,
             'broadcast': self.broadcast,
@@ -973,6 +974,7 @@ class Scheduler(ServerNode):
             ('released', 'forgotten'): self.transition_released_forgotten,
             ('memory', 'forgotten'): self.transition_memory_forgotten,
             ('erred', 'forgotten'): self.transition_released_forgotten,
+            ('erred', 'released'): self.transition_erred_released,
             ('memory', 'released'): self.transition_memory_released,
             ('released', 'erred'): self.transition_released_erred
         }
@@ -1018,15 +1020,30 @@ class Scheduler(ServerNode):
                          for worker in self.workers.values()}}
         return d
 
-    def get_worker_service_addr(self, worker, service_name):
+    def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
         Get the (host, port) address of the named service on the *worker*.
         Returns None if the service doesn't exist.
+
+        Parameters
+        ----------
+        worker : address
+        service_name : str
+            Common services include 'bokeh' and 'nanny'
+        protocol : boolean
+            Whether or not to include a full address with protocol (True)
+            or just a (host, port) pair
         """
         ws = self.workers[worker]
         port = ws.services.get(service_name)
         if port is None:
             return None
+        elif protocol:
+            return '%(protocol)s://%(host)s:%(port)d' % {
+                'protocol': ws.address.split('://')[0],
+                'host': ws.host,
+                'port': port
+            }
         else:
             return ws.host, port
 
@@ -1191,7 +1208,7 @@ class Scheduler(ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {'action': 'close-worker'})
-            nanny_addr = self.get_worker_service_addr(worker, 'nanny')
+            nanny_addr = self.get_worker_service_addr(worker, 'nanny', protocol=True)
             address = nanny_addr or worker
 
             self.worker_send(worker, {'op': 'close', 'report': False})
@@ -1637,6 +1654,33 @@ class Scheduler(ServerNode):
                 assert cause not in self.who_has
 
             return {}
+
+    def stimulus_retry(self, comm=None, keys=None, client=None):
+        logger.info("Client %s requests to retry %d keys", client, len(keys))
+        if client:
+            self.log_event(client, {'action': 'retry', 'count': len(keys)})
+
+        stack = list(keys)
+        seen = set()
+        roots = []
+        while stack:
+            key = stack.pop()
+            seen.add(key)
+            erred_deps = [dts.key for dts in self.tasks[key].dependencies
+                          if dts.state == 'erred']
+            if erred_deps:
+                stack.extend(erred_deps)
+            else:
+                roots.append(key)
+
+        recommendations = {key: 'waiting' for key in roots}
+        self.transitions(recommendations)
+
+        if self.validate:
+            for key in seen:
+                assert not self.tasks[key].exception_blame
+
+        return tuple(seen)
 
     def remove_worker(self, comm=None, address=None, safe=False, close=True):
         """
@@ -2290,7 +2334,7 @@ class Scheduler(ServerNode):
                 self.client_releases_keys(keys=[ts.key for ts in cs.wants_what],
                                           client=cs.client_key)
 
-            nannies = {addr: self.get_worker_service_addr(addr, 'nanny')
+            nannies = {addr: self.get_worker_service_addr(addr, 'nanny', protocol=True)
                        for addr in self.workers}
 
             for addr in list(self.workers):
@@ -2357,7 +2401,7 @@ class Scheduler(ServerNode):
         # TODO replace with worker_list
 
         if nanny:
-            addresses = [self.get_worker_service_addr(w, 'nanny')
+            addresses = [self.get_worker_service_addr(w, 'nanny', protocol=True)
                          for w in workers]
         else:
             addresses = workers
@@ -2369,7 +2413,7 @@ class Scheduler(ServerNode):
             resp = yield send_recv(comm, close=True, serializers=serializers, **msg)
             raise gen.Return(resp)
 
-        results = yield All([send_message(self.coerce_address(address))
+        results = yield All([send_message(address)
                              for address in addresses
                              if address is not None])
 
@@ -3492,6 +3536,39 @@ class Scheduler(ServerNode):
             ts.state = 'erred'
 
             # TODO: waiting data?
+            return recommendations
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+                pdb.set_trace()
+            raise
+
+    def transition_erred_released(self, key):
+        try:
+            ts = self.tasks[key]
+
+            if self.validate:
+                with log_errors(pdb=LOG_PDB):
+                    assert all(dts.state != 'erred' for dts in ts.dependencies)
+                    assert ts.exception_blame
+                    assert not ts.who_has
+                    assert not ts.waiting_on
+                    assert not ts.waiters
+
+            recommendations = OrderedDict()
+
+            ts.exception = None
+            ts.exception_blame = None
+            ts.traceback = None
+
+            for dep in ts.dependents:
+                if dep.state == 'erred':
+                    recommendations[dep.key] = 'waiting'
+
+            self.report({'op': 'task-retried', 'key': key})
+            ts.state = 'released'
+
             return recommendations
         except Exception as e:
             logger.exception(e)
