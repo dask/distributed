@@ -532,7 +532,6 @@ def test_limit_concurrent_gathering(c, s, a, b):
     futures = c.map(inc, range(100))
     results = yield futures
     assert len(a.outgoing_transfer_log) + len(b.outgoing_transfer_log) < 100
-    assert len(a.outgoing_transfer_log) + len(b.outgoing_transfer_log) < 30
 
 
 @gen_cluster(client=True, timeout=None)
