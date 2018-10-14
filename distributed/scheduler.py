@@ -16,6 +16,8 @@ import warnings
 
 import psutil
 import sortedcontainers
+import shelve
+from pathlib import Path
 try:
     from cytoolz import frequencies, merge, pluck, merge_sorted, first
 except ImportError:
@@ -770,6 +772,7 @@ class Scheduler(ServerNode):
             scheduler_file=None,
             security=None,
             worker_ttl=None,
+            persist_file=None,
             **kwargs):
 
         self._setup_logging()
@@ -995,6 +998,22 @@ class Scheduler(ServerNode):
                                   io_loop=loop)
             self.periodic_callbacks['worker-ttl'] = pc
 
+        if persist_file:
+            persist_interval = dask.config.get('distributed.scheduler.persist-interval')
+            self.persist_interval = parse_timedelta(persist_interval) if persist_interval else None
+            self.persist_scheduler = shelve.open(str(Path(persist_file).resolve()), writeback=True)
+            if 'TaskState' in self.persist_scheduler.keys():
+                self.tasks = self.persist_scheduler['TaskState']
+            else:
+                self.persist_scheduler['TaskState'] = self.tasks
+                self.persist_scheduler.sync()
+            pc = PeriodicCallback(self.sync_persist_taskstate,
+                                  self.persist_interval,
+                                  io_loop=loop)
+            self.periodic_callbacks['persist-scheduler'] = pc
+        else:
+            self.persist_scheduler = None
+
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS
         for ext in extensions:
@@ -1194,6 +1213,10 @@ class Scheduler(ServerNode):
         self.stop()
         yield super(Scheduler, self).close()
 
+        if self.persist_scheduler:
+            self.persist_scheduler.sync()
+            self.persist_scheduler.close()
+
         setproctitle("dask-scheduler [closed]")
         disable_gc_diagnosis()
 
@@ -1265,8 +1288,9 @@ class Scheduler(ServerNode):
     @gen.coroutine
     def add_worker(self, comm=None, address=None, keys=(), ncores=None,
                    name=None, resolve_address=True, nbytes=None, now=None,
-                   resources=None, host_info=None, memory_limit=None,
-                   metrics=None, pid=0, services=None, local_directory=None):
+                   resources=None, host_info=None, memory_limit=None, task_state=None, priorities=None,
+                   durations=None, resource_restrictions=None, dependencies=None, dependents=None,
+                   available_resources=None, metrics=None, pid=0, services=None, local_directory=None):
         """ Add a new worker to the cluster """
         with log_errors():
             address = self.coerce_address(address, resolve_address)
@@ -1294,6 +1318,48 @@ class Scheduler(ServerNode):
             self.host_info[host]['addresses'].add(address)
             self.host_info[host]['cores'] += ncores
 
+            # Add Running tasks to TaskState and Workerstate
+            if task_state:
+                for k, v in task_state.items():
+                    if k not in self.tasks.keys():
+                        ts = self.tasks[k] = TaskState(k, None)
+                        ts.state = v
+                    else:
+                        ts = self.tasks[k]
+
+                    if 'executing' in v:
+                        ts.state = 'processing'
+                        ts.processing_on = ws
+                        ws.processing[ts] = durations[k]
+                        ws.occupancy += durations[k]
+                    # TODO: This logic breaks test: "test_worker_breaks_and_returns" in file test_scheduler
+                    # if 'memory' in v:
+                    #     ws.has_what.add(ts)
+                    #     ts.who_has.add(ws)
+                    if priorities:
+                        ts.priority = priorities[k]
+                    if resource_restrictions:
+                        ts.resource_restrictions = resource_restrictions[k]
+
+                    for d in dependencies[k]:
+                        if d not in self.tasks.keys():
+                            dts = self.tasks[d] = TaskState(d, None)
+                        else:
+                            dts = self.tasks[d]
+                        ts.dependencies.add(dts)
+
+                    for d in dependents.keys():
+                        if d not in self.tasks.keys():
+                            dts = self.tasks[d] = TaskState(d, None)
+                        else:
+                            dts = self.tasks[d]
+                        dts.dependents.add(ts)
+                        if 'executing' in v:
+                            dts.waiting_on.add(ts)
+                        elif 'memory' in v:
+                            dts.waiters.add(ts)
+                    ws.used_resources = available_resources or {}
+
             self.total_ncores += ncores
             self.aliases[name] = address
             ws.name = name
@@ -1307,7 +1373,7 @@ class Scheduler(ServerNode):
                                              host_info=host_info,
                                              metrics=metrics)
 
-            # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot exist before this.
+            self.total_occupancy += ws.occupancy
             self.check_idle_saturated(ws)
 
             # for key in keys:  # TODO
@@ -1571,6 +1637,9 @@ class Scheduler(ServerNode):
         end = time()
         if self.digests is not None:
             self.digests['update-graph-duration'].add(end - start)
+
+        if self.persist_scheduler:
+            self.sync_persist_taskstate()
 
         # TODO: balance workers
 
@@ -4310,6 +4379,10 @@ class Scheduler(ServerNode):
                 logger.warn("Worker failed to heartbeat within %s seconds. "
                             "Closing: %s", self.worker_ttl, ws)
                 self.remove_worker(address=ws.address)
+
+    def sync_persist_taskstate(self):
+        self.persist_scheduler['TaskState'] = self.tasks
+        self.persist_scheduler.sync()
 
 
 def decide_worker(ts, all_workers, valid_workers, objective):

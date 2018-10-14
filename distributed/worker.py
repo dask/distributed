@@ -306,6 +306,10 @@ class WorkerBase(ServerNode):
                 _start = time()
                 comm = yield connect(self.scheduler.address,
                                      connection_args=self.connection_args)
+                for key in self.dependencies.keys():
+                    self.dependencies[key] = list(self.dependencies[key])
+                for key in self.dependents.keys():
+                    self.dependents[key] = list(self.dependents[key])
                 yield comm.write(dict(op='register-worker',
                                       reply=False,
                                       address=self.contact_address,
@@ -319,7 +323,14 @@ class WorkerBase(ServerNode):
                                       local_directory=self.local_dir,
                                       services=self.service_ports,
                                       pid=os.getpid(),
-                                      metrics=self.get_metrics()),
+                                      metrics=self.get_metrics(),
+                                      task_state=self.task_state,
+                                      priorities=self.priorities,
+                                      durations=self.durations,
+                                      resource_restrictions=self.resource_restrictions,
+                                      dependencies=self.dependencies,
+                                      dependents=self.dependents,
+                                      available_resources=self.available_resources),
                                  serializers=['msgpack'])
                 future = comm.read(deserializers=['msgpack'])
                 if self.death_timeout:

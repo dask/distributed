@@ -15,6 +15,7 @@ distributed:
     transition-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
+    persist-interval: 1s    # time to sync TaskState to disc
 
   worker:
     multiprocessing-method: forkserver

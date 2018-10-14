@@ -7,6 +7,8 @@ import json
 from operator import add, mul
 import sys
 from time import sleep
+import glob
+import os
 
 import dask
 from dask import delayed
@@ -1384,3 +1386,27 @@ def test_gh2187(c, s, a, b):
     yield gen.sleep(0.1)
     f = c.submit(bar, x, key='y')
     yield f
+
+
+@gen_test()
+def test_persist_taskstate():
+    s = Scheduler(validate=True, persist_file='persist_test')
+    s.start(0)
+    assert s.persist_scheduler
+    s.update_graph(tasks={'x': dumps_task((inc, 1)),
+                          'y': dumps_task((inc, 'x')),
+                          'z': dumps_task((inc, 2))},
+                   keys=['y'],
+                   dependencies={'y': 'x', 'x': [], 'z': []},
+                   client='client')
+    taskstates = s.tasks
+    s.close()
+    s.stop()
+    del s
+    s = Scheduler(validate=True, persist_file='persist_test')
+    s.start(0)
+    assert ([taskstates.keys()] == [s.tasks.keys()] and
+            [x.state for x in taskstates.values()] == [x.state for x in s.tasks.values()])
+    s.close()
+    for f in glob.glob("persist_test*"):
+        os.remove(f)
