@@ -741,12 +741,12 @@ def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
 
 
 def slow(func):
-    # try:
-    #     if not pytest.config.getoption("--runslow"):
-    #         func = pytest.mark.skip("need --runslow option to run")(func)
-    # except AttributeError:
-    #     # AttributeError: module 'pytest' has no attribute 'config'
-    #     pass
+    try:
+        if not pytest.config.getoption("--runslow"):
+            func = pytest.mark.skip("need --runslow option to run")(func)
+    except AttributeError:
+        # AttributeError: module 'pytest' has no attribute 'config'
+        pass
 
     return nodebug(func)
 
