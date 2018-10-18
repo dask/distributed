@@ -1,10 +1,11 @@
 from __future__ import print_function, division, absolute_import
+from collections import defaultdict, deque, OrderedDict
 try:
     # Python 3
-    from collections.abc import defaultdict, deque, OrderedDict, Mapping, Set
+    from collections.abc import Mapping, Set
 except ImportError:
     # Python 2.7
-    from collections import defaultdict, deque, OrderedDict, Mapping, Set
+    from collections import Mapping, Set
 from datetime import timedelta
 from functools import partial
 import itertools
