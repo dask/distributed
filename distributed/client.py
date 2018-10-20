@@ -26,7 +26,7 @@ import weakref
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
-from dask.compatibility import apply, unicode, Iterator
+from dask.compatibility import apply, unicode
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
 except ImportError:
@@ -46,7 +46,7 @@ from .utils_comm import (WrappedKey, unpack_remotedata, pack_data,
                          scatter_to_workers, gather_from_workers)
 from .cfexecutor import ClientExecutor
 from .compatibility import (Queue as pyQueue, Empty, isqueue, html_escape,
-        StopAsyncIteration)
+        StopAsyncIteration, Iterator)
 from .core import connect, rpc, clean_exception, CommClosedError, PooledRPCCall
 from .metrics import time
 from .node import Node
