@@ -1,11 +1,5 @@
 from __future__ import print_function, division, absolute_import
 from collections import defaultdict, deque, OrderedDict
-try:
-    # Python 3
-    from collections.abc import Mapping, Set
-except ImportError:
-    # Python 2.7
-    from collections import Mapping, Set
 from datetime import timedelta
 from functools import partial
 import itertools
@@ -35,7 +29,7 @@ import dask
 from .batched import BatchedSend
 from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
-from .compatibility import finalize, unicode
+from .compatibility import finalize, unicode, Mapping, Set
 from .core import (rpc, connect, send_recv,
                    clean_exception, CommClosedError)
 from . import profile

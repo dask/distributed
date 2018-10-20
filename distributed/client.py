@@ -2,12 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 import atexit
 from collections import defaultdict
-try:
-    # Python 3
-    from collections.abc import Iterator
-except ImportError:
-    # Python 2.7
-    from collections import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
 from contextlib import contextmanager
@@ -32,7 +26,7 @@ import weakref
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
-from dask.compatibility import apply, unicode
+from dask.compatibility import apply, unicode, Iterator
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
 except ImportError:
