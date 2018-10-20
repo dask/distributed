@@ -19,7 +19,7 @@ try:
     from cytoolz import frequencies, merge, pluck, merge_sorted, first
 except ImportError:
     from toolz import frequencies, merge, pluck, merge_sorted, first
-from toolz import valmap, first, second, compose, groupby
+from toolz import valmap, second, compose, groupby
 from tornado import gen
 from tornado.gen import Return
 from tornado.ioloop import IOLoop
