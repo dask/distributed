@@ -1827,7 +1827,8 @@ class Client(Node):
 
         >>> [future] = c.scatter([element], broadcast=True)  # doctest: +SKIP
 
-        Send scattered data to function
+        Send scattered data to parallelized function using client futures
+        interface
 
         >>> data = c.scatter(data, broadcast=True)  # doctest: +SKIP
         >>> res = [c.submit(func, data, i) for i in range(100)]
