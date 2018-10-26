@@ -1827,6 +1827,11 @@ class Client(Node):
 
         >>> [future] = c.scatter([element], broadcast=True)  # doctest: +SKIP
 
+        Send scattered data to function
+
+        >>> data = c.scatter(data, broadcast=True)  # doctest: +SKIP
+        >>> res = [c.submit(func, data, i) for i in range(100)]
+
         See Also
         --------
         Client.gather: Gather data back to local process
