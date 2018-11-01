@@ -168,10 +168,11 @@ class Adaptive(object):
         ----
         Additional workers are added whenever
 
-        1. There are unrunnable tasks and no workers
-        2. The cluster is CPU constrained
-        3. The cluster is RAM constrained
-        4. There are fewer workers than our minimum
+        1. There are fewer workers than our minimum
+        2. There are unrunnable tasks and no workers
+        3. There are no idle tasks, and
+            a. The cluster is CPU constrained, or
+            b. The cluster is RAM constrained
 
         See Also
         --------
@@ -187,6 +188,9 @@ class Adaptive(object):
 
             if self.scheduler.unrunnable and not self.scheduler.workers:
                 return True
+
+            if not all(ws.processing for ws in self.scheduler.workers.values()):
+                return False
 
             needs_cpu = self.needs_cpu()
             needs_memory = self.needs_memory()
