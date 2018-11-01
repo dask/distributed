@@ -170,7 +170,8 @@ class Adaptive(object):
 
         1. There are fewer workers than our minimum
         2. There are unrunnable tasks and no workers
-        3. There are no idle tasks, and
+        3. There are no idle workers and the number of pending tasks exceeds
+            the number of workers, and
             a. The cluster is CPU constrained, or
             b. The cluster is RAM constrained
 
@@ -190,6 +191,14 @@ class Adaptive(object):
                 return True
 
             if not all(ws.processing for ws in self.scheduler.workers.values()):
+                return False
+
+            tasks_processing = sum(
+                (len(w.processing) for w in self.scheduler.workers.values()))
+
+            num_workers = len(self.scheduler.workers)
+
+            if tasks_processing <= num_workers:
                 return False
 
             needs_cpu = self.needs_cpu()
