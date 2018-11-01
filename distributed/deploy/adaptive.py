@@ -278,36 +278,31 @@ class Adaptive(object):
         return {'n': instances}
 
     def recommendations(self, comm=None):
-        should_scale_up = self.should_scale_up()
-        workers = set(self.workers_to_close(key=self.worker_key,
+
+        workers_to_close = set(self.workers_to_close(key=self.worker_key,
                                             minimum=self.minimum))
-        if should_scale_up and workers:
-            logger.info("Attempting to scale up and scale down simultaneously.")
-            self.close_counts.clear()
-            return {'status': 'error',
-                    'msg': 'Trying to scale up and down simultaneously'}
-
-        elif should_scale_up:
-            self.close_counts.clear()
-            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
-
-        elif workers:
+        if workers_to_close:
             d = {}
             to_close = []
             for w, c in self.close_counts.items():
-                if w in workers:
+                if w in workers_to_close:
                     if c >= self.wait_count:
                         to_close.append(w)
                     else:
                         d[w] = c
 
-            for w in workers:
+            for w in workers_to_close:
                 d[w] = d.get(w, 0) + 1
 
             self.close_counts = d
 
             if to_close:
                 return {'status': 'down', 'workers': to_close}
+
+        elif self.should_scale_up():
+            self.close_counts.clear()
+            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
+
         else:
             self.close_counts.clear()
             return None
