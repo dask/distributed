@@ -123,7 +123,8 @@ class Adaptive(object):
         Notes
         -----
         Returns ``True`` if the occupancy per core is some factor larger
-        than ``startup_cost``.
+        than ``startup_cost`` and the number of tasks exceeds the number of
+        workers
         """
         total_occupancy = self.scheduler.total_occupancy
         total_cores = sum([ws.ncores for ws in self.scheduler.workers.values()])
@@ -131,9 +132,21 @@ class Adaptive(object):
         if total_occupancy / (total_cores + 1e-9) > self.startup_cost * 2:
             logger.info("CPU limit exceeded [%d occupancy / %d cores]",
                         total_occupancy, total_cores)
-            return True
-        else:
-            return False
+
+            tasks_processing = sum(
+                (len(w.processing) for w in self.scheduler.workers.values()))
+
+            num_workers = len(self.scheduler.workers)
+
+            if tasks_processing > num_workers:
+                logger.info(
+                    "pending tasks exceed number of workers "
+                    "[%d tasks / %d workers]",
+                    tasks_processing, num_workers)
+
+                return True
+
+        return False
 
     def needs_memory(self):
         """
@@ -168,12 +181,10 @@ class Adaptive(object):
         ----
         Additional workers are added whenever
 
-        1. There are fewer workers than our minimum
-        2. There are unrunnable tasks and no workers
-        3. There are no idle workers and the number of pending tasks exceeds
-            the number of workers, and
-            a. The cluster is CPU constrained, or
-            b. The cluster is RAM constrained
+        1. There are unrunnable tasks and no workers
+        2. The cluster is CPU constrained
+        3. The cluster is RAM constrained
+        4. There are fewer workers than our minimum
 
         See Also
         --------
@@ -189,17 +200,6 @@ class Adaptive(object):
 
             if self.scheduler.unrunnable and not self.scheduler.workers:
                 return True
-
-            if not all(ws.processing for ws in self.scheduler.workers.values()):
-                return False
-
-            tasks_processing = sum(
-                (len(w.processing) for w in self.scheduler.workers.values()))
-
-            num_workers = len(self.scheduler.workers)
-
-            if tasks_processing <= num_workers:
-                return False
 
             needs_cpu = self.needs_cpu()
             needs_memory = self.needs_memory()
@@ -291,31 +291,36 @@ class Adaptive(object):
         return {'n': instances}
 
     def recommendations(self, comm=None):
-
-        workers_to_close = set(self.workers_to_close(key=self.worker_key,
+        should_scale_up = self.should_scale_up()
+        workers = set(self.workers_to_close(key=self.worker_key,
                                             minimum=self.minimum))
-        if workers_to_close:
+        if should_scale_up and workers:
+            logger.info("Attempting to scale up and scale down simultaneously.")
+            self.close_counts.clear()
+            return {'status': 'error',
+                    'msg': 'Trying to scale up and down simultaneously'}
+
+        elif should_scale_up:
+            self.close_counts.clear()
+            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
+
+        elif workers:
             d = {}
             to_close = []
             for w, c in self.close_counts.items():
-                if w in workers_to_close:
+                if w in workers:
                     if c >= self.wait_count:
                         to_close.append(w)
                     else:
                         d[w] = c
 
-            for w in workers_to_close:
+            for w in workers:
                 d[w] = d.get(w, 0) + 1
 
             self.close_counts = d
 
             if to_close:
                 return {'status': 'down', 'workers': to_close}
-
-        elif self.should_scale_up():
-            self.close_counts.clear()
-            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
-
         else:
             self.close_counts.clear()
             return None
