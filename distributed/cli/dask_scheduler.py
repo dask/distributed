@@ -127,9 +127,9 @@ def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
                           security=sec)
     scheduler.start(addr)
     if not preload:
-        preload = dask.config.get('distributed.scheduler.preloads')
+        preload = dask.config.get('distributed.scheduler.preload')
     if not preload_argv:
-        preload_argv = dask.config.get('distributed.scheduler.preloads-argv')
+        preload_argv = dask.config.get('distributed.scheduler.preload-argv')
     preload_modules(preload, parameter=scheduler, file_dir=local_directory, argv=preload_argv)
 
     logger.info('Local Directory: %26s', local_directory)

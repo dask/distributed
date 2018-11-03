@@ -15,8 +15,8 @@ distributed:
     transition-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
-    preloads: []
-    preloads-argv: []
+    preload: []
+    preload-argv: []
 
   worker:
     multiprocessing-method: forkserver
@@ -24,8 +24,8 @@ distributed:
     connections:            # Maximum concurrent connections for data
       outgoing: 50          # This helps to control network saturation
       incoming: 10
-    preloads: []
-    preloads-argv: []
+    preload: []
+    preload-argv: []
 
     profile:
       interval: 10ms        # Time between statistical profiling queries

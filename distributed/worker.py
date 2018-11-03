@@ -109,10 +109,10 @@ class WorkerBase(ServerNode):
         self.death_timeout = death_timeout
         self.preload = preload
         if self.preload is None:
-            self.preload = dask.config.get('distributed.worker.preloads')
+            self.preload = dask.config.get('distributed.worker.preload')
         self.preload_argv = preload_argv
         if self.preload_argv is None:
-            self.preload_argv = dask.config.get('distributed.worker.preloads-argv')
+            self.preload_argv = dask.config.get('distributed.worker.preload-argv')
         self.contact_address = contact_address
         self.memory_monitor_interval = parse_timedelta(memory_monitor_interval, default='ms')
         self.extensions = dict()
