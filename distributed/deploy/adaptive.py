@@ -133,18 +133,20 @@ class Adaptive(object):
             logger.info("CPU limit exceeded [%d occupancy / %d cores]",
                         total_occupancy, total_cores)
 
-            tasks_processing = sum(
-                (len(w.processing) for w in self.scheduler.workers.values()))
-
             num_workers = len(self.scheduler.workers)
 
-            if tasks_processing > num_workers:
-                logger.info(
-                    "pending tasks exceed number of workers "
-                    "[%d tasks / %d workers]",
-                    tasks_processing, num_workers)
+            tasks_processing = 0
 
-                return True
+            for w in self.scheduler.workers.values():
+                tasks_processing += len(w.processing)
+
+                if tasks_processing > num_workers:
+                    logger.info(
+                        "pending tasks exceed number of workers "
+                        "[%d tasks / %d workers]",
+                        tasks_processing, num_workers)
+
+                    return True
 
         return False
 
