@@ -119,14 +119,14 @@ def serialize_numpy_maskedarray(x):
     header = {"data-header": data_header,
               "mask-header": mask_header,
               "fill_value": fill_value,
-              "nframes": (len(data_frames),)}
+              "nframes": len(data_frames)}
     return header, data_frames + mask_frames
 
 
 @dask_deserialize.register(np.ma.core.MaskedArray)
 def deserialize_numpy_maskedarray(header, frames):
-    data_frames = frames[:header["nframes"][0]]
-    mask_frames = frames[header["nframes"][0]:]
+    data_frames = frames[:header["nframes"]]
+    mask_frames = frames[header["nframes"]:]
     data_header = header["data-header"]
     mask_header = header["mask-header"]
 
