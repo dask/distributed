@@ -329,6 +329,13 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             stream = yield client.connect(ip, port,
                                           max_buffer_size=MAX_BUFFER_SIZE,
                                           **kwargs)
+            # Under certain circumstances tornado will have a closed connnection with an error and not raise
+            # a StreamClosedError.
+            #
+            # This occurs with tornado 5.x and openssl 1.1+
+            if stream.closed() and stream.error:
+                raise StreamClosedError(stream.error)
+
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
