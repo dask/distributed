@@ -188,8 +188,8 @@ def connect(addr, timeout=None, deserialize=True, connection_args=None):
             comm = yield gen.with_timeout(timedelta(seconds=deadline - time()),
                                           future,
                                           quiet_exceptions=EnvironmentError)
-        except FatalCommClosedError as e:
-            raise e
+        except FatalCommClosedError:
+            raise
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
