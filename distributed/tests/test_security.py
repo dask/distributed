@@ -25,6 +25,14 @@ keycert1 = get_cert('tls-key-cert.pem')
 # Note this cipher uses RSA auth as this matches our test certs
 FORCED_CIPHER = 'ECDHE-RSA-AES128-GCM-SHA256'
 
+TLS_13_CIPHERS = [
+    'TLS_AES_128_GCM_SHA256',
+    'TLS_AES_256_GCM_SHA384',
+    'TLS_CHACHA20_POLY1305_SHA256',
+    'TLS_AES_128_CCM_SHA256',
+    'TLS_AES_128_CCM_8_SHA256',
+]
+
 
 def test_defaults():
     with new_config({}):
@@ -316,7 +324,7 @@ def test_tls_listen_connect():
         comm = yield connect(listener.contact_address,
                              connection_args=forced_cipher_sec.get_connection_args('worker'))
         cipher, _, _, = comm.extra_info['cipher']
-        assert cipher == FORCED_CIPHER
+        assert cipher in [FORCED_CIPHER] + TLS_13_CIPHERS
         comm.abort()
 
 
