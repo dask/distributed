@@ -580,8 +580,13 @@ def test_tls_reject_certificate():
     listener.start()
 
     with pytest.raises(EnvironmentError) as excinfo:
-        yield connect(listener.contact_address, timeout=0.5,
-                      connection_args={'ssl_context': bad_cli_ctx})
+        try:
+            yield connect(listener.contact_address, timeout=0.5,
+                          connection_args={'ssl_context': bad_cli_ctx})
+        except Exception as e:
+            print(type(e), flush=True)
+            print(repr(e), flush=True)
+            raise e
 
     # The wrong error is reported on Python 2, see https://github.com/tornadoweb/tornado/pull/2028
     if sys.version_info >= (3,) and os.name != 'nt':
