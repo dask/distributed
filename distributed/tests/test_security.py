@@ -201,7 +201,12 @@ def test_connection_args():
     ctx = d['ssl_context']
     basic_checks(ctx)
     if sys.version_info >= (3, 6):
-        assert len(ctx.get_ciphers()) == 1
+        supported_ciphers = ctx.get_ciphers()
+        tls_12_ciphers = [c for c in supported_ciphers if c['protocol'] == 'TLSv1.2']
+        assert len(tls_12_ciphers) == 1
+        tls_13_ciphers = [c for c in supported_ciphers if c['protocol'] == 'TLSv1.3']
+        if len(tls_13_ciphers):
+            assert len(tls_13_ciphers) == 3
 
 
 def test_listen_args():
@@ -255,7 +260,12 @@ def test_listen_args():
     ctx = d['ssl_context']
     basic_checks(ctx)
     if sys.version_info >= (3, 6):
-        assert len(ctx.get_ciphers()) == 1
+        supported_ciphers = ctx.get_ciphers()
+        tls_12_ciphers = [c for c in supported_ciphers if c['protocol'] == 'TLSv1.2']
+        assert len(tls_12_ciphers) == 1
+        tls_13_ciphers = [c for c in supported_ciphers if c['protocol'] == 'TLSv1.3']
+        if len(tls_13_ciphers):
+            assert len(tls_13_ciphers) == 3
 
 
 @gen_test()
