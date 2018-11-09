@@ -6,7 +6,7 @@ from zlib import crc32
 import numpy as np
 import pytest
 
-from  distributed.compatibility import PY2
+from distributed.compatibility import PY2
 from distributed.protocol import (serialize, deserialize, decompress, dumps,
                                   loads, to_serialize, msgpack)
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
@@ -72,7 +72,7 @@ def test_dumps_serialize_numpy(x):
     header, frames = serialize(x)
     if 'compression' in header:
         frames = decompress(header, frames)
-    buffer_interface = buffer if PY2 else memoryview
+    buffer_interface = buffer if PY2 else memoryview  # noqa: F821
     for frame in frames:
         assert isinstance(frame, (bytes, buffer_interface))
     y = deserialize(header, frames)
