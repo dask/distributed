@@ -1384,7 +1384,7 @@ if 'asyncio' in sys.modules:
             isinstance(traitlets.config.Application.instance(), NotebookApp)
         )
 
-    if not jupyter_event_loop_initialized:
+    if not jupyter_event_loop_initialized and tornado.version_info[0] >= 5:
         import asyncio
         import tornado.platform.asyncio
         asyncio.set_event_loop_policy(tornado.platform.asyncio.AnyThreadEventLoopPolicy())
