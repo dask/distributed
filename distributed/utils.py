@@ -1372,7 +1372,7 @@ def reset_logger_locks():
 
 
 # Only bother if asyncio has been loaded by Tornado
-if 'asyncio' in sys.modules:
+if 'asyncio' in sys.modules and tornado.version_info[0] >= 5:
 
     jupyter_event_loop_initialized = False
 
@@ -1384,7 +1384,7 @@ if 'asyncio' in sys.modules:
             isinstance(traitlets.config.Application.instance(), NotebookApp)
         )
 
-    if not jupyter_event_loop_initialized and tornado.version_info[0] >= 5:
+    if not jupyter_event_loop_initialized:
         import asyncio
         import tornado.platform.asyncio
         asyncio.set_event_loop_policy(tornado.platform.asyncio.AnyThreadEventLoopPolicy())
