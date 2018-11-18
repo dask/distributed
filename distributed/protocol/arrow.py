@@ -11,7 +11,7 @@ def serialize_batch(batch):
     writer = pyarrow.RecordBatchStreamWriter(sink, batch.schema)
     writer.write_batch(batch)
     writer.close()
-    buf = sink.get_result()
+    buf = sink.getvalue()
     header = {}
     frames = [buf]
     return header, frames
@@ -30,7 +30,7 @@ def serialize_table(tbl):
     writer = pyarrow.RecordBatchStreamWriter(sink, tbl.schema)
     writer.write_table(tbl)
     writer.close()
-    buf = sink.get_result()
+    buf = sink.getvalue()
     header = {}
     frames = [buf]
     return header, frames
