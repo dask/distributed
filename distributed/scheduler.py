@@ -40,7 +40,8 @@ from .proctitle import setproctitle
 from .security import Security
 from .utils import (All, ignoring, get_ip, get_fileno_limit, log_errors,
                     key_split, validate_key, no_default, DequeHandler,
-                    parse_timedelta, PeriodicCallback, shutting_down)
+                    parse_timedelta, PeriodicCallback, shutting_down, tictoc,
+                    format_time)
 from .utils_comm import (scatter_to_workers, gather_from_workers)
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
 
@@ -1313,7 +1314,7 @@ class Scheduler(ServerNode):
             # for key in keys:  # TODO
             #     self.mark_key_in_memory(key, [address])
 
-            self.stream_comms[address] = BatchedSend(interval='5ms', loop=self.loop)
+            self.stream_comms[address] = BatchedSend(interval='0ms', loop=self.loop)
 
             if ws.ncores > len(ws.processing):
                 self.idle.add(ws)
@@ -2076,6 +2077,7 @@ class Scheduler(ServerNode):
             else:
                 msg['task'] = task
 
+            print('scheduler send task to worker', format_time(tictoc()))
             self.worker_send(worker, msg)
         except Exception as e:
             logger.exception(e)
@@ -2091,6 +2093,8 @@ class Scheduler(ServerNode):
         if worker not in self.workers:
             return
         validate_key(key)
+        print('scheduler task finished', format_time(tictoc()))
+        print('')
         r = self.stimulus_task_finished(key=key, worker=worker, **msg)
         self.transitions(r)
 

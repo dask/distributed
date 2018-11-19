@@ -1424,3 +1424,14 @@ def iscoroutinefunction(f):
     if sys.version_info >= (3, 5) and inspect.iscoroutinefunction(f):
         return True
     return False
+
+
+_tictoc_last = time()
+
+
+def tictoc():
+    global _tictoc_last
+    now = time()
+    duration = now - _tictoc_last
+    _tictoc_last = now
+    return duration

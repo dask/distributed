@@ -47,7 +47,8 @@ from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, mp_context, import_file,
                     silence_logging, thread_state, json_load_robust, key_split,
                     format_bytes, DequeHandler, PeriodicCallback,
-                    parse_bytes, parse_timedelta, iscoroutinefunction)
+                    parse_bytes, parse_timedelta, iscoroutinefunction, tictoc,
+                    format_time)
 from .utils_comm import pack_data, gather_from_workers
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 
@@ -275,7 +276,7 @@ class WorkerBase(ServerNode):
                 if response['status'] == 'missing':
                     yield self._register_with_scheduler()
                     return
-                self.scheduler_delay = response['time'] - middle
+                self.scheduler_delay = 0 # response['time'] - middle
                 self.periodic_callbacks['heartbeat'].callback_time = response['heartbeat-interval'] * 1000
             except CommClosedError:
                 logger.warning("Heartbeat to scheduler failed")
@@ -358,7 +359,7 @@ class WorkerBase(ServerNode):
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
 
-        self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
+        self.batched_stream = BatchedSend(interval='0ms', loop=self.loop)
         self.batched_stream.start(comm)
         self.periodic_callbacks['heartbeat'].start()
         self.loop.add_callback(self.handle_scheduler, comm)
@@ -395,7 +396,7 @@ class WorkerBase(ServerNode):
 
     def send_to_worker(self, address, msg):
         if address not in self.stream_comms:
-            bcomm = BatchedSend(interval='1ms', loop=self.loop)
+            bcomm = BatchedSend(interval='2ms', loop=self.loop)
             self.stream_comms[address] = bcomm
 
             @gen.coroutine
@@ -914,6 +915,7 @@ def apply_function(function, args, kwargs, execution_state, key,
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
+    print('worker starts computing', format_time(tictoc()))
     ident = get_thread_identity()
     with active_threads_lock:
         active_threads[ident] = key
@@ -1357,6 +1359,7 @@ class Worker(WorkerBase):
     def add_task(self, key, function=None, args=None, kwargs=None, task=None,
                  who_has=None, nbytes=None, priority=None, duration=None,
                  resource_restrictions=None, actor=False, **kwargs2):
+        print('worker accepts task', format_time(tictoc()))
         try:
             if key in self.tasks:
                 state = self.task_state[key]
@@ -1447,6 +1450,7 @@ class Worker(WorkerBase):
             if self.waiting_for_data[key]:
                 self.data_needed.append(key)
             else:
+                print('worker transitions key', format_time(tictoc()))
                 self.transition(key, 'ready')
             if self.validate:
                 if who_has:
@@ -1841,6 +1845,7 @@ class Worker(WorkerBase):
 
         if key in self.startstops:
             d['startstops'] = self.startstops[key]
+        print('worker reports done scheduler', format_time(tictoc()))
         self.batched_stream.send(d)
 
     def put_key_in_memory(self, key, value, transition=True):
@@ -2305,6 +2310,7 @@ class Worker(WorkerBase):
 
             logger.debug("Execute key: %s worker: %s", key, self.address)  # TODO: comment out?
             try:
+                print('worker submits task to threadpool', format_time(tictoc()))
                 result = yield self.executor_submit(key, apply_function,
                                                     args=(function, args2, kwargs2,
                                                           self.execution_state, key,
