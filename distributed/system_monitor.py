@@ -10,7 +10,7 @@ from .metrics import time
 class SystemMonitor(object):
     def __init__(self, n=10000):
         self.proc = psutil.Process()
-        self.proc_children = psutil.children(recursive=True)
+        self.proc_children = self.proc.children(recursive=True)
 
         self.time = deque(maxlen=n)
         self.cpu = deque(maxlen=n)
