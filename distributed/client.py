@@ -3546,8 +3546,12 @@ class Client(Node):
             raise gen.Return(msgs)
 
     @gen.coroutine
-    def _register_worker_callbacks(self, setup=None):
-        responses = yield self.scheduler.register_worker_callbacks(setup=dumps(setup))
+    def _register_worker_callbacks(self, name, setup=None):
+        callbacks = {}
+        if setup is not None:
+            callbacks['setup'] = dumps(setup)
+
+        responses = yield self.scheduler.register_worker_callbacks(callbacks=callbacks, name=name)
         results = {}
         for key, resp in responses.items():
             if resp['status'] == 'OK':
@@ -3556,25 +3560,28 @@ class Client(Node):
                 six.reraise(*clean_exception(**resp))
         raise gen.Return(results)
 
-    def register_worker_callbacks(self, setup=None):
+    def register_worker_callbacks(self, name, setup=None):
         """
         Registers a setup callback function for all current and future workers.
 
         This registers a new setup function for workers in this cluster. The
         function will run immediately on all currently connected workers. It
         will also be run upon connection by any workers that are added in the
-        future. Multiple setup functions can be registered - these will be
-        called in the order they were added.
+        future. Multiple setup functions can be registered - the order they are
+        called are undefined.
 
         If the function takes an input argument named ``dask_worker`` then
         that variable will be populated with the worker itself.
 
         Parameters
         ----------
+        name : string
+            A unique identifier of the callbacks. If a set of callbacks
+            of the same name are already registered, they will be replaced.
         setup : callable(dask_worker: Worker) -> None
             Function to register and run on all workers
         """
-        return self.sync(self._register_worker_callbacks, setup=setup)
+        return self.sync(self._register_worker_callbacks, setup=setup, name=name)
 
 
 class Executor(Client):

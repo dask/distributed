@@ -904,7 +904,7 @@ class Scheduler(ServerNode):
         self.plugins = []
         self.transition_log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
         self.log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
-        self.worker_setups = []
+        self.worker_setups = {}
 
         worker_handlers = {
             'task-finished': self.handle_task_finished,
@@ -3090,14 +3090,20 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_worker_callbacks(self, comm, setup=None):
-        """ Registers a setup function, and call it on every worker """
-        if setup is None:
-            raise gen.Return({})
+    def register_worker_callbacks(self, comm, name, callbacks):
+        """ Registers a setup function, and call it on every worker;
+        """
+        responses = {}
 
-        self.worker_setups.append(setup)
+        if 'setup' in callbacks:
+            setup = callbacks['setup']
 
-        responses = yield self.broadcast(msg=dict(op='run', function=setup))
+            # add the setup function to the list to run them on new clients.
+            self.worker_setups[name] = setup
+
+            # trigger the setup function on the existing clients.
+            responses.update((yield self.broadcast(msg=dict(op='run', function=setup))))
+
         raise gen.Return(responses)
 
     #####################
