@@ -3605,7 +3605,6 @@ class Client(Node):
         result = yield self.scheduler.unregister_worker_callbacks(names=names)
         raise gen.Return(result)
 
-
     def unregister_worker_callbacks(self, setup=None):
         """ """
         return self.sync(self._unregister_worker_callbacks, setup=setup)
