@@ -1211,6 +1211,10 @@ def test_register_worker_callbacks(c, s, a, b):
         os.environ['MY_ENV_VALUE'] = 'WORKER_ENV_VALUE'
         return "Env set."
 
+    #preload function to run
+    def mystartup3(dask_worker):
+        dask_worker.init_variable2 = 1
+
     #Check that preload function has been run
     def test_import(dask_worker):
         return hasattr(dask_worker, 'init_variable')
@@ -1219,6 +1223,9 @@ def test_register_worker_callbacks(c, s, a, b):
     def test_startup2():
         import os
         return os.getenv('MY_ENV_VALUE', None) == 'WORKER_ENV_VALUE'
+
+    def test_startup3(dask_worker):
+        return hasattr(dask_worker, 'init_variable2')
 
     # Nothing has been run yet
     assert len(s.worker_setups) == 0
@@ -1235,8 +1242,14 @@ def test_register_worker_callbacks(c, s, a, b):
     yield worker._close()
 
     # Add a preload function
-    response = yield c.register_worker_callbacks(setup=mystartup)
-    assert len(response) == 2
+    names = yield c.register_worker_callbacks(setup=mystartup)
+    assert len(names) == 1
+    assert len(s.worker_setups) == 1
+
+    # Add the same preload function, again
+    names_again = yield c.register_worker_callbacks(setup=mystartup)
+    assert len(names_again) == 1
+    assert names_again['setup'] == names['setup']
     assert len(s.worker_setups) == 1
 
     # Check it has been ran on existing worker
@@ -1251,21 +1264,33 @@ def test_register_worker_callbacks(c, s, a, b):
     yield worker._close()
 
     # Register another preload function
-    response = yield c.register_worker_callbacks(setup=mystartup2)
-    assert len(response) == 2
+    names2 = yield c.register_worker_callbacks(setup=mystartup2)
+    assert len(names2) == 1
     assert len(s.worker_setups) == 2
 
     # Check it has been run
     result = yield c.run(test_startup2)
     assert list(result.values()) == [True] * 2
 
+    # unregister a preload function
+    names3 = yield c.register_worker_callbacks(setup=mystartup3)
+    assert len(s.worker_setups) == 3
+    yield c.unregister_worker_callbacks(setup=names3['setup'])
+    assert len(s.worker_setups) == 2
+
     # Start a worker and check it is ran on it
     worker = Worker(s.address, loop=s.loop)
     yield worker._start()
     result = yield c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [True]
+
     result = yield c.run(test_startup2, workers=[worker.address])
     assert list(result.values()) == [True]
+
+    # startup3 is not ran, as it is unregistered before worker is added.
+    result = yield c.run(test_startup3, workers=[worker.address])
+    assert list(result.values()) == [False]
+
     yield worker._close()
 
     # Final exception test

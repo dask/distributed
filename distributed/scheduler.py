@@ -963,7 +963,8 @@ class Scheduler(ServerNode):
             'heartbeat_worker': self.heartbeat_worker,
             'get_task_status': self.get_task_status,
             'get_task_stream': self.get_task_stream,
-            'register_worker_callbacks': self.register_worker_callbacks
+            'register_worker_callbacks': self.register_worker_callbacks,
+            'unregister_worker_callbacks': self.unregister_worker_callbacks
         }
 
         self._transitions = {
@@ -3125,7 +3126,7 @@ class Scheduler(ServerNode):
         # add the setup function to the list to run them on new clients.
         if 'setup' in names:
             name = names['setup']
-            worker_setups.pop(name)
+            self.worker_setups.pop(name)
 
         raise gen.Return(None)
 

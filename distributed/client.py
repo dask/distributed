@@ -3549,15 +3549,14 @@ class Client(Node):
     def _register_worker_callbacks(self, setup=None, name=None):
         callbacks = {}
         names = {}
-
+        from hashlib import md5
         # prepare the callbacks and their names
         if setup is not None:
             serialized = dumps(setup)
-            callbacks['setup'] = setup_serialized
+            callbacks['setup'] = serialized
             if name is None:
-                name = funcname(setup) + \
-                       '-' + uuid.uuid5('dask-worker-callbacks',
-                                        serialized)
+                h = md5(serialized)
+                name = funcname(setup) + '-' + h.hexdigest()
             names['setup'] = name
 
         responses = yield self.scheduler.register_worker_callbacks(callbacks=callbacks, names=names)
@@ -3598,7 +3597,7 @@ class Client(Node):
         return self.sync(self._register_worker_callbacks, setup=setup, name=name)
 
     @gen.coroutine
-    def _unregsiter_worker_callbacks(self, setup=None):
+    def _unregister_worker_callbacks(self, setup=None):
         names = {}
         if setup is not None:
             names['setup'] = setup
