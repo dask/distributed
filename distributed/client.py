@@ -22,6 +22,7 @@ import six
 import socket
 import warnings
 import weakref
+from hashlib import md5
 
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
@@ -3549,7 +3550,6 @@ class Client(Node):
     def _register_worker_callbacks(self, setup=None, name=None):
         callbacks = {}
         names = {}
-        from hashlib import md5
         # prepare the callbacks and their names
         if setup is not None:
             serialized = dumps(setup)
