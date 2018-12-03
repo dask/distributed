@@ -3546,42 +3546,70 @@ class Client(Node):
             raise gen.Return(msgs)
 
     @gen.coroutine
-    def _register_worker_callbacks(self, name, setup=None):
+    def _register_worker_callbacks(self, setup=None, name=None):
         callbacks = {}
-        if setup is not None:
-            callbacks['setup'] = dumps(setup)
+        names = {}
 
-        responses = yield self.scheduler.register_worker_callbacks(callbacks=callbacks, name=name)
+        # prepare the callbacks and their names
+        if setup is not None:
+            serialized = dumps(setup)
+            callbacks['setup'] = setup_serialized
+            if name is None:
+                name = funcname(setup) + \
+                       '-' + uuid.uuid5('dask-worker-callbacks',
+                                        serialized)
+            names['setup'] = name
+
+        responses = yield self.scheduler.register_worker_callbacks(callbacks=callbacks, names=names)
         results = {}
         for key, resp in responses.items():
             if resp['status'] == 'OK':
                 results[key] = resp['result']
             elif resp['status'] == 'error':
                 six.reraise(*clean_exception(**resp))
-        raise gen.Return(results)
+        raise gen.Return(names)
 
-    def register_worker_callbacks(self, name, setup=None):
+    def register_worker_callbacks(self, setup=None, name=None):
         """
         Registers a setup callback function for all current and future workers.
 
         This registers a new setup function for workers in this cluster. The
         function will run immediately on all currently connected workers. It
         will also be run upon connection by any workers that are added in the
-        future. Multiple setup functions can be registered - the order they are
-        called are undefined.
+        future. Multiple setup functions can be registered
+         We only keep one function version per name.
+
+        The callback function shall be indempotent, and may be called several
+        times. The order callback functions are called are undefined.
 
         If the function takes an input argument named ``dask_worker`` then
         that variable will be populated with the worker itself.
 
         Parameters
         ----------
-        name : string
-            A unique identifier of the callbacks. If a set of callbacks
-            of the same name are already registered, they will be replaced.
         setup : callable(dask_worker: Worker) -> None
             Function to register and run on all workers
+        name : string, or None
+            A unique identifier for the callbacks. If None, a default identifier
+            will be generated from the type of the callback and the function.
+            A good candidate value for this argument is the full qualified name
+            of the function.
         """
         return self.sync(self._register_worker_callbacks, setup=setup, name=name)
+
+    @gen.coroutine
+    def _unregsiter_worker_callbacks(self, setup=None):
+        names = {}
+        if setup is not None:
+            names['setup'] = setup
+
+        result = yield self.scheduler.unregister_worker_callbacks(names=names)
+        raise gen.Return(result)
+
+
+    def unregister_worker_callbacks(self, setup=None):
+        """ """
+        return self.sync(self._unregister_worker_callbacks, setup=setup)
 
 
 class Executor(Client):

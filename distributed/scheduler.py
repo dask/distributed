@@ -3090,13 +3090,27 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_worker_callbacks(self, comm, name, callbacks):
-        """ Registers a setup function, and call it on every worker;
+    def register_worker_callbacks(self, comm, callbacks, names):
+        """ Registers a set of event driven callback functions on workers for the given name.
+
+            Parameters
+            ----------
+            'callbacks': dict
+                a dictionary of serialized callback functions. Currently
+                supported callbacks are:
+
+                - 'setup' : a function that shall be called on workers when they first
+                    connect to the scheduler. The function is called on every existing worker.
+
+            'names' : dict
+                a dictionary of function names for each entry in callbacks.
+
         """
         responses = {}
 
         if 'setup' in callbacks:
             setup = callbacks['setup']
+            name = names['setup']
 
             # add the setup function to the list to run them on new clients.
             self.worker_setups[name] = setup
@@ -3105,6 +3119,15 @@ class Scheduler(ServerNode):
             responses.update((yield self.broadcast(msg=dict(op='run', function=setup))))
 
         raise gen.Return(responses)
+
+    @gen.coroutine
+    def unregister_worker_callbacks(self, comm, names):
+        # add the setup function to the list to run them on new clients.
+        if 'setup' in names:
+            name = names['setup']
+            worker_setups.pop(name)
+
+        raise gen.Return(None)
 
     #####################
     # State Transitions #
