@@ -3593,10 +3593,10 @@ class Client(Node):
         function will run immediately on all currently connected workers. It
         will also be run upon connection by any workers that are added in the
         future. Multiple setup functions can be registered
-         We only keep one function version per name.
+        We only keep one function version per name.
 
         The callback function shall be indempotent, and may be called several
-        times. The order callback functions are called are undefined.
+        times. The order of invocation of callback functions is undefined.
 
         If the function takes an input argument named ``dask_worker`` then
         that variable will be populated with the worker itself.
@@ -3606,6 +3606,8 @@ class Client(Node):
         setup : callable(dask_worker: Worker) -> None, or tuple of (name, callable)
             Function to register and run on all workers.
             If a name is not given, then it is generated from the callable.
+
+
         """
         return self.sync(self._register_worker_callbacks, setup=setup)
 
