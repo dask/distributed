@@ -3101,11 +3101,14 @@ class Scheduler(ServerNode):
         if setup is not None:
             name, func = setup
 
-            # add the setup function to the list to run them on new clients.
-            self.worker_setups[name] = func
+            oldfunc = self.worker_setups.get(name, "")
 
-            # trigger the setup function on the existing clients.
-            responses.update((yield self.broadcast(msg=dict(op='run', function=func))))
+            if oldfunc != func:
+                # add the setup function to the list to run them on new clients.
+                self.worker_setups[name] = func
+
+                # trigger the setup function on the existing clients.
+                responses.update((yield self.broadcast(msg=dict(op='run', function=func))))
 
         raise gen.Return(responses)
 
