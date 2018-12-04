@@ -1242,13 +1242,11 @@ def test_register_worker_callbacks(c, s, a, b):
     yield worker._close()
 
     # Add a preload function
-    result = yield c.register_worker_callbacks(setup=mystartup)
-    assert len(result) == 2
+    yield c.register_worker_callbacks(setup=mystartup)
     assert len(s.worker_setups) == 1
 
     # Add the same preload function, again
-    result = yield c.register_worker_callbacks(setup=mystartup)
-    assert len(result) == 2
+    yield c.register_worker_callbacks(setup=mystartup)
     assert len(s.worker_setups) == 1
 
     # Check it has been ran on existing worker
@@ -1263,8 +1261,7 @@ def test_register_worker_callbacks(c, s, a, b):
     yield worker._close()
 
     # Register another preload function
-    result = yield c.register_worker_callbacks(setup=mystartup2)
-    assert len(result) == 2
+    yield c.register_worker_callbacks(setup=mystartup2)
     assert len(s.worker_setups) == 2
 
     # Check it has been run
