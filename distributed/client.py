@@ -103,7 +103,12 @@ def _del_global_client(c):
         except KeyError:
             pass
 
+
 def _serialize_named_func(named_func):
+    """ takes a function or a tuple of (name, func)
+
+        returns a tuple of (name, serialized_func)
+    """
     if isinstance(named_func, tuple):
         name, func = named_func
     else:
@@ -118,6 +123,7 @@ def _serialize_named_func(named_func):
 
     named_func = (name, serialized)
     return named_func
+
 
 class Future(WrappedKey):
     """ A remotely running computation
@@ -3598,8 +3604,8 @@ class Client(Node):
         Parameters
         ----------
         setup : callable(dask_worker: Worker) -> None, or tuple of (name, callable)
-            Function to register and run on all workers. If a name is not given,
-            then it is generated from the name and content of the callable.
+            Function to register and run on all workers.
+            If a name is not given, then it is generated from the callable.
         """
         return self.sync(self._register_worker_callbacks, setup=setup)
 
@@ -3613,7 +3619,14 @@ class Client(Node):
         raise gen.Return(result)
 
     def unregister_worker_callbacks(self, setup=None):
-        """ """
+        """ Unregisters a worker callback.
+
+            Parameters
+            ----------
+            setup : callable(dask_worker: Worker) -> None, or tuple of (name, callable)
+                The setup callback to remove; it will be matched by the name.
+                If a name is not given, then it is generated from the callable.
+        """
         return self.sync(self._unregister_worker_callbacks, setup=setup)
 
 
