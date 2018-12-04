@@ -1203,8 +1203,10 @@ def test_custom_metrics(c, s, a, b):
 @gen_cluster(client=True)
 def test_register_worker_callbacks(c, s, a, b):
     #preload function to run
-    def mystartup(dask_worker):
-        dask_worker.init_variable = 1
+    def mystartup1(dask_worker):
+        if not hasattr(dask_worker, "init_variable"):
+            dask_worker.init_variable = 0
+        dask_worker.init_variable = dask_worker.init_variable + 1
 
     def mystartup2():
         import os
@@ -1216,9 +1218,12 @@ def test_register_worker_callbacks(c, s, a, b):
         dask_worker.init_variable2 = 1
 
     #Check that preload function has been run
-    def test_import(dask_worker):
+    def test_startup1(dask_worker):
         return hasattr(dask_worker, 'init_variable')
-        #       and dask_worker.init_variable == 1
+
+    def test_run_once(dask_worker):
+        return (hasattr(dask_worker, 'init_variable')
+               and dask_worker.init_variable == 1)
 
     def test_startup2():
         import os
@@ -1229,7 +1234,7 @@ def test_register_worker_callbacks(c, s, a, b):
 
     # Nothing has been run yet
     assert len(s.worker_setups) == 0
-    result = yield c.run(test_import)
+    result = yield c.run(test_startup1)
     assert list(result.values()) == [False] * 2
     result = yield c.run(test_startup2)
     assert list(result.values()) == [False] * 2
@@ -1237,26 +1242,29 @@ def test_register_worker_callbacks(c, s, a, b):
     # Start a worker and check that startup is not run
     worker = Worker(s.address, loop=s.loop)
     yield worker._start()
-    result = yield c.run(test_import, workers=[worker.address])
+    result = yield c.run(test_startup1, workers=[worker.address])
     assert list(result.values()) == [False]
     yield worker._close()
 
     # Add a preload function
-    yield c.register_worker_callbacks(setup=mystartup)
+    yield c.register_worker_callbacks(setup=mystartup1)
     assert len(s.worker_setups) == 1
 
     # Add the same preload function, again
-    yield c.register_worker_callbacks(setup=mystartup)
+    yield c.register_worker_callbacks(setup=mystartup1)
     assert len(s.worker_setups) == 1
 
     # Check it has been ran on existing worker
-    result = yield c.run(test_import)
+    result = yield c.run(test_startup1)
+    assert list(result.values()) == [True] * 2
+
+    result = yield c.run(test_run_once)
     assert list(result.values()) == [True] * 2
 
     # Start a worker and check it is ran on it
     worker = Worker(s.address, loop=s.loop)
     yield worker._start()
-    result = yield c.run(test_import, workers=[worker.address])
+    result = yield c.run(test_startup1, workers=[worker.address])
     assert list(result.values()) == [True]
     yield worker._close()
 
@@ -1277,7 +1285,7 @@ def test_register_worker_callbacks(c, s, a, b):
     # Start a worker and check it is ran on it
     worker = Worker(s.address, loop=s.loop)
     yield worker._start()
-    result = yield c.run(test_import, workers=[worker.address])
+    result = yield c.run(test_startup1, workers=[worker.address])
     assert list(result.values()) == [True]
 
     result = yield c.run(test_startup2, workers=[worker.address])
