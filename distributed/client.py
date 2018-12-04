@@ -103,6 +103,21 @@ def _del_global_client(c):
         except KeyError:
             pass
 
+def _serialize_named_func(named_func):
+    if isinstance(named_func, tuple):
+        name, func = named_func
+    else:
+        func = named_func
+        name = None
+
+    serialized = dumps(func)
+
+    if name is None:
+        h = md5(serialized)
+        name = funcname(func) + '-' + h.hexdigest()
+
+    named_func = (name, serialized)
+    return named_func
 
 class Future(WrappedKey):
     """ A remotely running computation
@@ -3547,28 +3562,24 @@ class Client(Node):
             raise gen.Return(msgs)
 
     @gen.coroutine
-    def _register_worker_callbacks(self, setup=None, name=None):
-        callbacks = {}
-        names = {}
+    def _register_worker_callbacks(self, setup=None):
+
         # prepare the callbacks and their names
         if setup is not None:
-            serialized = dumps(setup)
-            callbacks['setup'] = serialized
-            if name is None:
-                h = md5(serialized)
-                name = funcname(setup) + '-' + h.hexdigest()
-            names['setup'] = name
+            setup = _serialize_named_func(setup)
 
-        responses = yield self.scheduler.register_worker_callbacks(callbacks=callbacks, names=names)
+        responses = yield self.scheduler.register_worker_callbacks(setup=setup)
+
         results = {}
         for key, resp in responses.items():
             if resp['status'] == 'OK':
                 results[key] = resp['result']
             elif resp['status'] == 'error':
                 six.reraise(*clean_exception(**resp))
-        raise gen.Return(names)
 
-    def register_worker_callbacks(self, setup=None, name=None):
+        raise gen.Return(results)
+
+    def register_worker_callbacks(self, setup=None):
         """
         Registers a setup callback function for all current and future workers.
 
@@ -3586,23 +3597,19 @@ class Client(Node):
 
         Parameters
         ----------
-        setup : callable(dask_worker: Worker) -> None
-            Function to register and run on all workers
-        name : string, or None
-            A unique identifier for the callbacks. If None, a default identifier
-            will be generated from the type of the callback and the function.
-            A good candidate value for this argument is the full qualified name
-            of the function.
+        setup : callable(dask_worker: Worker) -> None, or tuple of (name, callable)
+            Function to register and run on all workers. If a name is not given,
+            then it is generated from the name and content of the callable.
         """
-        return self.sync(self._register_worker_callbacks, setup=setup, name=name)
+        return self.sync(self._register_worker_callbacks, setup=setup)
 
     @gen.coroutine
     def _unregister_worker_callbacks(self, setup=None):
-        names = {}
-        if setup is not None:
-            names['setup'] = setup
 
-        result = yield self.scheduler.unregister_worker_callbacks(names=names)
+        if setup is not None:
+            setup = _serialize_named_func(setup)
+
+        result = yield self.scheduler.unregister_worker_callbacks(setup=setup)
         raise gen.Return(result)
 
     def unregister_worker_callbacks(self, setup=None):

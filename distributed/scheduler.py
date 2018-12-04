@@ -3091,41 +3091,29 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_worker_callbacks(self, comm, callbacks, names):
+    def register_worker_callbacks(self, comm, setup=None):
         """ Registers a set of event driven callback functions on workers for the given name.
 
-            Parameters
-            ----------
-            'callbacks': dict
-                a dictionary of serialized callback functions. Currently
-                supported callbacks are:
-
-                - 'setup' : a function that shall be called on workers when they first
-                    connect to the scheduler. The function is called on every existing worker.
-
-            'names' : dict
-                a dictionary of function names for each entry in callbacks.
-
+            setup must be a tuple of (name, serialized_function)
         """
         responses = {}
 
-        if 'setup' in callbacks:
-            setup = callbacks['setup']
-            name = names['setup']
+        if setup is not None:
+            name, func = setup
 
             # add the setup function to the list to run them on new clients.
-            self.worker_setups[name] = setup
+            self.worker_setups[name] = func
 
             # trigger the setup function on the existing clients.
-            responses.update((yield self.broadcast(msg=dict(op='run', function=setup))))
+            responses.update((yield self.broadcast(msg=dict(op='run', function=func))))
 
         raise gen.Return(responses)
 
     @gen.coroutine
-    def unregister_worker_callbacks(self, comm, names):
+    def unregister_worker_callbacks(self, comm, setup=None):
         # add the setup function to the list to run them on new clients.
-        if 'setup' in names:
-            name = names['setup']
+        if setup is not None:
+            name, func = setup
             self.worker_setups.pop(name)
 
         raise gen.Return(None)
