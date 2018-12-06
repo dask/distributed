@@ -58,7 +58,7 @@ def pickle_loads(header, frames):
 
 
 msgpack_len_opts = {
-    ('max_%s_len' % x): 2**31-1
+    ('max_%s_len' % x): 2**31 - 1
     for x in ['str', 'bin', 'array', 'map', 'ext']}
 
 
