@@ -21,7 +21,8 @@ _deserialize = deserialize
 
 try:
     msgpack.loads(msgpack.dumps(''), raw=False, **msgpack_len_opts)
-    msgpack_opts = {'raw': False, **msgpack_len_opts}
+    msgpack_opts = {'raw': False}
+    msgpack_opts.update(msgpack_len_opts)
 except TypeError:
     # Backward compat with old msgpack (prior to 0.5.2)
     msgpack_opts = {'encoding': 'utf-8'}
