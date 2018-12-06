@@ -137,6 +137,23 @@ def test_large_messages():
     assert (msg['y']['a'].data == msg2['y']['a']).all()
 
 
+@slow
+def test_large_messages_map():
+    np = pytest.importorskip('numpy')
+    psutil = pytest.importorskip('psutil')
+    if psutil.virtual_memory().total < 8e9:
+        return
+
+    if sys.version_info.major == 2:
+        return 2
+
+    x = {i: 'mystring_%d' % i for i in range(100000)}
+
+    b = dumps(x)
+    x2 = loads(b)
+    assert x == x2
+
+
 def test_loads_deserialize_False():
     frames = dumps({'data': Serialize(123), 'status': 'OK'})
     msg = loads(frames)
