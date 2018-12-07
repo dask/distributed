@@ -181,10 +181,11 @@ def connect(addr, timeout=None, deserialize=True, connection_args=None):
                % (addr, timeout, error))
         raise IOError(msg)
 
+    # This starts a thread
+    future = connector.connect(loc, deserialize=deserialize,
+                               **(connection_args or {}))
     while True:
         try:
-            future = connector.connect(loc, deserialize=deserialize,
-                                       **(connection_args or {}))
             comm = yield gen.with_timeout(timedelta(seconds=deadline - time()),
                                           future,
                                           quiet_exceptions=EnvironmentError)
