@@ -124,27 +124,25 @@ class Adaptive(object):
         -----
         Returns ``True`` if the occupancy per core is some factor larger
         than ``startup_cost`` and the number of tasks exceeds the number of
-        workers
+        cores
         """
         total_occupancy = self.scheduler.total_occupancy
-        total_cores = sum([ws.ncores for ws in self.scheduler.workers.values()])
+        total_cores = self.scheduler.total_ncores
 
         if total_occupancy / (total_cores + 1e-9) > self.startup_cost * 2:
             logger.info("CPU limit exceeded [%d occupancy / %d cores]",
                         total_occupancy, total_cores)
-
-            num_workers = len(self.scheduler.workers)
 
             tasks_processing = 0
 
             for w in self.scheduler.workers.values():
                 tasks_processing += len(w.processing)
 
-                if tasks_processing > num_workers:
+                if tasks_processing > total_cores:
                     logger.info(
-                        "pending tasks exceed number of workers "
-                        "[%d tasks / %d workers]",
-                        tasks_processing, num_workers)
+                        "pending tasks exceed number of cores "
+                        "[%d tasks / %d cores]",
+                        tasks_processing, total_cores)
 
                     return True
 
