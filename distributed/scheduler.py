@@ -3113,14 +3113,13 @@ class Scheduler(ServerNode):
 
         raise gen.Return(responses)
 
-    @gen.coroutine
     def unregister_worker_callbacks(self, comm, setup=None):
         # add the setup function to the list to run them on new clients.
         if setup is not None:
             name, func = setup
             self.worker_setups.pop(name)
 
-        raise gen.Return(None)
+        return None
 
     #####################
     # State Transitions #
