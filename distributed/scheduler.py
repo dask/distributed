@@ -3093,7 +3093,8 @@ class Scheduler(ServerNode):
     @gen.coroutine
     def register_worker_callbacks(self, comm, setup=None):
         """
-        Registers a set of event driven callback functions on workers for the given name.
+        Registers a set of event driven callback functions
+        on workers for the given name.
 
         setup must be a tuple of (name, serialized_function)
         """
@@ -3114,12 +3115,17 @@ class Scheduler(ServerNode):
         raise gen.Return(responses)
 
     def unregister_worker_callbacks(self, comm, setup=None):
-        # add the setup function to the list to run them on new clients.
+        """
+        Unregisters a set of event driven callback functions on workers
+        for the given name.
+
+        setup must be a tuple of (name, serialized_function).
+        The value of serialized_function is unused.
+
+        """
         if setup is not None:
             name, func = setup
             self.worker_setups.pop(name)
-
-        return None
 
     #####################
     # State Transitions #
