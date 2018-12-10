@@ -3092,9 +3092,10 @@ class Scheduler(ServerNode):
 
     @gen.coroutine
     def register_worker_callbacks(self, comm, setup=None):
-        """ Registers a set of event driven callback functions on workers for the given name.
+        """
+        Registers a set of event driven callback functions on workers for the given name.
 
-            setup must be a tuple of (name, serialized_function)
+        setup must be a tuple of (name, serialized_function)
         """
         responses = {}
 
