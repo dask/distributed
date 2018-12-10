@@ -3603,7 +3603,7 @@ class Client(Node):
 
         Parameters
         ----------
-        setup : callable(dask_worker: Worker) -> None, or tuple of (name, callable)
+        setup : callable(dask_worker: Worker) -> None or tuple of (name, callable)
             Function to register and run on all workers.
             If a name is not given, then it is generated from the callable.
 
