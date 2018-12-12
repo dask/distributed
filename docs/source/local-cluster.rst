@@ -27,6 +27,16 @@ an ``Client`` with no arguments:
    >>> client = Client()
    >>> client
    <Client: scheduler=127.0.0.1:8786 processes=8 cores=8>
+   
+Embedded interpreter
+--------------------
+
+You have to set the `correct executable for multiprocessing <https://docs.python.org/3/library/multiprocessing.html#multiprocessing.set_executable>`_ to launch a local cluster from within an embedded Python interpreter. Otherwise attempting to spawn workers will spawn new instances of the embedding application instead.
+
+.. code-block:: python
+    
+    multiprocessing.set_executable(
+        os.path.join(sys.exec_prefix, 'pythonw.exe'))  # Windows only
 
 API
 ---
