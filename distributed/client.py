@@ -638,6 +638,20 @@ class Client(Node):
         from distributed.recreate_exceptions import ReplayExceptionClient
         ReplayExceptionClient(self)
 
+        # set up the dashboard
+        info =  self.cluster.scheduler.identity()
+        if info and 'bokeh' in info['services']:
+            protocol, rest = self.scheduler.address.split('://')
+            port = info['services']['bokeh']
+            if protocol == 'inproc':
+                host = 'localhost'
+            else:
+                host = rest.split(':')[0]
+            template = dask.config.get('distributed.dashboard.link')
+            self.dashboard_url = template.format(host=host, port=port, **os.environ)
+            # include the dashboard url in the scheduler info
+            self._scheduler_identity['dashboard_url'] = self.dashboard_url
+
     @classmethod
     def current(cls):
         """ Return global client if one exists, otherwise raise ValueError """
@@ -676,12 +690,15 @@ class Client(Node):
         # Note: avoid doing I/O here...
         info = self._scheduler_identity
         addr = info.get('address')
+        url = self.dashboard_url
         if addr:
             workers = info.get('workers', {})
             nworkers = len(workers)
             ncores = sum(w['ncores'] for w in workers.values())
-            return '<%s: scheduler=%r processes=%d cores=%d>' % (
-                self.__class__.__name__, addr, nworkers, ncores)
+            memory = sum(w['memory_limit'] for w in info['workers'].values())
+            memory = format_bytes(memory).replace(' ','')
+            return '<%s: scheduler=%r dashboard_url=%s processes=%d cores=%d mem=%s>' % (
+                self.__class__.__name__, addr, url, nworkers, ncores, memory)
         elif self.scheduler is not None:
             return '<%s: scheduler=%r>' % (
                 self.__class__.__name__, self.scheduler.address)
@@ -710,15 +727,7 @@ class Client(Node):
                     "<ul>\n"
                     "  <li><b>Scheduler: not connected</b>\n")
         if info and 'bokeh' in info['services']:
-            protocol, rest = scheduler.address.split('://')
-            port = info['services']['bokeh']
-            if protocol == 'inproc':
-                host = 'localhost'
-            else:
-                host = rest.split(':')[0]
-            template = dask.config.get('distributed.dashboard.link')
-            address = template.format(host=host, port=port, **os.environ)
-            text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': address}
+            text += "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n" % {'web': self.dashboard_url}
 
         text += "</ul>\n"
 
