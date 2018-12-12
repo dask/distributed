@@ -73,7 +73,7 @@ def test_acquires_blocking(c, s, a, b):
     yield lock.release()
     assert not lock.locked()
 
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         lock.acquire(blocking=False, timeout=1)
 
 
