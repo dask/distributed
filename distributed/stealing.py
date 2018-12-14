@@ -133,7 +133,7 @@ class WorkStealing(SchedulerPlugin):
 
         nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
 
-        transfer_time = nbytes / BANDWIDTH + LATENCY
+        transfer_time = nbytes / dask.config.get('distributed.scheduler.bandwidth') + dask.config.get('distributed.scheduler.latency')
         split = ts.prefix
         if split in fast_tasks:
             return None, None
