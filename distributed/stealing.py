@@ -15,8 +15,8 @@ try:
 except ImportError:
     from toolz import topk
 
-BANDWIDTH = 100e6
-LATENCY = 10e-3
+BANDWIDTH = dask.config.get('distributed.scheduler.bandwidth')
+LATENCY = dask.config.get('distributed.scheduler.latency')
 log_2 = log(2)
 
 logger = logging.getLogger(__name__)
@@ -133,7 +133,7 @@ class WorkStealing(SchedulerPlugin):
 
         nbytes = sum(dep.get_nbytes() for dep in ts.dependencies)
 
-        transfer_time = nbytes / dask.config.get('distributed.scheduler.bandwidth') + dask.config.get('distributed.scheduler.latency')
+        transfer_time = nbytes / BANDWIDTH + LATENCY
         split = ts.prefix
         if split in fast_tasks:
             return None, None
