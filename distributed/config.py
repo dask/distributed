@@ -24,6 +24,7 @@ dask.config.update_defaults(defaults)
 aliases = {
     'allowed-failures': 'distributed.scheduler.allowed-failures',
     'bandwidth': 'distributed.scheduler.bandwidth',
+    'latency': 'distributed.scheduler.latency',
     'default-data-size': 'distributed.scheduler.default-data-size',
     'transition-log-length': 'distributed.scheduler.transition-log-length',
     'work-stealing': 'distributed.scheduler.work-stealing',
