@@ -327,7 +327,7 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
     client = TCPClient(t_executor)
 
     @gen.coroutine
-    def connect(self, address, deserialize=True, executor=None, **connection_args):
+    def connect(self, address, deserialize=True, **connection_args):
         self._check_encryption(address, connection_args)
         ip, port = parse_host_port(address)
         kwargs = self._get_connect_args(**connection_args)
@@ -336,6 +336,14 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
             stream = yield BaseTCPConnector.client.connect(ip, port,
                                           max_buffer_size=MAX_BUFFER_SIZE,
                                           **kwargs)
+
+            # Under certain circumstances tornado will have a closed connnection with an error and not raise
+            # a StreamClosedError.
+            #
+            # This occurs with tornado 5.x and openssl 1.1+
+            if stream.closed() and stream.error:
+                raise StreamClosedError(stream.error)
+
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
