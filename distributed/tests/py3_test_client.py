@@ -158,3 +158,22 @@ async def test_dont_hold_on_to_large_messages(c, s, a, b):
             pytest.fail("array should have been destroyed")
 
         await gen.sleep(0.200)
+
+
+@gen_cluster(client=True)
+async def test_run_scheduler_async_def(c, s, a, b):
+    async def f(dask_scheduler):
+        await gen.sleep(0.01)
+        dask_scheduler.foo = 'bar'
+
+    await c.run_on_scheduler(f)
+
+    assert s.foo == 'bar'
+
+    async def f(dask_worker):
+        await gen.sleep(0.01)
+        dask_worker.foo = 'bar'
+
+    await c.run(f)
+    assert a.foo == 'bar'
+    assert b.foo == 'bar'
