@@ -2048,9 +2048,11 @@ class Client(Node):
 
     @gen.coroutine
     def _run_on_scheduler(self, function, *args, **kwargs):
+        wait = kwargs.pop('wait', True)
         response = yield self.scheduler.run_function(function=dumps(function),
                                                      args=dumps(args),
-                                                     kwargs=dumps(kwargs))
+                                                     kwargs=dumps(kwargs),
+                                                     wait=wait)
         if response['status'] == 'error':
             six.reraise(*clean_exception(**response))
         else:

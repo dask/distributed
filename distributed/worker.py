@@ -2934,9 +2934,15 @@ def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
         kwargs['dask_scheduler'] = server
     logger.info("Run out-of-band function %r", funcname(function))
     try:
-        result = function(*args, **kwargs)
-        if is_coro:
-            result = (yield result) if wait else None
+        if not is_coro:
+            result = function(*args, **kwargs)
+        else:
+            if wait:
+                result = yield function(*args, **kwargs)
+            else:
+                server.loop.add_callback(function, *args, **kwargs)
+                result = None
+
     except Exception as e:
         logger.warning(" Run Failed\n"
                        "Function: %s\n"

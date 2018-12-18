@@ -177,3 +177,28 @@ async def test_run_scheduler_async_def(c, s, a, b):
     await c.run(f)
     assert a.foo == 'bar'
     assert b.foo == 'bar'
+
+
+@gen_cluster(client=True)
+async def test_run_scheduler_async_def_wait(c, s, a, b):
+    async def f(dask_scheduler):
+        await gen.sleep(0.01)
+        dask_scheduler.foo = 'bar'
+
+    await c.run_on_scheduler(f, wait=False)
+
+    while not hasattr(s, 'foo'):
+        await gen.sleep(0.01)
+    assert s.foo == 'bar'
+
+    async def f(dask_worker):
+        await gen.sleep(0.01)
+        dask_worker.foo = 'bar'
+
+    await c.run(f, wait=False)
+
+    while not hasattr(a, 'foo') or not hasattr(b, 'foo'):
+        await gen.sleep(0.01)
+
+    assert a.foo == 'bar'
+    assert b.foo == 'bar'
