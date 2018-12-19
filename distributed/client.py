@@ -2101,8 +2101,6 @@ class Client(Node):
                 six.reraise(*clean_exception(**resp))
         if wait:
             raise gen.Return(results)
-        else:
-            return None
 
     def run(self, function, *args, **kwargs):
         """
