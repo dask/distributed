@@ -4,6 +4,7 @@ from ..utils import ignoring
 
 from .cluster import Cluster
 from .local import LocalCluster
+from .cuda import LocalCUDACluster
 from .adaptive import Adaptive
 with ignoring(ImportError):
     from .ssh import SSHCluster
