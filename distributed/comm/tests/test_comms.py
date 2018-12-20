@@ -289,6 +289,41 @@ def test_tls_specific():
     assert set(l) == {1234} | set(range(N))
 
 
+@gen_test()
+def test_comm_failure_threading():
+    """
+    When we fail to connect, make sure we don't make a lot
+    of threads.
+    """
+
+    @gen.coroutine
+    def sleep_for_500ms():
+        max_thread_count = 0
+        for x in range(500):
+            yield gen.sleep(0.001)
+            thread_count = threading.active_count()
+            if thread_count > max_thread_count:
+                max_thread_count = thread_count
+        return max_thread_count
+
+    # tcp.TCPConnector()
+    sleep_future = gen.convert_yielded(sleep_for_500ms())
+    with pytest.raises(IOError):
+        future_connect = gen.convert_yielded(connect("tcp://localhost:28400", 0.6))
+        yield future_connect
+    max_thread_count = yield sleep_future
+    assert max_thread_count == 4, f"Max thread count found to be: {max_thread_count}"
+
+    # tcp.TLSConnector()
+    sleep_future = gen.convert_yielded(sleep_for_500ms())
+    with pytest.raises(IOError):
+        future_connect = gen.convert_yielded(
+                connect("tls://localhost:28400", 0.6, connection_args={'ssl_context': get_client_ssl_context()}))
+        yield future_connect
+    max_thread_count = yield sleep_future
+    assert max_thread_count == 4, f"Max thread count found to be: {max_thread_count}"
+
+
 @gen.coroutine
 def check_inproc_specific(run_client):
     """
