@@ -312,7 +312,7 @@ def test_comm_failure_threading():
         future_connect = gen.convert_yielded(connect("tcp://localhost:28400", 0.6))
         yield future_connect
     max_thread_count = yield sleep_future
-    assert max_thread_count == 4, f"Max thread count found to be: {max_thread_count}"
+    assert max_thread_count == 4
 
     # tcp.TLSConnector()
     sleep_future = gen.convert_yielded(sleep_for_500ms())
@@ -321,7 +321,7 @@ def test_comm_failure_threading():
                 connect("tls://localhost:28400", 0.6, connection_args={'ssl_context': get_client_ssl_context()}))
         yield future_connect
     max_thread_count = yield sleep_future
-    assert max_thread_count == 4, f"Max thread count found to be: {max_thread_count}"
+    assert max_thread_count == 4
 
 
 @gen.coroutine
