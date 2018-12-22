@@ -13,7 +13,7 @@ from tornado import gen
 from .cluster import Cluster
 from ..core import CommClosedError
 from ..utils import (sync, ignoring, All, silence_logging, LoopRunner,
-        log_errors, thread_state)
+        log_errors, thread_state, parse_timedelta)
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..worker import Worker, _ncores
@@ -264,14 +264,22 @@ class LocalCluster(Cluster):
         self.sync(self._stop_worker, w)
 
     @gen.coroutine
-    def _close(self):
+    def _close(self, timeout='2s'):
         # Can be 'closing' as we're called by close() below
         if self.status == 'closed':
             return
+        self.status = 'closing'
+
+        self.scheduler.clear_task_state()
+
+        with ignoring(gen.TimeoutError):
+            yield gen.with_timeout(
+                timedelta(seconds=parse_timedelta(timeout)),
+                All([self._stop_worker(w) for w in self.workers]),
+            )
+        del self.workers[:]
 
         try:
-            with ignoring(gen.TimeoutError, CommClosedError, OSError):
-                yield All([w._close() for w in self.workers])
             with ignoring(gen.TimeoutError, CommClosedError, OSError):
                 yield self.scheduler.close(fast=True)
             del self.workers[:]
@@ -284,23 +292,12 @@ class LocalCluster(Cluster):
             return
 
         try:
-            self.scheduler.clear_task_state()
+            self._loop_runner.run_sync(self._close, callback_timeout=timeout)
+        except RuntimeError:  # IOLoop is closed
+            pass
 
-            for w in self.workers:
-                self.loop.add_callback(self._stop_worker, w)
-            for i in range(10):
-                if not self.workers:
-                    break
-                else:
-                    sleep(0.01)
-            del self.workers[:]
-            try:
-                self._loop_runner.run_sync(self._close, callback_timeout=timeout)
-            except RuntimeError:  # IOLoop is closed
-                pass
-            self._loop_runner.stop()
-        finally:
-            self.status = 'closed'
+        self._loop_runner.stop()
+
         with ignoring(AttributeError):
             silence_logging(self._old_logging_level)
 
