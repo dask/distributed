@@ -4,7 +4,7 @@ import atexit
 from datetime import timedelta
 import logging
 import math
-from time import sleep
+import warnings
 import weakref
 import toolz
 
