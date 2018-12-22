@@ -292,14 +292,17 @@ class LocalCluster(Cluster):
             return
 
         try:
-            self._loop_runner.run_sync(self._close, callback_timeout=timeout)
+            result = self.sync(self._close, callback_timeout=timeout)
         except RuntimeError:  # IOLoop is closed
             pass
 
-        self._loop_runner.stop()
-
         with ignoring(AttributeError):
             silence_logging(self._old_logging_level)
+
+        if not self.asynchronous:
+            self._loop_runner.stop()
+
+        return result
 
     @gen.coroutine
     def scale_up(self, n, **kwargs):
