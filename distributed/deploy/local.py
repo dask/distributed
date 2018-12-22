@@ -151,9 +151,12 @@ class LocalCluster(Cluster):
     def __await__(self):
         return self._started.__await__()
 
+    @property
+    def asynchronous(self):
+        return self._asynchronous or getattr(thread_state, 'asynchronous', False)
+
     def sync(self, func, *args, **kwargs):
-        asynchronous = kwargs.pop('asynchronous', None)
-        if asynchronous or self._asynchronous or getattr(thread_state, 'asynchronous', False):
+        if kwargs.pop('asynchronous', None) or self.asynchronous:
             callback_timeout = kwargs.pop('callback_timeout', None)
             future = func(*args, **kwargs)
             if callback_timeout is not None:
