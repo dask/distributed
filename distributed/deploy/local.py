@@ -199,6 +199,10 @@ class LocalCluster(Cluster):
 
     @gen.coroutine
     def _start_worker(self, death_timeout=60, **kwargs):
+        if self.status.startswith('clos'):
+            warnings.warn("Tried to start a worker while status=='%s'" % self.status)
+            return
+
         if self.processes:
             W = Nanny
             kwargs['quiet'] = True
