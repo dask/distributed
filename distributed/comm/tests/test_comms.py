@@ -305,23 +305,22 @@ def test_comm_failure_threading():
             if thread_count > max_thread_count:
                 max_thread_count = thread_count
         return max_thread_count
+    original_thread_count = threading.active_count()
 
     # tcp.TCPConnector()
-    sleep_future = gen.convert_yielded(sleep_for_500ms())
+    sleep_future = sleep_for_500ms()
     with pytest.raises(IOError):
-        future_connect = gen.convert_yielded(connect("tcp://localhost:28400", 0.6))
-        yield future_connect
+        yield connect("tcp://localhost:28400", 0.6)
     max_thread_count = yield sleep_future
-    assert max_thread_count == 4
+    assert max_thread_count - original_thread_count == 2
 
     # tcp.TLSConnector()
-    sleep_future = gen.convert_yielded(sleep_for_500ms())
+    sleep_future = sleep_for_500ms()
     with pytest.raises(IOError):
-        future_connect = gen.convert_yielded(
-                connect("tls://localhost:28400", 0.6, connection_args={'ssl_context': get_client_ssl_context()}))
-        yield future_connect
+        yield connect("tls://localhost:28400", 0.6,
+                                 connection_args={'ssl_context': get_client_ssl_context()})
     max_thread_count = yield sleep_future
-    assert max_thread_count == 4
+    assert max_thread_count - original_thread_count == 2
 
 
 @gen.coroutine
