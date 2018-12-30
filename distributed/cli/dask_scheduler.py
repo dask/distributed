@@ -118,10 +118,13 @@ def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
 
     services = {}
     if _bokeh:
-        with ignoring(ImportError):
+        try:
             from distributed.bokeh.scheduler import BokehScheduler
             services[('bokeh', bokeh_port)] = (BokehScheduler,
                                                {'prefix': bokeh_prefix})
+        except ImportError as error:
+            logger.info('bokeh import error: %s' % error)
+            
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file,
                           security=sec)
