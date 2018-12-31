@@ -123,8 +123,11 @@ def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
             services[('bokeh', bokeh_port)] = (BokehScheduler,
                                                {'prefix': bokeh_prefix})
         except ImportError as error:
-            logger.info('bokeh import error: %s' % error)
-            
+            if str(error).startswith('No module named'):
+                logger.info('Web dashboard not loaded.  Unable to import bokeh')
+            else:
+                logger.info('Unable to import bokeh: %s' % str(error))
+
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file,
                           security=sec)
