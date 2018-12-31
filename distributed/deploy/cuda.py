@@ -1,12 +1,32 @@
 import os
 
 from tornado import gen
+import toolz
 
 from .local import LocalCluster
 
 
+@toolz.memoize
 def get_n_gpus():
     return len(os.popen("nvidia-smi -L").read().strip().split("\n"))
+
+
+def cuda_visible_devices(i, n=None):
+    """ Cycling values for CUDA_VISIBLE_DEVICES environment variable
+
+    Examples
+    --------
+    >>> cuda_visible_devices(0, 4)
+    '0,1,2,3'
+    >>> cuda_visible_devices(3, 8)
+    '3,4,5,6,7,0,1,2'
+    """
+    if n is None:
+        n = get_n_gpus()
+
+    L = list(range(n))
+    L = L[i:] + L[:i]
+    return ",".join(map(str, L))
 
 
 class LocalCUDACluster(LocalCluster):
@@ -41,7 +61,7 @@ class LocalCUDACluster(LocalCluster):
 
         yield [
             self._start_worker(
-                **self.worker_kwargs, env={"CUDA_VISIBLE_DEVICES": str(i)}
+                **self.worker_kwargs, env={"CUDA_VISIBLE_DEVICES": cuda_visible_devices(i)}
             )
             for i in range(n_workers)
         ]
