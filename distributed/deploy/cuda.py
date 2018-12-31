@@ -4,6 +4,7 @@ from tornado import gen
 import toolz
 
 from .local import LocalCluster
+from ..worker import TOTAL_MEMORY
 
 
 @toolz.memoize
@@ -31,14 +32,21 @@ def cuda_visible_devices(i, n=None):
 
 class LocalCUDACluster(LocalCluster):
     def __init__(
-        self, n_workers=get_n_gpus(), threads_per_worker=1, processes=True, **kwargs
+        self, n_workers=get_n_gpus(), threads_per_worker=1, processes=True,
+        memory_limit=None, **kwargs
     ):
         if not processes:
             raise NotImplementedError("Need processes to segment GPUs")
         if n_workers > get_n_gpus():
             raise ValueError("Can not specify more processes than GPUs")
+        if memory_limit is None:
+            memory_limit = TOTAL_MEMORY / n_workers
         LocalCluster.__init__(
-            self, n_workers=n_workers, threads_per_worker=threads_per_worker, **kwargs
+            self,
+            n_workers=n_workers,
+            threads_per_worker=threads_per_worker,
+            memory_limit=memory_limit,
+            **kwargs,
         )
 
     @gen.coroutine
