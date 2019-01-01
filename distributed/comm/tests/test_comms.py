@@ -297,9 +297,9 @@ def test_comm_failure_threading():
     """
 
     @gen.coroutine
-    def sleep_for_120ms():
+    def sleep_for_60ms():
         max_thread_count = 0
-        for x in range(120):
+        for x in range(60):
             yield gen.sleep(0.001)
             thread_count = threading.active_count()
             if thread_count > max_thread_count:
@@ -308,17 +308,17 @@ def test_comm_failure_threading():
     original_thread_count = threading.active_count()
 
     # tcp.TCPConnector()
-    sleep_future = sleep_for_120ms()
+    sleep_future = sleep_for_60ms()
     with pytest.raises(IOError):
-        yield connect("tcp://localhost:28400", 0.1)
+        yield connect("tcp://localhost:28400", 0.052)
     max_thread_count = yield sleep_future
     # 2 is the number set by BaseTCPConnector.executor (ThreadPoolExecutor)
     assert max_thread_count <= 2 + original_thread_count
 
     # tcp.TLSConnector()
-    sleep_future = sleep_for_120ms()
+    sleep_future = sleep_for_60ms()
     with pytest.raises(IOError):
-        yield connect("tls://localhost:28400", 0.1,
+        yield connect("tls://localhost:28400", 0.052,
                                  connection_args={'ssl_context': get_client_ssl_context()})
     max_thread_count = yield sleep_future
     assert max_thread_count <= 2 + original_thread_count
