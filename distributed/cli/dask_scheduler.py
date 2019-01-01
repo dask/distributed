@@ -14,7 +14,7 @@ from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
 from distributed.security import Security
-from distributed.utils import get_ip_interface, ignoring
+from distributed.utils import get_ip_interface
 from distributed.cli.utils import (check_python_3, install_signal_handlers,
                                    uri_from_host_port)
 from distributed.preloading import preload_modules, validate_preload_argv
