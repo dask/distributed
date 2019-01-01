@@ -304,7 +304,7 @@ def test_comm_failure_threading():
             thread_count = threading.active_count()
             if thread_count > max_thread_count:
                 max_thread_count = thread_count
-        return max_thread_count
+        raise gen.Return(max_thread_count)
     original_thread_count = threading.active_count()
 
     # tcp.TCPConnector()
