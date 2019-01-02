@@ -322,7 +322,7 @@ class RequireEncryptionMixin(object):
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    executor = ThreadPoolExecutor(2)
+    executor = ThreadPoolExecutor(3)
     t_executor = netutil.ExecutorResolver(close_executor=False, executor=executor)
     client = TCPClient(t_executor)
 
