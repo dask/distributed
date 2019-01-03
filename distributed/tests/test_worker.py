@@ -1271,3 +1271,50 @@ def test_register_worker_callbacks(c, s, a, b):
     # Final exception test
     with pytest.raises(ZeroDivisionError):
         yield c.register_worker_callbacks(setup=lambda: 1 / 0)
+
+
+@gen_cluster(client=True)
+def test_worker_keeps_data_gh2420(c, s, a, b):
+    # Make a piece of data which is slow to serialize, to trigger the race
+    # Put data X on worker A
+    # Give task Y to worker B so that it fetches X from A
+    # Cancel the task on B
+    # Wait until the transfer is done
+    # Ensure that the scheduler's who_has for X is accurate
+    class SlowSerializeObj(object):
+        """An object which is slow to serialize and deserialize."""
+        def __getstate__(self):
+            import time
+            time.sleep(1)
+            return {}
+
+        def __setstate__(self, d):
+            import time
+            time.sleep(1)
+
+    x = c.submit(SlowSerializeObj, workers=a.address)
+    yield wait(x)
+    assert not a.executing
+    assert x.key in a.data
+
+    def bogus_task(bogus_input):
+        import time
+        time.sleep(1)
+        return 2
+
+    y = c.submit(bogus_task, x, workers=b.address)
+    yield c._cancel(y)
+
+    # The notification to the scheduler happens in a batched send
+    # Make sure it has time to arrive
+    yield gen.sleep(5)
+    try:
+        yield wait(y)
+    except:
+        pass
+
+    # for entry in b.log:
+    #     print("b log: %s" % str(entry))
+
+    assert (x.key in a.data) == (a.address in s.who_has[x.key])
+    assert (x.key in b.data) == (b.address in s.who_has[x.key])
