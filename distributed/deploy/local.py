@@ -294,7 +294,7 @@ class LocalCluster(Cluster):
         try:
             result = self.sync(self._close, callback_timeout=timeout)
         except RuntimeError:  # IOLoop is closed
-            pass
+            result = None
 
         if hasattr(self, '_old_logging_level'):
             if self.asynchronous:

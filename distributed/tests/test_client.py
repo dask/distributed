@@ -4571,8 +4571,12 @@ def test_quiet_client_close(loop):
         lines = out.strip().split('\n')
         assert len(lines) <= 2
         for line in lines:
-            assert not line or 'Reconnecting' in line or set(line) == {'-'}
-        # assert not out
+            assert (
+                not line or
+                'Reconnecting' in line or
+                'garbage' in line or
+                set(line) == {'-'}
+            ), line
 
 
 @gen_cluster()
