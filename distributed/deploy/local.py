@@ -298,7 +298,7 @@ class LocalCluster(Cluster):
 
         if hasattr(self, '_old_logging_level'):
             if self.asynchronous:
-                result.add_done_callback(lambda: silence_logging(self._old_logging_level))
+                result.add_done_callback(lambda _: silence_logging(self._old_logging_level))
             else:
                 silence_logging(self._old_logging_level)
 
