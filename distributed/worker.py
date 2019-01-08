@@ -615,15 +615,6 @@ class Worker(ServerNode):
             raise ValueError("Unexpected response from register: %r" %
                              (response,))
         else:
-            # Retrieve eventual init functions and run them
-            for function_bytes in response['worker-setups']:
-                setup_function = pickle.loads(function_bytes)
-                if has_arg(setup_function, 'dask_worker'):
-                    result = setup_function(dask_worker=self)
-                else:
-                    result = setup_function()
-                logger.info('Init function %s ran: output=%s' % (setup_function, result))
-
             yield [self.plugin_add(plugin=plugin) for plugin in response['worker-plugins']]
 
             logger.info('        Registered to: %26s', self.scheduler.address)
@@ -1986,7 +1977,7 @@ class Worker(ServerNode):
 
     @gen.coroutine
     def plugin_add(self, comm=None, plugin=None, name=None):
-        with log_errors(pdb=True):
+        with log_errors(pdb=False):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
             if not name:

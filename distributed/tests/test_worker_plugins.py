@@ -4,6 +4,7 @@ from distributed import Worker
 
 class MyPlugin:
     name = 'MyPlugin'
+
     def __init__(self, data):
         self.data = data
 

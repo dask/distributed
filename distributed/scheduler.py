@@ -904,7 +904,6 @@ class Scheduler(ServerNode):
         self.plugins = []
         self.transition_log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
         self.log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
-        self.worker_setups = []
         self.worker_plugins = []
 
         worker_handlers = {
@@ -964,7 +963,6 @@ class Scheduler(ServerNode):
             'heartbeat_worker': self.heartbeat_worker,
             'get_task_status': self.get_task_status,
             'get_task_stream': self.get_task_stream,
-            'register_worker_callbacks': self.register_worker_callbacks,
             'register_worker_plugin': self.register_worker_plugin,
         }
 
@@ -1360,7 +1358,6 @@ class Scheduler(ServerNode):
                 'status': 'OK',
                 'time': time(),
                 'heartbeat-interval': heartbeat_interval(len(self.workers)),
-                'worker-setups': self.worker_setups,
                 'worker-plugins': self.worker_plugins,
             })
             yield self.handle_worker(comm=comm, worker=address)
@@ -3124,17 +3121,6 @@ class Scheduler(ServerNode):
         self.worker_plugins.append(plugin)
 
         responses = yield self.broadcast(msg=dict(op='plugin-add', plugin=plugin))
-        raise gen.Return(responses)
-
-    @gen.coroutine
-    def register_worker_callbacks(self, comm, setup=None):
-        """ Registers a setup function, and call it on every worker """
-        if setup is None:
-            raise gen.Return({})
-
-        self.worker_setups.append(setup)
-
-        responses = yield self.broadcast(msg=dict(op='run', function=setup))
         raise gen.Return(responses)
 
     #####################

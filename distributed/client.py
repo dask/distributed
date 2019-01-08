@@ -61,7 +61,7 @@ from .worker import dumps_task, get_client, get_worker, secede
 from .utils import (All, sync, funcname, ignoring, queue_to_iterator,
                     tokey, log_errors, str_graph, key_split, format_bytes, asciitable,
                     thread_state, no_default, PeriodicCallback, LoopRunner,
-                    parse_timedelta, shutting_down)
+                    parse_timedelta, shutting_down, has_keyword)
 from .versions import get_versions
 
 
@@ -3593,7 +3593,7 @@ class Client(Node):
         setup : callable(dask_worker: Worker) -> None
             Function to register and run on all workers
         """
-        return self.sync(self._register_worker_callbacks, setup=setup)
+        return self.register_worker_plugin(_WorkerSetupPlugin(setup))
 
     def register_worker_plugin(self, plugin=None):
         """
@@ -3627,6 +3627,18 @@ class Client(Node):
             Function to register and run on all workers
         """
         return self.sync(self.scheduler.register_worker_plugin, plugin=dumps(plugin))
+
+
+class _WorkerSetupPlugin(object):
+    """ This is used to support older setup functions as callbacks """
+    def __init__(self, setup):
+        self._setup = setup
+
+    def setup(self, worker):
+        if has_keyword(self._setup, 'dask_worker'):
+            return self._setup(dask_worker=worker)
+        else:
+            return self._setup()
 
 
 class Executor(Client):
