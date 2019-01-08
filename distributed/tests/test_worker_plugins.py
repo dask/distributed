@@ -58,3 +58,10 @@ def test_duplicate_with_no_name(c, s, a, b):
     assert len(a.plugins) == len(b.plugins) == 2
 
     assert a._my_plugin_data == 10
+
+
+    yield c.register_worker_plugin(plugin)
+    assert len(a.plugins) == len(b.plugins) == 2
+
+    yield c.register_worker_plugin(plugin, name='foo')
+    assert len(a.plugins) == len(b.plugins) == 3

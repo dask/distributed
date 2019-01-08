@@ -3116,11 +3116,11 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_worker_plugin(self, comm, plugin):
+    def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
         self.worker_plugins.append(plugin)
 
-        responses = yield self.broadcast(msg=dict(op='plugin-add', plugin=plugin))
+        responses = yield self.broadcast(msg=dict(op='plugin-add', plugin=plugin, name=name))
         raise gen.Return(responses)
 
     #####################

@@ -3595,7 +3595,7 @@ class Client(Node):
         """
         return self.register_worker_plugin(_WorkerSetupPlugin(setup))
 
-    def register_worker_plugin(self, plugin=None):
+    def register_worker_plugin(self, plugin=None, name=None):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
@@ -3626,7 +3626,12 @@ class Client(Node):
         setup : callable(dask_worker: Worker) -> None
             Function to register and run on all workers
         """
-        return self.sync(self.scheduler.register_worker_plugin, plugin=dumps(plugin))
+        return self.sync(
+            self.scheduler.
+            register_worker_plugin,
+            plugin=dumps(plugin),
+            name=name
+        )
 
 
 class _WorkerSetupPlugin(object):
