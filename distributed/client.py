@@ -3595,6 +3595,11 @@ class Client(Node):
         """
         return self.sync(self._register_worker_callbacks, setup=setup)
 
+    def register_worker_plugin(self, plugin=None):
+        """  TODO
+        """
+        return self.sync(self.scheduler.register_worker_plugin, plugin=dumps(plugin))
+
 
 class Executor(Client):
     """ Deprecated: see Client """

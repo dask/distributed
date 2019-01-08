@@ -10,6 +10,7 @@ from pickle import PicklingError
 import random
 import threading
 import sys
+import uuid
 import warnings
 import weakref
 
@@ -259,7 +260,7 @@ class Worker(ServerNode):
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=None, preload_argv=None, security=None,
                  contact_address=None, memory_monitor_interval='200ms',
-                 extensions=None, metrics=None, **kwargs):
+                 extensions=None, metrics=None, plugins=(), **kwargs):
         self.tasks = dict()
         self.task_state = dict()
         self.dep_state = dict()
@@ -459,6 +460,7 @@ class Worker(ServerNode):
             'versions': self.versions,
             'actor_execute': self.actor_execute,
             'actor_attribute': self.actor_attribute,
+            'plugin-add': self.plugin_add,
         }
 
         stream_handlers = {
@@ -512,6 +514,9 @@ class Worker(ServerNode):
                               profile_cycle_interval * 1000,
                               io_loop=self.io_loop)
         self.periodic_callbacks['profile-cycle'] = pc
+
+        self.plugins = {}
+        self._pending_plugins = plugins
 
         _global_workers.append(weakref.ref(self))
 
@@ -618,6 +623,8 @@ class Worker(ServerNode):
                 else:
                     result = setup_function()
                 logger.info('Init function %s ran: output=%s' % (setup_function, result))
+
+            yield [self.plugin_add(plugin=plugin) for plugin in response['worker-plugins']]
 
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
@@ -814,6 +821,9 @@ class Worker(ServerNode):
 
         setproctitle("dask-worker [%s]" % self.address)
 
+        yield [self.plugin_add(plugin=plugin) for plugin in self._pending_plugins]
+        self._pending_plugins = ()
+
         yield self._register_with_scheduler()
 
         self.start_periodic_callbacks()
@@ -832,6 +842,9 @@ class Worker(ServerNode):
             logger.info("Stopping worker at %s", self.address)
             self.status = 'closing'
             setproctitle("dask-worker [closing]")
+
+            yield [plugin.teardown() for plugin in self.plugins.values() if
+                    hasattr(plugin, 'teardown')]
 
             self.stop()
             for pc in self.periodic_callbacks.values():
@@ -1970,6 +1983,29 @@ class Worker(ServerNode):
     def run_coroutine(self, comm, function, args=(), kwargs=None, wait=True):
         return run(self, comm, function=function, args=args, kwargs=kwargs,
                    wait=wait)
+
+    @gen.coroutine
+    def plugin_add(self, comm=None, plugin=None, name=None):
+        with log_errors(pdb=True):
+            if isinstance(plugin, bytes):
+                plugin = pickle.loads(plugin)
+            if not name:
+                if hasattr(plugin, 'name'):
+                    name = plugin.name
+                else:
+                    name = funcname(plugin) + '-' + str(uuid.uuid4())
+
+            assert name
+
+            if name in self.plugins:
+                return
+            else:
+                self.plugins[name] = plugin
+
+                logger.info("Starting Worker plugin %s" % name)
+                result = plugin.setup(worker=self)
+                if isinstance(result, gen.Future):
+                    result = yield result
 
     @gen.coroutine
     def actor_execute(self, comm=None, actor=None, function=None, args=(), kwargs={}):
