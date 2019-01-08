@@ -11,7 +11,7 @@ import pytest
 from tornado import gen, ioloop, locks, queues
 from tornado.concurrent import Future
 
-from distributed.compatibility import finalize, PY3
+from distributed.compatibility import PY3
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (gen_test, requires_ipv6, has_ipv6,
