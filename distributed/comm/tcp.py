@@ -322,9 +322,13 @@ class RequireEncryptionMixin(object):
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    executor = ThreadPoolExecutor(3)
-    t_executor = netutil.ExecutorResolver(close_executor=False, executor=executor)
-    client = TCPClient(t_executor)
+    if PY3:  # see github PR #2403 discussion for more info
+        _executor = ThreadPoolExecutor(2)
+        _resolver = netutil.ExecutorResolver(close_executor=False,
+                                             executor=_executor)
+    else:
+        _resolver = None
+    client = TCPClient(resolver=_resolver)
 
     @gen.coroutine
     def connect(self, address, deserialize=True, **connection_args):
