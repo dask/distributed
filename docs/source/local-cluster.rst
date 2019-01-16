@@ -38,7 +38,7 @@ an ``Client`` with no arguments:
       if __name__ == '__main__':
           cluster = LocalCluster()
           client = Client(cluster)
-          main(client)
+          # Your code follows here
 
 API
 ---
