@@ -63,3 +63,9 @@ def _register_sklearn():
 @dask_deserialize.register_lazy("torchvision")
 def _register_torch():
     from . import torch
+
+
+@dask_serialize.register_lazy("cupy")
+@dask_deserialize.register_lazy("cupy")
+def _register_cupy():
+    from . import cuda

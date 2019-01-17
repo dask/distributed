@@ -25,7 +25,8 @@ from distributed.protocol import (to_serialize, Serialized, serialize,
 from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
                               parse_address, parse_host_port,
                               unparse_host_port, resolve_address,
-                              get_address_host, get_local_address_for)
+                              get_address_host, get_local_address_for,
+                              registry)
 
 
 EXTERNAL_IP4 = get_ip()
@@ -458,7 +459,7 @@ def check_client_server(addr, check_listen_addr=None, check_contact_addr=None,
     # Check listener properties
     bound_addr = listener.listen_address
     bound_scheme, bound_loc = parse_address(bound_addr)
-    assert bound_scheme in ('inproc', 'tcp', 'tls')
+    assert bound_scheme in registry.backends
     assert bound_scheme == parse_address(addr)[0]
 
     if check_listen_addr is not None:
@@ -499,6 +500,12 @@ def check_client_server(addr, check_listen_addr=None, check_contact_addr=None,
     assert set(l) == {1234} | set(range(20))
 
     listener.stop()
+
+
+@gen_test()
+def test_ucx_client_server():
+    pytest.importorskip("distributed.comm.ucx")
+    yield check_client_server('ucx://10.33.225.160')
 
 
 def tcp_eq(expected_host, expected_port=None):
@@ -596,6 +603,7 @@ def test_tls_client_server_ipv6():
 def test_inproc_client_server():
     yield check_client_server('inproc://', inproc_check())
     yield check_client_server(inproc.new_address(), inproc_check())
+
 
 
 #

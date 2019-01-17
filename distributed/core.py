@@ -396,6 +396,9 @@ class Server(object):
                             if op == 'close-stream':
                                 closed = True
                                 break
+                            # XXX: getting a KeyError here. Our
+                            # not stream_handlers.
+                            # It's /pdb
                             handler = self.stream_handlers[op]
                             handler(**merge(extra, msg))
                         else:
@@ -412,7 +415,9 @@ class Server(object):
                 pdb.set_trace()
             raise
         finally:
-            comm.close()  # TODO: why do we need this now?
+            yield comm.close()  # TODO: why do we need this now?
+            #             ^ Good question :) comm.close can be a
+            # coroutine, in which case this isn't doing anything.
             assert comm.closed()
 
     @gen.coroutine

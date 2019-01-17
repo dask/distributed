@@ -12,6 +12,11 @@ from .core import connect, listen, Comm, CommClosedError
 def _register_transports():
     from . import inproc
     from . import tcp
+    try:
+        from . import ucx
+    except ImportError:
+        pass
+
 
 
 _register_transports()

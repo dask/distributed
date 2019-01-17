@@ -1277,7 +1277,12 @@ else:
             try:
                 return frame.nbytes
             except AttributeError:
-                return len(frame)
+                # XXX: nbytes fails for MemoryPointer.
+                # Probably time to move away
+                try:
+                    return len(frame)
+                except TypeError:
+                    return sys.getsizeof(frame)
 
 
 def PeriodicCallback(callback, callback_time, io_loop=None):

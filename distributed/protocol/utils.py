@@ -55,6 +55,10 @@ def merge_frames(header, frames):
     if not frames:
         return frames
 
+    if any(x.__class__.__name__ == 'MemoryPointer' for x in frames):
+        # XXX
+        return frames
+
     assert sum(lengths) == sum(map(nbytes, frames))
 
     if all(len(f) == l for f, l in zip(frames, lengths)):
