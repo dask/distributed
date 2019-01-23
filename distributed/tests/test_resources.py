@@ -278,9 +278,9 @@ def test_full_collections(c, s, a, b):
 
 @pytest.mark.parametrize('optimize_graph', [
     pytest.param(True,
-        marks=pytest.mark.xfail(True, reason="don't track resources through optimization")),
+        marks=pytest.mark.xfail(reason="don't track resources through optimization")),
     pytest.param(False,
-        marks=pytest.mark.skipif(WINDOWS, False, reason="intermittent failure"))
+        marks=pytest.mark.skipif(WINDOWS, reason="intermittent failure"))
 ])
 def test_collections_get(client, optimize_graph, s, a, b):
     da = pytest.importorskip('dask.array')
