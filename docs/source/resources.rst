@@ -60,12 +60,12 @@ need to do something like this::
 
 Here is an example that illustrates how to use resources to ensure each task is
 run inside a separate process, which is useful to execute non thread-safe tasks
-or tasks that uses manages multithreading internally::
+or tasks that uses multithreading internally::
 
    dask-worker scheduler:8786 --nprocs 3 --nthreads 2 --resources "process=1"
 
 With the code below, there will be at most 3 tasks running concurrently and
-each task will run in a separate process::
+each task will run in a separate process:
 
 .. code-block:: python
 
