@@ -48,13 +48,13 @@ When we submit tasks to the cluster we specify constraints per task
    final = client.submit(aggregate, processed, resources={'MEMORY': 70e9})
 
 
-Resources are per worker process
---------------------------------
+Resources are applied separately to each worker process
+-------------------------------------------------------
 
 If you are using ``dask-worker --nprocs <nprocs>`` the resource will be applied
-to each of the ``nprocs`` workers. Suppose you have 2 GPUs on your machine, if
-you want to use two worker processes, you have 1 GPU per worker process so you
-need to do something like this::
+separately to each of the ``nprocs`` worker processes. Suppose you have 2 GPUs
+on your machine, if you want to use two worker processes, you have 1 GPU per
+worker process so you need to do something like this::
 
    dask-worker scheduler:8786 --nprocs 2 --resources "GPU=1"
 
