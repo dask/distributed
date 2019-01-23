@@ -470,7 +470,7 @@ def assert_balanced(inp, expected, c, s, *workers):
 
     pytest.param([[1, 1, 1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], []],
                  [[1, 1, 1, 1, 1], [1, 1], [1, 1], [1, 1], [1, 1]],
-                 marks=pytest.mark.xfail("Some uncertainty based on executing stolen task"))
+                 marks=pytest.mark.xfail(reason="Some uncertainty based on executing stolen task"))
 ])
 def test_balance(inp, expected):
     test = lambda *args, **kwargs: assert_balanced(inp, expected, *args, **kwargs)
