@@ -281,7 +281,7 @@ def test_full_collections(c, s, a, b):
         marks=pytest.mark.xfail(True, reason="don't track resources through optimization")),
     pytest.param(False,
         marks=pytest.mark.skipif(WINDOWS, False, reason="intermittent failure"))
-    ])
+])
 def test_collections_get(client, optimize_graph, s, a, b):
     da = pytest.importorskip('dask.array')
 
