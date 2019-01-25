@@ -5471,7 +5471,7 @@ def test_released_dependencies(c, s, a, b):
 
 @gen_cluster(client=True, check_new_threads=False)
 def test_profile_bokeh(c, s, a, b):
-    bokeh = pytest.importorskip('bokeh')
+    pytest.importorskip('bokeh.plotting')
     from bokeh.model import Model
     yield c.map(slowinc, range(10), delay=0.2)
     state, figure = yield c.profile(plot=True)
