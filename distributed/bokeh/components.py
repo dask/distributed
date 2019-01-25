@@ -311,7 +311,7 @@ class ProfilePlot(DashboardComponent):
         state = profile.create()
         data = profile.plot_data(state, profile_interval)
         self.states = data.pop('states')
-        self.source = ColumnDataSource(data=data)
+        self.root, self.source = profile.plot_figure(data, **kwargs)
 
         @without_property_validation
         def cb(attr, old, new):
@@ -334,45 +334,6 @@ class ProfilePlot(DashboardComponent):
             self.source.selected.on_change('indices', cb)
         else:
             self.source.on_change('selected', cb)
-
-        self.root = figure(tools='tap', **kwargs)
-        self.root.quad('left', 'right', 'top', 'bottom', color='color',
-                      line_color='black', line_width=2, source=self.source)
-
-        hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips="""
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@width</span>
-                </div>
-                """
-        )
-        self.root.add_tools(hover)
-
-        self.root.xaxis.visible = False
-        self.root.yaxis.visible = False
-        self.root.grid.visible = False
 
     @without_property_validation
     def update(self, state):

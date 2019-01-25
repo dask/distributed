@@ -299,3 +299,54 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
         prof = merge(prof, recent)
 
     return prof
+
+
+def plot_figure(data, **kwargs):
+    from bokeh.plotting import ColumnDataSource, figure
+    from bokeh.models import HoverTool
+
+    if 'states' in data:
+        data = toolz.dissoc(data, 'states')
+
+    source = ColumnDataSource(data=data)
+
+    fig = figure(tools='tap', **kwargs)
+    fig.quad('left', 'right', 'top', 'bottom', color='color',
+             line_color='black', line_width=2, source=source)
+
+    hover = HoverTool(
+        point_policy="follow_mouse",
+        tooltips="""
+            <div>
+                <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
+            </div>
+            <div>
+                <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
+            </div>
+            <div>
+                <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
+            </div>
+            <div>
+                <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
+            </div>
+            <div>
+                <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
+            </div>
+            <div>
+                <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@width</span>
+            </div>
+            """
+    )
+    fig.add_tools(hover)
+
+    fig.xaxis.visible = False
+    fig.yaxis.visible = False
+    fig.grid.visible = False
+
+    return fig, source
