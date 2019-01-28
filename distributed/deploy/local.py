@@ -57,6 +57,10 @@ class LocalCluster(Cluster):
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
     security : Security
+    protocol: str (optiona)
+        Protocol to use like ``tcp://``, ``tls://``, ``inproc://``
+        This defaults to sensible choice given other keyword arguments like
+        ``processes`` and ``security``
 
     Examples
     --------
@@ -101,6 +105,8 @@ class LocalCluster(Cluster):
                 protocol = 'inproc://'
             else:
                 protocol = 'tcp://'
+        if not protocol.endswith('://'):
+            protocol = protocol + '://'
         self.protocol = protocol
 
         self.silence_logs = silence_logs

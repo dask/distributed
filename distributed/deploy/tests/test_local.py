@@ -559,7 +559,7 @@ def test_protocol_inproc(loop):
 
 
 def test_protocol_tcp(loop):
-    with LocalCluster(protocol='tcp://', loop=loop, processes=False) as cluster:
+    with LocalCluster(protocol='tcp', loop=loop, processes=False) as cluster:
         assert cluster.scheduler.address.startswith('tcp://')
 
 
