@@ -553,5 +553,15 @@ def test_asynchronous_property(loop):
         cluster.sync(_)
 
 
+def test_protocol_inproc(loop):
+    with LocalCluster(protocol='inproc://', loop=loop, processes=False) as cluster:
+        assert cluster.scheduler.address.startswith('inproc://')
+
+
+def test_protocol_tcp(loop):
+    with LocalCluster(protocol='tcp://', loop=loop, processes=False) as cluster:
+        assert cluster.scheduler.address.startswith('tcp://')
+
+
 if sys.version_info >= (3, 5):
     from distributed.deploy.tests.py3_test_deploy import *  # noqa F401
