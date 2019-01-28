@@ -1091,7 +1091,7 @@ class Client(Node):
             with ignoring(AttributeError, gen.TimeoutError):
                 yield gen.with_timeout(timedelta(milliseconds=100),
                                        self._handle_scheduler_coroutine,
-                                       CancelledError)
+                                       quiet_exceptions=(CancelledError,))
 
             if self.scheduler_comm and self.scheduler_comm.comm and not self.scheduler_comm.comm.closed():
                 yield self.scheduler_comm.close()
