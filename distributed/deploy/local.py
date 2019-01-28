@@ -99,7 +99,9 @@ class LocalCluster(Cluster):
         self.processes = processes
 
         if protocol is None:
-            if security:
+            if ip and '://' in ip:
+                protocol = ip.split('://')[0]
+            elif security:
                 protocol = 'tls://'
             elif not self.processes and not scheduler_port:
                 protocol = 'inproc://'

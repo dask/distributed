@@ -563,5 +563,10 @@ def test_protocol_tcp(loop):
         assert cluster.scheduler.address.startswith('tcp://')
 
 
+def test_protocol_ip(loop):
+    with LocalCluster(ip='tcp://127.0.0.2', loop=loop, processes=False) as cluster:
+        assert cluster.scheduler.address.startswith('tcp://127.0.0.2')
+
+
 if sys.version_info >= (3, 5):
     from distributed.deploy.tests.py3_test_deploy import *  # noqa F401
