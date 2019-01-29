@@ -373,7 +373,7 @@ class ProfileTimePlot(DashboardComponent):
         self.state = profile.create()
         data = profile.plot_data(self.state, profile_interval)
         self.states = data.pop('states')
-        self.source = ColumnDataSource(data=data)
+        self.profile_plot, self.source = profile.plot_figure(data, **kwargs)
 
         changing = [False]  # avoid repeated changes from within callback
 
@@ -405,47 +405,6 @@ class ProfileTimePlot(DashboardComponent):
             self.source.selected.on_change('indices', cb)
         else:
             self.source.on_change('selected', cb)
-
-        self.profile_plot = figure(tools='tap', height=400, **kwargs)
-        r = self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
-                                   line_color='black', source=self.source)
-        r.selection_glyph = None
-        r.nonselection_glyph = None
-
-        hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips="""
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@percentage</span>
-                </div>
-                """
-        )
-        self.profile_plot.add_tools(hover)
-
-        self.profile_plot.xaxis.visible = False
-        self.profile_plot.yaxis.visible = False
-        self.profile_plot.grid.visible = False
 
         self.ts_source = ColumnDataSource({'time': [], 'count': []})
         self.ts_plot = figure(title='Activity over time', height=100,
@@ -552,7 +511,7 @@ class ProfileServer(DashboardComponent):
         self.state = profile.get_profile(self.log)
         data = profile.plot_data(self.state, profile_interval)
         self.states = data.pop('states')
-        self.source = ColumnDataSource(data=data)
+        self.profile_plot, self.source = profile.plot_figure(data, **kwargs)
 
         changing = [False]  # avoid repeated changes from within callback
 
@@ -584,47 +543,6 @@ class ProfileServer(DashboardComponent):
             self.source.selected.on_change('indices', cb)
         else:
             self.source.on_change('selected', cb)
-
-        self.profile_plot = figure(tools='tap', height=400, **kwargs)
-        r = self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
-                                   line_color='black', source=self.source)
-        r.selection_glyph = None
-        r.nonselection_glyph = None
-
-        hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips="""
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@percentage</span>
-                </div>
-                """
-        )
-        self.profile_plot.add_tools(hover)
-
-        self.profile_plot.xaxis.visible = False
-        self.profile_plot.yaxis.visible = False
-        self.profile_plot.grid.visible = False
 
         self.ts_source = ColumnDataSource({'time': [], 'count': []})
         self.ts_plot = figure(title='Activity over time', height=100,

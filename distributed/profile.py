@@ -313,8 +313,11 @@ def plot_figure(data, **kwargs):
     source = ColumnDataSource(data=data)
 
     fig = figure(tools='tap', **kwargs)
-    fig.quad('left', 'right', 'top', 'bottom', color='color',
+    r = fig.quad('left', 'right', 'top', 'bottom', color='color',
              line_color='black', line_width=2, source=source)
+
+    r.selection_glyph = None
+    r.nonselection_glyph = None
 
     hover = HoverTool(
         point_policy="follow_mouse",
