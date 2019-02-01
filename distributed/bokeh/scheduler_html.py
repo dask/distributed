@@ -5,6 +5,7 @@ import toolz
 from tornado import escape
 from tornado import gen
 from tornado import web
+from prometheus_client import Gauge, generate_latest
 
 from ..utils import log_errors, format_bytes, format_time
 
@@ -163,6 +164,23 @@ class IndividualPlots(RequestHandler):
         self.write(result)
 
 
+class PrometheusHandler(RequestHandler):
+    # Construct Prometheus metrics
+    # https://prometheus.io/docs/introduction/overview/
+    def get(self):
+        workers = Gauge('workers_total',
+            'Total number of workers.',
+            namespace='scheduler')
+        workers.set(len(self.server.workers))
+
+        clients = Gauge('clients_total',
+            'Total number of clients.',
+            namespace='scheduler')
+        clients.set(len(self.server.clients))
+
+        self.write(generate_latest())
+
+
 routes = [
         (r'info/main/workers.html', Workers),
         (r'info/worker/(.*).html', Worker),
@@ -175,6 +193,7 @@ routes = [
         (r'json/identity.json', IdentityJSON),
         (r'json/index.html', IndexJSON),
         (r'individual-plots.json', IndividualPlots),
+        (r'metrics', PrometheusHandler),
 ]
 
 
