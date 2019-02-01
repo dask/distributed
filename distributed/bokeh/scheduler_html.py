@@ -5,7 +5,6 @@ import toolz
 from tornado import escape
 from tornado import gen
 from tornado import web
-from prometheus_client import Gauge, generate_latest
 
 from ..utils import log_errors, format_bytes, format_time
 
@@ -165,20 +164,19 @@ class IndividualPlots(RequestHandler):
 
 
 class PrometheusHandler(RequestHandler):
-    # Construct Prometheus metrics
-    # https://prometheus.io/docs/introduction/overview/
     def get(self):
-        workers = Gauge('workers_total',
+        import prometheus_client
+        workers = prometheus_client.Gauge('workers_total',
             'Total number of workers.',
             namespace='scheduler')
         workers.set(len(self.server.workers))
 
-        clients = Gauge('clients_total',
+        clients = prometheus_client.Gauge('clients_total',
             'Total number of clients.',
             namespace='scheduler')
         clients.set(len(self.server.clients))
 
-        self.write(generate_latest())
+        self.write(prometheus_client.generate_latest())
 
 
 routes = [

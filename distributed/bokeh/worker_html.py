@@ -1,7 +1,6 @@
 import os
 
 from tornado import web
-from prometheus_client import Gauge, generate_latest
 
 dirname = os.path.dirname(__file__)
 
@@ -16,15 +15,14 @@ class RequestHandler(web.RequestHandler):
 
 
 class PrometheusHandler(RequestHandler):
-    # Construct Prometheus metrics
-    # https://prometheus.io/docs/introduction/overview/
     def get(self):
-        #workers = Gauge('memory_bytes',
+        import prometheus_client
+        #workers = prometheus_client.Gauge('memory_bytes',
         #    'Total memory.',
         #    namespace='worker')
         #workers.set(0.)
 
-        self.write(generate_latest())
+        self.write(prometheus_client.generate_latest())
 
 
 routes = [
