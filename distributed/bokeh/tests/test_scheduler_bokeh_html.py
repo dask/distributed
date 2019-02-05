@@ -60,3 +60,14 @@ def test_prefix(c, s, a, b):
             json.loads(body)
         else:
             assert xml.etree.ElementTree.fromstring(body) is not None
+
+
+@gen_cluster(client=True,
+             check_new_threads=False,
+             scheduler_kwargs={'services': {('bokeh', 0):  BokehScheduler}})
+def test_prometheus(c, s, a, b):
+    http_client = AsyncHTTPClient()
+    for suffix in ['metrics']:
+        response = yield http_client.fetch('http://localhost:%d/%s'
+                                           % (s.services['bokeh'].port, suffix))
+        assert response.code == 200
