@@ -27,6 +27,7 @@ from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
+from dask.optimization import SubgraphCallable
 import dask.bag as db
 from distributed import (Worker, Nanny, fire_and_forget, LocalCluster,
                          get_client, secede, get_worker, Executor, profile,
@@ -5496,6 +5497,34 @@ def test_profile_bokeh(c, s, a, b):
     with tmpfile('html') as fn:
         yield c.profile(filename=fn)
         assert os.path.exists(fn)
+
+
+@gen_cluster(client=True)
+def test_get_mix_futures_and_SubgraphCallable(c, s, a, b):
+    future = c.submit(add, 1, 2)
+
+    subgraph = SubgraphCallable({'_2': (add, '_0', '_1'),
+                                 '_3': (add, future, '_2')},
+                                '_3', ('_0', '_1'))
+    dsk = {'a': 1,
+           'b': 2,
+           'c': (subgraph, 'a', 'b'),
+           'd': (subgraph, 'c', 'b')}
+
+    future2 = c.get(dsk, 'd', sync=False)
+    result = yield future2
+    assert result == 11
+
+    # Nested subgraphs
+    subgraph2 = SubgraphCallable({'_2': (subgraph, '_0', '_1'),
+                                  '_3': (subgraph, '_2', '_1'),
+                                  '_4': (add, '_3', future2)},
+                                 '_4', ('_0', '_1'))
+
+    dsk2 = {'e': 1, 'f': 2, 'g': (subgraph2, 'e', 'f')}
+
+    result = yield c.get(dsk2, 'g', sync=False)
+    assert result == 22
 
 
 if sys.version_info >= (3, 5):
