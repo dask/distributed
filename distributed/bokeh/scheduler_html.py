@@ -164,19 +164,21 @@ class IndividualPlots(RequestHandler):
 
 
 class PrometheusHandler(RequestHandler):
-    def get(self):
-        import prometheus_client
-        workers = prometheus_client.Gauge('workers_total',
+    import prometheus_client # keep out of global namespace
+    def __init__(self, *args, **kwargs):
+        super(PrometheusHandler, self).__init__(*args, **kwargs)
+        self.workers = self.prometheus_client.Gauge('workers_total',
             'Total number of workers.',
             namespace='scheduler')
-        workers.set(len(self.server.workers))
-
-        clients = prometheus_client.Gauge('clients_total',
+        self.clients = self.prometheus_client.Gauge('clients_total',
             'Total number of clients.',
             namespace='scheduler')
-        clients.set(len(self.server.clients))
 
-        self.write(prometheus_client.generate_latest())
+    def get(self):
+        self.workers.set(len(self.server.workers))
+        self.clients.set(len(self.server.clients))
+
+        self.write(self.prometheus_client.generate_latest())
 
 
 routes = [

@@ -15,14 +15,19 @@ class RequestHandler(web.RequestHandler):
 
 
 class PrometheusHandler(RequestHandler):
-    def get(self):
-        import prometheus_client
-        #workers = prometheus_client.Gauge('memory_bytes',
+    import prometheus_client # keep out of global namespace
+    def __init__(self, *args, **kwargs):
+        super(PrometheusHandler, self).__init__(*args, **kwargs)
+        # Add metrics like this:
+        # self.workers = self.prometheus_client.Gauge('memory_bytes',
         #    'Total memory.',
         #    namespace='worker')
-        #workers.set(0.)
 
-        self.write(prometheus_client.generate_latest())
+    def get(self):
+        # Example metric update
+        # self.workers.set(0.)
+
+        self.write(self.prometheus_client.generate_latest())
 
 
 routes = [
