@@ -165,6 +165,7 @@ class IndividualPlots(RequestHandler):
 
 class PrometheusHandler(RequestHandler):
     import prometheus_client # keep out of global namespace
+
     def __init__(self, *args, **kwargs):
         super(PrometheusHandler, self).__init__(*args, **kwargs)
         self.workers = self.prometheus_client.Gauge('workers_total',
