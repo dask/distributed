@@ -5527,5 +5527,19 @@ def test_get_mix_futures_and_SubgraphCallable(c, s, a, b):
     assert result == 22
 
 
+@gen_cluster(client=True)
+def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
+    dd = pytest.importorskip('dask.dataframe')
+    import pandas as pd
+    df = pd.DataFrame({'x': range(1, 11)})
+    ddf = dd.from_pandas(df, npartitions=2).persist()
+    ddf = ddf.map_partitions(lambda x: x)
+    ddf['x'] = ddf['x'].astype('f8')
+    ddf = ddf.map_partitions(lambda x: x)
+    ddf['x'] = ddf['x'].astype('f8')
+    result = yield c.compute(ddf)
+    assert result.equals(df.astype('f8'))
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401
