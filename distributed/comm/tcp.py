@@ -322,7 +322,7 @@ class RequireEncryptionMixin(object):
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
     if PY3:  # see github PR #2403 discussion for more info
-        _executor = ThreadPoolExecutor(2)
+        _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
         _resolver = netutil.ExecutorResolver(close_executor=False,
                                              executor=_executor)
     else:
