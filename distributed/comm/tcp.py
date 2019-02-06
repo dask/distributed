@@ -11,8 +11,6 @@ try:
 except ImportError:
     ssl = None
 
-from concurrent.futures import ThreadPoolExecutor
-
 import dask
 import tornado
 from tornado import gen, netutil
@@ -21,6 +19,7 @@ from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 from ..compatibility import finalize, PY3
+from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes,
                      parse_timedelta, shutting_down)
 
