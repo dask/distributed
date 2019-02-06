@@ -1005,25 +1005,28 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(ncores=[('127.0.0.1', 2)], client=True,
+@gen_cluster(ncores=[('127.0.0.1', 2)],
+             client=True,
              worker_kwargs={'memory_monitor_interval': 10},
              timeout=20)
 def test_pause_executor(c, s, a):
     memory = psutil.Process().memory_info().rss
-    a.memory_limit = memory / 0.8 + 200e6
+    a.memory_limit = memory / 0.8 + 500e6
     np = pytest.importorskip('numpy')
 
     def f():
-        x = np.ones(int(300e6), dtype='u1')
+        x = np.ones(int(500e6), dtype='u1')
         sleep(1)
 
     with captured_logger(logging.getLogger('distributed.worker')) as logger:
         future = c.submit(f)
         futures = c.map(slowinc, range(10), delay=0.1)
 
-        yield gen.sleep(0.3)
-        assert a.paused, (format_bytes(psutil.Process().memory_info().rss),
-                          format_bytes(a.memory_limit))
+        start = time()
+        while not a.paused:
+            yield gen.sleep(0.01)
+            assert time() < start + 1,  (format_bytes(psutil.Process().memory_info().rss),
+                                         format_bytes(a.memory_limit))
         out = logger.getvalue()
         assert 'memory' in out.lower()
         assert 'pausing' in out.lower()
