@@ -2494,7 +2494,7 @@ def test_wait_on_collections(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_futures_of(c, s, a, b):
+def test_futures_of_get(c, s, a, b):
     x, y, z = c.map(inc, [1, 2, 3])
 
     assert set(futures_of(0)) == set()
@@ -2505,6 +2505,11 @@ def test_futures_of(c, s, a, b):
 
     b = db.Bag({('b', i): f for i, f in enumerate([x, y, z])}, 'b', 3)
     assert set(futures_of(b)) == {x, y, z}
+
+    sg = SubgraphCallable({'x': x, 'y': y, 'z': z,
+                           'out': (add, (add, (add, x, y), z), 'in')},
+                          'out', ('in',))
+    assert set(futures_of(sg)) == {x, y, z}
 
 
 def test_futures_of_class():
