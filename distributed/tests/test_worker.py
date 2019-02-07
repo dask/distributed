@@ -1009,11 +1009,12 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
              client=True,
              worker_kwargs={'memory_monitor_interval': 10,
                             'memory_spill_fraction': False,  # don't spill
-                            'memory_target_fraction': False},
+                            'memory_target_fraction': False,
+                            'memory_pause_fraction': 0.5},
              timeout=20)
 def test_pause_executor(c, s, a):
     memory = psutil.Process().memory_info().rss
-    a.memory_limit = memory / 0.8 + 200e6
+    a.memory_limit = memory / 0.5 + 200e6
     np = pytest.importorskip('numpy')
 
     def f():
