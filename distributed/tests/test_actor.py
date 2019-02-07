@@ -471,7 +471,7 @@ def test_compute(c, s, a, b):
     start = time()
     while a.data or b.data:
         yield gen.sleep(0.01)
-        assert time() < start + 2
+        assert time() < start + 5
 
 
 def test_compute_sync(client):
