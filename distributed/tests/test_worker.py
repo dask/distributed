@@ -1023,12 +1023,12 @@ def test_pause_executor(c, s, a):
 
     with captured_logger(logging.getLogger('distributed.worker')) as logger:
         future = c.submit(f)
-        futures = c.map(slowinc, range(10), delay=0.1)
+        futures = c.map(slowinc, range(30), delay=0.1)
 
         start = time()
         while not a.paused:
             yield gen.sleep(0.01)
-            assert time() < start + 1,  (format_bytes(psutil.Process().memory_info().rss),
+            assert time() < start + 4,  (format_bytes(psutil.Process().memory_info().rss),
                                          format_bytes(a.memory_limit),
                                          len(a.data))
         out = logger.getvalue()
