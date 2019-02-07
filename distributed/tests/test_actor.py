@@ -6,7 +6,6 @@ import pytest
 
 import dask
 from distributed import Actor, ActorFuture, Client, Future, wait, Nanny
-from distributed.compatibility import PY2
 from distributed.utils_test import gen_cluster
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 from distributed.metrics import time
