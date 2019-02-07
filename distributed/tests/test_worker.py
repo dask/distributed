@@ -1030,8 +1030,7 @@ def test_pause_executor(c, s, a):
             yield gen.sleep(0.01)
             assert time() < start + 1,  (format_bytes(psutil.Process().memory_info().rss),
                                          format_bytes(a.memory_limit),
-                                         len(a.data),
-                                         len(a.data.fast))
+                                         len(a.data))
         out = logger.getvalue()
         assert 'memory' in out.lower()
         assert 'pausing' in out.lower()
