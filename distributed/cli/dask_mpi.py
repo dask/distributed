@@ -99,7 +99,7 @@ def main(scheduler_file, interface, nthreads, local_directory, memory_limit,
 
 def go():
     check_python_3()
-    warn("The distributed version of dask-mpi is depricated. Please use dask-mpi, more information at http://mpi.dask.org")
+    warn("The dask-mpi command line utility in the `distributed` package is deprecated.  Please install the `dask-mpi` package instead. More information is available at https://mpi.dask.org")
     main()
 
 
