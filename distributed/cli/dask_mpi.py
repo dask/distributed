@@ -4,6 +4,7 @@ import click
 from mpi4py import MPI
 from tornado.ioloop import IOLoop
 from tornado import gen
+from warnings import warn
 
 from distributed import Scheduler, Nanny, Worker
 from distributed.bokeh.worker import BokehWorker
@@ -98,6 +99,7 @@ def main(scheduler_file, interface, nthreads, local_directory, memory_limit,
 
 def go():
     check_python_3()
+    warn("The distributed version of dask-mpi is depricated. Please use dask-mpi, more information at http://mpi.dask.org")
     main()
 
 
