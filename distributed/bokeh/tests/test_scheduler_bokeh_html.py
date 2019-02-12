@@ -67,7 +67,6 @@ def test_prefix(c, s, a, b):
              scheduler_kwargs={'services': {('bokeh', 0):  BokehScheduler}})
 def test_prometheus(c, s, a, b):
     http_client = AsyncHTTPClient()
-    for suffix in ['metrics']:
-        response = yield http_client.fetch('http://localhost:%d/%s'
-                                           % (s.services['bokeh'].port, suffix))
-        assert response.code == 200
+    response = yield http_client.fetch('http://localhost:%d/metrics'
+                                       % s.services['bokeh'].port)
+    assert response.code == 200
