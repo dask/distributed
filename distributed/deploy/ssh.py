@@ -215,7 +215,7 @@ def start_worker(logdir, scheduler_addr, scheduler_port, worker_addr, nthreads, 
                  worker_port,
                  nanny_port,
                  remote_python=None,
-                 remote_dask_worker=None):
+                 remote_dask_worker='distributed.cli.dask_worker'):
 
     cmd = ('{python} -m {remote_dask_worker} '
            '{scheduler_addr}:{scheduler_port} '
@@ -235,7 +235,7 @@ def start_worker(logdir, scheduler_addr, scheduler_port, worker_addr, nthreads, 
 
     cmd = cmd.format(
         python=remote_python or sys.executable,
-        remote_dask_worker=remote_dask_worker or 'distributed.cli.dask_worker',
+        remote_dask_worker=remote_dask_worker,
         scheduler_addr=scheduler_addr,
         scheduler_port=scheduler_port,
         worker_addr=worker_addr,
@@ -276,7 +276,7 @@ class SSHCluster(object):
                  ssh_username=None, ssh_port=22, ssh_private_key=None,
                  nohost=False, logdir=None, remote_python=None,
                  memory_limit=None, worker_port=None, nanny_port=None,
-                 remote_dask_worker=None):
+                 remote_dask_worker='distributed.cli.dask_worker'):
 
         self.scheduler_addr = scheduler_addr
         self.scheduler_port = scheduler_port
