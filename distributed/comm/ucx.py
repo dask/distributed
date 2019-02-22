@@ -133,41 +133,56 @@ class UCX(Comm):
             msg, serializers=serializers, on_error=on_error
         )  # TODO: context=
         nframes = struct.pack("Q", len(frames))
-        await self.ep.send_obj(nframes, sys.getsizeof(nframes))  # send number of frames
+        await self.ep.send_obj(nframes)  # send number of frames
 
         for frame in frames:
-            if isinstance(frame, memoryview):
-                # TODO: UCX-PY #27
-                frame = frame.tobytes()
-            size = sys.getsizeof(frame)
-            await self.ep.send_obj(frame, size)
+            await self.ep.send_obj(frame)
         return sum(map(nbytes, frames))
 
     async def read(self, deserializers=None):
         resp = await self.ep.recv_future()
-        # XXX: this breaks things, e.g. test_ucx_specific
-        # dummy = b'0' * 8
-        # resp = await self.ep.recv_obj(dummy, 41)
         obj = ucp.get_obj_from_msg(resp)
         n_frames, = struct.unpack("Q", obj)
 
-        # Notes:
-        # 1. Eventually, ucp_msg will be our abstraction over GPU vs. CPU
-        #    memory. We won't need to worry about checking for the destination
-        #    here. The message object will have a reference to the region of
-        #    memory. Downstream of us (say from _frames) will deserialize
-        #    appropriately, based on whether it's a GPU or CPU object.
-        # 2. We will still deserialize the header early, to check the *length*
-        #    of the next message. This lets us use the faster `recv_obj` to
-        #    read the next nbytes.
-        _header_start = b'\x83\xa7headers'
+        # TODO: see if we care about deserializing all headers.
+        # We could probably do some tricks to make this less expensive,
+        # (if it's even expensive in the first place)
+        header_start = b'\x83\xa7headers'
+        peek_bytes = len(header_start)
 
         frames = []
         msg = {}
 
+        gpu_inbound = False
+        size = ()
+
         for i in range(n_frames):
-            resp = await self.ep.recv_future()
+            if size:
+                # XXX: when do we get multiple keys here? Non-contiguous?
+                assert len(size) == 1
+                size, = size
+                resp = await self.ep.recv_obj(size, cuda=gpu_inbound)
+                # prepare for the next (header) recv
+                size = ()
+                gpu_inbound = False
+            else:
+                resp = await self.ep.recv_future()
             frame = ucp.get_obj_from_msg(resp)
+            if type(frame) == memoryview:
+                if frame[:peek_bytes] == header_start:
+                    # we have a header. Let's see if
+                    # 1. We know the next frame's length (for fast recv)
+                    # 2. We know the next frame's memory destination (GPU or CPU).
+                    headers = msgpack.loads(frame, use_list=False)
+                    keys = headers[b'keys']
+                    for key in keys:
+                        header = headers[b'headers'][key]
+                        size = header.get(b'lengths', ())
+                        if size:
+                            if header.get(b'is_cuda', False):
+                                gpu_inbound = True
+                            break
+
             frames.append(frame)
 
         msg = await from_frames(
