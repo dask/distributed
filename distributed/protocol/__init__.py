@@ -69,3 +69,15 @@ def _register_torch():
 @dask_deserialize.register_lazy("cupy")
 def _register_cupy():
     from . import cuda
+
+
+@dask_serialize.register_lazy("numba")
+@dask_deserialize.register_lazy("numba")
+def _register_cupy():
+    from . import numba
+
+
+@dask_serialize.register_lazy("cudf")
+@dask_deserialize.register_lazy("cudf")
+def _register_cupy():
+    from . import cudf
