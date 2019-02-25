@@ -153,18 +153,23 @@ class UCX(Comm):
         frames = []
         msg = {}
 
-        gpu_inbound = False
-        size = ()
+        # For cudf, we would ideally do
+        # header = recv_future()
+        # columns [recv_obj(size, cuda=True) for size in header['sizes']]
+        # So maybe make gpu_inbound an int that has the number of remaining
+        # gpu_inbound recvs?
+
+        gpu_inbound = 0
+        size = []
 
         for i in range(n_frames):
             if size:
+                this_size = size.pop()
                 # XXX: when do we get multiple keys here? Non-contiguous?
-                assert len(size) == 1
-                size, = size
-                resp = await self.ep.recv_obj(size, cuda=gpu_inbound)
+                resp = await self.ep.recv_obj(this_size, cuda=bool(gpu_inbound))
                 # prepare for the next (header) recv
-                size = ()
-                gpu_inbound = False
+                if gpu_inbound:
+                    gpu_inbound -= 1
             else:
                 resp = await self.ep.recv_future()
             frame = ucp.get_obj_from_msg(resp)
@@ -177,10 +182,11 @@ class UCX(Comm):
                     keys = headers[b'keys']
                     for key in keys:
                         header = headers[b'headers'][key]
-                        size = header.get(b'lengths', ())
+                        size = list(header.get(b'lengths', []))
                         if size:
-                            if header.get(b'is_cuda', False):
-                                gpu_inbound = True
+                            size = size[::-1]
+                            if header.get(b'is_cuda', 0):
+                                gpu_inbound = int(header[b'is_cuda'])
                             break
 
             frames.append(frame)
