@@ -2,7 +2,6 @@ import asyncio
 import itertools
 
 import pytest
-import dask
 import numpy as np
 
 from distributed.comm import ucx, listen, connect
@@ -12,7 +11,6 @@ from distributed.protocol import to_serialize
 from distributed.utils_test import gen_test
 
 from .test_comms import check_deserialize
-import ucp_py as ucp
 
 
 ADDRESS = ucx.ADDRESS
@@ -175,14 +173,16 @@ def test_ucx_deserialize():
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason="UCX")  # memory is garbage...
-async def test_ping_pong_cupy():
+@pytest.mark.parametrize('shape', [
+    (100,),
+    (10, 10)
+])
+async def test_ping_pong_cupy(shape):
     cupy = pytest.importorskip('cupy')
     address = "{}:{}".format(HOST, next(port_counter))
     com, serv_com = await get_comm_pair(address)
 
-    # TODO: ucx-py doesn't handle 2d yet.
-    arr = cupy.random.random(100,)
+    arr = cupy.random.random(shape)
     msg = {"op": "ping", 'data': to_serialize(arr)}
 
     await com.write(msg)
