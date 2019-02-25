@@ -40,5 +40,5 @@ def deserialize_numba_ndarray(header, frames):
     # TODO: put this in ucx... as a kind of "fixup"
     frame.typestr = header['typestr']
     frame.shape = header['shape']
-    arr, _  = numba.cuda.devicearray.auto_device(frame)
+    arr, _ = numba.cuda.devicearray.auto_device(frame)
     return arr
