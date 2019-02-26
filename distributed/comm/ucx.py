@@ -144,29 +144,17 @@ class UCX(Comm):
         obj = ucp.get_obj_from_msg(resp)
         n_frames, = struct.unpack("Q", obj)
 
-        # TODO: see if we care about deserializing all headers.
-        # We could probably do some tricks to make this less expensive,
-        # (if it's even expensive in the first place)
-        header_start = b'\x83\xa7headers'
-        peek_bytes = len(header_start)
-
         frames = []
-        msg = {}
-
-        # For cudf, we would ideally do
-        # header = recv_future()
-        # columns [recv_obj(size, cuda=True) for size in header['sizes']]
-        # So maybe make gpu_inbound an int that has the number of remaining
-        # gpu_inbound recvs?
-
+        # gpu_inbound and sizes are for seeing if we can
+        # 1. Take a fastpath to recv a known-length object
+        # 2. Take a fast-fastpath to recv into GPU memory.
+        # see peek for more.
         gpu_inbound = 0
         sizes = []
 
-        # TODO: this multi-send for cudf broke things.
         for i in range(n_frames):
             if sizes:
                 this_size = sizes.pop()
-                print("this size", this_size)
                 # XXX: when do we get multiple keys here? Non-contiguous?
                 resp = await self.ep.recv_obj(this_size, cuda=bool(gpu_inbound))
                 # prepare for the next (header) recv
@@ -342,6 +330,28 @@ def should_peek(frame):
 
 
 def peek(frame):
+    """
+    Inspect a header for whether we can take a faster recv-path.
+
+    Parameters
+    ----------
+    frame : memoryview
+        The header frame to inspect.
+
+    Returns
+    -------
+    sizes : list
+        List of the next sided :meth:`recv_obj` receives to perform.
+        The recevies should be performed last to first, so use
+        :func:`list.pop` to get the next receive.
+    gpu_inbound : int
+        The number of GPU recvies to do. Decrement this to get
+        back to regular recvs.
+
+    See Also
+    --------
+    should_peek : check whether it's appropriate to peek.
+    """
     headers = msgpack.loads(frame, use_list=False)
     keys = headers[b'keys']
     sizes = []
