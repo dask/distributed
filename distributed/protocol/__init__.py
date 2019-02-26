@@ -73,11 +73,11 @@ def _register_cupy():
 
 @dask_serialize.register_lazy("numba")
 @dask_deserialize.register_lazy("numba")
-def _register_cupy():
+def _register_numba():
     from . import numba
 
 
 @dask_serialize.register_lazy("cudf")
 @dask_deserialize.register_lazy("cudf")
-def _register_cupy():
+def _register_cudf():
     from . import cudf
