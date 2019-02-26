@@ -133,7 +133,7 @@ class UCX(Comm):
             msg, serializers=serializers, on_error=on_error
         )  # TODO: context=
         nframes = struct.pack("Q", len(frames))
-        await self.ep.send_obj(nframes)  # send number of frames
+        await self.ep.send_obj(nframes)
 
         for frame in frames:
             await self.ep.send_obj(frame)
@@ -269,7 +269,7 @@ class UCXListener(Listener):
         if self.ep:
             ucp.destroy_ep(self.ep)
         # if self.listener_instance:
-            # ucp.stop_listener(self.listener_instance)
+        #   ucp.stop_listener(self.listener_instance)
 
     def get_host_port(self):
         # TODO: TCP raises if this hasn't started yet.

@@ -2,7 +2,6 @@ import asyncio
 import itertools
 
 import pytest
-import numpy as np
 import ucp_py as ucp
 
 from distributed.comm import ucx, listen, connect
@@ -153,6 +152,8 @@ def test_ucx_specific():
 
 @pytest.mark.asyncio
 async def test_ping_pong_data():
+    np = pytest.importorskip('numpy')
+
     data = np.ones((10, 10))
     # TODO: broken for large arrays
     address = "{}:{}".format(HOST, next(port_counter))
@@ -203,10 +204,10 @@ async def test_ping_pong_cupy(shape):
 
 @pytest.mark.asyncio
 async def test_ping_pong_numba():
+    np = pytest.importorskip('numpy')
     numba = pytest.importorskip("numba")
-    numpy = pytest.importorskip("numpy")
+    import numba.cuda
 
-    import distributed.protocol.numba  # noqa
     address = "{}:{}".format(HOST, next(port_counter))
 
     arr = np.arange(10)
@@ -224,7 +225,6 @@ async def test_ping_pong_numba():
 @pytest.mark.asyncio
 async def test_ping_pong_cudf():
     cudf = pytest.importorskip("cudf")
-    import distributed.protocol.cudf  # noqa
 
     df = cudf.DataFrame({"A": [1, 2, None], "B": [1., 2., None]})
     address = "{}:{}".format(HOST, next(port_counter))
