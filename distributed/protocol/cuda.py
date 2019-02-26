@@ -30,7 +30,7 @@ def serialize_cupy_ndarray(x):
     header = x.__cuda_array_interface__.copy()
     header['lengths'] = (x.nbytes,)  # one per stride
     header['compression'] = (None,)  # TODO
-    header['is_cuda'] = True
+    header['is_cuda'] = 1
     header['dtype'] = dtype
     return header, [data]
 

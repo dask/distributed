@@ -28,7 +28,7 @@ def serialize_cudf_dataframe(x):
 
     header = {
         'lengths': [len(x)] * len(arrays),
-        'is_cuda': True,
+        'is_cuda': len(arrays),
         'subheaders': sub_headers,
         'columns': x.columns.tolist(),  # TODO: ugh...
         'null_counts': null_counts,

@@ -160,12 +160,12 @@ class UCX(Comm):
         # gpu_inbound recvs?
 
         gpu_inbound = 0
-        size = []
+        sizes = []
 
         # TODO: this multi-send for cudf broke things.
         for i in range(n_frames):
-            if size:
-                this_size = size.pop()
+            if sizes:
+                this_size = sizes.pop()
                 print("this size", this_size)
                 # XXX: when do we get multiple keys here? Non-contiguous?
                 resp = await self.ep.recv_obj(this_size, cuda=bool(gpu_inbound))
@@ -175,21 +175,11 @@ class UCX(Comm):
             else:
                 resp = await self.ep.recv_future()
             frame = ucp.get_obj_from_msg(resp)
-            if type(frame) == memoryview:
-                if frame[:peek_bytes] == header_start:
-                    # we have a header. Let's see if
-                    # 1. We know the next frame's length (for fast recv)
-                    # 2. We know the next frame's memory destination (GPU or CPU).
-                    headers = msgpack.loads(frame, use_list=False)
-                    keys = headers[b'keys']
-                    for key in keys:
-                        header = headers[b'headers'][key]
-                        size = list(header.get(b'lengths', []))
-                        if size:
-                            size = size[::-1]
-                            if header.get(b'is_cuda', 0):
-                                gpu_inbound = int(header[b'is_cuda'])
-                            break
+            if should_peek(frame):
+                # we have a header. Let's see if
+                # 1. We know the next frame's length (for fast recv)
+                # 2. We know the next frame's memory destination (GPU or CPU).
+                sizes, gpu_inbound = peek(frame)
 
             frames.append(frame)
 
@@ -342,6 +332,31 @@ class UCXBackend(Backend):
         else:
             local_host = get_ip(host)
         return unparse_host_port(local_host, None)
+
+
+def should_peek(frame):
+    header_start = b'\x83\xa7headers'
+    peek_bytes = len(header_start)
+
+    return type(frame) == memoryview and frame[:peek_bytes] == header_start
+
+
+def peek(frame):
+    headers = msgpack.loads(frame, use_list=False)
+    keys = headers[b'keys']
+    sizes = []
+    gpu_inbound = 0
+
+    for key in keys:
+        header = headers[b'headers'][key]
+        sizes = list(header.get(b'lengths', []))
+        if sizes:
+            sizes = sizes[::-1]
+            if header.get(b'is_cuda', 0):
+                gpu_inbound = int(header[b'is_cuda'])
+            break
+
+    return sizes, gpu_inbound
 
 
 backends["ucx"] = UCXBackend()
