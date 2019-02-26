@@ -229,6 +229,7 @@ class UCXListener(Listener):
         self.deserialize = deserialize
         self.ep = None  # type: ucp.ucp_py_ep
         self.listener_instance = None  # type: ucp.ListenerFuture
+        self._task = None
 
         # XXX: The init may be required to take args like
         # {'require_encryption': None, 'ssl_context': None}
@@ -255,12 +256,14 @@ class UCXListener(Listener):
         except RuntimeError:
             loop = asyncio.get_event_loop()
 
-        # Does someone need to hold onto this task?
-        loop.create_task(server.coroutine)
+        t = loop.create_task(server.coroutine)
+        self._task = t
 
     def stop(self):
         # What all should this do?
-        # ucp.stop_listener(self.ep)  # do this here?
+        if self._task:
+            self._task.cancel()
+
         if self.ep:
             ucp.destroy_ep(self.ep)
         # if self.listener_instance:
