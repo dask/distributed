@@ -193,3 +193,40 @@ async def test_ping_pong_cupy(shape):
     cupy.testing.assert_array_equal(arr, data2)
     await com.close()
     await serv_com.close()
+
+
+@pytest.mark.asyncio
+async def test_ping_pong_numba():
+    numba = pytest.importorskip("numba")
+    numpy = pytest.importorskip("numpy")
+
+    import distributed.protocol.numba  # noqa
+    address = "{}:{}".format(HOST, next(port_counter))
+
+    arr = np.arange(10)
+    arr = numba.cuda.to_device(arr)
+
+    com, serv_com = await get_comm_pair(address)
+    msg = {"op": "ping", 'data': to_serialize(arr)}
+
+    await com.write(msg)
+    result = await serv_com.read()
+    data2 = result.pop('data')
+    assert result['op'] == 'ping'
+
+
+@pytest.mark.asyncio
+async def test_ping_pong_cudf():
+    cudf = pytest.importorskip("cudf")
+    import distributed.protocol.cudf  # noqa
+
+    df = cudf.DataFrame({"A": [1, 2, None], "B": [1., 2., None]})
+    address = "{}:{}".format(HOST, next(port_counter))
+
+    com, serv_com = await get_comm_pair(address)
+    msg = {"op": "ping", 'data': to_serialize(df)}
+
+    await com.write(msg)
+    result = await serv_com.read()
+    data2 = result.pop('data')
+    assert result['op'] == 'ping'

@@ -162,9 +162,11 @@ class UCX(Comm):
         gpu_inbound = 0
         size = []
 
+        # TODO: this multi-send for cudf broke things.
         for i in range(n_frames):
             if size:
                 this_size = size.pop()
+                print("this size", this_size)
                 # XXX: when do we get multiple keys here? Non-contiguous?
                 resp = await self.ep.recv_obj(this_size, cuda=bool(gpu_inbound))
                 # prepare for the next (header) recv
@@ -255,6 +257,7 @@ class UCXListener(Listener):
         # XXX: The init may be required to take args like
         # {'require_encryption': None, 'ssl_context': None}
         self.connection_args = connection_args
+        self._task = None
 
     def start(self):
         async def serve_forever(client_ep, listener_instance):
@@ -292,7 +295,7 @@ class UCXListener(Listener):
         if self.ep:
             ucp.destroy_ep(self.ep)
         # if self.listener_instance:
-        #     ucp.stop_listener(self.listener_instance)
+            # ucp.stop_listener(self.listener_instance)
 
     def get_host_port(self):
         # TODO: TCP raises if this hasn't started yet.
