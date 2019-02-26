@@ -246,10 +246,6 @@ class UCXListener(Listener):
                 await self.comm_handler(ucx)
 
         _ucp_init()
-        # Workaround for hanging test in
-        # pytest distributed/comm/tests/test_ucx.py::test_comm_objs -vs --count=2
-        # on the second time through.
-        ucp._libs.ucp_py.reader_added = 0
         # XXX: the port handling is probably incorrect.
         # need to figure out if `server_port=None` is
         # server_port=13337, or server_port="next free port"

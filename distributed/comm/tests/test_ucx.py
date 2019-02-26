@@ -3,6 +3,7 @@ import itertools
 
 import pytest
 import numpy as np
+import ucp_py as ucp
 
 from distributed.comm import ucx, listen, connect
 from distributed.comm.registry import backends, get_backend
@@ -43,6 +44,11 @@ async def get_comm_pair(listen_addr, listen_args=None, connect_args=None, **kwar
 
     async def handle_comm(comm):
         await q.put(comm)
+
+    # Workaround for hanging test in
+    # pytest distributed/comm/tests/test_ucx.py::test_comm_objs -vs --count=2
+    # on the second time through.
+    ucp._libs.ucp_py.reader_added = 0
 
     listener = listen(listen_addr, handle_comm, connection_args=listen_args, **kwargs)
     with listener:
