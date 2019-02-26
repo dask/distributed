@@ -3,9 +3,16 @@ from .serialize import dask_serialize, dask_deserialize
 from .numba import serialize_numba_ndarray, deserialize_numba_ndarray
 
 
+# TODO:
+# 1. Just use positions
+#    a. Fixes duplicate columns
+#    b. Fixes non-msgpack-serializable names
+# 2. cudf.Series
+# 3. Serialize the index
+
+
 @dask_serialize.register(cudf.DataFrame)
 def serialize_cudf_dataframe(x):
-    # TODO: does cudf support duplicate columns?
     sub_headers = []
     arrays = []
     null_masks = []
@@ -30,7 +37,9 @@ def serialize_cudf_dataframe(x):
         'lengths': [len(x)] * len(arrays),
         'is_cuda': len(arrays),
         'subheaders': sub_headers,
-        'columns': x.columns.tolist(),  # TODO: ugh...
+        # TODO: the header must be msgpack (de)serializable.
+        # See if we can avoid names, and just use integer positions.
+        'columns': x.columns.tolist(),
         'null_counts': null_counts,
         'null_subheaders': null_headers
     }
@@ -40,8 +49,6 @@ def serialize_cudf_dataframe(x):
 
 @dask_deserialize.register(cudf.DataFrame)
 def serialize_cudf_dataframe(header, frames):
-    # TODO: duplicate columns
-
     columns = header['columns']
     n_columns = len(header['columns'])
     n_masks = len(header['null_subheaders'])
