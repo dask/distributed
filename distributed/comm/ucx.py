@@ -100,6 +100,27 @@ class UCX(Comm):
         The address, prefixed with `ucx://` to use.
     deserialize : bool, default True
         Whether to deserialize data in :meth:`distributed.protocol.loads`
+
+    Notes
+    -----
+    The read-write cycle uses the following pattern:
+
+    Each msg is serialized into a number of "data" frames. We prepend these
+    real frames with two additional frames
+
+        1. is_gpu: Boolean indicator for whether the frame should be
+           received into GPU memory. Packed in '?' format. Unpack with
+           ``<n_frames>?`` format.
+        2. frame_size : Unisigned int describing the size of frame (in bytes)
+           to receive. Packed in 'Q' format, so a length-0 frame is equivalent
+           to an unsized frame. Unpacked with ``<n_frames>Q``.
+
+    The expected read cycle is
+
+    1. Read the frame describing number of frames
+    2. Read the frame describing whether each data frame is gpu-bound
+    3. Read the frame describing whether each data frame is sized
+    4. Read all the data frames.
     """
 
     def __init__(self, ep: ucp.ucp_py_ep,
@@ -132,7 +153,29 @@ class UCX(Comm):
         frames = await to_frames(
             msg, serializers=serializers, on_error=on_error
         )  # TODO: context=
+        gpu_frames = b''.join([struct.pack("?", hasattr(frame, '__cuda_array_interface__'))
+                               for frame in frames])
+
+        def sizeof(x):
+            # I don't think we want to use nbytes, since that falls back
+            # to sys.getsizeof.
+            attrs = set(dir(x))
+            if 'nbytes' in attrs:
+                nbytes = x.nbytes
+            elif {'size', 'dtype'} & attrs:
+                # numba
+                nbytes = x.dtype.itemsize * x.size
+            elif isinstance(x, bytes):
+                nbytes = len(x)
+            else:
+                nbytes = 0
+            return struct.pack('Q', nbytes)
+
+        n_data_frames = len(frames)
+        sized_frames = b''.join(sizeof(x) for x in frames)
+        frames = [gpu_frames] + [sized_frames] + frames
         nframes = struct.pack("Q", len(frames))
+
         await self.ep.send_obj(nframes)
 
         for frame in frames:
@@ -143,32 +186,24 @@ class UCX(Comm):
         resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
         n_frames, = struct.unpack("Q", obj)
+        n_data_frames = n_frames - 2
+
+        gpu_frame_msg = await self.ep.recv_future()
+        gpu_frame_msg = gpu_frame_msg.get_obj()
+        is_gpu = struct.unpack("{}?".format(n_data_frames), gpu_frame_msg)
+
+        sized_frame_msg = await self.ep.recv_future()
+        sized_frame_msg = sized_frame_msg.get_obj()
+        sizes = struct.unpack("{}Q".format(n_data_frames), sized_frame_msg)
 
         frames = []
-        # gpu_inbound and sizes are for seeing if we can
-        # 1. Take a fastpath to recv a known-length object
-        # 2. Take a fast-fastpath to recv into GPU memory.
-        # see peek for more.
-        gpu_inbound = 0
-        sizes = []
 
-        for i in range(n_frames):
-            if sizes:
-                this_size = sizes.pop()
-                # XXX: when do we get multiple keys here? Non-contiguous?
-                resp = await self.ep.recv_obj(this_size, cuda=bool(gpu_inbound))
-                # prepare for the next (header) recv
-                if gpu_inbound:
-                    gpu_inbound -= 1
+        for i, (is_gpu, size) in enumerate(zip(is_gpu, sizes)):
+            if size > 0:
+                resp = await self.ep.recv_obj(size, cuda=is_gpu)
             else:
                 resp = await self.ep.recv_future()
             frame = ucp.get_obj_from_msg(resp)
-            if should_peek(frame):
-                # we have a header. Let's see if
-                # 1. We know the next frame's length (for fast recv)
-                # 2. We know the next frame's memory destination (GPU or CPU).
-                sizes, gpu_inbound = peek(frame)
-
             frames.append(frame)
 
         msg = await from_frames(
@@ -316,53 +351,6 @@ class UCXBackend(Backend):
         else:
             local_host = get_ip(host)
         return unparse_host_port(local_host, None)
-
-
-def should_peek(frame):
-    header_start = b'\x83\xa7headers'
-    peek_bytes = len(header_start)
-
-    return type(frame) == memoryview and frame[:peek_bytes] == header_start
-
-
-def peek(frame):
-    """
-    Inspect a header for whether we can take a faster recv-path.
-
-    Parameters
-    ----------
-    frame : memoryview
-        The header frame to inspect.
-
-    Returns
-    -------
-    sizes : list
-        List of the next sided :meth:`recv_obj` receives to perform.
-        The recevies should be performed last to first, so use
-        :func:`list.pop` to get the next receive.
-    gpu_inbound : int
-        The number of GPU recvies to do. Decrement this to get
-        back to regular recvs.
-
-    See Also
-    --------
-    should_peek : check whether it's appropriate to peek.
-    """
-    headers = msgpack.loads(frame, use_list=False)
-    keys = headers[b'keys']
-    sizes = []
-    gpu_inbound = 0
-
-    for key in keys:
-        header = headers[b'headers'][key]
-        sizes = list(header.get(b'lengths', []))
-        if sizes:
-            sizes = sizes[::-1]
-            if header.get(b'is_cuda', 0):
-                gpu_inbound = int(header[b'is_cuda'])
-            break
-
-    return sizes, gpu_inbound
 
 
 backends["ucx"] = UCXBackend()
