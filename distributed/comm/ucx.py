@@ -155,25 +155,9 @@ class UCX(Comm):
         )  # TODO: context=
         gpu_frames = b''.join([struct.pack("?", hasattr(frame, '__cuda_array_interface__'))
                                for frame in frames])
+        size_frames = b''.join([struct.pack("Q", nbytes(frame)) for frame in frames])
 
-        def sizeof(x):
-            # I don't think we want to use nbytes, since that falls back
-            # to sys.getsizeof.
-            attrs = set(dir(x))
-            if 'nbytes' in attrs:
-                nbytes = x.nbytes
-            elif {'size', 'dtype'} & attrs:
-                # numba
-                nbytes = x.dtype.itemsize * x.size
-            elif isinstance(x, bytes):
-                nbytes = len(x)
-            else:
-                nbytes = 0
-            return struct.pack('Q', nbytes)
-
-        n_data_frames = len(frames)
-        sized_frames = b''.join(sizeof(x) for x in frames)
-        frames = [gpu_frames] + [sized_frames] + frames
+        frames = [gpu_frames] + [size_frames] + frames
         nframes = struct.pack("Q", len(frames))
 
         await self.ep.send_obj(nframes)
