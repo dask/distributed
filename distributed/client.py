@@ -26,6 +26,7 @@ import weakref
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
+from dask.optimization import SubgraphCallable
 from dask.compatibility import apply, unicode
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
@@ -572,6 +573,20 @@ class Client(Node):
         else:
             self.connection_args = self.security.get_connection_args('client')
 
+        if address is None:
+            address = dask.config.get('scheduler-address', None)
+            if address:
+                logger.info("Config value `scheduler-address` found: %s",
+                            address)
+
+        if isinstance(address, (rpc, PooledRPCCall)):
+            self.scheduler = address
+        elif hasattr(address, "scheduler_address"):
+            # It's a LocalCluster or LocalCluster-compatible object
+            self.cluster = address
+            with ignoring(AttributeError):
+                loop = address.loop
+
         self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
         self._should_close_loop = not loop
@@ -591,18 +606,6 @@ class Client(Node):
                 heartbeat_interval * 1000,
                 io_loop=self.loop
         )
-
-        if address is None:
-            address = dask.config.get('scheduler-address', None)
-            if address:
-                logger.info("Config value `scheduler-address` found: %s",
-                            address)
-
-        if isinstance(address, (rpc, PooledRPCCall)):
-            self.scheduler = address
-        elif hasattr(address, "scheduler_address"):
-            # It's a LocalCluster or LocalCluster-compatible object
-            self.cluster = address
 
         self._start_arg = address
         if set_as_default:
@@ -771,7 +774,7 @@ class Client(Node):
         if self.status in ('running', 'closing'):
             try:
                 self.scheduler_comm.send(msg)
-            except CommClosedError:
+            except (CommClosedError, AttributeError):
                 if self.status == 'running':
                     raise
         elif self.status in ('connecting', 'newly-created'):
@@ -2975,7 +2978,8 @@ class Client(Node):
             keys += list(map(tokey, {f.key for f in futures}))
         return self.sync(self.scheduler.call_stack, keys=keys or None)
 
-    def profile(self, key=None, start=None, stop=None, workers=None, merge_workers=True):
+    def profile(self, key=None, start=None, stop=None, workers=None,
+                merge_workers=True, plot=False, filename=None):
         """ Collect statistical profiling information about recent work
 
         Parameters
@@ -2987,16 +2991,49 @@ class Client(Node):
         stop: time
         workers: list
             List of workers to restrict profile information
+        plot: boolean or string
+            Whether or not to return a plot object
+        filename: str
+            Filename to save the plot
 
         Examples
         --------
         >>> client.profile()  # call on collections
+        >>> client.profile(filename='dask-profile.html')  # save to html file
         """
         if isinstance(workers, six.string_types + (Number,)):
             workers = [workers]
 
-        return self.sync(self.scheduler.profile, key=key, workers=workers,
-                         merge_workers=merge_workers, start=start, stop=stop)
+        return self.sync(self._profile, key=key, workers=workers,
+                         merge_workers=merge_workers, start=start, stop=stop,
+                         plot=plot, filename=filename)
+
+    @gen.coroutine
+    def _profile(self, key=None, start=None, stop=None, workers=None,
+                 merge_workers=True, plot=False, filename=None):
+        if isinstance(workers, six.string_types + (Number,)):
+            workers = [workers]
+
+        state = yield self.scheduler.profile(key=key, workers=workers,
+                merge_workers=merge_workers, start=start, stop=stop)
+
+        if filename:
+            plot = True
+
+        if plot:
+            from . import profile
+            data = profile.plot_data(state)
+            figure, source = profile.plot_figure(data, sizing_mode='stretch_both')
+
+            if plot == 'save' and not filename:
+                filename = 'dask-profile.html'
+
+            from bokeh.plotting import save
+            save(figure, title='Dask Profile', filename=filename)
+            raise gen.Return((state, figure))
+
+        else:
+            raise gen.Return(state)
 
     def scheduler_info(self, **kwargs):
         """ Basic information about the workers in the cluster
@@ -3928,11 +3965,13 @@ def futures_of(o, client=None):
         x = stack.pop()
         if type(x) in (tuple, set, list):
             stack.extend(x)
-        if type(x) is dict:
+        elif type(x) is dict:
             stack.extend(x.values())
-        if isinstance(x, Future):
+        elif type(x) is SubgraphCallable:
+            stack.extend(x.dsk.values())
+        elif isinstance(x, Future):
             futures.add(x)
-        if dask.is_dask_collection(x):
+        elif dask.is_dask_collection(x):
             stack.extend(x.__dask_graph__().values())
 
     if client is not None:

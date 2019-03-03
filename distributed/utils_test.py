@@ -136,7 +136,7 @@ def loop():
     start = time()
     while set(_global_clients):
         sleep(0.1)
-        assert time() < start + 5
+        assert time() < start + 10
 
     _cleanup_dangling()
 
@@ -871,7 +871,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                                         Worker=Worker, scheduler_kwargs=scheduler_kwargs,
                                         worker_kwargs=worker_kwargs)
                                 except Exception as e:
-                                    logger.error("Failed to start gen_cluster, retryng", exc_info=True)
+                                    logger.error("Failed to start gen_cluster, retrying", exc_info=True)
                                 else:
                                     workers[:] = ws
                                     args = [s] + workers
@@ -931,7 +931,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                     bad = [t for t, v in threading._active.items()
                            if t not in active_threads_start and
                           "Threaded" not in v.name and
-                          "watch message" not in v.name]
+                          "watch message" not in v.name and
+                          "TCP-Executor" not in v.name]
                     if not bad:
                         break
                     else:

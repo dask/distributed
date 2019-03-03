@@ -1,6 +1,47 @@
 Changelog
 =========
 
+1.26.0 - 2019-02-25
+-------------------
+
+-  Update style to fix recent flake8 update (#2500) (#2509) `Matthew Rocklin`_
+-  Fix typo in gen_cluster log message (#2503) `Loïc Estève`_
+-  Allow KeyError when closing event loop (#2498) `Matthew Rocklin`_
+-  Avoid thread testing for TCP ThreadPoolExecutor (#2510) `Matthew Rocklin`_
+-  Find Futures inside SubgraphCallable (#2505) `Jim Crist`_
+-  Avoid AttributeError when closing and sending a message (#2514) `Matthew Rocklin`_
+-  Add deprecation warning to dask_mpi.py (#2522) `jukent`_
+-  Relax statistical profiling test (#2527) `Matthew Rocklin`_
+-  Support alternative --remote-dask-worker SSHCluster() and dask-ssh CLI (#2526) `Adam Beberg`_
+-  Iterate over full list of plugins in transition (#2518) `Matthew Rocklin`_
+-  Create Prometheus Endpoint (#2499) `Adam Beberg`_
+-  Use pytest.importorskip for prometheus test (#2533) `Matthew Rocklin`_
+-  MAINT skip prometheus test when no installed (#2534) `Olivier Grisel`_
+-  Fix intermittent testing failures (#2535) `Matthew Rocklin`_
+-  Avoid using nprocs keyword in dask-ssh if set to one (#2531)  `Matthew Rocklin`_
+-  Bump minimum Tornado version to 5.0
+
+
+1.25.3 - 2019-01-31
+-------------------
+
+-  Fix excess threading on missing connections (:pr:`2403`) `Daniel Farrell`_
+-  Fix typo in doc (:pr:`2457`) `Loïc Estève`_
+-  Start fewer but larger workers with LocalCluster (:pr:`2452`) `Matthew Rocklin`_
+-  Check for non-zero ``length`` first in ``read`` loop (:pr:`2465`) `John Kirkham`_
+-  DOC: Use of local cluster in script (:pr:`2462`) `Peter Killick`_
+-  DOC/API: Signature for base class write / read (:pr:`2472`) `Tom Augspurger`_
+-  Support Pytest 4 in Tests (:pr:`2478`) `Adam Beberg`_
+-  Ensure async behavior in event loop with LocalCluster (:pr:`2484`) `Matthew Rocklin`_
+-  Fix spurious CancelledError (:pr:`2485`) `Loïc Estève`_
+-  Properly reset dask.config scheduler and shuffle when closing the client (:pr:`2475`) `George Sakkis`_
+-  Make it more explict that resources are per worker. (:pr:`2470`) `Loïc Estève`_
+-  Remove references to center (:pr:`2488`)  `Matthew Rocklin`_
+-  Expand client clearing timeout to 10s in testing (:pr:`2493`) `Matthew Rocklin`_
+-  Propagate key keyword in progressbar (:pr:`2492`) `Matthew Rocklin`_
+-  Use provided cluster's IOLoop if present in Client (:pr:`2494`) `Matthew Rocklin`_
+
+
 1.25.2 - 2019-01-04
 -------------------
 
@@ -897,3 +938,6 @@ significantly without many new features.
 .. _`Stephan Hoyer`: https://github.com/shoyer
 .. _`tjb900`: https://github.com/tjb900
 .. _`Dirk Petersen`: https://github.com/dirkpetersen
+.. _`Daniel Farrell`: https://github.com/danpf
+.. _`George Sakkis`: https://github.com/gsakkis
+.. _`Adam Beberg`: https://github.com/beberg

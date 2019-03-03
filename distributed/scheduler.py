@@ -97,7 +97,6 @@ class ClientState(object):
        collection) gets garbage-collected.
 
     """
-
     __slots__ = (
         'client_key',
         'wants_what',
@@ -764,7 +763,6 @@ class Scheduler(ServerNode):
 
     def __init__(
             self,
-            center=None,
             loop=None,
             delete_interval='500ms',
             synchronize_worker_interval='60s',
@@ -3956,7 +3954,7 @@ class Scheduler(ServerNode):
                     except KeyError:
                         pass
                     self.tasks[ts.key] = ts
-                for plugin in self.plugins:
+                for plugin in list(self.plugins):
                     try:
                         plugin.transition(key, start, finish2, *args, **kwargs)
                     except Exception:

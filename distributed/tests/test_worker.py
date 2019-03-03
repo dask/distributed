@@ -1005,25 +1005,32 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
-@gen_cluster(ncores=[('127.0.0.1', 2)], client=True,
-             worker_kwargs={'memory_monitor_interval': 10},
+@gen_cluster(ncores=[('127.0.0.1', 2)],
+             client=True,
+             worker_kwargs={'memory_monitor_interval': 10,
+                            'memory_spill_fraction': False,  # don't spill
+                            'memory_target_fraction': False,
+                            'memory_pause_fraction': 0.5},
              timeout=20)
 def test_pause_executor(c, s, a):
     memory = psutil.Process().memory_info().rss
-    a.memory_limit = memory / 0.8 + 200e6
+    a.memory_limit = memory / 0.5 + 200e6
     np = pytest.importorskip('numpy')
 
     def f():
-        x = np.ones(int(300e6), dtype='u1')
+        x = np.ones(int(400e6), dtype='u1')
         sleep(1)
 
     with captured_logger(logging.getLogger('distributed.worker')) as logger:
         future = c.submit(f)
-        futures = c.map(slowinc, range(10), delay=0.1)
+        futures = c.map(slowinc, range(30), delay=0.1)
 
-        yield gen.sleep(0.3)
-        assert a.paused, (format_bytes(psutil.Process().memory_info().rss),
-                          format_bytes(a.memory_limit))
+        start = time()
+        while not a.paused:
+            yield gen.sleep(0.01)
+            assert time() < start + 4,  (format_bytes(psutil.Process().memory_info().rss),
+                                         format_bytes(a.memory_limit),
+                                         len(a.data))
         out = logger.getvalue()
         assert 'memory' in out.lower()
         assert 'pausing' in out.lower()
@@ -1033,7 +1040,7 @@ def test_pause_executor(c, s, a):
     yield wait(futures)
 
 
-@gen_cluster(client=True, worker_kwargs={'profile_cycle_interval': 100})
+@gen_cluster(client=True, worker_kwargs={'profile_cycle_interval': '50 ms'})
 def test_statistical_profiling_cycle(c, s, a, b):
     futures = c.map(slowinc, range(20), delay=0.05)
     yield wait(futures)
@@ -1045,7 +1052,9 @@ def test_statistical_profiling_cycle(c, s, a, b):
     assert not x['count']
 
     x = a.get_profile(start=0, stop=time())
-    assert x['count'] == sum(p['count'] for _, p in a.profile_history) + a.profile_recent['count']
+    actual = sum(p['count'] for _, p in a.profile_history) + a.profile_recent['count']
+    x2 = a.get_profile(start=0, stop=time())
+    assert x['count'] <= actual <= x2['count']
 
     y = a.get_profile(start=end - 0.300, stop=time())
     assert 0 < y['count'] <= x['count']

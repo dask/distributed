@@ -829,7 +829,10 @@ class Worker(ServerNode):
 
             disable_gc_diagnosis()
 
-            logger.info("Stopping worker at %s", self.address)
+            try:
+                logger.info("Stopping worker at %s", self.address)
+            except ValueError:  # address not available if already closed
+                logger.info("Stopping worker")
             self.status = 'closing'
             setproctitle("dask-worker [closing]")
 
@@ -2627,11 +2630,11 @@ class Reschedule(Exception):
     pass
 
 
-def parse_memory_limit(memory_limit, ncores):
+def parse_memory_limit(memory_limit, ncores, total_cores=_ncores):
     if memory_limit is None:
         return None
     if memory_limit == 'auto':
-        memory_limit = int(TOTAL_MEMORY * min(1, ncores / _ncores))
+        memory_limit = int(TOTAL_MEMORY * min(1, ncores / total_cores))
     with ignoring(ValueError, TypeError):
         x = float(memory_limit)
         if isinstance(x, float) and x <= 1:
