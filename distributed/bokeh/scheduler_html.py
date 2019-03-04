@@ -170,13 +170,13 @@ class _PrometheusCollector(object):
 
     def collect(self):
         yield self.prometheus_client.core.GaugeMetricFamily(
-            'scheduler_workers_total',
-            'Total number of workers.',
+            'dask_scheduler_workers',
+            'Number of workers.',
             value=len(self.server.workers),
         )
         yield self.prometheus_client.core.GaugeMetricFamily(
-            'scheduler_clients_total',
-            'Total number of clients.',
+            'dask_scheduler_clients',
+            'Number of clients.',
             value=len(self.server.clients),
         )
 

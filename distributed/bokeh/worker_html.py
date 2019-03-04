@@ -28,8 +28,8 @@ class _PrometheusCollector(object):
         #
         # 2. yield your metrics
         #     yield self.prometheus_client.core.GaugeMetricFamily(
-        #         'worker_connections_total',
-        #         'Total number of connections currently open.',
+        #         'dask_worker_connections',
+        #         'Number of connections currently open.',
         #         value=???,
         #     )
 
