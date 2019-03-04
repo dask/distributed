@@ -207,6 +207,7 @@ class PrometheusHandler(RequestHandler):
 
     def get(self):
         self.write(self.prometheus_client.generate_latest())
+        self.set_header('Content-Type', 'text/plain; version=0.0.4')
 
 
 routes = [
