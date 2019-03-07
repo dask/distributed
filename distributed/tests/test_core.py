@@ -11,7 +11,7 @@ import pytest
 import dask
 from distributed.compatibility import finalize, get_thread_identity
 from distributed.core import (pingpong, Server, rpc, connect, send_recv,
-                               coerce_to_address, ConnectionPool)
+                               coerce_to_address, ConnectionPool, CommClosedError)
 from distributed.protocol.compression import compressions
 
 from distributed.metrics import time
@@ -94,6 +94,22 @@ def test_server(loop):
         server.stop()
 
     loop.run_sync(f)
+
+
+def test_server_raises_on_blocked_handlers(loop):
+    @gen.coroutine
+    def f():
+        server = Server({'ping': pingpong}, blocked_handlers=['ping'])
+        server.listen(8881)
+
+        comm = yield connect(server.address)
+        yield comm.write({'op': 'ping'})
+        with pytest.raises(CommClosedError):
+            msg = yield comm.read()
+
+        server.stop()
+
+    res = loop.run_sync(f)
 
 
 class MyServer(Server):

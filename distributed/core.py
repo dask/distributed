@@ -89,13 +89,14 @@ class Server(object):
     default_ip = ''
     default_port = 0
 
-    def __init__(self, handlers, stream_handlers=None, connection_limit=512,
+    def __init__(self, handlers, blocked_handlers=None, stream_handlers=None, connection_limit=512,
                  deserialize=True, io_loop=None):
         self.handlers = {
             'identity': self.identity,
             'connection_stream': self.handle_stream,
         }
         self.handlers.update(handlers)
+        self.blocked_handlers = blocked_handlers or []
         self.stream_handlers = {}
         self.stream_handlers.update(stream_handlers or {})
 
@@ -312,6 +313,9 @@ class Server(object):
 
                 try:
                     op = msg.pop('op')
+                    if op in self.blocked_handlers:
+                        msg = "The {op} handler has been explicitly disallowed in {obj}, possibly due to security concerns."
+                        raise ValueError(msg.format(op=op, obj=type(self).__name__))
                 except KeyError:
                     raise ValueError(
                         "Received unexpected message without 'op' key: " %
