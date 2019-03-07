@@ -314,7 +314,7 @@ class Server(object):
                 try:
                     op = msg.pop('op')
                     if op in self.blocked_handlers:
-                        msg = "The {op} handler has been explicitly disallowed in {obj}, possibly due to security concerns."
+                        msg = "The '{op}' handler has been explicitly disallowed in {obj}, possibly due to security concerns."
                         raise ValueError(msg.format(op=op, obj=type(self).__name__))
                 except KeyError:
                     raise ValueError(

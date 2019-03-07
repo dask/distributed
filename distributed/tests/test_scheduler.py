@@ -16,7 +16,7 @@ from tornado import gen
 import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
-from distributed.core import connect, rpc
+from distributed.core import connect, rpc, CommClosedError
 from distributed.scheduler import Scheduler, BANDWIDTH
 from distributed.client import wait
 from distributed.metrics import time
@@ -250,6 +250,22 @@ def test_add_worker(s, a, b):
     assert w.ip in s.host_info
     assert s.host_info[w.ip]['addresses'] == {a.address, b.address, w.address}
     yield w._close()
+
+
+@gen_cluster(scheduler_kwargs={'blocked_handlers': ['feed']})
+def test_blocked_handlers_is_respected(s, a, b):
+    def func(scheduler):
+        return dumps(dict(scheduler.worker_info))
+
+    comm = yield connect(s.address)
+    yield comm.write({'op': 'feed',
+                      'function': dumps(func),
+                      'interval': 0.01})
+
+    with pytest.raises(CommClosedError):
+        response = yield comm.read()
+
+    yield comm.close()
 
 
 @gen_cluster()
