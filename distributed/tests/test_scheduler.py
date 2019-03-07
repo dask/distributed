@@ -253,7 +253,7 @@ def test_add_worker(s, a, b):
 
 
 @gen_cluster(scheduler_kwargs={'blocked_handlers': ['feed']})
-def test_blocked_handlers_is_respected(s, a, b):
+def test_blocked_handlers_are_respected(s, a, b):
     def func(scheduler):
         return dumps(dict(scheduler.worker_info))
 

@@ -14,6 +14,7 @@ from tornado import gen
 import pytest
 
 from distributed import Client, Worker, Nanny
+from distributed.core import CommClosedError
 from distributed.deploy.local import LocalCluster, nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils_test import (inc, gen_test, slowinc,
@@ -39,6 +40,13 @@ def test_simple(loop):
             assert any(w.data == {x.key: 2} for w in c.workers)
 
             assert e.loop is c.loop
+
+
+def test_local_cluster_supports_blocked_handlers(loop):
+    with LocalCluster(blocked_handlers=['run_function'], loop=loop) as c:
+        with Client(c) as client:
+            with pytest.raises(CommClosedError):
+                client.run_on_scheduler(lambda x: x, 42)
 
 
 @pytest.mark.skipif('sys.version_info[0] == 2', reason='fork issues')
