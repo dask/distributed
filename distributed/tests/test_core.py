@@ -104,9 +104,13 @@ def test_server_raises_on_blocked_handlers(loop):
 
         comm = yield connect(server.address)
         yield comm.write({'op': 'ping'})
-        with pytest.raises(CommClosedError):
-            msg = yield comm.read()
+        msg = yield comm.read()
 
+        assert 'exception' in msg
+        assert isinstance(msg['exception'], ValueError)
+        assert "'ping' handler has been explicitly disallowed" in repr(msg['exception'])
+
+        comm.close()
         server.stop()
 
     res = loop.run_sync(f)

@@ -262,8 +262,11 @@ def test_blocked_handlers_are_respected(s, a, b):
                       'function': dumps(func),
                       'interval': 0.01})
 
-    with pytest.raises(CommClosedError):
-        response = yield comm.read()
+    response = yield comm.read()
+
+    assert 'exception' in response
+    assert isinstance(response['exception'], ValueError)
+    assert "'feed' handler has been explicitly disallowed" in repr(response['exception'])
 
     yield comm.close()
 

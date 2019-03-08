@@ -43,6 +43,12 @@ def get_total_physical_memory():
         return 2e9
 
 
+def raise_later(exc):
+    def _raise(*args, **kwargs):
+        raise exc
+    return _raise
+
+
 MAX_BUFFER_SIZE = get_total_physical_memory()
 
 tick_maximum_delay = parse_timedelta(dask.config.get('distributed.admin.tick.limit'), default='ms')
@@ -313,9 +319,6 @@ class Server(object):
 
                 try:
                     op = msg.pop('op')
-                    if op in self.blocked_handlers:
-                        msg = "The '{op}' handler has been explicitly disallowed in {obj}, possibly due to security concerns."
-                        raise ValueError(msg.format(op=op, obj=type(self).__name__))
                 except KeyError:
                     raise ValueError(
                         "Received unexpected message without 'op' key: " %
@@ -334,7 +337,12 @@ class Server(object):
 
                 result = None
                 try:
-                    handler = self.handlers[op]
+                    if op in self.blocked_handlers:
+                        _msg = "The '{op}' handler has been explicitly disallowed in {obj}, possibly due to security concerns."
+                        exc = ValueError(_msg.format(op=op, obj=type(self).__name__))
+                        handler = raise_later(exc)
+                    else:
+                        handler = self.handlers[op]
                 except KeyError:
                     logger.warning("No handler %s found in %s", op,
                                    type(self).__name__, exc_info=True)

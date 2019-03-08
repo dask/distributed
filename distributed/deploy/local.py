@@ -56,7 +56,7 @@ class LocalCluster(Cluster):
         Extra worker arguments, will be passed to the Worker constructor.
     blocked_handlers: List[str]
         A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
-        e.g., ``['feed', 'run_function']``
+        like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
     security : Security
