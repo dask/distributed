@@ -338,7 +338,8 @@ class Server(object):
                 result = None
                 try:
                     if op in self.blocked_handlers:
-                        _msg = "The '{op}' handler has been explicitly disallowed in {obj}, possibly due to security concerns."
+                        _msg = ("The '{op}' handler has been explicitly disallowed "
+                                "in {obj}, possibly due to security concerns.")
                         exc = ValueError(_msg.format(op=op, obj=type(self).__name__))
                         handler = raise_later(exc)
                     else:
