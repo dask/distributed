@@ -11,7 +11,7 @@ import pytest
 import dask
 from distributed.compatibility import finalize, get_thread_identity
 from distributed.core import (pingpong, Server, rpc, connect, send_recv,
-                               coerce_to_address, ConnectionPool, CommClosedError)
+                               coerce_to_address, ConnectionPool)
 from distributed.protocol.compression import compressions
 
 from distributed.metrics import time

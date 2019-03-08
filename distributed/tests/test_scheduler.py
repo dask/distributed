@@ -16,7 +16,7 @@ from tornado import gen
 import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
-from distributed.core import connect, rpc, CommClosedError
+from distributed.core import connect, rpc
 from distributed.scheduler import Scheduler, BANDWIDTH
 from distributed.client import wait
 from distributed.metrics import time
