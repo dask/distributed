@@ -102,7 +102,9 @@ class Server(object):
             'connection_stream': self.handle_stream,
         }
         self.handlers.update(handlers)
-        self.blocked_handlers = blocked_handlers or []
+        if blocked_handlers is None:
+            blocked_handlers = dask.config.get('distributed.%s.blocked-handlers' % type(self).lower(), [])
+        self.blocked_handlers = blocked_handlers
         self.stream_handlers = {}
         self.stream_handlers.update(stream_handlers or {})
 
