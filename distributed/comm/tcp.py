@@ -21,13 +21,13 @@ from tornado.tcpserver import TCPServer
 from ..compatibility import finalize, PY3
 from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes,
-                     parse_timedelta, shutting_down)
+                     parse_timedelta, shutting_down, iscoroutinefunction)
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedError
 from .utils import (to_frames, from_frames,
-                    get_tcp_server_address, ensure_concrete_host)
+                    get_tcp_server_address, ensure_concrete_host,)
 
 
 logger = logging.getLogger(__name__)
@@ -433,7 +433,9 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
                      address, self.contact_address)
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)
-        self.comm_handler(comm)
+        maybe_coro = self.comm_handler(comm)
+        if iscoroutinefunction(self.comm_handler):
+            yield maybe_coro
 
     def get_host_port(self):
         """
