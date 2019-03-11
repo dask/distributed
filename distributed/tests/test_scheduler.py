@@ -271,6 +271,12 @@ def test_blocked_handlers_are_respected(s, a, b):
     yield comm.close()
 
 
+def test_scheduler_init_pulls_blocked_handlers_from_config():
+    with dask.config.set({'distributed.scheduler.blocked-handlers': ['test-handler']}):
+        s = Scheduler()
+    assert s.blocked_handlers == ['test-handler']
+
+
 @gen_cluster()
 def test_feed(s, a, b):
     def func(scheduler):
