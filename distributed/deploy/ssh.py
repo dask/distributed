@@ -295,7 +295,8 @@ class SSHCluster(object):
         self.memory_limit = memory_limit
         self.worker_port = worker_port
         self.nanny_port = nanny_port
-        self.remote_dask_worker = remote_dask_worker
+        if remote_dask_worker is None:
+            self.remote_dask_worker = 'distributed.cli.dask_worker'
 
         # Generate a universal timestamp to use for log files
         import datetime
