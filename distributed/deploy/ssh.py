@@ -297,8 +297,6 @@ class SSHCluster(object):
         self.nanny_port = nanny_port
         if remote_dask_worker is None:
             self.remote_dask_worker = 'distributed.cli.dask_worker'
-        else:
-            self.remote_dask_worker = remote_dask_worker
 
         # Generate a universal timestamp to use for log files
         import datetime
