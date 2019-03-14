@@ -52,6 +52,9 @@ from distributed.cli.utils import check_python_3
 @click.pass_context
 def main(ctx, scheduler, scheduler_port, hostnames, hostfile, log_directory, **kwargs):
 
+    if kwargs.get("remote_dask_worker") is None:
+        kwargs.pop("remote_dask_worker")
+
     try:
         hostnames = list(hostnames)
         if hostfile:
