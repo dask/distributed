@@ -50,7 +50,7 @@ from distributed.cli.utils import check_python_3
 @click.option('--remote-dask-worker', default=None, type=str,
               help="Worker to run. Defaults to distributed.cli.dask_worker")
 @click.pass_context
-def main(ctx, scheduler, scheduler_port, hostnames, hostfile, **kwargs):
+def main(ctx, scheduler, scheduler_port, hostnames, hostfile, log_directory, **kwargs):
 
     try:
         hostnames = list(hostnames)
@@ -66,7 +66,7 @@ def main(ctx, scheduler, scheduler_port, hostnames, hostfile, **kwargs):
         print(ctx.get_help())
         exit(1)
 
-    c = SSHCluster(scheduler, scheduler_port, hostnames, **kwargs)
+    c = SSHCluster(scheduler, scheduler_port, hostnames, logdir=log_directory, **kwargs)
 
     import distributed
     print('\n---------------------------------------------------------------')
