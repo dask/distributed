@@ -539,5 +539,5 @@ def test_warn_on_duration():
         with warn_on_duration('1ms', 'foo'):
             sleep(0.100)
 
-    assert len(record) == 1
+    assert len(record) == 1, record
     assert 'foo' in str(record[0].message)
