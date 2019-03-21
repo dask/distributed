@@ -19,14 +19,15 @@ from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
 from ..compatibility import finalize, PY3
+from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import (ensure_bytes, ensure_ip, get_ip, get_ipv6, nbytes,
                      parse_timedelta, shutting_down)
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, Connector, Listener, CommClosedError
+from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedError
 from .utils import (to_frames, from_frames,
-                    get_tcp_server_address, ensure_concrete_host)
+                    get_tcp_server_address, ensure_concrete_host,)
 
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,9 @@ def convert_stream_closed_error(obj, exc):
     if exc.real_error is not None:
         # The stream was closed because of an underlying OS error
         exc = exc.real_error
+        if ssl and isinstance(exc, ssl.SSLError):
+            if 'UNKNOWN_CA' in exc.reason:
+                raise FatalCommClosedError("in %s: %s: %s" % (obj, exc.__class__.__name__, exc))
         raise CommClosedError("in %s: %s: %s" % (obj, exc.__class__.__name__, exc))
     else:
         raise CommClosedError("in %s: %s" % (obj, exc))
@@ -181,16 +185,15 @@ class TCP(Comm):
 
             frames = []
             for length in lengths:
-                if PY3 and self._iostream_has_read_into:
-                    frame = bytearray(length)
-                    if length:
+                if length:
+                    if PY3 and self._iostream_has_read_into:
+                        frame = bytearray(length)
                         n = yield stream.read_into(frame)
                         assert n == length, (n, length)
-                else:
-                    if length:
-                        frame = yield stream.read_bytes(length)
                     else:
-                        frame = b''
+                        frame = yield stream.read_bytes(length)
+                else:
+                    frame = b''
                 frames.append(frame)
         except StreamClosedError as e:
             self.stream = None
@@ -301,7 +304,8 @@ def _expect_tls_context(connection_args):
     ctx = connection_args.get('ssl_context')
     if not isinstance(ctx, ssl.SSLContext):
         raise TypeError("TLS expects a `ssl_context` argument of type "
-                        "ssl.SSLContext (perhaps check your TLS configuration?)")
+                        "ssl.SSLContext (perhaps check your TLS configuration?)"
+                        "  Instead got %s" % str(ctx))
     return ctx
 
 
@@ -316,6 +320,13 @@ class RequireEncryptionMixin(object):
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
+    if PY3:  # see github PR #2403 discussion for more info
+        _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
+        _resolver = netutil.ExecutorResolver(close_executor=False,
+                                             executor=_executor)
+    else:
+        _resolver = None
+    client = TCPClient(resolver=_resolver)
 
     @gen.coroutine
     def connect(self, address, deserialize=True, **connection_args):
@@ -323,11 +334,18 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         ip, port = parse_host_port(address)
         kwargs = self._get_connect_args(**connection_args)
 
-        client = TCPClient()
         try:
-            stream = yield client.connect(ip, port,
+            stream = yield BaseTCPConnector.client.connect(ip, port,
                                           max_buffer_size=MAX_BUFFER_SIZE,
                                           **kwargs)
+
+            # Under certain circumstances tornado will have a closed connnection with an error and not raise
+            # a StreamClosedError.
+            #
+            # This occurs with tornado 5.x and openssl 1.1+
+            if stream.closed() and stream.error:
+                raise StreamClosedError(stream.error)
+
         except StreamClosedError as e:
             # The socket connect() call failed
             convert_stream_closed_error(self, e)
@@ -415,7 +433,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
                      address, self.contact_address)
         local_address = self.prefix + get_stream_address(stream)
         comm = self.comm_class(stream, local_address, address, self.deserialize)
-        self.comm_handler(comm)
+        yield self.comm_handler(comm)
 
     def get_host_port(self):
         """

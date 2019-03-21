@@ -14,7 +14,7 @@ from tornado import gen
 import pytest
 
 from distributed import Client, Worker, Nanny
-from distributed.deploy.local import LocalCluster
+from distributed.deploy.local import LocalCluster, nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils_test import (inc, gen_test, slowinc,
                                     assert_cannot_connect,
@@ -32,11 +32,22 @@ from distributed.deploy.utils_test import ClusterTest
 def test_simple(loop):
     with LocalCluster(4, scheduler_port=0, processes=False, silence_logs=False,
                       diagnostics_port=None, loop=loop) as c:
-        with Client(c.scheduler_address, loop=loop) as e:
+        with Client(c) as e:
             x = e.submit(inc, 1)
             x.result()
             assert x.key in c.scheduler.tasks
             assert any(w.data == {x.key: 2} for w in c.workers)
+
+            assert e.loop is c.loop
+
+
+def test_local_cluster_supports_blocked_handlers(loop):
+    with LocalCluster(blocked_handlers=['run_function'], loop=loop) as c:
+        with Client(c) as client:
+            with pytest.raises(ValueError) as exc:
+                client.run_on_scheduler(lambda x: x, 42)
+
+    assert "'run_function' handler has been explicitly disallowed in Scheduler" in str(exc.value)
 
 
 @pytest.mark.skipif('sys.version_info[0] == 2', reason='fork issues')
@@ -50,7 +61,6 @@ def test_close_twice():
             cluster.close()
             sleep(0.5)
         log = log.getvalue()
-        print(log)
         assert not log
 
 
@@ -132,7 +142,7 @@ class LocalTest(ClusterTest, unittest.TestCase):
 def test_Client_with_local(loop):
     with LocalCluster(1, scheduler_port=0, silence_logs=False,
                       diagnostics_port=None, loop=loop) as c:
-        with Client(c, loop=loop) as e:
+        with Client(c) as e:
             assert len(e.ncores()) == len(c.workers)
             assert c.scheduler_address in repr(c)
 
@@ -145,6 +155,7 @@ def test_Client_solo(loop):
 
 @gen_test()
 def test_duplicate_clients():
+    pytest.importorskip('bokeh')
     c1 = yield Client(processes=False, silence_logs=False, diagnostics_port=9876)
     with pytest.warns(Exception) as info:
         c2 = yield Client(processes=False, silence_logs=False, diagnostics_port=9876)
@@ -245,7 +256,7 @@ def test_repeated():
 @pytest.mark.parametrize('processes', [True, False])
 def test_bokeh(loop, processes):
     pytest.importorskip('bokeh')
-    import requests
+    requests = pytest.importorskip('requests')
     with LocalCluster(scheduler_port=0, silence_logs=False, loop=loop,
                       processes=processes, diagnostics_port=0) as c:
         bokeh_port = c.scheduler.services['bokeh'].port
@@ -277,7 +288,7 @@ def test_scale_up_and_down():
     cluster = yield LocalCluster(0, scheduler_port=0, processes=False,
                                  silence_logs=False, diagnostics_port=None,
                                  loop=loop, asynchronous=True)
-    c = yield Client(cluster, loop=loop, asynchronous=True)
+    c = yield Client(cluster, asynchronous=True)
 
     assert not cluster.workers
 
@@ -291,8 +302,8 @@ def test_scale_up_and_down():
     assert len(cluster.workers) == 1
     assert addr not in cluster.scheduler.ncores
 
-    yield c._close()
-    yield cluster._close()
+    yield c.close()
+    yield cluster.close()
 
 
 def test_silent_startup():
@@ -327,15 +338,17 @@ def test_remote_access(loop):
         sync(loop, assert_can_connect_from_everywhere_4_6, c.scheduler.port)
 
 
-def test_memory(loop):
-    with LocalCluster(scheduler_port=0, processes=False, silence_logs=False,
-                      diagnostics_port=None, loop=loop) as cluster:
+@pytest.mark.parametrize('n_workers', [None, 3])
+def test_memory(loop, n_workers):
+    with LocalCluster(n_workers=n_workers, scheduler_port=0, processes=False,
+                      silence_logs=False, diagnostics_port=None, loop=loop) as cluster:
         assert sum(w.memory_limit for w in cluster.workers) <= TOTAL_MEMORY
 
 
-def test_memory_nanny(loop):
-    with LocalCluster(scheduler_port=0, processes=True, silence_logs=False,
-                      diagnostics_port=None, loop=loop) as cluster:
+@pytest.mark.parametrize('n_workers', [None, 3])
+def test_memory_nanny(loop, n_workers):
+    with LocalCluster(n_workers=n_workers, scheduler_port=0, processes=True,
+                      silence_logs=False, diagnostics_port=None, loop=loop) as cluster:
         with Client(cluster.scheduler_address, loop=loop) as c:
             info = c.scheduler_info()
             assert (sum(w['memory_limit'] for w in info['workers'].values())
@@ -493,7 +506,7 @@ def test_scale_retires_workers():
     cluster = yield MyCluster(0, scheduler_port=0, processes=False,
                               silence_logs=False, diagnostics_port=None,
                               loop=loop, asynchronous=True)
-    c = yield Client(cluster, loop=loop, asynchronous=True)
+    c = yield Client(cluster, asynchronous=True)
 
     assert not cluster.workers
 
@@ -511,8 +524,47 @@ def test_scale_retires_workers():
         yield gen.sleep(0.01)
         assert time() < start + 3
 
-    yield c._close()
-    yield cluster._close()
+    yield c.close()
+    yield cluster.close()
+
+
+def test_local_tls_restart(loop):
+    from distributed.utils_test import tls_only_security
+    security = tls_only_security()
+    with LocalCluster(n_workers=1, scheduler_port=8786, silence_logs=False, security=security,
+                      diagnostics_port=False, ip='tls://0.0.0.0', loop=loop) as c:
+        with Client(c.scheduler.address, loop=loop, security=security) as client:
+            print(c.workers, c.workers[0].address)
+            workers_before = set(client.scheduler_info()['workers'])
+            assert client.submit(inc, 1).result() == 2
+            client.restart()
+            workers_after = set(client.scheduler_info()['workers'])
+            assert client.submit(inc, 2).result() == 3
+            assert workers_before != workers_after
+
+
+def test_default_process_thread_breakdown():
+    assert nprocesses_nthreads(1) == (1, 1)
+    assert nprocesses_nthreads(4) == (4, 1)
+    assert nprocesses_nthreads(5) == (5, 1)
+    assert nprocesses_nthreads(8) == (4, 2)
+    assert nprocesses_nthreads(12) in ((6, 2), (4, 3))
+    assert nprocesses_nthreads(20) == (5, 4)
+    assert nprocesses_nthreads(24) in ((6, 4), (8, 3))
+    assert nprocesses_nthreads(32) == (8, 4)
+    assert nprocesses_nthreads(40) in ((8, 5), (10, 4))
+    assert nprocesses_nthreads(80) in ((10, 8), (16, 5))
+
+
+def test_asynchronous_property(loop):
+    with LocalCluster(4, scheduler_port=0, processes=False, silence_logs=False,
+                      diagnostics_port=None, loop=loop) as cluster:
+
+        @gen.coroutine
+        def _():
+            assert cluster.asynchronous
+
+        cluster.sync(_)
 
 
 if sys.version_info >= (3, 5):

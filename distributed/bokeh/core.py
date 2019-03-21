@@ -32,6 +32,8 @@ class BokehServer(object):
                                      port=port, address=ip,
                                      check_unused_sessions_milliseconds=500,
                                      allow_websocket_origin=["*"],
+                                     use_index=False,
+                                     extra_patterns=[(r'/', web.RedirectHandler, {'url': '/status'})],
                                      **self.server_kwargs)
                 self.server.start()
 

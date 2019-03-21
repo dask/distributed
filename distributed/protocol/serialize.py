@@ -57,12 +57,23 @@ def pickle_loads(header, frames):
     return pickle.loads(b''.join(frames))
 
 
+msgpack_len_opts = {
+    ('max_%s_len' % x): 2**31 - 1
+    for x in ['str', 'bin', 'array', 'map', 'ext']}
+
+
 def msgpack_dumps(x):
-    return {'serializer': 'msgpack'}, [msgpack.dumps(x, use_bin_type=True)]
+    try:
+        frame = msgpack.dumps(x, use_bin_type=True)
+    except Exception:
+        raise NotImplementedError()
+    else:
+        return {'serializer': 'msgpack'}, [frame]
 
 
 def msgpack_loads(header, frames):
-    return msgpack.loads(b''.join(frames), encoding='utf8', use_list=False)
+    return msgpack.loads(b''.join(frames), encoding='utf8', use_list=False,
+                         **msgpack_len_opts)
 
 
 def serialization_error_loads(header, frames):
@@ -135,11 +146,11 @@ def serialize(x, serializers=None, on_error='message', context=None):
             return header, frames
         except NotImplementedError:
             continue
-        except Exception:
+        except Exception as e:
             tb = traceback.format_exc()
-            continue
+            break
 
-    msg = "Could not serialize object of type %s" % type(x).__name__
+    msg = "Could not serialize object of type %s." % type(x).__name__
     if on_error == 'message':
         frames = [msg]
         if tb:
@@ -149,7 +160,7 @@ def serialize(x, serializers=None, on_error='message', context=None):
 
         return {'serializer': 'error'}, frames
     elif on_error == 'raise':
-        raise TypeError(msg)
+        raise TypeError(msg, str(x)[:10000])
 
 
 def deserialize(header, frames, deserializers=None):
@@ -160,6 +171,9 @@ def deserialize(header, frames, deserializers=None):
     ----------
     header: dict
     frames: list of bytes
+    deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+        An optional dict mapping a name to a (de)serializer.
+        See `dask_serialize` and `dask_deserialize` for more.
 
     See Also
     --------
@@ -357,7 +371,7 @@ def deserialize_bytes(b):
     frames = unpack_frames(b)
     header, frames = frames[0], frames[1:]
     if header:
-        header = msgpack.loads(header, encoding='utf8', use_list=False)
+        header = msgpack.loads(header, raw=False, use_list=False)
     else:
         header = {}
     frames = decompress(header, frames)

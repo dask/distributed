@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import json
+import re
 import xml.etree.ElementTree
 
 import pytest
@@ -40,6 +41,7 @@ def test_connect(c, s, a, b):
             json.loads(body)
         else:
             assert xml.etree.ElementTree.fromstring(body) is not None
+            assert not re.search("href=./", body)  # no absolute links
 
 
 @gen_cluster(client=True,
@@ -58,3 +60,28 @@ def test_prefix(c, s, a, b):
             json.loads(body)
         else:
             assert xml.etree.ElementTree.fromstring(body) is not None
+
+
+@gen_cluster(client=True,
+             check_new_threads=False,
+             scheduler_kwargs={'services': {('bokeh', 0):  BokehScheduler}})
+def test_prometheus(c, s, a, b):
+    pytest.importorskip('prometheus_client')
+    from prometheus_client.parser import text_string_to_metric_families
+
+    http_client = AsyncHTTPClient()
+
+    # request data twice since there once was a case where metrics got registered multiple times resulting in
+    # prometheus_client errors
+    for _ in range(2):
+        response = yield http_client.fetch('http://localhost:%d/metrics'
+                                           % s.services['bokeh'].port)
+        assert response.code == 200
+        assert response.headers['Content-Type'] == 'text/plain; version=0.0.4'
+
+        txt = response.body.decode('utf8')
+        families = {
+            familiy.name
+            for familiy in text_string_to_metric_families(txt)
+        }
+        assert 'dask_scheduler_workers' in families

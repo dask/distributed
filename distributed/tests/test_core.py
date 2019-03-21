@@ -96,6 +96,26 @@ def test_server(loop):
     loop.run_sync(f)
 
 
+def test_server_raises_on_blocked_handlers(loop):
+    @gen.coroutine
+    def f():
+        server = Server({'ping': pingpong}, blocked_handlers=['ping'])
+        server.listen(8881)
+
+        comm = yield connect(server.address)
+        yield comm.write({'op': 'ping'})
+        msg = yield comm.read()
+
+        assert 'exception' in msg
+        assert isinstance(msg['exception'], ValueError)
+        assert "'ping' handler has been explicitly disallowed" in repr(msg['exception'])
+
+        comm.close()
+        server.stop()
+
+    res = loop.run_sync(f)
+
+
 class MyServer(Server):
     default_port = 8756
 
@@ -300,6 +320,8 @@ def check_rpc_message_lifetime(*listen_args):
         assert w2() is None
         # If additional instances were created, they were deleted as well
         assert CountedObject.n_instances == 0
+
+    server.stop()
 
 
 @gen_test()
@@ -651,6 +673,8 @@ def test_rpc_serialization(loop):
         with rpc(server.address, serializers=['msgpack', 'pickle']) as r:
             result = yield r.echo(x=to_serialize(inc))
             assert result == {'result': inc}
+
+        server.stop()
 
     loop.run_sync(f)
 

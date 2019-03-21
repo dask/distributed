@@ -1,15 +1,12 @@
 from __future__ import print_function, division, absolute_import
 
-from distutils.version import LooseVersion
 from functools import partial
 import logging
 import math
-from math import sqrt
 from numbers import Number
 from operator import add
 import os
 
-import bokeh
 from bokeh.layouts import column, row
 from bokeh.models import (ColumnDataSource, DataRange1d, HoverTool, ResetTool,
                           PanTool, WheelZoomTool, TapTool, OpenURL, Range1d, Plot, Quad,
@@ -29,10 +26,11 @@ except ImportError:
     np = False
 
 from . import components
-from .components import (DashboardComponent, ProfileTimePlot, ProfileServer)
+from .components import (DashboardComponent, ProfileTimePlot, ProfileServer,
+                         add_periodic_callback)
 from .core import BokehServer
 from .worker import SystemMonitor, counters_doc
-from .utils import transpose
+from .utils import transpose, BOKEH_VERSION, without_property_validation
 from ..metrics import time
 from ..utils import log_errors, format_bytes, format_time
 from ..diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
@@ -58,8 +56,10 @@ template_variables = {'pages': ['status', 'workers', 'tasks', 'system', 'profile
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), 'theme.yaml'))
 
 nan = float('nan')
+inf = float('inf')
 
 
+@without_property_validation
 def update(source, data):
     """ Update source with data
 
@@ -116,7 +116,7 @@ class Occupancy(DashboardComponent):
             # fig.xaxis[0].formatter = NumeralTickFormatter(format='0.0s')
             fig.x_range.start = 0
 
-            tap = TapTool(callback=OpenURL(url='http://@bokeh_address/'))
+            tap = TapTool(callback=OpenURL(url='http://@bokeh_address/main'))
 
             hover = HoverTool()
             hover.tooltips = "@worker : @occupancy s."
@@ -125,6 +125,7 @@ class Occupancy(DashboardComponent):
 
             self.root = fig
 
+    @without_property_validation
     def update(self):
         with log_errors():
             workers = list(self.scheduler.workers.values())
@@ -192,6 +193,7 @@ class ProcessingHistogram(DashboardComponent):
                            left='left', right='right', bottom=0, top='top',
                            color='blue')
 
+    @without_property_validation
     def update(self):
         L = [len(ws.processing) for ws in self.scheduler.workers.values()]
         counts, x = np.histogram(L, bins=40)
@@ -228,6 +230,7 @@ class NBytesHistogram(DashboardComponent):
                            left='left', right='right', bottom=0, top='top',
                            color='blue')
 
+    @without_property_validation
     def update(self):
         nbytes = np.asarray([ws.nbytes for ws in self.scheduler.workers.values()])
         counts, x = np.histogram(nbytes, bins=40)
@@ -283,7 +286,7 @@ class CurrentLoad(DashboardComponent):
                 fig.yaxis.visible = False
                 fig.ygrid.visible = False
 
-                tap = TapTool(callback=OpenURL(url='http://@bokeh_address/'))
+                tap = TapTool(callback=OpenURL(url='http://@bokeh_address/main'))
                 fig.add_tools(tap)
 
                 fig.toolbar.logo = None
@@ -305,6 +308,7 @@ class CurrentLoad(DashboardComponent):
 
             processing.y_range = nbytes.y_range
 
+    @without_property_validation
     def update(self):
         with log_errors():
             workers = list(self.scheduler.workers.values())
@@ -330,10 +334,8 @@ class CurrentLoad(DashboardComponent):
             nbytes_color = []
             max_limit = 0
             for ws, nb in zip(workers, nbytes):
-                try:
-                    limit = self.scheduler.workers[ws.address].memory_limit
-                except KeyError:
-                    limit = 16e9
+                limit = getattr(self.scheduler.workers[ws.address], 'memory_limit', inf) or inf
+
                 if limit > max_limit:
                     max_limit = limit
 
@@ -387,6 +389,7 @@ class StealingTimeSeries(DashboardComponent):
 
         self.root = fig
 
+    @without_property_validation
     def update(self):
         with log_errors():
             result = {'time': [time() * 1000],
@@ -444,7 +447,7 @@ class StealingEvents(DashboardComponent):
         except (KeyError, IndexError):
             color = 'black'
 
-        radius = sqrt(min(total_duration, 10)) * 30 + 2
+        radius = math.sqrt(min(total_duration, 10)) * 30 + 2
 
         d = {'time': time * 1000, 'level': level, 'count': len(msgs),
              'color': color, 'duration': total_duration, 'radius': radius,
@@ -452,6 +455,7 @@ class StealingEvents(DashboardComponent):
 
         return d
 
+    @without_property_validation
     def update(self):
         with log_errors():
             log = self.steal.log
@@ -501,6 +505,7 @@ class Events(DashboardComponent):
 
         self.root = fig
 
+    @without_property_validation
     def update(self):
         with log_errors():
             log = self.scheduler.events[self.name]
@@ -554,6 +559,7 @@ class TaskStream(components.TaskStream):
         components.TaskStream.__init__(self, n_rectangles=n_rectangles,
                                        clear_interval=clear_interval, **kwargs)
 
+    @without_property_validation
     def update(self):
         if self.index == self.plugin.index:
             return
@@ -641,6 +647,7 @@ class GraphPlot(DashboardComponent):
         rect.nonselection_glyph = None
         self.root.add_tools(hover, tap)
 
+    @without_property_validation
     def update(self):
         with log_errors():
             # occasionally reset the column data source to remove old nodes
@@ -659,6 +666,7 @@ class GraphPlot(DashboardComponent):
 
             self.patch_updates()
 
+    @without_property_validation
     def add_new_nodes_edges(self, new, new_edges, update=False):
         if new or update:
             node_key = []
@@ -711,6 +719,7 @@ class GraphPlot(DashboardComponent):
                 self.node_source.stream(node)
                 self.edge_source.stream(edge)
 
+    @without_property_validation
     def patch_updates(self):
         """
         Small updates like color changes or lost nodes from task transitions
@@ -838,6 +847,7 @@ class TaskProgress(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+    @without_property_validation
     def update(self):
         with log_errors():
             state = {'all': valmap(len, self.plugin.all),
@@ -910,6 +920,7 @@ class MemoryUse(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+    @without_property_validation
     def update(self):
         with log_errors():
             nb = nbytes_bar(self.plugin.nbytes)
@@ -955,7 +966,7 @@ class WorkerTable(DashboardComponent):
                       'num_fds': NumberFormatter(format='0'),
                       'ncores': NumberFormatter(format='0')}
 
-        if LooseVersion(bokeh.__version__) < '0.12.15':
+        if BOKEH_VERSION < '0.12.15':
             dt_kwargs = {'row_headers': False}
         else:
             dt_kwargs = {'index_position': None}
@@ -1034,6 +1045,7 @@ class WorkerTable(DashboardComponent):
 
         self.root = column(*components, id='bk-worker-table', **sizing_mode)
 
+    @without_property_validation
     def update(self):
         data = {name: [] for name in self.names + self.extra_names}
         for addr, ws in sorted(self.scheduler.workers.items()):
@@ -1047,6 +1059,7 @@ class WorkerTable(DashboardComponent):
             data['memory_limit'][-1] = ws.memory_limit
             data['cpu'][-1] = ws.metrics['cpu'] / 100.0
             data['cpu_fraction'][-1] = ws.metrics['cpu'] / 100.0 / ws.ncores
+            data['ncores'][-1] = ws.ncores
 
         self.source.data.update(data)
 
@@ -1055,7 +1068,7 @@ def systemmonitor_doc(scheduler, extra, doc):
     with log_errors():
         sysmon = SystemMonitor(scheduler, sizing_mode='stretch_both')
         doc.title = "Dask: Scheduler System Monitor"
-        doc.add_periodic_callback(sysmon.update, 500)
+        add_periodic_callback(doc, sysmon, 500)
 
         for subdoc in sysmon.root.children:
             doc.add_root(subdoc)
@@ -1071,9 +1084,9 @@ def stealing_doc(scheduler, extra, doc):
         stealing_events = StealingEvents(scheduler, sizing_mode='scale_width')
         stealing_events.root.x_range = stealing_ts.root.x_range
         doc.title = "Dask: Work Stealing"
-        doc.add_periodic_callback(occupancy.update, 500)
-        doc.add_periodic_callback(stealing_ts.update, 500)
-        doc.add_periodic_callback(stealing_events.update, 500)
+        add_periodic_callback(doc, occupancy, 500)
+        add_periodic_callback(doc, stealing_ts, 500)
+        add_periodic_callback(doc, stealing_events, 500)
 
         doc.add_root(column(occupancy.root, stealing_ts.root,
                             stealing_events.root,
@@ -1088,7 +1101,7 @@ def events_doc(scheduler, extra, doc):
     with log_errors():
         events = Events(scheduler, 'all', height=250)
         events.update()
-        doc.add_periodic_callback(events.update, 500)
+        add_periodic_callback(doc, events, 500)
         doc.title = "Dask: Scheduler Events"
         doc.add_root(column(events.root, sizing_mode='scale_width'))
         doc.template = env.get_template('simple.html')
@@ -1100,7 +1113,7 @@ def workers_doc(scheduler, extra, doc):
     with log_errors():
         table = WorkerTable(scheduler)
         table.update()
-        doc.add_periodic_callback(table.update, 500)
+        add_periodic_callback(doc, table, 500)
         doc.title = "Dask: Workers"
         doc.add_root(table.root)
         doc.template = env.get_template('simple.html')
@@ -1113,7 +1126,7 @@ def tasks_doc(scheduler, extra, doc):
         ts = TaskStream(scheduler, n_rectangles=100000, clear_interval='60s',
                         sizing_mode='stretch_both')
         ts.update()
-        doc.add_periodic_callback(ts.update, 5000)
+        add_periodic_callback(doc, ts, 5000)
         doc.title = "Dask: Task Stream"
         doc.add_root(ts.root)
         doc.template = env.get_template('simple.html')
@@ -1126,7 +1139,7 @@ def graph_doc(scheduler, extra, doc):
         graph = GraphPlot(scheduler, sizing_mode='stretch_both')
         doc.title = "Dask: Task Graph"
         graph.update()
-        doc.add_periodic_callback(graph.update, 200)
+        add_periodic_callback(doc, graph, 200)
         doc.add_root(graph.root)
 
         doc.template = env.get_template('simple.html')
@@ -1139,16 +1152,16 @@ def status_doc(scheduler, extra, doc):
         task_stream = TaskStream(scheduler, n_rectangles=1000,
                                  clear_interval='10s', sizing_mode='stretch_both')
         task_stream.update()
-        doc.add_periodic_callback(task_stream.update, 100)
+        add_periodic_callback(doc, task_stream, 100)
 
         task_progress = TaskProgress(scheduler, sizing_mode='stretch_both')
         task_progress.update()
-        doc.add_periodic_callback(task_progress.update, 100)
+        add_periodic_callback(doc, task_progress, 100)
 
         if len(scheduler.workers) < 50:
             current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
             current_load.update()
-            doc.add_periodic_callback(current_load.update, 100)
+            add_periodic_callback(doc, current_load, 100)
             doc.add_root(current_load.nbytes_figure)
             doc.add_root(current_load.processing_figure)
         else:
@@ -1156,8 +1169,8 @@ def status_doc(scheduler, extra, doc):
             nbytes_hist.update()
             processing_hist = ProcessingHistogram(scheduler, sizing_mode='stretch_both')
             processing_hist.update()
-            doc.add_periodic_callback(nbytes_hist.update, 100)
-            doc.add_periodic_callback(processing_hist.update, 100)
+            add_periodic_callback(doc, nbytes_hist, 100)
+            add_periodic_callback(doc, processing_hist, 100)
             current_load_fig = row(nbytes_hist.root, processing_hist.root,
                                    sizing_mode='stretch_both')
 
@@ -1177,7 +1190,7 @@ def individual_task_stream_doc(scheduler, extra, doc):
     task_stream = TaskStream(scheduler, n_rectangles=1000,
                              clear_interval='10s', sizing_mode='stretch_both')
     task_stream.update()
-    doc.add_periodic_callback(task_stream.update, 100)
+    add_periodic_callback(doc, task_stream, 100)
     doc.add_root(task_stream.root)
     doc.theme = BOKEH_THEME
 
@@ -1185,7 +1198,7 @@ def individual_task_stream_doc(scheduler, extra, doc):
 def individual_nbytes_doc(scheduler, extra, doc):
     current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
     current_load.update()
-    doc.add_periodic_callback(current_load.update, 100)
+    add_periodic_callback(doc, current_load, 100)
     doc.add_root(current_load.nbytes_figure)
     doc.theme = BOKEH_THEME
 
@@ -1193,7 +1206,7 @@ def individual_nbytes_doc(scheduler, extra, doc):
 def individual_nprocessing_doc(scheduler, extra, doc):
     current_load = CurrentLoad(scheduler, sizing_mode='stretch_both')
     current_load.update()
-    doc.add_periodic_callback(current_load.update, 100)
+    add_periodic_callback(doc, current_load, 100)
     doc.add_root(current_load.processing_figure)
     doc.theme = BOKEH_THEME
 
@@ -1201,7 +1214,7 @@ def individual_nprocessing_doc(scheduler, extra, doc):
 def individual_progress_doc(scheduler, extra, doc):
     task_progress = TaskProgress(scheduler, height=160, sizing_mode='stretch_both')
     task_progress.update()
-    doc.add_periodic_callback(task_progress.update, 100)
+    add_periodic_callback(doc, task_progress, 100)
     doc.add_root(task_progress.root)
     doc.theme = BOKEH_THEME
 
@@ -1210,7 +1223,8 @@ def individual_graph_doc(scheduler, extra, doc):
     with log_errors():
         graph = GraphPlot(scheduler, sizing_mode='stretch_both')
         graph.update()
-        doc.add_periodic_callback(graph.update, 200)
+
+        add_periodic_callback(doc, graph, 200)
         doc.add_root(graph.root)
         doc.theme = BOKEH_THEME
 
@@ -1235,7 +1249,7 @@ def individual_workers_doc(scheduler, extra, doc):
     with log_errors():
         table = WorkerTable(scheduler)
         table.update()
-        doc.add_periodic_callback(table.update, 500)
+        add_periodic_callback(doc, table, 500)
         doc.add_root(table.root)
         doc.theme = BOKEH_THEME
 

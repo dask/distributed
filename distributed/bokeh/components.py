@@ -15,6 +15,7 @@ import dask
 from tornado import gen
 import toolz
 
+from .utils import without_property_validation, BOKEH_VERSION
 from ..diagnostics.progress_stream import nbytes_bar
 from .. import profile
 from ..utils import log_errors, parse_timedelta
@@ -69,6 +70,7 @@ class TaskStream(DashboardComponent):
         # Required for update callback
         self.task_stream_index = [0]
 
+    @without_property_validation
     def update(self, messages):
         with log_errors():
             index = messages['task-events']['index']
@@ -95,77 +97,77 @@ class TaskStream(DashboardComponent):
 
 
 def task_stream_figure(clear_interval='20s', **kwargs):
-        """
-        kwargs are applied to the bokeh.models.plots.Plot constructor
-        """
-        clear_interval = parse_timedelta(clear_interval, default='ms')
+    """
+    kwargs are applied to the bokeh.models.plots.Plot constructor
+    """
+    clear_interval = parse_timedelta(clear_interval, default='ms')
 
-        source = ColumnDataSource(data=dict(
-            start=[time() - clear_interval], duration=[0.1], key=['start'],
-            name=['start'], color=['white'], duration_text=['100 ms'],
-            worker=['foo'], y=[0], worker_thread=[1], alpha=[0.0])
-        )
+    source = ColumnDataSource(data=dict(
+        start=[time() - clear_interval], duration=[0.1], key=['start'],
+        name=['start'], color=['white'], duration_text=['100 ms'],
+        worker=['foo'], y=[0], worker_thread=[1], alpha=[0.0])
+    )
 
-        x_range = DataRange1d(range_padding=0)
-        y_range = DataRange1d(range_padding=0)
+    x_range = DataRange1d(range_padding=0)
+    y_range = DataRange1d(range_padding=0)
 
-        root = figure(
-            name='task_stream',
-            title="Task Stream",
-            id='bk-task-stream-plot',
-            x_range=x_range,
-            y_range=y_range,
-            toolbar_location="above",
-            x_axis_type='datetime',
-            min_border_right=35,
-            tools='',
-            **kwargs
-        )
+    root = figure(
+        name='task_stream',
+        title="Task Stream",
+        id='bk-task-stream-plot',
+        x_range=x_range,
+        y_range=y_range,
+        toolbar_location="above",
+        x_axis_type='datetime',
+        min_border_right=35,
+        tools='',
+        **kwargs
+    )
 
-        rect = root.rect(
-            source=source,
-            x="start",
-            y="y",
-            width="duration",
-            height=0.4,
-            fill_color="color",
-            line_color="color",
-            line_alpha=0.6,
-            fill_alpha="alpha",
-            line_width=3
-        )
-        rect.nonselection_glyph = None
+    rect = root.rect(
+        source=source,
+        x="start",
+        y="y",
+        width="duration",
+        height=0.4,
+        fill_color="color",
+        line_color="color",
+        line_alpha=0.6,
+        fill_alpha="alpha",
+        line_width=3
+    )
+    rect.nonselection_glyph = None
 
-        root.yaxis.major_label_text_alpha = 0
-        root.yaxis.minor_tick_line_alpha = 0
-        root.yaxis.major_tick_line_alpha = 0
-        root.xgrid.visible = False
+    root.yaxis.major_label_text_alpha = 0
+    root.yaxis.minor_tick_line_alpha = 0
+    root.yaxis.major_tick_line_alpha = 0
+    root.xgrid.visible = False
 
-        hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips="""
-                <div>
-                    <span style="font-size: 12px; font-weight: bold;">@name:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@duration_text</span>
-                </div>
-                """
-        )
+    hover = HoverTool(
+        point_policy="follow_mouse",
+        tooltips="""
+            <div>
+                <span style="font-size: 12px; font-weight: bold;">@name:</span>&nbsp;
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@duration_text</span>
+            </div>
+            """
+    )
 
-        tap = TapTool(callback=OpenURL(url='/profile?key=@name'))
+    tap = TapTool(callback=OpenURL(url='/profile?key=@name'))
 
-        root.add_tools(
-            hover, tap,
-            BoxZoomTool(),
-            ResetTool(),
-            PanTool(dimensions="width"),
-            WheelZoomTool(dimensions="width")
-        )
-        if ExportTool:
-            export = ExportTool()
-            export.register_plot(root)
-            root.add_tools(export)
+    root.add_tools(
+        hover, tap,
+        BoxZoomTool(),
+        ResetTool(),
+        PanTool(dimensions="width"),
+        WheelZoomTool(dimensions="width")
+    )
+    if ExportTool:
+        export = ExportTool()
+        export.register_plot(root)
+        root.add_tools(export)
 
-        return source, root
+    return source, root
 
 
 class MemoryUsage(DashboardComponent):
@@ -210,6 +212,7 @@ class MemoryUsage(DashboardComponent):
         )
         self.root.add_tools(hover)
 
+    @without_property_validation
     def update(self, messages):
         with log_errors():
             msg = messages['progress']
@@ -259,6 +262,7 @@ class Processing(DashboardComponent):
 
         self.root = fig
 
+    @without_property_validation
     def update(self, messages):
         with log_errors():
             msg = messages['processing']
@@ -307,12 +311,17 @@ class ProfilePlot(DashboardComponent):
         state = profile.create()
         data = profile.plot_data(state, profile_interval)
         self.states = data.pop('states')
-        self.source = ColumnDataSource(data=data)
+        self.root, self.source = profile.plot_figure(data, **kwargs)
 
+        @without_property_validation
         def cb(attr, old, new):
             with log_errors():
                 try:
-                    ind = new['1d']['indices'][0]
+                    selected = new.indices
+                except AttributeError:
+                    selected = new['1d']['indices']
+                try:
+                    ind = selected[0]
                 except IndexError:
                     return
                 data = profile.plot_data(self.states[ind], profile_interval)
@@ -321,47 +330,12 @@ class ProfilePlot(DashboardComponent):
                 self.source.data.update(data)
                 self.source.selected = old
 
-        self.source.on_change('selected', cb)
+        if BOKEH_VERSION >= '1.0.0':
+            self.source.selected.on_change('indices', cb)
+        else:
+            self.source.on_change('selected', cb)
 
-        self.root = figure(tools='tap', **kwargs)
-        self.root.quad('left', 'right', 'top', 'bottom', color='color',
-                      line_color='black', line_width=2, source=self.source)
-
-        hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips="""
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@width</span>
-                </div>
-                """
-        )
-        self.root.add_tools(hover)
-
-        self.root.xaxis.visible = False
-        self.root.yaxis.visible = False
-        self.root.grid.visible = False
-
+    @without_property_validation
     def update(self, state):
         with log_errors():
             self.state = state
@@ -399,16 +373,21 @@ class ProfileTimePlot(DashboardComponent):
         self.state = profile.create()
         data = profile.plot_data(self.state, profile_interval)
         self.states = data.pop('states')
-        self.source = ColumnDataSource(data=data)
+        self.profile_plot, self.source = profile.plot_figure(data, **kwargs)
 
         changing = [False]  # avoid repeated changes from within callback
 
+        @without_property_validation
         def cb(attr, old, new):
             if changing[0]:
                 return
             with log_errors():
+                if isinstance(new, list):  # bokeh >= 1.0
+                    selected = new
+                else:
+                    selected = new['1d']['indices']
                 try:
-                    ind = new['1d']['indices'][0]
+                    ind = selected[0]
                 except IndexError:
                     return
                 data = profile.plot_data(self.states[ind], profile_interval)
@@ -416,51 +395,16 @@ class ProfileTimePlot(DashboardComponent):
                 self.states.extend(data.pop('states'))
                 changing[0] = True  # don't recursively trigger callback
                 self.source.data.update(data)
-                self.source.selected = old
+                if isinstance(new, list):  # bokeh >= 1.0
+                    self.source.selected.indices = old
+                else:
+                    self.source.selected = old
                 changing[0] = False
 
-        self.source.on_change('selected', cb)
-
-        self.profile_plot = figure(tools='tap', height=400, **kwargs)
-        r = self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
-                                   line_color='black', source=self.source)
-        r.selection_glyph = None
-        r.nonselection_glyph = None
-
-        hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips="""
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@percentage</span>
-                </div>
-                """
-        )
-        self.profile_plot.add_tools(hover)
-
-        self.profile_plot.xaxis.visible = False
-        self.profile_plot.yaxis.visible = False
-        self.profile_plot.grid.visible = False
+        if BOKEH_VERSION >= '1.0.0':
+            self.source.selected.on_change('indices', cb)
+        else:
+            self.source.on_change('selected', cb)
 
         self.ts_source = ColumnDataSource({'time': [], 'count': []})
         self.ts_plot = figure(title='Activity over time', height=100,
@@ -476,7 +420,10 @@ class ProfileTimePlot(DashboardComponent):
 
         def ts_change(attr, old, new):
             with log_errors():
-                selected = self.ts_source.selected['1d']['indices']
+                try:
+                    selected = self.ts_source.selected.indices
+                except AttributeError:
+                    selected = self.ts_source.selected['1d']['indices']
                 if selected:
                     start = self.ts_source.data['time'][min(selected)] / 1000
                     stop = self.ts_source.data['time'][max(selected)] / 1000
@@ -485,7 +432,10 @@ class ProfileTimePlot(DashboardComponent):
                     self.start = self.stop = None
                 self.trigger_update(update_metadata=False)
 
-        self.ts_source.on_change('selected', ts_change)
+        if BOKEH_VERSION >= '1.0.0':
+            self.ts_source.selected.on_change('indices', ts_change)
+        else:
+            self.ts_source.on_change('selected', ts_change)
 
         self.reset_button = Button(label="Reset", button_type="success")
         self.reset_button.on_click(lambda: self.update(self.state) )
@@ -507,6 +457,7 @@ class ProfileTimePlot(DashboardComponent):
                                self.update_button, sizing_mode='scale_width'),
                            self.profile_plot, self.ts_plot, **kwargs)
 
+    @without_property_validation
     def update(self, state, metadata=None):
         with log_errors():
             self.state = state
@@ -526,6 +477,7 @@ class ProfileTimePlot(DashboardComponent):
 
                 self.ts_source.data.update(self.ts)
 
+    @without_property_validation
     def trigger_update(self, update_metadata=True):
         @gen.coroutine
         def cb():
@@ -559,16 +511,21 @@ class ProfileServer(DashboardComponent):
         self.state = profile.get_profile(self.log)
         data = profile.plot_data(self.state, profile_interval)
         self.states = data.pop('states')
-        self.source = ColumnDataSource(data=data)
+        self.profile_plot, self.source = profile.plot_figure(data, **kwargs)
 
         changing = [False]  # avoid repeated changes from within callback
 
+        @without_property_validation
         def cb(attr, old, new):
             if changing[0]:
                 return
             with log_errors():
+                if isinstance(new, list):  # bokeh >= 1.0
+                    selected = new
+                else:
+                    selected = new['1d']['indices']
                 try:
-                    ind = new['1d']['indices'][0]
+                    ind = selected[0]
                 except IndexError:
                     return
                 data = profile.plot_data(self.states[ind], profile_interval)
@@ -576,51 +533,16 @@ class ProfileServer(DashboardComponent):
                 self.states.extend(data.pop('states'))
                 changing[0] = True  # don't recursively trigger callback
                 self.source.data.update(data)
-                self.source.selected = old
+                if isinstance(new, list):  # bokeh >= 1.0
+                    self.source.selected.indices = old
+                else:
+                    self.source.selected = old
                 changing[0] = False
 
-        self.source.on_change('selected', cb)
-
-        self.profile_plot = figure(tools='tap', height=400, **kwargs)
-        r = self.profile_plot.quad('left', 'right', 'top', 'bottom', color='color',
-                                   line_color='black', source=self.source)
-        r.selection_glyph = None
-        r.nonselection_glyph = None
-
-        hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips="""
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Filename:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@filename</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line number:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line_number</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Line:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@line</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Time:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@time</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Percentage:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@percentage</span>
-                </div>
-                """
-        )
-        self.profile_plot.add_tools(hover)
-
-        self.profile_plot.xaxis.visible = False
-        self.profile_plot.yaxis.visible = False
-        self.profile_plot.grid.visible = False
+        if BOKEH_VERSION >= '1.0.0':
+            self.source.selected.on_change('indices', cb)
+        else:
+            self.source.on_change('selected', cb)
 
         self.ts_source = ColumnDataSource({'time': [], 'count': []})
         self.ts_plot = figure(title='Activity over time', height=100,
@@ -636,7 +558,10 @@ class ProfileServer(DashboardComponent):
 
         def ts_change(attr, old, new):
             with log_errors():
-                selected = self.ts_source.selected['1d']['indices']
+                try:
+                    selected = self.ts_source.selected.indices
+                except AttributeError:
+                    selected = self.ts_source.selected['1d']['indices']
                 if selected:
                     start = self.ts_source.data['time'][min(selected)] / 1000
                     stop = self.ts_source.data['time'][max(selected)] / 1000
@@ -645,7 +570,10 @@ class ProfileServer(DashboardComponent):
                     self.start = self.stop = None
                 self.trigger_update()
 
-        self.ts_source.on_change('selected', ts_change)
+        if BOKEH_VERSION >= '1.0.0':
+            self.ts_source.selected.on_change('indices', ts_change)
+        else:
+            self.ts_source.on_change('selected', ts_change)
 
         self.reset_button = Button(label="Reset", button_type="success")
         self.reset_button.on_click(lambda: self.update(self.state))
@@ -657,6 +585,7 @@ class ProfileServer(DashboardComponent):
                                sizing_mode='scale_width'),
                            self.profile_plot, self.ts_plot, **kwargs)
 
+    @without_property_validation
     def update(self, state):
         with log_errors():
             self.state = state
@@ -664,6 +593,7 @@ class ProfileServer(DashboardComponent):
             self.states = data.pop('states')
             self.source.data.update(data)
 
+    @without_property_validation
     def trigger_update(self):
         self.state = profile.get_profile(self.log, start=self.start, stop=self.stop)
         data = profile.plot_data(self.state, profile_interval)
@@ -672,3 +602,33 @@ class ProfileServer(DashboardComponent):
         times = [t * 1000 for t, _ in self.log]
         counts = list(toolz.pluck('count', toolz.pluck(1, self.log)))
         self.ts_source.data.update({'time': times, 'count': counts})
+
+
+def add_periodic_callback(doc, component, interval):
+    """ Add periodic callback to doc in a way that avoids reference cycles
+
+    If we instead use ``doc.add_periodic_callback(component.update, 100)`` then
+    the component stays in memory as a reference cycle because its method is
+    still around.  This way we avoid that and let things clean up a bit more
+    nicely.
+
+    TODO: we still have reference cycles.  Docs seem to be referred to by their
+    add_periodic_callback methods.
+    """
+    ref = weakref.ref(component)
+
+    doc.add_periodic_callback(lambda: update(ref), interval)
+    _attach(doc, component)
+
+
+def update(ref):
+    comp = ref()
+    if comp is not None:
+        comp.update()
+
+
+def _attach(doc, component):
+    if not hasattr(doc, 'components'):
+        doc.components = set()
+
+    doc.components.add(component)

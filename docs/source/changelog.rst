@@ -1,20 +1,166 @@
 Changelog
 =========
 
-1.23.2 - YYYY-MM-DD
+1.26.0 - 2019-02-25
 -------------------
 
--
+-  Update style to fix recent flake8 update (#2500) (#2509) `Matthew Rocklin`_
+-  Fix typo in gen_cluster log message (#2503) `Loïc Estève`_
+-  Allow KeyError when closing event loop (#2498) `Matthew Rocklin`_
+-  Avoid thread testing for TCP ThreadPoolExecutor (#2510) `Matthew Rocklin`_
+-  Find Futures inside SubgraphCallable (#2505) `Jim Crist`_
+-  Avoid AttributeError when closing and sending a message (#2514) `Matthew Rocklin`_
+-  Add deprecation warning to dask_mpi.py (#2522) `jukent`_
+-  Relax statistical profiling test (#2527) `Matthew Rocklin`_
+-  Support alternative --remote-dask-worker SSHCluster() and dask-ssh CLI (#2526) `Adam Beberg`_
+-  Iterate over full list of plugins in transition (#2518) `Matthew Rocklin`_
+-  Create Prometheus Endpoint (#2499) `Adam Beberg`_
+-  Use pytest.importorskip for prometheus test (#2533) `Matthew Rocklin`_
+-  MAINT skip prometheus test when no installed (#2534) `Olivier Grisel`_
+-  Fix intermittent testing failures (#2535) `Matthew Rocklin`_
+-  Avoid using nprocs keyword in dask-ssh if set to one (#2531)  `Matthew Rocklin`_
+-  Bump minimum Tornado version to 5.0
+
+
+1.25.3 - 2019-01-31
+-------------------
+
+-  Fix excess threading on missing connections (:pr:`2403`) `Daniel Farrell`_
+-  Fix typo in doc (:pr:`2457`) `Loïc Estève`_
+-  Start fewer but larger workers with LocalCluster (:pr:`2452`) `Matthew Rocklin`_
+-  Check for non-zero ``length`` first in ``read`` loop (:pr:`2465`) `John Kirkham`_
+-  DOC: Use of local cluster in script (:pr:`2462`) `Peter Killick`_
+-  DOC/API: Signature for base class write / read (:pr:`2472`) `Tom Augspurger`_
+-  Support Pytest 4 in Tests (:pr:`2478`) `Adam Beberg`_
+-  Ensure async behavior in event loop with LocalCluster (:pr:`2484`) `Matthew Rocklin`_
+-  Fix spurious CancelledError (:pr:`2485`) `Loïc Estève`_
+-  Properly reset dask.config scheduler and shuffle when closing the client (:pr:`2475`) `George Sakkis`_
+-  Make it more explict that resources are per worker. (:pr:`2470`) `Loïc Estève`_
+-  Remove references to center (:pr:`2488`)  `Matthew Rocklin`_
+-  Expand client clearing timeout to 10s in testing (:pr:`2493`) `Matthew Rocklin`_
+-  Propagate key keyword in progressbar (:pr:`2492`) `Matthew Rocklin`_
+-  Use provided cluster's IOLoop if present in Client (:pr:`2494`) `Matthew Rocklin`_
+
+
+1.25.2 - 2019-01-04
+-------------------
+
+-  Clean up LocalCluster logging better in async mode (:pr:`2448`) `Matthew Rocklin`_
+-  Add short error message if bokeh cannot be imported (:pr:`2444`) `Dirk Petersen`_
+-  Add optional environment variables to Nanny (:pr:`2431`) `Matthew Rocklin`_
+-  Make the direct keyword docstring entries uniform (:pr:`2441`) `Matthew Rocklin`_
+-  Make LocalCluster.close async friendly (:pr:`2437`) `Matthew Rocklin`_
+-  gather_dep: don't request dependencies we already found out we don't want (:pr:`2428`) `tjb900`_
+-  Add parameters to Client.run docstring (:pr:`2429`) `Matthew Rocklin`_
+-  Support coroutines and async-def functions in run/run_scheduler (:pr:`2427`) `Matthew Rocklin`_
+-  Name threads in ThreadPoolExecutors (:pr:`2408`) `Matthew Rocklin`_
+
+
+
+1.25.1 - 2018-12-15
+-------------------
+
+-  Serialize numpy.ma.masked objects properly (:pr:`2384`) `Jim Crist`_
+-  Turn off bokeh property validation in dashboard (:pr:`2387`) `Jim Crist`_
+-  Fully initialize WorkerState objects (:pr:`2388`) `Jim Crist`_
+-  Fix typo in scheduler docstring (:pr:`2393`) `Russ Bubley`_
+-  DOC: fix typo in distributed.worker.Worker docstring (:pr:`2395`) `Loïc Estève`_
+-  Remove clients and workers from event log after removal (:pr:`2394`) `tjb900`_
+-  Support msgpack 0.6.0 by providing length keywords (:pr:`2399`) `tjb900`_
+-  Use async-await on large messages test (:pr:`2404`) `Matthew Rocklin`_
+-  Fix race condition in normalize_collection (:pr:`2386`) `Jim Crist`_
+-  Fix redict collection after HighLevelGraph fix upstream (:pr:`2413`) `Matthew Rocklin`_
+-  Add a blocking argument to Lock.acquire(`) (:pr:`2412`) `Stephan Hoyer`_
+-  Fix long traceback test (:pr:`2417`) `Matthew Rocklin`_
+-  Update x509 certificates to current OpenSSL standards. (:pr:`2418`) `Diane Trout`_
+
+
+1.25.0 - 2018-11-28
+-------------------
+
+-  Fixed the 404 error on the Scheduler Dashboard homepage (:pr:`2361`) `Michael Wheeler`_
+-  Consolidate two Worker classes into one (:pr:`2363`) `Matthew Rocklin`_
+-  Avoid warnings in pyarrow and msgpack (:pr:`2364`) `Matthew Rocklin`_
+-  Avoid race condition in Actor's Future (:pr:`2374`) `Matthew Rocklin`_
+-  Support missing packages keyword in Client.get_versions (:pr:`2379`) `Matthew Rocklin`_
+-  Fixup serializing masked arrays (:pr:`2373`) `Jim Crist`_
+
+
+1.24.2 - 2018-11-15
+-------------------
+
+-  Add support for Bokeh 1.0 (:pr:`2348`) (:pr:`2356`) `Matthew Rocklin`_
+-  Fix regression that dropped support for Tornado 4 (:pr:`2353`) `Roy Wedge`_
+-  Avoid deprecation warnings (:pr:`2355`) (:pr:`2357`) `Matthew Rocklin`_
+-  Fix typo in worker documentation (:pr:`2349`) `Tom Rochette`_
+
+
+1.24.1 - 2018-11-09
+-------------------
+
+-  Use tornado's builtin AnyThreadLoopEventPolicy (:pr:`2326`) `Matthew Rocklin`_
+-  Adjust TLS tests for openssl 1.1 (:pr:`2331`) `Marius van Niekerk`_
+-  Avoid setting event loop policy if within Jupyter notebook server (:pr:`2343`) `Matthew Rocklin`_
+-  Add preload script to conf (:pr:`2325`) `Guillaume Eynard-Bontemps`_
+-  Add serializer for Numpy masked arrays (:pr:`2335`) `Peter Killick`_
+-  Use psutil.Process.oneshot (:pr:`2339`) `NotSqrt`_
+-  Use worker SSL context when getting client from worker. (:pr:`2301`) Anonymous
+
+
+1.24.0 - 2018-10-26
+-------------------
+
+-  Remove Joblib Dask Backend from codebase (:pr:`2298`) `Matthew Rocklin`_
+-  Include worker tls protocol in Scheduler.restart (:pr:`2295`) `Matthew Rocklin`_
+-  Adapt to new Bokeh selection for 1.0 (:pr:`2292`) `Matthew Rocklin`_
+-  Add explicit retry method to Future and Client (:pr:`2299`) `Matthew Rocklin`_
+-  Point to main worker page in bokeh links (:pr:`2300`) `Matthew Rocklin`_
+-  Limit concurrency when gathering many times (:pr:`2303`) `Matthew Rocklin`_
+-  Add tls_cluster pytest fixture (:pr:`2302`) `Matthew Rocklin`_
+-  Convert ConnectionPool.open and active to properties (:pr:`2304`) `Matthew Rocklin`_
+-  change export_tb to format_tb (:pr:`2306`) `Eric Ma`_
+-  Redirect joblib page to dask-ml (:pr:`2307`) `Matthew Rocklin`_
+-  Include unserializable object in error message (:pr:`2310`) `Matthew Rocklin`_
+-  Import Mapping, Iterator, Set from collections.abc in Python 3 (:pr:`2315`) `Gaurav Sheni`_
+-  Extend Client.scatter docstring (:pr:`2320`) `Eric Ma`_
+-  Update for new flake8 (:pr:`2321`)  `Matthew Rocklin`_
+
+
+1.23.3 - 2018-10-05
+-------------------
+
+-  Err in dask serialization if not a NotImplementedError (:pr:`2251`) `Matthew Rocklin`_
+-  Protect against key missing from priority in GraphLayout (:pr:`2259`) `Matthew Rocklin`_
+-  Do not pull data twice in Client.gather (:pr:`2263`) `Adam Klein`_
+-  Add pytest fixture for cluster tests (:pr:`2262`) `Matthew Rocklin`_
+-  Cleanup bokeh callbacks  (:pr:`2261`) (:pr:`2278`) `Matthew Rocklin`_
+-  Fix bokeh error for `memory_limit=None` (:pr:`2255`) `Brett Naul`_
+-  Place large keywords into task graph in Client.map (:pr:`2281`) `Matthew Rocklin`_
+-  Remove redundant blosc threading code from protocol.numpy (:pr:`2284`) `Mike Gevaert`_
+-  Add ncores to workertable (:pr:`2289`) `Matthew Rocklin`_
+-  Support upload_file on files with no extension (:pr:`2290`) `Matthew Rocklin`_
+
+
+1.23.2 - 2018-09-17
+-------------------
+
+-  Discard dependent rather than remove (:pr:`2250`) `Matthew Rocklin`_
+-  Use dask_sphinx_theme `Matthew Rocklin`_
+-  Drop the Bokeh index page (:pr:`2241`) `John Kirkham`_
+-  Revert change to keep link relative (:pr:`2242`) `Matthew Rocklin`_
+-  docs: Fix broken AWS link in setup.rst file (:pr:`2240`) `Vladyslav Moisieienkov`_
+-  Return cancelled futures in as_completed (:pr:`2233`) `Chris White`_
+
 
 1.23.1 - 2018-09-06
 -------------------
 
--  Raise informative error when mixing futures between clients (#2227) `Matthew Rocklin`_
--  add byte_keys to unpack_remotedata call (#2232) `Matthew Rocklin`_
--  Add documentation for gist/rawgit for get_task_stream (#2236) `Matthew Rocklin`_
--  Quiet Client.close by waiting for scheduler stop signal (#2237) `Matthew Rocklin`_
--  Display system graphs nicely on different screen sizes (#2239) `Derek Ludwig`_
--  Mutate passed in workers dict in TaskStreamPlugin.rectangles (#2238) `Matthew Rocklin`_
+-  Raise informative error when mixing futures between clients (:pr:`2227`) `Matthew Rocklin`_
+-  add byte_keys to unpack_remotedata call (:pr:`2232`) `Matthew Rocklin`_
+-  Add documentation for gist/rawgit for get_task_stream (:pr:`2236`) `Matthew Rocklin`_
+-  Quiet Client.close by waiting for scheduler stop signal (:pr:`2237`) `Matthew Rocklin`_
+-  Display system graphs nicely on different screen sizes (:pr:`2239`) `Derek Ludwig`_
+-  Mutate passed in workers dict in TaskStreamPlugin.rectangles (:pr:`2238`) `Matthew Rocklin`_
 
 
 1.23.0 - 2018-08-30
@@ -23,30 +169,30 @@ Changelog
 -  Add direct_to_workers to Client `Matthew Rocklin`_
 -  Add Scheduler.proxy to workers `Matthew Rocklin`_
 -  Implement Actors `Matthew Rocklin`_
--  Fix tooltip (#2168) `Loïc Estève`_
--  Fix scale /  avoid returning coroutines (#2171) `Joe Hamman`_
--  Clarify dask-worker --nprocs (#2173) `Yu Feng`_
--  Concatenate all bytes of small messages in TCP comms (#2172) `Matthew Rocklin`_
--  Add dashboard_link property (#2176) `Jacob Tomlinson`_
--  Always offload to_frames (#2170) `Matthew Rocklin`_
--  Warn if desired port is already in use (#2191) (#2199) `Matthew Rocklin`_
--  Add profile page for event loop thread (#2144) `Matthew Rocklin`_
--  Use dispatch for dask serialization, also add sklearn, pytorch (#2175) `Matthew Rocklin`_
--  Handle corner cases with busy signal (#2182) `Matthew Rocklin`_
--  Check self.dependencies when looking at tasks in memory (#2196) `Matthew Rocklin`_
--  Add ability to log additional custom metrics from each worker (#2169) `Loïc Estève`_
--  Fix formatting when port is a tuple (#2204) `Loïc Estève`_
--  Describe what ZeroMQ is (#2211) `Mike DePalatis`_
--  Tiny typo fix (#2214) `Anderson Banihirwe`_
--  Add Python 3.7 to travis.yml (#2203) `Matthew Rocklin`_
--  Add plot= keyword to get_task_stream (#2198) `Matthew Rocklin`_
--  Add support for optional versions in Client.get_versions (#2216) `Matthew Rocklin`_
--  Add routes for solo bokeh figures in dashboard (#2185) `Matthew Rocklin`_
--  Be resilient to missing dep after busy signal (#2217) `Matthew Rocklin`_
--  Use CSS Grid to layout status page on the dashboard (#2213) `Derek Ludwig`_ and `Luke Canavan`_
--  Fix deserialization of queues on main ioloop thread (#2221) `Matthew Rocklin`_
--  Add a worker initialization function (#2201) `Guillaume EB`_
--  Collapse navbar in dashboard (#2223) `Luke Canavan`_
+-  Fix tooltip (:pr:`2168`) `Loïc Estève`_
+-  Fix scale /  avoid returning coroutines (:pr:`2171`) `Joe Hamman`_
+-  Clarify dask-worker --nprocs (:pr:`2173`) `Yu Feng`_
+-  Concatenate all bytes of small messages in TCP comms (:pr:`2172`) `Matthew Rocklin`_
+-  Add dashboard_link property (:pr:`2176`) `Jacob Tomlinson`_
+-  Always offload to_frames (:pr:`2170`) `Matthew Rocklin`_
+-  Warn if desired port is already in use (:pr:`2191`) (:pr:`2199`) `Matthew Rocklin`_
+-  Add profile page for event loop thread (:pr:`2144`) `Matthew Rocklin`_
+-  Use dispatch for dask serialization, also add sklearn, pytorch (:pr:`2175`) `Matthew Rocklin`_
+-  Handle corner cases with busy signal (:pr:`2182`) `Matthew Rocklin`_
+-  Check self.dependencies when looking at tasks in memory (:pr:`2196`) `Matthew Rocklin`_
+-  Add ability to log additional custom metrics from each worker (:pr:`2169`) `Loïc Estève`_
+-  Fix formatting when port is a tuple (:pr:`2204`) `Loïc Estève`_
+-  Describe what ZeroMQ is (:pr:`2211`) `Mike DePalatis`_
+-  Tiny typo fix (:pr:`2214`) `Anderson Banihirwe`_
+-  Add Python 3.7 to travis.yml (:pr:`2203`) `Matthew Rocklin`_
+-  Add plot= keyword to get_task_stream (:pr:`2198`) `Matthew Rocklin`_
+-  Add support for optional versions in Client.get_versions (:pr:`2216`) `Matthew Rocklin`_
+-  Add routes for solo bokeh figures in dashboard (:pr:`2185`) `Matthew Rocklin`_
+-  Be resilient to missing dep after busy signal (:pr:`2217`) `Matthew Rocklin`_
+-  Use CSS Grid to layout status page on the dashboard (:pr:`2213`) `Derek Ludwig`_ and `Luke Canavan`_
+-  Fix deserialization of queues on main ioloop thread (:pr:`2221`) `Matthew Rocklin`_
+-  Add a worker initialization function (:pr:`2201`) `Guillaume Eynard-Bontemps`_
+-  Collapse navbar in dashboard (:pr:`2223`) `Luke Canavan`_
 
 
 1.22.1 - 2018-08-03
@@ -775,4 +921,23 @@ significantly without many new features.
 .. _`Derek Ludwig`: https://github.com/dsludwig
 .. _`Anderson Banihirwe`: https://github.com/andersy005
 .. _`Yu Feng`: https://github.com/rainwoodman
-.. _`Guillaume EB`: https://github.com/guillaumeeb
+.. _`Guillaume Eynard-Bontemps`: https://github.com/guillaumeeb
+.. _`Vladyslav Moisieienkov`: https://github.com/VMois
+.. _`Chris White`: https://github.com/cicdw
+.. _`Adam Klein`: https://github.com/adamklein
+.. _`Mike Gevaert`: https://github.com/mgeplf
+.. _`Gaurav Sheni`: https://github.com/gsheni
+.. _`Eric Ma`: https://github.com/ericmjl
+.. _`Peter Killick`: https://github.com/dkillick
+.. _`NotSqrt`: https://github.com/NotSqrt
+.. _`Tom Rochette`: https://github.com/tomzx
+.. _`Roy Wedge`: https://github.com/rwedge
+.. _`Michael Wheeler`: https://github.com/mikewheel
+.. _`Diane Trout`: https://github.com/detrout
+.. _`tjb900`: https://github.com/tjb900
+.. _`Stephan Hoyer`: https://github.com/shoyer
+.. _`tjb900`: https://github.com/tjb900
+.. _`Dirk Petersen`: https://github.com/dirkpetersen
+.. _`Daniel Farrell`: https://github.com/danpf
+.. _`George Sakkis`: https://github.com/gsakkis
+.. _`Adam Beberg`: https://github.com/beberg

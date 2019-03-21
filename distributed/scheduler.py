@@ -1,6 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
-from collections import defaultdict, deque, OrderedDict, Mapping, Set
+from collections import defaultdict, deque, OrderedDict
 from datetime import timedelta
 from functools import partial
 import itertools
@@ -20,7 +20,7 @@ try:
     from cytoolz import frequencies, merge, pluck, merge_sorted, first
 except ImportError:
     from toolz import frequencies, merge, pluck, merge_sorted, first
-from toolz import valmap, first, second, compose, groupby
+from toolz import valmap, second, compose, groupby
 from tornado import gen
 from tornado.gen import Return
 from tornado.ioloop import IOLoop
@@ -30,7 +30,7 @@ import dask
 from .batched import BatchedSend
 from .comm import (normalize_address, resolve_address,
                    get_address_host, unparse_host_port)
-from .compatibility import finalize, unicode
+from .compatibility import finalize, unicode, Mapping, Set
 from .core import (rpc, connect, send_recv,
                    clean_exception, CommClosedError)
 from . import profile
@@ -97,7 +97,6 @@ class ClientState(object):
        collection) gets garbage-collected.
 
     """
-
     __slots__ = (
         'client_key',
         'wants_what',
@@ -193,9 +192,10 @@ class WorkerState(object):
     # XXX need a state field to signal active/removed?
 
     __slots__ = (
+        'actors',
         'address',
         'has_what',
-        'info',
+        'last_seen',
         'local_directory',
         'memory_limit',
         'metrics',
@@ -206,30 +206,34 @@ class WorkerState(object):
         'pid',
         'processing',
         'resources',
-        'time_delay',
-        'used_resources',
         'services',
         'status',
-        'last_seen',
-        'actors',
+        'time_delay',
+        'used_resources',
     )
 
-    def __init__(self, worker, ncores, memory_limit, name=None):
-        self.address = worker
-        self.has_what = set()
-        self.memory_limit = memory_limit
+    def __init__(self, address=None, pid=0, name=None, ncores=0, memory_limit=0,
+                 local_directory=None, services=None):
+        self.address = address
+        self.pid = pid
         self.name = name
-        self.nbytes = 0
         self.ncores = ncores
+        self.memory_limit = memory_limit
+        self.local_directory = local_directory
+        self.services = services or {}
+
+        self.status = 'running'
+        self.nbytes = 0
         self.occupancy = 0
-        self.pid = 0
-        self.processing = dict()
+        self.metrics = {}
+        self.last_seen = 0
+        self.time_delay = 0
+
+        self.actors = set()
+        self.has_what = set()
+        self.processing = {}
         self.resources = {}
         self.used_resources = {}
-        self.last_seen = 0
-        self.services = {}
-        self.actors = set()
-        self.metrics = {}
 
     @property
     def host(self):
@@ -738,7 +742,7 @@ class Scheduler(ServerNode):
         Information about each worker host
 
     * **clients:** ``{client key: ClientState}``
-        Workers currently connected to the scheduler
+        Clients currently connected to the scheduler
 
     * **services:** ``{str: port}``:
         Other services running on this scheduler, like Bokeh
@@ -759,7 +763,6 @@ class Scheduler(ServerNode):
 
     def __init__(
             self,
-            center=None,
             loop=None,
             delete_interval='500ms',
             synchronize_worker_interval='60s',
@@ -930,6 +933,7 @@ class Scheduler(ServerNode):
             'unregister': self.remove_worker,
             'gather': self.gather,
             'cancel': self.stimulus_cancel,
+            'retry': self.stimulus_retry,
             'feed': self.feed,
             'terminate': self.close,
             'broadcast': self.broadcast,
@@ -973,6 +977,7 @@ class Scheduler(ServerNode):
             ('released', 'forgotten'): self.transition_released_forgotten,
             ('memory', 'forgotten'): self.transition_memory_forgotten,
             ('erred', 'forgotten'): self.transition_released_forgotten,
+            ('erred', 'released'): self.transition_erred_released,
             ('memory', 'released'): self.transition_memory_released,
             ('released', 'erred'): self.transition_released_erred
         }
@@ -1018,15 +1023,30 @@ class Scheduler(ServerNode):
                          for worker in self.workers.values()}}
         return d
 
-    def get_worker_service_addr(self, worker, service_name):
+    def get_worker_service_addr(self, worker, service_name, protocol=False):
         """
         Get the (host, port) address of the named service on the *worker*.
         Returns None if the service doesn't exist.
+
+        Parameters
+        ----------
+        worker : address
+        service_name : str
+            Common services include 'bokeh' and 'nanny'
+        protocol : boolean
+            Whether or not to include a full address with protocol (True)
+            or just a (host, port) pair
         """
         ws = self.workers[worker]
         port = ws.services.get(service_name)
         if port is None:
             return None
+        elif protocol:
+            return '%(protocol)s://%(host)s:%(port)d' % {
+                'protocol': ws.address.split('://')[0],
+                'host': ws.host,
+                'port': port
+            }
         else:
             return ws.host, port
 
@@ -1191,7 +1211,7 @@ class Scheduler(ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {'action': 'close-worker'})
-            nanny_addr = self.get_worker_service_addr(worker, 'nanny')
+            nanny_addr = self.get_worker_service_addr(worker, 'nanny', protocol=True)
             address = nanny_addr or worker
 
             self.worker_send(worker, {'op': 'close', 'report': False})
@@ -1210,40 +1230,40 @@ class Scheduler(ServerNode):
     @gen.coroutine
     def heartbeat_worker(self, comm=None, address=None, resolve_address=True,
                           now=None, resources=None, host_info=None, metrics=None):
-            address = self.coerce_address(address, resolve_address)
-            address = normalize_address(address)
-            host = get_address_host(address)
+        address = self.coerce_address(address, resolve_address)
+        address = normalize_address(address)
+        host = get_address_host(address)
 
-            local_now = time()
-            now = now or time()
-            metrics = metrics or {}
-            host_info = host_info or {}
+        local_now = time()
+        now = now or time()
+        metrics = metrics or {}
+        host_info = host_info or {}
 
-            self.host_info[host]['last-seen'] = local_now
+        self.host_info[host]['last-seen'] = local_now
 
-            ws = self.workers.get(address)
-            if not ws:
-                return {'status': 'missing'}
+        ws = self.workers.get(address)
+        if not ws:
+            return {'status': 'missing'}
 
-            ws.last_seen = time()
+        ws.last_seen = time()
 
-            if metrics:
-                ws.metrics = metrics
+        if metrics:
+            ws.metrics = metrics
 
-            if host_info:
-                self.host_info[host].update(host_info)
+        if host_info:
+            self.host_info[host].update(host_info)
 
-            delay = time() - now
-            ws.time_delay = delay
+        delay = time() - now
+        ws.time_delay = delay
 
-            if resources:
-                self.add_resources(worker=address, resources=resources)
+        if resources:
+            self.add_resources(worker=address, resources=resources)
 
-            self.log_event(address, merge({'action': 'heartbeat'}, metrics))
+        self.log_event(address, merge({'action': 'heartbeat'}, metrics))
 
-            return {'status': 'OK',
-                    'time': time(),
-                    'heartbeat-interval': heartbeat_interval(len(self.workers))}
+        return {'status': 'OK',
+                'time': time(),
+                'heartbeat-interval': heartbeat_interval(len(self.workers))}
 
     @gen.coroutine
     def add_worker(self, comm=None, address=None, keys=(), ncores=None,
@@ -1260,9 +1280,15 @@ class Scheduler(ServerNode):
             if ws is not None:
                 raise ValueError("Worker already exists %s" % address)
 
-            ws = WorkerState(address, ncores, memory_limit, name)
-            ws.status = 'running'
-            self.workers[address] = ws
+            self.workers[address] = ws = WorkerState(
+                    address=address,
+                    pid=pid,
+                    ncores=ncores,
+                    memory_limit=memory_limit,
+                    name=name,
+                    local_directory=local_directory,
+                    services=services
+            )
 
             if name in self.aliases:
                 msg = {'status': 'error',
@@ -1279,10 +1305,6 @@ class Scheduler(ServerNode):
 
             self.total_ncores += ncores
             self.aliases[name] = address
-            ws.name = name
-            ws.pid = pid
-            ws.services = services
-            ws.local_directory = local_directory
 
             response = self.heartbeat_worker(address=address,
                                              resolve_address=resolve_address,
@@ -1638,6 +1660,33 @@ class Scheduler(ServerNode):
 
             return {}
 
+    def stimulus_retry(self, comm=None, keys=None, client=None):
+        logger.info("Client %s requests to retry %d keys", client, len(keys))
+        if client:
+            self.log_event(client, {'action': 'retry', 'count': len(keys)})
+
+        stack = list(keys)
+        seen = set()
+        roots = []
+        while stack:
+            key = stack.pop()
+            seen.add(key)
+            erred_deps = [dts.key for dts in self.tasks[key].dependencies
+                          if dts.state == 'erred']
+            if erred_deps:
+                stack.extend(erred_deps)
+            else:
+                roots.append(key)
+
+        recommendations = {key: 'waiting' for key in roots}
+        self.transitions(recommendations)
+
+        if self.validate:
+            for key in seen:
+                assert not self.tasks[key].exception_blame
+
+        return tuple(seen)
+
     def remove_worker(self, comm=None, address=None, safe=False, close=True):
         """
         Remove worker from cluster
@@ -1716,7 +1765,19 @@ class Scheduler(ServerNode):
             if not self.workers:
                 logger.info("Lost all workers")
 
+            @gen.coroutine
+            def remove_worker_from_events():
+                # If the worker isn't registered anymore after the delay, remove from events
+                if address not in self.workers and address in self.events:
+                    del self.events[address]
+
+            cleanup_delay = parse_timedelta(dask.config.get('distributed.scheduler.events-cleanup-delay'))
+            self.loop.call_later(
+                cleanup_delay,
+                remove_worker_from_events
+            )
             logger.debug("Removed worker %s", address)
+
         return 'OK'
 
     def stimulus_cancel(self, comm, keys=None, client=None, force=False):
@@ -2003,6 +2064,18 @@ class Scheduler(ServerNode):
                                       client=cs.client_key)
             del self.clients[client]
 
+        @gen.coroutine
+        def remove_client_from_events():
+            # If the client isn't registered anymore after the delay, remove from events
+            if client not in self.clients and client in self.events:
+                del self.events[client]
+
+        cleanup_delay = parse_timedelta(dask.config.get('distributed.scheduler.events-cleanup-delay'))
+        self.loop.call_later(
+            cleanup_delay,
+            remove_client_from_events
+        )
+
     def send_task_to_worker(self, worker, key):
         """ Send a single computational task to a worker """
         try:
@@ -2153,7 +2226,7 @@ class Scheduler(ServerNode):
                 worker_comm.abort()
                 self.remove_worker(address=worker)
 
-    def add_plugin(self, plugin=None, idempotent=True, **kwargs):
+    def add_plugin(self, plugin=None, idempotent=False, **kwargs):
         """
         Add external plugin to scheduler
 
@@ -2290,7 +2363,7 @@ class Scheduler(ServerNode):
                 self.client_releases_keys(keys=[ts.key for ts in cs.wants_what],
                                           client=cs.client_key)
 
-            nannies = {addr: self.get_worker_service_addr(addr, 'nanny')
+            nannies = {addr: self.get_worker_service_addr(addr, 'nanny', protocol=True)
                        for addr in self.workers}
 
             for addr in list(self.workers):
@@ -2357,7 +2430,7 @@ class Scheduler(ServerNode):
         # TODO replace with worker_list
 
         if nanny:
-            addresses = [self.get_worker_service_addr(w, 'nanny')
+            addresses = [self.get_worker_service_addr(w, 'nanny', protocol=True)
                          for w in workers]
         else:
             addresses = workers
@@ -2369,7 +2442,7 @@ class Scheduler(ServerNode):
             resp = yield send_recv(comm, close=True, serializers=serializers, **msg)
             raise gen.Return(resp)
 
-        results = yield All([send_message(self.coerce_address(address))
+        results = yield All([send_message(address)
                              for address in addresses
                              if address is not None])
 
@@ -2993,7 +3066,7 @@ class Scheduler(ServerNode):
             self.unknown_durations[prefix].add(ts)
             return default
 
-    def run_function(self, stream, function, args=(), kwargs={}):
+    def run_function(self, stream, function, args=(), kwargs={}, wait=True):
         """ Run a function within this process
 
         See Also
@@ -3002,7 +3075,7 @@ class Scheduler(ServerNode):
         """
         from .worker import run
         self.log_event('all', {'action': 'run-function', 'function': function})
-        return run(self, stream, function=function, args=args, kwargs=kwargs)
+        return run(self, stream, function=function, args=args, kwargs=kwargs, wait=wait)
 
     def set_metadata(self, stream=None, keys=None, value=None):
         try:
@@ -3500,6 +3573,39 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    def transition_erred_released(self, key):
+        try:
+            ts = self.tasks[key]
+
+            if self.validate:
+                with log_errors(pdb=LOG_PDB):
+                    assert all(dts.state != 'erred' for dts in ts.dependencies)
+                    assert ts.exception_blame
+                    assert not ts.who_has
+                    assert not ts.waiting_on
+                    assert not ts.waiters
+
+            recommendations = OrderedDict()
+
+            ts.exception = None
+            ts.exception_blame = None
+            ts.traceback = None
+
+            for dep in ts.dependents:
+                if dep.state == 'erred':
+                    recommendations[dep.key] = 'waiting'
+
+            self.report({'op': 'task-retried', 'key': key})
+            ts.state = 'released'
+
+            return recommendations
+        except Exception as e:
+            logger.exception(e)
+            if LOG_PDB:
+                import pdb
+                pdb.set_trace()
+            raise
+
     def transition_waiting_released(self, key):
         try:
             ts = self.tasks[key]
@@ -3848,7 +3954,7 @@ class Scheduler(ServerNode):
                     except KeyError:
                         pass
                     self.tasks[ts.key] = ts
-                for plugin in self.plugins:
+                for plugin in list(self.plugins):
                     try:
                         plugin.transition(key, start, finish2, *args, **kwargs)
                     except Exception:
@@ -4230,8 +4336,8 @@ class Scheduler(ServerNode):
         now = time()
         for ws in self.workers.values():
             if ws.last_seen < now - self.worker_ttl:
-                logger.warn("Worker failed to heartbeat within %s seconds. "
-                            "Closing: %s", self.worker_ttl, ws)
+                logger.warning("Worker failed to heartbeat within %s seconds. "
+                               "Closing: %s", self.worker_ttl, ws)
                 self.remove_worker(address=ws.address)
 
 

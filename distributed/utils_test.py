@@ -34,12 +34,12 @@ import pytest
 import six
 
 import dask
-from toolz import merge, memoize
+from toolz import merge, memoize, assoc
 from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
-from .client import default_client, _global_clients
+from .client import default_client, _global_clients, Client
 from .compatibility import PY3, Empty, WINDOWS, PY2
 from .comm.utils import offload
 from .config import initialize_logging
@@ -136,13 +136,14 @@ def loop():
     start = time()
     while set(_global_clients):
         sleep(0.1)
-        assert time() < start + 5
+        assert time() < start + 10
 
     _cleanup_dangling()
 
     if PY2:  # no forkserver, so no extra procs
         for child in psutil.Process().children(recursive=True):
-            child.terminate()
+            with ignoring(psutil.NoSuchProcess):
+                child.terminate()
 
     _global_clients.clear()
 
@@ -533,6 +534,75 @@ def check_active_rpc(loop, active_rpc_timeout=1):
     loop.run_sync(wait)
 
 
+@pytest.fixture
+def cluster_fixture(loop):
+    with cluster() as (scheduler, workers):
+        yield (scheduler, workers)
+
+
+@pytest.fixture
+def s(cluster_fixture):
+    scheduler, workers = cluster_fixture
+    return scheduler
+
+
+@pytest.fixture
+def a(cluster_fixture):
+    scheduler, workers = cluster_fixture
+    return workers[0]
+
+
+@pytest.fixture
+def b(cluster_fixture):
+    scheduler, workers = cluster_fixture
+    return workers[1]
+
+
+@pytest.fixture
+def client(loop, cluster_fixture):
+    scheduler, workers = cluster_fixture
+    with Client(scheduler['address'], loop=loop) as client:
+        yield client
+
+
+@pytest.fixture
+def client_secondary(loop, cluster_fixture):
+    scheduler, workers = cluster_fixture
+    with Client(scheduler['address'], loop=loop) as client:
+        yield client
+
+
+@contextmanager
+def tls_cluster_context(worker_kwargs=None, scheduler_kwargs=None,
+                        security=None, **kwargs):
+    security = security or tls_only_security()
+    worker_kwargs = assoc(worker_kwargs or {}, 'security', security)
+    scheduler_kwargs = assoc(scheduler_kwargs or {}, 'security', security)
+
+    with cluster(worker_kwargs=worker_kwargs,
+                 scheduler_kwargs=scheduler_kwargs,
+                 **kwargs) as (s, workers):
+        yield s, workers
+
+
+@pytest.fixture
+def tls_cluster(loop, security):
+    with tls_cluster_context(security=security) as (scheduler, workers):
+        yield (scheduler, workers)
+
+
+@pytest.fixture
+def tls_client(tls_cluster, loop, security):
+    s, workers = tls_cluster
+    with Client(s['address'], security=security, loop=loop) as client:
+        yield client
+
+
+@pytest.fixture
+def security():
+    return tls_only_security()
+
+
 @contextmanager
 def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
             scheduler_kwargs={}):
@@ -588,7 +658,13 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
 
             start = time()
             try:
-                with rpc(saddr) as s:
+                try:
+                    security = scheduler_kwargs['security']
+                    rpc_kwargs = {'connection_args': security.get_connection_args('client')}
+                except KeyError:
+                    rpc_kwargs = {}
+
+                with rpc(saddr, **rpc_kwargs) as s:
                     while True:
                         ncores = loop.run_sync(s.ncores)
                         if len(ncores) == nworkers:
@@ -604,8 +680,9 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
                 logger.debug("Closing out test cluster")
 
                 loop.run_sync(lambda: disconnect_all([w['address'] for w in workers],
-                                                     timeout=0.5))
-                loop.run_sync(lambda: disconnect(saddr, timeout=0.5))
+                                                     timeout=0.5,
+                                                     rpc_kwargs=rpc_kwargs))
+                loop.run_sync(lambda: disconnect(saddr, timeout=0.5, rpc_kwargs=rpc_kwargs))
 
                 scheduler.terminate()
                 scheduler_q.close()
@@ -645,11 +722,13 @@ def cluster(nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1,
 
 
 @gen.coroutine
-def disconnect(addr, timeout=3):
+def disconnect(addr, timeout=3, rpc_kwargs=None):
+    rpc_kwargs = rpc_kwargs or {}
+
     @gen.coroutine
     def do_disconnect():
         with ignoring(EnvironmentError, CommClosedError):
-            with rpc(addr) as w:
+            with rpc(addr, **rpc_kwargs) as w:
                 yield w.terminate(close=True)
 
     with ignoring(TimeoutError):
@@ -657,8 +736,8 @@ def disconnect(addr, timeout=3):
 
 
 @gen.coroutine
-def disconnect_all(addresses, timeout=3):
-    yield [disconnect(addr, timeout) for addr in addresses]
+def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
+    yield [disconnect(addr, timeout, rpc_kwargs) for addr in addresses]
 
 
 def slow(func):
@@ -792,7 +871,7 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                                         Worker=Worker, scheduler_kwargs=scheduler_kwargs,
                                         worker_kwargs=worker_kwargs)
                                 except Exception as e:
-                                    logger.error("Failed to start gen_cluster, retryng", exc_info=True)
+                                    logger.error("Failed to start gen_cluster, retrying", exc_info=True)
                                 else:
                                     workers[:] = ws
                                     args = [s] + workers
@@ -852,7 +931,8 @@ def gen_cluster(ncores=[('127.0.0.1', 1), ('127.0.0.1', 2)],
                     bad = [t for t, v in threading._active.items()
                            if t not in active_threads_start and
                           "Threaded" not in v.name and
-                          "watch message" not in v.name]
+                          "watch message" not in v.name and
+                          "TCP-Executor" not in v.name]
                     if not bad:
                         break
                     else:
@@ -912,7 +992,7 @@ def popen(args, **kwargs):
     if sys.platform.startswith('win'):
         args[0] = os.path.join(sys.prefix, 'Scripts', args[0])
     else:
-        args[0] = os.path.join(sys.prefix, 'bin', args[0])
+        args[0] = os.path.join(os.environ.get('DESTDIR', '') + sys.prefix, 'bin', args[0])
     proc = subprocess.Popen(args, **kwargs)
     try:
         yield proc

@@ -118,14 +118,9 @@ todo_include_todos = True
 
 # -- Options for HTML output ----------------------------------------------
 
-# Taken from docs.readthedocs.io:
-# on_rtd is whether we are on readthedocs.io
-on_rtd = os.environ.get('READTHEDOCS', None) == 'True'
-
-if not on_rtd:  # only import and set the theme if we're building docs locally
-    import sphinx_rtd_theme
-    html_theme = 'sphinx_rtd_theme'
-    html_theme_path = [sphinx_rtd_theme.get_html_theme_path()]
+import dask_sphinx_theme
+html_theme = 'dask_sphinx_theme'
+html_theme_path = [dask_sphinx_theme.get_html_theme_path()]
 
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -384,5 +379,34 @@ intersphinx_mapping = {
     'numpy': ('http://docs.scipy.org/doc/numpy', None),
     }
 
+# Redirects
+# https://tech.signavio.com/2017/managing-sphinx-redirects
+redirect_files = [
+    # old html, new html
+    ('joblib.html', 'https://ml.dask.org/joblib.html'),
+]
+
+
+redirect_template = """\
+<html>
+  <head>
+    <meta http-equiv="refresh" content="1; url={new}" />
+    <script>
+      window.location.href = "{new}"
+    </script>
+  </head>
+</html>
+"""
+
+
+def copy_legacy_redirects(app, docname):
+    if app.builder.name == 'html':
+        for html_src_path, new in redirect_files:
+            page = redirect_template.format(new=new)
+            target_path = app.outdir + '/' + html_src_path
+            with open(target_path, 'w') as f:
+                f.write(page)
+
+
 def setup(app):
-    app.add_stylesheet("https://dask.pydata.org/en/latest/_static/style.css")
+    app.connect('build-finished', copy_legacy_redirects)

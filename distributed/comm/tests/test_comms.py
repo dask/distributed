@@ -4,12 +4,14 @@ from functools import partial
 import os
 import sys
 import threading
+import warnings
 
 import pytest
 
 from tornado import gen, ioloop, locks, queues
 from tornado.concurrent import Future
 
+from distributed.compatibility import PY3
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (gen_test, requires_ipv6, has_ipv6,
@@ -28,7 +30,9 @@ from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
 
 EXTERNAL_IP4 = get_ip()
 if has_ipv6():
-    EXTERNAL_IP6 = get_ipv6()
+    with warnings.catch_warnings(record=True):
+        warnings.simplefilter('always')
+        EXTERNAL_IP6 = get_ipv6()
 
 
 ca_file = get_cert('tls-ca-cert.pem')
@@ -284,6 +288,46 @@ def test_tls_specific():
     futures = [client_communicate(key=i, delay=0.05) for i in range(N)]
     yield futures
     assert set(l) == {1234} | set(range(N))
+
+
+@gen_test()
+def test_comm_failure_threading():
+    """
+    When we fail to connect, make sure we don't make a lot
+    of threads.
+
+    We only assert for PY3, because the thread limit only is
+    set for python 3.  See github PR #2403 discussion for info.
+    """
+
+    @gen.coroutine
+    def sleep_for_60ms():
+        max_thread_count = 0
+        for x in range(60):
+            yield gen.sleep(0.001)
+            thread_count = threading.active_count()
+            if thread_count > max_thread_count:
+                max_thread_count = thread_count
+        raise gen.Return(max_thread_count)
+    original_thread_count = threading.active_count()
+
+    # tcp.TCPConnector()
+    sleep_future = sleep_for_60ms()
+    with pytest.raises(IOError):
+        yield connect("tcp://localhost:28400", 0.052)
+    max_thread_count = yield sleep_future
+    # 2 is the number set by BaseTCPConnector.executor (ThreadPoolExecutor)
+    if PY3:
+        assert max_thread_count <= 2 + original_thread_count
+
+    # tcp.TLSConnector()
+    sleep_future = sleep_for_60ms()
+    with pytest.raises(IOError):
+        yield connect("tls://localhost:28400", 0.052,
+                                 connection_args={'ssl_context': get_client_ssl_context()})
+    max_thread_count = yield sleep_future
+    if PY3:
+        assert max_thread_count <= 2 + original_thread_count
 
 
 @gen.coroutine
@@ -580,8 +624,9 @@ def test_tls_reject_certificate():
     listener.start()
 
     with pytest.raises(EnvironmentError) as excinfo:
-        yield connect(listener.contact_address, timeout=0.5,
+        comm = yield connect(listener.contact_address, timeout=0.5,
                       connection_args={'ssl_context': bad_cli_ctx})
+        yield comm.write({'x': 'foo'})  # TODO: why is this necessary in Tornado 6 ?
 
     # The wrong error is reported on Python 2, see https://github.com/tornadoweb/tornado/pull/2028
     if sys.version_info >= (3,) and os.name != 'nt':
@@ -935,6 +980,7 @@ def check_deserialize(addr):
     yield check_connector_deserialize(addr, True, msg, partial(check_out, True))
 
 
+@pytest.mark.xfail(reason='intermittent failure on windows')
 @gen_test()
 def test_tcp_deserialize():
     yield check_deserialize('tcp://')

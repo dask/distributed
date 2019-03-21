@@ -4,19 +4,21 @@ import atexit
 from datetime import timedelta
 import logging
 import math
-from time import sleep
+import warnings
 import weakref
 import toolz
 
+from dask.utils import factors
 from tornado import gen
 
 from .cluster import Cluster
+from ..compatibility import get_thread_identity
 from ..core import CommClosedError
 from ..utils import (sync, ignoring, All, silence_logging, LoopRunner,
-        log_errors, thread_state)
+        log_errors, thread_state, parse_timedelta)
 from ..nanny import Nanny
 from ..scheduler import Scheduler
-from ..worker import Worker, _ncores
+from ..worker import Worker, parse_memory_limit, _ncores
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +54,9 @@ class LocalCluster(Cluster):
         Tornado gen.coroutines.  This should remain False for normal use.
     kwargs: dict
         Extra worker arguments, will be passed to the Worker constructor.
+    blocked_handlers: List[str]
+        A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
+        like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
     security : Security
@@ -80,7 +85,7 @@ class LocalCluster(Cluster):
                  loop=None, start=None, ip=None, scheduler_port=0,
                  silence_logs=logging.WARN, diagnostics_port=8787,
                  services=None, worker_services=None, service_kwargs=None,
-                 asynchronous=False, security=None, **worker_kwargs):
+                 asynchronous=False, security=None, blocked_handlers=None, **worker_kwargs):
         if start is not None:
             msg = ("The start= parameter is deprecated. "
                    "LocalCluster always starts. "
@@ -99,8 +104,7 @@ class LocalCluster(Cluster):
             self._old_logging_level = silence_logging(level=silence_logs)
         if n_workers is None and threads_per_worker is None:
             if processes:
-                n_workers = _ncores
-                threads_per_worker = 1
+                n_workers, threads_per_worker = nprocesses_nthreads(_ncores)
             else:
                 n_workers = 1
                 threads_per_worker = _ncores
@@ -109,6 +113,8 @@ class LocalCluster(Cluster):
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(_ncores / n_workers)))
+        if n_workers and 'memory_limit' not in worker_kwargs:
+            worker_kwargs['memory_limit'] = parse_memory_limit('auto', 1, n_workers)
 
         worker_kwargs.update({
             'ncores': threads_per_worker,
@@ -130,7 +136,8 @@ class LocalCluster(Cluster):
 
         self.scheduler = Scheduler(loop=self.loop,
                                    services=services,
-                                   security=security)
+                                   security=security,
+                                   blocked_handlers=blocked_handlers)
         self.scheduler_port = scheduler_port
 
         self.workers = []
@@ -151,9 +158,16 @@ class LocalCluster(Cluster):
     def __await__(self):
         return self._started.__await__()
 
+    @property
+    def asynchronous(self):
+        return (
+            self._asynchronous or
+            getattr(thread_state, 'asynchronous', False) or
+            hasattr(self.loop, '_thread_identity') and self.loop._thread_identity == get_thread_identity()
+        )
+
     def sync(self, func, *args, **kwargs):
-        asynchronous = kwargs.pop('asynchronous', None)
-        if asynchronous or self._asynchronous or getattr(thread_state, 'asynchronous', False):
+        if kwargs.pop('asynchronous', None) or self.asynchronous:
             callback_timeout = kwargs.pop('callback_timeout', None)
             future = func(*args, **kwargs)
             if callback_timeout is not None:
@@ -196,6 +210,10 @@ class LocalCluster(Cluster):
 
     @gen.coroutine
     def _start_worker(self, death_timeout=60, **kwargs):
+        if self.status and self.status.startswith('clos'):
+            warnings.warn("Tried to start a worker while status=='%s'" % self.status)
+            return
+
         if self.processes:
             W = Nanny
             kwargs['quiet'] = True
@@ -257,14 +275,22 @@ class LocalCluster(Cluster):
         self.sync(self._stop_worker, w)
 
     @gen.coroutine
-    def _close(self):
+    def _close(self, timeout='2s'):
         # Can be 'closing' as we're called by close() below
         if self.status == 'closed':
             return
+        self.status = 'closing'
+
+        self.scheduler.clear_task_state()
+
+        with ignoring(gen.TimeoutError):
+            yield gen.with_timeout(
+                timedelta(seconds=parse_timedelta(timeout)),
+                All([self._stop_worker(w) for w in self.workers]),
+            )
+        del self.workers[:]
 
         try:
-            with ignoring(gen.TimeoutError, CommClosedError, OSError):
-                yield All([w._close() for w in self.workers])
             with ignoring(gen.TimeoutError, CommClosedError, OSError):
                 yield self.scheduler.close(fast=True)
             del self.workers[:]
@@ -277,25 +303,20 @@ class LocalCluster(Cluster):
             return
 
         try:
-            self.scheduler.clear_task_state()
+            result = self.sync(self._close, callback_timeout=timeout)
+        except RuntimeError:  # IOLoop is closed
+            result = None
 
-            for w in self.workers:
-                self.loop.add_callback(self._stop_worker, w)
-            for i in range(10):
-                if not self.workers:
-                    break
-                else:
-                    sleep(0.01)
-            del self.workers[:]
-            try:
-                self._loop_runner.run_sync(self._close, callback_timeout=timeout)
-            except RuntimeError:  # IOLoop is closed
-                pass
+        if hasattr(self, '_old_logging_level'):
+            if self.asynchronous:
+                result.add_done_callback(lambda _: silence_logging(self._old_logging_level))
+            else:
+                silence_logging(self._old_logging_level)
+
+        if not self.asynchronous:
             self._loop_runner.stop()
-        finally:
-            self.status = 'closed'
-        with ignoring(AttributeError):
-            silence_logging(self._old_logging_level)
+
+        return result
 
     @gen.coroutine
     def scale_up(self, n, **kwargs):
@@ -360,6 +381,34 @@ class LocalCluster(Cluster):
             return self.scheduler.address
         except ValueError:
             return '<unstarted>'
+
+
+def nprocesses_nthreads(n):
+    """
+    The default breakdown of processes and threads for a given number of cores
+
+    Parameters
+    ----------
+    n: int
+        Number of available cores
+
+    Examples
+    --------
+    >>> nprocesses_nthreads(4)
+    (4, 1)
+    >>> nprocesses_nthreads(32)
+    (8, 4)
+
+    Returns
+    -------
+    nprocesses, nthreads
+    """
+    if n <= 4:
+        processes = n
+    else:
+        processes = min(f for f in factors(n) if f >= math.sqrt(n))
+    threads = n // processes
+    return (processes, threads)
 
 
 clusters_to_close = weakref.WeakSet()

@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import atexit
+import dask
 import logging
 import os
 import shutil
@@ -13,7 +14,7 @@ from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
 from distributed.security import Security
-from distributed.utils import get_ip_interface, ignoring
+from distributed.utils import get_ip_interface
 from distributed.cli.utils import (check_python_3, install_signal_handlers,
                                    uri_from_host_port)
 from distributed.preloading import preload_modules, validate_preload_argv
@@ -58,7 +59,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               "cluster is on a shared network file system.")
 @click.option('--local-directory', default='', type=str,
               help="Directory to place scheduler files")
-@click.option('--preload', type=str, multiple=True, is_eager=True,
+@click.option('--preload', type=str, multiple=True, is_eager=True, default='',
               help='Module that should be loaded by the scheduler process  '
                    'like "foo.bar" or "/path/to/foo.py".')
 @click.argument('preload_argv', nargs=-1,
@@ -117,14 +118,24 @@ def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
 
     services = {}
     if _bokeh:
-        with ignoring(ImportError):
+        try:
             from distributed.bokeh.scheduler import BokehScheduler
             services[('bokeh', bokeh_port)] = (BokehScheduler,
                                                {'prefix': bokeh_prefix})
+        except ImportError as error:
+            if str(error).startswith('No module named'):
+                logger.info('Web dashboard not loaded.  Unable to import bokeh')
+            else:
+                logger.info('Unable to import bokeh: %s' % str(error))
+
     scheduler = Scheduler(loop=loop, services=services,
                           scheduler_file=scheduler_file,
                           security=sec)
     scheduler.start(addr)
+    if not preload:
+        preload = dask.config.get('distributed.scheduler.preload')
+    if not preload_argv:
+        preload_argv = dask.config.get('distributed.scheduler.preload-argv')
     preload_modules(preload, parameter=scheduler, file_dir=local_directory, argv=preload_argv)
 
     logger.info('Local Directory: %26s', local_directory)

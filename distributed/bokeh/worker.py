@@ -16,9 +16,10 @@ from bokeh.palettes import RdBu
 from bokeh.themes import Theme
 from toolz import merge, partition_all
 
-from .components import DashboardComponent, ProfileTimePlot, ProfileServer
+from .components import (DashboardComponent, ProfileTimePlot, ProfileServer,
+                         add_periodic_callback)
 from .core import BokehServer
-from .utils import transpose
+from .utils import transpose, without_property_validation
 from ..compatibility import WINDOWS
 from ..diagnostics.progress_stream import color_of
 from ..metrics import time
@@ -56,6 +57,7 @@ class StateTable(DashboardComponent):
         )
         self.root = table
 
+    @without_property_validation
     def update(self):
         with log_errors():
             w = self.worker
@@ -107,6 +109,7 @@ class CommunicatingStream(DashboardComponent):
             self.last_outgoing = 0
             self.who = dict()
 
+    @without_property_validation
     def update(self):
         with log_errors():
             outgoing = self.worker.outgoing_transfer_log
@@ -175,6 +178,7 @@ class CommunicatingTimeSeries(DashboardComponent):
 
         self.root = fig
 
+    @without_property_validation
     def update(self):
         with log_errors():
             self.source.stream({'x': [time() * 1000],
@@ -203,6 +207,7 @@ class ExecutingTimeSeries(DashboardComponent):
 
         self.root = fig
 
+    @without_property_validation
     def update(self):
         with log_errors():
             self.source.stream({'x': [time() * 1000],
@@ -263,6 +268,7 @@ class CrossFilter(DashboardComponent):
 
             self.root = self.layout
 
+    @without_property_validation
     def update(self):
         with log_errors():
             outgoing = self.worker.outgoing_transfer_log
@@ -322,6 +328,7 @@ class CrossFilter(DashboardComponent):
             )
             return fig
 
+    @without_property_validation
     def update_figure(self, attr, old, new):
         with log_errors():
             fig = self.create_figure(**self.kwargs)
@@ -417,6 +424,7 @@ class SystemMonitor(DashboardComponent):
         self.last = self.worker.monitor.count
         return d
 
+    @without_property_validation
     def update(self):
         with log_errors():
             self.source.stream(self.get_data(), 1000)
@@ -504,6 +512,7 @@ class Counters(DashboardComponent):
             self.counter_figures[name] = fig
             return fig
 
+    @without_property_validation
     def update(self):
         with log_errors():
             for name, fig in self.digest_figures.items():
@@ -554,10 +563,10 @@ def main_doc(worker, extra, doc):
         communicating_stream.root.x_range = xr
 
         doc.title = "Dask Worker Internal Monitor"
-        doc.add_periodic_callback(statetable.update, 200)
-        doc.add_periodic_callback(executing_ts.update, 200)
-        doc.add_periodic_callback(communicating_ts.update, 200)
-        doc.add_periodic_callback(communicating_stream.update, 200)
+        add_periodic_callback(doc, statetable, 200)
+        add_periodic_callback(doc, executing_ts, 200)
+        add_periodic_callback(doc, communicating_ts, 200)
+        add_periodic_callback(doc, communicating_stream, 200)
         doc.add_root(column(statetable.root,
                             executing_ts.root,
                             communicating_ts.root,
@@ -575,8 +584,8 @@ def crossfilter_doc(worker, extra, doc):
         crossfilter = CrossFilter(worker)
 
         doc.title = "Dask Worker Cross-filter"
-        doc.add_periodic_callback(statetable.update, 500)
-        doc.add_periodic_callback(crossfilter.update, 500)
+        add_periodic_callback(doc, statetable, 500)
+        add_periodic_callback(doc, crossfilter, 500)
 
         doc.add_root(column(statetable.root, crossfilter.root))
         doc.template = env.get_template('simple.html')
@@ -589,7 +598,7 @@ def systemmonitor_doc(worker, extra, doc):
     with log_errors():
         sysmon = SystemMonitor(worker, sizing_mode='scale_width')
         doc.title = "Dask Worker Monitor"
-        doc.add_periodic_callback(sysmon.update, 500)
+        add_periodic_callback(doc, sysmon, 500)
 
         doc.add_root(sysmon.root)
         doc.template = env.get_template('simple.html')
@@ -602,7 +611,7 @@ def counters_doc(server, extra, doc):
     with log_errors():
         doc.title = "Dask Worker Counters"
         counter = Counters(server, sizing_mode='stretch_both')
-        doc.add_periodic_callback(counter.update, 500)
+        add_periodic_callback(doc, counter, 500)
 
         doc.add_root(counter.root)
         doc.template = env.get_template('simple.html')
@@ -670,5 +679,18 @@ class BokehWorker(BokehServer):
         self.server = None
 
     @property
+    def extra(self):
+        return merge({'prefix': self.prefix}, template_variables)
+
+    @property
     def my_server(self):
         return self.worker
+
+    def listen(self, *args, **kwargs):
+        super(BokehWorker, self).listen(*args, **kwargs)
+
+        from .worker_html import routes
+        handlers = [(self.prefix + '/' + url, cls, {'server': self.my_server, 'extra': self.extra})
+                    for url, cls in routes]
+
+        self.server._tornado.add_handlers(r'.*', handlers)

@@ -194,6 +194,43 @@ def test_remove_worker_from_scheduler(s, a, b):
     s.validate_state()
 
 
+@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
+def test_clear_events_worker_removal(s, a, b):
+    assert a.address in s.events
+    assert a.address in s.ncores
+    assert b.address in s.events
+    assert b.address in s.ncores
+
+    s.remove_worker(address=a.address)
+    # Shortly after removal, the events should still be there
+    assert a.address in s.events
+    assert a.address not in s.ncores
+    s.validate_state()
+
+    start = time()
+    while a.address in s.events:
+        yield gen.sleep(0.01)
+        assert time() < start + 2
+    assert b.address in s.events
+
+
+@gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"}, client=True)
+def test_clear_events_client_removal(c, s, a, b):
+    assert c.id in s.events
+    s.remove_client(c.id)
+
+    assert c.id in s.events
+    assert c.id not in s.clients
+    assert c not in s.clients
+
+    s.remove_client(c.id)
+    # If it doesn't reconnect after a given time, the events log should be cleared
+    start = time()
+    while c.id in s.events:
+        yield gen.sleep(0.01)
+        assert time() < start + 2
+
+
 @gen_cluster()
 def test_add_worker(s, a, b):
     w = Worker(s.ip, s.port, ncores=3)
@@ -213,6 +250,31 @@ def test_add_worker(s, a, b):
     assert w.ip in s.host_info
     assert s.host_info[w.ip]['addresses'] == {a.address, b.address, w.address}
     yield w._close()
+
+
+@gen_cluster(scheduler_kwargs={'blocked_handlers': ['feed']})
+def test_blocked_handlers_are_respected(s, a, b):
+    def func(scheduler):
+        return dumps(dict(scheduler.worker_info))
+
+    comm = yield connect(s.address)
+    yield comm.write({'op': 'feed',
+                      'function': dumps(func),
+                      'interval': 0.01})
+
+    response = yield comm.read()
+
+    assert 'exception' in response
+    assert isinstance(response['exception'], ValueError)
+    assert "'feed' handler has been explicitly disallowed" in repr(response['exception'])
+
+    yield comm.close()
+
+
+def test_scheduler_init_pulls_blocked_handlers_from_config():
+    with dask.config.set({'distributed.scheduler.blocked-handlers': ['test-handler']}):
+        s = Scheduler()
+    assert s.blocked_handlers == ['test-handler']
 
 
 @gen_cluster()

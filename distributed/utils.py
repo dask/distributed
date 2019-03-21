@@ -241,6 +241,11 @@ def sync(loop, func, *args, **kwargs):
     if PollIOLoop and ((isinstance(loop, PollIOLoop) and getattr(loop, '_closing', False)) or
             (hasattr(loop, 'asyncio_loop') and loop.asyncio_loop._closed)):
         raise RuntimeError("IOLoop is closed")
+    try:
+        if loop.asyncio_loop.is_closed():  # tornado 6
+            raise RuntimeError("IOLoop is closed")
+    except AttributeError:
+        pass
 
     timeout = kwargs.pop('callback_timeout', None)
 
@@ -370,6 +375,8 @@ class LoopRunner(object):
             # Loop already running in other thread (user-launched)
             done_evt.wait(5)
             if not isinstance(start_exc[0], RuntimeError):
+                if not isinstance(start_exc[0], Exception):  # track down infrequent error
+                    raise TypeError("not an exception", start_exc[0])
                 raise start_exc[0]
             self._all_loops[self._loop] = count + 1, None
         else:
@@ -406,7 +413,8 @@ class LoopRunner(object):
             try:
                 self._loop.add_callback(self._loop.stop)
                 self._loop_thread.join(timeout=timeout)
-                self._loop.close()
+                with ignoring(KeyError):  # IOLoop can be missing
+                    self._loop.close()
             finally:
                 self._loop_thread = None
 
@@ -1018,7 +1026,7 @@ def import_file(path):
     names_to_import = []
     tmp_python_path = None
 
-    if ext in ('.py'):  # , '.pyc'):
+    if ext in ('.py',):  # , '.pyc'):
         if directory not in sys.path:
             tmp_python_path = directory
         names_to_import.append(name)
@@ -1359,28 +1367,6 @@ class DequeHandler(logging.Handler):
             inst.clear()
 
 
-def fix_asyncio_event_loop_policy(asyncio):
-    """
-    Work around https://github.com/tornadoweb/tornado/issues/2183
-    """
-    class PatchedDefaultEventLoopPolicy(asyncio.DefaultEventLoopPolicy):
-
-        def get_event_loop(self):
-            """Get the event loop.
-
-            This may be None or an instance of EventLoop.
-            """
-            try:
-                return super().get_event_loop()
-            except RuntimeError:
-                # "There is no current event loop in thread"
-                loop = self.new_event_loop()
-                self.set_event_loop(loop)
-                return loop
-
-    asyncio.set_event_loop_policy(PatchedDefaultEventLoopPolicy())
-
-
 def reset_logger_locks():
     """ Python 2's logger's locks don't survive a fork event
 
@@ -1392,8 +1378,22 @@ def reset_logger_locks():
 
 
 # Only bother if asyncio has been loaded by Tornado
-if 'asyncio' in sys.modules:
-    fix_asyncio_event_loop_policy(sys.modules['asyncio'])
+if 'asyncio' in sys.modules and tornado.version_info[0] >= 5:
+
+    jupyter_event_loop_initialized = False
+
+    if 'notebook' in sys.modules:
+        import traitlets
+        from notebook.notebookapp import NotebookApp
+        jupyter_event_loop_initialized = (
+            traitlets.config.Application.initialized() and
+            isinstance(traitlets.config.Application.instance(), NotebookApp)
+        )
+
+    if not jupyter_event_loop_initialized:
+        import asyncio
+        import tornado.platform.asyncio
+        asyncio.set_event_loop_policy(tornado.platform.asyncio.AnyThreadEventLoopPolicy())
 
 
 def has_keyword(func, keyword):

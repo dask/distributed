@@ -42,15 +42,16 @@ conda install -q \
     mock \
     netcdf4 \
     paramiko \
+    prometheus_client \
     psutil \
-    pytest=3.7 \
+    pytest \
     pytest-timeout \
     python=$PYTHON \
     requests \
     scipy \
     tblib \
     toolz \
-    tornado \
+    tornado=$TORNADO \
     $PACKAGES
 
 pip install -q pytest-repeat pytest-faulthandler
@@ -69,10 +70,6 @@ fi;
 
 # Install distributed
 pip install --no-deps -e .
-
-if [[ ! -z $TORNADO ]]; then
-    pip install -U tornado==$TORNADO
-fi
 
 # For debugging
 echo -e "--\n--Conda Environment\n--"

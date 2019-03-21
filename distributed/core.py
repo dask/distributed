@@ -43,6 +43,12 @@ def get_total_physical_memory():
         return 2e9
 
 
+def raise_later(exc):
+    def _raise(*args, **kwargs):
+        raise exc
+    return _raise
+
+
 MAX_BUFFER_SIZE = get_total_physical_memory()
 
 tick_maximum_delay = parse_timedelta(dask.config.get('distributed.admin.tick.limit'), default='ms')
@@ -89,13 +95,16 @@ class Server(object):
     default_ip = ''
     default_port = 0
 
-    def __init__(self, handlers, stream_handlers=None, connection_limit=512,
+    def __init__(self, handlers, blocked_handlers=None, stream_handlers=None, connection_limit=512,
                  deserialize=True, io_loop=None):
         self.handlers = {
             'identity': self.identity,
             'connection_stream': self.handle_stream,
         }
         self.handlers.update(handlers)
+        if blocked_handlers is None:
+            blocked_handlers = dask.config.get('distributed.%s.blocked-handlers' % type(self).__name__.lower(), [])
+        self.blocked_handlers = blocked_handlers
         self.stream_handlers = {}
         self.stream_handlers.update(stream_handlers or {})
 
@@ -310,7 +319,13 @@ class Server(object):
                     raise TypeError("Bad message type.  Expected dict, got\n  "
                                     + str(msg))
 
-                op = msg.pop('op')
+                try:
+                    op = msg.pop('op')
+                except KeyError:
+                    raise ValueError(
+                        "Received unexpected message without 'op' key: " %
+                        str(msg)
+                    )
                 if self.counters is not None:
                     self.counters['op'].add(op)
                 self._comms[comm] = op
@@ -324,7 +339,13 @@ class Server(object):
 
                 result = None
                 try:
-                    handler = self.handlers[op]
+                    if op in self.blocked_handlers:
+                        _msg = ("The '{op}' handler has been explicitly disallowed "
+                                "in {obj}, possibly due to security concerns.")
+                        exc = ValueError(_msg.format(op=op, obj=type(self).__name__))
+                        handler = raise_later(exc)
+                    else:
+                        handler = self.handlers[op]
                 except KeyError:
                     logger.warning("No handler %s found in %s", op,
                                    type(self).__name__, exc_info=True)
@@ -693,8 +714,6 @@ class ConnectionPool(object):
                  serializers=None,
                  deserializers=None,
                  connection_args=None):
-        self.open = 0          # Total number of open comms
-        self.active = 0        # Number of comms currently in use
         self.limit = limit     # Max number of open comms
         # Invariant: len(available) == open - active
         self.available = defaultdict(set)
@@ -705,6 +724,14 @@ class ConnectionPool(object):
         self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args
         self.event = Event()
+
+    @property
+    def active(self):
+        return sum(map(len, self.occupied.values()))
+
+    @property
+    def open(self):
+        return self.active + sum(map(len, self.available.values()))
 
     def __repr__(self):
         return "<ConnectionPool: open=%d, active=%d>" % (self.open,
@@ -727,26 +754,20 @@ class ConnectionPool(object):
         if available:
             comm = available.pop()
             if not comm.closed():
-                self.active += 1
                 occupied.add(comm)
                 raise gen.Return(comm)
-            else:
-                self.open -= 1
 
         while self.open >= self.limit:
             self.event.clear()
             self.collect()
             yield self.event.wait()
 
-        self.open += 1
         try:
             comm = yield connect(addr, timeout=timeout,
                                  deserialize=self.deserialize,
                                  connection_args=self.connection_args)
         except Exception:
-            self.open -= 1
             raise
-        self.active += 1
         occupied.add(comm)
 
         if self.open >= self.limit:
@@ -763,9 +784,7 @@ class ConnectionPool(object):
         except KeyError:
             pass
         else:
-            self.active -= 1
             if comm.closed():
-                self.open -= 1
                 if self.open < self.limit:
                     self.event.set()
             else:
@@ -781,7 +800,6 @@ class ConnectionPool(object):
             for comm in comms:
                 comm.close()
             comms.clear()
-        self.open = self.active
         if self.open < self.limit:
             self.event.set()
 
@@ -794,13 +812,10 @@ class ConnectionPool(object):
             comms = self.available.pop(addr)
             for comm in comms:
                 comm.close()
-                self.open -= 1
         if addr in self.occupied:
             comms = self.occupied.pop(addr)
             for comm in comms:
                 comm.close()
-                self.open -= 1
-                self.active -= 1
         if self.open < self.limit:
             self.event.set()
 

@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import json
+import re
 import sys
 from time import sleep
 
@@ -48,7 +49,9 @@ def test_simple(c, s, a, b):
                    'individual-nprocessing',
                    'individual-profile']:
         response = yield http_client.fetch('http://localhost:%d/%s' % (port, suffix))
-        assert 'bokeh' in response.body.decode().lower()
+        body = response.body.decode()
+        assert 'bokeh' in body.lower()
+        assert not re.search("href=./", body)  # no absolute links
 
     response = yield http_client.fetch('http://localhost:%d/individual-plots.json' % port)
     response = json.loads(response.body.decode())
@@ -293,6 +296,9 @@ def test_WorkerTable(c, s, a, b):
     assert all(wt.source.data.values())
     assert all(len(v) == 2 for v in wt.source.data.values())
 
+    ncores = wt.source.data['ncores']
+    assert all(ncores)
+
 
 @gen_cluster(client=True)
 def test_WorkerTable_custom_metrics(c, s, a, b):
@@ -535,3 +541,12 @@ def test_profile_server(c, s, a, b):
     yield gen.sleep(0.200)
     ptp.trigger_update()
     assert 2 < len(ptp.ts_source.data['time']) < 20
+
+
+@gen_cluster(client=True,
+             scheduler_kwargs={'services': {('bokeh', 0): BokehScheduler}})
+def test_root_redirect(c, s, a, b):
+    http_client = AsyncHTTPClient()
+    response = yield http_client.fetch('http://localhost:%d/' % s.services['bokeh'].port)
+    assert response.code == 200
+    assert "/status" in response.effective_url
