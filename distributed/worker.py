@@ -259,7 +259,7 @@ class Worker(ServerNode):
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=None, preload_argv=None, security=None,
                  contact_address=None, memory_monitor_interval='200ms',
-                 extensions=None, metrics=None, **kwargs):
+                 extensions=None, metrics=None, low_level_profiler=False, **kwargs):
         self.tasks = dict()
         self.task_state = dict()
         self.dep_state = dict()
@@ -439,6 +439,8 @@ class Worker(ServerNode):
         self.service_ports = service_ports or {}
         self.service_specs = services or {}
         self.metrics = dict(metrics) if metrics else {}
+
+        self.low_level_profiler = low_level_profiler
 
         handlers = {
             'gather': self.gather,
@@ -2229,19 +2231,20 @@ class Worker(ServerNode):
             active_threads = self.active_threads.copy()
         frames = sys._current_frames()
         frames = {ident: frames[ident] for ident in active_threads}
-        llframes = {ident: profile.ll_get_stack(ident) for ident in active_threads}
+        llframes = {}
+        if self.low_level_profiler:
+            llframes = {ident: profile.ll_get_stack(ident) for ident in active_threads}
         for ident, frame in frames.items():
             if frame is not None:
                 key = key_split(active_threads[ident])
                 init = profile.create()
-                llframe = llframes[ident]
+                llframe = llframes.get(ident)
 
                 state = profile.process(frame, True, self.profile_recent,
                                 stop='distributed/worker.py')
-                profile.llprocess(llframe, None, state)
+                state = profile.llprocess(llframe, None, state)
                 state = profile.process(frame, True, self.profile_keys[key],
                                         stop='distributed/worker.py')
-                # profile.llprocess(llframe, None, state)
 
         stop = time()
         if self.digests is not None:
