@@ -1,12 +1,13 @@
+import pytest
 import sys
 import time
 from toolz import first
 import threading
 
-from distributed.compatibility import get_thread_identity
+from distributed.compatibility import get_thread_identity, WINDOWS
 from distributed import metrics
 from distributed.profile import (process, merge, create, call_stack,
-        identifier, watch)
+        identifier, watch, llprocess, ll_get_stack)
 
 
 def test_basic():
@@ -37,6 +38,7 @@ def test_basic():
     while len(d['children']) == 1:
         d = first(d['children'].values())
 
+
     assert d['count'] == 100
     assert 'test_f' in str(d['description'])
     g = [c for c in d['children'].values() if 'test_g' in str(c['description'])][0]
@@ -44,6 +46,39 @@ def test_basic():
 
     assert g['count'] < h['count']
     assert 95 < g['count'] + h['count'] <= 100
+
+@pytest.mark.skipif(
+        WINDOWS, reason="no low-level profiler support for Windows available")
+def test_basic_low_level():
+    def test_g():
+        time.sleep(0.05)
+
+    def test_f():
+        for i in range(100):
+            test_g()
+
+    thread = threading.Thread(target=test_f)
+    thread.daemon = True
+    thread.start()
+
+    state = create()
+
+    for i in range(100):
+        time.sleep(0.02)
+        frame = sys._current_frames()[thread.ident]
+        llframes = {thread.ident: ll_get_stack(thread.ident)}
+        for f in llframes.values():
+            if f is not None:
+                llprocess(f, None, state)
+
+
+    assert state['count'] == 100
+    d = state
+    while len(d['children']) == 1:
+        d = first(d['children'].values())
+
+    assert d['count'] == 100
+    assert '__restore_rt' in str(d['description'])
 
 
 def test_merge():
