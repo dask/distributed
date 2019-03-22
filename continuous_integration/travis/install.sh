@@ -39,6 +39,7 @@ conda install -q \
     ipywidgets \
     joblib \
     jupyter_client \
+    libunwind \
     mock \
     netcdf4 \
     paramiko \
@@ -60,6 +61,7 @@ pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
 pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
+pip install -q git+https://github.com/numba/stacktrace --upgrade --no-deps
 pip install -q sortedcollections msgpack --no-deps
 pip install -q keras --upgrade --no-deps
 
