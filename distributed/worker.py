@@ -513,6 +513,8 @@ class Worker(ServerNode):
                               io_loop=self.io_loop)
         self.periodic_callbacks['profile-cycle'] = pc
 
+        self.worker_setups = {}
+
         _global_workers.append(weakref.ref(self))
 
     ##################
@@ -610,22 +612,25 @@ class Worker(ServerNode):
             raise ValueError("Unexpected response from register: %r" %
                              (response,))
         else:
-            # Retrieve eventual init functions and run them
-            for function_bytes in response['worker-setups']:
-                setup_function = pickle.loads(function_bytes)
-                if has_arg(setup_function, 'dask_worker'):
-                    result = setup_function(dask_worker=self)
-                else:
-                    result = setup_function()
-                logger.info('Init function %s ran: output=%s' % (setup_function, result))
-
             logger.info('        Registered to: %26s', self.scheduler.address)
             logger.info('-' * 49)
+
+        # Retrieve eventual init functions (only worker-setups for now)
+        for name, function_bytes in response['worker-setups'].items():
+            self.worker_setups[name] = pickle.loads(function_bytes)
 
         self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
         self.batched_stream.start(comm)
         self.periodic_callbacks['heartbeat'].start()
         self.loop.add_callback(self.handle_scheduler, comm)
+
+        # run eventual init functions (only worker-setups for now)
+        for name, setup_function in self.worker_setups.items():
+            if has_arg(setup_function, 'dask_worker'):
+                result = setup_function(dask_worker=self)
+            else:
+                result = setup_function()
+            logger.info('Init function %s : %s ran: output=%s' % (name, setup_function, result))
 
     @gen.coroutine
     def heartbeat(self):

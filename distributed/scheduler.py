@@ -902,7 +902,7 @@ class Scheduler(ServerNode):
         self.plugins = []
         self.transition_log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
         self.log = deque(maxlen=dask.config.get('distributed.scheduler.transition-log-length'))
-        self.worker_setups = []
+        self.worker_setups = {}
 
         worker_handlers = {
             'task-finished': self.handle_task_finished,
@@ -961,7 +961,8 @@ class Scheduler(ServerNode):
             'heartbeat_worker': self.heartbeat_worker,
             'get_task_status': self.get_task_status,
             'get_task_stream': self.get_task_stream,
-            'register_worker_callbacks': self.register_worker_callbacks
+            'register_worker_callbacks': self.register_worker_callbacks,
+            'unregister_worker_callbacks': self.unregister_worker_callbacks
         }
 
         self._transitions = {
@@ -3113,14 +3114,40 @@ class Scheduler(ServerNode):
 
     @gen.coroutine
     def register_worker_callbacks(self, comm, setup=None):
-        """ Registers a setup function, and call it on every worker """
-        if setup is None:
-            raise gen.Return({})
+        """
+        Registers a set of event driven callback functions
+        on workers for the given name.
 
-        self.worker_setups.append(setup)
+        setup must be a tuple of (name, serialized_function)
+        """
+        responses = {}
 
-        responses = yield self.broadcast(msg=dict(op='run', function=setup))
+        if setup is not None:
+            name, func = setup
+
+            oldfunc = self.worker_setups.get(name, "")
+
+            if oldfunc != func:
+                # add the setup function to the list to run them on new clients.
+                self.worker_setups[name] = func
+
+                # trigger the setup function on the existing clients.
+                responses.update((yield self.broadcast(msg=dict(op='run', function=func))))
+
         raise gen.Return(responses)
+
+    def unregister_worker_callbacks(self, comm, setup=None):
+        """
+        Unregisters a set of event driven callback functions on workers
+        for the given name.
+
+        setup must be a tuple of (name, serialized_function).
+        The value of serialized_function is unused.
+
+        """
+        if setup is not None:
+            name, func = setup
+            self.worker_setups.pop(name)
 
     #####################
     # State Transitions #
