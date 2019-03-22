@@ -398,7 +398,7 @@ def llprocess(frames, child, state):
 
 
 def ll_get_stack(tid):
-    from stacktrace import get_thread_stack, print_thread_stack
+    from stacktrace import get_thread_stack
     frames = get_thread_stack(tid, show_python=False)
     llframes = list(_remove_py_stack(frames))[::-1]
     return llframes
