@@ -76,7 +76,7 @@ def test_basic_low_level():
         d = first(d['children'].values())
 
     assert d['count'] == 100
-    assert '__restore_rt' in str(d['description'])
+    assert '__restore_rt' or '_L_unlock' in str(d['description'])
 
 
 def test_merge():
