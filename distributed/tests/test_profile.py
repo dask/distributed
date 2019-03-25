@@ -38,7 +38,6 @@ def test_basic():
     while len(d['children']) == 1:
         d = first(d['children'].values())
 
-
     assert d['count'] == 100
     assert 'test_f' in str(d['description'])
     g = [c for c in d['children'].values() if 'test_g' in str(c['description'])][0]
@@ -70,7 +69,6 @@ def test_basic_low_level():
         for f in llframes.values():
             if f is not None:
                 llprocess(f, None, state)
-
 
     assert state['count'] == 100
     d = state
