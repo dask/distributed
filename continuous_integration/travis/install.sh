@@ -54,13 +54,16 @@ conda install -q \
     tornado=$TORNADO \
     $PACKAGES
 
+# For low-level profiler, install libunwind and stacktrace from conda-forge
+conda install -c defaults -c conda-forge libunwind
+conda install -c defaults -c numba -c conda-forge stacktrace
+
 pip install -q pytest-repeat pytest-faulthandler
 
 pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
 pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
-pip install -q git+https://github.com/numba/stacktrace --upgrade --no-deps
 pip install -q sortedcollections msgpack --no-deps
 pip install -q keras --upgrade --no-deps
 
