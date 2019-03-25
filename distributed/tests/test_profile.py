@@ -46,8 +46,13 @@ def test_basic():
     assert g['count'] < h['count']
     assert 95 < g['count'] + h['count'] <= 100
 
+
 @pytest.mark.skipif(
-        WINDOWS, reason="no low-level profiler support for Windows available")
+        sys.version_info < (3, 5),
+        reason='stacktrace not supported on python < 3.5')
+@pytest.mark.skipif(
+        WINDOWS,
+        reason='no low-level profiler support for Windows available')
 def test_basic_low_level():
     def test_g():
         time.sleep(0.05)
