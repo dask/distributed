@@ -26,9 +26,6 @@ conda update -q conda
 conda create -q -n test-environment python=$PYTHON
 source activate test-environment
 
-# Needed for stacktrace
-apt-get install -q -y libunwind-dev
-
 # Install dependencies
 conda install -q \
     bokeh \

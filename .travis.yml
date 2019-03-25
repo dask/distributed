@@ -26,6 +26,10 @@ matrix:
     ## This needs to be the exact same line as above
     #env: PYTHON=3.6 RUNSLOW=false
 
+before_install:
+    - sudo apt-get update
+    - sudo apt-get install -y libunwind-dev
+
 install:
   - if [[ $TESTS == true ]]; then source continuous_integration/travis/install.sh ; fi
 
