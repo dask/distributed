@@ -81,7 +81,9 @@ def test_basic_low_level():
         d = first(d['children'].values())
 
     assert d['count'] == 100
-    assert '__restore_rt' or '_L_unlock' in str(d['description'])
+    call = str(d['description'])
+    expected = ['__restore_rt', '_L_unlock']
+    assert any([e in call for e in expected])
 
 
 def test_merge():
