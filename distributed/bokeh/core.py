@@ -19,7 +19,6 @@ class BokehServer(object):
     server_kwargs = {}
 
     def listen(self, addr):
-        breakpoint()
         if self.server:
             return
         if isinstance(addr, tuple):
