@@ -1112,7 +1112,8 @@ class Scheduler(ServerNode):
             if listen_ip == '0.0.0.0':
                 listen_ip = ''
 
-            if isinstance(addr_or_port, str) and addr_or_port.startswith('inproc://'):
+            if isinstance(addr_or_port, str) and (addr_or_port.startswith('inproc://')
+                                                  or addr_or_port.startswith('ucx://')):
                 listen_ip = 'localhost'
 
             # Services listen on all addresses
