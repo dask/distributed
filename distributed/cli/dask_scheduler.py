@@ -42,6 +42,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 # XXX default port (or URI) values should be centralized somewhere
 @click.option('--bokeh-port', type=int, default=8787,
               help="Bokeh port for visual diagnostics")
+@click.option('--bokeh-host', type=str, default=None,
+              help="URI, IP or hostname for Bokeh Server")
 @click.option('--bokeh/--no-bokeh', '_bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
 @click.option('--show/--no-show', default=False, help="Show web UI")
@@ -64,7 +66,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
                    'like "foo.bar" or "/path/to/foo.py".')
 @click.argument('preload_argv', nargs=-1,
                 type=click.UNPROCESSED, callback=validate_preload_argv)
-def main(host, port, bokeh_port, show, _bokeh, bokeh_whitelist, bokeh_prefix,
+def main(host, port, bokeh_port, bokeh_host, show, _bokeh, bokeh_whitelist, bokeh_prefix,
         use_xheaders, pid_file, scheduler_file, interface,
         local_directory, preload, preload_argv, tls_ca_file, tls_cert, tls_key):
 

@@ -18,7 +18,7 @@ from ..utils import (sync, ignoring, All, silence_logging, LoopRunner,
         log_errors, thread_state, parse_timedelta)
 from ..nanny import Nanny
 from ..scheduler import Scheduler
-from ..worker import Worker, _ncores
+from ..worker import Worker, parse_memory_limit, _ncores
 
 logger = logging.getLogger(__name__)
 
@@ -54,10 +54,13 @@ class LocalCluster(Cluster):
         Tornado gen.coroutines.  This should remain False for normal use.
     kwargs: dict
         Extra worker arguments, will be passed to the Worker constructor.
+    blocked_handlers: List[str]
+        A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
+        like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
     security : Security
-    protocol: str (optiona)
+    protocol: str (optional)
         Protocol to use like ``tcp://``, ``tls://``, ``inproc://``
         This defaults to sensible choice given other keyword arguments like
         ``processes`` and ``security``
@@ -87,7 +90,8 @@ class LocalCluster(Cluster):
                  silence_logs=logging.WARN, diagnostics_port=8787,
                  services=None, worker_services=None, service_kwargs=None,
                  asynchronous=False, security=None, protocol=None,
-                 **worker_kwargs):
+                 blocked_handlers=None, **worker_kwargs):
+
         if start is not None:
             msg = ("The start= parameter is deprecated. "
                    "LocalCluster always starts. "
@@ -129,6 +133,8 @@ class LocalCluster(Cluster):
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
             threads_per_worker = max(1, int(math.ceil(_ncores / n_workers)))
+        if n_workers and 'memory_limit' not in worker_kwargs:
+            worker_kwargs['memory_limit'] = parse_memory_limit('auto', 1, n_workers)
 
         worker_kwargs.update({
             'ncores': threads_per_worker,
@@ -150,7 +156,8 @@ class LocalCluster(Cluster):
 
         self.scheduler = Scheduler(loop=self.loop,
                                    services=services,
-                                   security=security)
+                                   security=security,
+                                   blocked_handlers=blocked_handlers)
         self.scheduler_port = scheduler_port
 
         self.workers = []

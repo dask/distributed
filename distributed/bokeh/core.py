@@ -19,6 +19,7 @@ class BokehServer(object):
     server_kwargs = {}
 
     def listen(self, addr):
+        breakpoint()
         if self.server:
             return
         if isinstance(addr, tuple):
@@ -29,7 +30,7 @@ class BokehServer(object):
         for i in range(5):
             try:
                 self.server = Server(self.apps,
-                                     port=port, address=ip,
+                                     port=port, address='10.33.227.165',
                                      check_unused_sessions_milliseconds=500,
                                      allow_websocket_origin=["*"],
                                      use_index=False,
