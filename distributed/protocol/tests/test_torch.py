@@ -31,3 +31,10 @@ def test_resnet():
     header, frames = serialize(model)
     model2 = deserialize(header, frames)
     assert str(model) == str(model2)
+
+
+def test_deserialize_grad():
+    torch.set_printoptions(precision=10)
+    a = np.random.rand(8, 1)
+    t = torch.tensor(a, requires_grad=True, dtype=torch.float)
+    deserialize(*serialize(t))
