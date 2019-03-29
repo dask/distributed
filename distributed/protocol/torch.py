@@ -7,7 +7,7 @@ import numpy as np
 
 @dask_serialize.register(torch.Tensor)
 def serialize_torch_Tensor(t):
-    header, frames = serialize(t.detach_().numpy())
+    header, frames = serialize(t.detach().numpy())
     if t.grad is not None:
         grad_header, grad_frames = serialize(t.grad.numpy())
         header['grad'] = {'header': grad_header, 'start': len(frames)}
