@@ -34,7 +34,6 @@ def test_resnet():
 
 
 def test_deserialize_grad():
-    torch.set_printoptions(precision=10)
     a = np.random.rand(8, 1)
     t = torch.tensor(a, requires_grad=True, dtype=torch.float)
     deserialize(*serialize(t))
