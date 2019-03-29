@@ -37,7 +37,6 @@ def test_deserialize_grad():
     a = np.random.rand(8, 1)
     t = torch.tensor(a, requires_grad=True, dtype=torch.float)
     t2 = deserialize(*serialize(t))
-
     assert t2.requires_grad
 
     a = np.around(a, decimals=6)
