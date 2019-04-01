@@ -1063,7 +1063,8 @@ def import_file(path):
             import pkg_resources
             pkgs = pkg_resources.find_distributions(path)
             for pkg in pkgs:
-                names_to_import.append(pkg.project_name)
+                # See https://github.com/dask/distributed/issues/1819
+                names_to_import.extend(pkg.get_metadata_lines('top_level.txt'))
         elif ext in ('.zip', '.pyz'):
             names_to_import.append(name)
 
