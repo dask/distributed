@@ -89,9 +89,9 @@ class LocalCluster(Cluster):
                  loop=None, start=None, ip=None, scheduler_port=0,
                  silence_logs=logging.WARN, diagnostics_port=8787,
                  services=None, worker_services=None, service_kwargs=None,
-                 asynchronous=False, security=None, protocol=None, 
+                 asynchronous=False, security=None, protocol=None,
                  blocked_handlers=None, **worker_kwargs):
-      if start is not None:
+        if start is not None:
             msg = ("The start= parameter is deprecated. "
                    "LocalCluster always starts. "
                    "For asynchronous operation use the following: \n\n"
