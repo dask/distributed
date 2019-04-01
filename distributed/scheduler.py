@@ -925,7 +925,7 @@ class Scheduler(ServerNode):
         self.total_occupancy = 0
         self.host_info = defaultdict(dict)
         self.resources = defaultdict(dict)
-        self.aliases = dict()
+        self.aliases = defaultdict(set)
 
         self._task_state_collections = [self.unrunnable]
 
@@ -1363,26 +1363,32 @@ class Scheduler(ServerNode):
 
             ws = self.workers.get(address)
             if ws is not None:
-                raise ValueError("Worker already exists %s" % address)
+               msg = {
+                    "status": "error",
+                    "message": "worker already exists %s" % address,
+                    "time": time(),
+                }
+                yield comm.write(msg)
+                return
 
-            self.workers[address] = ws = WorkerState(
-                address=address,
-                pid=pid,
-                ncores=ncores,
-                memory_limit=memory_limit,
-                name=name,
-                local_directory=local_directory,
-                services=services,
-            )
-
-            if name in self.aliases:
-                msg = {
+            if name in self.aliases and address in self.aliases[name]:
+               msg = {
                     "status": "error",
                     "message": "name taken, %s" % name,
                     "time": time(),
                 }
                 yield comm.write(msg)
                 return
+
+            self.workers[address] = ws = WorkerState(
+                    address=address,
+                    pid=pid,
+                    ncores=ncores,
+                    memory_limit=memory_limit,
+                    name=name,
+                    local_directory=local_directory,
+                    services=services
+            )
 
             if "addresses" not in self.host_info[host]:
                 self.host_info[host].update({"addresses": set(), "cores": 0})
@@ -1391,7 +1397,7 @@ class Scheduler(ServerNode):
             self.host_info[host]["cores"] += ncores
 
             self.total_ncores += ncores
-            self.aliases[name] = address
+            self.aliases[name].append(address)
 
             response = self.heartbeat_worker(
                 address=address,
@@ -1856,7 +1862,9 @@ class Scheduler(ServerNode):
 
             self.rpc.remove(address)
             del self.stream_comms[address]
-            del self.aliases[ws.name]
+            self.aliases[ws.name].remove(address)
+            if not self.aliases[ws.name]:
+                del self.aliases[ws.name]
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
@@ -4391,8 +4399,6 @@ class Scheduler(ServerNode):
         Handles strings, tuples, or aliases.
         """
         # XXX how many address-parsing routines do we have?
-        if addr in self.aliases:
-            addr = self.aliases[addr]
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, six.string_types):
