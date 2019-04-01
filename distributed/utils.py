@@ -478,28 +478,6 @@ def tmp_text(filename, text):
             os.remove(fn)
 
 
-@contextmanager
-def tmp_dir(texts):
-    directory = tempfile.mkdtemp()
-    for fname, text in texts.items():
-        full_fname = os.path.join(directory, fname)
-
-        try:
-            os.makedirs(os.path.dirname(full_fname))
-        except FileExistsError:
-            pass # we don't care if dir already exists
-
-        with open(full_fname, 'w') as f:
-            f.write(text)
-
-    try:
-        yield directory
-    finally:
-        if os.path.exists(directory):
-            shutil.rmtree(directory)
-    
-
-
 def clear_queue(q):
     while not q.empty():
         q.get_nowait()
