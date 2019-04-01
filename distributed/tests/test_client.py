@@ -10,6 +10,7 @@ import logging
 import os
 import pickle
 import random
+import subprocess
 import sys
 import threading
 from threading import Semaphore
@@ -43,7 +44,7 @@ from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
 from distributed.utils import (ignoring, mp_context, sync, tmp_text, tokey,
-                               tmpfile)
+                               tmpfile, tmp_dir)
 from distributed.utils_test import (cluster, slow, slowinc, slowadd, slowdec,
                                     randominc, inc, dec, div, throws, geninc, asyncinc,
                                     gen_cluster, gen_test, double, popen,
@@ -1548,6 +1549,38 @@ def test_upload_file_zip(c, s, a, b):
             if os.path.basename(path) == 'myfile.zip':
                 sys.path.remove(path)
                 break
+
+
+@gen_cluster(client=True)
+def test_upload_file_egg(c, s, a, b):
+    def g():
+        import package_1, package_2
+        return package_1.a, package_2.b
+
+    for value in [123, 456]:
+        dir_contents = {
+                'setup.py': (
+                    'from setuptools import setup, find_packages\n'
+                    'setup(name="my_package", packages=find_packages())\n'
+                ),
+                'package_1/__init__.py': 'a = {}'.format(value),
+                'package_2/__init__.py': 'b = {}'.format(value),
+        }
+        with tmp_dir(dir_contents) as directory:
+            subprocess.check_call(['python', 'setup.py', 'bdist_egg'], cwd=directory)
+            egg_root = os.path.join(directory, 'dist')
+            print(os.listdir(directory))
+            print(os.listdir(os.path.dirname(egg_root)))
+            print(os.listdir(egg_root))
+            egg_name = [fname for fname in os.listdir(egg_root) if fname.endswith('.egg')][0]
+            egg_path = os.path.join(egg_root, egg_name)
+            yield c.upload_file(egg_path)
+
+            x = c.submit(g, pure=False)
+            result = yield x
+            assert result == (value, value)
+    # this test won't impact the others, because the dir containg the
+    # egg is gone at this point.
 
 
 @gen_cluster(client=True)
