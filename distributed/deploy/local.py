@@ -44,11 +44,11 @@ class LocalCluster(Cluster):
         Use a falsey value like False or None for no change.
     ip: string
         IP address on which the scheduler will listen, defaults to only localhost
+    diagnostics_address: str
+        Address on which to listen for the Bokeh diagnostics server like
+        'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
     diagnostics_port: int
-        Port on which the :doc:`web` will be provided.  8787 by default, use 0
-        to choose a random port, ``None`` to disable it, or an
-        :samp:`({ip}:{port})` tuple to listen on a different IP address than
-        the scheduler.
+        Deprecated.  See diagnostics_address.
     asynchronous: bool (False by default)
         Set to True if using this cluster within async/await functions or within
         Tornado gen.coroutines.  This should remain False for normal use.
@@ -83,7 +83,8 @@ class LocalCluster(Cluster):
     """
     def __init__(self, n_workers=None, threads_per_worker=None, processes=True,
                  loop=None, start=None, ip=None, scheduler_port=0,
-                 silence_logs=logging.WARN, diagnostics_port=8787,
+                 silence_logs=logging.WARN, diagnostics_address=':8787',
+                 diagnostics_port=None,
                  services=None, worker_services=None, service_kwargs=None,
                  asynchronous=False, security=None, blocked_handlers=None, **worker_kwargs):
         if start is not None:
@@ -92,6 +93,13 @@ class LocalCluster(Cluster):
                    "For asynchronous operation use the following: \n\n"
                    "  cluster = yield LocalCluster(asynchronous=True)")
             raise ValueError(msg)
+
+        if diagnostics_port is not None:
+            warnings.warn(
+                "diagnostics_port has been deprecated. "
+                "Please use `diagnostics_address=` instead"
+            )
+            diagnostics_address = diagnostics_port
 
         self.status = None
         self.processes = processes
@@ -124,14 +132,14 @@ class LocalCluster(Cluster):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
 
-        if diagnostics_port is not False and diagnostics_port is not None:
+        if diagnostics_address is not False and diagnostics_address is not None:
             try:
                 from distributed.bokeh.scheduler import BokehScheduler
                 from distributed.bokeh.worker import BokehWorker
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                services[('bokeh', diagnostics_port)] = (BokehScheduler, (service_kwargs or {}).get('bokeh', {}))
+                services[('bokeh', diagnostics_address)] = (BokehScheduler, (service_kwargs or {}).get('bokeh', {}))
                 worker_services[('bokeh', 0)] = BokehWorker
 
         self.scheduler = Scheduler(loop=self.loop,
