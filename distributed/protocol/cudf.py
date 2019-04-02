@@ -34,7 +34,6 @@ def serialize_cudf_dataframe(x):
     arrays.extend(null_masks)
 
     header = {
-        'lengths': [len(x)] * len(arrays),
         'is_cuda': len(arrays),
         'subheaders': sub_headers,
         # TODO: the header must be msgpack (de)serializable.
