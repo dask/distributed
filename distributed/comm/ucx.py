@@ -104,10 +104,10 @@ class UCX(Comm):
     Each msg is serialized into a number of "data" frames. We prepend these
     real frames with two additional frames
 
-        1. is_gpu: Boolean indicator for whether the frame should be
+        1. is_gpus: Boolean indicator for whether the frame should be
            received into GPU memory. Packed in '?' format. Unpack with
            ``<n_frames>?`` format.
-        2. frame_size : Unisigned int describing the size of frame (in bytes)
+        2. frame_size : Unsigned int describing the size of frame (in bytes)
            to receive. Packed in 'Q' format, so a length-0 frame is equivalent
            to an unsized frame. Unpacked with ``<n_frames>Q``.
 
@@ -170,7 +170,7 @@ class UCX(Comm):
 
         gpu_frame_msg = await self.ep.recv_future()
         gpu_frame_msg = gpu_frame_msg.get_obj()
-        is_gpu = struct.unpack("{}?".format(n_data_frames), gpu_frame_msg)
+        is_gpus = struct.unpack("{}?".format(n_data_frames), gpu_frame_msg)
 
         sized_frame_msg = await self.ep.recv_future()
         sized_frame_msg = sized_frame_msg.get_obj()
@@ -178,9 +178,9 @@ class UCX(Comm):
 
         frames = []
 
-        for i, (is_gpu, size) in enumerate(zip(is_gpu, sizes)):
+        for i, (is_gpus, size) in enumerate(zip(is_gpus, sizes)):
             if size > 0:
-                resp = await self.ep.recv_obj(size, cuda=is_gpu)
+                resp = await self.ep.recv_obj(size, cuda=is_gpus)
             else:
                 resp = await self.ep.recv_future()
             frame = ucp.get_obj_from_msg(resp)
@@ -299,6 +299,12 @@ class UCXListener(Listener):
         host, port = self.get_host_port()
         host = ensure_concrete_host(host)  # TODO: ensure_concrete_host
         return self.prefix + unparse_host_port(host, port)
+
+    @property
+    def bound_address(self):
+        # TODO: Does this become part of the base API? Kinda hazy, since
+        # we exclude in for inproc.
+        return self.get_host_port()
 
 
 class UCXBackend(Backend):
