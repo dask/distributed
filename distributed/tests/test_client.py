@@ -1561,7 +1561,7 @@ def test_upload_file_egg(c, s, a, b):
 
                 with open(os.path.join(dirname, 'setup.py'), 'w') as f:
                     f.write('from setuptools import setup, find_packages\n')
-                    f.write('setup(name="my_package", packages=find_packages())\n')
+                    f.write('setup(name="my_package", packages=find_packages(), version="{}")\n'.format(value))
 
                 # test a package with an underscore in the name
                 package_1 = os.path.join(dirname, 'package_1')
@@ -1586,6 +1586,7 @@ def test_upload_file_egg(c, s, a, b):
                 egg_path = os.path.join(egg_root, egg_name)
 
                 yield c.upload_file(egg_path)
+                os.remove(egg_path)
 
                 x = c.submit(g, pure=False)
                 result = yield x
