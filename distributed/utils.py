@@ -683,7 +683,7 @@ def silence_logging(level, root='distributed'):
     return old
 
 
-@toolz.memoize
+#@toolz.memoize
 def ensure_ip(hostname):
     """ Ensure that address is an IP address
 
