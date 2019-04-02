@@ -8,11 +8,7 @@ See :ref:`communcations` for more.
 import asyncio
 import itertools
 import logging
-import sys
 import struct
-import msgpack
-
-from dask import config
 
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener

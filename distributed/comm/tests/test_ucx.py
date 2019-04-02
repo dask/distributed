@@ -180,6 +180,25 @@ def test_ucx_deserialize():
 
 
 @pytest.mark.asyncio
+async def test_ping_pong_cudf():
+    # if this test appears after cupy an import error arises
+    # *** ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `CXXABI_1.3.11'
+    # not found (required by python3.7/site-packages/pyarrow/../../../libarrow.so.12)
+    cudf = pytest.importorskip('cudf')
+
+    df = cudf.DataFrame({"A": [1, 2, None], "B": [1., 2., None]})
+    address = "{}:{}".format(HOST, next(port_counter))
+
+    com, serv_com = await get_comm_pair(address)
+    msg = {"op": "ping", 'data': to_serialize(df)}
+
+    await com.write(msg)
+    result = await serv_com.read()
+    data2 = result.pop('data')
+    assert result['op'] == 'ping'
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize('shape', [
     (100,),
     (10, 10)
@@ -215,22 +234,6 @@ async def test_ping_pong_numba():
 
     com, serv_com = await get_comm_pair(address)
     msg = {"op": "ping", 'data': to_serialize(arr)}
-
-    await com.write(msg)
-    result = await serv_com.read()
-    data2 = result.pop('data')
-    assert result['op'] == 'ping'
-
-
-@pytest.mark.asyncio
-async def test_ping_pong_cudf():
-    cudf = pytest.importorskip("cudf")
-
-    df = cudf.DataFrame({"A": [1, 2, None], "B": [1., 2., None]})
-    address = "{}:{}".format(HOST, next(port_counter))
-
-    com, serv_com = await get_comm_pair(address)
-    msg = {"op": "ping", 'data': to_serialize(df)}
 
     await com.write(msg)
     result = await serv_com.read()

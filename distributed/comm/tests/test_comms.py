@@ -604,11 +604,10 @@ def test_inproc_client_server():
     yield check_client_server('inproc://', inproc_check())
     yield check_client_server(inproc.new_address(), inproc_check())
 
-
-
 #
 # TLS certificate handling
 #
+
 
 @gen_test()
 def test_tls_reject_certificate():
