@@ -1061,7 +1061,7 @@ class Scheduler(ServerNode):
             else:
                 port = 0
 
-            if isinstance(port, str):
+            if isinstance(port, (str, bytes)):
                 port = port.split(':')
 
             if isinstance(port, (tuple, list)):
