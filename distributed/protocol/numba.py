@@ -26,8 +26,9 @@ def serialize_numba_ndarray(x):
     dtype = (0, x.dtype.str)
     nbytes = data.dtype.itemsize * data.size
 
+    # used in the ucx comms for gpu/cpu message passing
+    # 'lengths' set by dask
     header = x.__cuda_array_interface__.copy()
-    header['lengths'] = (nbytes,)  # one per stride
     header['compression'] = (None,)  # TODO
     header['is_cuda'] = 1
     header['dtype'] = dtype
