@@ -233,15 +233,16 @@ class LocalCluster(Cluster):
         raise gen.Return(self)
 
     @gen.coroutine
-    def _start_worker(self, death_timeout=60, **kwargs):
+    def _start_worker(self, death_timeout=60, **worker_kwargs):
         if self.status and self.status.startswith('clos'):
             warnings.warn("Tried to start a worker while status=='%s'" % self.status)
             return
 
         if self.processes:
             W = Nanny
-            kwargs['quiet'] = True
+            kwargs = dict(quiet=True, worker_kwargs=worker_kwargs)
         else:
+            kwargs = worker_kwargs
             W = Worker
 
         w = W(self.scheduler.address, loop=self.loop,
