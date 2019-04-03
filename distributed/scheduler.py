@@ -1288,7 +1288,14 @@ class Scheduler(ServerNode):
 
             ws = self.workers.get(address)
             if ws is not None:
-                raise ValueError("Worker already exists %s" % address)
+                self.remove_worker(address=address)
+                msg = {'status': 'error', 
+                       'message': "worker already exists %s" % address,
+                       'time': time()}
+                yield comm.write(msg)
+                return
+
+            # DD
 
             if name in self.aliases:
                 msg = {'status': 'error', 

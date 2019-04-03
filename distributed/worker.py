@@ -598,7 +598,7 @@ class Worker(ServerNode):
                 response = yield future
                 if response['status'] == 'error':
                     msg = response.get('message','')
-                    if msg.startswith('name taken') or msg.startswith('address not found'):
+                    if msg.startswith('name taken') or msg.startswith('address not found') or msg.startswith('worker already exists'):
                         yield gen.sleep(0.1)
                         continue
                 _end = time()
