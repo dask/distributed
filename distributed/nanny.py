@@ -197,7 +197,8 @@ class Nanny(ServerNode):
                     self._given_worker_port)
 
         if self.process is None:
-            worker_kwargs = dict(ncores=self.ncores,
+            worker_kwargs = dict(scheduler_ip=self.scheduler_addr,
+                                 ncores=self.ncores,
                                  local_dir=self.local_dir,
                                  services=self.services,
                                  service_ports={'nanny': self.port},
@@ -214,7 +215,7 @@ class Nanny(ServerNode):
                                  contact_address=self.contact_address)
             worker_kwargs.update(self.worker_kwargs)
             self.process = WorkerProcess(
-                worker_args=(self.scheduler_addr,),
+                worker_args=tuple(),
                 worker_kwargs=worker_kwargs,
                 worker_start_args=(start_arg,),
                 silence_logs=self.silence_logs,
