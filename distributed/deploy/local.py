@@ -242,8 +242,8 @@ class LocalCluster(Cluster):
             W = Nanny
             kwargs = dict(quiet=True, worker_kwargs=worker_kwargs)
         else:
-            kwargs = worker_kwargs
             W = Worker
+            kwargs = worker_kwargs
 
         w = W(self.scheduler.address, loop=self.loop,
               death_timeout=death_timeout,
