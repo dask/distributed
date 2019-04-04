@@ -43,7 +43,7 @@ class Nanny(ServerNode):
             memory_limit='auto', reconnect=True, validate=False, quiet=False,
             resources=None, silence_logs=None, death_timeout=None, preload=(),
             preload_argv=[], security=None, contact_address=None,
-            listen_address=None, worker_class=None, env=None, worker_kwargs={}, **kwargs):
+            listen_address=None, worker_class=None, env=None, **worker_kwargs):
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
@@ -97,8 +97,7 @@ class Nanny(ServerNode):
                     'run': self.run}
 
         super(Nanny, self).__init__(handlers, io_loop=self.loop,
-                                    connection_args=self.connection_args,
-                                    **kwargs)
+                                    connection_args=self.connection_args)
 
         if self.memory_limit:
             pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
