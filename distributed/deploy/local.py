@@ -47,6 +47,8 @@ class LocalCluster(Cluster):
     dashboard_address: str
         Address on which to listen for the Bokeh diagnostics server like
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
+        Set to ``None`` to disable the dashboard.
+        Use port 0 for a random port.
     diagnostics_port: int
         Deprecated.  See dashboard_address.
     asynchronous: bool (False by default)
