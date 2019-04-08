@@ -919,20 +919,29 @@ def test_worker_fds(s):
         assert time() < start + 0.5
 
 
-@pytest.mark.skipif(not sys.platform.startswith('linux'),
-                    reason="Need 127.0.0.2 to mean localhost")
 @gen_cluster(ncores=[])
 def test_service_hosts_match_worker(s):
     pytest.importorskip('bokeh')
     from distributed.bokeh.worker import BokehWorker
     services = {('bokeh', ':0'): BokehWorker}
-    for host in ['tcp://0.0.0.0', 'tcp://127.0.0.2']:
-        w = Worker(s.address, services=services)
-        yield w._start(host)
 
-        sock = first(w.services['bokeh'].server._http._sockets.values())
-        assert sock.getsockname()[0] == host.split('://')[1]
-        yield w._close()
+    w = Worker(s.address, services={('bokeh', ':0'): BokehWorker})
+    yield w._start('tcp://0.0.0.0')
+    sock = first(w.services['bokeh'].server._http._sockets.values())
+    assert sock.getsockname()[0] in ('::', '0.0.0.0')
+    yield w._close()
+
+    w = Worker(s.address, services={('bokeh', ':0'): BokehWorker})
+    yield w._start('tcp://127.0.0.1')
+    sock = first(w.services['bokeh'].server._http._sockets.values())
+    assert sock.getsockname()[0] in ('::', '0.0.0.0')
+    yield w._close()
+
+    w = Worker(s.address, services={('bokeh', 0): BokehWorker})
+    yield w._start('tcp://127.0.0.1')
+    sock = first(w.services['bokeh'].server._http._sockets.values())
+    assert sock.getsockname()[0] == '127.0.0.1'
+    yield w._close()
 
 
 @gen_cluster(ncores=[])
