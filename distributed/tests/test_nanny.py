@@ -333,3 +333,11 @@ def test_environment_variable(c, s):
     results = yield c.run(lambda: os.environ['FOO'])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
     yield [a._close(), b._close()]
+
+
+@gen_cluster(ncores=[], client=True)
+def test_data_types(c, s):
+    w = yield Nanny(s.address, data=dict)
+    r = yield c.run(lambda dask_worker: type(dask_worker.data))
+    assert r[w.worker_address] == dict
+    yield w._close()
