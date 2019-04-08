@@ -1061,7 +1061,7 @@ class Scheduler(ServerNode):
             else:
                 port = 0
 
-            if isinstance(port, (str, bytes)):
+            if isinstance(port, (str, unicode)):
                 port = port.split(':')
 
             if isinstance(port, (tuple, list)):
@@ -1074,7 +1074,7 @@ class Scheduler(ServerNode):
 
             try:
                 service = v(self, io_loop=self.loop, **kwargs)
-                service.listen((listen_ip or default_listen_ip, port))
+                service.listen((listen_ip if listen_ip is None else default_listen_ip, port))
                 self.services[k] = service
             except Exception as e:
                 warnings.warn("\nCould not launch service '%s' on port %s. " % (k, port) +

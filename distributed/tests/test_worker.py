@@ -925,7 +925,7 @@ def test_worker_fds(s):
 def test_service_hosts_match_worker(s):
     pytest.importorskip('bokeh')
     from distributed.bokeh.worker import BokehWorker
-    services = {('bokeh', 0): BokehWorker}
+    services = {('bokeh', ':0'): BokehWorker}
     for host in ['tcp://0.0.0.0', 'tcp://127.0.0.2']:
         w = Worker(s.address, services=services)
         yield w._start(host)
@@ -933,6 +933,19 @@ def test_service_hosts_match_worker(s):
         sock = first(w.services['bokeh'].server._http._sockets.values())
         assert sock.getsockname()[0] == host.split('://')[1]
         yield w._close()
+
+
+@gen_cluster(ncores=[])
+def test_start_services(s):
+    pytest.importorskip('bokeh')
+    from distributed.bokeh.worker import BokehWorker
+    services = {('bokeh', ':1234'): BokehWorker}
+
+    w = Worker(s.address, services=services)
+    yield w._start()
+
+    assert w.services['bokeh'].server.port == 1234
+    yield w._close()
 
 
 @gen_test()

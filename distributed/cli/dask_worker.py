@@ -41,9 +41,9 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help="Serving computation port, defaults to random")
 @click.option('--nanny-port', type=int, default=0,
               help="Serving nanny port, defaults to random")
-@click.option('--bokeh-port', type=int, default=0,
+@click.option('--bokeh-port', type=int, default=None,
               help="Deprecated.  See --dashboard-address")
-@click.option('--dashboard-address', type=str, default=':8787',
+@click.option('--dashboard-address', type=str, default=':0',
               help="Address on which to listen for diagnostics dashboard")
 @click.option('--bokeh/--no-bokeh', 'bokeh', default=True, show_default=True,
               required=False, help="Launch Bokeh Web UI")
@@ -187,7 +187,7 @@ def main(scheduler, host, worker_port, listen_address, contact_address,
                 result = (BokehWorker, {'prefix': bokeh_prefix})
             else:
                 result = BokehWorker
-            services[('bokeh', bokeh_port)] = result
+            services[('bokeh', dashboard_address)] = result
 
     if resources:
         resources = resources.replace(',', ' ').split()
