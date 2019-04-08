@@ -21,7 +21,8 @@ from tornado.ioloop import TimeoutError
 
 from distributed import (Nanny, get_client, wait, default_client,
         get_worker, Reschedule)
-from distributed.compatibility import WINDOWS, cache_from_source
+from distributed.compatibility import (WINDOWS, cache_from_source,
+        MutableMapping)
 from distributed.core import rpc
 from distributed.client import wait
 from distributed.scheduler import Scheduler
@@ -1280,3 +1281,25 @@ def test_register_worker_callbacks(c, s, a, b):
     # Final exception test
     with pytest.raises(ZeroDivisionError):
         yield c.register_worker_callbacks(setup=lambda: 1 / 0)
+
+
+@gen_cluster(ncores=[])
+def test_data_types(s):
+    w = yield Worker(s.address, data=dict)
+    assert isinstance(w.data, dict)
+    yield w._close()
+
+    data = dict()
+    w = yield Worker(s.address, data=data)
+    assert w.data is data
+    yield w._close()
+
+    class Data(dict):
+        def __init__(self, x, y):
+            self.x = x
+            self.y = y
+
+    w = yield Worker(s.address, data=(Data, {'x': 123, 'y': 456}))
+    assert w.data.x == 123
+    assert w.data.y == 456
+    yield w._close()
