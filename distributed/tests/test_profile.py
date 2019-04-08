@@ -7,7 +7,7 @@ import threading
 from distributed.compatibility import get_thread_identity, WINDOWS
 from distributed import metrics
 from distributed.profile import (process, merge, create, call_stack,
-        identifier, watch, llprocess, ll_get_stack)
+        identifier, watch, llprocess, ll_get_stack, plot_data)
 
 
 def test_basic():
@@ -45,6 +45,10 @@ def test_basic():
 
     assert g['count'] < h['count']
     assert 95 < g['count'] + h['count'] <= 100
+
+    pd = plot_data(state)
+    assert len(set(map(len, pd.values()))) == 1  # all same length
+    assert len(set(pd['color'])) > 1  # different colors
 
 
 @pytest.mark.skipif(
