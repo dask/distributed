@@ -1141,8 +1141,8 @@ def test_service_hosts():
 
     for port in [0, ('127.0.0.3', 0)]:
         for url, expected in [('tcp://0.0.0.0', ('::', '0.0.0.0')),
-                              ('tcp://127.0.0.2', '127.0.0.2'),
-                              ('tcp://127.0.0.2:38275', '127.0.0.2')]:
+                              ('tcp://127.0.0.2', ('0.0.0.0', '127.0.0.2')),
+                              ('tcp://127.0.0.2:38275', ('0.0.0.0', '127.0.0.2'))]:
             services = {('bokeh', port): BokehScheduler}
 
             s = Scheduler(services=services)
