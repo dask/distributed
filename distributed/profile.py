@@ -199,9 +199,14 @@ def plot_data(state, profile_interval=0.010):
         ident = state['identifier']
 
         try:
-            colors.append(color_of(desc['filename']))
+            fn = desc['filename']
         except IndexError:
             colors.append('gray')
+        else:
+            if fn == '<c>':
+                colors.append('lightgray')
+            else:
+                colors.append(color_of(fn))
 
         delta = (stop - start) / state['count']
 
