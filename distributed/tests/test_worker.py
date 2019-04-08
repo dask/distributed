@@ -21,8 +21,7 @@ from tornado.ioloop import TimeoutError
 
 from distributed import (Nanny, get_client, wait, default_client,
         get_worker, Reschedule)
-from distributed.compatibility import (WINDOWS, cache_from_source,
-        MutableMapping)
+from distributed.compatibility import WINDOWS, cache_from_source
 from distributed.core import rpc
 from distributed.client import wait
 from distributed.scheduler import Scheduler
