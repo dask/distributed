@@ -765,7 +765,7 @@ class Worker(ServerNode):
                 kwargs = {}
 
             self.services[k] = v(self, io_loop=self.loop, **kwargs)
-            self.services[k].listen((listen_ip if listen_ip is None else default_listen_ip, port))
+            self.services[k].listen((listen_ip if listen_ip is not None else default_listen_ip, port))
             self.service_ports[k] = self.services[k].port
 
     @gen.coroutine
