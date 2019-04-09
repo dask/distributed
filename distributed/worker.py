@@ -29,7 +29,8 @@ from . import profile, comm
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for, connect
 from .comm.utils import offload
-from .compatibility import unicode, get_thread_identity, finalize
+from .compatibility import (unicode, get_thread_identity, finalize,
+        MutableMapping)
 from .core import (error_message, CommClosedError, send_recv,
                    pingpong, coerce_to_address)
 from .diskutils import WorkSpace
@@ -47,7 +48,8 @@ from .utils import (funcname, get_ip, has_arg, _maybe_complex, log_errors,
                     ignoring, mp_context, import_file,
                     silence_logging, thread_state, json_load_robust, key_split,
                     format_bytes, DequeHandler, PeriodicCallback,
-                    parse_bytes, parse_timedelta, iscoroutinefunction)
+                    parse_bytes, parse_timedelta, iscoroutinefunction,
+                    warn_on_duration)
 from .utils_comm import pack_data, gather_from_workers
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 
@@ -215,6 +217,8 @@ class Worker(ServerNode):
     scheduler_ip: str
     scheduler_port: int
     ip: str, optional
+    data: MutableMapping, type, None
+        The object to use for storage, builds a disk-backed LRU dict by default
     ncores: int, optional
     loop: tornado.ioloop.IOLoop
     local_dir: str, optional
@@ -259,7 +263,8 @@ class Worker(ServerNode):
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=None, preload_argv=None, security=None,
                  contact_address=None, memory_monitor_interval='200ms',
-                 extensions=None, metrics=None, low_level_profiler=False, **kwargs):
+                 extensions=None, metrics=None, data=None, low_level_profiler=False,
+                 **kwargs):
         self.tasks = dict()
         self.task_state = dict()
         self.dep_state = dict()
@@ -377,9 +382,16 @@ class Worker(ServerNode):
         if silence_logs:
             silence_logging(level=silence_logs)
 
-        self._workspace = WorkSpace(os.path.abspath(local_dir))
-        self._workdir = self._workspace.new_work_dir(prefix='worker-')
-        self.local_dir = self._workdir.dir_path
+        with warn_on_duration(
+            '1s',
+            "Creating scratch directories is taking a surprisingly long time. "
+            "This is often due to running workers on a network file system. "
+            "Consider specifying a local-directory to point workers to write "
+            "scratch data to a local disk."
+        ):
+            self._workspace = WorkSpace(os.path.abspath(local_dir))
+            self._workdir = self._workspace.new_work_dir(prefix='worker-')
+            self.local_dir = self._workdir.dir_path
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -403,7 +415,13 @@ class Worker(ServerNode):
         else:
             self.memory_pause_fraction = dask.config.get('distributed.worker.memory.pause')
 
-        if (self.memory_limit and
+        if isinstance(data, MutableMapping):
+            self.data = data
+        elif callable(data):
+            self.data = data()
+        elif isinstance(data, tuple):
+            self.data = data[0](**data[1])
+        elif (self.memory_limit and
                 (self.memory_target_fraction or
                  self.memory_spill_fraction)):
             try:
@@ -744,19 +762,30 @@ class Worker(ServerNode):
     # Lifecycle #
     #############
 
-    def start_services(self, listen_ip=''):
+    def start_services(self, default_listen_ip):
+        if default_listen_ip == '0.0.0.0':
+            default_listen_ip = ''  # for IPV6
+
         for k, v in self.service_specs.items():
+            listen_ip = None
             if isinstance(k, tuple):
                 k, port = k
             else:
                 port = 0
 
+            if isinstance(port, (str, unicode)):
+                port = port.split(':')
+
+            if isinstance(port, (tuple, list)):
+                listen_ip, port = (port[0], int(port[1]))
+
             if isinstance(v, tuple):
                 v, kwargs = v
             else:
-                v, kwargs = v, {}
+                kwargs = {}
+
             self.services[k] = v(self, io_loop=self.loop, **kwargs)
-            self.services[k].listen((listen_ip, port))
+            self.services[k].listen((listen_ip if listen_ip is not None else default_listen_ip, port))
             self.service_ports[k] = self.services[k].port
 
     @gen.coroutine
@@ -819,6 +848,10 @@ class Worker(ServerNode):
         yield self._register_with_scheduler()
 
         self.start_periodic_callbacks()
+        raise gen.Return(self)
+
+    def __await__(self):
+        return self._start().__await__()
 
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
