@@ -4,13 +4,12 @@ import logging
 import logging.config
 import os
 import sys
+import types
 
 import dask
 import yaml
 
 from .compatibility import logging_names
-
-config = dask.config.config
 
 
 fn = os.path.join(os.path.dirname(__file__), 'distributed.yaml')
@@ -90,8 +89,13 @@ def _initialize_logging_old_style(config):
     loggers.update(config.get('logging', {}))
 
     handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(logging.Formatter(dask.config.get('distributed.admin.log-format',
-                                                           config=config)))
+    if isinstance(config, dict):
+        # old style internal dict
+        log_format = dask.config.get('distributed.admin.log-format', config=config)
+    else:
+        # new style config object
+        log_format = config.get('distributed.admin.log-format')
+    handler.setFormatter(logging.Formatter(log_format))
     for name, level in loggers.items():
         if isinstance(level, str):
             level = logging_names[level.upper()]
@@ -133,4 +137,9 @@ def initialize_logging(config):
             _initialize_logging_old_style(config)
 
 
-initialize_logging(dask.config.config)
+if isinstance(dask.config, types.ModuleType):
+    # config module, pass global dictionary
+    initialize_logging(dask.config.config)
+else:
+    # config object
+    initialize_logging(dask.config)
