@@ -2240,10 +2240,10 @@ class Worker(ServerNode):
                 llframe = llframes.get(ident)
 
                 state = profile.process(frame, True, self.profile_recent,
-                                stop='distributed/worker.py')
-                state = profile.llprocess(llframe, None, state)
-                state = profile.process(frame, True, self.profile_keys[key],
                                         stop='distributed/worker.py')
+                profile.llprocess(llframe, None, state)
+                profile.process(frame, True, self.profile_keys[key],
+                                stop='distributed/worker.py')
 
         stop = time()
         if self.digests is not None:
