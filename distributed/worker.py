@@ -2237,7 +2237,6 @@ class Worker(ServerNode):
         for ident, frame in frames.items():
             if frame is not None:
                 key = key_split(active_threads[ident])
-                init = profile.create()
                 llframe = llframes.get(ident)
 
                 state = profile.process(frame, True, self.profile_recent,
