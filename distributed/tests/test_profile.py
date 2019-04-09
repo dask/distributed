@@ -71,7 +71,6 @@ def test_basic_low_level():
     state = create()
 
     for i in range(100):
-        time.sleep(0.02)
         frame = sys._current_frames()[thread.ident]
         llframes = {thread.ident: ll_get_stack(thread.ident)}
         for f in llframes.values():
