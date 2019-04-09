@@ -52,12 +52,11 @@ def test_basic():
 
 
 @pytest.mark.skipif(
-        sys.version_info < (3, 5),
-        reason='stacktrace not supported on python < 3.5')
-@pytest.mark.skipif(
         WINDOWS,
         reason='no low-level profiler support for Windows available')
 def test_basic_low_level():
+    pytest.importorskip('stacktrace')
+
     def test_g():
         time.sleep(0.05)
 
@@ -80,14 +79,14 @@ def test_basic_low_level():
                 llprocess(f, None, state)
 
     assert state['count'] == 100
-    d = state
-    while len(d['children']) == 1:
-        d = first(d['children'].values())
-
-    assert d['count'] == 100
-    call = str(d['description'])
-    expected = ['__restore_rt', '_L_unlock']
-    assert any([e in call for e in expected])
+    children = state.get('children')
+    assert children
+    expected = '<low-level>'
+    for k, v in zip(children.keys(), children.values()):
+        desc = v.get('description')
+        assert desc
+        filename = desc.get('filename')
+        assert expected in k and filename == expected
 
 
 def test_merge():
