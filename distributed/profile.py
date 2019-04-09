@@ -203,7 +203,7 @@ def plot_data(state, profile_interval=0.010):
         except IndexError:
             colors.append('gray')
         else:
-            if fn == '<c>':
+            if fn == '<low-level>':
                 colors.append('lightgray')
             else:
                 colors.append(color_of(fn))
@@ -377,14 +377,14 @@ def llprocess(frames, child, state):
         state = llprocess(frames, frame, state)
 
     addr = hex(frame.addr - frame.offset)
-    ident = ';'.join(map(str, (frame.name, '<c>', addr)))
+    ident = ';'.join(map(str, (frame.name, '<low-level>', addr)))
     try:
         d = state['children'][ident]
     except KeyError:
         d = {
             'count': 0,
             'description': {
-                'filename': '<c>',
+                'filename': '<low-level>',
                 'name': frame.name,
                 'line_number': 0,
                 'line': str(frame),
