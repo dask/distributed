@@ -1490,7 +1490,8 @@ class Scheduler(ServerNode):
                                     keys=keys, restrictions=restrictions or {},
                                     dependencies=dependencies,
                                     priority=priority,
-                                    loose_restrictions=loose_restrictions)
+                                    loose_restrictions=loose_restrictions,
+                                    resources=resources)
             except Exception as e:
                 logger.exception(e)
 
