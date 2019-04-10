@@ -9,11 +9,10 @@ RabbitMQ Example
 ----------------
 
 RabbitMQ is a distributed messaging queue that we can use to post updates about
-task transitions. Work done on the scheduler must be kept to a minimum as it is
-the one node in the system that we cannot have more than one of. By posting
-transitions to RabbitMQ, we allow other workers to do the processing of
-transitions. See the
-`RabbitMQ tutorial<https://www.rabbitmq.com/tutorials/tutorial-two-python.html>`_
+task transitions. By posting transitions to RabbitMQ, we allow other machines
+to do the processing of transitions and keep scheduler processing to a minimum.
+See the
+`RabbitMQ tutorial <https://www.rabbitmq.com/tutorials/tutorial-two-python.html>`_
 for more information on RabbitMQ and how to consume the messages.
 
 .. code-block:: python
@@ -48,3 +47,5 @@ for more information on RabbitMQ and how to consume the messages.
    def dask_setup(scheduler):
        plugin = RabbitMQPlugin()
        scheduler.add_plugin(plugin)
+
+Run with: ``dask-scheduler --preload <filename.py>``
