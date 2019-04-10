@@ -263,7 +263,8 @@ class Worker(ServerNode):
                  executor=None, resources=None, silence_logs=None,
                  death_timeout=None, preload=None, preload_argv=None, security=None,
                  contact_address=None, memory_monitor_interval='200ms',
-                 extensions=None, metrics=None, data=None, low_level_profiler=False,
+                 extensions=None, metrics=None, data=None,
+                 low_level_profiler=dask.config.get('distributed.worker.profile.low-level'),
                  **kwargs):
         self.tasks = dict()
         self.task_state = dict()
