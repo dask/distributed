@@ -57,22 +57,12 @@ def test_basic():
 def test_basic_low_level():
     pytest.importorskip('stacktrace')
 
-    def test_g():
-        time.sleep(0.05)
-
-    def test_f():
-        for i in range(100):
-            test_g()
-
-    thread = threading.Thread(target=test_f)
-    thread.daemon = True
-    thread.start()
-
     state = create()
 
     for i in range(100):
-        frame = sys._current_frames()[thread.ident]
-        llframes = {thread.ident: ll_get_stack(thread.ident)}
+        time.sleep(0.02)
+        frame = sys._current_frames()[threading.get_ident()]
+        llframes = {threading.get_ident(): ll_get_stack(threading.get_ident())}
         for f in llframes.values():
             if f is not None:
                 llprocess(f, None, state)
