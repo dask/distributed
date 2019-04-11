@@ -70,7 +70,7 @@ thread per process::
    $ dask-worker scheduler:8786 --nprocs 8 --nthreads 1
 
 This will launch 8 worker processes each of which has its own
-ThreadPoolExecutor of size 1. 
+ThreadPoolExecutor of size 1.
 
 If your computations are external to Python and long-running and don't release
 the GIL then beware that while the computation is running the worker process
@@ -99,7 +99,7 @@ are the available options::
      --nprocs INTEGER       Number of worker processes to launch.  Defaults to one.
      --name TEXT            Alias
      --memory-limit TEXT    Maximum bytes of memory that this worker should use.
-                            Use None for unlimited, or 'auto' for
+                            Use 0 for unlimited, or 'auto' for
                             TOTAL_MEMORY * min(1, ncores / total_cores)
      --no-nanny
      --help                 Show this message and exit.
