@@ -236,7 +236,7 @@ def test_add_worker(s, a, b):
     w = Worker(s.ip, s.port, ncores=3)
     w.data['x-5'] = 6
     w.data['y'] = 1
-    yield w._start(0)
+    yield w
 
     dsk = {('x-%d' % i): (inc, i) for i in range(10)}
     s.update_graph(tasks=valmap(dumps_task, dsk), keys=list(dsk), client='client',
@@ -502,14 +502,12 @@ def test_broadcast_nanny(s, a, b):
 def test_worker_name():
     s = Scheduler(validate=True)
     s.start(0)
-    w = Worker(s.ip, s.port, name='alice')
-    yield w._start()
+    w = yield Worker(s.ip, s.port, name='alice')
     assert s.workers[w.address].name == 'alice'
     assert s.aliases['alice'] == w.address
 
     with pytest.raises(ValueError):
-        w2 = Worker(s.ip, s.port, name='alice')
-        yield w2._start()
+        w2 = yield Worker(s.ip, s.port, name='alice')
         yield w2._close()
 
     yield s.close()
@@ -525,7 +523,7 @@ def test_coerce_address():
         a = Worker(s.ip, s.port, name='alice')
         b = Worker(s.ip, s.port, name=123)
         c = Worker('127.0.0.1', s.port, name='charlie')
-        yield [a._start(), b._start(), c._start()]
+        yield [a, b, c]
 
         assert s.coerce_address('127.0.0.1:8000') == 'tcp://127.0.0.1:8000'
         assert s.coerce_address('[::1]:8000') == 'tcp://[::1]:8000'
@@ -559,9 +557,7 @@ def test_file_descriptors_dont_leak(s):
     proc = psutil.Process()
     before = proc.num_fds()
 
-    w = Worker(s.ip, s.port)
-
-    yield w._start(0)
+    w = yield Worker(s.ip, s.port)
     yield w._close()
 
     during = proc.num_fds()
@@ -634,8 +630,7 @@ def test_scatter_no_workers(c, s):
 
 @gen_cluster(ncores=[])
 def test_scheduler_sees_memory_limits(s):
-    w = Worker(s.ip, s.port, ncores=3, memory_limit=12345)
-    yield w._start(0)
+    w = yield Worker(s.ip, s.port, ncores=3, memory_limit=12345)
 
     assert s.workers[w.address].memory_limit == 12345
     yield w._close()
@@ -751,8 +746,7 @@ def test_file_descriptors(c, s):
     num_fds_1 = proc.num_fds()
 
     N = 20
-    nannies = [Nanny(s.ip, s.port, loop=s.loop) for i in range(N)]
-    yield [n._start() for n in nannies]
+    nannies = yield [Nanny(s.ip, s.port, loop=s.loop) for i in range(N)]
 
     while len(s.ncores) < N:
         yield gen.sleep(0.1)
@@ -894,7 +888,7 @@ def test_worker_arrives_with_processing_data(c, s, a, b):
     w = Worker(s.ip, s.port, ncores=1)
     w.put_key_in_memory(y.key, 3)
 
-    yield w._start()
+    yield w
 
     start = time()
 
@@ -945,7 +939,7 @@ def test_no_workers_to_memory(c, s):
     w = Worker(s.ip, s.port, ncores=1)
     w.put_key_in_memory(y.key, 3)
 
-    yield w._start()
+    yield w
 
     start = time()
 
@@ -975,7 +969,7 @@ def test_no_worker_to_memory_restrictions(c, s, a, b):
     w = Worker(s.ip, s.port, ncores=1, name='alice')
     w.put_key_in_memory(y.key, 3)
 
-    yield w._start()
+    yield w
 
     while len(s.workers) < 3:
         yield gen.sleep(0.01)
@@ -1132,30 +1126,38 @@ def test_correct_bad_time_estimate(c, s, *workers):
     assert all(w.data for w in workers), [sorted(w.data) for w in workers]
 
 
-@pytest.mark.skipif(not sys.platform.startswith('linux'),
-                    reason="Need 127.0.0.* to mean localhost")
 @gen_test()
 def test_service_hosts():
     pytest.importorskip('bokeh')
     from distributed.bokeh.scheduler import BokehScheduler
 
-    for port in [0, ('127.0.0.3', 0)]:
-        for url, expected in [('tcp://0.0.0.0', ('::', '0.0.0.0')),
-                              ('tcp://127.0.0.2', '127.0.0.2'),
-                              ('tcp://127.0.0.2:38275', '127.0.0.2')]:
-            services = {('bokeh', port): BokehScheduler}
+    port = 0
+    for url, expected in [
+            ('tcp://0.0.0.0', ('::', '0.0.0.0')),
+            ('tcp://127.0.0.1', '127.0.0.1'),
+            ('tcp://127.0.0.1:38275', '127.0.0.1')]:
+        services = {('bokeh', port): BokehScheduler}
 
-            s = Scheduler(services=services)
-            yield s.start(url)
+        s = Scheduler(services=services)
+        yield s.start(url)
 
-            sock = first(s.services['bokeh'].server._http._sockets.values())
-            if isinstance(port, tuple):    # host explicitly overridden
-                assert sock.getsockname()[0] == port[0]
-            elif isinstance(expected, tuple):
-                assert sock.getsockname()[0] in expected
-            else:
-                assert sock.getsockname()[0] == expected
-            yield s.close()
+        sock = first(s.services['bokeh'].server._http._sockets.values())
+        if isinstance(expected, tuple):
+            assert sock.getsockname()[0] in expected
+        else:
+            assert sock.getsockname()[0] == expected
+        yield s.close()
+
+    port = ('127.0.0.1', 0)
+    for url in ['tcp://0.0.0.0', 'tcp://127.0.0.1', 'tcp://127.0.0.1:38275']:
+        services = {('bokeh', port): BokehScheduler}
+
+        s = Scheduler(services=services)
+        yield s.start(url)
+
+        sock = first(s.services['bokeh'].server._http._sockets.values())
+        assert sock.getsockname()[0] == '127.0.0.1'
+        yield s.close()
 
 
 @gen_cluster(client=True, worker_kwargs={'profile_cycle_interval': 100})
@@ -1435,13 +1437,17 @@ def test_gh2187(c, s, a, b):
         return x + 'bar'
 
     def baz(x):
-        sleep(0.1)
         return x + 'baz'
 
-    x = c.submit(foo, key='x')
-    y = c.submit(bar, x, key='y')
+    def qux(x):
+        sleep(0.1)
+        return x + 'qux'
+
+    w = c.submit(foo, key='w')
+    x = c.submit(bar, w, key='x')
+    y = c.submit(baz, x, key='y')
     yield y
-    z = c.submit(baz, y, key='z')
+    z = c.submit(qux, y, key='z')
     del y
     yield gen.sleep(0.1)
     f = c.submit(bar, x, key='y')

@@ -609,6 +609,21 @@ def test_wait(c, s, a, b):
     assert x.status == y.status == 'finished'
 
 
+@gen_cluster(client=True)
+def test_wait_first_completed(c, s, a, b):
+    x = c.submit(slowinc, 1)
+    y = c.submit(slowinc, 1)
+    z = c.submit(inc, 2)
+
+    done, not_done = yield wait([x, y, z], return_when='FIRST_COMPLETED')
+
+    assert done == {z}
+    assert not_done == {x, y}
+    assert z.status == 'finished'
+    assert x.status == 'pending'
+    assert y.status == 'pending'
+
+
 @gen_cluster(client=True, timeout=2)
 def test_wait_timeout(c, s, a, b):
     future = c.submit(sleep, 0.3)
@@ -1864,7 +1879,7 @@ def test_repr_async(c, s, a, b):
 
 @gen_test()
 def test_repr_localcluster():
-    cluster = yield LocalCluster(processes=False, diagnostics_port=None,
+    cluster = yield LocalCluster(processes=False, dashboard_address=None,
                                  asynchronous=True)
     client = yield Client(cluster, asynchronous=True)
     try:
@@ -2736,7 +2751,7 @@ def test_worker_aliases():
     a = Worker(s.ip, s.port, name='alice')
     b = Worker(s.ip, s.port, name='bob')
     w = Worker(s.ip, s.port, name=3)
-    yield [a._start(), b._start(), w._start()]
+    yield [a, b, w]
 
     c = yield Client((s.ip, s.port), asynchronous=True)
 
@@ -2950,8 +2965,7 @@ def test_unrunnable_task_runs(c, s, a, b):
     assert s.tasks[x.key] in s.unrunnable
     assert s.get_task_status(keys=[x.key]) == {x.key: 'no-worker'}
 
-    w = Worker(s.ip, s.port, loop=s.loop)
-    yield w._start()
+    w = yield Worker(s.ip, s.port, loop=s.loop)
 
     start = time()
     while x.status != 'finished':
@@ -3619,7 +3633,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 yield gen.sleep(sleep)
                 w = worker(s['address'], loop=loop)
                 running[w] = None
-                yield w._start()
+                yield w
                 addr = w.worker_address
                 running[w] = addr
                 yield gen.sleep(duration)
@@ -4904,7 +4918,7 @@ def test_use_synchronous_client_in_async_context(loop, c):
 
 def test_quiet_quit_when_cluster_leaves(loop_in_thread):
     loop = loop_in_thread
-    with LocalCluster(loop=loop, scheduler_port=0, diagnostics_port=None,
+    with LocalCluster(loop=loop, scheduler_port=0, dashboard_address=None,
                       silence_logs=False) as cluster:
         with captured_logger('distributed.comm') as sio:
             with Client(cluster, loop=loop) as client:
