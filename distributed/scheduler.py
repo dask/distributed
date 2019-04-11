@@ -1872,7 +1872,7 @@ class Scheduler(ServerNode):
                     ts.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
-                        e = pickle.dumps(KilledWorker(k, address))
+                        e = pickle.dumps(KilledWorker(task_key=k, last_worker_state=ws), -1)
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)
 
@@ -4827,4 +4827,7 @@ def heartbeat_interval(n):
 
 
 class KilledWorker(Exception):
-    pass
+    def __init__(self, *args, **kwargs):
+        super(KilledWorker, self).__init__(*args)
+        self.args = args
+        self.kwargs = kwargs
