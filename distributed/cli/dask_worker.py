@@ -88,8 +88,6 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
               help='Resources for task constraints like "GPU=2 MEM=10e9". '
                    'Resources are applied separately to each worker process '
                    "(only relevant when starting multiple worker processes with '--nprocs').")
-@click.option('--low-level-profiler', default=False,
-              help='Enable profiling of low-level calls, like C functions.')
 @click.option('--scheduler-file', type=str, default='',
               help='Filename to JSON encoded scheduler information. '
                    'Use with dask-scheduler --scheduler-file')
@@ -104,7 +102,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
                 type=click.UNPROCESSED, callback=validate_preload_argv)
 def main(scheduler, host, worker_port, listen_address, contact_address,
          nanny_port, nthreads, nprocs, nanny, name,
-         memory_limit, pid_file, reconnect, resources, bokeh, low_level_profiler,
+         memory_limit, pid_file, reconnect, resources, bokeh,
          bokeh_port, local_directory, scheduler_file, interface,
          death_timeout, preload, preload_argv, bokeh_prefix, tls_ca_file,
          tls_cert, tls_key, dashboard_address):
@@ -235,7 +233,6 @@ def main(scheduler, host, worker_port, listen_address, contact_address,
                  preload=preload, preload_argv=preload_argv,
                  security=sec, contact_address=contact_address,
                  name=name if nprocs == 1 or not name else name + '-' + str(i),
-                 low_level_profiler=low_level_profiler,
                  **kwargs)
                for i in range(nprocs)]
 

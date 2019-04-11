@@ -44,7 +44,7 @@ class Nanny(ServerNode):
             resources=None, silence_logs=None, death_timeout=None, preload=(),
             preload_argv=[], security=None, contact_address=None,
             listen_address=None, worker_class=None, env=None,
-            low_level_profiler=False, **worker_kwargs):
+            **worker_kwargs):
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
@@ -85,8 +85,6 @@ class Nanny(ServerNode):
         self.auto_restart = True
 
         self.memory_limit = parse_memory_limit(memory_limit, self.ncores)
-
-        self.low_level_profiler = low_level_profiler
 
         if silence_logs:
             silence_logging(level=silence_logs)
@@ -219,7 +217,6 @@ class Nanny(ServerNode):
                                  preload=self.preload,
                                  preload_argv=self.preload_argv,
                                  security=self.security,
-                                 low_level_profiler=self.low_level_profiler,
                                  contact_address=self.contact_address)
             worker_kwargs.update(self.worker_kwargs)
             self.process = WorkerProcess(
