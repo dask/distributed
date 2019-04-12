@@ -698,22 +698,22 @@ class Worker(ServerNode):
                 future = comm.read(deserializers=["msgpack"])
 =======
                 comm = yield connect(self.scheduler.address,
-                                    connection_args=self.connection_args)
+                                     connection_args=self.connection_args)
                 yield comm.write(dict(op='register-worker',
-                                    reply=False,
-                                    address=self.contact_address,
-                                    keys=list(self.data),
-                                    ncores=self.ncores,
-                                    name=self.name,
-                                    nbytes=self.nbytes,
-                                    now=time(),
-                                    resources=self.total_resources,
-                                    memory_limit=self.memory_limit,
-                                    local_directory=self.local_dir,
-                                    services=self.service_ports,
-                                    pid=os.getpid(),
-                                    metrics=self.get_metrics()),
-                                serializers=['msgpack'])
+                                      reply=False,
+                                      address=self.contact_address,
+                                      keys=list(self.data),
+                                      ncores=self.ncores,
+                                      name=self.name,
+                                      nbytes=self.nbytes,
+                                      now=time(),
+                                      resources=self.total_resources,
+                                      memory_limit=self.memory_limit,
+                                      local_directory=self.local_dir,
+                                      services=self.service_ports,
+                                      pid=os.getpid(),
+                                      metrics=self.get_metrics()),
+                                 serializers=['msgpack'])
                 future = comm.read(deserializers=['msgpack'])
 >>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
                 if self.death_timeout:
@@ -761,6 +761,7 @@ class Worker(ServerNode):
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
+<<<<<<< HEAD
     @gen.coroutine
     def heartbeat(self):
         if not self.heartbeat_active:
@@ -851,6 +852,12 @@ class Worker(ServerNode):
         finally:
             self.periodic_callbacks['heartbeat'].start()
             self.loop.add_callback(self.handle_scheduler, comm)
+=======
+        self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
+        self.batched_stream.start(comm)
+        self.periodic_callbacks['heartbeat'].start()
+        self.loop.add_callback(self.handle_scheduler, comm)
+>>>>>>> Cleanup
 
     @gen.coroutine
     def heartbeat(self):
