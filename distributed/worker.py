@@ -614,6 +614,11 @@ class Worker(ServerNode):
                         continue
                     future = gen.with_timeout(timedelta(seconds=diff), future)
                 response = yield future
+                if response['status'] == 'error':
+                    msg = response.get('message','')
+                    if msg.startswith('name taken') or msg.startswith('address not found') or msg.startswith('worker already exists'):
+                        yield gen.sleep(0.1)
+                        continue
                 _end = time()
                 middle = (_start + _end) / 2
                 self.scheduler_delay = response['time'] - middle

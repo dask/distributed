@@ -13,6 +13,7 @@ import pickle
 import random
 import six
 import warnings
+import socket
 
 import psutil
 import sortedcontainers
@@ -1276,13 +1277,36 @@ class Scheduler(ServerNode):
                    metrics=None, pid=0, services=None, local_directory=None):
         """ Add a new worker to the cluster """
         with log_errors():
-            address = self.coerce_address(address, resolve_address)
+            try:
+                address = self.coerce_address(address, resolve_address)
+            except socket.gaierror as e:
+                # handle exceptions if hostname isn't found in dnslookup,
+                # perhaps because dns propgation is slow
+                msg = {'status': 'error', 
+                       'message': 'address not found, %s' % address,
+                       'time': time()}
+                yield comm.write(msg)
+                return
             address = normalize_address(address)
             host = get_address_host(address)
 
             ws = self.workers.get(address)
             if ws is not None:
-                raise ValueError("Worker already exists %s" % address)
+                self.remove_worker(address=address)
+                msg = {'status': 'error', 
+                       'message': "worker already exists %s" % address,
+                       'time': time()}
+                yield comm.write(msg)
+                return
+
+            # DD
+
+            if name in self.aliases:
+                msg = {'status': 'error', 
+                       'message': 'name taken, %s' % name,
+                       'time': time()}
+                yield comm.write(msg)
+                return
 
             self.workers[address] = ws = WorkerState(
                     address=address,
@@ -1293,13 +1317,6 @@ class Scheduler(ServerNode):
                     local_directory=local_directory,
                     services=services
             )
-
-            if name in self.aliases:
-                msg = {'status': 'error',
-                       'message': 'name taken, %s' % name,
-                       'time': time()}
-                yield comm.write(msg)
-                return
 
             if 'addresses' not in self.host_info[host]:
                 self.host_info[host].update({'addresses': set(), 'cores': 0})
@@ -4127,8 +4144,6 @@ class Scheduler(ServerNode):
         Handles strings, tuples, or aliases.
         """
         # XXX how many address-parsing routines do we have?
-        if addr in self.aliases:
-            addr = self.aliases[addr]
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, six.string_types):
