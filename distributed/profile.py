@@ -164,6 +164,7 @@ def plot_data(state, profile_interval=0.010):
 
     See Also
     --------
+    plot_figure
     distributed.bokeh.components.ProfilePlot
     """
     starts = []
@@ -258,6 +259,29 @@ def _watch(thread_id, log, interval='20ms', cycle='2s', omit=None,
 
 def watch(thread_id=None, interval='20ms', cycle='2s', maxlen=1000, omit=None,
           stop=lambda: False):
+    """ Gather profile information on a particular thread
+
+    This starts a new thread to watch a particular thread and returns a deque
+    that holds periodic profile information.
+
+    Parameters
+    ----------
+    thread_id: int
+    interval: str
+        Time per sample
+    cycle: str
+        Time per refreshing to a new profile state
+    maxlen: int
+        Passed onto deque, maximum number of periods
+    omit: str
+        Don't include entries that start with this filename
+    stop: callable
+        Function to call to see if we should stop
+
+    Returns
+    -------
+    deque
+    """
     if thread_id is None:
         thread_id = get_thread_identity()
 
@@ -278,6 +302,17 @@ def watch(thread_id=None, interval='20ms', cycle='2s', maxlen=1000, omit=None,
 
 
 def get_profile(history, recent=None, start=None, stop=None, key=None):
+    """ Collect profile information from a sequence of profile states
+
+    Parameters
+    ----------
+    history: Sequence[Tuple[time, Dict]]
+        A list or deque of profile states
+    recent: dict
+        The most recent accumulating state
+    start: time
+    stop: time
+    """
     now = time()
     if start is None:
         istart = 0
@@ -309,6 +344,15 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
 
 
 def plot_figure(data, **kwargs):
+    """ Plot profile data using Bokeh
+
+    This takes the output from the function ``plot_data`` and produces a Bokeh
+    figure
+
+    See Also
+    --------
+    plot_data
+    """
     from bokeh.plotting import ColumnDataSource, figure
     from bokeh.models import HoverTool
 
@@ -370,6 +414,19 @@ def _remove_py_stack(frames):
 
 
 def llprocess(frames, child, state):
+    """ Add counts from low level profile information onto existing state
+
+    This uses the ``stacktrace`` module to collect low level stack trace
+    information and place it onto the given sttate.
+
+    It is configured with the ``distributed.worker.profile.low-level`` config
+    entry.
+
+    See Also
+    --------
+    process
+    ll_get_stack
+    """
     if not frames:
         return
     frame = frames.pop()
@@ -403,6 +460,7 @@ def llprocess(frames, child, state):
 
 
 def ll_get_stack(tid):
+    """ Collect low level stack information from thread id """
     from stacktrace import get_thread_stack
     frames = get_thread_stack(tid, show_python=False)
     llframes = list(_remove_py_stack(frames))[::-1]
