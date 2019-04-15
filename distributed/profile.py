@@ -214,12 +214,12 @@ def plot_data(state, profile_interval=0.010):
         ident = state["identifier"]
 
         try:
-            fn = desc['filename']
+            fn = desc["filename"]
         except IndexError:
-            colors.append('gray')
+            colors.append("gray")
         else:
-            if fn == '<low-level>':
-                colors.append('lightgray')
+            if fn == "<low-level>":
+                colors.append("lightgray")
             else:
                 colors.append(color_of(fn))
 
@@ -467,34 +467,35 @@ def llprocess(frames, child, state):
         state = llprocess(frames, frame, state)
 
     addr = hex(frame.addr - frame.offset)
-    ident = ';'.join(map(str, (frame.name, '<low-level>', addr)))
+    ident = ";".join(map(str, (frame.name, "<low-level>", addr)))
     try:
-        d = state['children'][ident]
+        d = state["children"][ident]
     except KeyError:
         d = {
-            'count': 0,
-            'description': {
-                'filename': '<low-level>',
-                'name': frame.name,
-                'line_number': 0,
-                'line': str(frame),
+            "count": 0,
+            "description": {
+                "filename": "<low-level>",
+                "name": frame.name,
+                "line_number": 0,
+                "line": str(frame),
             },
-            'children': {},
-            'identifier': ident,
+            "children": {},
+            "identifier": ident,
         }
-        state['children'][ident] = d
+        state["children"][ident] = d
 
-    state['count'] += 1
+    state["count"] += 1
 
     if child is not None:
         return d
     else:
-        d['count'] += 1
+        d["count"] += 1
 
 
 def ll_get_stack(tid):
     """ Collect low level stack information from thread id """
     from stacktrace import get_thread_stack
+
     frames = get_thread_stack(tid, show_python=False)
     llframes = list(_remove_py_stack(frames))[::-1]
     return llframes

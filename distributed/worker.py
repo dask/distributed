@@ -269,7 +269,6 @@ class Worker(ServerNode):
     distributed.nanny.Nanny
     """
 
-
     def __init__(
         self,
         scheduler_ip=None,
@@ -295,7 +294,7 @@ class Worker(ServerNode):
         extensions=None,
         metrics=None,
         data=None,
-        low_level_profiler=dask.config.get('distributed.worker.profile.low-level'),
+        low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
         **kwargs
     ):
         self.tasks = dict()
@@ -2477,11 +2476,11 @@ class Worker(ServerNode):
                 llframe = llframes.get(ident)
 
                 state = profile.process(
-                    frame, True, self.profile_recent, stop='distributed/worker.py'
+                    frame, True, self.profile_recent, stop="distributed/worker.py"
                 )
                 profile.llprocess(llframe, None, state)
                 profile.process(
-                    frame, True, self.profile_keys[key], stop='distributed/worker.py'
+                    frame, True, self.profile_keys[key], stop="distributed/worker.py"
                 )
 
         stop = time()

@@ -43,7 +43,6 @@ class Nanny(ServerNode):
     process = None
     status = None
 
-
     def __init__(
         self,
         scheduler_ip=None,
