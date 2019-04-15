@@ -1363,50 +1363,35 @@ class Scheduler(ServerNode):
 
             ws = self.workers.get(address)
             if ws is not None:
-<<<<<<< HEAD
-               msg = {
+                msg = {
                     "status": "error",
                     "message": "worker already exists %s" % address,
                     "time": time(),
                 }
-=======
-                msg = {'status': 'error', 
-                       'message': "worker already exists %s" % address,
-                       'time': time()}
->>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
                 yield comm.write(msg)
                 return
 
             if name in self.aliases and address in self.aliases[name]:
-<<<<<<< HEAD
-               msg = {
+                msg = {
                     "status": "error",
                     "message": "name taken, %s" % name,
                     "time": time(),
                 }
-=======
-                msg = {'status': 'error',
-                       'message': 'name taken, %s' % name,
-                       'time': time()}
->>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
                 yield comm.write(msg)
                 return
 
             self.workers[address] = ws = WorkerState(
-                    address=address,
-                    pid=pid,
-                    ncores=ncores,
-                    memory_limit=memory_limit,
-                    name=name,
-                    local_directory=local_directory,
-                    services=services
+                address=address,
+                pid=pid,
+                ncores=ncores,
+                memory_limit=memory_limit,
+                name=name,
+                local_directory=local_directory,
+                services=services,
             )
 
-<<<<<<< HEAD
             if "addresses" not in self.host_info[host]:
                 self.host_info[host].update({"addresses": set(), "cores": 0})
-=======
->>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
 
             self.host_info[host]["addresses"].add(address)
             self.host_info[host]["cores"] += ncores
@@ -1414,7 +1399,6 @@ class Scheduler(ServerNode):
             self.total_ncores += ncores
             self.aliases[name].append(address)
 
-<<<<<<< HEAD
             response = self.heartbeat_worker(
                 address=address,
                 resolve_address=resolve_address,
@@ -1423,13 +1407,6 @@ class Scheduler(ServerNode):
                 host_info=host_info,
                 metrics=metrics,
             )
-=======
-            response = self.heartbeat_worker(address=address,
-                                             resolve_address=resolve_address,
-                                             now=now, resources=resources,
-                                             host_info=host_info,
-                                             metrics=metrics)
->>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
 
             # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot exist before this.
             self.check_idle_saturated(ws)
@@ -1885,7 +1862,7 @@ class Scheduler(ServerNode):
 
             self.rpc.remove(address)
             del self.stream_comms[address]
-            try: 
+            try:
                 self.aliases[ws.name].remove(address)
             except ValueError:
                 pass
@@ -4425,6 +4402,8 @@ class Scheduler(ServerNode):
         Handles strings, tuples, or aliases.
         """
         # XXX how many address-parsing routines do we have?
+        if addr in self.aliases:
+            addr = self.aliases[addr][-1]
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, six.string_types):
