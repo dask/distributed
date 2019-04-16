@@ -253,7 +253,6 @@ class LocalCluster(Cluster):
             kwargs['quiet'] = True
         else:
             W = Worker
-
         w = yield W(self.scheduler.address, loop=self.loop,
               death_timeout=death_timeout,
               silence_logs=self.silence_logs, **kwargs)
@@ -321,6 +320,7 @@ class LocalCluster(Cluster):
                 timedelta(seconds=parse_timedelta(timeout)),
                 All([self._stop_worker(w) for w in self.workers]),
             )
+
         del self.workers[:]
 
         try:

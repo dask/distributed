@@ -67,7 +67,9 @@ def _parse_host_port(address: str, default_port=None) -> tuple:
     if address.startswith("ucx://"):
         _, address = _parse_address(address)
 
-    default_port = default_port or 13337
+    # if default port is None we select the next port availabe
+    # ucx-py does not currently support random port assignment
+    default_port = default_port or next(_PORT_COUNTER)
     return parse_host_port(address, default_port=default_port)
 
 
@@ -132,6 +134,7 @@ class UCX(Comm):
         self._host, self._port = _parse_host_port(address, default_port)
         self._local_addr = None
         self.deserialize = deserialize
+        self.comm_flag = None
 
         # finalizer?
 
@@ -146,6 +149,7 @@ class UCX(Comm):
         return self.address
 
     async def write(self, msg: dict, serializers=None, on_error: str = "message"):
+        # msg can also be a list of dicts when sending batched messages
         frames = await to_frames(
             msg, serializers=serializers, on_error=on_error
         )  # TODO: context=
@@ -189,14 +193,20 @@ class UCX(Comm):
         msg = await from_frames(
             frames, deserialize=self.deserialize, deserializers=deserializers
         )
+
         return msg
 
     def abort(self):
+        # breakpoint()
         if self.ep:
             ucp.destroy_ep(self.ep)
+            print(self)
+            print(self.listener_instance)
+            print(type(self.listener_instance))
             self.ep = None
         # if self.listener_instance:
-        #     ucp.stop_listener(self.listener_instance)
+            # ucp.stop_listener(self.listener_instance)
+            # self.listener_instance = None
 
     async def close(self):
         # TODO: Handle in-flight messages?
@@ -225,6 +235,7 @@ class UCXConnector(Connector):
 
 
 class UCXListener(Listener):
+    # MAX_LISTENERS 256 in ucx-py
     prefix = UCXConnector.prefix
     comm_class = UCXConnector.comm_class
     encrypted = UCXConnector.encrypted

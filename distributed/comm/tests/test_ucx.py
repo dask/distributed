@@ -4,21 +4,26 @@ import itertools
 import pytest
 import ucp_py as ucp
 
+from distributed import Client
 from distributed.comm import ucx, listen, connect
 from distributed.comm.registry import backends, get_backend
 from distributed.comm import ucx, parse_address, parse_host_port
 from distributed.protocol import to_serialize
-from distributed.utils_test import gen_test
+from distributed.deploy.local import LocalCluster
+from distributed.utils_test import gen_test, loop, inc
 
 from .test_comms import check_deserialize
 
 
-ADDRESS = ucx.ADDRESS
-HOST, PORT = parse_host_port(ADDRESS.lstrip("ucx://"))
-HOST = 'ucx://' + HOST
+ucx_addr = ucp.get_address()
+scheduler_port = 13337
+
+ADDRESS = ucx_addr
+HOST = f'ucx://{ucx_addr}:{scheduler_port}'
+
 # Currently having some issues with re-using ports.
 # Tests just hang. Still debugging.
-port_counter = itertools.count(PORT)
+port_counter = itertools.count(scheduler_port)
 
 
 def test_parse_address():
@@ -239,3 +244,26 @@ async def test_ping_pong_numba():
     result = await serv_com.read()
     data2 = result.pop('data')
     assert result['op'] == 'ping'
+
+
+def test_ucx_localcluster(loop):
+    ucx_addr = ucp.get_address()
+    port = 13337
+    env={'UCX_MEMTYPE_CACHE': 'n'}
+    worker_kwargs = {'env': env}
+    with LocalCluster(protocol="ucx://", scheduler_port=port,
+                        ip=ucx_addr,
+                        dashboard_address='127.0.0.1:8787',
+                        n_workers=2,
+                        threads_per_worker=1,
+                        processes=False,
+                        # env=env,
+                        ) as c:
+        with Client(c) as e:
+            x = e.submit(inc, 1)
+            x.result()
+            assert x.key in c.scheduler.tasks
+            assert any(w.data == {x.key: 2} for w in c.workers)
+            assert e.loop is c.loop
+
+
