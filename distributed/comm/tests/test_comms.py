@@ -24,16 +24,6 @@ from distributed.utils_test import (
 )
 from distributed.utils_test import loop  # noqa: F401
 
-<<<<<<< HEAD
-from distributed.protocol import (to_serialize, Serialized, serialize,
-                                  deserialize)
-
-from distributed.comm import (tcp, inproc, connect, listen, CommClosedError,
-                              parse_address, parse_host_port,
-                              unparse_host_port, resolve_address,
-                              get_address_host, get_local_address_for,
-                              registry)
-=======
 from distributed.protocol import to_serialize, Serialized, serialize, deserialize
 
 from distributed.comm import (
@@ -49,8 +39,6 @@ from distributed.comm import (
     get_address_host,
     get_local_address_for,
 )
->>>>>>> cb6ed57573ef171988b372843489e12c8e5c5b6b
-
 
 EXTERNAL_IP4 = get_ip()
 if has_ipv6():
@@ -499,11 +487,7 @@ def check_client_server(
     # Check listener properties
     bound_addr = listener.listen_address
     bound_scheme, bound_loc = parse_address(bound_addr)
-<<<<<<< HEAD
-    assert bound_scheme in registry.backends
-=======
     assert bound_scheme in ("inproc", "tcp", "tls")
->>>>>>> cb6ed57573ef171988b372843489e12c8e5c5b6b
     assert bound_scheme == parse_address(addr)[0]
 
     if check_listen_addr is not None:
