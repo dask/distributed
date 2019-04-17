@@ -496,7 +496,7 @@ class Server(object):
     def close(self):
         self.listener.stop()
         for comm in self._comms:
-            comm.close()
+            yield comm.close()
         for cb in self._ongoing_coroutines:
             cb.cancel()
         for i in range(10):

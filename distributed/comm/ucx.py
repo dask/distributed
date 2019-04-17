@@ -210,6 +210,8 @@ class UCX(Comm):
 
     async def close(self):
         # TODO: Handle in-flight messages?
+        # sleep is currently used to help flush buffer
+        await asyncio.sleep(1.0)
         self.abort()
 
     def closed(self):
@@ -226,8 +228,9 @@ class UCXConnector(Connector):
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect")
         _ucp_init()
-
+        print(address)
         ip, port = _parse_host_port(address)
+        print(f'Connection Established at {ip} {port}')
         ep = ucp.get_endpoint(ip.encode(), port)
         return self.comm_class(ep, self.prefix + address,
                                listener_instance=None,

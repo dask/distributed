@@ -265,7 +265,6 @@ class LocalCluster(Cluster):
                 address += ":" + str(self.scheduler_port)
 
         self.scheduler.start(address)
-
         yield [self._start_worker(**self.worker_kwargs) for i in range(n_workers)]
 
         self.status = "running"

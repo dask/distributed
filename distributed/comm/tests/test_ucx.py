@@ -245,25 +245,55 @@ async def test_ping_pong_numba():
     data2 = result.pop('data')
     assert result['op'] == 'ping'
 
+@pytest.mark.parametrize('processes', [
+    True,
+    False,
+])
+def test_ucx_localcluster(loop, processes):
+    if processes:
+        kwargs = {'env': {'UCX_MEMTYPE_CACHE': 'n'}}
+    else:
+        kwargs = {}
 
-def test_ucx_localcluster(loop):
     ucx_addr = ucp.get_address()
     port = 13337
-    env={'UCX_MEMTYPE_CACHE': 'n'}
-    worker_kwargs = {'env': env}
     with LocalCluster(protocol="ucx://", scheduler_port=port,
                         ip=ucx_addr,
-                        dashboard_address='127.0.0.1:8787',
+                        dashboard_address=None,
                         n_workers=2,
                         threads_per_worker=1,
-                        processes=False,
-                        # env=env,
-                        ) as c:
-        with Client(c) as e:
+                        processes=processes,
+                        **kwargs,
+                        ) as cluster:
+        with Client(cluster) as e:
             x = e.submit(inc, 1)
             x.result()
-            assert x.key in c.scheduler.tasks
-            assert any(w.data == {x.key: 2} for w in c.workers)
-            assert e.loop is c.loop
+            assert x.key in cluster.scheduler.tasks
+            assert any(w.data == {x.key: 2} for w in cluster.workers)
+            assert e.loop is cluster.loop
+            assert len(cluster.scheduler.workers) == 2
+            print(cluster.scheduler.workers)
 
 
+def test_tcp_localcluster(loop):
+    ucx_addr = '127.0.0.1'
+    port = 13337
+    env={'UCX_MEMTYPE_CACHE': 'n'}
+    with LocalCluster(
+        2,
+        scheduler_port=port,
+        ip = ucx_addr,
+        processes=True,
+        threads_per_worker=1,
+        dashboard_address=None,
+        silence_logs=False,
+        env=env,
+    ) as cluster:
+        print(cluster.scheduler.workers)
+        # with Client(cluster) as e:
+        #     x = e.submit(inc, 1)
+        #     x.result()
+        #     assert x.key in c.scheduler.tasks
+        #     assert any(w.data == {x.key: 2} for w in c.workers)
+        #     assert e.loop is c.loop
+        #     print(c.scheduler.workers)
