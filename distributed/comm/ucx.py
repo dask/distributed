@@ -69,7 +69,8 @@ def _parse_host_port(address: str, default_port=None) -> tuple:
 
     # if default port is None we select the next port availabe
     # ucx-py does not currently support random port assignment
-    default_port = default_port or next(_PORT_COUNTER)
+    import random
+    default_port = default_port or random.randint(1024, 65000)
     return parse_host_port(address, default_port=default_port)
 
 
@@ -254,7 +255,7 @@ class UCXListener(Listener):
         if not address.startswith("ucx"):
             address = "ucx://" + address
         self.address = address
-        self.ip, self.port = _parse_host_port(address, default_port=next(_PORT_COUNTER))
+        self.ip, self.port = _parse_host_port(address, default_port=0)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self.ep = None  # type: ucp.ucp_py_ep
@@ -284,7 +285,7 @@ class UCXListener(Listener):
 
         try:
             loop = asyncio.get_running_loop()
-        except RuntimeError:
+        except (RuntimeError, AttributeError):
             loop = asyncio.get_event_loop()
 
         t = loop.create_task(server.coroutine)
