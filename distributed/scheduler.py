@@ -3965,9 +3965,7 @@ class Scheduler(ServerNode):
                     self.tasks[ts.key] = ts
                 for plugin in list(self.plugins):
                     try:
-                        if self.tasks[key].processing_on is not None:
-                            kwargs['worker'] = self.tasks[key].processing_on.address
-                        plugin.transition(key, start, finish2, *args, **kwargs)
+                        plugin.transition(key, start, finish2, task_state=ts, *args, **kwargs)
                     except Exception:
                         logger.info("Plugin failed with exception", exc_info=True)
                 if ts.state == 'forgotten':
