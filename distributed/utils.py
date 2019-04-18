@@ -23,7 +23,7 @@ import tempfile
 import threading
 import warnings
 import weakref
-
+import pkgutil
 import six
 import tblib.pickling_support
 
@@ -1037,14 +1037,8 @@ def import_file(path):
     if ext in ('.egg', '.zip', '.pyz'):
         if path not in sys.path:
             sys.path.insert(0, path)
-        if ext == '.egg':
-            import pkg_resources
-            pkgs = pkg_resources.find_distributions(path)
-            for pkg in pkgs:
-                # See https://github.com/dask/distributed/issues/1819
-                names_to_import.extend(pkg.get_metadata_lines('top_level.txt'))
-        elif ext in ('.zip', '.pyz'):
-            names_to_import.append(name)
+        names = (mod_info.name for mod_info in  pkgutil.iter_modules([path]))
+        names_to_import.extend(names)
 
     loaded = []
     if not names_to_import:
