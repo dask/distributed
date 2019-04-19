@@ -1103,7 +1103,10 @@ def import_file(path):
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
             sys.path.insert(0, path)
-        names = (mod_info.name for mod_info in  pkgutil.iter_modules([path]))
+        if PY2:
+            names = (mod_info[1] for mod_info in pkgutil.iter_modules([path]))
+        else:
+            names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
         names_to_import.extend(names)
 
     loaded = []
