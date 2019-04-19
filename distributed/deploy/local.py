@@ -74,6 +74,8 @@ class LocalCluster(Cluster):
         Protocol to use like ``tcp://``, ``tls://``, ``inproc://``
         This defaults to sensible choice given other keyword arguments like
         ``processes`` and ``security``
+    worker_class: Worker
+        Worker class used to instantiate workers from.
 
     Examples
     --------
@@ -115,6 +117,7 @@ class LocalCluster(Cluster):
         security=None,
         protocol=None,
         blocked_handlers=None,
+        worker_class=None,
         **worker_kwargs
     ):
         if start is not None:
@@ -203,6 +206,8 @@ class LocalCluster(Cluster):
         if security:
             self.worker_kwargs["security"] = security
 
+        self.worker_class = worker_class
+
         self.start(ip=ip, n_workers=n_workers)
 
         clusters_to_close.add(self)
@@ -280,9 +285,10 @@ class LocalCluster(Cluster):
 
         if self.processes:
             W = Nanny
+            kwargs["worker_class"] = self.worker_class
             kwargs["quiet"] = True
         else:
-            W = Worker
+            W = self.worker_class or Worker
 
         w = yield W(
             self.scheduler.address,
