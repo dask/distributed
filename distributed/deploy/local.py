@@ -206,6 +206,8 @@ class LocalCluster(Cluster):
         if security:
             self.worker_kwargs["security"] = security
 
+        if not worker_class:
+            worker_class = Worker if not processes else Nanny
         self.worker_class = worker_class
 
         self.start(ip=ip, n_workers=n_workers)
@@ -284,13 +286,9 @@ class LocalCluster(Cluster):
             return
 
         if self.processes:
-            W = Nanny
-            kwargs["worker_class"] = self.worker_class
             kwargs["quiet"] = True
-        else:
-            W = self.worker_class or Worker
 
-        w = yield W(
+        w = yield self.worker_class(
             self.scheduler.address,
             loop=self.loop,
             death_timeout=death_timeout,
