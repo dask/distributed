@@ -1482,3 +1482,18 @@ def gen_tls_cluster(**kwargs):
     return gen_cluster(
         scheduler="tls://127.0.0.1", security=tls_only_security(), **kwargs
     )
+
+
+@contextmanager
+def save_sys_modules():
+    old_modules = sys.modules
+    old_path = sys.path
+    try:
+        yield
+    finally:
+        for i, elem in enumerate(sys.path):
+            if elem not in old_path:
+                del sys.path[i]
+        for elem in sys.modules.keys():
+            if elem not in old_modules:
+                del sys.modules[elem]
