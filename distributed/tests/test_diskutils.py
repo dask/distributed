@@ -19,7 +19,7 @@ from distributed.utils import mp_context
 from distributed.utils_test import captured_logger, slow
 
 
-def assert_directory_contents(dir_path, expected, trials=1):
+def assert_directory_contents(dir_path, expected, trials=2):
     expected = [os.path.join(dir_path, p) for p in expected]
     for i in range(trials):
         actual = [
@@ -91,7 +91,7 @@ def test_two_workspaces_in_same_directory(tmpdir):
     assert_contents(["aa", "aa.dirlock"], trials=5)
     del a
     gc.collect()
-    assert_contents([])
+    assert_contents([], trials=5)
 
 
 def test_workspace_process_crash(tmpdir):
