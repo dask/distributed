@@ -24,7 +24,7 @@ except ImportError:
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
+from tornado.locks import Event, Lock
 
 from . import profile, comm
 from .batched import BatchedSend
@@ -502,6 +502,7 @@ class Worker(ServerNode):
         self.scheduler_delay = 0
         self.stream_comms = dict()
         self.heartbeat_active = False
+        self.heartbeat_lock = Lock()
         self._ipython_kernel = None
 
         if self.local_dir not in sys.path:
@@ -671,6 +672,7 @@ class Worker(ServerNode):
                 raise gen.Return
             try:
                 _start = time()
+<<<<<<< HEAD
                 comm = yield connect(
                     self.scheduler.address, connection_args=self.connection_args
                 )
@@ -694,6 +696,26 @@ class Worker(ServerNode):
                     serializers=["msgpack"],
                 )
                 future = comm.read(deserializers=["msgpack"])
+=======
+                comm = yield connect(self.scheduler.address,
+                                    connection_args=self.connection_args)
+                yield comm.write(dict(op='register-worker',
+                                    reply=False,
+                                    address=self.contact_address,
+                                    keys=list(self.data),
+                                    ncores=self.ncores,
+                                    name=self.name,
+                                    nbytes=self.nbytes,
+                                    now=time(),
+                                    resources=self.total_resources,
+                                    memory_limit=self.memory_limit,
+                                    local_directory=self.local_dir,
+                                    services=self.service_ports,
+                                    pid=os.getpid(),
+                                    metrics=self.get_metrics()),
+                                serializers=['msgpack'])
+                future = comm.read(deserializers=['msgpack'])
+>>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
                 if self.death_timeout:
                     diff = self.death_timeout - (time() - start)
                     if diff < 0:
@@ -710,8 +732,14 @@ class Worker(ServerNode):
                 yield gen.sleep(0.1)
             except gen.TimeoutError:
                 logger.info("Timed out when connecting to scheduler")
+<<<<<<< HEAD
         if response["status"] != "OK":
             raise ValueError("Unexpected response from register: %r" % (response,))
+=======
+        if response['status'] != 'OK':
+            logger.warning("Unexpected response from register: %r" %
+                            (response,))
+>>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
         else:
             # Retrieve eventual init functions and run them
             for function_bytes in response["worker-setups"]:
@@ -727,6 +755,7 @@ class Worker(ServerNode):
             logger.info("        Registered to: %26s", self.scheduler.address)
             logger.info("-" * 49)
 
+<<<<<<< HEAD
         self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.batched_stream.start(comm)
         self.periodic_callbacks["heartbeat"].start()
@@ -758,6 +787,99 @@ class Worker(ServerNode):
                 self.heartbeat_active = False
         else:
             logger.debug("Heartbeat skipped: channel busy")
+=======
+            while True:
+                if self.death_timeout and time() > start + self.death_timeout:
+                    yield self._close(timeout=1)
+                    return
+                if self.status in ('closed', 'closing'):
+                    raise gen.Return
+                try:
+                    _start = time()
+                    comm = yield connect(self.scheduler.address,
+                                        connection_args=self.connection_args)
+                    yield comm.write(dict(op='register-worker',
+                                        reply=False,
+                                        address=self.contact_address,
+                                        keys=list(self.data),
+                                        ncores=self.ncores,
+                                        name=self.name,
+                                        nbytes=self.nbytes,
+                                        now=time(),
+                                        resources=self.total_resources,
+                                        memory_limit=self.memory_limit,
+                                        local_directory=self.local_dir,
+                                        services=self.service_ports,
+                                        pid=os.getpid(),
+                                        metrics=self.get_metrics()),
+                                    serializers=['msgpack'])
+                    future = comm.read(deserializers=['msgpack'])
+                    if self.death_timeout:
+                        diff = self.death_timeout - (time() - start)
+                        if diff < 0:
+                            continue
+                        future = gen.with_timeout(timedelta(seconds=diff), future)
+                    response = yield future
+                    _end = time()
+                    middle = (_start + _end) / 2
+                    self.scheduler_delay = response['time'] - middle
+                    self.status = 'running'
+                    break
+                except EnvironmentError:
+                    logger.info('Waiting to connect to: %26s', self.scheduler.address)
+                    yield gen.sleep(0.1)
+                except gen.TimeoutError:
+                    logger.info("Timed out when connecting to scheduler")
+            if response['status'] != 'OK':
+                logger.warning("Unexpected response from register: %r" %
+                                (response,))
+            else:
+                # Retrieve eventual init functions and run them
+                for function_bytes in response['worker-setups']:
+                    setup_function = pickle.loads(function_bytes)
+                    if has_arg(setup_function, 'dask_worker'):
+                        result = setup_function(dask_worker=self)
+                    else:
+                        result = setup_function()
+                    logger.info('Init function %s ran: output=%s' % (setup_function, result))
+
+                logger.info('        Registered to: %26s', self.scheduler.address)
+                logger.info('-' * 49)
+
+            self.batched_stream = BatchedSend(interval='2ms', loop=self.loop)
+            self.batched_stream.start(comm)
+        finally:
+            self.periodic_callbacks['heartbeat'].start()
+            self.loop.add_callback(self.handle_scheduler, comm)
+
+    @gen.coroutine
+    def heartbeat(self):
+        with (yield self.heartbeat_lock.acquire()):
+            if not self.heartbeat_active:
+                self.heartbeat_active = True
+                logger.debug("Heartbeat: %s" % self.address)
+                try:
+                    start = time()
+                    response = yield self.scheduler.heartbeat_worker(
+                        address=self.contact_address,
+                        now=time(),
+                        metrics=self.get_metrics()
+                    )
+                    end = time()
+                    middle = (start + end) / 2
+
+                    if response['status'] == 'missing':
+                        yield self._register_with_scheduler()
+                        return
+                    self.scheduler_delay = response['time'] - middle
+                    self.periodic_callbacks['heartbeat'].callback_time = response['heartbeat-interval'] * 1000
+                except CommClosedError:
+                    logger.warning("Heartbeat to scheduler failed")
+                finally:
+                    self.heartbeat_active = False
+            else:
+                logger.debug("Heartbeat skipped: channel busy")
+>>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
 
     @gen.coroutine
     def handle_scheduler(self, comm):

@@ -925,7 +925,7 @@ class Scheduler(ServerNode):
         self.total_occupancy = 0
         self.host_info = defaultdict(dict)
         self.resources = defaultdict(dict)
-        self.aliases = defaultdict(set)
+        self.aliases = defaultdict(list)
 
         self._task_state_collections = [self.unrunnable]
 
@@ -1363,20 +1363,32 @@ class Scheduler(ServerNode):
 
             ws = self.workers.get(address)
             if ws is not None:
+<<<<<<< HEAD
                msg = {
                     "status": "error",
                     "message": "worker already exists %s" % address,
                     "time": time(),
                 }
+=======
+                msg = {'status': 'error', 
+                       'message': "worker already exists %s" % address,
+                       'time': time()}
+>>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
                 yield comm.write(msg)
                 return
 
             if name in self.aliases and address in self.aliases[name]:
+<<<<<<< HEAD
                msg = {
                     "status": "error",
                     "message": "name taken, %s" % name,
                     "time": time(),
                 }
+=======
+                msg = {'status': 'error',
+                       'message': 'name taken, %s' % name,
+                       'time': time()}
+>>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
                 yield comm.write(msg)
                 return
 
@@ -1390,8 +1402,11 @@ class Scheduler(ServerNode):
                     services=services
             )
 
+<<<<<<< HEAD
             if "addresses" not in self.host_info[host]:
                 self.host_info[host].update({"addresses": set(), "cores": 0})
+=======
+>>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
 
             self.host_info[host]["addresses"].add(address)
             self.host_info[host]["cores"] += ncores
@@ -1399,6 +1414,7 @@ class Scheduler(ServerNode):
             self.total_ncores += ncores
             self.aliases[name].append(address)
 
+<<<<<<< HEAD
             response = self.heartbeat_worker(
                 address=address,
                 resolve_address=resolve_address,
@@ -1407,6 +1423,13 @@ class Scheduler(ServerNode):
                 host_info=host_info,
                 metrics=metrics,
             )
+=======
+            response = self.heartbeat_worker(address=address,
+                                             resolve_address=resolve_address,
+                                             now=now, resources=resources,
+                                             host_info=host_info,
+                                             metrics=metrics)
+>>>>>>> Improve worker/scheduler communication such that scheduler state isn't changed until checks are made and scheduler responses to the worker are not exceptions, rather "error" messages that the worker can process.
 
             # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot exist before this.
             self.check_idle_saturated(ws)
@@ -1862,7 +1885,10 @@ class Scheduler(ServerNode):
 
             self.rpc.remove(address)
             del self.stream_comms[address]
-            self.aliases[ws.name].remove(address)
+            try: 
+                self.aliases[ws.name].remove(address)
+            except ValueError:
+                pass
             if not self.aliases[ws.name]:
                 del self.aliases[ws.name]
             self.idle.discard(ws)
@@ -4416,7 +4442,8 @@ class Scheduler(ServerNode):
         Coerce the hostname of a worker.
         """
         if host in self.aliases:
-            return self.workers[self.aliases[host]].host
+            # get last as it's most recent
+            return self.workers[self.aliases[host][-1]].host
         else:
             return host
 
