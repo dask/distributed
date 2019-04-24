@@ -331,7 +331,6 @@ def test_adapt_down():
         yield cluster.close()
 
 
-@pytest.mark.xfail(reason="we currently only judge occupancy, not ntasks")
 @gen_test(timeout=30)
 def test_no_more_workers_than_tasks():
     loop = IOLoop.current()
