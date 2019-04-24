@@ -2,7 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 from time import sleep
 
-import pytest
 from toolz import frequencies, pluck
 from tornado import gen
 from tornado.ioloop import IOLoop
