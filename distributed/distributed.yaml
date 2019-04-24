@@ -11,21 +11,32 @@ distributed:
   scheduler:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
+    blocked-handlers: []
     default-data-size: 1000
+    # Number of seconds to wait until workers or clients are removed from the events log
+    # after they have been removed from the scheduler
+    events-cleanup-delay: 1h
     transition-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
+    preload: []
+    preload-argv: []
 
   worker:
+    blocked-handlers: []
     multiprocessing-method: forkserver
     use-file-locking: True
     connections:            # Maximum concurrent connections for data
       outgoing: 50          # This helps to control network saturation
       incoming: 10
+    preload: []
+    preload-argv: []
 
     profile:
       interval: 10ms        # Time between statistical profiling queries
       cycle: 1000ms         # Time between starting new profile
+      low-level: False      # Whether or not to include low-level functions
+                            # Requires https://github.com/numba/stacktrace
 
     # Fractions of worker memory at which we take action to avoid memory blowup
     # Set any of the lower three values to False to turn off the behavior entirely

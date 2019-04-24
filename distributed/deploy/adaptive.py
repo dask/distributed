@@ -86,18 +86,30 @@ class Adaptive(object):
     the cluster's ``scale_up`` method.
     '''
 
-    def __init__(self, scheduler, cluster=None, interval='1s', startup_cost='1s',
-                 scale_factor=2, minimum=0, maximum=None, wait_count=3,
-                 target_duration='5s', worker_key=lambda x: x, **kwargs):
-        interval = parse_timedelta(interval, default='ms')
+    def __init__(
+        self,
+        scheduler,
+        cluster=None,
+        interval="1s",
+        startup_cost="1s",
+        scale_factor=2,
+        minimum=0,
+        maximum=None,
+        wait_count=3,
+        target_duration="5s",
+        worker_key=lambda x: x,
+        **kwargs
+    ):
+        interval = parse_timedelta(interval, default="ms")
         self.worker_key = worker_key
         self.scheduler = scheduler
         self.cluster = cluster
-        self.startup_cost = parse_timedelta(startup_cost, default='s')
+        self.startup_cost = parse_timedelta(startup_cost, default="s")
         self.scale_factor = scale_factor
         if self.cluster:
-            self._adapt_callback = PeriodicCallback(self._adapt, interval * 1000,
-                                                    io_loop=scheduler.loop)
+            self._adapt_callback = PeriodicCallback(
+                self._adapt, interval * 1000, io_loop=scheduler.loop
+            )
             self.scheduler.loop.add_callback(self._adapt_callback.start)
         self._adapting = False
         self._workers_to_close_kwargs = kwargs
@@ -108,7 +120,7 @@ class Adaptive(object):
         self.wait_count = wait_count
         self.target_duration = parse_timedelta(target_duration)
 
-        self.scheduler.handlers['adaptive_recommendations'] = self.recommendations
+        self.scheduler.handlers["adaptive_recommendations"] = self.recommendations
 
     def stop(self):
         if self.cluster:
@@ -130,8 +142,11 @@ class Adaptive(object):
         total_cores = self.scheduler.total_ncores
 
         if total_occupancy / (total_cores + 1e-9) > self.startup_cost * 2:
-            logger.info("CPU limit exceeded [%d occupancy / %d cores]",
-                        total_occupancy, total_cores)
+            logger.info(
+                "CPU limit exceeded [%d occupancy / %d cores]",
+                total_occupancy,
+                total_cores,
+            )
 
             tasks_processing = 0
 
@@ -157,8 +172,9 @@ class Adaptive(object):
         Returns ``True`` if  the required bytes in distributed memory is some
         factor larger than the actual distributed memory available.
         """
-        limit_bytes = {addr: ws.memory_limit
-                       for addr, ws in self.scheduler.workers.items()}
+        limit_bytes = {
+            addr: ws.memory_limit for addr, ws in self.scheduler.workers.items()
+        }
         worker_bytes = [ws.nbytes for ws in self.scheduler.workers.values()]
 
         limit = sum(limit_bytes.values())
@@ -234,25 +250,24 @@ class Adaptive(object):
         kw.update(kwargs)
 
         if self.maximum is not None and len(self.scheduler.workers) > self.maximum:
-            kw['n'] = len(self.scheduler.workers) - self.maximum
+            kw["n"] = len(self.scheduler.workers) - self.maximum
 
         L = self.scheduler.workers_to_close(**kw)
         if len(self.scheduler.workers) - len(L) < self.minimum:
-            L = L[:len(self.scheduler.workers) - self.minimum]
+            L = L[: len(self.scheduler.workers) - self.minimum]
 
         return L
 
     @gen.coroutine
     def _retire_workers(self, workers=None):
         if workers is None:
-            workers = self.workers_to_close(key=self.worker_key,
-                                            minimum=self.minimum)
+            workers = self.workers_to_close(key=self.worker_key, minimum=self.minimum)
         if not workers:
             raise gen.Return(workers)
         with log_errors():
-            yield self.scheduler.retire_workers(workers=workers,
-                                                remove=True,
-                                                close_workers=True)
+            yield self.scheduler.retire_workers(
+                workers=workers, remove=True, close_workers=True
+            )
 
             logger.info("Retiring workers %s", workers)
             f = self.cluster.scale_down(workers)
@@ -276,33 +291,32 @@ class Adaptive(object):
         --------
         LocalCluster.scale_up
         """
-        target = math.ceil(self.scheduler.total_occupancy /
-                           self.target_duration)
-        instances = max(1,
-                        len(self.scheduler.workers) * self.scale_factor,
-                        target,
-                        self.minimum)
+        target = math.ceil(self.scheduler.total_occupancy / self.target_duration)
+        instances = max(
+            1, len(self.scheduler.workers) * self.scale_factor, target, self.minimum
+        )
 
         if self.maximum:
             instances = min(self.maximum, instances)
 
         instances = int(instances)
         logger.info("Scaling up to %d workers", instances)
-        return {'n': instances}
+        return {"n": instances}
 
     def recommendations(self, comm=None):
         should_scale_up = self.should_scale_up()
-        workers = set(self.workers_to_close(key=self.worker_key,
-                                            minimum=self.minimum))
+        workers = set(self.workers_to_close(key=self.worker_key, minimum=self.minimum))
         if should_scale_up and workers:
             logger.info("Attempting to scale up and scale down simultaneously.")
             self.close_counts.clear()
-            return {'status': 'error',
-                    'msg': 'Trying to scale up and down simultaneously'}
+            return {
+                "status": "error",
+                "msg": "Trying to scale up and down simultaneously",
+            }
 
         elif should_scale_up:
             self.close_counts.clear()
-            return toolz.merge({'status': 'up'}, self.get_scale_up_kwargs())
+            return toolz.merge({"status": "up"}, self.get_scale_up_kwargs())
 
         elif workers:
             d = {}
@@ -320,7 +334,7 @@ class Adaptive(object):
             self.close_counts = d
 
             if to_close:
-                return {'status': 'down', 'workers': to_close}
+                return {"status": "down", "workers": to_close}
         else:
             self.close_counts.clear()
             return None
@@ -335,16 +349,16 @@ class Adaptive(object):
             recommendations = self.recommendations()
             if not recommendations:
                 return
-            status = recommendations.pop('status')
-            if status == 'up':
+            status = recommendations.pop("status")
+            if status == "up":
                 f = self.cluster.scale_up(**recommendations)
-                self.log.append((time(), 'up', recommendations))
+                self.log.append((time(), "up", recommendations))
                 if gen.is_future(f):
                     yield f
 
-            elif status == 'down':
-                self.log.append((time(), 'down', recommendations['workers']))
-                workers = yield self._retire_workers(workers=recommendations['workers'])
+            elif status == "down":
+                self.log.append((time(), "down", recommendations["workers"]))
+                workers = yield self._retire_workers(workers=recommendations["workers"])
         finally:
             self._adapting = False
 

@@ -12,6 +12,7 @@ if sys.version_info[0] == 2:
     from inspect import getargspec
     from cgi import escape as html_escape
     from collections import Iterator, Mapping, Set, MutableMapping
+    from fractions import gcd
 
     reload = reload
     unicode = unicode
@@ -19,6 +20,7 @@ if sys.version_info[0] == 2:
     PY3 = False
     ConnectionRefusedError = OSError
     FileExistsError = OSError
+
     class StopAsyncIteration(Exception):
         pass
 
@@ -32,7 +34,7 @@ if sys.version_info[0] == 2:
 
     def gzip_compress(b):
         bio = BytesIO()
-        f = gzip.GzipFile(fileobj=bio, mode='w')
+        f = gzip.GzipFile(fileobj=bio, mode="w")
         f.write(b)
         f.close()
         bio.seek(0)
@@ -40,22 +42,24 @@ if sys.version_info[0] == 2:
         return result
 
     def isqueue(o):
-        return (hasattr(o, 'queue') and
-                hasattr(o, '__module__') and
-                o.__module__ == 'Queue')
+        return (
+            hasattr(o, "queue") and hasattr(o, "__module__") and o.__module__ == "Queue"
+        )
 
     def invalidate_caches():
         pass
 
     def cache_from_source(path):
         import os
+
         name, ext = os.path.splitext(path)
-        return name + '.pyc'
+        return name + ".pyc"
 
     logging_names = logging._levelNames
 
     def iscoroutinefunction(func):
         return False
+
 
 if sys.version_info[0] == 3:
     from asyncio import iscoroutinefunction
@@ -67,12 +71,14 @@ if sys.version_info[0] == 3:
     from importlib.util import cache_from_source
     from inspect import getfullargspec as getargspec
     from html import escape as html_escape
+    from math import gcd
 
     PY2 = False
     PY3 = True
     unicode = str
     from gzip import decompress as gzip_decompress
     from gzip import compress as gzip_compress
+
     ConnectionRefusedError = ConnectionRefusedError
     FileExistsError = FileExistsError
     StopAsyncIteration = StopAsyncIteration
@@ -85,8 +91,9 @@ if sys.version_info[0] == 3:
 
 
 import platform
-PYPY = platform.python_implementation().lower() == 'pypy'
-WINDOWS = sys.platform.startswith('win')
+
+PYPY = platform.python_implementation().lower() == "pypy"
+WINDOWS = sys.platform.startswith("win")
 
 
 try:
@@ -139,6 +146,7 @@ except ImportError:
                 # We may register the exit function more than once because
                 # of a thread race, but that is harmless
                 import atexit
+
                 atexit.register(self._exitfunc)
                 finalize._registered_with_atexit = True
             info = self._Info()
@@ -195,10 +203,14 @@ except ImportError:
             info = self._registry.get(self)
             obj = info and info.weakref()
             if obj is None:
-                return '<%s object at %#x; dead>' % (type(self).__name__, id(self))
+                return "<%s object at %#x; dead>" % (type(self).__name__, id(self))
             else:
-                return '<%s object at %#x; for %r at %#x>' % \
-                    (type(self).__name__, id(self), type(obj).__name__, id(obj))
+                return "<%s object at %#x; for %r at %#x>" % (
+                    type(self).__name__,
+                    id(self),
+                    type(obj).__name__,
+                    id(obj),
+                )
 
         @classmethod
         def _select_for_exit(cls):
@@ -216,6 +228,7 @@ except ImportError:
             try:
                 if cls._registry:
                     import gc
+
                     if gc.isenabled():
                         reenable_gc = True
                         gc.disable()
