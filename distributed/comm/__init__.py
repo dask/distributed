@@ -20,7 +20,7 @@ def _register_transports():
     try:
         from . import ucx
     except ImportError:
-        pass
+        print("UCX Import Error!")
 
 
 

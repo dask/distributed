@@ -16,7 +16,7 @@ from .registry import Backend, backends
 from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 
-import ucp_py as ucp
+import ucp
 
 logger = logging.getLogger(__name__)
 MAX_MSG_LOG = 23
