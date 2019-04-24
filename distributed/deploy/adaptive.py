@@ -155,9 +155,10 @@ class Adaptive(object):
 
                 if tasks_processing > total_cores:
                     logger.info(
-                        "pending tasks exceed number of cores "
-                        "[%d tasks / %d cores]",
-                        tasks_processing, total_cores)
+                        "pending tasks exceed number of cores " "[%d tasks / %d cores]",
+                        tasks_processing,
+                        total_cores,
+                    )
 
                     return True
 
