@@ -2,7 +2,7 @@ import asyncio
 import itertools
 
 import pytest
-import ucp_py as ucp
+ucp = pytest.importorskip('ucp')
 
 from distributed import Client
 from distributed.comm import ucx, listen, connect
