@@ -201,9 +201,7 @@ class UCX(Comm):
         # breakpoint()
         if self.ep:
             ucp.destroy_ep(self.ep)
-            print(self)
-            print(self.listener_instance)
-            print(type(self.listener_instance))
+            logger.debug("Destroyed UCX endpoint")
             self.ep = None
         # if self.listener_instance:
             # ucp.stop_listener(self.listener_instance)
@@ -227,11 +225,9 @@ class UCXConnector(Connector):
     client = ...  # TODO: add a client here?
 
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
-        logger.debug("UCXConnector.connect")
+        logger.debug("UCXConnector.connect: %s", address)
         _ucp_init()
-        print(address)
         ip, port = _parse_host_port(address)
-        print(f'Connection Established at {ip} {port}')
         ep = ucp.get_endpoint(ip.encode(), port)
         return self.comm_class(ep, self.prefix + address,
                                listener_instance=None,
