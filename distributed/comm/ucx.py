@@ -123,7 +123,7 @@ class UCX(Comm):
     def __init__(
         self, ep: ucp.ucp_py_ep, address: str, listener_instance, deserialize=True
     ):
-        logger.info("UCX.__init__ %s %s", address, listener_instance)
+        logger.debug("UCX.__init__ %s %s", address, listener_instance)
         self.ep = ep
         assert address.startswith("ucx")
         self.address = address
