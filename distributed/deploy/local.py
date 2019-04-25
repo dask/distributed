@@ -15,6 +15,7 @@ from .cluster import Cluster
 from ..compatibility import get_thread_identity
 from ..core import CommClosedError
 from ..utils import (
+    get_ip_interface,
     sync,
     ignoring,
     All,
@@ -62,7 +63,7 @@ class LocalCluster(Cluster):
     asynchronous: bool (False by default)
         Set to True if using this cluster within async/await functions or within
         Tornado gen.coroutines.  This should remain False for normal use.
-    kwargs: dict
+    worker_kwargs: dict
         Extra worker arguments, will be passed to the Worker constructor.
     blocked_handlers: List[str]
         A list of strings specifying a blacklist of handlers to disallow on the Scheduler,
@@ -74,6 +75,10 @@ class LocalCluster(Cluster):
         Protocol to use like ``tcp://``, ``tls://``, ``inproc://``
         This defaults to sensible choice given other keyword arguments like
         ``processes`` and ``security``
+    interface: str (optional)
+        Network interface to use.  Defaults to lo/localhost
+    worker_class: Worker
+        Worker class used to instantiate workers from.
 
     Examples
     --------
@@ -115,6 +120,8 @@ class LocalCluster(Cluster):
         security=None,
         protocol=None,
         blocked_handlers=None,
+        interface=None,
+        worker_class=None,
         **worker_kwargs
     ):
         if start is not None:
@@ -152,6 +159,7 @@ class LocalCluster(Cluster):
         self.silence_logs = silence_logs
         self._asynchronous = asynchronous
         self.security = security
+        self.interface = interface
         services = services or {}
         worker_services = worker_services or {}
         if silence_logs:
@@ -202,6 +210,10 @@ class LocalCluster(Cluster):
         self.worker_kwargs = worker_kwargs
         if security:
             self.worker_kwargs["security"] = security
+
+        if not worker_class:
+            worker_class = Worker if not processes else Nanny
+        self.worker_class = worker_class
 
         self.start(ip=ip, n_workers=n_workers)
 
@@ -255,7 +267,10 @@ class LocalCluster(Cluster):
             address = self.protocol
         else:
             if ip is None:
-                ip = "127.0.0.1"
+                if self.interface:
+                    ip = get_ip_interface(self.interface)
+                else:
+                    ip = "127.0.0.1"
 
             if "://" in ip:
                 address = ip
@@ -278,12 +293,9 @@ class LocalCluster(Cluster):
             return
 
         if self.processes:
-            W = Nanny
             kwargs["quiet"] = True
-        else:
-            W = Worker
 
-        w = yield W(
+        w = yield self.worker_class(
             self.scheduler.address,
             loop=self.loop,
             death_timeout=death_timeout,
