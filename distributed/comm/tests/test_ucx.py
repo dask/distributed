@@ -15,15 +15,11 @@ from distributed.utils_test import gen_test, loop, inc
 from .test_comms import check_deserialize
 
 
-ucx_addr = ucp.get_address()
-scheduler_port = 13337
-
-ADDRESS = ucx_addr
-HOST = f'ucx://{ucx_addr}:{scheduler_port}'
+HOST = ucp.get_address()
 
 # Currently having some issues with re-using ports.
 # Tests just hang. Still debugging.
-port_counter = itertools.count(scheduler_port)
+port_counter = itertools.count(13337)
 
 
 def test_parse_address():
@@ -32,7 +28,6 @@ def test_parse_address():
 
 
 def test_parse_host_port():
-    assert ucx._parse_host_port("10.33.225.160") == ("10.33.225.160", 13337)
     assert ucx._parse_host_port("10.33.225.160:13337") == ("10.33.225.160", 13337)
     assert ucx._parse_host_port("10.33.225.160:13338") == ("10.33.225.160", 13338)
 
@@ -84,7 +79,7 @@ async def test_ping_pong():
 
 @pytest.mark.asyncio
 async def test_comm_objs():
-    address = "{}:{}".format(HOST, next(port_counter))
+    address = "ucx://{}:{}".format(HOST, next(port_counter))
     comm, serv_com = await get_comm_pair(address)
 
     assert comm.peer_address == address
@@ -256,23 +251,21 @@ def test_ucx_localcluster(loop, processes):
         kwargs = {}
 
     ucx_addr = ucp.get_address()
-    port = 13337
-    with LocalCluster(protocol="ucx://", scheduler_port=port,
-                        ip=ucx_addr,
-                        dashboard_address=None,
-                        n_workers=2,
-                        threads_per_worker=1,
-                        processes=processes,
-                        **kwargs,
-                        ) as cluster:
-        with Client(cluster) as e:
-            x = e.submit(inc, 1)
+    with LocalCluster(protocol="ucx://",
+                      ip=ucx_addr,
+                      dashboard_address=None,
+                      n_workers=2,
+                      threads_per_worker=1,
+                      processes=processes,
+                      **kwargs,
+                      ) as cluster:
+        with Client(cluster) as client:
+            x = client.submit(inc, 1)
             x.result()
             assert x.key in cluster.scheduler.tasks
-            assert any(w.data == {x.key: 2} for w in cluster.workers)
-            assert e.loop is cluster.loop
+            if not processes:
+                assert any(w.data == {x.key: 2} for w in cluster.workers)
             assert len(cluster.scheduler.workers) == 2
-            print(cluster.scheduler.workers)
 
 
 def test_tcp_localcluster(loop):

@@ -21,12 +21,9 @@ import ucp
 logger = logging.getLogger(__name__)
 MAX_MSG_LOG = 23
 PORT = 13337
-IP = ucp.get_address()
-DEFAULT_ADDRESS = f"ucx://{IP}:{PORT}"
 
 # set in ~/.dask/config.yaml
 # or DASK_DISTRIBUTED__COMM__UCXADDRESS
-ADDRESS = DEFAULT_ADDRESS
 _PORT_COUNTER = itertools.count(PORT)
 
 _INITIALIZED = False
