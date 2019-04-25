@@ -21,12 +21,12 @@ def serialize_cudf_dataframe(x):
 
     for label, col in x.iteritems():
         header, [frame] = serialize_numba_ndarray(col.data.mem)
-        header['name'] = label
+        header["name"] = label
         sub_headers.append(header)
         arrays.append(frame)
         if col.null_count:
             header, [frame] = serialize_numba_ndarray(col.nullmask.mem)
-            header['name'] = label
+            header["name"] = label
             null_headers.append(header)
             null_masks.append(frame)
             null_counts[label] = col.null_count
@@ -34,13 +34,13 @@ def serialize_cudf_dataframe(x):
     arrays.extend(null_masks)
 
     header = {
-        'is_cuda': len(arrays),
-        'subheaders': sub_headers,
+        "is_cuda": len(arrays),
+        "subheaders": sub_headers,
         # TODO: the header must be msgpack (de)serializable.
         # See if we can avoid names, and just use integer positions.
-        'columns': x.columns.tolist(),
-        'null_counts': null_counts,
-        'null_subheaders': null_headers
+        "columns": x.columns.tolist(),
+        "null_counts": null_counts,
+        "null_subheaders": null_headers,
     }
 
     return header, arrays
@@ -48,21 +48,21 @@ def serialize_cudf_dataframe(x):
 
 @dask_deserialize.register(cudf.DataFrame)
 def serialize_cudf_dataframe(header, frames):
-    columns = header['columns']
-    n_columns = len(header['columns'])
-    n_masks = len(header['null_subheaders'])
+    columns = header["columns"]
+    n_columns = len(header["columns"])
+    n_masks = len(header["null_subheaders"])
 
     masks = {}
     pairs = []
 
     for i in range(n_masks):
-        subheader = header['null_subheaders'][i]
+        subheader = header["null_subheaders"][i]
         frame = frames[n_columns + i]
         mask = deserialize_numba_ndarray(subheader, [frame])
-        masks[subheader['name']] = mask
+        masks[subheader["name"]] = mask
 
-    for subheader, frame in zip(header['subheaders'], frames[:n_columns]):
-        name = subheader['name']
+    for subheader, frame in zip(header["subheaders"], frames[:n_columns]):
+        name = subheader["name"]
         array = deserialize_numba_ndarray(subheader, [frame])
 
         if name in masks:

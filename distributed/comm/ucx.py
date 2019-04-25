@@ -67,6 +67,7 @@ def _parse_host_port(address: str, default_port=None) -> tuple:
     # if default port is None we select the next port availabe
     # ucx-py does not currently support random port assignment
     import random
+
     default_port = default_port or random.randint(1024, 65000)
     return parse_host_port(address, default_port=default_port)
 
@@ -119,10 +120,9 @@ class UCX(Comm):
     4. Read all the data frames.
     """
 
-    def __init__(self, ep: ucp.ucp_py_ep,
-                 address: str,
-                 listener_instance,
-                 deserialize=True):
+    def __init__(
+        self, ep: ucp.ucp_py_ep, address: str, listener_instance, deserialize=True
+    ):
         logger.info("UCX.__init__ %s %s", address, listener_instance)
         self.ep = ep
         assert address.startswith("ucx")
@@ -151,9 +151,13 @@ class UCX(Comm):
         frames = await to_frames(
             msg, serializers=serializers, on_error=on_error
         )  # TODO: context=
-        gpu_frames = b''.join([struct.pack("?", hasattr(frame, '__cuda_array_interface__'))
-                               for frame in frames])
-        size_frames = b''.join([struct.pack("Q", nbytes(frame)) for frame in frames])
+        gpu_frames = b"".join(
+            [
+                struct.pack("?", hasattr(frame, "__cuda_array_interface__"))
+                for frame in frames
+            ]
+        )
+        size_frames = b"".join([struct.pack("Q", nbytes(frame)) for frame in frames])
 
         frames = [gpu_frames] + [size_frames] + frames
         nframes = struct.pack("Q", len(frames))
@@ -201,8 +205,8 @@ class UCX(Comm):
             logger.debug("Destroyed UCX endpoint")
             self.ep = None
         # if self.listener_instance:
-            # ucp.stop_listener(self.listener_instance)
-            # self.listener_instance = None
+        # ucp.stop_listener(self.listener_instance)
+        # self.listener_instance = None
 
     async def close(self):
         # TODO: Handle in-flight messages?
@@ -226,9 +230,9 @@ class UCXConnector(Connector):
         _ucp_init()
         ip, port = _parse_host_port(address)
         ep = ucp.get_endpoint(ip.encode(), port)
-        return self.comm_class(ep, self.prefix + address,
-                               listener_instance=None,
-                               deserialize=deserialize)
+        return self.comm_class(
+            ep, self.prefix + address, listener_instance=None, deserialize=deserialize
+        )
 
 
 class UCXListener(Listener):
@@ -238,11 +242,7 @@ class UCXListener(Listener):
     encrypted = UCXConnector.encrypted
 
     def __init__(
-        self,
-        address: str,
-        comm_handler: None,
-        deserialize=False,
-        **connection_args,
+        self, address: str, comm_handler: None, deserialize=False, **connection_args
     ):
         logger.debug("UCXListener.__init__")
         if not address.startswith("ucx"):
@@ -262,8 +262,9 @@ class UCXListener(Listener):
 
     def start(self):
         async def serve_forever(client_ep, listener_instance):
-            ucx = UCX(client_ep, self.address, listener_instance,
-                      deserialize=self.deserialize)
+            ucx = UCX(
+                client_ep, self.address, listener_instance, deserialize=self.deserialize
+            )
             self.listener_instance = listener_instance
             if self.comm_handler:
                 await self.comm_handler(ucx)

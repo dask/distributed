@@ -55,7 +55,7 @@ def merge_frames(header, frames):
     if not frames:
         return frames
 
-    if any(x.__class__.__name__ == 'MemoryPointer' for x in frames):
+    if any(x.__class__.__name__ == "MemoryPointer" for x in frames):
         # XXX
         return frames
 

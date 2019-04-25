@@ -532,7 +532,7 @@ def check_client_server(
 @gen_test()
 def test_ucx_client_server():
     pytest.importorskip("distributed.comm.ucx")
-    yield check_client_server('ucx://10.33.225.160')
+    yield check_client_server("ucx://10.33.225.160")
 
 
 def tcp_eq(expected_host, expected_port=None):
@@ -635,6 +635,7 @@ def test_tls_client_server_ipv6():
 def test_inproc_client_server():
     yield check_client_server("inproc://", inproc_check())
     yield check_client_server(inproc.new_address(), inproc_check())
+
 
 #
 # TLS certificate handling

@@ -2,7 +2,8 @@ import asyncio
 import itertools
 
 import pytest
-ucp = pytest.importorskip('ucp')
+
+ucp = pytest.importorskip("ucp")
 
 from distributed import Client
 from distributed.comm import ucx, listen, connect
@@ -84,11 +85,11 @@ async def test_comm_objs():
 
     assert comm.peer_address == address
     scheme, loc = parse_address(comm.peer_address)
-    assert scheme == 'ucx'
+    assert scheme == "ucx"
 
     assert comm.peer_address == address
     scheme, loc = parse_address(serv_com.peer_address)
-    assert scheme == 'ucx'
+    assert scheme == "ucx"
 
 
 def test_ucx_specific():
@@ -152,7 +153,7 @@ def test_ucx_specific():
 
 @pytest.mark.asyncio
 async def test_ping_pong_data():
-    np = pytest.importorskip('numpy')
+    np = pytest.importorskip("numpy")
 
     data = np.ones((10, 10))
     # TODO: broken for large arrays
@@ -162,7 +163,7 @@ async def test_ping_pong_data():
     await com.write(msg)
     result = await serv_com.read()
     result["op"] = "pong"
-    data2 = result.pop('data')
+    data2 = result.pop("data")
     np.testing.assert_array_equal(data2, data)
 
     await serv_com.write(result)
@@ -184,38 +185,35 @@ async def test_ping_pong_cudf():
     # if this test appears after cupy an import error arises
     # *** ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `CXXABI_1.3.11'
     # not found (required by python3.7/site-packages/pyarrow/../../../libarrow.so.12)
-    cudf = pytest.importorskip('cudf')
+    cudf = pytest.importorskip("cudf")
 
-    df = cudf.DataFrame({"A": [1, 2, None], "B": [1., 2., None]})
+    df = cudf.DataFrame({"A": [1, 2, None], "B": [1.0, 2.0, None]})
     address = "{}:{}".format(HOST, next(port_counter))
 
     com, serv_com = await get_comm_pair(address)
-    msg = {"op": "ping", 'data': to_serialize(df)}
+    msg = {"op": "ping", "data": to_serialize(df)}
 
     await com.write(msg)
     result = await serv_com.read()
-    data2 = result.pop('data')
-    assert result['op'] == 'ping'
+    data2 = result.pop("data")
+    assert result["op"] == "ping"
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('shape', [
-    (100,),
-    (10, 10)
-])
+@pytest.mark.parametrize("shape", [(100,), (10, 10)])
 async def test_ping_pong_cupy(shape):
-    cupy = pytest.importorskip('cupy')
+    cupy = pytest.importorskip("cupy")
     address = "{}:{}".format(HOST, next(port_counter))
     com, serv_com = await get_comm_pair(address)
 
     arr = cupy.random.random(shape)
-    msg = {"op": "ping", 'data': to_serialize(arr)}
+    msg = {"op": "ping", "data": to_serialize(arr)}
 
     await com.write(msg)
     result = await serv_com.read()
-    data2 = result.pop('data')
+    data2 = result.pop("data")
 
-    assert result['op'] == 'ping'
+    assert result["op"] == "ping"
     cupy.testing.assert_array_equal(arr, data2)
     await com.close()
     await serv_com.close()
@@ -223,7 +221,7 @@ async def test_ping_pong_cupy(shape):
 
 @pytest.mark.asyncio
 async def test_ping_pong_numba():
-    np = pytest.importorskip('numpy')
+    np = pytest.importorskip("numpy")
     numba = pytest.importorskip("numba")
     import numba.cuda
 
@@ -233,32 +231,31 @@ async def test_ping_pong_numba():
     arr = numba.cuda.to_device(arr)
 
     com, serv_com = await get_comm_pair(address)
-    msg = {"op": "ping", 'data': to_serialize(arr)}
+    msg = {"op": "ping", "data": to_serialize(arr)}
 
     await com.write(msg)
     result = await serv_com.read()
-    data2 = result.pop('data')
-    assert result['op'] == 'ping'
+    data2 = result.pop("data")
+    assert result["op"] == "ping"
 
-@pytest.mark.parametrize('processes', [
-    True,
-    False,
-])
+
+@pytest.mark.parametrize("processes", [True, False])
 def test_ucx_localcluster(loop, processes):
     if processes:
-        kwargs = {'env': {'UCX_MEMTYPE_CACHE': 'n'}}
+        kwargs = {"env": {"UCX_MEMTYPE_CACHE": "n"}}
     else:
         kwargs = {}
 
     ucx_addr = ucp.get_address()
-    with LocalCluster(protocol="ucx://",
-                      ip=ucx_addr,
-                      dashboard_address=None,
-                      n_workers=2,
-                      threads_per_worker=1,
-                      processes=processes,
-                      **kwargs,
-                      ) as cluster:
+    with LocalCluster(
+        protocol="ucx://",
+        ip=ucx_addr,
+        dashboard_address=None,
+        n_workers=2,
+        threads_per_worker=1,
+        processes=processes,
+        **kwargs,
+    ) as cluster:
         with Client(cluster) as client:
             x = client.submit(inc, 1)
             x.result()
@@ -269,13 +266,13 @@ def test_ucx_localcluster(loop, processes):
 
 
 def test_tcp_localcluster(loop):
-    ucx_addr = '127.0.0.1'
+    ucx_addr = "127.0.0.1"
     port = 13337
-    env={'UCX_MEMTYPE_CACHE': 'n'}
+    env = {"UCX_MEMTYPE_CACHE": "n"}
     with LocalCluster(
         2,
         scheduler_port=port,
-        ip = ucx_addr,
+        ip=ucx_addr,
         processes=True,
         threads_per_worker=1,
         dashboard_address=None,
