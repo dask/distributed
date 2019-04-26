@@ -11,7 +11,7 @@ import logging
 import struct
 
 from .addressing import parse_host_port, unparse_host_port
-from .core import Comm, Connector, Listener
+from .core import Comm, Connector, Listener, CommClosedError
 from .registry import Backend, backends
 from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
@@ -124,7 +124,7 @@ class UCX(Comm):
         self, ep: ucp.ucp_py_ep, address: str, listener_instance, deserialize=True
     ):
         logger.debug("UCX.__init__ %s %s", address, listener_instance)
-        self.ep = ep
+        self._ep = ep
         assert address.startswith("ucx")
         self.address = address
         self.listener_instance = listener_instance
@@ -200,22 +200,28 @@ class UCX(Comm):
 
     def abort(self):
         # breakpoint()
-        if self.ep:
-            ucp.destroy_ep(self.ep)
+        if self._ep:
+            ucp.destroy_ep(self._ep)
             logger.debug("Destroyed UCX endpoint")
-            self.ep = None
+            self._ep = None
         # if self.listener_instance:
         # ucp.stop_listener(self.listener_instance)
         # self.listener_instance = None
 
+    @property
+    def ep(self):
+        if self._ep:
+            return self._ep
+        else:
+            raise CommClosedError("UCX Endpoint is closed")
+
     async def close(self):
         # TODO: Handle in-flight messages?
         # sleep is currently used to help flush buffer
-        await asyncio.sleep(1.0)
         self.abort()
 
     def closed(self):
-        return self.ep is None
+        return self._ep is None
 
 
 class UCXConnector(Connector):
@@ -251,7 +257,7 @@ class UCXListener(Listener):
         self.ip, self.port = _parse_host_port(address, default_port=0)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
-        self.ep = None  # type: ucp.ucp_py_ep
+        self._ep = None  # type: ucp.ucp_py_ep
         self.listener_instance = None  # type: ucp.ListenerFuture
         self._task = None
 
@@ -290,8 +296,8 @@ class UCXListener(Listener):
         if self._task:
             self._task.cancel()
 
-        if self.ep:
-            ucp.destroy_ep(self.ep)
+        if self._ep:
+            ucp.destroy_ep(self._ep)
         # if self.listener_instance:
         #   ucp.stop_listener(self.listener_instance)
 
