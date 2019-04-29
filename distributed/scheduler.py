@@ -4222,7 +4222,7 @@ class Scheduler(ServerNode):
                     except KeyError:
                         pass
                     self.tasks[ts.key] = ts
-                kwargs['task_state'] = ts
+                kwargs["task_state"] = ts
                 for plugin in list(self.plugins):
                     try:
                         plugin.transition(key, start, finish2, *args, **kwargs)
