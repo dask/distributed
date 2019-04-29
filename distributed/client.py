@@ -976,8 +976,11 @@ class Client(Node):
                     yield gen.sleep(0.1)
                     timeout = deadline - self.loop.time()
             else:
-                logger.error("Failed to reconnect to scheduler after %.2f "
-                             "seconds, closing client", self._timeout)
+                logger.error(
+                    "Failed to reconnect to scheduler after %.2f "
+                    "seconds, closing client",
+                    self._timeout,
+                )
                 yield self._close()
 
     @gen.coroutine

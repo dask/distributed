@@ -3704,12 +3704,12 @@ def test_reconnect(loop):
     c.close()
 
 
-@gen_cluster(client=True, ncores=[], client_kwargs={'timeout': 0.5})
+@gen_cluster(client=True, ncores=[], client_kwargs={"timeout": 0.5})
 def test_reconnect_timeout(c, s):
     with captured_logger(logging.getLogger("distributed.client")) as logger:
         yield s.close()
         start = time()
-        while c.status != 'closed':
+        while c.status != "closed":
             yield c._update_scheduler_info()
             assert time() < start + 5, "Timeout waiting for reconnect to fail"
     text = logger.getvalue()
