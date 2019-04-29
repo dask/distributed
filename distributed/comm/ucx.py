@@ -91,7 +91,7 @@ class UCX(Comm):
 
     Parameters
     ----------
-    ep : ucp.ucp_py_ep
+    ep : ucp.Endpoint
         The UCP endpoint.
     address : str
         The address, prefixed with `ucx://` to use.
@@ -121,7 +121,7 @@ class UCX(Comm):
     """
 
     def __init__(
-        self, ep: ucp.ucp_py_ep, address: str, listener_instance, deserialize=True
+        self, ep: ucp.Endpoint, address: str, listener_instance, deserialize=True
     ):
         logger.debug("UCX.__init__ %s %s", address, listener_instance)
         self._ep = ep
@@ -257,7 +257,7 @@ class UCXListener(Listener):
         self.ip, self.port = _parse_host_port(address, default_port=0)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
-        self._ep = None  # type: ucp.ucp_py_ep
+        self._ep = None  # type: ucp.Endpoint
         self.listener_instance = None  # type: ucp.ListenerFuture
         self._task = None
 

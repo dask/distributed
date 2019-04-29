@@ -26,6 +26,7 @@ from distributed.utils_test import loop  # noqa: F401
 
 from distributed.protocol import to_serialize, Serialized, serialize, deserialize
 
+from distributed.comm.registry import backends
 from distributed.comm import (
     tcp,
     inproc,
@@ -487,7 +488,7 @@ def check_client_server(
     # Check listener properties
     bound_addr = listener.listen_address
     bound_scheme, bound_loc = parse_address(bound_addr)
-    assert bound_scheme in ("inproc", "tcp", "tls")
+    assert bound_scheme in backends
     assert bound_scheme == parse_address(addr)[0]
 
     if check_listen_addr is not None:
@@ -532,7 +533,9 @@ def check_client_server(
 @gen_test()
 def test_ucx_client_server():
     pytest.importorskip("distributed.comm.ucx")
-    yield check_client_server("ucx://10.33.225.160")
+    import ucp
+    addr = ucp.get_address()
+    yield check_client_server("ucx://" + addr)
 
 
 def tcp_eq(expected_host, expected_port=None):
