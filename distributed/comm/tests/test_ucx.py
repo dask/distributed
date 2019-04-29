@@ -200,7 +200,7 @@ async def test_ping_pong_cudf():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("shape", [(100,), (10, 10)])
+@pytest.mark.parametrize("shape", [(100,), (10, 10), (4_947,)])
 async def test_ping_pong_cupy(shape):
     cupy = pytest.importorskip("cupy")
     address = "ucx://{}:{}".format(HOST, next(port_counter))
