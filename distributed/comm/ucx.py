@@ -159,10 +159,11 @@ class UCX(Comm):
         )
         size_frames = b"".join([struct.pack("Q", nbytes(frame)) for frame in frames])
 
-        frames = [gpu_frames] + [size_frames] + frames
         nframes = struct.pack("Q", len(frames))
 
-        await self.ep.send_obj(nframes)
+        meta = b''.join([nframes, gpu_frames, size_frames])
+
+        await self.ep.send_obj(meta)
 
         for frame in frames:
             await self.ep.send_obj(frame)
@@ -171,16 +172,13 @@ class UCX(Comm):
     async def read(self, deserializers=None):
         resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
-        n_frames, = struct.unpack("Q", obj)
-        n_data_frames = n_frames - 2
+        nframes, = struct.unpack("Q", obj[:8])
 
-        gpu_frame_msg = await self.ep.recv_future()
-        gpu_frame_msg = gpu_frame_msg.get_obj()
-        is_gpus = struct.unpack("{}?".format(n_data_frames), gpu_frame_msg)
+        gpu_frame_msg = obj[8:8 + nframes]
+        is_gpus = struct.unpack("{}?".format(nframes), gpu_frame_msg)
 
-        sized_frame_msg = await self.ep.recv_future()
-        sized_frame_msg = sized_frame_msg.get_obj()
-        sizes = struct.unpack("{}Q".format(n_data_frames), sized_frame_msg)
+        sized_frame_msg = obj[8 + nframes:]
+        sizes = struct.unpack("{}Q".format(nframes), sized_frame_msg)
 
         frames = []
 
