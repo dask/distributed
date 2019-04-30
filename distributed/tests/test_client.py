@@ -3711,6 +3711,7 @@ def test_reconnect_timeout(c, s):
         start = time()
         while c.status != "closed":
             yield c._update_scheduler_info()
+            yield gen.sleep(0.05)
             assert time() < start + 5, "Timeout waiting for reconnect to fail"
     text = logger.getvalue()
     assert "Failed to reconnect" in text
