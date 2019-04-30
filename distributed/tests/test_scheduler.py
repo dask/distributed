@@ -536,11 +536,7 @@ def test_worker_name():
     s.start(0)
     w = yield Worker(s.ip, s.port, name="alice")
     assert s.workers[w.address].name == "alice"
-    assert s.aliases["alice"] == w.address
-
-    with pytest.raises(ValueError):
-        w2 = yield Worker(s.ip, s.port, name="alice")
-        yield w2._close()
+    assert w.address in s.aliases["alice"]
 
     yield s.close()
     yield w._close()

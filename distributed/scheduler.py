@@ -925,7 +925,7 @@ class Scheduler(ServerNode):
         self.total_occupancy = 0
         self.host_info = defaultdict(dict)
         self.resources = defaultdict(dict)
-        self.aliases = dict()
+        self.aliases = defaultdict(list)
 
         self._task_state_collections = [self.unrunnable]
 
@@ -1363,7 +1363,22 @@ class Scheduler(ServerNode):
 
             ws = self.workers.get(address)
             if ws is not None:
-                raise ValueError("Worker already exists %s" % address)
+                msg = {
+                    "status": "error",
+                    "message": "worker already exists %s" % address,
+                    "time": time(),
+                }
+                yield comm.write(msg)
+                return
+
+            if name in self.aliases and address in self.aliases[name]:
+                msg = {
+                    "status": "error",
+                    "message": "name taken, %s" % name,
+                    "time": time(),
+                }
+                yield comm.write(msg)
+                return
 
             self.workers[address] = ws = WorkerState(
                 address=address,
@@ -1375,15 +1390,6 @@ class Scheduler(ServerNode):
                 services=services,
             )
 
-            if name in self.aliases:
-                msg = {
-                    "status": "error",
-                    "message": "name taken, %s" % name,
-                    "time": time(),
-                }
-                yield comm.write(msg)
-                return
-
             if "addresses" not in self.host_info[host]:
                 self.host_info[host].update({"addresses": set(), "cores": 0})
 
@@ -1391,7 +1397,7 @@ class Scheduler(ServerNode):
             self.host_info[host]["cores"] += ncores
 
             self.total_ncores += ncores
-            self.aliases[name] = address
+            self.aliases[name].append(address)
 
             response = self.heartbeat_worker(
                 address=address,
@@ -1856,7 +1862,12 @@ class Scheduler(ServerNode):
 
             self.rpc.remove(address)
             del self.stream_comms[address]
-            del self.aliases[ws.name]
+            try:
+                self.aliases[ws.name].remove(address)
+            except ValueError:
+                pass
+            if not self.aliases[ws.name]:
+                del self.aliases[ws.name]
             self.idle.discard(ws)
             self.saturated.discard(ws)
             del self.workers[address]
@@ -4392,7 +4403,7 @@ class Scheduler(ServerNode):
         """
         # XXX how many address-parsing routines do we have?
         if addr in self.aliases:
-            addr = self.aliases[addr]
+            addr = self.aliases[addr][-1]
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
         if not isinstance(addr, six.string_types):
@@ -4410,7 +4421,8 @@ class Scheduler(ServerNode):
         Coerce the hostname of a worker.
         """
         if host in self.aliases:
-            return self.workers[self.aliases[host]].host
+            # get last as it's most recent
+            return self.workers[self.aliases[host][-1]].host
         else:
             return host
 

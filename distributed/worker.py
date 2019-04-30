@@ -24,7 +24,7 @@ except ImportError:
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
+from tornado.locks import Event, Lock
 
 from . import profile, comm
 from .batched import BatchedSend
@@ -502,6 +502,7 @@ class Worker(ServerNode):
         self.scheduler_delay = 0
         self.stream_comms = dict()
         self.heartbeat_active = False
+        self.heartbeat_lock = Lock()
         self._ipython_kernel = None
 
         if self.local_dir not in sys.path:
@@ -711,7 +712,7 @@ class Worker(ServerNode):
             except gen.TimeoutError:
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
-            raise ValueError("Unexpected response from register: %r" % (response,))
+            logger.warning("Unexpected response from register: %r" % (response,))
         else:
             # Retrieve eventual init functions and run them
             for function_bytes in response["worker-setups"]:
@@ -734,30 +735,31 @@ class Worker(ServerNode):
 
     @gen.coroutine
     def heartbeat(self):
-        if not self.heartbeat_active:
-            self.heartbeat_active = True
-            logger.debug("Heartbeat: %s" % self.address)
-            try:
-                start = time()
-                response = yield self.scheduler.heartbeat_worker(
-                    address=self.contact_address, now=time(), metrics=self.get_metrics()
-                )
-                end = time()
-                middle = (start + end) / 2
+        with (yield self.heartbeat_lock.acquire()):
+            if not self.heartbeat_active:
+                self.heartbeat_active = True
+                logger.debug("Heartbeat: %s" % self.address)
+                try:
+                    start = time()
+                    response = yield self.scheduler.heartbeat_worker(
+                        address=self.contact_address, now=time(), metrics=self.get_metrics()
+                    )
+                    end = time()
+                    middle = (start + end) / 2
 
-                if response["status"] == "missing":
-                    yield self._register_with_scheduler()
-                    return
-                self.scheduler_delay = response["time"] - middle
-                self.periodic_callbacks["heartbeat"].callback_time = (
-                    response["heartbeat-interval"] * 1000
-                )
-            except CommClosedError:
-                logger.warning("Heartbeat to scheduler failed")
-            finally:
-                self.heartbeat_active = False
-        else:
-            logger.debug("Heartbeat skipped: channel busy")
+                    if response["status"] == "missing":
+                        yield self._register_with_scheduler()
+                        return
+                    self.scheduler_delay = response["time"] - middle
+                    self.periodic_callbacks["heartbeat"].callback_time = (
+                        response["heartbeat-interval"] * 1000
+                    )
+                except CommClosedError:
+                    logger.warning("Heartbeat to scheduler failed")
+                finally:
+                    self.heartbeat_active = False
+            else:
+                logger.debug("Heartbeat skipped: channel busy")
 
     @gen.coroutine
     def handle_scheduler(self, comm):
