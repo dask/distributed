@@ -248,7 +248,7 @@ def test_ucx_localcluster(loop, processes):
     ucx_addr = ucp.get_address()
     with LocalCluster(
         protocol="ucx",
-        interface='ib0',
+        interface="ib0",
         dashboard_address=None,
         n_workers=2,
         threads_per_worker=1,

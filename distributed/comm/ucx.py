@@ -20,8 +20,8 @@ import ucp
 
 import os
 
-os.environ.setdefault('UCX_RNDV_SCHEME', 'put_zcopy')
-os.environ.setdefault('UCX_MEMTYPE_CACHE', 'n')
+os.environ.setdefault("UCX_RNDV_SCHEME", "put_zcopy")
+os.environ.setdefault("UCX_MEMTYPE_CACHE", "n")
 
 logger = logging.getLogger(__name__)
 MAX_MSG_LOG = 23
@@ -166,7 +166,7 @@ class UCX(Comm):
 
         nframes = struct.pack("Q", len(frames))
 
-        meta = b''.join([nframes, gpu_frames, size_frames])
+        meta = b"".join([nframes, gpu_frames, size_frames])
 
         await self.ep.send_obj(meta)
 
@@ -179,10 +179,10 @@ class UCX(Comm):
         obj = ucp.get_obj_from_msg(resp)
         nframes, = struct.unpack("Q", obj[:8])
 
-        gpu_frame_msg = obj[8:8 + nframes]
+        gpu_frame_msg = obj[8 : 8 + nframes]
         is_gpus = struct.unpack("{}?".format(nframes), gpu_frame_msg)
 
-        sized_frame_msg = obj[8 + nframes:]
+        sized_frame_msg = obj[8 + nframes :]
         sizes = struct.unpack("{}Q".format(nframes), sized_frame_msg)
 
         frames = []
