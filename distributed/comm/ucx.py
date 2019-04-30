@@ -177,12 +177,12 @@ class UCX(Comm):
     async def read(self, deserializers=None):
         resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
-        nframes, = struct.unpack("Q", obj[:8])
+        nframes, = struct.unpack("Q", obj[:8])  # first eight bytes for number of frames
 
-        gpu_frame_msg = obj[8 : 8 + nframes]
+        gpu_frame_msg = obj[8 : 8 + nframes]  # next nframes bytes for if they're GPU frames
         is_gpus = struct.unpack("{}?".format(nframes), gpu_frame_msg)
 
-        sized_frame_msg = obj[8 + nframes :]
+        sized_frame_msg = obj[8 + nframes :]  # then the rest for frame sizes
         sizes = struct.unpack("{}Q".format(nframes), sized_frame_msg)
 
         frames = []
