@@ -21,6 +21,7 @@ distributed:
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
     preload: []
     preload-argv: []
+    latency: .01            # used in calculation of transfer_time for work stealing
 
   worker:
     blocked-handlers: []
