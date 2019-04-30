@@ -18,6 +18,11 @@ from ..utils import ensure_ip, get_ip, get_ipv6, nbytes
 
 import ucp
 
+import os
+
+os.environ.setdefault('UCX_RNDV_SCHEME', 'put_zcopy')
+os.environ.setdefault('UCX_MEMTYPE_CACHE', 'n')
+
 logger = logging.getLogger(__name__)
 MAX_MSG_LOG = 23
 PORT = 13337

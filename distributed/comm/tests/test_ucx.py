@@ -200,7 +200,7 @@ async def test_ping_pong_cudf():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("shape", [(100,), (10, 10), (4_947,)])
+@pytest.mark.parametrize("shape", [(100,), (10, 10), (4947,)])
 async def test_ping_pong_cupy(shape):
     cupy = pytest.importorskip("cupy")
     address = "ucx://{}:{}".format(HOST, next(port_counter))
@@ -209,8 +209,7 @@ async def test_ping_pong_cupy(shape):
     arr = cupy.random.random(shape)
     msg = {"op": "ping", "data": to_serialize(arr)}
 
-    await com.write(msg)
-    result = await serv_com.read()
+    _, result = await asyncio.gather(com.write(msg), serv_com.read())
     data2 = result.pop("data")
 
     assert result["op"] == "ping"
@@ -248,8 +247,8 @@ def test_ucx_localcluster(loop, processes):
 
     ucx_addr = ucp.get_address()
     with LocalCluster(
-        protocol="ucx://",
-        ip=ucx_addr,
+        protocol="ucx",
+        interface='ib0',
         dashboard_address=None,
         n_workers=2,
         threads_per_worker=1,
