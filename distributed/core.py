@@ -900,7 +900,7 @@ class ConnectionPool(object):
         if addr in self.occupied:
             comms = self.occupied.pop(addr)
             for comm in comms:
-                comm.close()
+                IOLoop.current().add_callback(comm.close)
         if self.open < self.limit:
             self.event.set()
 
