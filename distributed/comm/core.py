@@ -38,10 +38,11 @@ class Comm(with_metaclass(ABCMeta)):
     depending on the underlying transport's characteristics.
     """
 
-    _comms = weakref.WeakSet()
+    _instances = weakref.WeakSet()
 
     def __init__(self):
-        self._comms.add(self)
+        self._instances.add(self)
+        self.name = None
 
     # XXX add set_close_callback()?
 

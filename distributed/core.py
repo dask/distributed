@@ -788,7 +788,7 @@ class ConnectionPool(object):
         Whether or not to deserialize data by default or pass it through
     """
 
-    _pools = weakref.WeakSet()
+    _instances = weakref.WeakSet()
 
     def __init__(
         self,
@@ -811,7 +811,7 @@ class ConnectionPool(object):
         self.event = Event()
         self.server = weakref.ref(server)
         self._created = weakref.WeakSet()
-        self._pools.add(self)
+        self._instances.add(self)
 
     @property
     def active(self):

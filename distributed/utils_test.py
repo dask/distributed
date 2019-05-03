@@ -763,13 +763,13 @@ def cluster(
         assert time() < start + 1, "Workers still around after one second"
 
     for i in range(5):
-        if all(c.closed() for c in Comm._comms):
+        if all(c.closed() for c in Comm._instances):
             break
         else:
             sleep(0.1)
     else:
-        L = [c for c in Comm._comms if not c.closed()]
-        Comm._comms.clear()
+        L = [c for c in Comm._instances if not c.closed()]
+        Comm._instances.clear()
         raise ValueError("Unclosed Comms", L)
 
 
@@ -924,7 +924,7 @@ def gen_cluster(
         def test_func():
             del _global_workers[:]
             _global_clients.clear()
-            Comm._comms.clear()
+            Comm._instances.clear()
             active_threads_start = set(threading._active)
 
             reset_config()
@@ -1001,13 +1001,13 @@ def gen_cluster(
                                 yield c._close(fast=True)
 
                             for i in range(5):
-                                if all(c.closed() for c in Comm._comms):
+                                if all(c.closed() for c in Comm._instances):
                                     break
                                 else:
                                     yield gen.sleep(0.05)
                             else:
-                                L = [c for c in Comm._comms if not c.closed()]
-                                Comm._comms.clear()
+                                L = [c for c in Comm._instances if not c.closed()]
+                                Comm._instances.clear()
                                 raise ValueError("Unclosed Comms", L)
 
                             raise gen.Return(result)
