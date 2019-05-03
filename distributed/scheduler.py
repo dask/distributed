@@ -1221,7 +1221,7 @@ class Scheduler(ServerNode):
             yield All(self.coroutines)
 
     @gen.coroutine
-    def close(self, comm=None, fast=False):
+    def close(self, comm=None, fast=False, close_workers=False):
         """ Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -1234,6 +1234,12 @@ class Scheduler(ServerNode):
 
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
+
+        if close_workers:
+            for worker in self.workers:
+                self.worker_send(worker, {"op": "close", "report": False})
+            while self.workers:
+                yield gen.sleep(0.1)
 
         for pc in self.periodic_callbacks.values():
             pc.stop()

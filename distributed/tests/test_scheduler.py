@@ -544,7 +544,6 @@ def test_worker_name():
         yield w2._close()
 
     yield s.close()
-    yield w._close()
 
 
 @gen_test()
@@ -585,7 +584,6 @@ def test_coerce_address():
         assert s.coerce_address("zzzt:8000", resolve=False) == "tcp://zzzt:8000"
 
         yield s.close()
-        yield [w._close() for w in [a, b, c]]
 
 
 @pytest.mark.skipif(
@@ -1505,3 +1503,10 @@ def test_workerstate_clean(s, a, b):
     assert ws.address == a.address
     b = pickle.dumps(ws)
     assert len(b) < 1000
+
+
+@gen_cluster()
+def test_close_workers(s, a, b):
+    yield s.close(close_workers=True)
+    assert a.status == "closed"
+    assert b.status == "closed"
