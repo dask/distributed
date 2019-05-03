@@ -771,7 +771,8 @@ def cluster(
     else:
         L = [c for c in Comm._instances if not c.closed()]
         Comm._instances.clear()
-        raise ValueError("Unclosed Comms", L)
+        print("Unclosed Comms", L)
+        # raise ValueError("Unclosed Comms", L)
 
 
 @gen.coroutine
@@ -1009,7 +1010,8 @@ def gen_cluster(
                             else:
                                 L = [c for c in Comm._instances if not c.closed()]
                                 Comm._instances.clear()
-                                raise ValueError("Unclosed Comms", L)
+                                # raise ValueError("Unclosed Comms", L)
+                                print("Unclosed Comms", L)
 
                             raise gen.Return(result)
 
