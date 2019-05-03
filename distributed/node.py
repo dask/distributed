@@ -27,6 +27,7 @@ class Node(object):
             serializers=serializers,
             deserializers=deserializers,
             connection_args=connection_args,
+            server=self,
         )
 
 

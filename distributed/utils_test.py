@@ -41,6 +41,7 @@ from tornado.ioloop import IOLoop
 
 from .client import default_client, _global_clients, Client
 from .compatibility import PY3, Empty, WINDOWS, PY2
+from .comm import Comm
 from .comm.utils import offload
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
@@ -761,6 +762,16 @@ def cluster(
         sleep(0.01)
         assert time() < start + 1, "Workers still around after one second"
 
+    for i in range(5):
+        if all(c.closed() for c in Comm._comms):
+            break
+        else:
+            sleep(0.1)
+    else:
+        L = [c for c in Comm._comms if not c.closed()]
+        Comm._comms.clear()
+        raise ValueError("Unclosed Comms", L)
+
 
 @gen.coroutine
 def disconnect(addr, timeout=3, rpc_kwargs=None):
@@ -845,8 +856,8 @@ def start_cluster(
         )
         for i, ncore in enumerate(ncores)
     ]
-    for w in workers:
-        w.rpc = workers[0].rpc
+    # for w in workers:
+    #     w.rpc = workers[0].rpc
 
     yield [w._start(ncore[0]) for ncore, w in zip(ncores, workers)]
 
@@ -913,6 +924,7 @@ def gen_cluster(
         def test_func():
             del _global_workers[:]
             _global_clients.clear()
+            Comm._comms.clear()
             active_threads_start = set(threading._active)
 
             reset_config()
@@ -987,6 +999,16 @@ def gen_cluster(
                                 pass
                             else:
                                 yield c._close(fast=True)
+
+                            for i in range(5):
+                                if all(c.closed() for c in Comm._comms):
+                                    break
+                                else:
+                                    yield gen.sleep(0.05)
+                            else:
+                                L = [c for c in Comm._comms if not c.closed()]
+                                Comm._comms.clear()
+                                raise ValueError("Unclosed Comms", L)
 
                             raise gen.Return(result)
 
