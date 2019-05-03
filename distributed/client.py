@@ -690,6 +690,7 @@ class Client(Node):
             io_loop=self.loop,
             serializers=serializers,
             deserializers=deserializers,
+            timeout=timeout,
         )
 
         for ext in extensions:

@@ -797,6 +797,7 @@ class ConnectionPool(object):
         serializers=None,
         deserializers=None,
         connection_args=None,
+        timeout=None,
         server=None,
     ):
         self.limit = limit  # Max number of open comms
@@ -808,8 +809,9 @@ class ConnectionPool(object):
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args
+        self.timeout = timeout
         self.event = Event()
-        self.server = weakref.ref(server)
+        self.server = weakref.ref(server) if server else None
         self._created = weakref.WeakSet()
         self._instances.add(self)
 
@@ -852,7 +854,7 @@ class ConnectionPool(object):
         try:
             comm = yield connect(
                 addr,
-                timeout=timeout,
+                timeout=timeout or self.timeout,
                 deserialize=self.deserialize,
                 connection_args=self.connection_args,
             )

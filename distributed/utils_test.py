@@ -638,6 +638,7 @@ def cluster(
     ws = weakref.WeakSet()
 
     reset_config()
+    Comm._instances.clear()
 
     for name, level in logging_levels.items():
         logging.getLogger(name).setLevel(level)
