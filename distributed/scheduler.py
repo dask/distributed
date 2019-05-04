@@ -837,13 +837,13 @@ class Scheduler(ServerNode):
         self.scheduler_file = scheduler_file
         worker_ttl = worker_ttl or dask.config.get("distributed.scheduler.worker-ttl")
         self.worker_ttl = parse_timedelta(worker_ttl) if worker_ttl else None
-        self.idle_timeout = (
-            parse_timedelta(
-                idle_timeout or dask.config.get("distributed.scheduler.idle-timeout")
-            )
-            if idle_timeout
-            else None
+        idle_timeout = idle_timeout or dask.config.get(
+            "distributed.scheduler.idle-timeout"
         )
+        if idle_timeout:
+            self.idle_timeout = parse_timedelta(idle_timeout)
+        else:
+            self.idle_timeout = None
         self.time_started = time()
 
         self.security = security or Security()
