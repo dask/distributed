@@ -446,6 +446,9 @@ def test_Executor(c, s):
         yield w.close()
 
 
+@pytest.mark.skip(
+    reason="Other tests leak memory, so process-level checks" "trigger immediately"
+)
 @gen_cluster(
     client=True,
     ncores=[("127.0.0.1", 1)],
