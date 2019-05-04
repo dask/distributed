@@ -959,7 +959,7 @@ class Worker(ServerNode):
         self.loop.add_callback(self._start, port)
 
     def _close(self, *args, **kwargs):
-        warnings.warn("Worker._close has moved to Worker.close")
+        warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
     @gen.coroutine
