@@ -999,6 +999,12 @@ class Worker(ServerNode):
             for k, v in self.services.items():
                 v.stop()
 
+            if self.batched_stream and not self.batched_stream.comm.closed():
+                self.batched_stream.send({"op": "close-stream"})
+
+            if self.batched_stream:
+                self.batched_stream.close()
+
             if nanny and "nanny" in self.service_ports:
                 nanny_address = "%s%s:%d" % (
                     self.listener.prefix,
@@ -1007,12 +1013,6 @@ class Worker(ServerNode):
                 )
                 with self.rpc(nanny_address) as r:
                     yield r.terminate()
-
-            if self.batched_stream and not self.batched_stream.comm.closed():
-                self.batched_stream.send({"op": "close-stream"})
-
-            if self.batched_stream:
-                self.batched_stream.close()
 
             self.rpc.close()
             self._closed.set()
