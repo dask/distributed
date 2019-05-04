@@ -1380,3 +1380,12 @@ def test_data_types(s):
     assert w.data.x == 123
     assert w.data.y == 456
     yield w.close()
+
+
+@gen_cluster(ncores=[])
+def test_local_dir(s):
+    with tmpfile() as fn:
+        with dask.config.set(temporary_directory=fn):
+            w = yield Worker(s.address)
+            assert w.local_dir.startswith(fn)
+            assert "dask-worker-space" in w.local_dir
