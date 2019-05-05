@@ -1250,9 +1250,12 @@ class Scheduler(ServerNode):
 
         if close_workers:
             for worker in self.workers:
-                self.worker_send(worker, {"op": "close", "report": False})
-            while self.workers:
-                yield gen.sleep(0.1)
+                self.worker_send(worker, {"op": "close"})
+            for i in range(20):  # wait a second for send signals to clear
+                if self.workers:
+                    yield gen.sleep(0.05)
+                else:
+                    break
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
