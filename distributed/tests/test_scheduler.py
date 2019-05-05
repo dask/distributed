@@ -1521,3 +1521,11 @@ def test_workerstate_clean(s, a, b):
     assert ws.address == a.address
     b = pickle.dumps(ws)
     assert len(b) < 1000
+
+
+@gen_cluster(client=True)
+def test_result_type(c, s, a, b):
+    x = c.submit(lambda: 1)
+    yield x
+
+    assert "int" in s.tasks[x.key].type
