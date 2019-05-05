@@ -386,6 +386,8 @@ class Worker(ServerNode):
         self.outgoing_count = 0
         self.outgoing_current_count = 0
         self.repetitively_busy = 0
+        self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.latency = 0.001
         self._client = None
 
         profile_cycle_interval = kwargs.pop(
@@ -638,6 +640,7 @@ class Worker(ServerNode):
             in_memory=len(self.data),
             ready=len(self.ready),
             in_flight=len(self.in_flight_tasks),
+            bandwidth=self.bandwidth,
         )
         custom = {k: metric(self) for k, metric in self.metrics.items()}
 
@@ -704,6 +707,7 @@ class Worker(ServerNode):
                 response = yield future
                 _end = time()
                 middle = (_start + _end) / 2
+                self.latency = (_end - start) * 0.05 + self.latency * 0.95
                 self.scheduler_delay = response["time"] - middle
                 self.status = "running"
                 break
@@ -1842,6 +1846,7 @@ class Worker(ServerNode):
 
                 total_bytes = sum(self.nbytes.get(dep, 0) for dep in response["data"])
                 duration = (stop - start) or 0.5
+                bandwidth = total_bytes / (duration - abs(self.scheduler_delay))
                 self.incoming_transfer_log.append(
                     {
                         "start": start + self.scheduler_delay,
@@ -1852,10 +1857,11 @@ class Worker(ServerNode):
                             dep: self.nbytes.get(dep, None) for dep in response["data"]
                         },
                         "total": total_bytes,
-                        "bandwidth": total_bytes / duration,
+                        "bandwidth": bandwidth,
                         "who": worker,
                     }
                 )
+                self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
                 if self.digests is not None:
                     self.digests["transfer-bandwidth"].add(total_bytes / duration)
                     self.digests["transfer-duration"].add(duration)

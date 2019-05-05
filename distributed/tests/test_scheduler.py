@@ -18,7 +18,7 @@ import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
 from distributed.core import connect, rpc
-from distributed.scheduler import Scheduler, BANDWIDTH
+from distributed.scheduler import Scheduler
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -904,8 +904,8 @@ def test_learn_occupancy_multiple_workers(c, s, a, b):
 @gen_cluster(client=True)
 def test_include_communication_in_occupancy(c, s, a, b):
     s.task_duration["slowadd"] = 0.001
-    x = c.submit(mul, b"0", int(BANDWIDTH), workers=a.address)
-    y = c.submit(mul, b"1", int(BANDWIDTH * 1.5), workers=b.address)
+    x = c.submit(mul, b"0", int(s.bandwidth), workers=a.address)
+    y = c.submit(mul, b"1", int(s.bandwidth * 1.5), workers=b.address)
 
     z = c.submit(slowadd, x, y, delay=1)
     while z.key not in s.tasks or not s.tasks[z.key].processing_on:
@@ -1513,6 +1513,17 @@ def test_idle_timeout(c, s, a, b):
 
     assert a.status == "closed"
     assert b.status == "closed"
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
+def test_bandwidth(c, s, a, b):
+    start = s.bandwidth
+    x = c.submit(inc, 1, workers=a.address)
+    y = c.submit(inc, x, workers=b.address)
+    yield y
+    yield b.heartbeat()
+    assert s.bandwidth < start  # we've learned that we're slower
+    assert b.latency
 
 
 @gen_cluster()
