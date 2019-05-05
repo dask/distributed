@@ -3891,7 +3891,7 @@ def test_lose_scattered_data(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[("127.0.0.1", 1)] * 3)
 def test_partially_lose_scattered_data(e, s, a, b, c):
-    [x] = yield e.scatter([1], workers=a.address)
+    x = yield e.scatter(1, workers=a.address)
     yield e.replicate(x, n=2)
 
     yield a.close()

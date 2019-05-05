@@ -174,12 +174,11 @@ def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_dir, "foobar.py"))
     assert a.local_dir != b.local_dir
 
-    aa = rpc(a.address)
-    bb = rpc(b.address)
-    yield [
-        aa.upload_file(filename="foobar.py", data=b"x = 123"),
-        bb.upload_file(filename="foobar.py", data="x = 123"),
-    ]
+    with rpc(a.address) as aa, rpc(b.address) as bb:
+        yield [
+            aa.upload_file(filename="foobar.py", data=b"x = 123"),
+            bb.upload_file(filename="foobar.py", data="x = 123"),
+        ]
 
     assert os.path.exists(os.path.join(a.local_dir, "foobar.py"))
     assert os.path.exists(os.path.join(b.local_dir, "foobar.py"))
@@ -193,10 +192,8 @@ def test_upload_file(c, s, a, b):
     result = yield future
     assert result == 123
 
-    yield a.close()
-    yield b.close()
-    aa.close_rpc()
-    bb.close_rpc()
+    yield c.close()
+    yield s.close(close_workers=True)
     assert not os.path.exists(os.path.join(a.local_dir, "foobar.py"))
 
 
@@ -251,6 +248,8 @@ def test_upload_egg(c, s, a, b):
     result = yield future
     assert result == 10 + 1
 
+    yield c.close()
+    yield s.close()
     yield a.close()
     yield b.close()
     assert not os.path.exists(os.path.join(a.local_dir, eggname))
@@ -278,6 +277,8 @@ def test_upload_pyz(c, s, a, b):
     result = yield future
     assert result == 10 + 1
 
+    yield c.close()
+    yield s.close()
     yield a.close()
     yield b.close()
     assert not os.path.exists(os.path.join(a.local_dir, pyzname))
