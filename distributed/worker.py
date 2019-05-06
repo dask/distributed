@@ -536,7 +536,7 @@ class Worker(ServerNode):
         }
 
         stream_handlers = {
-            "close": self._close,
+            "close": self.close,
             "compute-task": self.add_task,
             "release-task": partial(self.release_key, report=False),
             "delete-data": self.delete_data,
@@ -665,7 +665,7 @@ class Worker(ServerNode):
         logger.info("-" * 49)
         while True:
             if self.death_timeout and time() > start + self.death_timeout:
-                yield self._close(timeout=1)
+                yield self.close(timeout=1)
                 return
             if self.status in ("closed", "closing"):
                 raise gen.Return
@@ -674,6 +674,8 @@ class Worker(ServerNode):
                 comm = yield connect(
                     self.scheduler.address, connection_args=self.connection_args
                 )
+                comm.name = "Worker->Scheduler"
+                comm._server = weakref.ref(self)
                 yield comm.write(
                     dict(
                         op="register-worker",
@@ -773,7 +775,7 @@ class Worker(ServerNode):
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self._register_with_scheduler)
             else:
-                yield self._close(report=False)
+                yield self.close(report=False)
 
     def start_ipython(self, comm):
         """Start an IPython kernel
@@ -956,8 +958,12 @@ class Worker(ServerNode):
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
 
+    def _close(self, *args, **kwargs):
+        warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
+        return self.close(*args, **kwargs)
+
     @gen.coroutine
-    def _close(self, report=True, timeout=10, nanny=True, executor_wait=True):
+    def close(self, report=True, timeout=10, nanny=True, executor_wait=True):
         with log_errors():
             if self.status in ("closed", "closing"):
                 return
@@ -993,22 +999,27 @@ class Worker(ServerNode):
             for k, v in self.services.items():
                 v.stop()
 
-            self.status = "closed"
-
-            if nanny and "nanny" in self.service_ports:
-                with self.rpc((self.ip, self.service_ports["nanny"])) as r:
-                    yield r.terminate()
-
             if self.batched_stream and not self.batched_stream.comm.closed():
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
                 self.batched_stream.close()
 
+            if nanny and "nanny" in self.service_ports:
+                nanny_address = "%s%s:%d" % (
+                    self.listener.prefix,
+                    self.ip,
+                    self.service_ports["nanny"],
+                )
+                with self.rpc(nanny_address) as r:
+                    yield r.terminate()
+
             self.rpc.close()
             self._closed.set()
             self._remove_from_global_workers()
-            yield self.close()
+
+            self.status = "closed"
+            yield ServerNode.close(self)
 
             setproctitle("dask-worker [closed]")
 
@@ -1024,7 +1035,7 @@ class Worker(ServerNode):
 
     @gen.coroutine
     def terminate(self, comm, report=True):
-        yield self._close(report=report)
+        yield self.close(report=report)
         raise Return("OK")
 
     @gen.coroutine
@@ -1046,6 +1057,7 @@ class Worker(ServerNode):
                 comm = yield connect(
                     address, connection_args=self.connection_args  # TODO, serialization
                 )
+                comm.name = "Worker->Worker"
                 yield comm.write({"op": "connection_stream"})
 
                 bcomm.start(comm)
@@ -2947,6 +2959,7 @@ def get_data_from_worker(
         deserializers = rpc.deserializers
 
     comm = yield rpc.connect(worker)
+    comm.name = "Ephemeral Worker->Worker for gather"
     try:
         response = yield send_recv(
             comm,
@@ -3008,7 +3021,13 @@ def execute_task(task):
         return task
 
 
-cache = dict()
+try:
+    # a 10 MB cache of deserialized functions and their bytes
+    from zict import LRU
+
+    cache = LRU(10000000, dict(), weight=lambda k, v: len(v))
+except ImportError:
+    cache = dict()
 
 
 def dumps_function(func):

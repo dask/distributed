@@ -260,6 +260,20 @@ class WorkerState(object):
     def host(self):
         return get_address_host(self.address)
 
+    def clean(self):
+        """ Return a version of this object that is appropriate for serialization """
+        ws = WorkerState(
+            address=self.address,
+            pid=self.pid,
+            name=self.name,
+            ncores=self.ncores,
+            memory_limit=self.memory_limit,
+            local_directory=self.local_directory,
+            services=self.services,
+        )
+        ws.processing = {ts.key for ts in self.processing}
+        return ws
+
     def __repr__(self):
         return "<Worker %r, memory: %d, processing: %d>" % (
             self.address,
@@ -802,6 +816,7 @@ class Scheduler(ServerNode):
         scheduler_file=None,
         security=None,
         worker_ttl=None,
+        idle_timeout=None,
         **kwargs
     ):
 
@@ -822,6 +837,14 @@ class Scheduler(ServerNode):
         self.scheduler_file = scheduler_file
         worker_ttl = worker_ttl or dask.config.get("distributed.scheduler.worker-ttl")
         self.worker_ttl = parse_timedelta(worker_ttl) if worker_ttl else None
+        idle_timeout = idle_timeout or dask.config.get(
+            "distributed.scheduler.idle-timeout"
+        )
+        if idle_timeout:
+            self.idle_timeout = parse_timedelta(idle_timeout)
+        else:
+            self.idle_timeout = None
+        self.time_started = time()
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -1040,6 +1063,10 @@ class Scheduler(ServerNode):
             pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl, io_loop=loop)
             self.periodic_callbacks["worker-ttl"] = pc
 
+        if self.idle_timeout:
+            pc = PeriodicCallback(self.check_idle, self.idle_timeout / 4, io_loop=loop)
+            self.periodic_callbacks["idle-timeout"] = pc
+
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS
         for ext in extensions:
@@ -1207,7 +1234,7 @@ class Scheduler(ServerNode):
             yield All(self.coroutines)
 
     @gen.coroutine
-    def close(self, comm=None, fast=False):
+    def close(self, comm=None, fast=False, close_workers=False):
         """ Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -1220,6 +1247,15 @@ class Scheduler(ServerNode):
 
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
+
+        if close_workers:
+            for worker in self.workers:
+                self.worker_send(worker, {"op": "close"})
+            for i in range(20):  # wait a second for send signals to clear
+                if self.workers:
+                    yield gen.sleep(0.05)
+                else:
+                    break
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
@@ -1872,7 +1908,9 @@ class Scheduler(ServerNode):
                     ts.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
-                        e = pickle.dumps(KilledWorker(k, address))
+                        e = pickle.dumps(
+                            KilledWorker(task=k, last_worker=ws.clean()), -1
+                        )
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)
 
@@ -2160,6 +2198,7 @@ class Scheduler(ServerNode):
         We listen to all future messages from this Comm.
         """
         assert client is not None
+        comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
         self.clients[client] = ClientState(client)
@@ -2357,6 +2396,7 @@ class Scheduler(ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
+        comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
         worker_comm.start(comm)
         logger.info("Starting worker compute stream, %s", worker)
@@ -2617,6 +2657,7 @@ class Scheduler(ServerNode):
             comm = yield connect(
                 addr, deserialize=self.deserialize, connection_args=self.connection_args
             )
+            comm.name = "Scheduler Broadcast"
             resp = yield send_recv(comm, close=True, serializers=serializers, **msg)
             raise gen.Return(resp)
 
@@ -4632,6 +4673,21 @@ class Scheduler(ServerNode):
                 )
                 self.remove_worker(address=ws.address)
 
+    def check_idle(self):
+        if any(ws.processing for ws in self.workers.values()):
+            return
+        if self.unrunnable:
+            return
+
+        if not self.transition_log:
+            close = time() > self.time_started + self.idle_timeout
+        else:
+            last_task = self.transition_log[-1][-1]
+            close = time() > last_task + self.idle_timeout
+
+        if close:
+            self.loop.add_callback(self.close)
+
 
 def decide_worker(ts, all_workers, valid_workers, objective):
     """
@@ -4827,4 +4883,7 @@ def heartbeat_interval(n):
 
 
 class KilledWorker(Exception):
-    pass
+    def __init__(self, task, last_worker):
+        super(KilledWorker, self).__init__(task, last_worker)
+        self.task = task
+        self.last_worker = last_worker

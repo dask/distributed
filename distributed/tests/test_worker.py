@@ -25,7 +25,7 @@ from distributed.core import rpc
 from distributed.client import wait
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.worker import Worker, error_message, logger, TOTAL_MEMORY
+from distributed.worker import Worker, error_message, logger
 from distributed.utils import tmpfile, format_bytes
 from distributed.utils_test import (
     inc,
@@ -174,12 +174,11 @@ def test_upload_file(c, s, a, b):
     assert not os.path.exists(os.path.join(b.local_dir, "foobar.py"))
     assert a.local_dir != b.local_dir
 
-    aa = rpc(a.address)
-    bb = rpc(b.address)
-    yield [
-        aa.upload_file(filename="foobar.py", data=b"x = 123"),
-        bb.upload_file(filename="foobar.py", data="x = 123"),
-    ]
+    with rpc(a.address) as aa, rpc(b.address) as bb:
+        yield [
+            aa.upload_file(filename="foobar.py", data=b"x = 123"),
+            bb.upload_file(filename="foobar.py", data="x = 123"),
+        ]
 
     assert os.path.exists(os.path.join(a.local_dir, "foobar.py"))
     assert os.path.exists(os.path.join(b.local_dir, "foobar.py"))
@@ -193,10 +192,8 @@ def test_upload_file(c, s, a, b):
     result = yield future
     assert result == 123
 
-    yield a._close()
-    yield b._close()
-    aa.close_rpc()
-    bb.close_rpc()
+    yield c.close()
+    yield s.close(close_workers=True)
     assert not os.path.exists(os.path.join(a.local_dir, "foobar.py"))
 
 
@@ -251,8 +248,10 @@ def test_upload_egg(c, s, a, b):
     result = yield future
     assert result == 10 + 1
 
-    yield a._close()
-    yield b._close()
+    yield c.close()
+    yield s.close()
+    yield a.close()
+    yield b.close()
     assert not os.path.exists(os.path.join(a.local_dir, eggname))
 
 
@@ -278,8 +277,10 @@ def test_upload_pyz(c, s, a, b):
     result = yield future
     assert result == 10 + 1
 
-    yield a._close()
-    yield b._close()
+    yield c.close()
+    yield s.close()
+    yield a.close()
+    yield b.close()
     assert not os.path.exists(os.path.join(a.local_dir, pyzname))
 
 
@@ -309,7 +310,7 @@ def test_worker_with_port_zero():
     assert isinstance(w.port, int)
     assert w.port > 1024
 
-    yield w._close()
+    yield w.close()
 
 
 @slow
@@ -392,7 +393,7 @@ def test_spill_to_disk(c, s):
     yield x
     assert set(w.data.fast) == {x.key, z.key}
     assert set(w.data.slow) == {y.key} or set(w.data.slow) == {x.key, y.key}
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(client=True)
@@ -443,14 +444,21 @@ def test_Executor(c, s):
 
         assert e._threads  # had to do some work
 
-        yield w._close()
+        yield w.close()
 
 
-@pytest.mark.skip(reason="Leaks a large amount of memory")
-@gen_cluster(client=True, ncores=[("127.0.0.1", 1)], timeout=30)
+@pytest.mark.skip(
+    reason="Other tests leak memory, so process-level checks" "trigger immediately"
+)
+@gen_cluster(
+    client=True,
+    ncores=[("127.0.0.1", 1)],
+    timeout=30,
+    worker_kwargs={"memory_limit": 10e6},
+)
 def test_spill_by_default(c, s, w):
     da = pytest.importorskip("dask.array")
-    x = da.ones(int(TOTAL_MEMORY * 0.7), chunks=10000000, dtype="u1")
+    x = da.ones(int(10e6 * 0.7), chunks=1e6, dtype="u1")
     y = c.persist(x)
     yield wait(y)
     assert len(w.data.slow)  # something is on disk
@@ -928,8 +936,8 @@ def test_global_workers(s, a, b):
     n = len(_global_workers)
     w = _global_workers[-1]()
     assert w is a or w is b
-    yield a._close()
-    yield b._close()
+    yield a.close()
+    yield b.close()
     assert len(_global_workers) == n - 2
 
 
@@ -948,7 +956,7 @@ def test_worker_fds(s):
         yield gen.sleep(0.01)
         assert time() < start + 1
 
-    yield worker._close()
+    yield worker.close()
 
     start = time()
     while psutil.Process().num_fds() > start:
@@ -967,19 +975,19 @@ def test_service_hosts_match_worker(s):
     yield w._start("tcp://0.0.0.0")
     sock = first(w.services["bokeh"].server._http._sockets.values())
     assert sock.getsockname()[0] in ("::", "0.0.0.0")
-    yield w._close()
+    yield w.close()
 
     w = Worker(s.address, services={("bokeh", ":0"): BokehWorker})
     yield w._start("tcp://127.0.0.1")
     sock = first(w.services["bokeh"].server._http._sockets.values())
     assert sock.getsockname()[0] in ("::", "0.0.0.0")
-    yield w._close()
+    yield w.close()
 
     w = Worker(s.address, services={("bokeh", 0): BokehWorker})
     yield w._start("tcp://127.0.0.1")
     sock = first(w.services["bokeh"].server._http._sockets.values())
     assert sock.getsockname()[0] == "127.0.0.1"
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(ncores=[])
@@ -993,7 +1001,7 @@ def test_start_services(s):
     yield w._start()
 
     assert w.services["bokeh"].server.port == 1234
-    yield w._close()
+    yield w.close()
 
 
 @gen_test()
@@ -1003,7 +1011,7 @@ def test_scheduler_file():
         s.start(8009)
         w = yield Worker(scheduler_file=fn)
         assert set(s.workers) == {w.address}
-        yield w._close()
+        yield w.close()
         s.stop()
 
 
@@ -1182,7 +1190,7 @@ def test_avoid_memory_monitor_if_zero_limit(c, s):
 
     yield c.submit(inc, 2)  # worker doesn't pause
 
-    yield worker._close()
+    yield worker.close()
 
 
 @gen_cluster(
@@ -1221,7 +1229,7 @@ def test_scheduler_address_config(c, s):
     with dask.config.set({"scheduler-address": s.address}):
         worker = yield Worker(loop=s.loop)
         assert worker.scheduler.address == s.address
-    yield worker._close()
+    yield worker.close()
 
 
 @slow
@@ -1317,7 +1325,7 @@ def test_register_worker_callbacks(c, s, a, b):
     worker = yield Worker(s.address, loop=s.loop)
     result = yield c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [False]
-    yield worker._close()
+    yield worker.close()
 
     # Add a preload function
     response = yield c.register_worker_callbacks(setup=mystartup)
@@ -1332,7 +1340,7 @@ def test_register_worker_callbacks(c, s, a, b):
     worker = yield Worker(s.address, loop=s.loop)
     result = yield c.run(test_import, workers=[worker.address])
     assert list(result.values()) == [True]
-    yield worker._close()
+    yield worker.close()
 
     # Register another preload function
     response = yield c.register_worker_callbacks(setup=mystartup2)
@@ -1349,7 +1357,7 @@ def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True]
     result = yield c.run(test_startup2, workers=[worker.address])
     assert list(result.values()) == [True]
-    yield worker._close()
+    yield worker.close()
 
     # Final exception test
     with pytest.raises(ZeroDivisionError):
@@ -1360,12 +1368,12 @@ def test_register_worker_callbacks(c, s, a, b):
 def test_data_types(s):
     w = yield Worker(s.address, data=dict)
     assert isinstance(w.data, dict)
-    yield w._close()
+    yield w.close()
 
     data = dict()
     w = yield Worker(s.address, data=data)
     assert w.data is data
-    yield w._close()
+    yield w.close()
 
     class Data(dict):
         def __init__(self, x, y):
@@ -1375,4 +1383,4 @@ def test_data_types(s):
     w = yield Worker(s.address, data=(Data, {"x": 123, "y": 456}))
     assert w.data.x == 123
     assert w.data.y == 456
-    yield w._close()
+    yield w.close()

@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import cloudpickle
+import pickle
 from collections import defaultdict
 from datetime import timedelta
 import json
@@ -274,7 +275,7 @@ def test_add_worker(s, a, b):
 
     assert w.ip in s.host_info
     assert s.host_info[w.ip]["addresses"] == {a.address, b.address, w.address}
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(scheduler_kwargs={"blocked_handlers": ["feed"]})
@@ -540,10 +541,10 @@ def test_worker_name():
 
     with pytest.raises(ValueError):
         w2 = yield Worker(s.ip, s.port, name="alice")
-        yield w2._close()
+        yield w2.close()
 
+    yield w.close()
     yield s.close()
-    yield w._close()
 
 
 @gen_test()
@@ -584,7 +585,7 @@ def test_coerce_address():
         assert s.coerce_address("zzzt:8000", resolve=False) == "tcp://zzzt:8000"
 
         yield s.close()
-        yield [w._close() for w in [a, b, c]]
+        yield [w.close() for w in [a, b, c]]
 
 
 @pytest.mark.skipif(
@@ -597,7 +598,7 @@ def test_file_descriptors_dont_leak(s):
     before = proc.num_fds()
 
     w = yield Worker(s.ip, s.port)
-    yield w._close()
+    yield w.close()
 
     during = proc.num_fds()
 
@@ -667,7 +668,7 @@ def test_scatter_no_workers(c, s):
     yield [c.scatter(data={"y": 2}, timeout=5), w._start()]
 
     assert w.data["y"] == 2
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(ncores=[])
@@ -675,7 +676,7 @@ def test_scheduler_sees_memory_limits(s):
     w = yield Worker(s.ip, s.port, ncores=3, memory_limit=12345)
 
     assert s.workers[w.address].memory_limit == 12345
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(client=True, timeout=1000)
@@ -820,10 +821,10 @@ def test_file_descriptors(c, s):
     num_fds_6 = proc.num_fds()
     assert num_fds_6 < num_fds_5 + N
 
-    yield [n._close() for n in nannies]
+    yield [n.close() for n in nannies]
 
     assert not s.rpc.open
-    assert not c.rpc.open
+    assert not c.rpc.active
     assert not s.stream_comms
 
     start = time()
@@ -944,7 +945,7 @@ def test_worker_arrives_with_processing_data(c, s, a, b):
         z.key: "processing",
     }
 
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(client=True, ncores=[("127.0.0.1", 1)])
@@ -995,7 +996,7 @@ def test_no_workers_to_memory(c, s):
         z.key: "processing",
     }
 
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(client=True)
@@ -1024,7 +1025,7 @@ def test_no_worker_to_memory_restrictions(c, s, a, b):
         z.key: "processing",
     }
 
-    yield w._close()
+    yield w.close()
 
 
 def test_run_on_scheduler_sync(loop):
@@ -1332,7 +1333,7 @@ def test_mising_data_errant_worker(c, s, w1, w2, w3):
         y = c.submit(len, x, workers=w3.address)
         while not w3.tasks:
             yield gen.sleep(0.001)
-        w1._close()
+        w1.close()
         yield wait(y)
 
 
@@ -1496,3 +1497,34 @@ def test_gh2187(c, s, a, b):
     yield gen.sleep(0.1)
     f = c.submit(bar, x, key="y")
     yield f
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.idle-timeout": "200ms"})
+def test_idle_timeout(c, s, a, b):
+    future = c.submit(slowinc, 1)
+    yield future
+
+    assert s.status != "closed"
+
+    start = time()
+    while s.status != "closed":
+        yield gen.sleep(0.01)
+    assert time() < start + 3
+
+    assert a.status == "closed"
+    assert b.status == "closed"
+
+
+@gen_cluster()
+def test_workerstate_clean(s, a, b):
+    ws = s.workers[a.address].clean()
+    assert ws.address == a.address
+    b = pickle.dumps(ws)
+    assert len(b) < 1000
+
+
+@gen_cluster()
+def test_close_workers(s, a, b):
+    yield s.close(close_workers=True)
+    assert a.status == "closed"
+    assert b.status == "closed"

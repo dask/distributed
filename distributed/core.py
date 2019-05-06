@@ -496,7 +496,12 @@ class Server(object):
     def close(self):
         self.listener.stop()
 
-        yield [comm.close() for comm in self._comms]
+        for i in range(20):  # let comms close naturally for a second
+            if not self._comms:
+                break
+            else:
+                yield gen.sleep(0.05)
+        yield [comm.close() for comm in self._comms]  # then forcefully close
 
         for cb in self._ongoing_coroutines:
             cb.cancel()
@@ -599,6 +604,7 @@ class rpc(object):
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args
+        self._created = weakref.WeakSet()
         rpc.active.add(self)
 
     @gen.coroutine
@@ -638,6 +644,7 @@ class rpc(object):
                 deserialize=self.deserialize,
                 connection_args=self.connection_args,
             )
+            comm.name = "rpc"
         self.comms[comm] = False  # mark as taken
         raise gen.Return(comm)
 
@@ -654,6 +661,9 @@ class rpc(object):
         for comm in list(self.comms):
             if comm and not comm.closed():
                 _close_comm(comm)
+        for comm in list(self._created):
+            if comm and not comm.closed():
+                _close_comm(comm)
         self.comms.clear()
 
     def __getattr__(self, key):
@@ -665,6 +675,7 @@ class rpc(object):
                 kwargs["deserializers"] = self.deserializers
             try:
                 comm = yield self.live_comm()
+                comm.name = "rpc." + key
                 result = yield send_recv(comm=comm, op=key, **kwargs)
             except (RPCClosed, CommClosedError) as e:
                 raise e.__class__(
@@ -729,10 +740,12 @@ class PooledRPCCall(object):
             if self.deserializers is not None and kwargs.get("deserializers") is None:
                 kwargs["deserializers"] = self.deserializers
             comm = yield self.pool.connect(self.addr)
+            name, comm.name = comm.name, "ConnectionPool." + key
             try:
                 result = yield send_recv(comm=comm, op=key, **kwargs)
             finally:
                 self.pool.reuse(self.addr, comm)
+                comm.name = name
 
             raise gen.Return(result)
 
@@ -786,6 +799,8 @@ class ConnectionPool(object):
         Whether or not to deserialize data by default or pass it through
     """
 
+    _instances = weakref.WeakSet()
+
     def __init__(
         self,
         limit=512,
@@ -793,6 +808,8 @@ class ConnectionPool(object):
         serializers=None,
         deserializers=None,
         connection_args=None,
+        timeout=None,
+        server=None,
     ):
         self.limit = limit  # Max number of open comms
         # Invariant: len(available) == open - active
@@ -803,7 +820,11 @@ class ConnectionPool(object):
         self.serializers = serializers
         self.deserializers = deserializers if deserializers is not None else serializers
         self.connection_args = connection_args
+        self.timeout = timeout
         self.event = Event()
+        self.server = weakref.ref(server) if server else None
+        self._created = weakref.WeakSet()
+        self._instances.add(self)
 
     @property
     def active(self):
@@ -844,10 +865,13 @@ class ConnectionPool(object):
         try:
             comm = yield connect(
                 addr,
-                timeout=timeout,
+                timeout=timeout or self.timeout,
                 deserialize=self.deserialize,
                 connection_args=self.connection_args,
             )
+            comm.name = "ConnectionPool"
+            comm._pool = weakref.ref(self)
+            self._created.add(comm)
         except Exception:
             raise
         occupied.add(comm)
@@ -915,6 +939,9 @@ class ConnectionPool(object):
             for comm in comms:
                 comm.abort()
 
+        for comm in self._created:
+            IOLoop.current().add_callback(comm.abort)
+
 
 def coerce_to_address(o):
     if isinstance(o, (list, tuple)):
@@ -967,7 +994,7 @@ def clean_exception(exception, traceback, **kwargs):
     --------
     error_message: create and serialize errors into message
     """
-    if isinstance(exception, bytes):
+    if isinstance(exception, bytes) or isinstance(exception, bytearray):
         try:
             exception = protocol.pickle.loads(exception)
         except Exception:

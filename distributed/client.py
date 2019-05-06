@@ -538,6 +538,9 @@ class Client(Node):
         the scheduler to serve as intermediary.
     heartbeat_interval: int
         Time in milliseconds between heartbeats to scheduler
+    **kwargs:
+        If you do not pass a scheduler address, Client will create a
+        ``LocalCluster`` object, passing any extra keyword arguments.
 
     Examples
     --------
@@ -559,9 +562,19 @@ class Client(Node):
     >>> client.gather(c)  # doctest: +SKIP
     33
 
+    You can also call Client with no arguments in order to create your own
+    local cluster.
+
+    >>> client = Client()  # makes your own local "cluster" # doctest: +SKIP
+
+    Extra keywords will be passed directly to LocalCluster
+
+    >>> client = Client(processes=False, threads_per_worker=1)  # doctest: +SKIP
+
     See Also
     --------
     distributed.scheduler.Scheduler: Internal scheduler
+    distributed.deploy.local.LocalCluster:
     """
 
     def __init__(
@@ -578,7 +591,7 @@ class Client(Node):
         serializers=None,
         deserializers=None,
         extensions=DEFAULT_EXTENSIONS,
-        direct_to_workers=False,
+        direct_to_workers=None,
         **kwargs
     ):
         if timeout == no_default:
@@ -690,6 +703,7 @@ class Client(Node):
             io_loop=self.loop,
             serializers=serializers,
             deserializers=deserializers,
+            timeout=timeout,
         )
 
         for ext in extensions:
@@ -934,13 +948,7 @@ class Client(Node):
             address = self.cluster.scheduler_address
 
         if self.scheduler is None:
-            self.scheduler = rpc(
-                address,
-                timeout=timeout,
-                connection_args=self.connection_args,
-                serializers=self._serializers,
-                deserializers=self._deserializers,
-            )
+            self.scheduler = self.rpc(address)
         self.scheduler_comm = None
 
         yield self._ensure_connected(timeout=timeout)
@@ -954,9 +962,10 @@ class Client(Node):
         raise gen.Return(self)
 
     @gen.coroutine
-    def _reconnect(self, timeout=0.1):
+    def _reconnect(self):
         with log_errors():
             assert self.scheduler_comm.comm.closed()
+
             self.status = "connecting"
             self.scheduler_comm = None
 
@@ -964,12 +973,23 @@ class Client(Node):
                 st.cancel()
             self.futures.clear()
 
-            while self.status == "connecting":
+            timeout = self._timeout
+            deadline = self.loop.time() + timeout
+            while timeout > 0 and self.status == "connecting":
                 try:
-                    yield self._ensure_connected()
+                    yield self._ensure_connected(timeout=timeout)
                     break
                 except EnvironmentError:
-                    yield gen.sleep(timeout)
+                    # Wait a bit before retrying
+                    yield gen.sleep(0.1)
+                    timeout = deadline - self.loop.time()
+            else:
+                logger.error(
+                    "Failed to reconnect to scheduler after %.2f "
+                    "seconds, closing client",
+                    self._timeout,
+                )
+                yield self._close()
 
     @gen.coroutine
     def _ensure_connected(self, timeout=None):
@@ -989,6 +1009,7 @@ class Client(Node):
                 timeout=timeout,
                 connection_args=self.connection_args,
             )
+            comm.name = "Client->Scheduler"
             if timeout is not None:
                 yield gen.with_timeout(
                     timedelta(seconds=timeout), self._update_scheduler_info()
@@ -1213,6 +1234,7 @@ class Client(Node):
             if self._start_arg is None:
                 with ignoring(AttributeError):
                     yield self.cluster._close()
+            self.rpc.close()
             self.status = "closed"
             if _get_global_client() is self:
                 _set_global_client(None)
@@ -1586,6 +1608,8 @@ class Client(Node):
         data = {}
 
         if direct is None:
+            direct = self.direct_to_workers
+        if direct is None:
             try:
                 w = get_worker()
             except Exception:
@@ -1593,8 +1617,6 @@ class Client(Node):
             else:
                 if w.scheduler.address == self.scheduler.address:
                     direct = True
-        if direct is None:
-            direct = self.direct_to_workers
 
         @gen.coroutine
         def wait(k):
@@ -1845,6 +1867,8 @@ class Client(Node):
         types = valmap(type, data)
 
         if direct is None:
+            direct = self.direct_to_workers
+        if direct is None:
             try:
                 w = get_worker()
             except Exception:
@@ -1852,8 +1876,6 @@ class Client(Node):
             else:
                 if w.scheduler.address == self.scheduler.address:
                     direct = True
-        if direct is None:
-            direct = self.direct_to_workers
 
         if local_worker:  # running within task
             local_worker.update_data(data=data, report=False)
@@ -2369,7 +2391,8 @@ class Client(Node):
         warnings.warn(
             "This method has been deprecated. "
             "Instead use Client.run which detects async functions "
-            "automatically"
+            "automatically",
+            stacklevel=2,
         )
         return self.run(function, *args, **kwargs)
 
@@ -4110,7 +4133,7 @@ class as_completed(object):
             self.thread_condition.notify()
 
     @gen.coroutine
-    def track_future(self, future):
+    def _track_future(self, future):
         try:
             yield _wait(future)
         except CancelledError:
@@ -4136,7 +4159,7 @@ class as_completed(object):
                 if not isinstance(f, Future):
                     raise TypeError("Input must be a future, got %s" % f)
                 self.futures[f] += 1
-                self.loop.add_callback(self.track_future, f)
+                self.loop.add_callback(self._track_future, f)
 
     def add(self, future):
         """ Add a future to the collection
@@ -4146,8 +4169,12 @@ class as_completed(object):
         self.update((future,))
 
     def is_empty(self):
-        """Return True if there no waiting futures, False otherwise"""
+        """Returns True if there no completed or computing futures"""
         return not self.count()
+
+    def has_ready(self):
+        """Returns True if there are completed futures available."""
+        return not self.queue.empty()
 
     def count(self):
         """ Return the number of futures yet to be returned
@@ -4195,7 +4222,7 @@ class as_completed(object):
     next = __next__
 
     def next_batch(self, block=True):
-        """ Get next batch of futures from as_completed iterator
+        """ Get the next batch of completed futures.
 
         Parameters
         ----------

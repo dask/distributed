@@ -289,7 +289,9 @@ class LocalCluster(Cluster):
     @gen.coroutine
     def _start_worker(self, death_timeout=60, **kwargs):
         if self.status and self.status.startswith("clos"):
-            warnings.warn("Tried to start a worker while status=='%s'" % self.status)
+            warnings.warn(
+                "Tried to start a worker while status=='%s'" % self.status, stacklevel=2
+            )
             return
 
         if self.processes:
@@ -337,7 +339,7 @@ class LocalCluster(Cluster):
 
     @gen.coroutine
     def _stop_worker(self, w):
-        yield w._close()
+        yield w.close()
         if w in self.workers:
             self.workers.remove(w)
 
@@ -359,7 +361,11 @@ class LocalCluster(Cluster):
             return
         self.status = "closing"
 
-        self.scheduler.clear_task_state()
+        with ignoring(gen.TimeoutError, CommClosedError, OSError):
+            yield gen.with_timeout(
+                timedelta(seconds=parse_timedelta(timeout)),
+                self.scheduler.close(close_workers=True),
+            )
 
         with ignoring(gen.TimeoutError):
             yield gen.with_timeout(
@@ -368,13 +374,7 @@ class LocalCluster(Cluster):
             )
 
         del self.workers[:]
-
-        try:
-            with ignoring(gen.TimeoutError, CommClosedError, OSError):
-                yield self.scheduler.close(fast=True)
-            del self.workers[:]
-        finally:
-            self.status = "closed"
+        self.status = "closed"
 
     def close(self, timeout=20):
         """ Close the cluster """

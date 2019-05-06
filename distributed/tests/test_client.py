@@ -528,7 +528,7 @@ def test_gather_lost(c, s, a, b):
     [x] = yield c.scatter([1], workers=a.address)
     y = c.submit(inc, 1, workers=b.address)
 
-    yield a._close()
+    yield a.close()
 
     with pytest.raises(Exception):
         res = yield c.gather([x, y])
@@ -641,7 +641,7 @@ def test_gather_errors(c, s, a, b):
     with pytest.raises(AttributeError):
         yield c.gather(future_g)
 
-    yield a._close()
+    yield a.close()
 
 
 @gen_cluster(client=True)
@@ -946,7 +946,7 @@ def test_remove_worker(c, s, a, b):
     L = c.map(inc, range(20))
     yield wait(L)
 
-    yield b._close()
+    yield b.close()
 
     assert b.address not in s.workers
 
@@ -2845,7 +2845,7 @@ def test_worker_aliases():
         assert result == i + 1
 
     yield c.close()
-    yield [a._close(), b._close(), w._close()]
+    yield [a.close(), b.close(), w.close()]
     yield s.close()
 
 
@@ -3020,7 +3020,7 @@ def test_rebalance_unprepared(c, s, a, b):
 def test_receive_lost_key(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.address])
     result = yield x
-    yield a._close()
+    yield a.close()
 
     start = time()
     while x.status == "finished":
@@ -3036,7 +3036,7 @@ def test_unrunnable_task_runs(c, s, a, b):
     x = c.submit(inc, 1, workers=[a.ip])
     result = yield x
 
-    yield a._close()
+    yield a.close()
     start = time()
     while x.status == "finished":
         assert time() < start + 5
@@ -3055,7 +3055,7 @@ def test_unrunnable_task_runs(c, s, a, b):
     assert s.tasks[x.key] not in s.unrunnable
     result = yield x
     assert result == 2
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(client=True, ncores=[])
@@ -3067,7 +3067,7 @@ def test_add_worker_after_tasks(c, s):
 
     result = yield c.gather(futures)
 
-    yield n._close()
+    yield n.close()
 
 
 @pytest.mark.skipif(
@@ -3460,8 +3460,8 @@ def test_get_foo_lost_keys(c, s, u, v, w):
     d = yield c.scheduler.who_has(keys=[x.key, y.key])
     assert_dict_key_equal(d, {x.key: [ua], y.key: [va]})
 
-    yield u._close()
-    yield v._close()
+    yield u.close()
+    yield v.close()
 
     d = yield c.scheduler.has_what()
     assert_dict_key_equal(d, {wa: []})
@@ -3479,8 +3479,10 @@ def test_get_foo_lost_keys(c, s, u, v, w):
 @gen_cluster(client=True, Worker=Nanny, check_new_threads=False)
 def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 1)
-    with pytest.raises(KilledWorker):
+    with pytest.raises(KilledWorker) as info:
         yield f
+
+    assert info.value.last_worker.services["nanny"] in {a.port, b.port}
 
 
 def test_get_processing_sync(c, s, a, b):
@@ -3590,8 +3592,13 @@ def test_as_completed_batches(c, with_results):
 def test_as_completed_next_batch(c):
     futures = c.map(slowinc, range(2), delay=0.1)
     ac = as_completed(futures)
+    assert not ac.is_empty()
     assert ac.next_batch(block=False) == []
     assert set(ac.next_batch(block=True)).issubset(futures)
+    while not ac.is_empty():
+        assert set(ac.next_batch(block=True)).issubset(futures)
+    assert ac.is_empty()
+    assert not ac.has_ready()
 
 
 @gen_test()
@@ -3700,8 +3707,21 @@ def test_reconnect(loop):
         assert time() < start + 5
         sleep(0.1)
 
-    sync(loop, w._close)
+    sync(loop, w.close)
     c.close()
+
+
+@gen_cluster(client=True, ncores=[], client_kwargs={"timeout": 0.5})
+def test_reconnect_timeout(c, s):
+    with captured_logger(logging.getLogger("distributed.client")) as logger:
+        yield s.close()
+        start = time()
+        while c.status != "closed":
+            yield c._update_scheduler_info()
+            yield gen.sleep(0.05)
+            assert time() < start + 5, "Timeout waiting for reconnect to fail"
+    text = logger.getvalue()
+    assert "Failed to reconnect" in text
 
 
 @slow
@@ -3733,7 +3753,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 addr = w.worker_address
                 running[w] = addr
                 yield gen.sleep(duration)
-                yield w._close()
+                yield w.close()
                 del w
                 yield gen.moment
             done.release()
@@ -3862,7 +3882,7 @@ def test_threaded_get_within_distributed(c):
 def test_lose_scattered_data(c, s, a, b):
     [x] = yield c.scatter([1], workers=a.address)
 
-    yield a._close()
+    yield a.close()
     yield gen.sleep(0.1)
 
     assert x.status == "cancelled"
@@ -3871,10 +3891,10 @@ def test_lose_scattered_data(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[("127.0.0.1", 1)] * 3)
 def test_partially_lose_scattered_data(e, s, a, b, c):
-    [x] = yield e.scatter([1], workers=a.address)
+    x = yield e.scatter(1, workers=a.address)
     yield e.replicate(x, n=2)
 
-    yield a._close()
+    yield a.close()
     yield gen.sleep(0.1)
 
     assert x.status == "finished"
@@ -3889,7 +3909,7 @@ def test_scatter_compute_lose(c, s, a, b):
     z = c.submit(slowadd, x, y, delay=0.2)
     yield gen.sleep(0.1)
 
-    yield a._close()
+    yield a.close()
 
     with pytest.raises(CancelledError):
         yield wait(z)
@@ -3915,7 +3935,7 @@ def test_scatter_compute_store_lose(c, s, a, b):
     z = c.submit(slowadd, xx, y, delay=0.2, workers=b.address)
     yield wait(z)
 
-    yield a._close()
+    yield a.close()
 
     start = time()
     while x.status == "finished":
@@ -3960,7 +3980,7 @@ def test_scatter_compute_store_lose_processing(c, s, a, b):
     y = c.submit(slowinc, x, delay=0.2)
     z = c.submit(inc, y)
     yield gen.sleep(0.1)
-    yield a._close()
+    yield a.close()
 
     start = time()
     while x.status == "finished":
@@ -4693,20 +4713,16 @@ def test_quiet_client_close(loop):
             ), line
 
 
+@slow
 def test_quiet_client_close_when_cluster_is_closed_before_client(loop):
-    n_attempts = 5
-    # Trying a few times to reduce the flakiness of the test. Without the bug
-    # fix in #2477 and with 5 attempts, this test passes by chance in about 10%
-    # of the cases.
-    for _ in range(n_attempts):
-        with captured_logger(logging.getLogger("tornado.application")) as logger:
-            cluster = LocalCluster(loop=loop)
-            client = Client(cluster, loop=loop)
-            cluster.close()
-            client.close()
+    with captured_logger(logging.getLogger("tornado.application")) as logger:
+        cluster = LocalCluster(loop=loop, n_workers=1)
+        client = Client(cluster, loop=loop)
+        cluster.close()
+        client.close()
 
-        out = logger.getvalue()
-        assert "CancelledError" not in out
+    out = logger.getvalue()
+    assert "CancelledError" not in out
 
 
 @gen_cluster()
@@ -5685,6 +5701,14 @@ def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
     ddf["x"] = ddf["x"].astype("f8")
     result = yield c.compute(ddf)
     assert result.equals(df.astype("f8"))
+
+
+def test_direct_to_workers(s, loop):
+    with Client(s["address"], loop=loop, direct_to_workers=True) as client:
+        future = client.scatter(1)
+        future.result()
+        resp = client.run_on_scheduler(lambda dask_scheduler: dask_scheduler.events)
+        assert "gather" not in str(resp)
 
 
 if sys.version_info >= (3, 5):

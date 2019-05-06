@@ -41,6 +41,7 @@ from tornado.ioloop import IOLoop
 
 from .client import default_client, _global_clients, Client
 from .compatibility import PY3, Empty, WINDOWS, PY2
+from .comm import Comm
 from .comm.utils import offload
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
@@ -111,7 +112,7 @@ def invalid_python_script(tmpdir_factory):
 def cleanup_global_workers():
     for w in _global_workers:
         w = w()
-        w._close(report=False, executor_wait=False)
+        w.close(report=False, executor_wait=False)
 
 
 @pytest.fixture
@@ -525,7 +526,7 @@ def run_nanny(q, scheduler_q, **kwargs):
             try:
                 loop.start()
             finally:
-                loop.run_sync(worker._close)
+                loop.run_sync(worker.close)
                 loop.close(all_fds=True)
 
 
@@ -637,6 +638,7 @@ def cluster(
     ws = weakref.WeakSet()
 
     reset_config()
+    Comm._instances.clear()
 
     for name, level in logging_levels.items():
         logging.getLogger(name).setLevel(level)
@@ -761,6 +763,17 @@ def cluster(
         sleep(0.01)
         assert time() < start + 1, "Workers still around after one second"
 
+    for i in range(5):
+        if all(c.closed() for c in Comm._instances):
+            break
+        else:
+            sleep(0.1)
+    else:
+        L = [c for c in Comm._instances if not c.closed()]
+        Comm._instances.clear()
+        print("Unclosed Comms", L)
+        # raise ValueError("Unclosed Comms", L)
+
 
 @gen.coroutine
 def disconnect(addr, timeout=3, rpc_kwargs=None):
@@ -845,8 +858,8 @@ def start_cluster(
         )
         for i, ncore in enumerate(ncores)
     ]
-    for w in workers:
-        w.rpc = workers[0].rpc
+    # for w in workers:
+    #     w.rpc = workers[0].rpc
 
     yield [w._start(ncore[0]) for ncore, w in zip(ncores, workers)]
 
@@ -856,7 +869,7 @@ def start_cluster(
     ):
         yield gen.sleep(0.01)
         if time() - start > 5:
-            yield [w._close(timeout=1) for w in workers]
+            yield [w.close(timeout=1) for w in workers]
             yield s.close(fast=True)
             raise Exception("Cluster creation timeout")
     raise gen.Return((s, workers))
@@ -869,7 +882,7 @@ def end_cluster(s, workers):
     @gen.coroutine
     def end_worker(w):
         with ignoring(TimeoutError, CommClosedError, EnvironmentError):
-            yield w._close(report=False)
+            yield w.close(report=False)
 
     yield [end_worker(w) for w in workers]
     yield s.close()  # wait until scheduler stops completely
@@ -913,6 +926,7 @@ def gen_cluster(
         def test_func():
             del _global_workers[:]
             _global_clients.clear()
+            Comm._instances.clear()
             active_threads_start = set(threading._active)
 
             reset_config()
@@ -974,7 +988,7 @@ def gen_cluster(
                                 if s.validate:
                                     s.validate_state()
                             finally:
-                                if client:
+                                if client and c.status not in ("closing", "closed"):
                                     yield c._close(fast=s.status == "closed")
                                 yield end_cluster(s, workers)
                                 yield gen.with_timeout(
@@ -987,6 +1001,17 @@ def gen_cluster(
                                 pass
                             else:
                                 yield c._close(fast=True)
+
+                            for i in range(5):
+                                if all(c.closed() for c in Comm._instances):
+                                    break
+                                else:
+                                    yield gen.sleep(0.05)
+                            else:
+                                L = [c for c in Comm._instances if not c.closed()]
+                                Comm._instances.clear()
+                                # raise ValueError("Unclosed Comms", L)
+                                print("Unclosed Comms", L)
 
                             raise gen.Return(result)
 
@@ -1006,7 +1031,7 @@ def gen_cluster(
                 DequeHandler.clear_all_instances()
                 for w in _global_workers:
                     w = w()
-                    w._close(report=False, executor_wait=False)
+                    w.close(report=False, executor_wait=False)
                     if w.status == "running":
                         w.close()
                 del _global_workers[:]
