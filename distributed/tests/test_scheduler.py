@@ -1530,7 +1530,7 @@ def test_result_type(c, s, a, b):
 
     assert "int" in s.tasks[x.key].type
 
-    
+
 @gen_cluster()
 def test_close_workers(s, a, b):
     yield s.close(close_workers=True)
