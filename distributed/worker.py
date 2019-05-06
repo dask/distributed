@@ -2393,7 +2393,7 @@ class Worker(ServerNode):
         total = 0
 
         proc = self.monitor.proc
-        memory = proc.memory_info().rss
+        memory = proc.memory_info().rss + sum([child.memory_info().rss for child in proc.children(True)])
         frac = memory / self.memory_limit
 
         # Pause worker threads if above 80% memory use
