@@ -1528,3 +1528,13 @@ def test_close_workers(s, a, b):
     yield s.close(close_workers=True)
     assert a.status == "closed"
     assert b.status == "closed"
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
+)
+@gen_test()
+def test_host_address():
+    s = yield Scheduler(host="127.0.0.2")
+    assert "127.0.0.2" in s.address
+    yield s.close()

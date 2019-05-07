@@ -35,6 +35,7 @@ from .comm import (
     get_address_host,
     unparse_host_port,
 )
+from .comm.addressing import uri_from_host_port
 from .compatibility import finalize, unicode, Mapping, Set
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from . import profile
@@ -46,6 +47,7 @@ from .utils import (
     All,
     ignoring,
     get_ip,
+    get_ip_interface,
     get_fileno_limit,
     log_errors,
     key_split,
@@ -817,9 +819,11 @@ class Scheduler(ServerNode):
         security=None,
         worker_ttl=None,
         idle_timeout=None,
+        interface=None,
+        host=None,
+        port=8786,
         **kwargs
     ):
-
         self._setup_logging()
 
         # Attributes
@@ -1049,6 +1053,18 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
+        if interface:
+            if host:
+                raise ValueError("Can not specify both interface and host")
+            else:
+                host = get_ip_interface(interface)
+
+        if host or port:
+            self._start_addr = uri_from_host_port(host, port, 8786)
+        else:
+            # Choose appropriate address for scheduler
+            self._start_addr = None
+
         super(Scheduler, self).__init__(
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
@@ -1165,9 +1181,11 @@ class Scheduler(ServerNode):
         for service in self.services.values():
             service.stop()
 
-    def start(self, addr_or_port=8786, start_queues=True):
+    def start(self, addr_or_port=None, start_queues=True):
         """ Clear out old state and restart all running coroutines """
         enable_gc_diagnosis()
+
+        addr_or_port = addr_or_port or self._start_addr
 
         self.clear_task_state()
 
@@ -1226,6 +1244,15 @@ class Scheduler(ServerNode):
         setproctitle("dask-scheduler [%s]" % (self.address,))
 
         return self.finished()
+
+    def __await__(self):
+        self.start()
+
+        @gen.coroutine
+        def _():
+            return self
+
+        return _().__await__()
 
     @gen.coroutine
     def finished(self):

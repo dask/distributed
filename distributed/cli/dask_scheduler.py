@@ -16,12 +16,7 @@ from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
 from distributed.security import Security
-from distributed.utils import get_ip_interface
-from distributed.cli.utils import (
-    check_python_3,
-    install_signal_handlers,
-    uri_from_host_port,
-)
+from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.preloading import preload_modules, validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -186,14 +181,6 @@ def main(
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    if interface:
-        if host:
-            raise ValueError("Can not specify both interface and host")
-        else:
-            host = get_ip_interface(interface)
-
-    addr = uri_from_host_port(host, port, 8786)
-
     loop = IOLoop.current()
     logger.info("-" * 47)
 
@@ -213,9 +200,15 @@ def main(
                 logger.info("Unable to import bokeh: %s" % str(error))
 
     scheduler = Scheduler(
-        loop=loop, services=services, scheduler_file=scheduler_file, security=sec
+        loop=loop,
+        services=services,
+        scheduler_file=scheduler_file,
+        security=sec,
+        host=host,
+        port=port,
+        interface=interface,
     )
-    scheduler.start(addr)
+    scheduler.start()
     if not preload:
         preload = dask.config.get("distributed.scheduler.preload")
     if not preload_argv:
@@ -237,7 +230,7 @@ def main(
         if local_directory_created:
             shutil.rmtree(local_directory)
 
-        logger.info("End scheduler at %r", addr)
+        logger.info("End scheduler at %r", scheduler.address)
 
 
 def go():

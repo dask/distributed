@@ -1384,3 +1384,18 @@ def test_data_types(s):
     assert w.data.x == 123
     assert w.data.y == 456
     yield w.close()
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
+)
+@gen_cluster(ncores=[], client=True)
+def test_host_address(c, s):
+    w = yield Worker(s.address, host="127.0.0.2")
+    assert "127.0.0.2" in w.address
+    yield w.close()
+
+    n = yield Nanny(s.address, host="127.0.0.3")
+    assert "127.0.0.3" in n.address
+    assert "127.0.0.3" in n.worker_address
+    yield n.close()

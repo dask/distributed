@@ -29,7 +29,8 @@ from tornado.locks import Event
 from . import profile, comm
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for, connect
-from .comm.utils import offload, uri_from_host_port
+from .comm.utils import offload
+from .comm.addressing import uri_from_host_port
 from .compatibility import unicode, get_thread_identity, finalize, MutableMapping
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
