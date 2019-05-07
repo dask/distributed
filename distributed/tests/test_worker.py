@@ -304,8 +304,7 @@ def test_broadcast(s, a, b):
 
 @gen_test()
 def test_worker_with_port_zero():
-    s = Scheduler()
-    s.start(8007)
+    s = yield Scheduler(port=8007)
     w = yield Worker(s.address)
     assert isinstance(w.port, int)
     assert w.port > 1024
@@ -1007,8 +1006,7 @@ def test_start_services(s):
 @gen_test()
 def test_scheduler_file():
     with tmpfile() as fn:
-        s = Scheduler(scheduler_file=fn)
-        s.start(8009)
+        s = yield Scheduler(scheduler_file=fn, port=8009)
         w = yield Worker(scheduler_file=fn)
         assert set(s.workers) == {w.address}
         yield w.close()

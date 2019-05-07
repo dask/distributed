@@ -482,8 +482,8 @@ def run_scheduler(q, nputs, **kwargs):
     # On Python 2.7 and Unix, fork() is used to spawn child processes,
     # so avoid inheriting the parent's IO loop.
     with pristine_loop() as loop:
-        scheduler = Scheduler(validate=True, **kwargs)
-        done = scheduler.start("127.0.0.1")
+        scheduler = Scheduler(validate=True, host="127.0.0.1", **kwargs)
+        done = scheduler.start()
 
         for i in range(nputs):
             q.put(scheduler.address)
@@ -854,6 +854,7 @@ def start_cluster(
             security=security,
             loop=loop,
             validate=True,
+            host=ncore[0],
             **(merge(worker_kwargs, ncore[2]) if len(ncore) > 2 else worker_kwargs)
         )
         for i, ncore in enumerate(ncores)
@@ -861,7 +862,7 @@ def start_cluster(
     # for w in workers:
     #     w.rpc = workers[0].rpc
 
-    yield [w._start(ncore[0]) for ncore, w in zip(ncores, workers)]
+    yield workers
 
     start = time()
     while len(s.workers) < len(ncores) or any(

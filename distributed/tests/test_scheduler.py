@@ -533,8 +533,7 @@ def test_broadcast_nanny(s, a, b):
 
 @gen_test()
 def test_worker_name():
-    s = Scheduler(validate=True)
-    s.start(0)
+    s = yield Scheduler(validate=True, port=0)
     w = yield Worker(s.ip, s.port, name="alice")
     assert s.workers[w.address].name == "alice"
     assert s.aliases["alice"] == w.address
@@ -550,8 +549,7 @@ def test_worker_name():
 @gen_test()
 def test_coerce_address():
     with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-        s = Scheduler(validate=True)
-        s.start(0)
+        s = yield Scheduler(validate=True, port=0)
         print("scheduler:", s.address, s.listen_address)
         a = Worker(s.ip, s.port, name="alice")
         b = Worker(s.ip, s.port, name=123)
@@ -1133,8 +1131,7 @@ def test_fifo_submission(c, s, w):
 @gen_test()
 def test_scheduler_file():
     with tmpfile() as fn:
-        s = Scheduler(scheduler_file=fn)
-        s.start(0)
+        s = yield Scheduler(scheduler_file=fn, port=0)
         with open(fn) as f:
             data = json.load(f)
         assert data["address"] == s.address
