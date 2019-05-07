@@ -5,6 +5,7 @@ import six
 import dask
 
 from . import registry
+from ..utils import get_ip_interface
 
 
 DEFAULT_SCHEME = dask.config.get("distributed.comm.default-scheme")
@@ -203,5 +204,34 @@ def uri_from_host_port(host_arg, port_arg, default_port):
         port = default_port
     loc = unparse_host_port(host, port)
     addr = unparse_address(scheme, loc)
+
+    return addr
+
+
+def address_from_user_args(
+    host=None, port=None, interface=None, protocol=None, peer=None
+):
+    """ Get an address to listen on from common user provided arguments """
+    if protocol and protocol.rstrip("://") == "inplace":
+        if host or port or interface:
+            raise ValueError(
+                "Can not specify inproc protocol and host or port or interface"
+            )
+        else:
+            return "inproc://"
+
+    if interface:
+        if host:
+            raise ValueError("Can not specify both interface and host")
+        else:
+            host = get_ip_interface(interface)
+
+    if host or port:
+        addr = uri_from_host_port(host, port, 0)
+    else:
+        addr = ""
+
+    if protocol:
+        addr = protocol.rstrip("://") + "://" + addr
 
     return addr

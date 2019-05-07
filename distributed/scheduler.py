@@ -35,7 +35,7 @@ from .comm import (
     get_address_host,
     unparse_host_port,
 )
-from .comm.addressing import uri_from_host_port
+from .comm.addressing import address_from_user_args
 from .compatibility import finalize, unicode, Mapping, Set
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from . import profile
@@ -822,6 +822,7 @@ class Scheduler(ServerNode):
         interface=None,
         host=None,
         port=8786,
+        protocol=None,
         **kwargs
     ):
         self._setup_logging()
@@ -1059,11 +1060,9 @@ class Scheduler(ServerNode):
             else:
                 host = get_ip_interface(interface)
 
-        if host or port:
-            self._start_addr = uri_from_host_port(host, port, 8786)
-        else:
-            # Choose appropriate address for scheduler
-            self._start_addr = None
+        self._start_address = address_from_user_args(
+            host=host, port=port, interface=interface, protocol=protocol
+        )
 
         super(Scheduler, self).__init__(
             handlers=self.handlers,
@@ -1185,7 +1184,7 @@ class Scheduler(ServerNode):
         """ Clear out old state and restart all running coroutines """
         enable_gc_diagnosis()
 
-        addr_or_port = addr_or_port or self._start_addr
+        addr_or_port = addr_or_port or self._start_address
 
         self.clear_task_state()
 

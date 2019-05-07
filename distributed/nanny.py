@@ -16,7 +16,7 @@ from tornado.ioloop import IOLoop, TimeoutError
 from tornado.locks import Event
 
 from .comm import get_address_host, get_local_address_for, unparse_host_port
-from .comm.addressing import uri_from_host_port
+from .comm.addressing import address_from_user_args
 from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import time
 from .node import ServerNode
@@ -25,7 +25,6 @@ from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
     get_ip,
-    get_ip_interface,
     mp_context,
     silence_logging,
     json_load_robust,
@@ -74,6 +73,7 @@ class Nanny(ServerNode):
         interface=None,
         host=None,
         port=None,
+        protocol=None,
         **worker_kwargs
     ):
 
@@ -140,17 +140,9 @@ class Nanny(ServerNode):
             pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
             self.periodic_callbacks["memory"] = pc
 
-        if interface:
-            if host:
-                raise ValueError("Can not specify both interface and host")
-            else:
-                host = get_ip_interface(interface)
-
-        if host or port:
-            self._start_addr = uri_from_host_port(host, port, 0)
-        else:
-            # Choose appropriate address for scheduler
-            self._start_addr = None
+        self._start_address = address_from_user_args(
+            host=host, port=port, interface=interface, protocol=protocol
+        )
 
         self._listen_address = listen_address
         self.status = "init"
@@ -192,7 +184,7 @@ class Nanny(ServerNode):
     @gen.coroutine
     def _start(self, addr_or_port=0):
         """ Start nanny, start local process, start watching """
-        addr_or_port = addr_or_port or self._start_addr
+        addr_or_port = addr_or_port or self._start_address
 
         # XXX Factor this out
         if not addr_or_port:

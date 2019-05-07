@@ -30,7 +30,7 @@ from . import profile, comm
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for, connect
 from .comm.utils import offload
-from .comm.addressing import uri_from_host_port
+from .comm.addressing import address_from_user_args
 from .compatibility import unicode, get_thread_identity, finalize, MutableMapping
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
@@ -46,7 +46,6 @@ from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
     funcname,
     get_ip,
-    get_ip_interface,
     has_arg,
     _maybe_complex,
     log_errors,
@@ -299,6 +298,7 @@ class Worker(ServerNode):
         interface=None,
         host=None,
         port=None,
+        protocol=None,
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
         **kwargs
     ):
@@ -412,17 +412,9 @@ class Worker(ServerNode):
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
 
-        if interface:
-            if host:
-                raise ValueError("Can not specify both interface and host")
-            else:
-                host = get_ip_interface(interface)
-
-        if host or port:
-            self._start_addr = uri_from_host_port(host, port, 0)
-        else:
-            # Choose appropriate address for scheduler
-            self._start_addr = None
+        self._start_address = address_from_user_args(
+            host=host, port=port, interface=interface, protocol=protocol
+        )
 
         self.ncores = ncores or _ncores
         self.total_resources = resources or {}
@@ -902,7 +894,7 @@ class Worker(ServerNode):
     @gen.coroutine
     def _start(self, addr_or_port=0):
         assert self.status is None
-        addr_or_port = addr_or_port or self._start_addr
+        addr_or_port = addr_or_port or self._start_address
 
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
