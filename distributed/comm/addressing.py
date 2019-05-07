@@ -222,7 +222,7 @@ def address_from_user_args(
 
     if interface:
         if host:
-            raise ValueError("Can not specify both interface and host")
+            raise ValueError("Can not specify both interface and host", interface, host)
         else:
             host = get_ip_interface(interface)
 

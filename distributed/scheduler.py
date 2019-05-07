@@ -47,7 +47,6 @@ from .utils import (
     All,
     ignoring,
     get_ip,
-    get_ip_interface,
     get_fileno_limit,
     log_errors,
     key_split,
@@ -1053,12 +1052,6 @@ class Scheduler(ServerNode):
         }
 
         connection_limit = get_fileno_limit() / 2
-
-        if interface:
-            if host:
-                raise ValueError("Can not specify both interface and host")
-            else:
-                host = get_ip_interface(interface)
 
         self._start_address = address_from_user_args(
             host=host, port=port, interface=interface, protocol=protocol

@@ -5,6 +5,7 @@ import dask
 import logging
 import gc
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -145,6 +146,9 @@ def main(
             "Consider adding ``--dashboard-address :%d`` " % bokeh_port
         )
         dashboard_address = bokeh_port
+
+    if port is None and (not host or not re.search(r":\d", host)):
+        port = 8786
 
     sec = Security(
         tls_ca_file=tls_ca_file, tls_scheduler_cert=tls_cert, tls_scheduler_key=tls_key
