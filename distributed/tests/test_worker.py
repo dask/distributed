@@ -382,22 +382,22 @@ def test_spill_to_disk(c, s):
     yield wait(y)
 
     assert set(w.data) == {x.key, y.key}
-    assert set(w.host) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.host)
+    assert set(w.data.host) == {x.key, y.key}
+    assert set(w.data.fast) == set(w.data.host)
 
     z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
     yield wait(z)
     assert set(w.data) == {x.key, y.key, z.key}
-    assert set(w.host) == {y.key, z.key}
-    assert set(w.disk) == {x.key} or set(w.data.slow) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.host)
-    assert set(w.data.slow) == set(w.disk)
+    assert set(w.data.host) == {y.key, z.key}
+    assert set(w.data.disk) == {x.key} or set(w.data.slow) == {x.key, y.key}
+    assert set(w.data.fast) == set(w.data.host)
+    assert set(w.data.slow) == set(w.data.disk)
 
     yield x
-    assert set(w.host) == {x.key, z.key}
-    assert set(w.disk) == {y.key} or set(w.data.slow) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.host)
-    assert set(w.data.slow) == set(w.disk)
+    assert set(w.data.host) == {x.key, z.key}
+    assert set(w.data.disk) == {y.key} or set(w.data.slow) == {x.key, y.key}
+    assert set(w.data.fast) == set(w.data.host)
+    assert set(w.data.slow) == set(w.data.disk)
     yield w.close()
 
 
@@ -466,7 +466,7 @@ def test_spill_by_default(c, s, w):
     x = da.ones(int(10e6 * 0.7), chunks=1e6, dtype="u1")
     y = c.persist(x)
     yield wait(y)
-    assert len(w.disk)  # something is on disk
+    assert len(w.data.disk)  # something is on disk
     del x, y
 
 
@@ -1076,7 +1076,7 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
     futures = c.map(f, [100e6] * 8, pure=False)
 
     start = time()
-    while not a.disk:
+    while not a.data.disk:
         yield gen.sleep(0.1)
         assert time() < start + 5
 

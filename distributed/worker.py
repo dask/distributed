@@ -159,13 +159,12 @@ class Worker(ServerNode):
         memory_limit and at least one of memory_target_fraction or
         memory_spill_fraction values are defined, in that case, this attribute
         is a zict.Buffer, from which information on LRU cache can be queried.
-    * **host:** ``{key: object}``:
-        Dictionary mapping keys to actual values stored in host memory
-    * **disk:** ``{key: object}``:
-        Dictionary mapping keys to actual values stored on disk, always empty
-        if memory_limit is not defined and neither memory_target_fraction
-        nor memory_spill_fraction are defined, implying spilling host memory
-        to disk is disabled.
+    * **data.host:** ``{key: object}``:
+        Dictionary mapping keys to actual values stored in host memory. Only
+        available if condition for **data** being a zict.Buffer is met.
+    * **data.disk:** ``{key: object}``:
+        Dictionary mapping keys to actual values stored on disk. Only
+        available if condition for **data** being a zict.Buffer is met.
     * **task_state**: ``{key: string}``:
         The state of all tasks that the scheduler has asked us to compute.
         Valid states include waiting, constrained, executing, memory, erred
@@ -495,11 +494,10 @@ class Worker(ServerNode):
             )
             target = int(float(self.memory_limit) * self.memory_target_fraction)
             self.data = Buffer({}, storage, target, weight)
+            self.data.host = self.data.fast
+            self.data.disk = self.data.slow
         else:
             self.data = dict()
-
-        self.host = self.data.fast.d if hasattr(self.data, "fast") else self.data
-        self.disk = self.data.slow.d if hasattr(self.data, "slow") else dict()
 
         self.actors = {}
         self.loop = loop or IOLoop.current()
