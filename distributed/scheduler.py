@@ -1061,7 +1061,11 @@ class Scheduler(ServerNode):
         connection_limit = get_fileno_limit() / 2
 
         self._start_address = address_from_user_args(
-            host=host, port=port, interface=interface, protocol=protocol
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
         )
 
         super(Scheduler, self).__init__(

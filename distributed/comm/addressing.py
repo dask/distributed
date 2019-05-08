@@ -209,9 +209,12 @@ def uri_from_host_port(host_arg, port_arg, default_port):
 
 
 def address_from_user_args(
-    host=None, port=None, interface=None, protocol=None, peer=None
+    host=None, port=None, interface=None, protocol=None, peer=None, security=None
 ):
     """ Get an address to listen on from common user provided arguments """
+    if security and security.require_encryption and not protocol:
+        protocol = "tls"
+
     if protocol and protocol.rstrip("://") == "inplace":
         if host or port or interface:
             raise ValueError(
@@ -226,12 +229,15 @@ def address_from_user_args(
         else:
             host = get_ip_interface(interface)
 
+    if protocol and host and "://" not in host:
+        host = protocol.rstrip("://") + "://" + host
+
     if host or port:
         addr = uri_from_host_port(host, port, 0)
     else:
         addr = ""
 
-    if protocol:
+    if protocol and "://" not in addr:
         addr = protocol.rstrip("://") + "://" + addr
 
     return addr

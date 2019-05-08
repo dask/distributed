@@ -11,7 +11,6 @@ import itertools
 import logging
 import logging.config
 import os
-import psutil
 import re
 import shutil
 import signal
@@ -40,7 +39,7 @@ from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
 from .client import default_client, _global_clients, Client
-from .compatibility import PY3, Empty, WINDOWS, PY2
+from .compatibility import PY3, Empty, WINDOWS
 from .comm import Comm
 from .comm.utils import offload
 from .config import initialize_logging
@@ -156,11 +155,7 @@ def loop():
 
     _cleanup_dangling()
 
-    if PY2:  # no forkserver, so no extra procs
-        for child in psutil.Process().children(recursive=True):
-            with ignoring(psutil.NoSuchProcess):
-                child.terminate()
-
+    assert not mp_context.active_children()
     _global_clients.clear()
 
 
@@ -657,6 +652,7 @@ def cluster(
 
             # Launch scheduler
             scheduler = mp_context.Process(
+                name="Dask cluster test: Scheduler",
                 target=run_scheduler,
                 args=(scheduler_q, nworkers + 1),
                 kwargs=scheduler_kwargs,
@@ -675,7 +671,10 @@ def cluster(
                     worker_kwargs,
                 )
                 proc = mp_context.Process(
-                    target=_run_worker, args=(q, scheduler_q), kwargs=kwargs
+                    name="Dask cluster test: Worker",
+                    target=_run_worker,
+                    args=(q, scheduler_q),
+                    kwargs=kwargs,
                 )
                 ws.add(proc)
                 workers.append({"proc": proc, "queue": q, "dir": fn})
@@ -773,6 +772,8 @@ def cluster(
         Comm._instances.clear()
         print("Unclosed Comms", L)
         # raise ValueError("Unclosed Comms", L)
+
+    assert not mp_context.active_children()
 
 
 @gen.coroutine
@@ -1062,6 +1063,9 @@ def gen_cluster(
             _cleanup_dangling()
             with ignoring(AttributeError):
                 del thread_state.on_event_loop_thread
+
+            assert not mp_context.active_children()
+
             return result
 
         return test_func

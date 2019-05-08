@@ -414,7 +414,11 @@ class Worker(ServerNode):
         self.contact_address = contact_address
 
         self._start_address = address_from_user_args(
-            host=host, port=port, interface=interface, protocol=protocol
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
         )
 
         self.ncores = ncores or _ncores

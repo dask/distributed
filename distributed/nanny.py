@@ -141,7 +141,11 @@ class Nanny(ServerNode):
             self.periodic_callbacks["memory"] = pc
 
         self._start_address = address_from_user_args(
-            host=host, port=port, interface=interface, protocol=protocol
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
         )
 
         self._listen_address = listen_address
@@ -429,6 +433,7 @@ class WorkerProcess(object):
 
         self.process = AsyncProcess(
             target=self._run,
+            name="Dask Worker process (from Nanny)",
             kwargs=dict(
                 worker_args=self.worker_args,
                 worker_kwargs=self.worker_kwargs,
