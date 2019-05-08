@@ -155,7 +155,8 @@ def loop():
 
     _cleanup_dangling()
 
-    assert not mp_context.active_children()
+    assert_no_leaked_processes()
+
     _global_clients.clear()
 
 
@@ -773,7 +774,15 @@ def cluster(
         print("Unclosed Comms", L)
         # raise ValueError("Unclosed Comms", L)
 
-    assert not mp_context.active_children()
+    assert_no_leaked_processes()
+
+
+def assert_no_leaked_processes():
+    for i in range(20):
+        if mp_context.active_children():
+            sleep(0.1)
+    else:
+        assert not mp_context.active_children()
 
 
 @gen.coroutine
@@ -1064,7 +1073,7 @@ def gen_cluster(
             with ignoring(AttributeError):
                 del thread_state.on_event_loop_thread
 
-            assert not mp_context.active_children()
+            assert_no_leaked_processes()
 
             return result
 
