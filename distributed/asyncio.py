@@ -9,6 +9,6 @@ We recommend using the normal client with asynchonrous=True
 and a version of Tornado >= 5.
 
 Documentation: https://distributed.dask.org/en/latest/asynchronous.html
-Example: TODO
+Example: https://examples.dask.org/applications/async-await.html
 """
 )
