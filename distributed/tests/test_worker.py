@@ -382,21 +382,21 @@ def test_spill_to_disk(c, s):
     yield wait(y)
 
     assert set(w.data) == {x.key, y.key}
-    assert set(w.data.host) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.host)
+    assert set(w.data.memory) == {x.key, y.key}
+    assert set(w.data.fast) == set(w.data.memory)
 
     z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
     yield wait(z)
     assert set(w.data) == {x.key, y.key, z.key}
-    assert set(w.data.host) == {y.key, z.key}
+    assert set(w.data.memory) == {y.key, z.key}
     assert set(w.data.disk) == {x.key} or set(w.data.slow) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.host)
+    assert set(w.data.fast) == set(w.data.memory)
     assert set(w.data.slow) == set(w.data.disk)
 
     yield x
-    assert set(w.data.host) == {x.key, z.key}
+    assert set(w.data.memory) == {x.key, z.key}
     assert set(w.data.disk) == {y.key} or set(w.data.slow) == {x.key, y.key}
-    assert set(w.data.fast) == set(w.data.host)
+    assert set(w.data.fast) == set(w.data.memory)
     assert set(w.data.slow) == set(w.data.disk)
     yield w.close()
 

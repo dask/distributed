@@ -159,8 +159,8 @@ class Worker(ServerNode):
         memory_limit and at least one of memory_target_fraction or
         memory_spill_fraction values are defined, in that case, this attribute
         is a zict.Buffer, from which information on LRU cache can be queried.
-    * **data.host:** ``{key: object}``:
-        Dictionary mapping keys to actual values stored in host memory. Only
+    * **data.memory:** ``{key: object}``:
+        Dictionary mapping keys to actual values stored in memory. Only
         available if condition for **data** being a zict.Buffer is met.
     * **data.disk:** ``{key: object}``:
         Dictionary mapping keys to actual values stored on disk. Only
@@ -494,7 +494,7 @@ class Worker(ServerNode):
             )
             target = int(float(self.memory_limit) * self.memory_target_fraction)
             self.data = Buffer({}, storage, target, weight)
-            self.data.host = self.data.fast
+            self.data.memory = self.data.fast
             self.data.disk = self.data.slow
         else:
             self.data = dict()
