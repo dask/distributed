@@ -12,17 +12,14 @@ from dask.utils import factors
 from tornado import gen
 
 from .cluster import Cluster
-from ..compatibility import get_thread_identity
 from ..core import CommClosedError
 from ..utils import (
     get_ip_interface,
-    sync,
     ignoring,
     All,
     silence_logging,
     LoopRunner,
     log_errors,
-    thread_state,
     parse_timedelta,
 )
 from ..nanny import Nanny
@@ -51,7 +48,7 @@ class LocalCluster(Cluster):
     silence_logs: logging level
         Level of logs to print out to stdout.  ``logging.WARN`` by default.
         Use a falsey value like False or None for no change.
-    ip: string
+    host: string
         IP address on which the scheduler will listen, defaults to only localhost
     dashboard_address: str
         Address on which to listen for the Bokeh diagnostics server like
@@ -108,6 +105,7 @@ class LocalCluster(Cluster):
         processes=True,
         loop=None,
         start=None,
+        host=None,
         ip=None,
         scheduler_port=0,
         silence_logs=logging.WARN,
@@ -124,6 +122,9 @@ class LocalCluster(Cluster):
         worker_class=None,
         **worker_kwargs
     ):
+        if ip is not None:
+            raise ValueError("The LocalCluster ip= keyword has moved to host=")
+
         if start is not None:
             msg = (
                 "The start= parameter is deprecated. "
@@ -144,8 +145,8 @@ class LocalCluster(Cluster):
         self.processes = processes
 
         if protocol is None:
-            if ip and "://" in ip:
-                protocol = ip.split("://")[0]
+            if host and "://" in host:
+                protocol = host.split("://")[0]
             elif security:
                 protocol = "tls://"
             elif not self.processes and not scheduler_port:
@@ -215,7 +216,7 @@ class LocalCluster(Cluster):
             worker_class = Worker if not processes else Nanny
         self.worker_class = worker_class
 
-        self.start(ip=ip, n_workers=n_workers)
+        self.start(host=host, n_workers=n_workers)
 
         clusters_to_close.add(self)
 
@@ -229,25 +230,6 @@ class LocalCluster(Cluster):
     def __await__(self):
         return self._started.__await__()
 
-    @property
-    def asynchronous(self):
-        return (
-            self._asynchronous
-            or getattr(thread_state, "asynchronous", False)
-            or hasattr(self.loop, "_thread_identity")
-            and self.loop._thread_identity == get_thread_identity()
-        )
-
-    def sync(self, func, *args, **kwargs):
-        if kwargs.pop("asynchronous", None) or self.asynchronous:
-            callback_timeout = kwargs.pop("callback_timeout", None)
-            future = func(*args, **kwargs)
-            if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
-            return future
-        else:
-            return sync(self.loop, func, *args, **kwargs)
-
     def start(self, **kwargs):
         self._loop_runner.start()
         if self._asynchronous:
@@ -256,7 +238,7 @@ class LocalCluster(Cluster):
             self.sync(self._start, **kwargs)
 
     @gen.coroutine
-    def _start(self, ip=None, n_workers=0):
+    def _start(self, host=None, n_workers=0):
         """
         Start all cluster services.
         """
@@ -266,16 +248,16 @@ class LocalCluster(Cluster):
         if self.protocol == "inproc://":
             address = self.protocol
         else:
-            if ip is None:
+            if host is None:
                 if self.interface:
-                    ip = get_ip_interface(self.interface)
+                    host = get_ip_interface(self.interface)
                 else:
-                    ip = "127.0.0.1"
+                    host = "127.0.0.1"
 
-            if "://" in ip:
-                address = ip
+            if "://" in host:
+                address = host
             else:
-                address = self.protocol + ip
+                address = self.protocol + host
             if self.scheduler_port:
                 address += ":" + str(self.scheduler_port)
 

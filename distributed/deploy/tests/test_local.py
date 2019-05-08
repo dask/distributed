@@ -417,7 +417,7 @@ def test_remote_access(loop):
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=None,
-        ip="",
+        host="",
         loop=loop,
     ) as c:
         sync(loop, assert_can_connect_from_everywhere_4_6, c.scheduler.port)
@@ -620,7 +620,7 @@ def test_local_tls(loop):
         silence_logs=False,
         security=security,
         dashboard_address=False,
-        ip="tls://0.0.0.0",
+        host="tls://0.0.0.0",
         loop=loop,
     ) as c:
         sync(
@@ -690,7 +690,7 @@ def test_local_tls_restart(loop):
         silence_logs=False,
         security=security,
         dashboard_address=False,
-        ip="tls://0.0.0.0",
+        host="tls://0.0.0.0",
         loop=loop,
     ) as c:
         with Client(c.scheduler.address, loop=loop, security=security) as client:
@@ -750,7 +750,7 @@ def test_protocol_tcp(loop):
 )
 def test_protocol_ip(loop):
     with LocalCluster(
-        ip="tcp://127.0.0.2", loop=loop, n_workers=0, processes=False
+        host="tcp://127.0.0.2", loop=loop, n_workers=0, processes=False
     ) as cluster:
         assert cluster.scheduler.address.startswith("tcp://127.0.0.2")
 

@@ -930,7 +930,8 @@ class Worker(ServerNode):
         if "://" in listen_host:
             protocol, listen_host = listen_host.split("://")
 
-        self.name = self.name or self.address
+        if self.name is None:
+            self.name = self.address
         preload_modules(
             self.preload,
             parameter=self,
@@ -970,7 +971,15 @@ class Worker(ServerNode):
         raise gen.Return(self)
 
     def __await__(self):
-        return self._start().__await__()
+        if self.status is not None:
+
+            @gen.coroutine  # idempotent
+            def _():
+                raise gen.Return(self)
+
+            return _().__await__()
+        else:
+            return self._start().__await__()
 
     def start(self, port=0):
         self.loop.add_callback(self._start, port)
