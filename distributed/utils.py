@@ -727,8 +727,7 @@ def log_errors(pdb=False):
 
 def silence_logging(level, root="distributed"):
     """
-    Force all existing loggers below *root* to the given level at least
-    (or keep the existing level if less verbose).
+    Change all StreamHandlers for the given logger to the given level
     """
     if isinstance(level, str):
         level = getattr(logging, level.upper())
@@ -1530,3 +1529,18 @@ def warn_on_duration(duration, msg):
     stop = time()
     if stop - start > parse_timedelta(duration):
         warnings.warn(msg, stacklevel=2)
+
+
+def typename(typ):
+    """ Return name of type
+
+    Examples
+    --------
+    >>> from distributed import Scheduler
+    >>> typename(Scheduler)
+    'distributed.scheduler.Scheduler'
+    """
+    try:
+        return typ.__module__ + "." + typ.__name__
+    except AttributeError:
+        return str(typ)

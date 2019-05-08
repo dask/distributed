@@ -14,9 +14,15 @@ import msgpack
 
 from . import pickle
 from ..compatibility import PY2
-from ..utils import has_keyword
+from ..utils import has_keyword, typename
 from .compression import maybe_compress, decompress
-from .utils import unpack_frames, pack_frames_prelude, frame_split_size, ensure_bytes
+from .utils import (
+    unpack_frames,
+    pack_frames_prelude,
+    frame_split_size,
+    ensure_bytes,
+    msgpack_opts,
+)
 
 
 lazy_registrations = {}
@@ -58,11 +64,6 @@ def pickle_loads(header, frames):
     return pickle.loads(b"".join(frames))
 
 
-msgpack_len_opts = {
-    ("max_%s_len" % x): 2 ** 31 - 1 for x in ["str", "bin", "array", "map", "ext"]
-}
-
-
 def msgpack_dumps(x):
     try:
         frame = msgpack.dumps(x, use_bin_type=True)
@@ -73,9 +74,7 @@ def msgpack_dumps(x):
 
 
 def msgpack_loads(header, frames):
-    return msgpack.loads(
-        b"".join(frames), encoding="utf8", use_list=False, **msgpack_len_opts
-    )
+    return msgpack.loads(b"".join(frames), use_list=False, **msgpack_opts)
 
 
 def serialization_error_loads(header, frames):
@@ -444,18 +443,6 @@ def register_serialization_lazy(toplevel, func):
     module is ever loaded.
     """
     raise Exception("Serialization registration has changed. See documentation")
-
-
-def typename(typ):
-    """ Return name of type
-
-    Examples
-    --------
-    >>> from distributed import Scheduler
-    >>> typename(Scheduler)
-    'distributed.scheduler.Scheduler'
-    """
-    return typ.__module__ + "." + typ.__name__
 
 
 @partial(normalize_token.register, Serialized)

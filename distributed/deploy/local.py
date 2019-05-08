@@ -82,19 +82,19 @@ class LocalCluster(Cluster):
 
     Examples
     --------
-    >>> c = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
-    >>> c  # doctest: +SKIP
+    >>> cluster = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
+    >>> cluster  # doctest: +SKIP
     LocalCluster("127.0.0.1:8786", workers=8, ncores=8)
 
-    >>> c = Client(c)  # connect to local cluster  # doctest: +SKIP
+    >>> c = Client(cluster)  # connect to local cluster  # doctest: +SKIP
 
     Add a new worker to the cluster
 
-    >>> w = c.start_worker(ncores=2)  # doctest: +SKIP
+    >>> w = cluster.start_worker(ncores=2)  # doctest: +SKIP
 
     Shut down the extra worker
 
-    >>> c.stop_worker(w)  # doctest: +SKIP
+    >>> cluster.stop_worker(w)  # doctest: +SKIP
 
     Pass extra keyword arguments to Bokeh
 
@@ -290,7 +290,9 @@ class LocalCluster(Cluster):
     @gen.coroutine
     def _start_worker(self, death_timeout=60, **kwargs):
         if self.status and self.status.startswith("clos"):
-            warnings.warn("Tried to start a worker while status=='%s'" % self.status)
+            warnings.warn(
+                "Tried to start a worker while status=='%s'" % self.status, stacklevel=2
+            )
             return
 
         if self.processes:
@@ -338,7 +340,7 @@ class LocalCluster(Cluster):
 
     @gen.coroutine
     def _stop_worker(self, w):
-        yield w._close()
+        yield w.close()
         if w in self.workers:
             self.workers.remove(w)
 
@@ -360,7 +362,11 @@ class LocalCluster(Cluster):
             return
         self.status = "closing"
 
-        self.scheduler.clear_task_state()
+        with ignoring(gen.TimeoutError, CommClosedError, OSError):
+            yield gen.with_timeout(
+                timedelta(seconds=parse_timedelta(timeout)),
+                self.scheduler.close(close_workers=True),
+            )
 
         with ignoring(gen.TimeoutError):
             yield gen.with_timeout(
@@ -368,13 +374,7 @@ class LocalCluster(Cluster):
                 All([self._stop_worker(w) for w in self.workers]),
             )
         del self.workers[:]
-
-        try:
-            with ignoring(gen.TimeoutError, CommClosedError, OSError):
-                yield self.scheduler.close(fast=True)
-            del self.workers[:]
-        finally:
-            self.status = "closed"
+        self.status = "closed"
 
     def close(self, timeout=20):
         """ Close the cluster """
