@@ -35,6 +35,7 @@ from .comm import (
     get_address_host,
     unparse_host_port,
 )
+from .comm.addressing import address_from_user_args
 from .compatibility import finalize, unicode, Mapping, Set
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from . import profile
@@ -453,6 +454,11 @@ class TaskState(object):
        of a finished task.  This number is used for diagnostics and to
        help prioritize work.
 
+    .. attribute:: type: str
+
+       The type of the object as a string.  Only present for tasks that have
+       been computed.
+
     .. attribute:: exception: object
 
        If this task failed executing, the exception object is stored here.
@@ -566,6 +572,7 @@ class TaskState(object):
         "suspicious",
         "retries",
         "nbytes",
+        "type",
     )
 
     def __init__(self, key, run_spec):
@@ -590,6 +597,7 @@ class TaskState(object):
         self.resource_restrictions = None
         self.loose_restrictions = False
         self.actor = None
+        self.type = None
 
     def get_nbytes(self):
         nbytes = self.nbytes
@@ -817,9 +825,12 @@ class Scheduler(ServerNode):
         security=None,
         worker_ttl=None,
         idle_timeout=None,
+        interface=None,
+        host=None,
+        port=8786,
+        protocol=None,
         **kwargs
     ):
-
         self._setup_logging()
 
         # Attributes
@@ -1049,6 +1060,14 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
+        self._start_address = address_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+        )
+
         super(Scheduler, self).__init__(
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
@@ -1165,9 +1184,11 @@ class Scheduler(ServerNode):
         for service in self.services.values():
             service.stop()
 
-    def start(self, addr_or_port=8786, start_queues=True):
+    def start(self, addr_or_port=None, start_queues=True):
         """ Clear out old state and restart all running coroutines """
         enable_gc_diagnosis()
+
+        addr_or_port = addr_or_port or self._start_address
 
         self.clear_task_state()
 
@@ -1226,6 +1247,15 @@ class Scheduler(ServerNode):
         setproctitle("dask-scheduler [%s]" % (self.address,))
 
         return self.finished()
+
+    def __await__(self):
+        self.start()
+
+        @gen.coroutine
+        def _():
+            return self
+
+        return _().__await__()
 
     @gen.coroutine
     def finished(self):
@@ -1382,6 +1412,7 @@ class Scheduler(ServerNode):
         name=None,
         resolve_address=True,
         nbytes=None,
+        types=None,
         now=None,
         resources=None,
         host_info=None,
@@ -1460,7 +1491,11 @@ class Scheduler(ServerNode):
                     ts = self.tasks.get(key)
                     if ts is not None and ts.state in ("processing", "waiting"):
                         recommendations = self.transition(
-                            key, "memory", worker=address, nbytes=nbytes[key]
+                            key,
+                            "memory",
+                            worker=address,
+                            nbytes=nbytes[key],
+                            typename=types[key],
                         )
                         self.transitions(recommendations)
 
@@ -3418,7 +3453,9 @@ class Scheduler(ServerNode):
             if send_worker_msg:
                 self.worker_send(w, send_worker_msg)
 
-    def _add_to_memory(self, ts, ws, recommendations, type=None, **kwargs):
+    def _add_to_memory(
+        self, ts, ws, recommendations, type=None, typename=None, **kwargs
+    ):
         """
         Add *ts* to the set of in-memory tasks.
         """
@@ -3454,6 +3491,7 @@ class Scheduler(ServerNode):
             self.report(msg)
 
         ts.state = "memory"
+        ts.type = typename
 
         cs = self.clients["fire-and-forget"]
         if ts in cs.wants_what:
@@ -3676,7 +3714,14 @@ class Scheduler(ServerNode):
             raise
 
     def transition_processing_memory(
-        self, key, nbytes=None, type=None, worker=None, startstops=None, **kwargs
+        self,
+        key,
+        nbytes=None,
+        type=None,
+        typename=None,
+        worker=None,
+        startstops=None,
+        **kwargs
     ):
         try:
             ts = self.tasks[key]
@@ -3749,7 +3794,7 @@ class Scheduler(ServerNode):
 
             self._remove_from_processing(ts)
 
-            self._add_to_memory(ts, ws, recommendations, type=type)
+            self._add_to_memory(ts, ws, recommendations, type=type, typename=typename)
 
             if self.validate:
                 assert not ts.processing_on
@@ -4801,6 +4846,9 @@ def validate_task_state(ts):
             str(ts),
             str(ts.who_has),
         )
+        if ts.run_spec:  # was computed
+            assert ts.type
+            assert isinstance(ts.type, str)
         assert not any(ts in dts.waiting_on for dts in ts.dependents)
         for ws in ts.who_has:
             assert ts in ws.has_what, (
