@@ -277,6 +277,7 @@ class WorkerState(object):
             memory_limit=self.memory_limit,
             local_directory=self.local_directory,
             services=self.services,
+            nanny=self.nanny,
         )
         ws.processing = {ts.key for ts in self.processing}
         return ws
