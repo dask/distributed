@@ -54,7 +54,7 @@ class SpecCluster(Cluster):
         self.loop = self._loop_runner.loop
 
         self.scheduler = self.scheduler_spec["cls"](
-            loop=loop, **self.scheduler_spec["options"]
+            loop=self.loop, **self.scheduler_spec["options"]
         )
         self.status = "created"
 
@@ -72,7 +72,7 @@ class SpecCluster(Cluster):
         for name, d in self.worker_spec.items():
             cls, opts = d["cls"], d["options"]
             if "name" not in opts:
-                opts = toolz.assoc(opts, "name", name)
+                opts = toolz.merge({"name": name}, opts, {"loop": self.loop})
             worker = cls(self.scheduler.address, **opts)
 
             self.workers[name] = worker

@@ -7,14 +7,15 @@ class MyWorker(Worker):
     pass
 
 
+spec = {
+    0: {"cls": Worker, "options": {"ncores": 1}},
+    1: {"cls": Worker, "options": {"ncores": 2}},
+    "my-worker": {"cls": MyWorker, "options": {"ncores": 3}},
+}
+
+
 @pytest.mark.asyncio
 async def test_specification():
-
-    spec = {
-        0: {"cls": Worker, "options": {"ncores": 1}},
-        1: {"cls": Worker, "options": {"ncores": 2}},
-        "my-worker": {"cls": MyWorker, "options": {"ncores": 3}},
-    }
     async with SpecCluster(workers=spec, asynchronous=True) as cluster:
         assert cluster.worker_spec is spec
 
@@ -37,11 +38,6 @@ async def test_specification():
 
 
 def test_spec_sync(loop):
-    spec = {
-        0: {"cls": Worker, "options": {"ncores": 1}},
-        1: {"cls": Worker, "options": {"ncores": 2}},
-        "my-worker": {"cls": MyWorker, "options": {"ncores": 3}},
-    }
     with SpecCluster(workers=spec, loop=loop) as cluster:
         assert cluster.worker_spec is spec
         assert cluster.worker_spec is spec
@@ -57,5 +53,11 @@ def test_spec_sync(loop):
         assert cluster.workers["my-worker"].ncores == 3
 
         with Client(cluster, loop=loop) as client:
+            assert cluster.loop is cluster.scheduler.loop
+            assert cluster.loop is client.loop
             result = client.submit(lambda x: x + 1, 10).result()
             assert result == 11
+
+
+def test_loop_started():
+    cluster = SpecCluster(spec)
