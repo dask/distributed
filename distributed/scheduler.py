@@ -304,6 +304,7 @@ class WorkerState(object):
             "last_seen": self.last_seen,
             "services": self.services,
             "metrics": self.metrics,
+            "nanny": self.nanny,
         }
 
 

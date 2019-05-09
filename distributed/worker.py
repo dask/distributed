@@ -1023,13 +1023,8 @@ class Worker(ServerNode):
             if self.batched_stream:
                 self.batched_stream.close()
 
-            if nanny and "nanny" in self.service_ports:
-                nanny_address = "%s%s:%d" % (
-                    self.listener.prefix,
-                    self.ip,
-                    self.service_ports["nanny"],
-                )
-                with self.rpc(nanny_address) as r:
+            if nanny and self.nanny:
+                with self.rpc(self.nanny) as r:
                     yield r.terminate()
 
             self.rpc.close()
