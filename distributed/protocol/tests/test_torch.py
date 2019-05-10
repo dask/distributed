@@ -13,6 +13,7 @@ def test_tensor():
     t2 = deserialize(header, frames)
     assert (x == t2.numpy()).all()
 
+
 @pytest.mark.parametrize("requires_grad", [True, False])
 def test_grad(requires_grad):
     x = np.arange(10)
@@ -23,12 +24,13 @@ def test_grad(requires_grad):
 
     t2 = deserialize(*serialize(t))
 
-    assert (t2.requires_grad is requires_grad)
-    assert (t.requires_grad is requires_grad)
+    assert t2.requires_grad is requires_grad
+    assert t.requires_grad is requires_grad
     assert np.allclose(t2.detach().numpy(), x)
 
     if requires_grad:
         assert np.allclose(t2.grad.numpy(), 1)
+
 
 def test_resnet():
     torchvision = pytest.importorskip("torchvision")
