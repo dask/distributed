@@ -60,7 +60,6 @@ from distributed.sizeof import sizeof
 from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey, tmpfile
 from distributed.utils_test import (
     cluster,
-    slow,
     slowinc,
     slowadd,
     slowdec,
@@ -472,7 +471,7 @@ def test_exceptions(c, s, a, b):
 
 @gen_cluster()
 def test_gc(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
 
     x = c.submit(inc, 10)
     yield x
@@ -771,7 +770,7 @@ def test_recompute_released_key(c, s, a, b):
     assert result1 == result2
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(client=True)
 def test_long_tasks_dont_trigger_timeout(c, s, a, b):
     from time import sleep
@@ -1007,12 +1006,12 @@ def test_map_quotes(c, s, a, b):
 
 @gen_cluster()
 def test_two_consecutive_clients_share_results(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
 
     x = c.submit(random.randint, 0, 1000, pure=True)
     xx = yield x
 
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     y = f.submit(random.randint, 0, 1000, pure=True)
     yy = yield y
@@ -1681,8 +1680,8 @@ def test_upload_file_exception_sync(c):
 @pytest.mark.skip
 @gen_cluster()
 def test_multiple_clients(s, a, b):
-    a = yield Client((s.ip, s.port), asynchronous=True)
-    b = yield Client((s.ip, s.port), asynchronous=True)
+    a = yield Client(s.address, asynchronous=True)
+    b = yield Client(s.address, asynchronous=True)
 
     x = a.submit(inc, 1)
     y = b.submit(inc, 2)
@@ -2103,8 +2102,8 @@ def test_waiting_data(c, s, a, b):
 
 @gen_cluster()
 def test_multi_client(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     assert set(s.client_comms) == {c.id, f.id}
 
@@ -2171,9 +2170,9 @@ def test_cleanup_after_broken_client_connection(s, a, b):
 
 @gen_cluster()
 def test_multi_garbage_collection(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
 
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     x = c.submit(inc, 1)
     y = f.submit(inc, 2)
@@ -2295,8 +2294,8 @@ def test__cancel_tuple_key(c, s, a, b):
 
 @gen_cluster()
 def test__cancel_multi_client(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     x = c.submit(slowinc, 1)
     y = f.submit(slowinc, 1)
@@ -2824,14 +2823,13 @@ def test_diagnostic_nbytes(c, s, a, b):
 
 @gen_test()
 def test_worker_aliases():
-    s = Scheduler(validate=True)
-    s.start(0)
-    a = Worker(s.ip, s.port, name="alice")
-    b = Worker(s.ip, s.port, name="bob")
-    w = Worker(s.ip, s.port, name=3)
+    s = yield Scheduler(validate=True, port=0)
+    a = Worker(s.address, name="alice")
+    b = Worker(s.address, name="bob")
+    w = Worker(s.address, name=3)
     yield [a, b, w]
 
-    c = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
 
     L = c.map(inc, range(10), workers="alice")
     future = yield c.scatter(123, workers=3)
@@ -2907,10 +2905,10 @@ def test_client_num_fds(loop):
 
 @gen_cluster()
 def test_startup_close_startup(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
     yield c.close()
 
-    c = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
     yield c.close()
 
 
@@ -3045,7 +3043,7 @@ def test_unrunnable_task_runs(c, s, a, b):
     assert s.tasks[x.key] in s.unrunnable
     assert s.get_task_status(keys=[x.key]) == {x.key: "no-worker"}
 
-    w = yield Worker(s.ip, s.port, loop=s.loop)
+    w = yield Worker(s.address, loop=s.loop)
 
     start = time()
     while x.status != "finished":
@@ -3062,8 +3060,7 @@ def test_unrunnable_task_runs(c, s, a, b):
 def test_add_worker_after_tasks(c, s):
     futures = c.map(inc, range(10))
 
-    n = Nanny(s.ip, s.port, ncores=2, loop=s.loop)
-    n.start(0)
+    n = yield Nanny(s.address, ncores=2, loop=s.loop, port=0)
 
     result = yield c.gather(futures)
 
@@ -3475,14 +3472,14 @@ def test_get_foo_lost_keys(c, s, u, v, w):
     assert_dict_key_equal(d, {x.key: [], y.key: []})
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, check_new_threads=False)
 def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 1)
     with pytest.raises(KilledWorker) as info:
         yield f
 
-    assert info.value.last_worker.services["nanny"] in {a.port, b.port}
+    assert info.value.last_worker.nanny in {a.address, b.address}
 
 
 def test_get_processing_sync(c, s, a, b):
@@ -3530,7 +3527,7 @@ def test_get_returns_early(c):
     assert x.key in c.futures
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(Worker=Nanny, client=True)
 def test_Client_clears_references_after_restart(c, s, a, b):
     x = c.submit(inc, 1)
@@ -3603,10 +3600,9 @@ def test_as_completed_next_batch(c):
 
 @gen_test()
 def test_status():
-    s = Scheduler()
-    s.start(0)
+    s = yield Scheduler(port=0)
 
-    c = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
     assert c.status == "running"
     x = c.submit(inc, 1)
 
@@ -3647,7 +3643,7 @@ def test_scatter_raises_if_no_workers(c, s):
         yield c.scatter(1, timeout=0.5)
 
 
-@slow
+@pytest.mark.slow
 def test_reconnect(loop):
     w = Worker("127.0.0.1", 9393, loop=loop)
     w.start()
@@ -3724,7 +3720,7 @@ def test_reconnect_timeout(c, s):
     assert "Failed to reconnect" in text
 
 
-@slow
+@pytest.mark.slow
 @pytest.mark.skipif(
     sys.platform.startswith("win"), reason="num_fds not supported on windows"
 )
@@ -3786,8 +3782,8 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
 @gen_cluster(client=False, timeout=None)
 def test_idempotence(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     # Submit
     x = c.submit(inc, 1)
@@ -3891,7 +3887,7 @@ def test_lose_scattered_data(c, s, a, b):
 
 @gen_cluster(client=True, ncores=[("127.0.0.1", 1)] * 3)
 def test_partially_lose_scattered_data(e, s, a, b, c):
-    [x] = yield e.scatter([1], workers=a.address)
+    x = yield e.scatter(1, workers=a.address)
     yield e.replicate(x, n=2)
 
     yield a.close()
@@ -3993,8 +3989,8 @@ def test_scatter_compute_store_lose_processing(c, s, a, b):
 
 @gen_cluster(client=False)
 def test_serialize_future(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     future = c.submit(lambda: 1)
     result = yield future
@@ -4012,8 +4008,8 @@ def test_serialize_future(s, a, b):
 
 @gen_cluster(client=False)
 def test_temp_client(s, a, b):
-    c = yield Client((s.ip, s.port), asynchronous=True)
-    f = yield Client((s.ip, s.port), asynchronous=True)
+    c = yield Client(s.address, asynchronous=True)
+    f = yield Client(s.address, asynchronous=True)
 
     with temp_default_client(c):
         assert default_client() is c
@@ -4254,7 +4250,7 @@ def test_normalize_collection_dask_array(c, s, a, b):
     assert result1 == result2
 
 
-@slow
+@pytest.mark.slow
 def test_normalize_collection_with_released_futures(c):
     da = pytest.importorskip("dask.array")
 
@@ -4385,7 +4381,7 @@ def test_scatter_dict_workers(c, s, a, b):
     assert "a" in a.data or "a" in b.data
 
 
-@slow
+@pytest.mark.slow
 @gen_test()
 def test_client_timeout():
     loop = IOLoop.current()
@@ -4713,20 +4709,16 @@ def test_quiet_client_close(loop):
             ), line
 
 
+@pytest.mark.slow
 def test_quiet_client_close_when_cluster_is_closed_before_client(loop):
-    n_attempts = 5
-    # Trying a few times to reduce the flakiness of the test. Without the bug
-    # fix in #2477 and with 5 attempts, this test passes by chance in about 10%
-    # of the cases.
-    for _ in range(n_attempts):
-        with captured_logger(logging.getLogger("tornado.application")) as logger:
-            cluster = LocalCluster(loop=loop)
-            client = Client(cluster, loop=loop)
-            cluster.close()
-            client.close()
+    with captured_logger(logging.getLogger("tornado.application")) as logger:
+        cluster = LocalCluster(loop=loop, n_workers=1)
+        client = Client(cluster, loop=loop)
+        cluster.close()
+        client.close()
 
-        out = logger.getvalue()
-        assert "CancelledError" not in out
+    out = logger.getvalue()
+    assert "CancelledError" not in out
 
 
 @gen_cluster()
@@ -4762,7 +4754,7 @@ def test_threadsafe(c):
         del results
 
 
-@slow
+@pytest.mark.slow
 def test_threadsafe_get(c):
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(10,))
@@ -4781,7 +4773,7 @@ def test_threadsafe_get(c):
     assert results and all(results)
 
 
-@slow
+@pytest.mark.slow
 def test_threadsafe_compute(c):
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(10,))
@@ -4871,7 +4863,7 @@ def test_secede_simple(c, s, a):
     assert result == 2
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(client=True, ncores=[("127.0.0.1", 1)] * 2, timeout=60)
 def test_secede_balances(c, s, a, b):
     count = threading.active_count()
@@ -4977,7 +4969,7 @@ def test_dynamic_workloads_sync(c):
     _test_dynamic_workloads_sync(c, delay=0.02)
 
 
-@slow
+@pytest.mark.slow
 def test_dynamic_workloads_sync_random(c):
     _test_dynamic_workloads_sync(c, delay="random")
 
@@ -5197,7 +5189,7 @@ def test_client_async_before_loop_starts():
         client.close()
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(
     client=True,
     Worker=Nanny if PY3 else Worker,
@@ -5705,6 +5697,14 @@ def test_get_mix_futures_and_SubgraphCallable_dask_dataframe(c, s, a, b):
     ddf["x"] = ddf["x"].astype("f8")
     result = yield c.compute(ddf)
     assert result.equals(df.astype("f8"))
+
+
+def test_direct_to_workers(s, loop):
+    with Client(s["address"], loop=loop, direct_to_workers=True) as client:
+        future = client.scatter(1)
+        future.result()
+        resp = client.run_on_scheduler(lambda dask_scheduler: dask_scheduler.events)
+        assert "gather" not in str(resp)
 
 
 if sys.version_info >= (3, 5):
