@@ -2,12 +2,10 @@ from __future__ import print_function, division, absolute_import
 
 from time import sleep
 
-from tornado import gen
-
 from distributed import Scheduler, Worker
 from distributed.diagnostics.progressbar import TextProgressBar, progress
 from distributed.metrics import time
-from distributed.utils_test import inc, div, gen_cluster
+from distributed.utils_test import inc, div, gen_cluster, gen_test
 from distributed.utils_test import client, loop, cluster_fixture  # noqa: F401
 
 
@@ -46,18 +44,13 @@ def test_TextProgressBar_error(c, s, a, b):
     assert progress.comm.closed()
 
 
-def test_TextProgressBar_empty(loop, capsys):
-    @gen.coroutine
+def test_TextProgressBar_empty(capsys):
+    @gen_test()
     def f():
-        s = Scheduler(loop=loop)
-        done = s.start(0)
-        a = Worker(s.ip, s.port, loop=loop, ncores=1)
-        b = Worker(s.ip, s.port, loop=loop, ncores=1)
-        yield [a._start(0), b._start(0)]
+        s = yield Scheduler(port=0)
+        a, b = yield [Worker(s.address, ncores=1), Worker(s.address, ncores=1)]
 
-        progress = TextProgressBar(
-            [], scheduler=(s.ip, s.port), start=False, interval=0.01
-        )
+        progress = TextProgressBar([], scheduler=s.address, start=False, interval=0.01)
         yield progress.listen()
 
         assert progress.status == "finished"
@@ -65,9 +58,9 @@ def test_TextProgressBar_empty(loop, capsys):
 
         yield [a.close(), b.close()]
         s.close()
-        yield done
+        yield s.finished()
 
-    loop.run_sync(f)
+    f()
 
 
 def check_bar_completed(capsys, width=40):
