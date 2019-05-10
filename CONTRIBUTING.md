@@ -8,8 +8,8 @@ code conforms with these styles, run
 ``` shell
 $ pip install black flake8
 $ cd path/to/distributed
-$ black .
-$ flake8 .
+$ black distributed
+$ flake8 distributed
 ```
 
 [flake8]:http://flake8.pycqa.org/en/latest/
