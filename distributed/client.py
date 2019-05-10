@@ -1427,7 +1427,8 @@ class Client(Node):
         Parameters
         ----------
         func: callable
-        iterables: Iterables, Iterators, or Queues
+        iterables: Iterables
+            List-like objects to map over.  They should have the same length.
         key: str, list
             Prefix for task names if string.  Explicit names if list.
         pure: bool (defaults to True)
@@ -1705,9 +1706,7 @@ class Client(Node):
 
         raise gen.Return(response)
 
-    def gather(
-        self, futures, errors="raise", maxsize=0, direct=None, asynchronous=None
-    ):
+    def gather(self, futures, errors="raise", direct=None, asynchronous=None):
         """ Gather futures from distributed memory
 
         Accepts a future, nested container of futures, iterator, or queue.
@@ -1717,7 +1716,7 @@ class Client(Node):
         ----------
         futures: Collection of futures
             This can be a possibly nested collection of Future objects.
-            Collections can be lists, sets, iterators, queues or dictionaries
+            Collections can be lists, sets, or dictionaries
         errors: string
             Either 'raise' or 'skip' if we should raise if a future has erred
             or skip its inclusion in the output collection
@@ -1725,9 +1724,6 @@ class Client(Node):
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
-        maxsize: int
-            If the input is a queue then this produces an output queue with a
-            maximum size.
 
         Returns
         -------
@@ -1743,10 +1739,6 @@ class Client(Node):
         3
         >>> c.gather([x, [x], x])  # support lists and dicts # doctest: +SKIP
         [3, [3], 3]
-
-        >>> seq = c.gather(iter([x, x]))  # support iterators # doctest: +SKIP
-        >>> next(seq)  # doctest: +SKIP
-        3
 
         See Also
         --------
@@ -1891,7 +1883,6 @@ class Client(Node):
         broadcast=False,
         direct=None,
         hash=True,
-        maxsize=0,
         timeout=no_default,
         asynchronous=None,
     ):
@@ -1904,7 +1895,7 @@ class Client(Node):
 
         Parameters
         ----------
-        data: list, iterator, dict, Queue, or object
+        data: list, dict, or object
             Data to scatter out to workers.  Output type matches input type.
         workers: list of tuples (optional)
             Optionally constrain locations of data.
@@ -1916,8 +1907,6 @@ class Client(Node):
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
-        maxsize: int (optional)
-            Maximum size of queue if using queues, 0 implies infinite
         hash: bool (optional)
             Whether or not to hash data to determine key.
             If False then this uses a random key
@@ -1945,12 +1934,6 @@ class Client(Node):
         Constrain location of data to subset of workers
 
         >>> c.scatter([1, 2, 3], workers=[('hostname', 8788)])   # doctest: +SKIP
-
-        Handle streaming sequences of data with iterators or queues
-
-        >>> seq = c.scatter(iter([1, 2, 3]))  # doctest: +SKIP
-        >>> next(seq)  # doctest: +SKIP
-        <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
 
         Broadcast data to all workers
 
