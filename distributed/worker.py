@@ -1845,8 +1845,8 @@ class Worker(ServerNode):
                     )
 
                 total_bytes = sum(self.nbytes.get(dep, 0) for dep in response["data"])
-                duration = (stop - start) or 0.5
-                bandwidth = total_bytes / (duration - abs(self.scheduler_delay))
+                duration = (stop - start) or 0.010
+                bandwidth = total_bytes / duration
                 self.incoming_transfer_log.append(
                     {
                         "start": start + self.scheduler_delay,
@@ -1861,7 +1861,8 @@ class Worker(ServerNode):
                         "who": worker,
                     }
                 )
-                self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
+                if total_bytes > 10000:
+                    self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
                 if self.digests is not None:
                     self.digests["transfer-bandwidth"].add(total_bytes / duration)
                     self.digests["transfer-duration"].add(duration)
