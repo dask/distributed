@@ -30,6 +30,7 @@ from . import profile, comm
 from .batched import BatchedSend
 from .comm import get_address_host, get_local_address_for, connect
 from .comm.utils import offload
+from .comm.addressing import address_from_user_args
 from .compatibility import unicode, get_thread_identity, finalize, MutableMapping
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
@@ -44,6 +45,7 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
     funcname,
+    typename,
     get_ip,
     has_arg,
     _maybe_complex,
@@ -154,7 +156,16 @@ class Worker(ServerNode):
     that we want to collect from others.
 
     * **data:** ``{key: object}``:
-        Dictionary mapping keys to actual values
+        Prefer using the **host** attribute instead of this, unless
+        memory_limit and at least one of memory_target_fraction or
+        memory_spill_fraction values are defined, in that case, this attribute
+        is a zict.Buffer, from which information on LRU cache can be queried.
+    * **data.memory:** ``{key: object}``:
+        Dictionary mapping keys to actual values stored in memory. Only
+        available if condition for **data** being a zict.Buffer is met.
+    * **data.disk:** ``{key: object}``:
+        Dictionary mapping keys to actual values stored on disk. Only
+        available if condition for **data** being a zict.Buffer is met.
     * **task_state**: ``{key: string}``:
         The state of all tasks that the scheduler has asked us to compute.
         Valid states include waiting, constrained, executing, memory, erred
@@ -250,6 +261,8 @@ class Worker(ServerNode):
     executor: concurrent.futures.Executor
     resources: dict
         Resources that this worker has like ``{'GPU': 2}``
+    nanny: str
+        Address on which to contact nanny, if it exists
 
     Examples
     --------
@@ -279,6 +292,7 @@ class Worker(ServerNode):
         local_dir="dask-worker-space",
         services=None,
         service_ports=None,
+        service_kwargs=None,
         name=None,
         reconnect=True,
         memory_limit="auto",
@@ -294,6 +308,12 @@ class Worker(ServerNode):
         extensions=None,
         metrics=None,
         data=None,
+        interface=None,
+        host=None,
+        port=None,
+        protocol=None,
+        dashboard_address=None,
+        nanny=None,
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
         **kwargs
     ):
@@ -306,6 +326,7 @@ class Worker(ServerNode):
         self.who_has = dict()
         self.has_what = defaultdict(set)
         self.pending_data_per_worker = defaultdict(deque)
+        self.nanny = nanny
         self._lock = threading.Lock()
 
         self.data_needed = deque()  # TODO: replace with heap?
@@ -407,7 +428,16 @@ class Worker(ServerNode):
             scheduler_addr = coerce_to_address(scheduler_ip)
         else:
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
-        self._port = 0
+        self.contact_address = contact_address
+
+        self._start_address = address_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+        )
+
         self.ncores = ncores or _ncores
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
@@ -418,7 +448,6 @@ class Worker(ServerNode):
         self.preload_argv = preload_argv
         if self.preload_argv is None:
             self.preload_argv = dask.config.get("distributed.worker.preload-argv")
-        self.contact_address = contact_address
         self.memory_monitor_interval = parse_timedelta(
             memory_monitor_interval, default="ms"
         )
@@ -486,6 +515,8 @@ class Worker(ServerNode):
             )
             target = int(float(self.memory_limit) * self.memory_target_fraction)
             self.data = Buffer({}, storage, target, weight)
+            self.data.memory = self.data.fast
+            self.data.disk = self.data.slow
         else:
             self.data = dict()
 
@@ -510,8 +541,19 @@ class Worker(ServerNode):
             sys.path.insert(0, self.local_dir)
 
         self.services = {}
-        self.service_ports = service_ports or {}
         self.service_specs = services or {}
+
+        if dashboard_address is not None:
+            try:
+                from distributed.bokeh.worker import BokehWorker
+            except ImportError:
+                logger.debug("To start diagnostics web server please install Bokeh")
+            else:
+                self.service_specs[("bokeh", dashboard_address)] = (
+                    BokehWorker,
+                    (service_kwargs or {}).get("bokeh", {}),
+                )
+
         self.metrics = dict(metrics) if metrics else {}
 
         self.low_level_profiler = low_level_profiler
@@ -674,6 +716,7 @@ class Worker(ServerNode):
                 raise gen.Return
             try:
                 _start = time()
+                types = {k: typename(v) for k, v in self.data.items()}
                 comm = yield connect(
                     self.scheduler.address, connection_args=self.connection_args
                 )
@@ -688,11 +731,13 @@ class Worker(ServerNode):
                         ncores=self.ncores,
                         name=self.name,
                         nbytes=self.nbytes,
+                        types=types,
                         now=time(),
                         resources=self.total_resources,
                         memory_limit=self.memory_limit,
                         local_directory=self.local_dir,
                         services=self.service_ports,
+                        nanny=self.nanny,
                         pid=os.getpid(),
                         metrics=self.get_metrics(),
                     ),
@@ -858,37 +903,10 @@ class Worker(ServerNode):
     # Lifecycle #
     #############
 
-    def start_services(self, default_listen_ip):
-        if default_listen_ip == "0.0.0.0":
-            default_listen_ip = ""  # for IPV6
-
-        for k, v in self.service_specs.items():
-            listen_ip = None
-            if isinstance(k, tuple):
-                k, port = k
-            else:
-                port = 0
-
-            if isinstance(port, (str, unicode)):
-                port = port.split(":")
-
-            if isinstance(port, (tuple, list)):
-                listen_ip, port = (port[0], int(port[1]))
-
-            if isinstance(v, tuple):
-                v, kwargs = v
-            else:
-                kwargs = {}
-
-            self.services[k] = v(self, io_loop=self.loop, **kwargs)
-            self.services[k].listen(
-                (listen_ip if listen_ip is not None else default_listen_ip, port)
-            )
-            self.service_ports[k] = self.services[k].port
-
     @gen.coroutine
     def _start(self, addr_or_port=0):
         assert self.status is None
+        addr_or_port = addr_or_port or self._start_address
 
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
@@ -963,7 +981,7 @@ class Worker(ServerNode):
         self.loop.add_callback(self._start, port)
 
     def _close(self, *args, **kwargs):
-        warnings.warn("Worker._close has moved to Worker.close")
+        warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
     @gen.coroutine
@@ -1003,20 +1021,15 @@ class Worker(ServerNode):
             for k, v in self.services.items():
                 v.stop()
 
-            if nanny and "nanny" in self.service_ports:
-                nanny_address = "%s%s:%d" % (
-                    self.listener.prefix,
-                    self.ip,
-                    self.service_ports["nanny"],
-                )
-                with self.rpc(nanny_address) as r:
-                    yield r.terminate()
-
             if self.batched_stream and not self.batched_stream.comm.closed():
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
                 self.batched_stream.close()
+
+            if nanny and self.nanny:
+                with self.rpc(self.nanny) as r:
+                    yield r.terminate()
 
             self.rpc.close()
             self._closed.set()
@@ -1725,18 +1738,19 @@ class Worker(ServerNode):
             typ = self.types.get(key) or type(value)
             del value
             try:
-                typ = dumps_function(typ)
+                typ_serialized = dumps_function(typ)
             except PicklingError:
                 # Some types fail pickling (example: _thread.lock objects),
                 # send their name as a best effort.
-                typ = pickle.dumps(typ.__name__)
+                typ_serialized = pickle.dumps(typ.__name__)
             d = {
                 "op": "task-finished",
                 "status": "OK",
                 "key": key,
                 "nbytes": nbytes,
                 "thread": self.threads.get(key),
-                "type": typ,
+                "type": typ_serialized,
+                "typename": typename(typ),
             }
         elif key in self.exceptions:
             d = {

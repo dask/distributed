@@ -57,7 +57,7 @@ class LocalCluster(Cluster):
         Address on which to listen for the Bokeh diagnostics server like
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
         Set to ``None`` to disable the dashboard.
-        Use port 0 for a random port.
+        Use ':0' for a random port.
     diagnostics_port: int
         Deprecated.  See dashboard_address.
     asynchronous: bool (False by default)
@@ -82,19 +82,19 @@ class LocalCluster(Cluster):
 
     Examples
     --------
-    >>> c = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
-    >>> c  # doctest: +SKIP
+    >>> cluster = LocalCluster()  # Create a local cluster with as many workers as cores  # doctest: +SKIP
+    >>> cluster  # doctest: +SKIP
     LocalCluster("127.0.0.1:8786", workers=8, ncores=8)
 
-    >>> c = Client(c)  # connect to local cluster  # doctest: +SKIP
+    >>> c = Client(cluster)  # connect to local cluster  # doctest: +SKIP
 
     Add a new worker to the cluster
 
-    >>> w = c.start_worker(ncores=2)  # doctest: +SKIP
+    >>> w = cluster.start_worker(ncores=2)  # doctest: +SKIP
 
     Shut down the extra worker
 
-    >>> c.stop_worker(w)  # doctest: +SKIP
+    >>> cluster.stop_worker(w)  # doctest: +SKIP
 
     Pass extra keyword arguments to Bokeh
 
@@ -112,6 +112,7 @@ class LocalCluster(Cluster):
         scheduler_port=0,
         silence_logs=logging.WARN,
         dashboard_address=":8787",
+        worker_dashboard_address=None,
         diagnostics_port=None,
         services=None,
         worker_services=None,
@@ -179,29 +180,23 @@ class LocalCluster(Cluster):
             worker_kwargs["memory_limit"] = parse_memory_limit("auto", 1, n_workers)
 
         worker_kwargs.update(
-            {"ncores": threads_per_worker, "services": worker_services}
+            {
+                "ncores": threads_per_worker,
+                "services": worker_services,
+                "dashboard_address": worker_dashboard_address,
+            }
         )
 
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
 
-        if dashboard_address is not False and dashboard_address is not None:
-            try:
-                from distributed.bokeh.scheduler import BokehScheduler
-                from distributed.bokeh.worker import BokehWorker
-            except ImportError:
-                logger.debug("To start diagnostics web server please install Bokeh")
-            else:
-                services[("bokeh", dashboard_address)] = (
-                    BokehScheduler,
-                    (service_kwargs or {}).get("bokeh", {}),
-                )
-                worker_services[("bokeh", 0)] = BokehWorker
-
         self.scheduler = Scheduler(
             loop=self.loop,
             services=services,
+            service_kwargs=service_kwargs,
             security=security,
+            interface=interface,
+            dashboard_address=dashboard_address,
             blocked_handlers=blocked_handlers,
         )
         self.scheduler_port = scheduler_port
@@ -362,7 +357,11 @@ class LocalCluster(Cluster):
             return
         self.status = "closing"
 
-        self.scheduler.clear_task_state()
+        with ignoring(gen.TimeoutError, CommClosedError, OSError):
+            yield gen.with_timeout(
+                timedelta(seconds=parse_timedelta(timeout)),
+                self.scheduler.close(close_workers=True),
+            )
 
         with ignoring(gen.TimeoutError):
             yield gen.with_timeout(
@@ -370,13 +369,7 @@ class LocalCluster(Cluster):
                 All([self._stop_worker(w) for w in self.workers]),
             )
         del self.workers[:]
-
-        try:
-            with ignoring(gen.TimeoutError, CommClosedError, OSError):
-                yield self.scheduler.close(fast=True)
-            del self.workers[:]
-        finally:
-            self.status = "closed"
+        self.status = "closed"
 
     def close(self, timeout=20):
         """ Close the cluster """
