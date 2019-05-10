@@ -28,17 +28,13 @@ def test_text_progressbar(capsys, client):
 def test_TextProgressBar_error(c, s, a, b):
     x = c.submit(div, 1, 0)
 
-    progress = TextProgressBar(
-        [x.key], scheduler=(s.ip, s.port), start=False, interval=0.01
-    )
+    progress = TextProgressBar([x.key], scheduler=s.address, start=False, interval=0.01)
     yield progress.listen()
 
     assert progress.status == "error"
     assert progress.comm.closed()
 
-    progress = TextProgressBar(
-        [x.key], scheduler=(s.ip, s.port), start=False, interval=0.01
-    )
+    progress = TextProgressBar([x.key], scheduler=s.address, start=False, interval=0.01)
     yield progress.listen()
     assert progress.status == "error"
     assert progress.comm.closed()
