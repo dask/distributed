@@ -12,7 +12,6 @@ import os
 import pickle
 import random
 import six
-import warnings
 import weakref
 
 import psutil
