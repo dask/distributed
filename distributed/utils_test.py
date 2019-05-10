@@ -62,6 +62,7 @@ from .utils import (
     thread_state,
 )
 from .worker import Worker, TOTAL_MEMORY
+from .nanny import Nanny
 
 try:
     import dask.array  # register config
@@ -514,8 +515,6 @@ def run_worker(q, scheduler_q, **kwargs):
 
 
 def run_nanny(q, scheduler_q, **kwargs):
-    from distributed import Nanny
-
     with log_errors():
         with pristine_loop() as loop:
             scheduler_addr = scheduler_q.get()
@@ -923,7 +922,10 @@ def gen_cluster(
             func = gen.coroutine(func)
 
         def test_func():
+            Client._instances.clear()
             Worker._instances.clear()
+            Scheduler._instances.clear()
+            Nanny._instances.clear()
             _global_clients.clear()
             Comm._instances.clear()
             active_threads_start = set(threading._active)
