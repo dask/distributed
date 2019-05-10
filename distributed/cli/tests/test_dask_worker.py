@@ -6,13 +6,13 @@ pytest.importorskip("requests")
 
 import requests
 import sys
+import os
 from time import sleep
-from toolz import first
 
 from distributed import Client
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
-from distributed.utils_test import popen, slow, terminate_process, wait_for_port
+from distributed.utils_test import popen, terminate_process, wait_for_port
 from distributed.utils_test import loop  # noqa: F401
 
 
@@ -40,7 +40,10 @@ def test_nanny_worker_ports(loop):
                     else:
                         assert time() - start < 5
                         sleep(0.1)
-                assert d["workers"]["tcp://127.0.0.1:9684"]["services"]["nanny"] == 5273
+                assert (
+                    d["workers"]["tcp://127.0.0.1:9684"]["nanny"]
+                    == "tcp://127.0.0.1:5273"
+                )
 
 
 def test_memory_limit(loop):
@@ -52,7 +55,7 @@ def test_memory_limit(loop):
                 while not c.ncores():
                     sleep(0.1)
                 info = c.scheduler_info()
-                d = first(info["workers"].values())
+                [d] = info["workers"].values()
                 assert isinstance(d["memory_limit"], int)
                 assert d["memory_limit"] == 2e9
 
@@ -65,7 +68,7 @@ def test_no_nanny(loop):
             assert any(b"Registered" in worker.stderr.readline() for i in range(15))
 
 
-@slow
+@pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_no_reconnect(nanny, loop):
     with popen(["dask-scheduler", "--no-bokeh"]) as sched:
@@ -140,6 +143,17 @@ def test_scheduler_file(loop, nanny):
                     while not c.scheduler_info()["workers"]:
                         sleep(0.1)
                         assert time() < start + 10
+
+
+def test_scheduler_address_env(loop, monkeypatch):
+    monkeypatch.setenv("DASK_SCHEDULER_ADDRESS", "tcp://127.0.0.1:8786")
+    with popen(["dask-scheduler", "--no-bokeh"]) as sched:
+        with popen(["dask-worker", "--no-bokeh"]):
+            with Client(os.environ["DASK_SCHEDULER_ADDRESS"], loop=loop) as c:
+                start = time()
+                while not c.scheduler_info()["workers"]:
+                    sleep(0.1)
+                    assert time() < start + 10
 
 
 def test_nprocs_requires_nanny(loop):

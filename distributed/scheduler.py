@@ -36,6 +36,7 @@ from .comm import (
     get_address_host,
     unparse_host_port,
 )
+from .comm.addressing import address_from_user_args
 from .compatibility import finalize, unicode, Mapping, Set
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from . import profile
@@ -190,6 +191,10 @@ class WorkerState(object):
 
        The current status of the worker, either ``'running'`` or ``'closed'``
 
+    .. attribute:: nanny: str
+
+       Address of the associated Nanny, if present
+
     .. attribute:: last_seen: Number
 
        The last time we received a heartbeat from this worker, in local
@@ -214,6 +219,7 @@ class WorkerState(object):
         "memory_limit",
         "metrics",
         "name",
+        "nanny",
         "nbytes",
         "ncores",
         "occupancy",
@@ -235,6 +241,7 @@ class WorkerState(object):
         memory_limit=0,
         local_directory=None,
         services=None,
+        nanny=None,
     ):
         self.address = address
         self.pid = pid
@@ -243,6 +250,7 @@ class WorkerState(object):
         self.memory_limit = memory_limit
         self.local_directory = local_directory
         self.services = services or {}
+        self.nanny = nanny
 
         self.status = "running"
         self.nbytes = 0
@@ -271,6 +279,7 @@ class WorkerState(object):
             memory_limit=self.memory_limit,
             local_directory=self.local_directory,
             services=self.services,
+            nanny=self.nanny,
         )
         ws.processing = {ts.key for ts in self.processing}
         return ws
@@ -298,6 +307,7 @@ class WorkerState(object):
             "last_seen": self.last_seen,
             "services": self.services,
             "metrics": self.metrics,
+            "nanny": self.nanny,
         }
 
 
@@ -819,6 +829,7 @@ class Scheduler(ServerNode):
         delete_interval="500ms",
         synchronize_worker_interval="60s",
         services=None,
+        service_kwargs=None,
         allowed_failures=ALLOWED_FAILURES,
         extensions=None,
         validate=False,
@@ -826,9 +837,13 @@ class Scheduler(ServerNode):
         security=None,
         worker_ttl=None,
         idle_timeout=None,
+        interface=None,
+        host=None,
+        port=8786,
+        protocol=None,
+        dashboard_address=None,
         **kwargs
     ):
-
         self._setup_logging()
 
         # Attributes
@@ -859,6 +874,17 @@ class Scheduler(ServerNode):
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
         self.listen_args = self.security.get_listen_args("scheduler")
+
+        if dashboard_address is not None:
+            try:
+                from distributed.bokeh.scheduler import BokehScheduler
+            except ImportError:
+                logger.debug("To start diagnostics web server please install Bokeh")
+            else:
+                self.service_specs[("bokeh", dashboard_address)] = (
+                    BokehScheduler,
+                    (service_kwargs or {}).get("bokeh", {}),
+                )
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -1058,6 +1084,14 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
+        self._start_address = address_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+        )
+
         super(Scheduler, self).__init__(
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
@@ -1135,49 +1169,11 @@ class Scheduler(ServerNode):
         else:
             return ws.host, port
 
-    def start_services(self, default_listen_ip):
-        if default_listen_ip == "0.0.0.0":
-            default_listen_ip = ""  # for IPV6
-
-        for k, v in self.service_specs.items():
-            listen_ip = None
-            if isinstance(k, tuple):
-                k, port = k
-            else:
-                port = 0
-
-            if isinstance(port, (str, unicode)):
-                port = port.split(":")
-
-            if isinstance(port, (tuple, list)):
-                listen_ip, port = (port[0], int(port[1]))
-
-            if isinstance(v, tuple):
-                v, kwargs = v
-            else:
-                kwargs = {}
-
-            try:
-                service = v(self, io_loop=self.loop, **kwargs)
-                service.listen(
-                    (listen_ip if listen_ip is not None else default_listen_ip, port)
-                )
-                self.services[k] = service
-            except Exception as e:
-                warnings.warn(
-                    "\nCould not launch service '%s' on port %s. " % (k, port)
-                    + "Got the following message:\n\n"
-                    + str(e),
-                    stacklevel=3,
-                )
-
-    def stop_services(self):
-        for service in self.services.values():
-            service.stop()
-
-    def start(self, addr_or_port=8786, start_queues=True):
+    def start(self, addr_or_port=None, start_queues=True):
         """ Clear out old state and restart all running coroutines """
         enable_gc_diagnosis()
+
+        addr_or_port = addr_or_port or self._start_address
 
         self.clear_task_state()
 
@@ -1236,6 +1232,15 @@ class Scheduler(ServerNode):
         setproctitle("dask-scheduler [%s]" % (self.address,))
 
         return self.finished()
+
+    def __await__(self):
+        self.start()
+
+        @gen.coroutine
+        def _():
+            return self
+
+        return _().__await__()
 
     @gen.coroutine
     def finished(self):
@@ -1314,7 +1319,7 @@ class Scheduler(ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            nanny_addr = self.get_worker_service_addr(worker, "nanny", protocol=True)
+            nanny_addr = self.workers[worker].nanny
             address = nanny_addr or worker
 
             self.worker_send(worker, {"op": "close", "report": False})
@@ -1401,6 +1406,7 @@ class Scheduler(ServerNode):
         pid=0,
         services=None,
         local_directory=None,
+        nanny=None,
     ):
         """ Add a new worker to the cluster """
         with log_errors():
@@ -1420,6 +1426,7 @@ class Scheduler(ServerNode):
                 name=name,
                 local_directory=local_directory,
                 services=services,
+                nanny=nanny,
             )
 
             if name in self.aliases:
@@ -2575,10 +2582,7 @@ class Scheduler(ServerNode):
                     keys=[ts.key for ts in cs.wants_what], client=cs.client_key
                 )
 
-            nannies = {
-                addr: self.get_worker_service_addr(addr, "nanny", protocol=True)
-                for addr in self.workers
-            }
+            nannies = {addr: ws.nanny for addr, ws in self.workers.items()}
 
             for addr in list(self.workers):
                 try:
@@ -2661,9 +2665,7 @@ class Scheduler(ServerNode):
         # TODO replace with worker_list
 
         if nanny:
-            addresses = [
-                self.get_worker_service_addr(w, "nanny", protocol=True) for w in workers
-            ]
+            addresses = [self.workers[w].nanny for w in workers]
         else:
             addresses = workers
 

@@ -35,7 +35,6 @@ from distributed.utils_test import (
     cluster,
     div,
     varying,
-    slow,
 )
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from dask.compatibility import apply
@@ -533,8 +532,7 @@ def test_broadcast_nanny(s, a, b):
 
 @gen_test()
 def test_worker_name():
-    s = Scheduler(validate=True)
-    s.start(0)
+    s = yield Scheduler(validate=True, port=0)
     w = yield Worker(s.ip, s.port, name="alice")
     assert s.workers[w.address].name == "alice"
     assert s.aliases["alice"] == w.address
@@ -550,8 +548,7 @@ def test_worker_name():
 @gen_test()
 def test_coerce_address():
     with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-        s = Scheduler(validate=True)
-        s.start(0)
+        s = yield Scheduler(validate=True, port=0)
         print("scheduler:", s.address, s.listen_address)
         a = Worker(s.ip, s.port, name="alice")
         b = Worker(s.ip, s.port, name=123)
@@ -777,7 +774,7 @@ def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     assert all(ts.suspicious == 0 for ts in s.tasks.values())
 
 
-@slow
+@pytest.mark.slow
 @pytest.mark.skipif(
     sys.platform.startswith("win"), reason="file descriptors not really a thing"
 )
@@ -824,7 +821,7 @@ def test_file_descriptors(c, s):
     yield [n.close() for n in nannies]
 
     assert not s.rpc.open
-    assert not c.rpc.active
+    assert not any(occ for addr, occ in c.rpc.occupied.items() if occ != s.address)
     assert not s.stream_comms
 
     start = time()
@@ -833,7 +830,7 @@ def test_file_descriptors(c, s):
         assert time() < start + 3
 
 
-@slow
+@pytest.mark.slow
 @nodebug
 @gen_cluster(client=True)
 def test_learn_occupancy(c, s, a, b):
@@ -846,7 +843,7 @@ def test_learn_occupancy(c, s, a, b):
         assert 50 < s.workers[w.address].occupancy < 700
 
 
-@slow
+@pytest.mark.slow
 @nodebug
 @gen_cluster(client=True)
 def test_learn_occupancy_2(c, s, a, b):
@@ -1064,7 +1061,7 @@ def test_close_worker(c, s, a, b):
     assert len(s.workers) == 1
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=20)
 def test_close_nanny(c, s, a, b):
     assert len(s.workers) == 2
@@ -1133,8 +1130,7 @@ def test_fifo_submission(c, s, w):
 @gen_test()
 def test_scheduler_file():
     with tmpfile() as fn:
-        s = Scheduler(scheduler_file=fn)
-        s.start(0)
+        s = yield Scheduler(scheduler_file=fn, port=0)
         with open(fn) as f:
             data = json.load(f)
         assert data["address"] == s.address
@@ -1536,3 +1532,25 @@ def test_close_workers(s, a, b):
     yield s.close(close_workers=True)
     assert a.status == "closed"
     assert b.status == "closed"
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
+)
+@gen_test()
+def test_host_address():
+    s = yield Scheduler(host="127.0.0.2")
+    assert "127.0.0.2" in s.address
+    yield s.close()
+
+
+@gen_test()
+def test_dashboard_address():
+    pytest.importorskip("bokeh")
+    s = yield Scheduler(dashboard_address="127.0.0.1:8901")
+    assert s.services["bokeh"].port == 8901
+    yield s.close()
+
+    s = yield Scheduler(dashboard_address="127.0.0.1")
+    assert s.services["bokeh"].port
+    yield s.close()

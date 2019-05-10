@@ -33,7 +33,6 @@ from distributed.utils_test import (
     gen_cluster,
     div,
     dec,
-    slow,
     slowinc,
     gen_test,
     captured_logger,
@@ -147,7 +146,7 @@ def test_worker_bad_args(c, s, a, b):
     assert tuple(results) == (3, 7)
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster()
 def dont_test_delete_data_with_missing_worker(c, a, b):
     bad = "127.0.0.1:9001"  # this worker doesn't exist
@@ -304,8 +303,7 @@ def test_broadcast(s, a, b):
 
 @gen_test()
 def test_worker_with_port_zero():
-    s = Scheduler()
-    s.start(8007)
+    s = yield Scheduler(port=8007)
     w = yield Worker(s.address)
     assert isinstance(w.port, int)
     assert w.port > 1024
@@ -313,7 +311,7 @@ def test_worker_with_port_zero():
     yield w.close()
 
 
-@slow
+@pytest.mark.slow
 def test_worker_waits_for_center_to_come_up(loop):
     @gen.coroutine
     def f():
@@ -382,17 +380,22 @@ def test_spill_to_disk(c, s):
     yield wait(y)
 
     assert set(w.data) == {x.key, y.key}
-    assert set(w.data.fast) == {x.key, y.key}
+    assert set(w.data.memory) == {x.key, y.key}
+    assert set(w.data.fast) == set(w.data.memory)
 
     z = c.submit(np.random.randint, 0, 255, size=500, dtype="u1", key="z")
     yield wait(z)
     assert set(w.data) == {x.key, y.key, z.key}
-    assert set(w.data.fast) == {y.key, z.key}
-    assert set(w.data.slow) == {x.key} or set(w.data.slow) == {x.key, y.key}
+    assert set(w.data.memory) == {y.key, z.key}
+    assert set(w.data.disk) == {x.key} or set(w.data.slow) == {x.key, y.key}
+    assert set(w.data.fast) == set(w.data.memory)
+    assert set(w.data.slow) == set(w.data.disk)
 
     yield x
-    assert set(w.data.fast) == {x.key, z.key}
-    assert set(w.data.slow) == {y.key} or set(w.data.slow) == {x.key, y.key}
+    assert set(w.data.memory) == {x.key, z.key}
+    assert set(w.data.disk) == {y.key} or set(w.data.slow) == {x.key, y.key}
+    assert set(w.data.fast) == set(w.data.memory)
+    assert set(w.data.slow) == set(w.data.disk)
     yield w.close()
 
 
@@ -461,7 +464,7 @@ def test_spill_by_default(c, s, w):
     x = da.ones(int(10e6 * 0.7), chunks=1e6, dtype="u1")
     y = c.persist(x)
     yield wait(y)
-    assert len(w.data.slow)  # something is on disk
+    assert len(w.data.disk)  # something is on disk
     del x, y
 
 
@@ -722,7 +725,7 @@ def test_hold_onto_dependents(c, s, a, b):
     assert x.key in b.data
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(client=False, ncores=[])
 def test_worker_death_timeout(s):
     with dask.config.set({"distributed.comm.timeouts.connect": "1s"}):
@@ -1002,8 +1005,7 @@ def test_start_services(s):
 @gen_test()
 def test_scheduler_file():
     with tmpfile() as fn:
-        s = Scheduler(scheduler_file=fn)
-        s.start(8009)
+        s = yield Scheduler(scheduler_file=fn, port=8009)
         w = yield Worker(scheduler_file=fn)
         assert set(s.workers) == {w.address}
         yield w.close()
@@ -1066,7 +1068,7 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
     futures = c.map(f, [100e6] * 8, pure=False)
 
     start = time()
-    while not a.data.slow:
+    while not a.data.disk:
         yield gen.sleep(0.1)
         assert time() < start + 5
 
@@ -1227,7 +1229,7 @@ def test_scheduler_address_config(c, s):
     yield worker.close()
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(client=True)
 def test_wait_for_outgoing(c, s, a, b):
     np = pytest.importorskip("numpy")
@@ -1379,3 +1381,18 @@ def test_data_types(s):
     assert w.data.x == 123
     assert w.data.y == 456
     yield w.close()
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
+)
+@gen_cluster(ncores=[], client=True)
+def test_host_address(c, s):
+    w = yield Worker(s.address, host="127.0.0.2")
+    assert "127.0.0.2" in w.address
+    yield w.close()
+
+    n = yield Nanny(s.address, host="127.0.0.3")
+    assert "127.0.0.3" in n.address
+    assert "127.0.0.3" in n.worker_address
+    yield n.close()
