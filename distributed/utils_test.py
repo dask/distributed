@@ -191,7 +191,6 @@ def pristine_loop():
             pass
         IOLoop.clear_instance()
         IOLoop.clear_current()
-        print("loop closed")
 
 
 @contextmanager
@@ -1453,7 +1452,7 @@ def check_process_leak():
 
     yield
 
-    for i in range(20):
+    for i in range(30):
         if set(mp_context.active_children()) - start_children:
             sleep(0.1)
     else:
