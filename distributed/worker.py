@@ -12,15 +12,16 @@ import threading
 import sys
 import warnings
 import weakref
+import psutil
 
 import dask
 from dask.core import istask
 from dask.compatibility import apply
 
 try:
-    from cytoolz import pluck, partial, merge
+    from cytoolz import pluck, partial, merge, first
 except ImportError:
-    from toolz import pluck, partial, merge
+    from toolz import pluck, partial, merge, first
 from tornado.gen import Return
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -76,15 +77,7 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
-try:
-    import psutil
-
-    TOTAL_MEMORY = psutil.virtual_memory().total
-except ImportError:
-    logger.warning("Please install psutil to estimate worker memory use")
-    TOTAL_MEMORY = 8e9
-    psutil = None
-
+TOTAL_MEMORY = psutil.virtual_memory().total
 
 IN_PLAY = ("waiting", "ready", "executing", "long-running")
 PENDING = ("waiting", "ready", "constrained")
@@ -93,8 +86,6 @@ READY = ("ready", "constrained")
 
 
 DEFAULT_EXTENSIONS = [PubSubWorkerExtension]
-
-_global_workers = []
 
 
 class Worker(ServerNode):
@@ -281,6 +272,8 @@ class Worker(ServerNode):
     distributed.scheduler.Scheduler
     distributed.nanny.Nanny
     """
+
+    _instances = weakref.WeakSet()
 
     def __init__(
         self,
@@ -643,7 +636,7 @@ class Worker(ServerNode):
         )
         self.periodic_callbacks["profile-cycle"] = pc
 
-        _global_workers.append(weakref.ref(self))
+        Worker._instances.add(self)
 
     ##################
     # Administrative #
@@ -1035,22 +1028,11 @@ class Worker(ServerNode):
 
             self.rpc.close()
             self._closed.set()
-            self._remove_from_global_workers()
 
             self.status = "closed"
             yield ServerNode.close(self)
 
             setproctitle("dask-worker [closed]")
-
-    def __del__(self):
-        self._remove_from_global_workers()
-
-    def _remove_from_global_workers(self):
-        for ref in list(_global_workers):
-            if ref() is self:
-                _global_workers.remove(ref)
-            if ref() is None:
-                _global_workers.remove(ref)
 
     @gen.coroutine
     def terminate(self, comm, report=True):
@@ -2820,11 +2802,10 @@ def get_worker():
     try:
         return thread_state.execution_state["worker"]
     except AttributeError:
-        for ref in _global_workers[::-1]:
-            worker = ref()
-            if worker:
-                return worker
-        raise ValueError("No workers found")
+        try:
+            return first(Worker._instances)
+        except StopIteration:
+            raise ValueError("No workers found")
 
 
 def get_client(address=None, timeout=3, resolve_address=True):
@@ -2939,17 +2920,30 @@ class Reschedule(Exception):
 def parse_memory_limit(memory_limit, ncores, total_cores=_ncores):
     if memory_limit is None:
         return None
+
     if memory_limit == "auto":
         memory_limit = int(TOTAL_MEMORY * min(1, ncores / total_cores))
     with ignoring(ValueError, TypeError):
-        x = float(memory_limit)
-        if isinstance(x, float) and x <= 1:
-            return int(x * TOTAL_MEMORY)
+        memory_limit = float(memory_limit)
+        if isinstance(memory_limit, float) and memory_limit <= 1:
+            memory_limit = int(memory_limit * TOTAL_MEMORY)
 
     if isinstance(memory_limit, (unicode, str)):
-        return parse_bytes(memory_limit)
+        memory_limit = parse_bytes(memory_limit)
     else:
-        return int(memory_limit)
+        memory_limit = int(memory_limit)
+
+    # should be less than hard RSS limit
+    try:
+        import resource
+
+        hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]
+        if hard_limit > 0:
+            memory_limit = min(memory_limit, hard_limit)
+    except (ImportError, OSError):
+        pass
+
+    return memory_limit
 
 
 @gen.coroutine
@@ -3299,3 +3293,6 @@ def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=True):
     else:
         response = {"status": "OK", "result": to_serialize(result)}
     raise Return(response)
+
+
+_global_workers = Worker._instances
