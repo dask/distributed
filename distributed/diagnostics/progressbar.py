@@ -431,7 +431,6 @@ def progress(*futures, **kwargs):
     notebook = kwargs.pop("notebook", None)
     multi = kwargs.pop("multi", True)
     complete = kwargs.pop("complete", True)
-    assert not kwargs
 
     futures = futures_of(futures)
     if not isinstance(futures, (set, list)):
