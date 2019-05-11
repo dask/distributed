@@ -1452,9 +1452,11 @@ def check_process_leak():
 
     yield
 
-    for i in range(30):
-        if set(mp_context.active_children()) - start_children:
-            sleep(0.1)
+    for i in range(50):
+        if not set(mp_context.active_children()) - start_children:
+            break
+        else:
+            sleep(0.2)
     else:
         assert not mp_context.active_children()
 
