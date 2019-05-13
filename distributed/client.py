@@ -777,7 +777,7 @@ class Client(Node):
         else:
             return "<%s: not connected>" % (self.__class__.__name__,)
 
-    def _repr_html_(self):
+    def _get_current_info_and_scheduler(self):
         if (
             self.cluster
             and hasattr(self.cluster, "scheduler")
@@ -795,6 +795,10 @@ class Client(Node):
         else:
             info = False
             scheduler = self.scheduler
+        return info, scheduler
+
+    def _repr_html_(self):
+        info, scheduler = self._get_current_info_and_scheduler()
 
         if scheduler is not None:
             text = (
@@ -1066,7 +1070,10 @@ class Client(Node):
         if workers:
             @gen.coroutine
             def f():
-                info = yield self.scheduler.identity()
+                info, _ = self._get_current_info_and_scheduler()
+                while not info:
+                    yield gen.sleep(1)
+                    logger.debug("Waiting for scheduler info in 'wait_until_n' (1s)")
                 raise gen.Return(len(info['workers']))
             return self.sync(self._wait_until_n, f, workers)
 
