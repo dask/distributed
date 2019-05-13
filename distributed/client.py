@@ -1054,14 +1054,21 @@ class Client(Node):
             logger.debug("Not able to query scheduler for identity")
 
     @gen.coroutine
-    def _wait_until_n_workers(self, n):
-        info = yield self.scheduler.identity()
-        while n and len(info['workers']) < n:
-            yield gen.sleep(0.200)
-            info = yield self.scheduler.identity()
+    def _wait_until_n(self, func, n):
+        while n and (yield func()) < n:
+            yield gen.sleep(0.2)
 
-    def wait_until_n_workers(self, n):
-        return self.sync(self._wait_until_n_workers, n)
+    def wait_until_n(self, workers=0):
+        """
+        Note: If you add more arguments, you will need to return a list of
+        futures, or assert that only 1 is called at a time.
+        """
+        if workers:
+            @gen.coroutine
+            def f():
+                info = yield self.scheduler.identity()
+                raise gen.Return(len(info['workers']))
+            return self.sync(self._wait_until_n, f, workers)
 
     def _heartbeat(self):
         if self.scheduler_comm:
