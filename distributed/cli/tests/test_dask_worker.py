@@ -260,7 +260,7 @@ def test_bokeh_non_standard_ports(loop):
             start = time()
             while True:
                 try:
-                    response = requests.get("http://127.0.0.1:4833/main")
+                    response = requests.get("http://127.0.0.1:4833/status")
                     assert response.ok
                     break
                 except Exception:
