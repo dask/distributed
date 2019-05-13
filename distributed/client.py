@@ -1055,8 +1055,10 @@ class Client(Node):
 
     @gen.coroutine
     def _wait_until_n_workers(self, n):
-        while n and len(self.cluster.scheduler.workers) < n:
-            yield gen.sleep(0.01)
+        info = yield self.scheduler.identity()
+        while n and len(info['workers']) < n:
+            yield gen.sleep(0.200)
+            info = yield self.scheduler.identity()
 
     def wait_until_n_workers(self, n):
         return self.sync(self._wait_until_n_workers, n)
