@@ -14,7 +14,6 @@ from tornado import gen
 from .cluster import Cluster
 from ..core import CommClosedError
 from ..utils import (
-    get_ip_interface,
     ignoring,
     All,
     silence_logging,
@@ -49,7 +48,9 @@ class LocalCluster(Cluster):
         Level of logs to print out to stdout.  ``logging.WARN`` by default.
         Use a falsey value like False or None for no change.
     host: string
-        IP address on which the scheduler will listen, defaults to only localhost
+        Host address on which the scheduler will listen, defaults to only localhost
+    ip: string
+        Deprecated.  See ``host`` above.
     dashboard_address: str
         Address on which to listen for the Bokeh diagnostics server like
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
@@ -85,13 +86,9 @@ class LocalCluster(Cluster):
 
     >>> c = Client(cluster)  # connect to local cluster  # doctest: +SKIP
 
-    Add a new worker to the cluster
+    Scale the cluster to three workers
 
-    >>> w = cluster.start_worker(ncores=2)  # doctest: +SKIP
-
-    Shut down the extra worker
-
-    >>> cluster.stop_worker(w)  # doctest: +SKIP
+    >>> cluster.scale(3)  # doctest: +SKIP
 
     Pass extra keyword arguments to Bokeh
 
@@ -124,7 +121,8 @@ class LocalCluster(Cluster):
         **worker_kwargs
     ):
         if ip is not None:
-            raise ValueError("The LocalCluster ip= keyword has moved to host=")
+            warnings.warn("The ip keyword has been moved to host")
+            host = ip
 
         if start is not None:
             msg = (
@@ -156,12 +154,12 @@ class LocalCluster(Cluster):
                 protocol = "tcp://"
         if not protocol.endswith("://"):
             protocol = protocol + "://"
-        self.protocol = protocol
+
+        if host is None and not protocol.startswith("inproc") and not interface:
+            host = "127.0.0.1"
 
         self.silence_logs = silence_logs
         self._asynchronous = asynchronous
-        self.security = security
-        self.interface = interface
         services = services or {}
         worker_services = worker_services or {}
         if silence_logs:
@@ -185,6 +183,8 @@ class LocalCluster(Cluster):
                 "ncores": threads_per_worker,
                 "services": worker_services,
                 "dashboard_address": worker_dashboard_address,
+                "interface": interface,
+                "protocol": protocol,
             }
         )
 
@@ -193,14 +193,16 @@ class LocalCluster(Cluster):
 
         self.scheduler = Scheduler(
             loop=self.loop,
+            host=host,
             services=services,
             service_kwargs=service_kwargs,
             security=security,
+            port=scheduler_port,
             interface=interface,
+            protocol=protocol,
             dashboard_address=dashboard_address,
             blocked_handlers=blocked_handlers,
         )
-        self.scheduler_port = scheduler_port
 
         self.workers = []
         self.worker_kwargs = worker_kwargs
@@ -211,7 +213,7 @@ class LocalCluster(Cluster):
             worker_class = Worker if not processes else Nanny
         self.worker_class = worker_class
 
-        self.start(host=host, n_workers=n_workers)
+        self.start(n_workers=n_workers)
 
         clusters_to_close.add(self)
 
@@ -233,32 +235,17 @@ class LocalCluster(Cluster):
             self.sync(self._start, **kwargs)
 
     @gen.coroutine
-    def _start(self, host=None, n_workers=0):
+    def _start(self, n_workers=0):
         """
         Start all cluster services.
         """
         if self.status == "running":
             return
 
-        if self.protocol == "inproc://":
-            address = self.protocol
-        else:
-            if host is None:
-                if self.interface:
-                    host = get_ip_interface(self.interface)
-                else:
-                    host = "127.0.0.1"
-
-            if "://" in host:
-                address = host
-            else:
-                address = self.protocol + host
-            if self.scheduler_port:
-                address += ":" + str(self.scheduler_port)
-
-        self.scheduler.start(address)
+        self.scheduler.start()
 
         yield [self._start_worker(**self.worker_kwargs) for i in range(n_workers)]
+        yield self.scheduler
 
         self.status = "running"
 
