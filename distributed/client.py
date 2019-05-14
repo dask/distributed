@@ -1061,6 +1061,7 @@ class Client(Node):
             info = yield self.scheduler.identity()
 
     def wait_for_workers(self, n_workers=0):
+        """Blocking call to wait for n workers before continuing"""
         return self.sync(self._wait_for_workers, n_workers)
 
     def _heartbeat(self):
