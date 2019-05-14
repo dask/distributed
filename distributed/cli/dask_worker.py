@@ -8,8 +8,8 @@ from sys import exit
 import warnings
 
 import click
+import dask
 from distributed import Nanny, Worker
-from distributed.config import config
 from distributed.utils import parse_timedelta
 from distributed.worker import _ncores
 from distributed.security import Security
@@ -163,7 +163,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     default=None,
     help="Seconds to wait for a scheduler before closing",
 )
-@click.option("--bokeh-prefix", type=str, default=None, help="Prefix for the bokeh app")
+@click.option("--bokeh-prefix", type=str, default="", help="Prefix for the bokeh app")
 @click.option(
     "--preload",
     type=str,
@@ -288,18 +288,6 @@ def main(
 
     services = {}
 
-    if bokeh:
-        try:
-            from distributed.bokeh.worker import BokehWorker
-        except ImportError:
-            pass
-        else:
-            if bokeh_prefix:
-                result = (BokehWorker, {"prefix": bokeh_prefix})
-            else:
-                result = BokehWorker
-            services[("bokeh", dashboard_address)] = result
-
     if resources:
         resources = resources.replace(",", " ").split()
         resources = dict(pair.split("=") for pair in resources)
@@ -318,7 +306,11 @@ def main(
             kwargs["service_ports"] = {"nanny": nanny_port}
         t = Worker
 
-    if not scheduler and not scheduler_file and "scheduler-address" not in config:
+    if (
+        not scheduler
+        and not scheduler_file
+        and dask.config.get("scheduler-address", None) is None
+    ):
         raise ValueError(
             "Need to provide scheduler address like\n"
             "dask-worker SCHEDULER_ADDRESS:8786"
@@ -346,6 +338,8 @@ def main(
             interface=interface,
             host=host,
             port=port,
+            dashboard_address=dashboard_address if bokeh else None,
+            service_kwargs={"bokhe": {"prefix": bokeh_prefix}},
             name=name if nprocs == 1 or not name else name + "-" + str(i),
             **kwargs
         )

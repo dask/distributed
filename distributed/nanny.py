@@ -9,6 +9,7 @@ import shutil
 import threading
 import uuid
 import warnings
+import weakref
 
 import dask
 from tornado import gen
@@ -42,6 +43,7 @@ class Nanny(ServerNode):
     them as necessary.
     """
 
+    _instances = weakref.WeakSet()
     process = None
     status = None
 
@@ -149,6 +151,7 @@ class Nanny(ServerNode):
         )
 
         self._listen_address = listen_address
+        Nanny._instances.add(self)
         self.status = "init"
 
     def __repr__(self):
@@ -259,7 +262,7 @@ class Nanny(ServerNode):
                 ncores=self.ncores,
                 local_dir=self.local_dir,
                 services=self.services,
-                service_ports={"nanny": self.port},
+                nanny=self.address,
                 name=self.name,
                 memory_limit=self.memory_limit,
                 reconnect=self.reconnect,
