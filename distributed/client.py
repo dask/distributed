@@ -1056,7 +1056,7 @@ class Client(Node):
     @gen.coroutine
     def _wait_for_workers(self, func, n):
         while n and (yield func()) < n:
-            yield gen.sleep(0.2)
+            yield gen.sleep(0.1)
 
     def wait_for_workers(self, n_workers=0):
         """
