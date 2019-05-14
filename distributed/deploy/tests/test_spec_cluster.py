@@ -1,4 +1,4 @@
-from dask.distributed import SpecCluster, Worker, Client
+from dask.distributed import SpecCluster, Worker, Client, Scheduler
 from distributed.utils_test import loop  # noqa: F401
 import pytest
 
@@ -12,11 +12,14 @@ spec = {
     1: {"cls": Worker, "options": {"ncores": 2}},
     "my-worker": {"cls": MyWorker, "options": {"ncores": 3}},
 }
+scheduler = {"cls": Scheduler, "options": {"port": 0}}
 
 
 @pytest.mark.asyncio
 async def test_specification():
-    async with SpecCluster(workers=spec, asynchronous=True) as cluster:
+    async with SpecCluster(
+        workers=spec, scheduler=scheduler, asynchronous=True
+    ) as cluster:
         assert cluster.worker_spec is spec
 
         assert len(cluster.workers) == 3
@@ -38,7 +41,7 @@ async def test_specification():
 
 
 def test_spec_sync(loop):
-    with SpecCluster(workers=spec, loop=loop) as cluster:
+    with SpecCluster(workers=spec, scheduler=scheduler, loop=loop) as cluster:
         assert cluster.worker_spec is spec
         assert cluster.worker_spec is spec
 
@@ -61,3 +64,28 @@ def test_spec_sync(loop):
 
 def test_loop_started():
     cluster = SpecCluster(spec)
+
+
+@pytest.mark.asyncio
+async def test_scale():
+    worker = {"cls": Worker, "options": {"ncores": 1}}
+    async with SpecCluster(
+        asynchronous=True, scheduler=scheduler, worker=worker
+    ) as cluster:
+        assert not cluster.workers
+        assert not cluster.worker_spec
+
+        # Scale up
+        cluster.scale(2)
+        assert not cluster.workers
+        assert cluster.worker_spec
+
+        await cluster
+        assert len(cluster.workers) == 2
+
+        # Scale down
+        cluster.scale(1)
+        assert len(cluster.workers) == 2
+
+        await cluster
+        assert len(cluster.workers) == 1
