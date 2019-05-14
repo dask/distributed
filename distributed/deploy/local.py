@@ -15,7 +15,6 @@ from .cluster import Cluster
 from ..compatibility import get_thread_identity
 from ..core import CommClosedError
 from ..utils import (
-    get_ip_interface,
     sync,
     ignoring,
     All,
@@ -157,6 +156,9 @@ class LocalCluster(Cluster):
             protocol = protocol + "://"
         self.protocol = protocol
 
+        if ip is None and not protocol.startswith("inproc") and not interface:
+            ip = "127.0.0.1"
+
         self.silence_logs = silence_logs
         self._asynchronous = asynchronous
         self.security = security
@@ -184,6 +186,8 @@ class LocalCluster(Cluster):
                 "ncores": threads_per_worker,
                 "services": worker_services,
                 "dashboard_address": worker_dashboard_address,
+                "interface": interface,
+                "protocol": protocol,
             }
         )
 
@@ -192,14 +196,16 @@ class LocalCluster(Cluster):
 
         self.scheduler = Scheduler(
             loop=self.loop,
+            host=ip,
             services=services,
             service_kwargs=service_kwargs,
             security=security,
+            port=scheduler_port,
             interface=interface,
+            protocol=protocol,
             dashboard_address=dashboard_address,
             blocked_handlers=blocked_handlers,
         )
-        self.scheduler_port = scheduler_port
 
         self.workers = []
         self.worker_kwargs = worker_kwargs
@@ -258,25 +264,10 @@ class LocalCluster(Cluster):
         if self.status == "running":
             return
 
-        if self.protocol == "inproc://":
-            address = self.protocol
-        else:
-            if ip is None:
-                if self.interface:
-                    ip = get_ip_interface(self.interface)
-                else:
-                    ip = "127.0.0.1"
-
-            if "://" in ip:
-                address = ip
-            else:
-                address = self.protocol + ip
-            if self.scheduler_port:
-                address += ":" + str(self.scheduler_port)
-
-        self.scheduler.start(address)
+        self.scheduler.start()
 
         yield [self._start_worker(**self.worker_kwargs) for i in range(n_workers)]
+        yield self.scheduler
 
         self.status = "running"
 

@@ -128,7 +128,7 @@ def test_move_unserializable_data():
             assert y.result() is lock
 
 
-def test_transports():
+def test_transports_inproc():
     """
     Test the transport chosen by LocalCluster depending on arguments.
     """
@@ -140,6 +140,8 @@ def test_transports():
         with Client(c.scheduler.address) as e:
             assert e.submit(inc, 4).result() == 5
 
+
+def test_transports_tcp():
     # Have nannies => need TCP
     with LocalCluster(
         1, processes=True, silence_logs=False, dashboard_address=None
@@ -149,6 +151,8 @@ def test_transports():
         with Client(c.scheduler.address) as e:
             assert e.submit(inc, 4).result() == 5
 
+
+def test_transports_tcp_port():
     # Scheduler port specified => need TCP
     with LocalCluster(
         1,
