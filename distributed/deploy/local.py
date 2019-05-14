@@ -89,7 +89,7 @@ class LocalCluster(Cluster):
 
     >>> c = Client(cluster)  # connect to local cluster  # doctest: +SKIP
 
-    Scale the clusterr to three workers
+    Scale the cluster to three workers
 
     >>> cluster.scale(3)  # doctest: +SKIP
 
