@@ -89,13 +89,9 @@ class LocalCluster(Cluster):
 
     >>> c = Client(cluster)  # connect to local cluster  # doctest: +SKIP
 
-    Add a new worker to the cluster
+    Scale the clusterr to three workers
 
-    >>> w = cluster.start_worker(ncores=2)  # doctest: +SKIP
-
-    Shut down the extra worker
-
-    >>> cluster.stop_worker(w)  # doctest: +SKIP
+    >>> cluster.scale(3)  # doctest: +SKIP
 
     Pass extra keyword arguments to Bokeh
 
@@ -161,15 +157,12 @@ class LocalCluster(Cluster):
                 protocol = "tcp://"
         if not protocol.endswith("://"):
             protocol = protocol + "://"
-        self.protocol = protocol
 
         if host is None and not protocol.startswith("inproc") and not interface:
             host = "127.0.0.1"
 
         self.silence_logs = silence_logs
         self._asynchronous = asynchronous
-        self.security = security
-        self.interface = interface
         services = services or {}
         worker_services = worker_services or {}
         if silence_logs:
