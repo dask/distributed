@@ -29,6 +29,7 @@ from bokeh.models import (
     GroupFilter,
     CDSView,
 )
+from bokeh.models.tickers import SingleIntervalTicker
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
@@ -219,11 +220,18 @@ class ProcessingHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Tasks Processing",
+                title="Tasks Processing (Histogram)",
                 id="bk-nprocessing-histogram-plot",
                 name="processing_hist",
+                y_axis_label="frequency",
+                x_axis_type=None,
                 **kwargs
             )
+
+            self.root.x_range.start = 0
+            ticker = SingleIntervalTicker(interval=1)
+            xaxis = LinearAxis(ticker=ticker)
+            self.root.add_layout(xaxis, "below")
 
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
@@ -237,7 +245,8 @@ class ProcessingHistogram(DashboardComponent):
                 right="right",
                 bottom=0,
                 top="top",
-                color="blue",
+                color="deepskyblue",
+                fill_alpha=0.5,
             )
 
     @without_property_validation
@@ -259,11 +268,15 @@ class NBytesHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Bytes Stored",
+                title="Bytes Stored (Histogram)",
                 name="nbytes_hist",
                 id="bk-nbytes-histogram-plot",
+                y_axis_label="frequency",
                 **kwargs
             )
+
+            self.root.x_range.start = 0
+
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = -math.pi / 12
 
@@ -279,7 +292,8 @@ class NBytesHistogram(DashboardComponent):
                 right="right",
                 bottom=0,
                 top="top",
-                color="blue",
+                color="deepskyblue",
+                fill_alpha=0.5,
             )
 
     @without_property_validation
@@ -289,7 +303,7 @@ class NBytesHistogram(DashboardComponent):
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         self.source.data.update(d)
 
-        self.root.title.text = "Bytes stored: " + format_bytes(nbytes.sum())
+        self.root.title.text = "Bytes stored (Histogram): " + format_bytes(nbytes.sum())
 
 
 class CurrentLoad(DashboardComponent):
