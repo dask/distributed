@@ -777,7 +777,7 @@ class Client(Node):
         else:
             return "<%s: not connected>" % (self.__class__.__name__,)
 
-    def _get_current_info_and_scheduler(self):
+    def _repr_html_(self):
         if (
             self.cluster
             and hasattr(self.cluster, "scheduler")
@@ -795,10 +795,6 @@ class Client(Node):
         else:
             info = False
             scheduler = self.scheduler
-        return info, scheduler
-
-    def _repr_html_(self):
-        info, scheduler = self._get_current_info_and_scheduler()
 
         if scheduler is not None:
             text = (
@@ -1058,24 +1054,21 @@ class Client(Node):
             logger.debug("Not able to query scheduler for identity")
 
     @gen.coroutine
-    def _wait_until_n(self, func, n):
+    def _wait_for_workers(self, func, n):
         while n and (yield func()) < n:
             yield gen.sleep(0.2)
 
-    def wait_until_n(self, workers=0):
+    def wait_for_workers(self, n_workers=0):
         """
         Note: If you add more arguments, you will need to return a list of
         futures, or assert that only 1 is called at a time.
         """
-        if workers:
+        if n_workers:
             @gen.coroutine
             def f():
-                info, _ = self._get_current_info_and_scheduler()
-                while not info:
-                    yield gen.sleep(1)
-                    logger.debug("Waiting for scheduler info in 'wait_until_n' (1s)")
+                info = yield self.scheduler.identity()
                 raise gen.Return(len(info['workers']))
-            return self.sync(self._wait_until_n, f, workers)
+            return self.sync(self._wait_for_workers, f, n_workers)
 
     def _heartbeat(self):
         if self.scheduler_comm:
