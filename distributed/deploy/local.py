@@ -50,8 +50,10 @@ class LocalCluster(Cluster):
     silence_logs: logging level
         Level of logs to print out to stdout.  ``logging.WARN`` by default.
         Use a falsey value like False or None for no change.
+    host: string
+        Host address on which the scheduler will listen, defaults to only localhost
     ip: string
-        IP address on which the scheduler will listen, defaults to only localhost
+        Deprecated.  See ``host`` above.
     dashboard_address: str
         Address on which to listen for the Bokeh diagnostics server like
         'localhost:8787' or '0.0.0.0:8787'.  Defaults to ':8787'.
@@ -108,6 +110,7 @@ class LocalCluster(Cluster):
         loop=None,
         start=None,
         ip=None,
+        host=None,
         scheduler_port=0,
         silence_logs=logging.WARN,
         dashboard_address=":8787",
@@ -124,6 +127,10 @@ class LocalCluster(Cluster):
         worker_class=None,
         **worker_kwargs
     ):
+        if ip is not None:
+            warnings.warn("The ip keyword has been moved to host")
+            host = ip
+
         if start is not None:
             msg = (
                 "The start= parameter is deprecated. "
@@ -144,8 +151,8 @@ class LocalCluster(Cluster):
         self.processes = processes
 
         if protocol is None:
-            if ip and "://" in ip:
-                protocol = ip.split("://")[0]
+            if host and "://" in host:
+                protocol = host.split("://")[0]
             elif security:
                 protocol = "tls://"
             elif not self.processes and not scheduler_port:
@@ -156,8 +163,8 @@ class LocalCluster(Cluster):
             protocol = protocol + "://"
         self.protocol = protocol
 
-        if ip is None and not protocol.startswith("inproc") and not interface:
-            ip = "127.0.0.1"
+        if host is None and not protocol.startswith("inproc") and not interface:
+            host = "127.0.0.1"
 
         self.silence_logs = silence_logs
         self._asynchronous = asynchronous
@@ -196,7 +203,7 @@ class LocalCluster(Cluster):
 
         self.scheduler = Scheduler(
             loop=self.loop,
-            host=ip,
+            host=host,
             services=services,
             service_kwargs=service_kwargs,
             security=security,
@@ -216,7 +223,7 @@ class LocalCluster(Cluster):
             worker_class = Worker if not processes else Nanny
         self.worker_class = worker_class
 
-        self.start(ip=ip, n_workers=n_workers)
+        self.start(n_workers=n_workers)
 
         clusters_to_close.add(self)
 
@@ -257,7 +264,7 @@ class LocalCluster(Cluster):
             self.sync(self._start, **kwargs)
 
     @gen.coroutine
-    def _start(self, ip=None, n_workers=0):
+    def _start(self, n_workers=0):
         """
         Start all cluster services.
         """
