@@ -224,14 +224,8 @@ class ProcessingHistogram(DashboardComponent):
                 id="bk-nprocessing-histogram-plot",
                 name="processing_hist",
                 y_axis_label="frequency",
-                x_axis_type=None,
                 **kwargs
             )
-
-            self.root.x_range.start = 0
-            ticker = SingleIntervalTicker(interval=1)
-            xaxis = LinearAxis(ticker=ticker)
-            self.root.add_layout(xaxis, "below")
 
             self.root.xaxis.minor_tick_line_alpha = 0
             self.root.ygrid.visible = False
@@ -274,8 +268,6 @@ class NBytesHistogram(DashboardComponent):
                 y_axis_label="frequency",
                 **kwargs
             )
-
-            self.root.x_range.start = 0
 
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = -math.pi / 12
