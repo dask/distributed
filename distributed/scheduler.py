@@ -12,7 +12,7 @@ import os
 import pickle
 import random
 import six
-import warnings
+import weakref
 
 import psutil
 import sortedcontainers
@@ -35,6 +35,7 @@ from .comm import (
     get_address_host,
     unparse_host_port,
 )
+from .comm.addressing import address_from_user_args
 from .compatibility import finalize, unicode, Mapping, Set
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from . import profile
@@ -53,6 +54,7 @@ from .utils import (
     no_default,
     DequeHandler,
     parse_timedelta,
+    parse_bytes,
     PeriodicCallback,
     shutting_down,
 )
@@ -71,7 +73,6 @@ from .variable import VariableExtension
 logger = logging.getLogger(__name__)
 
 
-BANDWIDTH = dask.config.get("distributed.scheduler.bandwidth")
 ALLOWED_FAILURES = dask.config.get("distributed.scheduler.allowed-failures")
 
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
@@ -189,6 +190,10 @@ class WorkerState(object):
 
        The current status of the worker, either ``'running'`` or ``'closed'``
 
+    .. attribute:: nanny: str
+
+       Address of the associated Nanny, if present
+
     .. attribute:: last_seen: Number
 
        The last time we received a heartbeat from this worker, in local
@@ -213,6 +218,7 @@ class WorkerState(object):
         "memory_limit",
         "metrics",
         "name",
+        "nanny",
         "nbytes",
         "ncores",
         "occupancy",
@@ -234,6 +240,7 @@ class WorkerState(object):
         memory_limit=0,
         local_directory=None,
         services=None,
+        nanny=None,
     ):
         self.address = address
         self.pid = pid
@@ -242,6 +249,7 @@ class WorkerState(object):
         self.memory_limit = memory_limit
         self.local_directory = local_directory
         self.services = services or {}
+        self.nanny = nanny
 
         self.status = "running"
         self.nbytes = 0
@@ -259,6 +267,21 @@ class WorkerState(object):
     @property
     def host(self):
         return get_address_host(self.address)
+
+    def clean(self):
+        """ Return a version of this object that is appropriate for serialization """
+        ws = WorkerState(
+            address=self.address,
+            pid=self.pid,
+            name=self.name,
+            ncores=self.ncores,
+            memory_limit=self.memory_limit,
+            local_directory=self.local_directory,
+            services=self.services,
+            nanny=self.nanny,
+        )
+        ws.processing = {ts.key for ts in self.processing}
+        return ws
 
     def __repr__(self):
         return "<Worker %r, memory: %d, processing: %d>" % (
@@ -283,6 +306,7 @@ class WorkerState(object):
             "last_seen": self.last_seen,
             "services": self.services,
             "metrics": self.metrics,
+            "nanny": self.nanny,
         }
 
 
@@ -439,6 +463,11 @@ class TaskState(object):
        of a finished task.  This number is used for diagnostics and to
        help prioritize work.
 
+    .. attribute:: type: str
+
+       The type of the object as a string.  Only present for tasks that have
+       been computed.
+
     .. attribute:: exception: object
 
        If this task failed executing, the exception object is stored here.
@@ -552,6 +581,7 @@ class TaskState(object):
         "suspicious",
         "retries",
         "nbytes",
+        "type",
     )
 
     def __init__(self, key, run_spec):
@@ -576,6 +606,7 @@ class TaskState(object):
         self.resource_restrictions = None
         self.loose_restrictions = False
         self.actor = None
+        self.type = None
 
     def get_nbytes(self):
         nbytes = self.nbytes
@@ -789,6 +820,7 @@ class Scheduler(ServerNode):
     """
 
     default_port = 8786
+    _instances = weakref.WeakSet()
 
     def __init__(
         self,
@@ -796,15 +828,21 @@ class Scheduler(ServerNode):
         delete_interval="500ms",
         synchronize_worker_interval="60s",
         services=None,
+        service_kwargs=None,
         allowed_failures=ALLOWED_FAILURES,
         extensions=None,
         validate=False,
         scheduler_file=None,
         security=None,
         worker_ttl=None,
+        idle_timeout=None,
+        interface=None,
+        host=None,
+        port=8786,
+        protocol=None,
+        dashboard_address=None,
         **kwargs
     ):
-
         self._setup_logging()
 
         # Attributes
@@ -822,11 +860,31 @@ class Scheduler(ServerNode):
         self.scheduler_file = scheduler_file
         worker_ttl = worker_ttl or dask.config.get("distributed.scheduler.worker-ttl")
         self.worker_ttl = parse_timedelta(worker_ttl) if worker_ttl else None
+        idle_timeout = idle_timeout or dask.config.get(
+            "distributed.scheduler.idle-timeout"
+        )
+        if idle_timeout:
+            self.idle_timeout = parse_timedelta(idle_timeout)
+        else:
+            self.idle_timeout = None
+        self.time_started = time()
+        self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("scheduler")
         self.listen_args = self.security.get_listen_args("scheduler")
+
+        if dashboard_address is not None:
+            try:
+                from distributed.bokeh.scheduler import BokehScheduler
+            except ImportError:
+                logger.debug("To start diagnostics web server please install Bokeh")
+            else:
+                self.service_specs[("bokeh", dashboard_address)] = (
+                    BokehScheduler,
+                    (service_kwargs or {}).get("bokeh", {}),
+                )
 
         # Communication state
         self.loop = loop or IOLoop.current()
@@ -1026,6 +1084,14 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
+        self._start_address = address_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+        )
+
         super(Scheduler, self).__init__(
             handlers=self.handlers,
             stream_handlers=merge(worker_handlers, client_handlers),
@@ -1040,12 +1106,17 @@ class Scheduler(ServerNode):
             pc = PeriodicCallback(self.check_worker_ttl, self.worker_ttl, io_loop=loop)
             self.periodic_callbacks["worker-ttl"] = pc
 
+        if self.idle_timeout:
+            pc = PeriodicCallback(self.check_idle, self.idle_timeout / 4, io_loop=loop)
+            self.periodic_callbacks["idle-timeout"] = pc
+
         if extensions is None:
             extensions = DEFAULT_EXTENSIONS
         for ext in extensions:
             ext(self)
 
         setproctitle("dask-scheduler [not started]")
+        Scheduler._instances.add(self)
 
     ##################
     # Administration #
@@ -1098,49 +1169,11 @@ class Scheduler(ServerNode):
         else:
             return ws.host, port
 
-    def start_services(self, default_listen_ip):
-        if default_listen_ip == "0.0.0.0":
-            default_listen_ip = ""  # for IPV6
-
-        for k, v in self.service_specs.items():
-            listen_ip = None
-            if isinstance(k, tuple):
-                k, port = k
-            else:
-                port = 0
-
-            if isinstance(port, (str, unicode)):
-                port = port.split(":")
-
-            if isinstance(port, (tuple, list)):
-                listen_ip, port = (port[0], int(port[1]))
-
-            if isinstance(v, tuple):
-                v, kwargs = v
-            else:
-                kwargs = {}
-
-            try:
-                service = v(self, io_loop=self.loop, **kwargs)
-                service.listen(
-                    (listen_ip if listen_ip is not None else default_listen_ip, port)
-                )
-                self.services[k] = service
-            except Exception as e:
-                warnings.warn(
-                    "\nCould not launch service '%s' on port %s. " % (k, port)
-                    + "Got the following message:\n\n"
-                    + str(e),
-                    stacklevel=3,
-                )
-
-    def stop_services(self):
-        for service in self.services.values():
-            service.stop()
-
-    def start(self, addr_or_port=8786, start_queues=True):
+    def start(self, addr_or_port=None, start_queues=True):
         """ Clear out old state and restart all running coroutines """
         enable_gc_diagnosis()
+
+        addr_or_port = addr_or_port or self._start_address
 
         self.clear_task_state()
 
@@ -1200,6 +1233,15 @@ class Scheduler(ServerNode):
 
         return self.finished()
 
+    def __await__(self):
+        self.start()
+
+        @gen.coroutine
+        def _():
+            return self
+
+        return _().__await__()
+
     @gen.coroutine
     def finished(self):
         """ Wait until all coroutines have ceased """
@@ -1207,7 +1249,7 @@ class Scheduler(ServerNode):
             yield All(self.coroutines)
 
     @gen.coroutine
-    def close(self, comm=None, fast=False):
+    def close(self, comm=None, fast=False, close_workers=False):
         """ Send cleanup signal to all coroutines then wait until finished
 
         See Also
@@ -1220,6 +1262,15 @@ class Scheduler(ServerNode):
 
         logger.info("Scheduler closing...")
         setproctitle("dask-scheduler [closing]")
+
+        if close_workers:
+            for worker in self.workers:
+                self.worker_send(worker, {"op": "close"})
+            for i in range(20):  # wait a second for send signals to clear
+                if self.workers:
+                    yield gen.sleep(0.05)
+                else:
+                    break
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
@@ -1268,7 +1319,7 @@ class Scheduler(ServerNode):
         logger.info("Closing worker %s", worker)
         with log_errors():
             self.log_event(worker, {"action": "close-worker"})
-            nanny_addr = self.get_worker_service_addr(worker, "nanny", protocol=True)
+            nanny_addr = self.workers[worker].nanny
             address = nanny_addr or worker
 
             self.worker_send(worker, {"op": "close", "report": False})
@@ -1309,6 +1360,8 @@ class Scheduler(ServerNode):
         host_info = host_info or {}
 
         self.host_info[host]["last-seen"] = local_now
+        frac = 1 / 20 / len(self.workers)
+        self.bandwidth = self.bandwidth * (1 - frac) + metrics["bandwidth"] * frac
 
         ws = self.workers.get(address)
         if not ws:
@@ -1346,6 +1399,7 @@ class Scheduler(ServerNode):
         name=None,
         resolve_address=True,
         nbytes=None,
+        types=None,
         now=None,
         resources=None,
         host_info=None,
@@ -1354,6 +1408,7 @@ class Scheduler(ServerNode):
         pid=0,
         services=None,
         local_directory=None,
+        nanny=None,
     ):
         """ Add a new worker to the cluster """
         with log_errors():
@@ -1373,6 +1428,7 @@ class Scheduler(ServerNode):
                 name=name,
                 local_directory=local_directory,
                 services=services,
+                nanny=nanny,
             )
 
             if name in self.aliases:
@@ -1424,7 +1480,11 @@ class Scheduler(ServerNode):
                     ts = self.tasks.get(key)
                     if ts is not None and ts.state in ("processing", "waiting"):
                         recommendations = self.transition(
-                            key, "memory", worker=address, nbytes=nbytes[key]
+                            key,
+                            "memory",
+                            worker=address,
+                            nbytes=nbytes[key],
+                            typename=types[key],
                         )
                         self.transitions(recommendations)
 
@@ -1872,7 +1932,9 @@ class Scheduler(ServerNode):
                     ts.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
                         del recommendations[k]
-                        e = pickle.dumps(KilledWorker(k, address))
+                        e = pickle.dumps(
+                            KilledWorker(task=k, last_worker=ws.clean()), -1
+                        )
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)
 
@@ -2160,6 +2222,7 @@ class Scheduler(ServerNode):
         We listen to all future messages from this Comm.
         """
         assert client is not None
+        comm.name = "Scheduler->Client"
         logger.info("Receive client connection: %s", client)
         self.log_event(["all", client], {"action": "add-client", "client": client})
         self.clients[client] = ClientState(client)
@@ -2357,6 +2420,7 @@ class Scheduler(ServerNode):
         --------
         Scheduler.handle_client: Equivalent coroutine for clients
         """
+        comm.name = "Scheduler connection to worker"
         worker_comm = self.stream_comms[worker]
         worker_comm.start(comm)
         logger.info("Starting worker compute stream, %s", worker)
@@ -2520,10 +2584,7 @@ class Scheduler(ServerNode):
                     keys=[ts.key for ts in cs.wants_what], client=cs.client_key
                 )
 
-            nannies = {
-                addr: self.get_worker_service_addr(addr, "nanny", protocol=True)
-                for addr in self.workers
-            }
+            nannies = {addr: ws.nanny for addr, ws in self.workers.items()}
 
             for addr in list(self.workers):
                 try:
@@ -2606,9 +2667,7 @@ class Scheduler(ServerNode):
         # TODO replace with worker_list
 
         if nanny:
-            addresses = [
-                self.get_worker_service_addr(w, "nanny", protocol=True) for w in workers
-            ]
+            addresses = [self.workers[w].nanny for w in workers]
         else:
             addresses = workers
 
@@ -2617,6 +2676,7 @@ class Scheduler(ServerNode):
             comm = yield connect(
                 addr, deserialize=self.deserialize, connection_args=self.connection_args
             )
+            comm.name = "Scheduler Broadcast"
             resp = yield send_recv(comm, close=True, serializers=serializers, **msg)
             raise gen.Return(resp)
 
@@ -3279,7 +3339,7 @@ class Scheduler(ServerNode):
         Get the estimated communication cost (in s.) to compute the task
         on the given worker.
         """
-        return sum(dts.nbytes for dts in ts.dependencies - ws.has_what) / BANDWIDTH
+        return sum(dts.nbytes for dts in ts.dependencies - ws.has_what) / self.bandwidth
 
     def get_task_duration(self, ts, default=0.5):
         """
@@ -3377,7 +3437,9 @@ class Scheduler(ServerNode):
             if send_worker_msg:
                 self.worker_send(w, send_worker_msg)
 
-    def _add_to_memory(self, ts, ws, recommendations, type=None, **kwargs):
+    def _add_to_memory(
+        self, ts, ws, recommendations, type=None, typename=None, **kwargs
+    ):
         """
         Add *ts* to the set of in-memory tasks.
         """
@@ -3413,6 +3475,7 @@ class Scheduler(ServerNode):
             self.report(msg)
 
         ts.state = "memory"
+        ts.type = typename
 
         cs = self.clients["fire-and-forget"]
         if ts in cs.wants_what:
@@ -3635,7 +3698,14 @@ class Scheduler(ServerNode):
             raise
 
     def transition_processing_memory(
-        self, key, nbytes=None, type=None, worker=None, startstops=None, **kwargs
+        self,
+        key,
+        nbytes=None,
+        type=None,
+        typename=None,
+        worker=None,
+        startstops=None,
+        **kwargs
     ):
         try:
             ts = self.tasks[key]
@@ -3708,7 +3778,7 @@ class Scheduler(ServerNode):
 
             self._remove_from_processing(ts)
 
-            self._add_to_memory(ts, ws, recommendations, type=type)
+            self._add_to_memory(ts, ws, recommendations, type=type, typename=typename)
 
             if self.validate:
                 assert not ts.processing_on
@@ -4455,7 +4525,7 @@ class Scheduler(ServerNode):
             [dts.get_nbytes() for dts in ts.dependencies if ws not in dts.who_has]
         )
         stack_time = ws.occupancy / ws.ncores
-        start_time = comm_bytes / BANDWIDTH + stack_time
+        start_time = comm_bytes / self.bandwidth + stack_time
 
         if ts.actor:
             return (len(ws.actors), start_time, ws.nbytes)
@@ -4632,6 +4702,21 @@ class Scheduler(ServerNode):
                 )
                 self.remove_worker(address=ws.address)
 
+    def check_idle(self):
+        if any(ws.processing for ws in self.workers.values()):
+            return
+        if self.unrunnable:
+            return
+
+        if not self.transition_log:
+            close = time() > self.time_started + self.idle_timeout
+        else:
+            last_task = self.transition_log[-1][-1]
+            close = time() > last_task + self.idle_timeout
+
+        if close:
+            self.loop.add_callback(self.close)
+
 
 def decide_worker(ts, all_workers, valid_workers, objective):
     """
@@ -4745,6 +4830,9 @@ def validate_task_state(ts):
             str(ts),
             str(ts.who_has),
         )
+        if ts.run_spec:  # was computed
+            assert ts.type
+            assert isinstance(ts.type, str)
         assert not any(ts in dts.waiting_on for dts in ts.dependents)
         for ws in ts.who_has:
             assert ts in ws.has_what, (
@@ -4827,4 +4915,7 @@ def heartbeat_interval(n):
 
 
 class KilledWorker(Exception):
-    pass
+    def __init__(self, task, last_worker):
+        super(KilledWorker, self).__init__(task, last_worker)
+        self.task = task
+        self.last_worker = last_worker

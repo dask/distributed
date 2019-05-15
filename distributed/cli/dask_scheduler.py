@@ -3,7 +3,9 @@ from __future__ import print_function, division, absolute_import
 import atexit
 import dask
 import logging
+import gc
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -15,12 +17,7 @@ from tornado.ioloop import IOLoop
 
 from distributed import Scheduler
 from distributed.security import Security
-from distributed.utils import get_ip_interface
-from distributed.cli.utils import (
-    check_python_3,
-    install_signal_handlers,
-    uri_from_host_port,
-)
+from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.preloading import preload_modules, validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -137,6 +134,8 @@ def main(
     tls_key,
     dashboard_address,
 ):
+    g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
+    gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
 
     enable_proctitle_on_current()
     enable_proctitle_on_children()
@@ -147,6 +146,9 @@ def main(
             "Consider adding ``--dashboard-address :%d`` " % bokeh_port
         )
         dashboard_address = bokeh_port
+
+    if port is None and (not host or not re.search(r":\d", host)):
+        port = 8786
 
     sec = Security(
         tls_ca_file=tls_ca_file, tls_scheduler_cert=tls_cert, tls_scheduler_key=tls_key
@@ -183,36 +185,20 @@ def main(
         limit = max(soft, hard // 2)
         resource.setrlimit(resource.RLIMIT_NOFILE, (limit, hard))
 
-    if interface:
-        if host:
-            raise ValueError("Can not specify both interface and host")
-        else:
-            host = get_ip_interface(interface)
-
-    addr = uri_from_host_port(host, port, 8786)
-
     loop = IOLoop.current()
     logger.info("-" * 47)
 
-    services = {}
-    if _bokeh:
-        try:
-            from distributed.bokeh.scheduler import BokehScheduler
-
-            services[("bokeh", dashboard_address)] = (
-                BokehScheduler,
-                {"prefix": bokeh_prefix},
-            )
-        except ImportError as error:
-            if str(error).startswith("No module named"):
-                logger.info("Web dashboard not loaded.  Unable to import bokeh")
-            else:
-                logger.info("Unable to import bokeh: %s" % str(error))
-
     scheduler = Scheduler(
-        loop=loop, services=services, scheduler_file=scheduler_file, security=sec
+        loop=loop,
+        scheduler_file=scheduler_file,
+        security=sec,
+        host=host,
+        port=port,
+        interface=interface,
+        dashboard_address=dashboard_address if _bokeh else None,
+        service_kwargs={"bokeh": {"prefix": bokeh_prefix}},
     )
-    scheduler.start(addr)
+    scheduler.start()
     if not preload:
         preload = dask.config.get("distributed.scheduler.preload")
     if not preload_argv:
@@ -234,7 +220,7 @@ def main(
         if local_directory_created:
             shutil.rmtree(local_directory)
 
-        logger.info("End scheduler at %r", addr)
+        logger.info("End scheduler at %r", scheduler.address)
 
 
 def go():

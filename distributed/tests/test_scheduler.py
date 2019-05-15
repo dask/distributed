@@ -1,10 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
 import cloudpickle
+import pickle
 from collections import defaultdict
 from datetime import timedelta
 import json
-from operator import add, mul
+import operator
 import sys
 from time import sleep
 
@@ -17,7 +18,7 @@ import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
 from distributed.core import connect, rpc
-from distributed.scheduler import Scheduler, BANDWIDTH
+from distributed.scheduler import Scheduler
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -34,7 +35,6 @@ from distributed.utils_test import (
     cluster,
     div,
     varying,
-    slow,
 )
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from dask.compatibility import apply
@@ -63,7 +63,7 @@ def test_respect_data_in_memory(c, s, a):
 
     assert s.tasks[y.key].who_has == {s.workers[a.address]}
 
-    z = delayed(add)(x, y)
+    z = delayed(operator.add)(x, y)
     f2 = c.persist(z)
     while f2.key not in s.tasks or not s.tasks[f2.key]:
         assert s.tasks[y.key].who_has
@@ -253,7 +253,7 @@ def test_clear_events_client_removal(c, s, a, b):
 
 @gen_cluster()
 def test_add_worker(s, a, b):
-    w = Worker(s.ip, s.port, ncores=3)
+    w = Worker(s.address, ncores=3)
     w.data["x-5"] = 6
     w.data["y"] = 1
     yield w
@@ -274,7 +274,7 @@ def test_add_worker(s, a, b):
 
     assert w.ip in s.host_info
     assert s.host_info[w.ip]["addresses"] == {a.address, b.address, w.address}
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(scheduler_kwargs={"blocked_handlers": ["feed"]})
@@ -427,7 +427,10 @@ def test_filtered_communication(s, a, b):
     yield f.write(
         {
             "op": "update-graph",
-            "tasks": {"x": dumps_task((inc, 1)), "z": dumps_task((add, "x", 10))},
+            "tasks": {
+                "x": dumps_task((inc, 1)),
+                "z": dumps_task((operator.add, "x", 10)),
+            },
             "dependencies": {"x": [], "z": ["x"]},
             "client": "f",
             "keys": ["z"],
@@ -532,28 +535,26 @@ def test_broadcast_nanny(s, a, b):
 
 @gen_test()
 def test_worker_name():
-    s = Scheduler(validate=True)
-    s.start(0)
-    w = yield Worker(s.ip, s.port, name="alice")
+    s = yield Scheduler(validate=True, port=0)
+    w = yield Worker(s.address, name="alice")
     assert s.workers[w.address].name == "alice"
     assert s.aliases["alice"] == w.address
 
     with pytest.raises(ValueError):
-        w2 = yield Worker(s.ip, s.port, name="alice")
-        yield w2._close()
+        w2 = yield Worker(s.address, name="alice")
+        yield w2.close()
 
+    yield w.close()
     yield s.close()
-    yield w._close()
 
 
 @gen_test()
 def test_coerce_address():
     with dask.config.set({"distributed.comm.timeouts.connect": "100ms"}):
-        s = Scheduler(validate=True)
-        s.start(0)
+        s = yield Scheduler(validate=True, port=0)
         print("scheduler:", s.address, s.listen_address)
-        a = Worker(s.ip, s.port, name="alice")
-        b = Worker(s.ip, s.port, name=123)
+        a = Worker(s.address, name="alice")
+        b = Worker(s.address, name=123)
         c = Worker("127.0.0.1", s.port, name="charlie")
         yield [a, b, c]
 
@@ -584,7 +585,7 @@ def test_coerce_address():
         assert s.coerce_address("zzzt:8000", resolve=False) == "tcp://zzzt:8000"
 
         yield s.close()
-        yield [w._close() for w in [a, b, c]]
+        yield [w.close() for w in [a, b, c]]
 
 
 @pytest.mark.skipif(
@@ -596,8 +597,8 @@ def test_file_descriptors_dont_leak(s):
     proc = psutil.Process()
     before = proc.num_fds()
 
-    w = yield Worker(s.ip, s.port)
-    yield w._close()
+    w = yield Worker(s.address)
+    yield w.close()
 
     during = proc.num_fds()
 
@@ -663,19 +664,19 @@ def test_scatter_no_workers(c, s):
         yield c.scatter(123, timeout=0.1)
     assert time() < start + 1.5
 
-    w = Worker(s.ip, s.port, ncores=3)
+    w = Worker(s.address, ncores=3)
     yield [c.scatter(data={"y": 2}, timeout=5), w._start()]
 
     assert w.data["y"] == 2
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(ncores=[])
 def test_scheduler_sees_memory_limits(s):
-    w = yield Worker(s.ip, s.port, ncores=3, memory_limit=12345)
+    w = yield Worker(s.address, ncores=3, memory_limit=12345)
 
     assert s.workers[w.address].memory_limit == 12345
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(client=True, timeout=1000)
@@ -776,7 +777,7 @@ def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     assert all(ts.suspicious == 0 for ts in s.tasks.values())
 
 
-@slow
+@pytest.mark.slow
 @pytest.mark.skipif(
     sys.platform.startswith("win"), reason="file descriptors not really a thing"
 )
@@ -790,7 +791,7 @@ def test_file_descriptors(c, s):
     num_fds_1 = proc.num_fds()
 
     N = 20
-    nannies = yield [Nanny(s.ip, s.port, loop=s.loop) for i in range(N)]
+    nannies = yield [Nanny(s.address, loop=s.loop) for i in range(N)]
 
     while len(s.ncores) < N:
         yield gen.sleep(0.1)
@@ -820,10 +821,12 @@ def test_file_descriptors(c, s):
     num_fds_6 = proc.num_fds()
     assert num_fds_6 < num_fds_5 + N
 
-    yield [n._close() for n in nannies]
+    yield [n.close() for n in nannies]
 
     assert not s.rpc.open
-    assert not c.rpc.open
+    assert not any(
+        occ for addr, occ in c.rpc.occupied.items() if occ != s.address
+    ), list(c.rpc._created)
     assert not s.stream_comms
 
     start = time()
@@ -832,7 +835,7 @@ def test_file_descriptors(c, s):
         assert time() < start + 3
 
 
-@slow
+@pytest.mark.slow
 @nodebug
 @gen_cluster(client=True)
 def test_learn_occupancy(c, s, a, b):
@@ -845,7 +848,7 @@ def test_learn_occupancy(c, s, a, b):
         assert 50 < s.workers[w.address].occupancy < 700
 
 
-@slow
+@pytest.mark.slow
 @nodebug
 @gen_cluster(client=True)
 def test_learn_occupancy_2(c, s, a, b):
@@ -903,8 +906,8 @@ def test_learn_occupancy_multiple_workers(c, s, a, b):
 @gen_cluster(client=True)
 def test_include_communication_in_occupancy(c, s, a, b):
     s.task_duration["slowadd"] = 0.001
-    x = c.submit(mul, b"0", int(BANDWIDTH), workers=a.address)
-    y = c.submit(mul, b"1", int(BANDWIDTH * 1.5), workers=b.address)
+    x = c.submit(operator.mul, b"0", int(s.bandwidth), workers=a.address)
+    y = c.submit(operator.mul, b"1", int(s.bandwidth * 1.5), workers=b.address)
 
     z = c.submit(slowadd, x, y, delay=1)
     while z.key not in s.tasks or not s.tasks[z.key].processing_on:
@@ -928,7 +931,7 @@ def test_worker_arrives_with_processing_data(c, s, a, b):
     while not any(w.processing for w in s.workers.values()):
         yield gen.sleep(0.01)
 
-    w = Worker(s.ip, s.port, ncores=1)
+    w = Worker(s.address, ncores=1)
     w.put_key_in_memory(y.key, 3)
 
     yield w
@@ -944,7 +947,7 @@ def test_worker_arrives_with_processing_data(c, s, a, b):
         z.key: "processing",
     }
 
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(client=True, ncores=[("127.0.0.1", 1)])
@@ -979,7 +982,7 @@ def test_no_workers_to_memory(c, s):
     while not s.tasks:
         yield gen.sleep(0.01)
 
-    w = Worker(s.ip, s.port, ncores=1)
+    w = Worker(s.address, ncores=1)
     w.put_key_in_memory(y.key, 3)
 
     yield w
@@ -995,7 +998,7 @@ def test_no_workers_to_memory(c, s):
         z.key: "processing",
     }
 
-    yield w._close()
+    yield w.close()
 
 
 @gen_cluster(client=True)
@@ -1009,7 +1012,7 @@ def test_no_worker_to_memory_restrictions(c, s, a, b):
     while not s.tasks:
         yield gen.sleep(0.01)
 
-    w = Worker(s.ip, s.port, ncores=1, name="alice")
+    w = Worker(s.address, ncores=1, name="alice")
     w.put_key_in_memory(y.key, 3)
 
     yield w
@@ -1024,7 +1027,7 @@ def test_no_worker_to_memory_restrictions(c, s, a, b):
         z.key: "processing",
     }
 
-    yield w._close()
+    yield w.close()
 
 
 def test_run_on_scheduler_sync(loop):
@@ -1063,7 +1066,7 @@ def test_close_worker(c, s, a, b):
     assert len(s.workers) == 1
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(client=True, Worker=Nanny, timeout=20)
 def test_close_nanny(c, s, a, b):
     assert len(s.workers) == 2
@@ -1132,8 +1135,7 @@ def test_fifo_submission(c, s, w):
 @gen_test()
 def test_scheduler_file():
     with tmpfile() as fn:
-        s = Scheduler(scheduler_file=fn)
-        s.start(0)
+        s = yield Scheduler(scheduler_file=fn, port=0)
         with open(fn) as f:
             data = json.load(f)
         assert data["address"] == s.address
@@ -1332,7 +1334,7 @@ def test_mising_data_errant_worker(c, s, w1, w2, w3):
         y = c.submit(len, x, workers=w3.address)
         while not w3.tasks:
             yield gen.sleep(0.001)
-        w1._close()
+        w1.close()
         yield wait(y)
 
 
@@ -1376,7 +1378,7 @@ def test_dont_recompute_if_persisted_3(c, s, a, b):
     x = delayed(inc)(1, dask_key_name="x")
     y = delayed(inc)(2, dask_key_name="y")
     z = delayed(inc)(y, dask_key_name="z")
-    w = delayed(add)(x, z, dask_key_name="w")
+    w = delayed(operator.add)(x, z, dask_key_name="w")
 
     ww = w.persist()
     yield wait(ww)
@@ -1496,3 +1498,75 @@ def test_gh2187(c, s, a, b):
     yield gen.sleep(0.1)
     f = c.submit(bar, x, key="y")
     yield f
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.idle-timeout": "200ms"})
+def test_idle_timeout(c, s, a, b):
+    future = c.submit(slowinc, 1)
+    yield future
+
+    assert s.status != "closed"
+
+    start = time()
+    while s.status != "closed":
+        yield gen.sleep(0.01)
+    assert time() < start + 3
+
+    assert a.status == "closed"
+    assert b.status == "closed"
+
+
+@gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
+def test_bandwidth(c, s, a, b):
+    start = s.bandwidth
+    x = c.submit(operator.mul, b"0", 20000, workers=a.address)
+    y = c.submit(lambda x: x, x, workers=b.address)
+    yield y
+    yield b.heartbeat()
+    assert s.bandwidth < start  # we've learned that we're slower
+    assert b.latency
+
+
+@gen_cluster()
+def test_workerstate_clean(s, a, b):
+    ws = s.workers[a.address].clean()
+    assert ws.address == a.address
+    b = pickle.dumps(ws)
+    assert len(b) < 1000
+
+
+@gen_cluster(client=True)
+def test_result_type(c, s, a, b):
+    x = c.submit(lambda: 1)
+    yield x
+
+    assert "int" in s.tasks[x.key].type
+
+
+@gen_cluster()
+def test_close_workers(s, a, b):
+    yield s.close(close_workers=True)
+    assert a.status == "closed"
+    assert b.status == "closed"
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Need 127.0.0.2 to mean localhost"
+)
+@gen_test()
+def test_host_address():
+    s = yield Scheduler(host="127.0.0.2")
+    assert "127.0.0.2" in s.address
+    yield s.close()
+
+
+@gen_test()
+def test_dashboard_address():
+    pytest.importorskip("bokeh")
+    s = yield Scheduler(dashboard_address="127.0.0.1:8901")
+    assert s.services["bokeh"].port == 8901
+    yield s.close()
+
+    s = yield Scheduler(dashboard_address="127.0.0.1")
+    assert s.services["bokeh"].port
+    yield s.close()

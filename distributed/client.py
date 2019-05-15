@@ -55,7 +55,6 @@ from .utils_comm import (
 from .cfexecutor import ClientExecutor
 from .compatibility import (
     Queue as pyQueue,
-    Empty,
     isqueue,
     html_escape,
     StopAsyncIteration,
@@ -77,7 +76,6 @@ from .utils import (
     sync,
     funcname,
     ignoring,
-    queue_to_iterator,
     tokey,
     log_errors,
     str_graph,
@@ -538,6 +536,9 @@ class Client(Node):
         the scheduler to serve as intermediary.
     heartbeat_interval: int
         Time in milliseconds between heartbeats to scheduler
+    **kwargs:
+        If you do not pass a scheduler address, Client will create a
+        ``LocalCluster`` object, passing any extra keyword arguments.
 
     Examples
     --------
@@ -559,10 +560,22 @@ class Client(Node):
     >>> client.gather(c)  # doctest: +SKIP
     33
 
+    You can also call Client with no arguments in order to create your own
+    local cluster.
+
+    >>> client = Client()  # makes your own local "cluster" # doctest: +SKIP
+
+    Extra keywords will be passed directly to LocalCluster
+
+    >>> client = Client(processes=False, threads_per_worker=1)  # doctest: +SKIP
+
     See Also
     --------
     distributed.scheduler.Scheduler: Internal scheduler
+    distributed.deploy.local.LocalCluster:
     """
+
+    _instances = weakref.WeakSet()
 
     def __init__(
         self,
@@ -578,7 +591,7 @@ class Client(Node):
         serializers=None,
         deserializers=None,
         extensions=DEFAULT_EXTENSIONS,
-        direct_to_workers=False,
+        direct_to_workers=None,
         **kwargs
     ):
         if timeout == no_default:
@@ -690,12 +703,14 @@ class Client(Node):
             io_loop=self.loop,
             serializers=serializers,
             deserializers=deserializers,
+            timeout=timeout,
         )
 
         for ext in extensions:
             ext(self)
 
         self.start(timeout=timeout)
+        Client._instances.add(self)
 
         from distributed.recreate_exceptions import ReplayExceptionClient
 
@@ -934,13 +949,7 @@ class Client(Node):
             address = self.cluster.scheduler_address
 
         if self.scheduler is None:
-            self.scheduler = rpc(
-                address,
-                timeout=timeout,
-                connection_args=self.connection_args,
-                serializers=self._serializers,
-                deserializers=self._deserializers,
-            )
+            self.scheduler = self.rpc(address)
         self.scheduler_comm = None
 
         yield self._ensure_connected(timeout=timeout)
@@ -954,9 +963,10 @@ class Client(Node):
         raise gen.Return(self)
 
     @gen.coroutine
-    def _reconnect(self, timeout=0.1):
+    def _reconnect(self):
         with log_errors():
             assert self.scheduler_comm.comm.closed()
+
             self.status = "connecting"
             self.scheduler_comm = None
 
@@ -964,12 +974,23 @@ class Client(Node):
                 st.cancel()
             self.futures.clear()
 
-            while self.status == "connecting":
+            timeout = self._timeout
+            deadline = self.loop.time() + timeout
+            while timeout > 0 and self.status == "connecting":
                 try:
-                    yield self._ensure_connected()
+                    yield self._ensure_connected(timeout=timeout)
                     break
                 except EnvironmentError:
-                    yield gen.sleep(timeout)
+                    # Wait a bit before retrying
+                    yield gen.sleep(0.1)
+                    timeout = deadline - self.loop.time()
+            else:
+                logger.error(
+                    "Failed to reconnect to scheduler after %.2f "
+                    "seconds, closing client",
+                    self._timeout,
+                )
+                yield self._close()
 
     @gen.coroutine
     def _ensure_connected(self, timeout=None):
@@ -989,6 +1010,7 @@ class Client(Node):
                 timeout=timeout,
                 connection_args=self.connection_args,
             )
+            comm.name = "Client->Scheduler"
             if timeout is not None:
                 yield gen.with_timeout(
                     timedelta(seconds=timeout), self._update_scheduler_info()
@@ -1213,6 +1235,7 @@ class Client(Node):
             if self._start_arg is None:
                 with ignoring(AttributeError):
                     yield self.cluster._close()
+            self.rpc.close()
             self.status = "closed"
             if _get_global_client() is self:
                 _set_global_client(None)
@@ -1399,24 +1422,6 @@ class Client(Node):
 
         return futures[skey]
 
-    def _threaded_map(self, q_out, func, qs_in, **kwargs):
-        """ Internal function for mapping Queue """
-        if isqueue(qs_in[0]):
-            get = pyQueue.get
-        elif isinstance(qs_in[0], Iterator):
-            get = next
-        else:
-            raise NotImplementedError()
-
-        while True:
-            try:
-                args = [get(q) for q in qs_in]
-            except StopIteration as e:
-                q_out.put(e)
-                break
-            f = self.submit(func, *args, **kwargs)
-            q_out.put(f)
-
     def map(self, func, *iterables, **kwargs):
         """ Map a function on a sequence of arguments
 
@@ -1425,7 +1430,8 @@ class Client(Node):
         Parameters
         ----------
         func: callable
-        iterables: Iterables, Iterators, or Queues
+        iterables: Iterables
+            List-like objects to map over.  They should have the same length.
         key: str, list
             Prefix for task names if string.  Explicit names if list.
         pure: bool (defaults to True)
@@ -1464,20 +1470,10 @@ class Client(Node):
         if all(map(isqueue, iterables)) or all(
             isinstance(i, Iterator) for i in iterables
         ):
-            maxsize = kwargs.pop("maxsize", 0)
-            q_out = pyQueue(maxsize=maxsize)
-            t = threading.Thread(
-                target=self._threaded_map,
-                name="Threaded map()",
-                args=(q_out, func, iterables),
-                kwargs=kwargs,
+            raise TypeError(
+                "Dask no longer supports mapping over Iterators or Queues."
+                "Consider using a normal for loop and Client.submit"
             )
-            t.daemon = True
-            t.start()
-            if isqueue(iterables[0]):
-                return q_out
-            else:
-                return queue_to_iterator(q_out)
 
         key = kwargs.pop("key", None)
         key = key or funcname(func)
@@ -1586,6 +1582,8 @@ class Client(Node):
         data = {}
 
         if direct is None:
+            direct = self.direct_to_workers
+        if direct is None:
             try:
                 w = get_worker()
             except Exception:
@@ -1593,8 +1591,6 @@ class Client(Node):
             else:
                 if w.scheduler.address == self.scheduler.address:
                     direct = True
-        if direct is None:
-            direct = self.direct_to_workers
 
         @gen.coroutine
         def wait(k):
@@ -1713,22 +1709,7 @@ class Client(Node):
 
         raise gen.Return(response)
 
-    def _threaded_gather(self, qin, qout, **kwargs):
-        """ Internal function for gathering Queue """
-        while True:
-            L = [qin.get()]
-            while qin.empty():
-                try:
-                    L.append(qin.get_nowait())
-                except Empty:
-                    break
-            results = self.gather(L, **kwargs)
-            for item in results:
-                qout.put(item)
-
-    def gather(
-        self, futures, errors="raise", maxsize=0, direct=None, asynchronous=None
-    ):
+    def gather(self, futures, errors="raise", direct=None, asynchronous=None):
         """ Gather futures from distributed memory
 
         Accepts a future, nested container of futures, iterator, or queue.
@@ -1738,7 +1719,7 @@ class Client(Node):
         ----------
         futures: Collection of futures
             This can be a possibly nested collection of Future objects.
-            Collections can be lists, sets, iterators, queues or dictionaries
+            Collections can be lists, sets, or dictionaries
         errors: string
             Either 'raise' or 'skip' if we should raise if a future has erred
             or skip its inclusion in the output collection
@@ -1746,9 +1727,6 @@ class Client(Node):
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
-        maxsize: int
-            If the input is a queue then this produces an output queue with a
-            maximum size.
 
         Returns
         -------
@@ -1765,25 +1743,16 @@ class Client(Node):
         >>> c.gather([x, [x], x])  # support lists and dicts # doctest: +SKIP
         [3, [3], 3]
 
-        >>> seq = c.gather(iter([x, x]))  # support iterators # doctest: +SKIP
-        >>> next(seq)  # doctest: +SKIP
-        3
-
         See Also
         --------
         Client.scatter: Send data out to cluster
         """
         if isqueue(futures):
-            qout = pyQueue(maxsize=maxsize)
-            t = threading.Thread(
-                target=self._threaded_gather,
-                name="Threaded gather()",
-                args=(futures, qout),
-                kwargs={"errors": errors, "direct": direct},
+            raise TypeError(
+                "Dask no longer supports gathering over Iterators and Queues. "
+                "Consider using a normal for loop and Client.submit/gather"
             )
-            t.daemon = True
-            t.start()
-            return qout
+
         elif isinstance(futures, Iterator):
             return (self.gather(f, errors=errors, direct=direct) for f in futures)
         else:
@@ -1845,6 +1814,8 @@ class Client(Node):
         types = valmap(type, data)
 
         if direct is None:
+            direct = self.direct_to_workers
+        if direct is None:
             try:
                 w = get_worker()
             except Exception:
@@ -1852,8 +1823,6 @@ class Client(Node):
             else:
                 if w.scheduler.address == self.scheduler.address:
                     direct = True
-        if direct is None:
-            direct = self.direct_to_workers
 
         if local_worker:  # running within task
             local_worker.update_data(data=data, report=False)
@@ -1910,27 +1879,6 @@ class Client(Node):
             out = list(out.values())[0]
         raise gen.Return(out)
 
-    def _threaded_scatter(self, q_or_i, qout, **kwargs):
-        """ Internal function for scattering Iterable/Queue data """
-        while True:
-            if isqueue(q_or_i):
-                L = [q_or_i.get()]
-                while not q_or_i.empty():
-                    try:
-                        L.append(q_or_i.get_nowait())
-                    except Empty:
-                        break
-            else:
-                try:
-                    L = [next(q_or_i)]
-                except StopIteration as e:
-                    qout.put(e)
-                    break
-
-            futures = self.scatter(L, **kwargs)
-            for future in futures:
-                qout.put(future)
-
     def scatter(
         self,
         data,
@@ -1938,7 +1886,6 @@ class Client(Node):
         broadcast=False,
         direct=None,
         hash=True,
-        maxsize=0,
         timeout=no_default,
         asynchronous=None,
     ):
@@ -1951,7 +1898,7 @@ class Client(Node):
 
         Parameters
         ----------
-        data: list, iterator, dict, Queue, or object
+        data: list, dict, or object
             Data to scatter out to workers.  Output type matches input type.
         workers: list of tuples (optional)
             Optionally constrain locations of data.
@@ -1963,8 +1910,6 @@ class Client(Node):
             Whether or not to connect directly to the workers, or to ask
             the scheduler to serve as intermediary.  This can also be set when
             creating the Client.
-        maxsize: int (optional)
-            Maximum size of queue if using queues, 0 implies infinite
         hash: bool (optional)
             Whether or not to hash data to determine key.
             If False then this uses a random key
@@ -1993,12 +1938,6 @@ class Client(Node):
 
         >>> c.scatter([1, 2, 3], workers=[('hostname', 8788)])   # doctest: +SKIP
 
-        Handle streaming sequences of data with iterators or queues
-
-        >>> seq = c.scatter(iter([1, 2, 3]))  # doctest: +SKIP
-        >>> next(seq)  # doctest: +SKIP
-        <Future: status: finished, key: c0a8a20f903a4915b94db8de3ea63195>,
-
         Broadcast data to all workers
 
         >>> [future] = c.scatter([element], broadcast=True)  # doctest: +SKIP
@@ -2016,38 +1955,26 @@ class Client(Node):
         if timeout == no_default:
             timeout = self._timeout
         if isqueue(data) or isinstance(data, Iterator):
-            logger.debug("Starting thread for streaming data")
-            qout = pyQueue(maxsize=maxsize)
-
-            t = threading.Thread(
-                target=self._threaded_scatter,
-                name="Threaded scatter()",
-                args=(data, qout),
-                kwargs={"workers": workers, "broadcast": broadcast},
+            raise TypeError(
+                "Dask no longer supports mapping over Iterators or Queues."
+                "Consider using a normal for loop and Client.submit"
             )
-            t.daemon = True
-            t.start()
 
-            if isqueue(data):
-                return qout
-            else:
-                return queue_to_iterator(qout)
+        if hasattr(thread_state, "execution_state"):  # within worker task
+            local_worker = thread_state.execution_state["worker"]
         else:
-            if hasattr(thread_state, "execution_state"):  # within worker task
-                local_worker = thread_state.execution_state["worker"]
-            else:
-                local_worker = None
-            return self.sync(
-                self._scatter,
-                data,
-                workers=workers,
-                broadcast=broadcast,
-                direct=direct,
-                local_worker=local_worker,
-                timeout=timeout,
-                asynchronous=asynchronous,
-                hash=hash,
-            )
+            local_worker = None
+        return self.sync(
+            self._scatter,
+            data,
+            workers=workers,
+            broadcast=broadcast,
+            direct=direct,
+            local_worker=local_worker,
+            timeout=timeout,
+            asynchronous=asynchronous,
+            hash=hash,
+        )
 
     @gen.coroutine
     def _cancel(self, futures, force=False):
@@ -2369,7 +2296,8 @@ class Client(Node):
         warnings.warn(
             "This method has been deprecated. "
             "Instead use Client.run which detects async functions "
-            "automatically"
+            "automatically",
+            stacklevel=2,
         )
         return self.run(function, *args, **kwargs)
 
@@ -4110,7 +4038,7 @@ class as_completed(object):
             self.thread_condition.notify()
 
     @gen.coroutine
-    def track_future(self, future):
+    def _track_future(self, future):
         try:
             yield _wait(future)
         except CancelledError:
@@ -4136,7 +4064,7 @@ class as_completed(object):
                 if not isinstance(f, Future):
                     raise TypeError("Input must be a future, got %s" % f)
                 self.futures[f] += 1
-                self.loop.add_callback(self.track_future, f)
+                self.loop.add_callback(self._track_future, f)
 
     def add(self, future):
         """ Add a future to the collection
@@ -4146,8 +4074,12 @@ class as_completed(object):
         self.update((future,))
 
     def is_empty(self):
-        """Return True if there no waiting futures, False otherwise"""
+        """Returns True if there no completed or computing futures"""
         return not self.count()
+
+    def has_ready(self):
+        """Returns True if there are completed futures available."""
+        return not self.queue.empty()
 
     def count(self):
         """ Return the number of futures yet to be returned
@@ -4195,7 +4127,7 @@ class as_completed(object):
     next = __next__
 
     def next_batch(self, block=True):
-        """ Get next batch of futures from as_completed iterator
+        """ Get the next batch of completed futures.
 
         Parameters
         ----------

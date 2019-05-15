@@ -8,6 +8,8 @@ import psutil
 import shutil
 import threading
 import uuid
+import warnings
+import weakref
 
 import dask
 from tornado import gen
@@ -15,6 +17,7 @@ from tornado.ioloop import IOLoop, TimeoutError
 from tornado.locks import Event
 
 from .comm import get_address_host, get_local_address_for, unparse_host_port
+from .comm.addressing import address_from_user_args
 from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
 from .metrics import time
 from .node import ServerNode
@@ -40,6 +43,7 @@ class Nanny(ServerNode):
     them as necessary.
     """
 
+    _instances = weakref.WeakSet()
     process = None
     status = None
 
@@ -68,6 +72,10 @@ class Nanny(ServerNode):
         listen_address=None,
         worker_class=None,
         env=None,
+        interface=None,
+        host=None,
+        port=None,
+        protocol=None,
         **worker_kwargs
     ):
 
@@ -122,7 +130,7 @@ class Nanny(ServerNode):
             "kill": self.kill,
             "restart": self.restart,
             # cannot call it 'close' on the rpc side for naming conflict
-            "terminate": self._close,
+            "terminate": self.close,
             "run": self.run,
         }
 
@@ -134,7 +142,16 @@ class Nanny(ServerNode):
             pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
             self.periodic_callbacks["memory"] = pc
 
+        self._start_address = address_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+        )
+
         self._listen_address = listen_address
+        Nanny._instances.add(self)
         self.status = "init"
 
     def __repr__(self):
@@ -174,6 +191,7 @@ class Nanny(ServerNode):
     @gen.coroutine
     def _start(self, addr_or_port=0):
         """ Start nanny, start local process, start watching """
+        addr_or_port = addr_or_port or self._start_address
 
         # XXX Factor this out
         if not addr_or_port:
@@ -197,7 +215,7 @@ class Nanny(ServerNode):
             assert self.worker_address
             self.status = "running"
         else:
-            yield self._close()
+            yield self.close()
 
         self.start_periodic_callbacks()
 
@@ -244,7 +262,7 @@ class Nanny(ServerNode):
                 ncores=self.ncores,
                 local_dir=self.local_dir,
                 services=self.services,
-                service_ports={"nanny": self.port},
+                nanny=self.address,
                 name=self.name,
                 memory_limit=self.memory_limit,
                 reconnect=self.reconnect,
@@ -275,7 +293,7 @@ class Nanny(ServerNode):
                     timedelta(seconds=self.death_timeout), self.process.start()
                 )
             except gen.TimeoutError:
-                yield self._close(timeout=self.death_timeout)
+                yield self.close(timeout=self.death_timeout)
                 raise gen.Return("timed out")
         else:
             result = yield self.process.start()
@@ -332,7 +350,7 @@ class Nanny(ServerNode):
                 yield self.scheduler.unregister(address=self.worker_address)
             except (EnvironmentError, CommClosedError):
                 if not self.reconnect:
-                    yield self._close()
+                    yield self.close()
                     return
 
             try:
@@ -349,8 +367,12 @@ class Nanny(ServerNode):
     def pid(self):
         return self.process and self.process.pid
 
+    def _close(self, *args, **kwargs):
+        warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
+        return self.close(*args, **kwargs)
+
     @gen.coroutine
-    def _close(self, comm=None, timeout=5, report=None):
+    def close(self, comm=None, timeout=5, report=None):
         """
         Close the worker process, stop all comms.
         """
@@ -414,6 +436,7 @@ class WorkerProcess(object):
 
         self.process = AsyncProcess(
             target=self._run,
+            name="Dask Worker process (from Nanny)",
             kwargs=dict(
                 worker_args=self.worker_args,
                 worker_kwargs=self.worker_kwargs,
@@ -584,7 +607,7 @@ class WorkerProcess(object):
         @gen.coroutine
         def do_stop(timeout=5, executor_wait=True):
             try:
-                yield worker._close(
+                yield worker.close(
                     report=False,
                     nanny=False,
                     executor_wait=executor_wait,
