@@ -44,6 +44,8 @@ from tornado.locks import Event, Condition, Semaphore
 from tornado.ioloop import IOLoop
 from tornado.queues import Queue
 
+from asyncio import iscoroutine
+
 from .batched import BatchedSend
 from .utils_comm import (
     WrappedKey,
@@ -1286,7 +1288,13 @@ class Client(Node):
 
         if self._start_arg is None:
             with ignoring(AttributeError):
-                self.cluster.close()
+                f = self.cluster.close()
+                if iscoroutine(f):
+
+                    async def _():
+                        await f
+
+                    self.sync(_)
 
         sync(self.loop, self._close, fast=True)
 

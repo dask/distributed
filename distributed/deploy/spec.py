@@ -157,3 +157,9 @@ class SpecCluster(Cluster):
         await self
 
     scale_up = scale  # backwards compatibility
+
+    def __repr__(self):
+        return "SpecCluster(%r, workers=%d)" % (
+            self.scheduler_address,
+            len(self.workers),
+        )
