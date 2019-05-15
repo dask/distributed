@@ -9,7 +9,6 @@ import weakref
 from dask.utils import factors
 
 from .spec import SpecCluster
-from ..utils import silence_logging
 from ..nanny import Nanny
 from ..scheduler import Scheduler
 from ..worker import Worker, parse_memory_limit, _ncores
@@ -138,12 +137,9 @@ class LocalCluster(SpecCluster):
         if host is None and not protocol.startswith("inproc") and not interface:
             host = "127.0.0.1"
 
-        # self.silence_logs = silence_logs
         # self._asynchronous = asynchronous
         services = services or {}
         worker_services = worker_services or {}
-        if silence_logs:
-            self._old_logging_level = silence_logging(level=silence_logs)
         if n_workers is None and threads_per_worker is None:
             if processes:
                 n_workers, threads_per_worker = nprocesses_nthreads(_ncores)
@@ -166,6 +162,7 @@ class LocalCluster(SpecCluster):
                 "interface": interface,
                 "protocol": protocol,
                 "security": security,
+                "silence_logs": silence_logs,
             }
         )
 
@@ -184,10 +181,10 @@ class LocalCluster(SpecCluster):
             ),
         }
 
-        if worker_class is None:
-            worker_class = Worker if not processes else Nanny
-
-        worker = {"cls": worker_class, "options": worker_kwargs}
+        worker = {
+            "cls": worker_class or (Worker if not processes else Nanny),
+            "options": worker_kwargs,
+        }
 
         SpecCluster.__init__(
             self,
@@ -195,6 +192,7 @@ class LocalCluster(SpecCluster):
             worker=worker,
             loop=loop,
             asynchronous=asynchronous,
+            silence_logs=silence_logs,
         )
         self.scale(n_workers)
 

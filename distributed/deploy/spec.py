@@ -3,7 +3,7 @@ import asyncio
 import toolz
 
 from .cluster import Cluster
-from ..utils import LoopRunner
+from ..utils import LoopRunner, silence_logging
 from ..scheduler import Scheduler
 
 
@@ -36,7 +36,13 @@ class SpecCluster(Cluster):
     """
 
     def __init__(
-        self, workers=None, scheduler=None, asynchronous=False, loop=None, worker=None
+        self,
+        workers=None,
+        scheduler=None,
+        asynchronous=False,
+        loop=None,
+        worker=None,
+        silence_logs=False,
     ):
         if scheduler is None:
             try:
@@ -53,6 +59,9 @@ class SpecCluster(Cluster):
         self.workers = {}
         self._i = 0
         self._asynchronous = asynchronous
+
+        if silence_logs:
+            self._old_logging_level = silence_logging(level=silence_logs)
 
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
@@ -123,6 +132,10 @@ class SpecCluster(Cluster):
         self.scale(0)
         await self
         await self.scheduler.close(close_workers=True)
+
+        if hasattr(self, "_old_logging_level"):
+            silence_logging(self._old_logging_level)
+
         self.status = "closed"
 
     def close(self):
