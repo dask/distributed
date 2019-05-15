@@ -6,7 +6,7 @@ from toolz import frequencies, pluck
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from distributed import Client, wait, Adaptive, LocalCluster
+from distributed import Client, wait, Adaptive, LocalCluster, SpecCluster, Worker
 from distributed.utils_test import gen_cluster, gen_test, slowinc, inc
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from distributed.metrics import time
@@ -408,25 +408,17 @@ def test_target_duration():
 @gen_test(timeout=None)
 def test_worker_keys():
     """ Ensure that redefining adapt with a lower maximum removes workers """
-    cluster = yield LocalCluster(
-        0,
+    cluster = yield SpecCluster(
+        workers={
+            "a-1": {"cls": Worker},
+            "a-2": {"cls": Worker},
+            "b-1": {"cls": Worker},
+            "b-2": {"cls": Worker},
+        },
         asynchronous=True,
-        processes=False,
-        scheduler_port=0,
-        silence_logs=False,
-        dashboard_address=None,
     )
 
     try:
-        yield [
-            cluster.start_worker(name="a-1"),
-            cluster.start_worker(name="a-2"),
-            cluster.start_worker(name="b-1"),
-            cluster.start_worker(name="b-2"),
-        ]
-
-        while len(cluster.scheduler.workers) != 4:
-            yield gen.sleep(0.01)
 
         def key(ws):
             return ws.name.split("-")[0]

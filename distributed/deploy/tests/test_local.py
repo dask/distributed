@@ -789,5 +789,20 @@ def test_worker_class_nanny(loop):
         assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
 
 
+@pytest.mark.asyncio
+async def test_worker_class_nanny_async():
+    class MyNanny(Nanny):
+        pass
+
+    async with LocalCluster(
+        n_workers=2,
+        worker_class=MyNanny,
+        scheduler_port=0,
+        dashboard_address=None,
+        asynchronous=True,
+    ) as cluster:
+        assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
+
+
 if sys.version_info >= (3, 5):
     from distributed.deploy.tests.py3_test_deploy import *  # noqa F401

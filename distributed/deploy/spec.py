@@ -89,7 +89,7 @@ class SpecCluster(Cluster):
             workers = []
             for name in to_open:
                 d = self.worker_spec[name]
-                cls, opts = d["cls"], d["options"]
+                cls, opts = d["cls"], d.get("options", {})
                 if "name" not in opts:
                     opts = toolz.merge({"name": name}, opts, {"loop": self.loop})
                 worker = cls(self.scheduler.address, **opts)
