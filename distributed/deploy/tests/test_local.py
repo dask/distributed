@@ -46,7 +46,7 @@ def test_simple(loop):
             x = e.submit(inc, 1)
             x.result()
             assert x.key in c.scheduler.tasks
-            assert any(w.data == {x.key: 2} for w in c.workers)
+            assert any(w.data == {x.key: 2} for w in c.workers.values())
 
             assert e.loop is c.loop
 
@@ -87,10 +87,10 @@ def test_procs():
         silence_logs=False,
     ) as c:
         assert len(c.workers) == 2
-        assert all(isinstance(w, Worker) for w in c.workers)
+        assert all(isinstance(w, Worker) for w in c.workers.values())
         with Client(c.scheduler.address) as e:
-            assert all(w.ncores == 3 for w in c.workers)
-            assert all(isinstance(w, Worker) for w in c.workers)
+            assert all(w.ncores == 3 for w in c.workers.values())
+            assert all(isinstance(w, Worker) for w in c.workers.values())
         repr(c)
 
     with LocalCluster(
@@ -102,12 +102,12 @@ def test_procs():
         silence_logs=False,
     ) as c:
         assert len(c.workers) == 2
-        assert all(isinstance(w, Nanny) for w in c.workers)
+        assert all(isinstance(w, Nanny) for w in c.workers.values())
         with Client(c.scheduler.address) as e:
             assert all(v == 3 for v in e.ncores().values())
 
-            c.start_worker()
-            assert all(isinstance(w, Nanny) for w in c.workers)
+            c.scale(3)
+            assert all(isinstance(w, Nanny) for w in c.workers.values())
         repr(c)
 
 
@@ -213,7 +213,7 @@ def test_duplicate_clients():
 def test_Client_kwargs(loop):
     with Client(loop=loop, processes=False, n_workers=2, silence_logs=False) as c:
         assert len(c.cluster.workers) == 2
-        assert all(isinstance(w, Worker) for w in c.cluster.workers)
+        assert all(isinstance(w, Worker) for w in c.cluster.workers.values())
     assert c.cluster.status == "closed"
 
 
@@ -230,14 +230,14 @@ def test_defaults():
     with LocalCluster(
         scheduler_port=0, silence_logs=False, dashboard_address=None
     ) as c:
-        assert sum(w.ncores for w in c.workers) == _ncores
-        assert all(isinstance(w, Nanny) for w in c.workers)
+        assert sum(w.ncores for w in c.workers.values()) == _ncores
+        assert all(isinstance(w, Nanny) for w in c.workers.values())
 
     with LocalCluster(
         processes=False, scheduler_port=0, silence_logs=False, dashboard_address=None
     ) as c:
-        assert sum(w.ncores for w in c.workers) == _ncores
-        assert all(isinstance(w, Worker) for w in c.workers)
+        assert sum(w.ncores for w in c.workers.values()) == _ncores
+        assert all(isinstance(w, Worker) for w in c.workers.values())
         assert len(c.workers) == 1
 
     with LocalCluster(
@@ -248,7 +248,7 @@ def test_defaults():
         else:
             # n_workers not a divisor of _ncores => threads are overcommitted
             expected_total_threads = max(2, _ncores + 1)
-        assert sum(w.ncores for w in c.workers) == expected_total_threads
+        assert sum(w.ncores for w in c.workers.values()) == expected_total_threads
 
     with LocalCluster(
         threads_per_worker=_ncores * 2,
@@ -264,7 +264,7 @@ def test_defaults():
         silence_logs=False,
         dashboard_address=None,
     ) as c:
-        assert all(w.ncores == 1 for w in c.workers)
+        assert all(w.ncores == 1 for w in c.workers.values())
     with LocalCluster(
         threads_per_worker=2,
         n_workers=3,
@@ -273,7 +273,7 @@ def test_defaults():
         dashboard_address=None,
     ) as c:
         assert len(c.workers) == 3
-        assert all(w.ncores == 2 for w in c.workers)
+        assert all(w.ncores == 2 for w in c.workers.values())
 
 
 def test_worker_params():
@@ -284,7 +284,7 @@ def test_worker_params():
         dashboard_address=None,
         memory_limit=500,
     ) as c:
-        assert [w.memory_limit for w in c.workers] == [500] * 2
+        assert [w.memory_limit for w in c.workers.values()] == [500] * 2
 
 
 def test_memory_limit_none():
@@ -437,7 +437,7 @@ def test_memory(loop, n_workers):
         dashboard_address=None,
         loop=loop,
     ) as cluster:
-        assert sum(w.memory_limit for w in cluster.workers) <= TOTAL_MEMORY
+        assert sum(w.memory_limit for w in cluster.workers.values()) <= TOTAL_MEMORY
 
 
 @pytest.mark.parametrize("n_workers", [None, 3])
@@ -490,7 +490,7 @@ def test_io_loop_periodic_callbacks(loop):
         assert cluster.scheduler.loop is loop
         for pc in cluster.scheduler.periodic_callbacks.values():
             assert pc.io_loop is loop
-        for worker in cluster.workers:
+        for worker in cluster.workers.values():
             for pc in worker.periodic_callbacks.values():
                 assert pc.io_loop is loop
 
@@ -772,7 +772,7 @@ def test_worker_class_worker(loop):
         scheduler_port=0,
         dashboard_address=None,
     ) as cluster:
-        assert all(isinstance(w, MyWorker) for w in cluster.workers)
+        assert all(isinstance(w, MyWorker) for w in cluster.workers.values())
 
 
 def test_worker_class_nanny(loop):
@@ -786,7 +786,7 @@ def test_worker_class_nanny(loop):
         scheduler_port=0,
         dashboard_address=None,
     ) as cluster:
-        assert all(isinstance(w, MyNanny) for w in cluster.workers)
+        assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
 
 
 if sys.version_info >= (3, 5):

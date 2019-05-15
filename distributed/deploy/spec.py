@@ -53,7 +53,6 @@ class SpecCluster(Cluster):
         self.workers = {}
         self._i = 0
         self._asynchronous = asynchronous
-        self._lock = asyncio.Lock()
 
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
@@ -70,6 +69,7 @@ class SpecCluster(Cluster):
     async def _start(self):
         if self.status != "created":
             return
+        self._lock = asyncio.Lock()
         self.status = "starting"
         self.scheduler = await self.scheduler
 
@@ -114,16 +114,24 @@ class SpecCluster(Cluster):
         return self
 
     async def __aexit__(self, typ, value, traceback):
+        await self.close()
+
+    async def _close(self):
         self.status = "closing"
+        self.scale(0)
+        await self
         await self.scheduler.close(close_workers=True)
         self.status = "closed"
+
+    def close(self):
+        return self.sync(self._close)
 
     def __enter__(self):
         self.sync(self._correct_state)
         return self
 
     def __exit__(self, typ, value, traceback):
-        self.sync(self.scheduler.close, close_workers=True)
+        self.close()
         self._loop_runner.stop()
 
     def scale(self, n):
