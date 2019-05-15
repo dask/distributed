@@ -5715,7 +5715,7 @@ def test_instances(c, s, a, b):
 @gen_cluster(client=True)
 def test_wait_for_workers(c, s, a, b):
     future = c.wait_for_workers(n_workers=3)
-    yield gen.sleep(0.22) # 2 chances
+    yield gen.sleep(0.22)  # 2 chances
     assert not future.done()
 
     w = yield Worker(s.address)
