@@ -96,6 +96,8 @@ class SpecCluster(Cluster):
                 workers.append(worker)
             if workers:
                 await asyncio.wait(workers)
+                for w in workers:
+                    await w
             self.workers.update(dict(zip(to_open, workers)))
 
     def __await__(self):

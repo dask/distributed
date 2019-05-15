@@ -373,11 +373,13 @@ def test_scale_up_and_down():
 
     assert not cluster.workers
 
-    yield cluster.scale(2)
+    cluster.scale(2)
+    yield cluster
     assert len(cluster.workers) == 2
     assert len(cluster.scheduler.ncores) == 2
 
-    yield cluster.scale(1)
+    cluster.scale(1)
+    yield cluster
 
     assert len(cluster.workers) == 1
 
