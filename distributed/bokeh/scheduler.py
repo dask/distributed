@@ -29,7 +29,6 @@ from bokeh.models import (
     GroupFilter,
     CDSView,
 )
-from bokeh.models.tickers import SingleIntervalTicker
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
