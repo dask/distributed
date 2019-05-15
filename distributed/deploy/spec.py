@@ -144,3 +144,16 @@ class SpecCluster(Cluster):
             self.worker_spec[self._i] = self.new_spec
 
         self.loop.add_callback(self._correct_state)
+
+    async def scale_down(self, workers):
+        workers = set(workers)
+
+        # TODO: this is linear cost.  We should be indexing by name or something
+        to_close = [w for w in self.workers.values() if w.address in workers]
+        for k, v in self.workers.items():
+            if v.worker_address in workers:
+                del self.worker_spec[k]
+
+        await self
+
+    scale_up = scale  # backwards compatibility

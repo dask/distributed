@@ -7,7 +7,7 @@ class MyWorker(Worker):
     pass
 
 
-spec = {
+worker_spec = {
     0: {"cls": Worker, "options": {"ncores": 1}},
     1: {"cls": Worker, "options": {"ncores": 2}},
     "my-worker": {"cls": MyWorker, "options": {"ncores": 3}},
@@ -18,12 +18,12 @@ scheduler = {"cls": Scheduler, "options": {"port": 0}}
 @pytest.mark.asyncio
 async def test_specification():
     async with SpecCluster(
-        workers=spec, scheduler=scheduler, asynchronous=True
+        workers=worker_spec, scheduler=scheduler, asynchronous=True
     ) as cluster:
-        assert cluster.worker_spec is spec
+        assert cluster.worker_spec is worker_spec
 
         assert len(cluster.workers) == 3
-        assert set(cluster.workers) == set(spec)
+        assert set(cluster.workers) == set(worker_spec)
         assert isinstance(cluster.workers[0], Worker)
         assert isinstance(cluster.workers[1], Worker)
         assert isinstance(cluster.workers["my-worker"], MyWorker)
@@ -41,12 +41,16 @@ async def test_specification():
 
 
 def test_spec_sync(loop):
-    with SpecCluster(workers=spec, scheduler=scheduler, loop=loop) as cluster:
-        assert cluster.worker_spec is spec
-        assert cluster.worker_spec is spec
+    worker_spec = {
+        0: {"cls": Worker, "options": {"ncores": 1}},
+        1: {"cls": Worker, "options": {"ncores": 2}},
+        "my-worker": {"cls": MyWorker, "options": {"ncores": 3}},
+    }
+    with SpecCluster(workers=worker_spec, scheduler=scheduler, loop=loop) as cluster:
+        assert cluster.worker_spec is worker_spec
 
         assert len(cluster.workers) == 3
-        assert set(cluster.workers) == set(spec)
+        assert set(cluster.workers) == set(worker_spec)
         assert isinstance(cluster.workers[0], Worker)
         assert isinstance(cluster.workers[1], Worker)
         assert isinstance(cluster.workers["my-worker"], MyWorker)
@@ -63,7 +67,7 @@ def test_spec_sync(loop):
 
 
 def test_loop_started():
-    cluster = SpecCluster(spec)
+    cluster = SpecCluster(worker_spec)
 
 
 @pytest.mark.asyncio

@@ -184,7 +184,8 @@ class LocalCluster(SpecCluster):
             ),
         }
 
-        worker_class = Worker if not processes else Nanny
+        if worker_class is None:
+            worker_class = Worker if not processes else Nanny
 
         worker = {"cls": worker_class, "options": worker_kwargs}
 

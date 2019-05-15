@@ -373,15 +373,13 @@ def test_scale_up_and_down():
 
     assert not cluster.workers
 
-    yield cluster.scale_up(2)
+    yield cluster.scale(2)
     assert len(cluster.workers) == 2
     assert len(cluster.scheduler.ncores) == 2
 
-    addr = cluster.workers[0].address
-    yield cluster.scale_down([addr])
+    yield cluster.scale(1)
 
     assert len(cluster.workers) == 1
-    assert addr not in cluster.scheduler.ncores
 
     yield c.close()
     yield cluster.close()
