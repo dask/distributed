@@ -1585,6 +1585,24 @@ def test_upload_file_egg(c, s, a, b):
                 assert result == (value, value)
 
 
+@gen_cluster(client=True)
+def test_upload_large_file(c, s, a, b):
+    assert a.local_dir
+    assert b.local_dir
+    with tmp_text("myfile", "abc") as fn:
+        with tmp_text("myfile2", "def") as fn2:
+            yield c._upload_large_file(fn, remote_filename="x")
+            yield c._upload_large_file(fn2)
+
+            for w in [a, b]:
+                assert os.path.exists(os.path.join(w.local_dir, "x"))
+                assert os.path.exists(os.path.join(w.local_dir, "myfile2"))
+                with open(os.path.join(w.local_dir, "x")) as f:
+                    assert f.read() == "abc"
+                with open(os.path.join(w.local_dir, "myfile2")) as f:
+                    assert f.read() == "def"
+
+
 def test_upload_file_sync(c):
     def g():
         import myfile
