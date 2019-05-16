@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 import logging
 from numbers import Number
 from operator import add
@@ -312,15 +313,20 @@ def test_worker_with_port_zero():
 
 
 @pytest.mark.slow
-def test_worker_waits_for_center_to_come_up(loop):
+def test_worker_waits_for_scheduler(loop):
     @gen.coroutine
     def f():
-        w = yield Worker("127.0.0.1", 8007)
+        w = Worker("127.0.0.1", 8007)
+        try:
+            yield gen.with_timeout(timedelta(seconds=3), w)
+        except TimeoutError:
+            pass
+        else:
+            assert False
+        assert w.status not in ("closed", "running")
+        yield w.close(timeout=0.1)
 
-    try:
-        loop.run_sync(f, timeout=4)
-    except TimeoutError:
-        pass
+    loop.run_sync(f)
 
 
 @gen_cluster(client=True, ncores=[("127.0.0.1", 1)])
