@@ -1141,7 +1141,8 @@ def test_scheduler_file():
         assert data["address"] == s.address
 
         c = yield Client(scheduler_file=fn, loop=s.loop, asynchronous=True)
-    yield s.close()
+        yield c.close()
+        yield s.close()
 
 
 @pytest.mark.xfail(reason="")
