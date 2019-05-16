@@ -1,6 +1,7 @@
 import asyncio
 
 import toolz
+from tornado import gen
 
 from .cluster import Cluster
 from ..utils import LoopRunner, silence_logging
@@ -116,9 +117,23 @@ class SpecCluster(Cluster):
             await self._correct_state()
             if self.workers:
                 await asyncio.wait(list(self.workers.values()))  # maybe there are more
+            await self._wait_for_workers()
             return self
 
         return _().__await__()
+
+    async def _wait_for_workers(self):
+        # TODO: this function needs to query scheduler and worker state
+        # remotely without assuming that they are local
+        while {d["name"] for d in self.scheduler.identity()["workers"].values()} != set(
+            self.workers
+        ):
+            if (
+                any(w.status == "closed" for w in self.workers.values())
+                and self.scheduler.status == "running"
+            ):
+                raise gen.TimeoutError("Worker unexpectedly closed")
+            await asyncio.sleep(0.1)
 
     async def __aenter__(self):
         await self
@@ -128,6 +143,8 @@ class SpecCluster(Cluster):
         await self.close()
 
     async def _close(self):
+        if self.status.startswith("clos"):
+            return
         self.status = "closing"
         self.scale(0)
         await self
@@ -143,6 +160,7 @@ class SpecCluster(Cluster):
 
     def __enter__(self):
         self.sync(self._correct_state)
+        self.sync(self._wait_for_workers)
         return self
 
     def __exit__(self, typ, value, traceback):
