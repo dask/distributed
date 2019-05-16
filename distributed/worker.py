@@ -434,7 +434,7 @@ class Worker(ServerNode):
         self.ncores = ncores or _ncores
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
-        self.death_timeout = death_timeout
+        self.death_timeout = parse_timedelta(death_timeout)
         self.preload = preload
         if self.preload is None:
             self.preload = dask.config.get("distributed.worker.preload")

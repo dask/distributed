@@ -3271,7 +3271,12 @@ def test_get_foo_lost_keys(c, s, u, v, w):
 
 
 @pytest.mark.slow
-@gen_cluster(client=True, Worker=Nanny, check_new_threads=False)
+@gen_cluster(
+    client=True,
+    Worker=Nanny,
+    check_new_threads=False,
+    worker_kwargs={"death_timeout": "500ms"},
+)
 def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 1)
     with pytest.raises(KilledWorker) as info:

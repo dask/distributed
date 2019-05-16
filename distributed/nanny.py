@@ -30,6 +30,7 @@ from .utils import (
     silence_logging,
     json_load_robust,
     PeriodicCallback,
+    parse_timedelta,
 )
 from .worker import _ncores, run, parse_memory_limit, Worker
 
@@ -99,7 +100,7 @@ class Nanny(ServerNode):
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
-        self.death_timeout = death_timeout
+        self.death_timeout = parse_timedelta(death_timeout)
         self.preload = preload
         self.preload_argv = preload_argv
         self.Worker = Worker if worker_class is None else worker_class
