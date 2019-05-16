@@ -1460,7 +1460,9 @@ def check_instances():
     Client._instances.clear()
     Worker._instances.clear()
     Scheduler._instances.clear()
-    assert all(n.status == "closed" for n in Nanny._instances)
+    assert all(n.status == "closed" for n in Nanny._instances), {
+        n: n.status for n in Nanny._instances
+    }
     Nanny._instances.clear()
     _global_clients.clear()
     Comm._instances.clear()
