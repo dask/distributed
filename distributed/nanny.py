@@ -394,7 +394,6 @@ class Nanny(ServerNode):
             pass
         self.process = None
         self.rpc.close()
-        self.scheduler.close_rpc()
         self.status = "closed"
         if comm:
             yield comm.write("OK")
