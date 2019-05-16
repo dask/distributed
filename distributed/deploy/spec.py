@@ -78,6 +78,8 @@ class SpecCluster(Cluster):
             self._loop_runner.start()
             self.sync(self._start)
 
+        self._correct_state_waiting = None
+
     async def _start(self):
         if self.status != "created":
             return
@@ -87,8 +89,19 @@ class SpecCluster(Cluster):
 
         self.status = "starting"
 
-    async def _correct_state(self):
+    def _correct_state(self):
+        if self._correct_state_waiting:
+            # If people call this frequently, we only want to run it once
+            return self._correct_state_waiting
+        else:
+            task = asyncio.create_task(self._correct_state_internal())
+            self._correct_state_waiting = task
+            return task
+
+    async def _correct_state_internal(self):
         async with self._lock:
+            self._correct_state_waiting = None
+
             pre = list(set(self.workers))
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
