@@ -174,7 +174,6 @@ def test_min_max():
         loop=loop,
         asynchronous=True,
     )
-    yield cluster._start()
     try:
         adapt = Adaptive(
             cluster.scheduler,

@@ -3541,13 +3541,18 @@ def test_open_close_many_workers(loop, worker, count, repeat):
         before = proc.num_fds()
         done = Semaphore(0)
         running = weakref.WeakKeyDictionary()
+        workers = set()
+        status = True
 
         @gen.coroutine
         def start_worker(sleep, duration, repeat=1):
             for i in range(repeat):
                 yield gen.sleep(sleep)
+                if not status:
+                    return
                 w = worker(s["address"], loop=loop)
                 running[w] = None
+                workers.add(w)
                 yield w
                 addr = w.worker_address
                 running[w] = addr
@@ -3576,7 +3581,12 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 sleep(0.2)
                 assert time() < start + 10
 
-            [w.close() for w in running]
+            status = False
+
+            [c.sync(w.close) for w in list(workers)]
+            for w in workers:
+                assert w.status == "closed"
+
     start = time()
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())
