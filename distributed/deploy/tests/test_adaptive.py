@@ -7,7 +7,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 from distributed import Client, wait, Adaptive, LocalCluster, SpecCluster, Worker
-from distributed.utils_test import gen_cluster, gen_test, slowinc, inc
+from distributed.utils_test import gen_cluster, gen_test, slowinc, inc, clean
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from distributed.metrics import time
 
@@ -359,17 +359,18 @@ def test_no_more_workers_than_tasks():
 
 
 def test_basic_no_loop():
-    try:
-        with LocalCluster(
-            0, scheduler_port=0, silence_logs=False, dashboard_address=None
-        ) as cluster:
-            with Client(cluster) as client:
-                cluster.adapt()
-                future = client.submit(lambda x: x + 1, 1)
-                assert future.result() == 2
-            loop = cluster.loop
-    finally:
-        loop.add_callback(loop.stop)
+    with clean(threads=False):
+        try:
+            with LocalCluster(
+                0, scheduler_port=0, silence_logs=False, dashboard_address=None
+            ) as cluster:
+                with Client(cluster) as client:
+                    cluster.adapt()
+                    future = client.submit(lambda x: x + 1, 1)
+                    assert future.result() == 2
+                loop = cluster.loop
+        finally:
+            loop.add_callback(loop.stop)
 
 
 @gen_test(timeout=None)

@@ -116,40 +116,35 @@ def cleanup_global_workers():
 
 @pytest.fixture
 def loop():
-    Worker._instances.clear()
-    _global_clients.clear()
-    with pristine_loop() as loop:
-        # Monkey-patch IOLoop.start to wait for loop stop
-        orig_start = loop.start
-        is_stopped = threading.Event()
-        is_stopped.set()
+    with check_instances():
+        with pristine_loop() as loop:
+            # Monkey-patch IOLoop.start to wait for loop stop
+            orig_start = loop.start
+            is_stopped = threading.Event()
+            is_stopped.set()
 
-        def start():
-            is_stopped.clear()
+            def start():
+                is_stopped.clear()
+                try:
+                    orig_start()
+                finally:
+                    is_stopped.set()
+
+            loop.start = start
+
+            yield loop
+
+            # Stop the loop in case it's still running
             try:
-                orig_start()
-            finally:
-                is_stopped.set()
-
-        loop.start = start
-
-        yield loop
-
-        # Stop the loop in case it's still running
-        try:
-            sync(loop, cleanup_global_workers, callback_timeout=0.500)
-            loop.add_callback(loop.stop)
-        except RuntimeError as e:
-            if not re.match("IOLoop is clos(ed|ing)", str(e)):
-                raise
-        except gen.TimeoutError:
-            pass
-        else:
-            is_stopped.wait()
-    Worker._instances.clear()
-
-    _cleanup_dangling()
-    _global_clients.clear()
+                sync(loop, cleanup_global_workers, callback_timeout=0.500)
+                loop.add_callback(loop.stop)
+            except RuntimeError as e:
+                if not re.match("IOLoop is clos(ed|ing)", str(e)):
+                    raise
+            except gen.TimeoutError:
+                pass
+            else:
+                is_stopped.wait()
 
 
 @pytest.fixture
@@ -769,7 +764,7 @@ def gen_test(timeout=10):
 
     def _(func):
         def test_func():
-            with pristine_loop() as loop:
+            with clean() as loop:
                 if iscoroutinefunction(func):
                     cor = func
                 else:
@@ -1468,6 +1463,7 @@ def check_instances():
     Client._instances.clear()
     Worker._instances.clear()
     Scheduler._instances.clear()
+    assert all(n.status == "closed" for n in Nanny._instances)
     Nanny._instances.clear()
     _global_clients.clear()
     Comm._instances.clear()
@@ -1498,6 +1494,8 @@ def check_instances():
         print("Unclosed Comms", L)
         # raise ValueError("Unclosed Comms", L)
 
+    assert all(n.status == "closed" for n in Nanny._instances)
+    Nanny._instances.clear()
     DequeHandler.clear_all_instances()
 
 

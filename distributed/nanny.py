@@ -376,8 +376,12 @@ class Nanny(ServerNode):
         """
         Close the worker process, stop all comms.
         """
-        if self.status in ("closing", "closed"):
+        while self.status == "closing":
+            yield gen.sleep(0.01)
+
+        if self.status == "closed":
             raise gen.Return("OK")
+
         self.status = "closing"
         logger.info("Closing Nanny at %r", self.address)
         self.stop()
@@ -390,6 +394,7 @@ class Nanny(ServerNode):
         self.rpc.close()
         self.scheduler.close_rpc()
         self.status = "closed"
+        yield ServerNode.close(self)
         raise gen.Return("OK")
 
 

@@ -17,6 +17,7 @@ from distributed import Client, Worker, Nanny
 from distributed.deploy.local import LocalCluster, nprocesses_nthreads
 from distributed.metrics import time
 from distributed.utils_test import (
+    clean,
     inc,
     gen_test,
     slowinc,
@@ -171,7 +172,7 @@ def test_transports_tcp_port():
 @pytest.mark.skipif("sys.version_info[0] == 2", reason="")
 class LocalTest(ClusterTest, unittest.TestCase):
     Cluster = partial(LocalCluster, silence_logs=False, dashboard_address=None)
-    kwargs = {"dashboard_address": None}
+    kwargs = {"dashboard_address": None, "processes": False}
 
 
 @pytest.mark.skipif("sys.version_info[0] == 2", reason="")
@@ -208,6 +209,7 @@ def test_duplicate_clients():
         for msg in info.list
     )
     yield c1.close()
+    yield c2.close()
 
 
 def test_Client_kwargs(loop):
@@ -302,24 +304,28 @@ def test_memory_limit_none():
 
 
 def test_cleanup():
-    c = LocalCluster(2, scheduler_port=0, silence_logs=False, dashboard_address=None)
-    port = c.scheduler.port
-    c.close()
-    c2 = LocalCluster(
-        2, scheduler_port=port, silence_logs=False, dashboard_address=None
-    )
-    c.close()
+    with clean(threads=False):
+        c = LocalCluster(
+            2, scheduler_port=0, silence_logs=False, dashboard_address=None
+        )
+        port = c.scheduler.port
+        c.close()
+        c2 = LocalCluster(
+            2, scheduler_port=port, silence_logs=False, dashboard_address=None
+        )
+        c2.close()
 
 
 def test_repeated():
-    with LocalCluster(
-        0, scheduler_port=8448, silence_logs=False, dashboard_address=None
-    ) as c:
-        pass
-    with LocalCluster(
-        0, scheduler_port=8448, silence_logs=False, dashboard_address=None
-    ) as c:
-        pass
+    with clean(threads=False):
+        with LocalCluster(
+            0, scheduler_port=8448, silence_logs=False, dashboard_address=None
+        ) as c:
+            pass
+        with LocalCluster(
+            0, scheduler_port=8448, silence_logs=False, dashboard_address=None
+        ) as c:
+            pass
 
 
 @pytest.mark.parametrize("processes", [True, False])

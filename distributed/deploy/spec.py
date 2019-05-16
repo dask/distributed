@@ -1,4 +1,5 @@
 import asyncio
+import weakref
 
 import toolz
 from tornado import gen
@@ -45,6 +46,7 @@ class SpecCluster(Cluster):
         worker=None,
         silence_logs=False,
     ):
+        self._created = weakref.WeakSet()
         if scheduler is None:
             try:
                 from distributed.bokeh.scheduler import BokehScheduler
@@ -91,7 +93,9 @@ class SpecCluster(Cluster):
             to_close = set(self.workers) - set(self.worker_spec)
             if to_close:
                 await self.scheduler.retire_workers(workers=list(to_close))
-                await asyncio.wait([self.workers[w].close() for w in to_close])
+                tasks = [self.workers[w].close() for w in to_close]
+                for task in tasks:
+                    await task
             for name in to_close:
                 del self.workers[name]
 
@@ -103,11 +107,14 @@ class SpecCluster(Cluster):
                 if "name" not in opts:
                     opts = toolz.merge({"name": name}, opts, {"loop": self.loop})
                 worker = cls(self.scheduler.address, **opts)
+                self._created.add(worker)
                 workers.append(worker)
             if workers:
                 await asyncio.wait(workers)
                 for w in workers:
-                    await w
+                    w._cluster = weakref.ref(self)
+                    if self.status == "running":
+                        await w
             self.workers.update(dict(zip(to_open, workers)))
 
     def __await__(self):
@@ -146,9 +153,12 @@ class SpecCluster(Cluster):
         if self.status.startswith("clos"):
             return
         self.status = "closing"
+        async with self._lock:
+            await self.scheduler.close(close_workers=True)
         self.scale(0)
-        await self
-        await self.scheduler.close(close_workers=True)
+        await self._correct_state()
+        for w in self._created:
+            assert w.status == "closed"
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
