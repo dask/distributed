@@ -262,6 +262,8 @@ def test_bokeh_non_standard_ports(loop):
                 try:
                     response = requests.get("http://127.0.0.1:4833/status")
                     assert response.ok
+                    redirect_resp = requests.get("http://127.0.0.1:4833/main")
+                    redirect_resp.ok
                     break
                 except Exception:
                     sleep(0.5)
