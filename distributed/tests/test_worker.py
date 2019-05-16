@@ -356,11 +356,10 @@ def test_gather(s, a, b):
 
 
 @pytest.mark.asyncio
-async def test_io_loop(loop):
-    s = await Scheduler(loop=loop, port=0)
-    assert s.io_loop is loop
-    w = await Worker(s.address, loop=loop)
-    assert w.io_loop is loop
+async def test_io_loop():
+    s = await Scheduler(port=0)
+    w = await Worker(s.address, loop=s.loop)
+    assert w.io_loop is s.loop
     await s.close()
     await w.close()
 
