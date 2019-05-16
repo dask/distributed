@@ -72,10 +72,11 @@ class OldRoute(RequestHandler):
         self.redirect("/status")
 
 
-routes = [(r"metrics", PrometheusHandler),
-          (r"health", HealthHandler),
-          (r"main", OldRoute),
-          ]
+routes = [
+    (r"metrics", PrometheusHandler),
+    (r"health", HealthHandler),
+    (r"main", OldRoute),
+]
 
 
 def get_handlers(server):
