@@ -94,7 +94,7 @@ class SpecCluster(Cluster):
             # If people call this frequently, we only want to run it once
             return self._correct_state_waiting
         else:
-            task = asyncio.create_task(self._correct_state_internal())
+            task = asyncio.ensure_future(self._correct_state_internal())
             self._correct_state_waiting = task
             return task
 
