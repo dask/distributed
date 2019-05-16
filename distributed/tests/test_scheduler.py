@@ -1556,7 +1556,7 @@ def test_close_workers(s, a, b):
 )
 @gen_test()
 def test_host_address():
-    s = yield Scheduler(host="127.0.0.2")
+    s = yield Scheduler(host="127.0.0.2", port=0)
     assert "127.0.0.2" in s.address
     yield s.close()
 
@@ -1564,10 +1564,10 @@ def test_host_address():
 @gen_test()
 def test_dashboard_address():
     pytest.importorskip("bokeh")
-    s = yield Scheduler(dashboard_address="127.0.0.1:8901")
+    s = yield Scheduler(dashboard_address="127.0.0.1:8901", port=0)
     assert s.services["bokeh"].port == 8901
     yield s.close()
 
-    s = yield Scheduler(dashboard_address="127.0.0.1")
+    s = yield Scheduler(dashboard_address="127.0.0.1", port=0)
     assert s.services["bokeh"].port
     yield s.close()
