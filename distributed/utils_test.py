@@ -459,13 +459,13 @@ def readone(comm):
         raise gen.Return(msg)
 
 
-def run_scheduler(q, nputs, **kwargs):
+def run_scheduler(q, nputs, port=0, **kwargs):
     from distributed import Scheduler
 
     # On Python 2.7 and Unix, fork() is used to spawn child processes,
     # so avoid inheriting the parent's IO loop.
     with pristine_loop() as loop:
-        scheduler = Scheduler(validate=True, host="127.0.0.1", **kwargs)
+        scheduler = Scheduler(validate=True, host="127.0.0.1", port=port, **kwargs)
         done = scheduler.start()
 
         for i in range(nputs):
@@ -790,7 +790,9 @@ def start_cluster(
     scheduler_kwargs={},
     worker_kwargs={},
 ):
-    s = Scheduler(loop=loop, validate=True, security=security, **scheduler_kwargs)
+    s = Scheduler(
+        loop=loop, validate=True, security=security, port=0, **scheduler_kwargs
+    )
     done = s.start(scheduler_addr)
     workers = [
         Worker(
