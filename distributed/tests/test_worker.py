@@ -355,12 +355,14 @@ def test_gather(s, a, b):
         assert a.data["y"] == b.data["y"]
 
 
-def test_io_loop(loop):
-    s = Scheduler(loop=loop)
-    s.listen(0)
+@pytest.mark.asyncio
+async def test_io_loop(loop):
+    s = await Scheduler(loop=loop, port=0)
     assert s.io_loop is loop
-    w = Worker(s.address, loop=loop)
+    w = await Worker(s.address, loop=loop)
     assert w.io_loop is loop
+    await s.close()
+    await w.close()
 
 
 @gen_cluster(client=True, ncores=[])
