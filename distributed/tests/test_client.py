@@ -3525,7 +3525,7 @@ def test_reconnect_timeout(c, s):
 @pytest.mark.skipif(
     sys.version_info[0] == 2, reason="Semaphore.acquire doesn't support timeout option"
 )
-@pytest.mark.xfail(reason="TODO: intermittent failures")
+# @pytest.mark.xfail(reason="TODO: intermittent failures")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
 def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip("psutil")
@@ -3571,6 +3571,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 sleep(0.2)
                 assert time() < start + 10
 
+        [w.close() for w in running]
     start = time()
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())

@@ -769,10 +769,7 @@ def gen_test(timeout=10):
                     cor = func
                 else:
                     cor = gen.coroutine(func)
-                try:
-                    loop.run_sync(cor, timeout=timeout)
-                finally:
-                    loop.stop()
+                loop.run_sync(cor, timeout=timeout)
 
         return test_func
 

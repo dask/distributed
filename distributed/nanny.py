@@ -394,8 +394,9 @@ class Nanny(ServerNode):
         self.rpc.close()
         self.scheduler.close_rpc()
         self.status = "closed"
+        if comm:
+            yield comm.write("OK")
         yield ServerNode.close(self)
-        raise gen.Return("OK")
 
 
 class WorkerProcess(object):
