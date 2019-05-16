@@ -1495,7 +1495,7 @@ def check_instances():
         print("Unclosed Comms", L)
         # raise ValueError("Unclosed Comms", L)
 
-    assert all(n.status == "closed" for n in Nanny._instances)
+    assert all(n.status == "closed" or n.status == "init" for n in Nanny._instances)
     Nanny._instances.clear()
     DequeHandler.clear_all_instances()
 

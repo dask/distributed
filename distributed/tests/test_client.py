@@ -3531,7 +3531,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip("psutil")
     proc = psutil.Process()
 
-    with cluster(nworkers=0, active_rpc_timeout=20) as (s, _):
+    with cluster(nworkers=0, active_rpc_timeout=2) as (s, _):
         gc.collect()
         before = proc.num_fds()
         done = Semaphore(0)
@@ -3571,7 +3571,7 @@ def test_open_close_many_workers(loop, worker, count, repeat):
                 sleep(0.2)
                 assert time() < start + 10
 
-        [w.close() for w in running]
+            [w.close() for w in running]
     start = time()
     while proc.num_fds() > before:
         print("fds:", before, proc.num_fds())

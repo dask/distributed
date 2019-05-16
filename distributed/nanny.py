@@ -18,7 +18,7 @@ from tornado.locks import Event
 
 from .comm import get_address_host, get_local_address_for, unparse_host_port
 from .comm.addressing import address_from_user_args
-from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
+from .core import RPCClosed, CommClosedError, coerce_to_address
 from .metrics import time
 from .node import ServerNode
 from .process import AsyncProcess
@@ -78,6 +78,11 @@ class Nanny(ServerNode):
         protocol=None,
         **worker_kwargs
     ):
+        self.loop = loop or IOLoop.current()
+        self.security = security or Security()
+        assert isinstance(self.security, Security)
+        self.connection_args = self.security.get_connection_args("worker")
+        self.listen_args = self.security.get_listen_args("worker")
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
@@ -88,6 +93,7 @@ class Nanny(ServerNode):
             self.scheduler_addr = coerce_to_address(scheduler_ip)
         else:
             self.scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
+
         self._given_worker_port = worker_port
         self.ncores = ncores or _ncores
         self.reconnect = reconnect
@@ -105,15 +111,8 @@ class Nanny(ServerNode):
             "distributed.worker.memory.terminate"
         )
 
-        self.security = security or Security()
-        assert isinstance(self.security, Security)
-        self.connection_args = self.security.get_connection_args("worker")
-        self.listen_args = self.security.get_listen_args("worker")
-
         self.local_dir = local_dir
 
-        self.loop = loop or IOLoop.current()
-        self.scheduler = rpc(self.scheduler_addr, connection_args=self.connection_args)
         self.services = services
         self.name = name
         self.quiet = quiet
@@ -135,8 +134,10 @@ class Nanny(ServerNode):
         }
 
         super(Nanny, self).__init__(
-            handlers, io_loop=self.loop, connection_args=self.connection_args
+            handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
         )
+
+        self.scheduler = self.rpc(self.scheduler_addr)
 
         if self.memory_limit:
             pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)

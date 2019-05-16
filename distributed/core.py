@@ -491,7 +491,8 @@ class Server(object):
     def close(self):
         for pc in self.periodic_callbacks.values():
             pc.stop()
-        self.listener.stop()
+        if self.listener:
+            self.listener.stop()
         for i in range(20):  # let comms close naturally for a second
             if not self._comms:
                 break
