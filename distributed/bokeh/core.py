@@ -19,6 +19,7 @@ if LooseVersion(bokeh.__version__) < LooseVersion("0.13.0"):
 
 class BokehServer(object):
     server_kwargs = {}
+    proxy_enabled = True
 
     def listen(self, addr):
         if self.server:
