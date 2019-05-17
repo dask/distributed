@@ -492,7 +492,9 @@ def test_bokeh_kwargs(loop):
 
 
 def test_io_loop_periodic_callbacks(loop):
-    with LocalCluster(loop=loop, silence_logs=False) as cluster:
+    with LocalCluster(
+        loop=loop, port=0, dashboard_address=None, silence_logs=False
+    ) as cluster:
         assert cluster.scheduler.loop is loop
         for pc in cluster.scheduler.periodic_callbacks.values():
             assert pc.io_loop is loop
