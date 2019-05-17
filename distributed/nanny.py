@@ -242,7 +242,6 @@ class Nanny(ServerNode):
 
         deadline = self.loop.time() + timeout
         yield self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
-        yield self._unregister(deadline - self.loop.time())
 
     @gen.coroutine
     def instantiate(self, comm=None):
