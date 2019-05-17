@@ -181,6 +181,9 @@ class SpecCluster(Cluster):
     def close(self):
         return self.sync(self._close)
 
+    def __del__(self):
+        asyncio.ensure_future(self._close())
+
     def __enter__(self):
         self.sync(self._correct_state)
         self.sync(self._wait_for_workers)

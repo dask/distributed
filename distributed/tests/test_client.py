@@ -4201,20 +4201,20 @@ def test_client_timeout():
     loop = IOLoop.current()
     c = Client("127.0.0.1:57484", asynchronous=True)
 
-    s = Scheduler(loop=loop)
+    s = Scheduler(loop=loop, port=57484)
     yield gen.sleep(4)
     try:
-        s.start(("127.0.0.1", 57484))
+        yield s
     except EnvironmentError:  # port in use
         return
 
     start = time()
-    while not c.scheduler_comm:
-        yield gen.sleep(0.1)
+    yield c
+    try:
         assert time() < start + 2
-
-    yield c.close()
-    yield s.close()
+    finally:
+        yield c.close()
+        yield s.close()
 
 
 @gen_cluster(client=True)
