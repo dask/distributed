@@ -5,7 +5,7 @@ import toolz
 from tornado import gen
 
 from .cluster import Cluster
-from ..utils import LoopRunner, silence_logging
+from ..utils import LoopRunner, silence_logging, ignoring
 from ..scheduler import Scheduler
 
 
@@ -94,7 +94,7 @@ class SpecCluster(Cluster):
             # If people call this frequently, we only want to run it once
             return self._correct_state_waiting
         else:
-            task = asyncio.ensure_future(self._correct_state_internal())
+            task = asyncio.Task(self._correct_state_internal())
             self._correct_state_waiting = task
             return task
 
@@ -163,9 +163,12 @@ class SpecCluster(Cluster):
         await self.close()
 
     async def _close(self):
-        if self.status.startswith("clos"):
+        while self.status == "closing":
+            await asyncio.sleep(0.1)
+        if self.status == "closed":
             return
         self.status = "closing"
+
         async with self._lock:
             await self.scheduler.close(close_workers=True)
         self.scale(0)
@@ -179,7 +182,12 @@ class SpecCluster(Cluster):
         self.status = "closed"
 
     def close(self):
-        return self.sync(self._close)
+        with ignoring(RuntimeError):
+            return self.sync(self._close)
+
+    def __del__(self):
+        if self.status != "closed":
+            self.close()
 
     def __enter__(self):
         self.sync(self._correct_state)

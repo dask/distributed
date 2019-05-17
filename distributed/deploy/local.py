@@ -137,7 +137,6 @@ class LocalCluster(SpecCluster):
         if host is None and not protocol.startswith("inproc") and not interface:
             host = "127.0.0.1"
 
-        # self._asynchronous = asynchronous
         services = services or {}
         worker_services = worker_services or {}
         if n_workers is None and threads_per_worker is None:

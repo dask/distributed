@@ -498,8 +498,7 @@ class Server(object):
                 break
             else:
                 yield gen.sleep(0.05)
-        for comm in self._comms:
-            comm.close()
+        yield [comm.close() for comm in self._comms]
         for cb in self._ongoing_coroutines:
             cb.cancel()
         for i in range(10):

@@ -242,7 +242,6 @@ class Nanny(ServerNode):
 
         deadline = self.loop.time() + timeout
         yield self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
-        yield self._unregister(deadline - self.loop.time())
 
     @gen.coroutine
     def instantiate(self, comm=None):
@@ -328,9 +327,9 @@ class Nanny(ServerNode):
             return
         try:
             proc = psutil.Process(process.pid)
-        except psutil.NoSuchProcess:
+            memory = proc.memory_info().rss
+        except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return
-        memory = proc.memory_info().rss
         frac = memory / self.memory_limit
         if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
             logger.warning(
@@ -394,7 +393,6 @@ class Nanny(ServerNode):
             pass
         self.process = None
         self.rpc.close()
-        self.scheduler.close_rpc()
         self.status = "closed"
         if comm:
             yield comm.write("OK")

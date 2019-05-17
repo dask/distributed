@@ -152,7 +152,7 @@ class Occupancy(DashboardComponent):
             # fig.xaxis[0].formatter = NumeralTickFormatter(format='0.0s')
             fig.x_range.start = 0
 
-            tap = TapTool(callback=OpenURL(url="http://@bokeh_address/main"))
+            tap = TapTool(callback=OpenURL(url="http://@bokeh_address/"))
 
             hover = HoverTool()
             hover.tooltips = "@worker : @occupancy s."
@@ -223,6 +223,7 @@ class ProcessingHistogram(DashboardComponent):
                 id="bk-nprocessing-histogram-plot",
                 name="processing_hist",
                 y_axis_label="frequency",
+                tools="",
                 **kwargs
             )
 
@@ -265,6 +266,7 @@ class NBytesHistogram(DashboardComponent):
                 name="nbytes_hist",
                 id="bk-nbytes-histogram-plot",
                 y_axis_label="frequency",
+                tools="",
                 **kwargs
             )
 
@@ -366,7 +368,7 @@ class CurrentLoad(DashboardComponent):
                 fig.yaxis.visible = False
                 fig.ygrid.visible = False
 
-                tap = TapTool(callback=OpenURL(url="http://@bokeh_address/main"))
+                tap = TapTool(callback=OpenURL(url="http://@bokeh_address/"))
                 fig.add_tools(tap)
 
                 fig.toolbar.logo = None
@@ -943,6 +945,7 @@ class TaskProgress(DashboardComponent):
             x_range=x_range,
             y_range=y_range,
             toolbar_location=None,
+            tools="",
             **kwargs
         )
         self.root.line(  # just to define early ranges
