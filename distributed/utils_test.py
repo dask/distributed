@@ -730,9 +730,9 @@ def cluster(
             client.close()
 
     start = time()
-    while list(ws):
-        sleep(0.01)
-        assert time() < start + 1, "Workers still around after one second"
+    while len(ws):
+        sleep(0.1)
+        assert time() < start + 2, "Workers still around after two seconds"
 
 
 @gen.coroutine
