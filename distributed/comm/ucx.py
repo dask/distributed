@@ -239,7 +239,7 @@ class UCXConnector(Connector):
         logger.debug("UCXConnector.connect: %s", address)
         _ucp_init()
         ip, port = _parse_host_port(address)
-        ep = ucp.get_endpoint(ip.encode(), port)
+        ep = await ucp.get_endpoint(ip.encode(), port)
         return self.comm_class(
             ep, self.prefix + address, listener_instance=None, deserialize=deserialize
         )
