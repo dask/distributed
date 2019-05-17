@@ -2,8 +2,8 @@ from __future__ import print_function, division, absolute_import
 
 import atexit
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
+from concurrent.futures import ThreadPoolExecutor, CancelledError
+from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
 import copy
 from datetime import timedelta
@@ -1644,10 +1644,11 @@ class Client(Node):
                             st = self.futures[key]
                             exception = st.exception
                             traceback = st.traceback
-                        except (AttributeError, KeyError):
-                            six.reraise(CancelledError, CancelledError(key), None)
+                        except (KeyError, AttributeError):
+                            exc = CancelledError(key)
                         else:
                             six.reraise(type(exception), exception, traceback)
+                        raise exc
                     if errors == "skip":
                         bad_keys.add(key)
                         bad_data[key] = None
@@ -4067,7 +4068,10 @@ class as_completed(object):
         except CancelledError:
             pass
         if self.with_results:
-            result = yield future._result(raiseit=False)
+            try:
+                result = yield future._result(raiseit=False)
+            except CancelledError as exc:
+                result = exc
         with self.lock:
             self.futures[future] -= 1
             if not self.futures[future]:

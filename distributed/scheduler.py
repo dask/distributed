@@ -1989,7 +1989,10 @@ class Scheduler(ServerNode):
         """ Cancel a particular key and all dependents """
         # TODO: this should be converted to use the transition mechanism
         ts = self.tasks.get(key)
-        cs = self.clients[client]
+        try:
+            cs = self.clients[client]
+        except KeyError:
+            return
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
             if retries:
                 self.loop.add_future(
