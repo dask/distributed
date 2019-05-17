@@ -822,6 +822,7 @@ def test_file_descriptors(c, s):
     assert num_fds_6 < num_fds_5 + N
 
     yield [n.close() for n in nannies]
+    yield c.close()
 
     assert not s.rpc.open
     assert not any(
