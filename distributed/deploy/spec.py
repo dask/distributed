@@ -81,13 +81,17 @@ class SpecCluster(Cluster):
         self._correct_state_waiting = None
 
     async def _start(self):
-        if self.status != "created":
+        while self.status == "starting":
+            await asyncio.sleep(0.01)
+        if self.status == "running":
             return
+        if self.status == "closed":
+            raise ValueError("Cluster is closed")
+
         self._lock = asyncio.Lock()
         self.status = "starting"
         self.scheduler = await self.scheduler
-
-        self.status = "starting"
+        self.status = "running"
 
     def _correct_state(self):
         if self._correct_state_waiting:
@@ -132,7 +136,8 @@ class SpecCluster(Cluster):
 
     def __await__(self):
         async def _():
-            await self._start()
+            if self.status == "created":
+                await self._start()
             await self.scheduler
             await self._correct_state()
             if self.workers:
@@ -182,7 +187,7 @@ class SpecCluster(Cluster):
         self.status = "closed"
 
     def close(self):
-        with ignoring(RuntimeError):
+        with ignoring(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close)
 
     def __del__(self):
@@ -192,6 +197,7 @@ class SpecCluster(Cluster):
     def __enter__(self):
         self.sync(self._correct_state)
         self.sync(self._wait_for_workers)
+        assert self.status == "running"
         return self
 
     def __exit__(self, typ, value, traceback):
