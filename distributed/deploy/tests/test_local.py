@@ -280,6 +280,7 @@ def test_defaults():
 
 def test_worker_params():
     with LocalCluster(
+        processes=False,
         n_workers=2,
         scheduler_port=0,
         silence_logs=False,
