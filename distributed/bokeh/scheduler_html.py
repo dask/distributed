@@ -27,10 +27,12 @@ class RequestHandler(web.RequestHandler):
 class Workers(RequestHandler):
     def get(self):
         with log_errors():
+            # breakpoint()
             self.render(
                 "workers.html",
                 title="Workers",
                 scheduler=self.server,
+                # proxy=self.server.services.get('proxy', False),
                 **toolz.merge(self.server.__dict__, ns, self.extra)
             )
 

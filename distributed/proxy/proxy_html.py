@@ -12,7 +12,7 @@ from tornado.httpserver import HTTPServer
 
 
 def get_host():
-    return '10.31.241.45'
+    return '127.0.0.1'
 
 class GlobalProxyHandler(ProxyHandler):
     """
@@ -47,7 +47,11 @@ class GlobalProxyHandler(ProxyHandler):
         return self.proxy(port, proxied_path)
 
     def proxy(self, port, proxied_path):
-        host = get_host()
+        #incoming URI /proxy/{proxy}/port
+        host = self.get_argument('host', None)
+        if not host:
+            host = '127.0.0.1'
+        # return ProxyHandler coroutine
         return super().proxy(host, port, proxied_path)
 
 class Proxy(tornado.web.Application):
@@ -75,4 +79,7 @@ class Proxy(tornado.web.Application):
 
         self.server = HTTPServer(self.application)
 
-        self.server.listen(self.port)
+        # proxy should run with the same host as
+        # scheduler
+        addr = self.scheduler.ip
+        self.server.listen(addr, self.port)

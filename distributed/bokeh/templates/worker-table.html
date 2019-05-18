@@ -20,7 +20,12 @@
         <td> {{ len(ws.processing) }} </td>
         <td> {{ len(ws.has_what) }} </td>
         {% if 'bokeh' in ws.services %}
+          {{ scheduler.services }}
+          {% if 'proxy' in scheduler.services %}
+        <td> <a href="http://{{ ws.host }}:{{ scheduler.services['proxy'].port }}/proxy/{{ ws.services['bokeh'] }}/status?host={{ ws.host }}">bokeh</a> </td>
+          {% else %}
         <td> <a href="http://{{ ws.host }}:{{ ws.services['bokeh'] }}">bokeh</a> </td>
+          {% end %}
         {% else %}
         <td> </td>
         {% end %}
