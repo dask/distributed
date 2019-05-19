@@ -7,6 +7,7 @@ from tornado import gen
 from tornado import web
 
 from ..utils import log_errors, format_bytes, format_time
+from ..proxy.proxy_html import GlobalProxyHandler
 
 dirname = os.path.dirname(__file__)
 
@@ -236,7 +237,6 @@ class HealthHandler(RequestHandler):
         self.write("ok")
         self.set_header("Content-Type", "text/plain")
 
-
 routes = [
     (r"info/main/workers.html", Workers),
     (r"info/worker/(.*).html", Worker),
@@ -251,6 +251,7 @@ routes = [
     (r"individual-plots.json", IndividualPlots),
     (r"metrics", PrometheusHandler),
     (r"health", HealthHandler),
+    # (r"proxy/(\d+)(.*)", GlobalProxyHandler)
 ]
 
 

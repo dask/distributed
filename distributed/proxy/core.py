@@ -8,6 +8,7 @@ from jupyter_server_proxy.handlers import ProxyHandler
 import tornado.ioloop
 import tornado.web
 
+
 class Proxy(BokehServer):
     def __init__(self, scheduler, io_loop=None, prefix="", **kwargs):
         self.scheduler = scheduler

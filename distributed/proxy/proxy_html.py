@@ -12,20 +12,51 @@ from tornado.httpserver import HTTPServer
 
 
 def get_host():
-    return '127.0.0.1'
+    return "127.0.0.1"
 
-class GlobalProxyHandler(ProxyHandler):
+
+class GlobalProxyHandler(web.RequestHandler):
+    def initialize(self, server=None, extra=None):
+        self.server = server
+        self.extra = extra or {}
+
+    def get(self, port, proxied_path):
+        breakpoint()
+        print("HELLO")
+        # self.set_header("Content-Type", "text/plain; version=0.0.4")
+
+
+class _GlobalProxyHandler(ProxyHandler):
     """
     A tornado request handler that proxies HTTP and websockets
     from a port to any valid endpoint'.
     """
+    def initialize(self, scheduler=None, extra=None):
+        self.scheduler = scheduler
+        self.extra = extra or {}
+
     async def http_get(self, port, proxied_path):
-        # valid_address_check?
+        # route here first
+        # incoming URI /proxy/{proxy}/port
+        host = self.get_argument("host", None)
+        if not host:
+            host = "127.0.0.1"
+        self.host = host
+        worker = '%s:%s' % (self.host, str(port))
+        if not check_worker_bokeh_exits(self.scheduler, worker):
+            async def _noop():
+                return None
+            msg = "Worker <%s> does not exist" % worker
+            self.set_status(400)
+            self.finish(msg)
+            return
         return await self.proxy(port, proxied_path)
 
     async def open(self, port, proxied_path):
-        # proxy to other address
-        host = get_host()
+        # finally, proxy to other address/port
+        host = self.get_argument("host", None)
+        if not host:
+            host = "127.0.0.1"
         return await self.proxy_open(host, port, proxied_path)
 
     def post(self, port, proxied_path):
@@ -47,12 +78,30 @@ class GlobalProxyHandler(ProxyHandler):
         return self.proxy(port, proxied_path)
 
     def proxy(self, port, proxied_path):
-        #incoming URI /proxy/{proxy}/port
-        host = self.get_argument('host', None)
-        if not host:
-            host = '127.0.0.1'
-        # return ProxyHandler coroutine
-        return super().proxy(host, port, proxied_path)
+        # router here second
+        # returns ProxyHandler coroutine
+        return super().proxy(self.host, port, proxied_path)
+
+def check_worker_bokeh_exits(scheduler, worker):
+    """Check addr:port exists as a worker in scheduler list
+
+    Parameters
+    ----------
+    worker : str
+        addr:port
+
+    Returns
+    -------
+    bool
+    """
+    addr, port = worker.split(':')
+    workers = list(scheduler.workers.values())
+    for w in workers:
+        bokeh_port = w.services.get('bokeh', '')
+        if addr == w.host and port == str(bokeh_port):
+            return True
+    return False
+
 
 class Proxy(tornado.web.Application):
     def __init__(self, scheduler, io_loop=None, prefix="", **kwargs):
@@ -66,20 +115,33 @@ class Proxy(tornado.web.Application):
         self.server_kwargs = kwargs
         self.server_kwargs["prefix"] = prefix or None
 
-
         self.loop = io_loop or scheduler.loop
         self.server = None
 
     def listen(self, *args, **kwargs):
         addr, port = args[0]
+        if not addr:
+            # proxy should run with the same host as
+            # scheduler
+            addr = self.scheduler.ip
+        self.ip = addr
         self.port = port
 
-        handlers = [(r'/proxy/(\d+)(.*)', GlobalProxyHandler)]
+        # handlers = [
+        #     (
+        #         self.prefix + "/" + url,
+        #         cls,
+        #         {"server": self.my_server, "extra": self.extra},
+        #     )
+        #     for url, cls in routes
+        # ]
+
+        # self.server._tornado.add_handlers(r".*", handlers)
+        # breakpoint()
+
+        handlers = [(r"/proxy/(\d+)(.*)", _GlobalProxyHandler,
+            {"scheduler": self.scheduler},)]
         self.application = tornado.web.Application(handlers)
 
         self.server = HTTPServer(self.application)
-
-        # proxy should run with the same host as
-        # scheduler
-        addr = self.scheduler.ip
-        self.server.listen(addr, self.port)
+        self.server.listen(port=self.port, address=self.ip)
