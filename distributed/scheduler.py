@@ -841,6 +841,7 @@ class Scheduler(ServerNode):
         port=8786,
         protocol=None,
         dashboard_address=None,
+        use_proxy=False,
         **kwargs
     ):
         self._setup_logging()
@@ -856,6 +857,7 @@ class Scheduler(ServerNode):
         )
         self.digests = None
         self.service_specs = services or {}
+        self.service_kwargs = service_kwargs or {}
         self.services = {}
         self.scheduler_file = scheduler_file
         worker_ttl = worker_ttl or dask.config.get("distributed.scheduler.worker-ttl")
@@ -875,10 +877,12 @@ class Scheduler(ServerNode):
         self.connection_args = self.security.get_connection_args("scheduler")
         self.listen_args = self.security.get_listen_args("scheduler")
 
+        if use_proxy:
+            self.service_kwargs['use_proxy'] = True
         if dashboard_address is not None:
             try:
                 from distributed.bokeh.scheduler import BokehScheduler
-                from distributed.proxy.proxy_html import Proxy
+                # from distributed.proxy.proxy_html import Proxy
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
@@ -886,10 +890,10 @@ class Scheduler(ServerNode):
                     BokehScheduler,
                     (service_kwargs or {}).get("bokeh", {}),
                 )
-                self.service_specs[("proxy", 8785)] = (
-                    Proxy,
-                    (service_kwargs or {}).get("proxy", {}),
-                )
+                # self.service_specs[("proxy", 8785)] = (
+                #     Proxy,
+                #     (service_kwargs or {}).get("proxy", {}),
+                # )
 
         # Communication state
         self.loop = loop or IOLoop.current()

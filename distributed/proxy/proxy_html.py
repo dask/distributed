@@ -15,24 +15,13 @@ def get_host():
     return "127.0.0.1"
 
 
-class GlobalProxyHandler(web.RequestHandler):
-    def initialize(self, server=None, extra=None):
-        self.server = server
-        self.extra = extra or {}
-
-    def get(self, port, proxied_path):
-        breakpoint()
-        print("HELLO")
-        # self.set_header("Content-Type", "text/plain; version=0.0.4")
-
-
-class _GlobalProxyHandler(ProxyHandler):
+class GlobalProxyHandler(ProxyHandler):
     """
     A tornado request handler that proxies HTTP and websockets
     from a port to any valid endpoint'.
     """
-    def initialize(self, scheduler=None, extra=None):
-        self.scheduler = scheduler
+    def initialize(self, server=None, extra=None):
+        self.scheduler = server
         self.extra = extra or {}
 
     async def http_get(self, port, proxied_path):
@@ -127,20 +116,8 @@ class Proxy(tornado.web.Application):
         self.ip = addr
         self.port = port
 
-        # handlers = [
-        #     (
-        #         self.prefix + "/" + url,
-        #         cls,
-        #         {"server": self.my_server, "extra": self.extra},
-        #     )
-        #     for url, cls in routes
-        # ]
-
-        # self.server._tornado.add_handlers(r".*", handlers)
-        # breakpoint()
-
-        handlers = [(r"/proxy/(\d+)(.*)", _GlobalProxyHandler,
-            {"scheduler": self.scheduler},)]
+        handlers = [(r"/proxy/(\d+)(.*)", GlobalProxyHandler,
+            {"server": self.scheduler},)]
         self.application = tornado.web.Application(handlers)
 
         self.server = HTTPServer(self.application)

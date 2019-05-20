@@ -68,6 +68,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     help="Address on which to listen for diagnostics dashboard",
 )
 @click.option(
+    "--use-proxy/--no-use-proxy",
+    "use_proxy",
+    default=False,
+    show_default=True,
+    help="Use proxy routes for worker dashboards from diagnostic page",
+)
+@click.option(
     "--bokeh/--no-bokeh",
     "_bokeh",
     default=True,
@@ -133,6 +140,7 @@ def main(
     tls_cert,
     tls_key,
     dashboard_address,
+    use_proxy,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -196,7 +204,7 @@ def main(
         port=port,
         interface=interface,
         dashboard_address=dashboard_address if _bokeh else None,
-        service_kwargs={"bokeh": {"prefix": bokeh_prefix}},
+        service_kwargs={"bokeh": {"prefix": bokeh_prefix, "use_proxy": use_proxy}},
     )
     scheduler.start()
     if not preload:
