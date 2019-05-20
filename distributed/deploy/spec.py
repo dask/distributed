@@ -12,38 +12,99 @@ from ..scheduler import Scheduler
 class SpecCluster(Cluster):
     """ Cluster that requires a full specification of workers
 
-    This attempts to handle much of the logistics of cleanly setting up and
-    tearing down a scheduler and workers, without handling any of the logic
-    around user inputs.  It should form the base of other cluster creation
-    functions.
+    The SpecCluster class expects a full specification of the Scheduler and
+    Workers to use.  It removes any handling of user inputs (like threads vs
+    processes, number of cores, and so on) and any handling of cluster resource
+    managers (like pods, jobs, and so on).  Instead, it expects this
+    information to be passed in scheduler and worker specifications.  This
+    class does handle all of the logic around asynchronously cleanly setting up
+    and tearing things down at the right times.  Hopefully it can form a base
+    for other more user-centric classes.
 
     Parameters
     ----------
     workers: dict
         A dictionary mapping names to worker classes and their specifications
         See example below
-    Scheduler: dict, optional
+    scheduler: dict, optional
         A similar mapping for a scheduler
+    worker: dict
+        A specification of a single worker.
+        This is used for any new workers that are created.
     asynchronous: bool
         If this is intended to be used directly within an event loop with
         async/await
+    silence_logs: bool
+        Whether or not we should silence logging when setting up the cluster.
 
     Examples
     --------
-    >>> spec = {
+    To create a SpecCluster you specify how to set up a Scheduler and Workers
+
+    >>> from dask.distributed import Scheduler, Worker, Nanny
+    >>> scheduler = {'cls': Scheduler, 'options': {"dashboard_address": ':8787'}}
+    >>> workers = {
     ...     'my-worker': {"cls": Worker, "options": {"ncores": 1}},
     ...     'my-nanny': {"cls": Nanny, "options": {"ncores": 2}},
     ... }
-    >>> cluster = SpecCluster(workers=spec)
+    >>> cluster = SpecCluster(scheduler=scheduler, workers=workers)
+
+    The worker spec is stored as the ``.worker_spec`` attribute
+
+    >>> cluster.worker_spec
+    {
+       'my-worker': {"cls": Worker, "options": {"ncores": 1}},
+       'my-nanny': {"cls": Nanny, "options": {"ncores": 2}},
+    }
+
+    While the instantiation of this spec is stored in the ``.workers``
+    attribute
+
+    >>> cluster.workers
+    {
+        'my-worker': <Worker ...>
+        'my-nanny': <Nanny ...>
+    }
+
+    Should the spec change, we can await the cluster or call the
+    ``._correct_state`` method to align the actual state to the specified
+    state.
+
+    We can also ``.scale(...)`` the cluster, which adds new workers of a given
+    form.
+
+    >>> worker = {'cls': Worker, 'options': {}}
+    >>> cluster = SpecCluster(scheduler=scheduler, worker=worker)
+    >>> cluster.worker_spec
+    {}
+
+    >>> cluster.scale(3)
+    >>> cluster.worker_spec
+    {
+        0: {'cls': Worker, 'options': {}},
+        1: {'cls': Worker, 'options': {}},
+        2: {'cls': Worker, 'options': {}},
+    }
+
+    Note that above we are using the standard ``Worker`` and ``Nanny`` classes,
+    however in practice other classes could be used that handle resource
+    management like ``KubernetesPod`` or ``SLURMJob``.  The spec does not need
+    to conform to the expectations of the standard Dask Worker class.  It just
+    needs to be called with the provided options, support ``__await__`` and
+    ``close`` methods and the ``worker_address`` property..
+
+    Also note that uniformity of the specification is not required.  Other API
+    could be added externally (in subclasses) that adds workers of different
+    specifications into the same dictionary.
     """
 
     def __init__(
         self,
         workers=None,
         scheduler=None,
+        worker=None,
         asynchronous=False,
         loop=None,
-        worker=None,
         silence_logs=False,
     ):
         self._created = weakref.WeakSet()
