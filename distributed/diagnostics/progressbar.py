@@ -155,7 +155,11 @@ class ProgressWidget(ProgressBar):
     """
 
     def __init__(
-        self, keys, scheduler=None, interval="100ms", complete=False,
+        self,
+        keys,
+        scheduler=None,
+        interval="100ms",
+        complete=False,
         loop=None,
         **kwargs
     ):
@@ -210,7 +214,11 @@ class ProgressWidget(ProgressBar):
 
 class MultiProgressBar(object):
     def __init__(
-        self, keys, scheduler=None, func=key_split, interval="100ms",
+        self,
+        keys,
+        scheduler=None,
+        func=key_split,
+        interval="100ms",
         complete=False,
         **kwargs
     ):
