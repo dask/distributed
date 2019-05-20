@@ -152,7 +152,7 @@ class Occupancy(DashboardComponent):
             # fig.xaxis[0].formatter = NumeralTickFormatter(format='0.0s')
             fig.x_range.start = 0
 
-            tap = TapTool(callback=OpenURL(url="http://@bokeh_address/main"))
+            tap = TapTool(callback=OpenURL(url="http://@bokeh_address/"))
 
             hover = HoverTool()
             hover.tooltips = "@worker : @occupancy s."
@@ -219,9 +219,11 @@ class ProcessingHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Tasks Processing",
+                title="Tasks Processing (Histogram)",
                 id="bk-nprocessing-histogram-plot",
                 name="processing_hist",
+                y_axis_label="frequency",
+                tools="",
                 **kwargs
             )
 
@@ -237,7 +239,8 @@ class ProcessingHistogram(DashboardComponent):
                 right="right",
                 bottom=0,
                 top="top",
-                color="blue",
+                color="deepskyblue",
+                fill_alpha=0.5,
             )
 
     @without_property_validation
@@ -259,11 +262,14 @@ class NBytesHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Bytes Stored",
+                title="Bytes Stored (Histogram)",
                 name="nbytes_hist",
                 id="bk-nbytes-histogram-plot",
+                y_axis_label="frequency",
+                tools="",
                 **kwargs
             )
+
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = -math.pi / 12
 
@@ -279,7 +285,8 @@ class NBytesHistogram(DashboardComponent):
                 right="right",
                 bottom=0,
                 top="top",
-                color="blue",
+                color="deepskyblue",
+                fill_alpha=0.5,
             )
 
     @without_property_validation
@@ -289,7 +296,7 @@ class NBytesHistogram(DashboardComponent):
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         self.source.data.update(d)
 
-        self.root.title.text = "Bytes stored: " + format_bytes(nbytes.sum())
+        self.root.title.text = "Bytes stored (Histogram): " + format_bytes(nbytes.sum())
 
 
 class CurrentLoad(DashboardComponent):
@@ -361,7 +368,7 @@ class CurrentLoad(DashboardComponent):
                 fig.yaxis.visible = False
                 fig.ygrid.visible = False
 
-                tap = TapTool(callback=OpenURL(url="http://@bokeh_address/main"))
+                tap = TapTool(callback=OpenURL(url="http://@bokeh_address/"))
                 fig.add_tools(tap)
 
                 fig.toolbar.logo = None
@@ -938,6 +945,7 @@ class TaskProgress(DashboardComponent):
             x_range=x_range,
             y_range=y_range,
             toolbar_location=None,
+            tools="",
             **kwargs
         )
         self.root.line(  # just to define early ranges

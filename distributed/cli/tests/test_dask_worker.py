@@ -12,7 +12,7 @@ from time import sleep
 from distributed import Client
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
-from distributed.utils_test import popen, slow, terminate_process, wait_for_port
+from distributed.utils_test import popen, terminate_process, wait_for_port
 from distributed.utils_test import loop  # noqa: F401
 
 
@@ -40,7 +40,10 @@ def test_nanny_worker_ports(loop):
                     else:
                         assert time() - start < 5
                         sleep(0.1)
-                assert d["workers"]["tcp://127.0.0.1:9684"]["services"]["nanny"] == 5273
+                assert (
+                    d["workers"]["tcp://127.0.0.1:9684"]["nanny"]
+                    == "tcp://127.0.0.1:5273"
+                )
 
 
 def test_memory_limit(loop):
@@ -65,7 +68,7 @@ def test_no_nanny(loop):
             assert any(b"Registered" in worker.stderr.readline() for i in range(15))
 
 
-@slow
+@pytest.mark.slow
 @pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
 def test_no_reconnect(nanny, loop):
     with popen(["dask-scheduler", "--no-bokeh"]) as sched:
@@ -257,8 +260,10 @@ def test_bokeh_non_standard_ports(loop):
             start = time()
             while True:
                 try:
-                    response = requests.get("http://127.0.0.1:4833/main")
+                    response = requests.get("http://127.0.0.1:4833/status")
                     assert response.ok
+                    redirect_resp = requests.get("http://127.0.0.1:4833/main")
+                    redirect_resp.ok
                     break
                 except Exception:
                     sleep(0.5)
