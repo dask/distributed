@@ -21,7 +21,6 @@ import zipfile
 import pytest
 from toolz import identity, isdistinct, concat, pluck, valmap, partial, first, merge
 from tornado import gen
-from tornado.ioloop import IOLoop
 
 import dask
 from dask import delayed
@@ -4198,14 +4197,14 @@ def test_scatter_dict_workers(c, s, a, b):
 @pytest.mark.slow
 @gen_test()
 def test_client_timeout():
-    loop = IOLoop.current()
     c = Client("127.0.0.1:57484", asynchronous=True)
 
-    s = Scheduler(loop=loop, port=57484)
+    s = Scheduler(loop=c.loop, port=57484)
     yield gen.sleep(4)
     try:
         yield s
     except EnvironmentError:  # port in use
+        yield c.close()
         return
 
     start = time()
