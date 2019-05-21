@@ -68,7 +68,9 @@ try:
 
 except ImportError:
     logger.info(
-        "To route to workers diagnostics web server please install jupyter-server-proxy: pip install jupyter-server-proxy"
+        "To route to workers diagnostics web server "
+        "please install jupyter-server-proxy: "
+        "pip install jupyter-server-proxy"
     )
 
     class GlobalProxyHandler(web.RequestHandler):
@@ -82,8 +84,11 @@ except ImportError:
         def get(self, port, host, proxied_path):
             worker_url = "%s:%s/%s" % (host, str(port), proxied_path)
             msg = (
-                "Unable to route to workers through proxy.  Please install jupyter-server-proxy:<br/>> pip install jupyter-server-proxy.<br/> You can also navigate directly to the worker: <a href=http://%s>%s</a>"
-                % (worker_url, worker_url)
+                "Unable to route to workers through proxy.  "
+                "Please install jupyter-server-proxy:"
+                "<br/>> pip install jupyter-server-proxy.<br/> "
+                "You can also navigate directly to the worker: "
+                "<a href=http://%s>%s</a>" % (worker_url, worker_url)
             )
             self.write(msg)
 

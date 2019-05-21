@@ -591,7 +591,7 @@ def test_root_redirect(c, s, a, b):
 )
 def test_proxy_to_workers(c, s, a, b):
     try:
-        import jupyter_server_proxy
+        import jupyter_server_proxy  # noqa: F401
 
         proxy_exists = True
     except ImportError:

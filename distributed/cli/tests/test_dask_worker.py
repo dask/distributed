@@ -250,7 +250,7 @@ def test_respect_host_listen_address(loop, nanny, host):
 def test_bokeh_non_standard_ports(loop):
     pytest.importorskip("bokeh")
     try:
-        import jupyter_server_proxy
+        import jupyter_server_proxy  # noqa: F401
 
         proxy_exists = True
     except ImportError:
