@@ -159,7 +159,7 @@ class SpecCluster(Cluster):
             # If people call this frequently, we only want to run it once
             return self._correct_state_waiting
         else:
-            task = asyncio.Task(self._correct_state_internal())
+            task = asyncio.ensure_future(self._correct_state_internal())
             self._correct_state_waiting = task
             return task
 
@@ -172,7 +172,8 @@ class SpecCluster(Cluster):
             if to_close:
                 await self.scheduler.retire_workers(workers=list(to_close))
                 tasks = [self.workers[w].close() for w in to_close]
-                for task in tasks:
+                await asyncio.wait(tasks)
+                for task in tasks:  # for tornado gen.coroutine support
                     await task
             for name in to_close:
                 del self.workers[name]
@@ -191,8 +192,7 @@ class SpecCluster(Cluster):
                 await asyncio.wait(workers)
                 for w in workers:
                     w._cluster = weakref.ref(self)
-                    if self.status == "running":
-                        await w
+                    await w  # for tornado gen.coroutine support
             self.workers.update(dict(zip(to_open, workers)))
 
     def __await__(self):
