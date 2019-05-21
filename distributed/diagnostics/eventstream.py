@@ -25,7 +25,6 @@ class EventStream(SchedulerPlugin):
         if start == "processing":
             kwargs["key"] = key
             if finish == "memory" or finish == "erred":
-                kwargs.pop("task_state")
                 self.buffer.append(kwargs)
 
 
