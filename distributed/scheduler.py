@@ -1061,7 +1061,7 @@ class Scheduler(ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
-            'register_worker_plugin': self.register_worker_plugin,
+            "register_worker_plugin": self.register_worker_plugin,
         }
 
         self._transitions = {
@@ -1509,7 +1509,7 @@ class Scheduler(ServerNode):
                     "status": "OK",
                     "time": time(),
                     "heartbeat-interval": heartbeat_interval(len(self.workers)),
-                    'worker-plugins': self.worker_plugins,
+                    "worker-plugins": self.worker_plugins,
                 }
             )
             yield self.handle_worker(comm=comm, worker=address)
@@ -3410,7 +3410,9 @@ class Scheduler(ServerNode):
         """ Registers a setup function, and call it on every worker """
         self.worker_plugins.append(plugin)
 
-        responses = yield self.broadcast(msg=dict(op='plugin-add', plugin=plugin, name=name))
+        responses = yield self.broadcast(
+            msg=dict(op="plugin-add", plugin=plugin, name=name)
+        )
         raise gen.Return(responses)
 
     #####################

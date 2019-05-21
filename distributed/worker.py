@@ -273,6 +273,7 @@ class Worker(ServerNode):
     distributed.scheduler.Scheduler
     distributed.nanny.Nanny
     """
+
     _instances = weakref.WeakSet()
 
     def __init__(
@@ -577,7 +578,7 @@ class Worker(ServerNode):
             "versions": self.versions,
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
-            'plugin-add': self.plugin_add,
+            "plugin-add": self.plugin_add,
         }
 
         stream_handlers = {
@@ -768,8 +769,10 @@ class Worker(ServerNode):
         if response["status"] != "OK":
             raise ValueError("Unexpected response from register: %r" % (response,))
         else:
-            yield [self.plugin_add(plugin=plugin) for plugin in response['worker-plugins']]
-            
+            yield [
+                self.plugin_add(plugin=plugin) for plugin in response["worker-plugins"]
+            ]
+
             logger.info("        Registered to: %26s", self.scheduler.address)
             logger.info("-" * 49)
 
@@ -997,8 +1000,11 @@ class Worker(ServerNode):
             self.status = "closing"
             setproctitle("dask-worker [closing]")
 
-            yield [plugin.teardown() for plugin in self.plugins.values() if
-                    hasattr(plugin, 'teardown')]
+            yield [
+                plugin.teardown()
+                for plugin in self.plugins.values()
+                if hasattr(plugin, "teardown")
+            ]
 
             self.stop()
             for pc in self.periodic_callbacks.values():
@@ -2214,10 +2220,10 @@ class Worker(ServerNode):
             if isinstance(plugin, bytes):
                 plugin = pickle.loads(plugin)
             if not name:
-                if hasattr(plugin, 'name'):
+                if hasattr(plugin, "name"):
                     name = plugin.name
                 else:
-                    name = funcname(plugin) + '-' + str(uuid.uuid4())
+                    name = funcname(plugin) + "-" + str(uuid.uuid4())
 
             assert name
 
