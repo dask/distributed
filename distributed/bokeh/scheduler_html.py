@@ -7,7 +7,7 @@ from tornado import gen
 from tornado import web
 
 from ..utils import log_errors, format_bytes, format_time
-from ..proxy.proxy_html import GlobalProxyHandler, GlobalProxyHandler
+from .proxy_html import GlobalProxyHandler
 
 dirname = os.path.dirname(__file__)
 

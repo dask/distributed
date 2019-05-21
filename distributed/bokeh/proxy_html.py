@@ -1,5 +1,5 @@
-
 from jupyter_server_proxy.handlers import ProxyHandler
+
 
 class GlobalProxyHandler(ProxyHandler):
     """
