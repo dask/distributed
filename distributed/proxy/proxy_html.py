@@ -20,6 +20,7 @@ class GlobalProxyHandler(ProxyHandler):
     A tornado request handler that proxies HTTP and websockets
     from a port to any valid endpoint'.
     """
+
     def initialize(self, server=None, extra=None):
         self.scheduler = server
         self.extra = extra or {}
@@ -37,10 +38,12 @@ class GlobalProxyHandler(ProxyHandler):
         # slash is removed during regex in handler
         proxied_path = "/%s" % proxied_path
 
-        worker = '%s:%s' % (self.host, str(port))
+        worker = "%s:%s" % (self.host, str(port))
         if not check_worker_bokeh_exits(self.scheduler, worker):
+
             async def _noop():
                 return None
+
             msg = "Worker <%s> does not exist" % worker
             self.set_status(400)
             self.finish(msg)
@@ -74,6 +77,7 @@ class GlobalProxyHandler(ProxyHandler):
         # returns ProxyHandler coroutine
         return super().proxy(self.host, port, proxied_path)
 
+
 def check_worker_bokeh_exits(scheduler, worker):
     """Check addr:port exists as a worker in scheduler list
 
@@ -86,10 +90,10 @@ def check_worker_bokeh_exits(scheduler, worker):
     -------
     bool
     """
-    addr, port = worker.split(':')
+    addr, port = worker.split(":")
     workers = list(scheduler.workers.values())
     for w in workers:
-        bokeh_port = w.services.get('bokeh', '')
+        bokeh_port = w.services.get("bokeh", "")
         if addr == w.host and port == str(bokeh_port):
             return True
     return False
@@ -119,8 +123,9 @@ class Proxy(tornado.web.Application):
         self.ip = addr
         self.port = port
 
-        handlers = [(r"/proxy/(\d+)(.*)", GlobalProxyHandler,
-            {"server": self.scheduler},)]
+        handlers = [
+            (r"/proxy/(\d+)(.*)", GlobalProxyHandler, {"server": self.scheduler})
+        ]
         self.application = tornado.web.Application(handlers)
 
         self.server = HTTPServer(self.application)

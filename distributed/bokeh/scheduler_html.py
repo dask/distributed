@@ -235,6 +235,7 @@ class HealthHandler(RequestHandler):
         self.write("ok")
         self.set_header("Content-Type", "text/plain")
 
+
 routes = [
     (r"info/main/workers.html", Workers),
     (r"info/worker/(.*).html", Worker),
@@ -249,7 +250,7 @@ routes = [
     (r"individual-plots.json", IndividualPlots),
     (r"metrics", PrometheusHandler),
     (r"health", HealthHandler),
-    (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler)
+    (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler),
 ]
 
 

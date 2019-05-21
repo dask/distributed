@@ -265,7 +265,7 @@ def test_bokeh_non_standard_ports(loop):
                     redirect_resp = requests.get("http://127.0.0.1:4833/main")
                     redirect_resp.ok
                     # TEST PROXYING WORKS
-                    url = 'http://127.0.0.1:8787/proxy/4833/127.0.0.1/status'
+                    url = "http://127.0.0.1:8787/proxy/4833/127.0.0.1/status"
                     response = requests.get(url)
                     assert response.ok
                     break
