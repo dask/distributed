@@ -89,6 +89,7 @@ from .utils import (
     parse_timedelta,
     shutting_down,
     Any,
+    has_keyword,
 )
 from .versions import get_versions
 
@@ -3910,20 +3911,18 @@ class Client(Node):
             Function to register and run on all workers
         """
         return self.sync(
-            self.scheduler.
-            register_worker_plugin,
-            plugin=dumps(plugin),
-            name=name
+            self.scheduler.register_worker_plugin, plugin=dumps(plugin), name=name
         )
 
 
 class _WorkerSetupPlugin(object):
     """ This is used to support older setup functions as callbacks """
+
     def __init__(self, setup):
         self._setup = setup
 
     def setup(self, worker):
-        if has_keyword(self._setup, 'dask_worker'):
+        if has_keyword(self._setup, "dask_worker"):
             return self._setup(dask_worker=worker)
         else:
             return self._setup()
