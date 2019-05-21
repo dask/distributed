@@ -302,7 +302,7 @@ def test_bokeh_w_proxy(loop):
                     assert time() < start + 20
 
             # TEST PROXYING WORKS
-            url = 'http://localhost:8787/proxy/%s/status?host=127.0.0.1' % dashboard_worker_port
+            url = 'http://localhost:8787/proxy/%s/127.0.0.1/status' % dashboard_worker_port
             response = requests.get(url, timeout=0.5)
             assert response.ok
 

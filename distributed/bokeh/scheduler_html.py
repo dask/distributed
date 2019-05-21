@@ -249,7 +249,7 @@ routes = [
     (r"individual-plots.json", IndividualPlots),
     (r"metrics", PrometheusHandler),
     (r"health", HealthHandler),
-    (r"proxy/(\d+)(.*)", GlobalProxyHandler)
+    (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler)
 ]
 
 
