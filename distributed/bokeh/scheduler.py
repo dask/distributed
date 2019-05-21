@@ -1579,7 +1579,6 @@ class BokehScheduler(BokehServer):
         self.prefix = prefix
 
         self.server_kwargs = kwargs
-        self.use_proxy = self.server_kwargs.get('use_proxy', False)
 
         self.server_kwargs["prefix"] = prefix or None
 

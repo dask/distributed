@@ -250,7 +250,7 @@ def test_respect_host_listen_address(loop, nanny, host):
 def test_bokeh_non_standard_ports(loop):
     pytest.importorskip("bokeh")
 
-    with popen(["dask-scheduler", "--port", "3449", "--no-bokeh"]):
+    with popen(["dask-scheduler", "--port", "3449"]):
         with popen(
             ["dask-worker", "tcp://127.0.0.1:3449", "--dashboard-address", ":4833"]
         ) as proc:
@@ -264,47 +264,14 @@ def test_bokeh_non_standard_ports(loop):
                     assert response.ok
                     redirect_resp = requests.get("http://127.0.0.1:4833/main")
                     redirect_resp.ok
-                    break
-                except Exception:
-                    sleep(0.5)
-                    assert time() < start + 20
-
-        # TEST PROXYING NOT ENABLED
-        with pytest.raises(Exception):
-            url = 'http://localhost:8787/proxy/%s/status?host=127.0.0.1' % "4833"
-            response = requests.get(url, timeout=0.5)
-
-        with pytest.raises(Exception):
-            requests.get("http://localhost:4833/status/")
-
-
-
-def test_bokeh_w_proxy(loop):
-    pytest.importorskip("bokeh")
-    dashboard_worker_port = str(4833)
-    with popen(["dask-scheduler", "--port", "3449", "--use-proxy"]):
-        with popen(
-            ["dask-worker", "tcp://127.0.0.1:3449", "--dashboard-address", ":%s" % dashboard_worker_port]
-        ) as proc:
-            with Client("127.0.0.1:3449", loop=loop) as c:
-                pass
-
-            start = time()
-            while True:
-                try:
-                    response = requests.get("http://127.0.0.1:%s/status" % dashboard_worker_port)
+                    # TEST PROXYING WORKS
+                    url = 'http://127.0.0.1:8787/proxy/4833/127.0.0.1/status'
+                    response = requests.get(url)
                     assert response.ok
-                    redirect_resp = requests.get("http://127.0.0.1:%s/main" % dashboard_worker_port)
-                    redirect_resp.ok
                     break
                 except Exception:
                     sleep(0.5)
                     assert time() < start + 20
-
-            # TEST PROXYING WORKS
-            url = 'http://localhost:8787/proxy/%s/127.0.0.1/status' % dashboard_worker_port
-            response = requests.get(url, timeout=0.5)
-            assert response.ok
 
         with pytest.raises(Exception):
             requests.get("http://localhost:4833/status/")
