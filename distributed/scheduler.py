@@ -1364,7 +1364,10 @@ class Scheduler(ServerNode):
 
         self.host_info[host]["last-seen"] = local_now
         frac = 1 / 20 / len(self.workers)
-        self.bandwidth = self.bandwidth * (1 - frac) + metrics["bandwidth"] * frac
+        try:
+            self.bandwidth = self.bandwidth * (1 - frac) + metrics["bandwidth"] * frac
+        except KeyError:
+            pass
 
         ws = self.workers.get(address)
         if not ws:
