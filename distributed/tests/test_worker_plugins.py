@@ -9,11 +9,13 @@ class MyPlugin:
         self.data = data
 
     def setup(self, worker):
+        assert isinstance(worker, Worker)
         self.worker = worker
         self.worker._my_plugin_status = "setup"
         self.worker._my_plugin_data = self.data
 
-    def teardown(self):
+    def teardown(self, worker):
+        assert isinstance(worker, Worker)
         self.worker._my_plugin_status = "teardown"
 
 

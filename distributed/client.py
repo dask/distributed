@@ -3883,32 +3883,34 @@ class Client(Node):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
-        This registers a new object to handle setup and teardown handling for
-        workers in this cluster. The function will run immediately on all
-        currently connected workers. It will also be run upon connection by any
-        workers that are added in the future. Multiple setup functions can be
-        registered - these will be called in the order they were added.
+        This registers a new object to handle setup and teardown for workers in
+        this cluster. The function will run on all currently connected workers.
+        It will also be run upon connection by any workers that are added in
+        the future.
 
         The plugin should be a class with ``setup`` and ``teardown`` methods
         with the following signature.
 
+        Parameters
+        ----------
+        plugin: object
+            The plugin object to pass to the workers
+        name: str, optional
+            A name for the plugin.
+            Registering a plugin with the same name will have no effect.
+
         Examples
         --------
-        >>> class MyPluin:
+        >>> class MyPlugin:
         ...     def __init__(self, *args, **kwargs):
         ...         pass  # the constructor is up to you
         ...     def setup(self, worker: dask.distributed.Worker):
         ...         pass
-        ...     def teardown(self):
+        ...     def teardown(self, worker: dask.distributed.Worker):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
         >>> client.register_worker_plugin(plugin)
-
-        Parameters
-        ----------
-        setup : callable(dask_worker: Worker) -> None
-            Function to register and run on all workers
         """
         return self.sync(
             self.scheduler.register_worker_plugin, plugin=dumps(plugin), name=name
