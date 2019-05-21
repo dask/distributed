@@ -42,16 +42,22 @@ conda install -q \
     mock \
     netcdf4 \
     paramiko \
+    prometheus_client \
     psutil \
-    pytest=3.7 \
+    pytest \
     pytest-timeout \
     python=$PYTHON \
     requests \
     scipy \
     tblib \
     toolz \
-    tornado \
+    tornado=$TORNADO \
     $PACKAGES
+
+# For low-level profiler, install libunwind and stacktrace from conda-forge
+# For stacktrace we use --no-deps to avoid upgrade of python
+conda install -c defaults -c conda-forge libunwind
+conda install --no-deps -c defaults -c numba -c conda-forge stacktrace
 
 pip install -q pytest-repeat pytest-faulthandler
 
@@ -69,10 +75,6 @@ fi;
 
 # Install distributed
 pip install --no-deps -e .
-
-if [[ ! -z $TORNADO ]]; then
-    pip install -U tornado==$TORNADO
-fi
 
 # For debugging
 echo -e "--\n--Conda Environment\n--"

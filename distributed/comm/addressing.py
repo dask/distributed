@@ -5,9 +5,10 @@ import six
 import dask
 
 from . import registry
+from ..utils import get_ip_interface
 
 
-DEFAULT_SCHEME = dask.config.get('distributed.comm.default-scheme')
+DEFAULT_SCHEME = dask.config.get("distributed.comm.default-scheme")
 
 
 def parse_address(addr, strict=False):
@@ -21,11 +22,13 @@ def parse_address(addr, strict=False):
     """
     if not isinstance(addr, six.string_types):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
-    scheme, sep, loc = addr.rpartition('://')
+    scheme, sep, loc = addr.rpartition("://")
     if strict and not sep:
-        msg = ("Invalid url scheme. "
-               "Must include protocol like tcp://localhost:8000. "
-               "Got %s" % addr)
+        msg = (
+            "Invalid url scheme. "
+            "Must include protocol like tcp://localhost:8000. "
+            "Got %s" % addr
+        )
         raise ValueError(msg)
     if not sep:
         scheme = DEFAULT_SCHEME
@@ -39,7 +42,7 @@ def unparse_address(scheme, loc):
     >>> unparse_address('tcp', '127.0.0.1')
     'tcp://127.0.0.1'
     """
-    return '%s://%s' % (scheme, loc)
+    return "%s://%s" % (scheme, loc)
 
 
 def normalize_address(addr):
@@ -69,24 +72,24 @@ def parse_host_port(address, default_port=None):
             raise ValueError("missing port number in address %r" % (address,))
         return default_port
 
-    if address.startswith('['):
+    if address.startswith("["):
         # IPv6 notation: '[addr]:port' or '[addr]'.
         # The address may contain multiple colons.
-        host, sep, tail = address[1:].partition(']')
+        host, sep, tail = address[1:].partition("]")
         if not sep:
             _fail()
         if not tail:
             port = _default()
         else:
-            if not tail.startswith(':'):
+            if not tail.startswith(":"):
                 _fail()
             port = tail[1:]
     else:
         # Generic notation: 'addr:port' or 'addr'.
-        host, sep, port = address.partition(':')
+        host, sep, port = address.partition(":")
         if not sep:
             port = _default()
-        elif ':' in host:
+        elif ":" in host:
             _fail()
 
     return host, int(port)
@@ -96,10 +99,10 @@ def unparse_host_port(host, port=None):
     """
     Undo parse_host_port().
     """
-    if ':' in host and not host.startswith('['):
-        host = '[%s]' % host
+    if ":" in host and not host.startswith("["):
+        host = "[%s]" % host
     if port:
-        return '%s:%s' % (host, port)
+        return "%s:%s" % (host, port)
     else:
         return host
 
@@ -119,8 +122,9 @@ def get_address_host_port(addr, strict=False):
     try:
         return backend.get_address_host_port(loc)
     except NotImplementedError:
-        raise ValueError("don't know how to extract host and port "
-                         "for address %r" % (addr,))
+        raise ValueError(
+            "don't know how to extract host and port " "for address %r" % (addr,)
+        )
 
 
 def get_address_host(addr):
@@ -169,3 +173,71 @@ def resolve_address(addr):
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
     return unparse_address(scheme, backend.resolve_address(loc))
+
+
+def uri_from_host_port(host_arg, port_arg, default_port):
+    """
+    Process the *host* and *port* CLI options.
+    Return a URI.
+    """
+    # Much of distributed depends on a well-known IP being assigned to
+    # each entity (Worker, Scheduler, etc.), so avoid "universal" addresses
+    # like '' which would listen on all registered IPs and interfaces.
+    scheme, loc = parse_address(host_arg or "")
+
+    host, port = parse_host_port(
+        loc, port_arg if port_arg is not None else default_port
+    )
+
+    if port is None and port_arg is None:
+        port_arg = default_port
+
+    if port and port_arg and port != port_arg:
+        raise ValueError(
+            "port number given twice in options: "
+            "host %r and port %r" % (host_arg, port_arg)
+        )
+    if port is None and port_arg is not None:
+        port = port_arg
+    # Note `port = 0` means "choose a random port"
+    if port is None:
+        port = default_port
+    loc = unparse_host_port(host, port)
+    addr = unparse_address(scheme, loc)
+
+    return addr
+
+
+def address_from_user_args(
+    host=None, port=None, interface=None, protocol=None, peer=None, security=None
+):
+    """ Get an address to listen on from common user provided arguments """
+    if security and security.require_encryption and not protocol:
+        protocol = "tls"
+
+    if protocol and protocol.rstrip("://") == "inplace":
+        if host or port or interface:
+            raise ValueError(
+                "Can not specify inproc protocol and host or port or interface"
+            )
+        else:
+            return "inproc://"
+
+    if interface:
+        if host:
+            raise ValueError("Can not specify both interface and host", interface, host)
+        else:
+            host = get_ip_interface(interface)
+
+    if protocol and host and "://" not in host:
+        host = protocol.rstrip("://") + "://" + host
+
+    if host or port:
+        addr = uri_from_host_port(host, port, 0)
+    else:
+        addr = ""
+
+    if protocol and "://" not in addr:
+        addr = protocol.rstrip("://") + "://" + addr
+
+    return addr
