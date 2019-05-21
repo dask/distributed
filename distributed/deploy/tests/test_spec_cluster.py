@@ -7,6 +7,14 @@ class MyWorker(Worker):
     pass
 
 
+class BrokenWorker(Worker):
+    def __await__(self):
+        async def _():
+            raise Exception("Worker Broken")
+
+        return _().__await__()
+
+
 worker_spec = {
     0: {"cls": Worker, "options": {"ncores": 1}},
     1: {"cls": Worker, "options": {"ncores": 2}},
@@ -93,3 +101,15 @@ async def test_scale():
 
         await cluster
         assert len(cluster.workers) == 1
+
+
+@pytest.mark.asyncio
+async def test_broken_worker():
+    with pytest.raises(Exception) as info:
+        async with SpecCluster(
+            asynchronous=True,
+            workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
+        ) as cluster:
+            pass
+
+    assert "Broken" in str(info.value)
