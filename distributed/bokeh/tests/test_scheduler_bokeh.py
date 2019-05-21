@@ -590,13 +590,18 @@ def test_root_redirect(c, s, a, b):
     timeout=180,
 )
 def test_proxy_to_workers(c, s, a, b):
+    try:
+        import jupyter_server_proxy
+
+        proxy_exists = True
+    except ImportError:
+        proxy_exists = False
+
     dashboard_port = s.services["bokeh"].port
     http_client = AsyncHTTPClient()
     response = yield http_client.fetch("http://localhost:%d/" % dashboard_port)
     assert response.code == 200
     assert "/status" in response.effective_url
-
-    yield [a.heartbeat(), b.heartbeat()]
 
     for w in [a, b]:
         host = w.ip
@@ -612,6 +617,9 @@ def test_proxy_to_workers(c, s, a, b):
         response_direct = yield http_client.fetch(direct_url)
 
         assert response_proxy.code == 200
-        assert b"Crossfilter" in response_proxy.body
+        if proxy_exists:
+            assert b"Crossfilter" in response_proxy.body
+        else:
+            assert b"Please install jupyter-server-proxy" in response_proxy.body
         assert response_direct.code == 200
         assert b"Crossfilter" in response_direct.body

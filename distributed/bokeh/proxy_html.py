@@ -1,70 +1,94 @@
-from jupyter_server_proxy.handlers import ProxyHandler
+import logging
+
+from tornado import web
+
+logger = logging.getLogger(__name__)
+
+try:
+    from jupyter_server_proxy.handlers import ProxyHandler
+
+    class GlobalProxyHandler(ProxyHandler):
+        """
+        A tornado request handler that proxies HTTP and websockets
+        from a port to any valid endpoint'.
+        """
+
+        def initialize(self, server=None, extra=None):
+            self.scheduler = server
+            self.extra = extra or {}
+
+        async def http_get(self, port, host, proxied_path):
+            # route here first
+            # incoming URI /proxy/{port}/{host}/{proxied_path}
+
+            self.host = host
+
+            # rewrite uri for jupyter-server-proxy handling
+            uri = "/proxy/%s/%s" % (str(port), proxied_path)
+            self.request.uri = uri
+
+            # slash is removed during regex in handler
+            proxied_path = "/%s" % proxied_path
+
+            worker = "%s:%s" % (self.host, str(port))
+            if not check_worker_dashboard_exits(self.scheduler, worker):
+                msg = "Worker <%s> does not exist" % worker
+                self.set_status(400)
+                self.finish(msg)
+                return
+            return await self.proxy(port, proxied_path)
+
+        async def open(self, port, host, proxied_path):
+            # finally, proxy to other address/port
+            return await self.proxy_open(host, port, proxied_path)
+
+        def post(self, port, proxied_path):
+            return self.proxy(port, proxied_path)
+
+        def put(self, port, proxied_path):
+            return self.proxy(port, proxied_path)
+
+        def delete(self, port, proxied_path):
+            return self.proxy(port, proxied_path)
+
+        def head(self, port, proxied_path):
+            return self.proxy(port, proxied_path)
+
+        def patch(self, port, proxied_path):
+            return self.proxy(port, proxied_path)
+
+        def options(self, port, proxied_path):
+            return self.proxy(port, proxied_path)
+
+        def proxy(self, port, proxied_path):
+            # router here second
+            # returns ProxyHandler coroutine
+            return super().proxy(self.host, port, proxied_path)
 
 
-class GlobalProxyHandler(ProxyHandler):
-    """
-    A tornado request handler that proxies HTTP and websockets
-    from a port to any valid endpoint'.
-    """
+except ImportError:
+    logger.info(
+        "To route to workers diagnostics web server please install jupyter-server-proxy: pip install jupyter-server-proxy"
+    )
 
-    def initialize(self, server=None, extra=None):
-        self.scheduler = server
-        self.extra = extra or {}
+    class GlobalProxyHandler(web.RequestHandler):
+        """Minimal Proxy handler when jupyter-server-proxy is not installed
+        """
 
-    async def http_get(self, port, host, proxied_path):
-        # route here first
-        # incoming URI /proxy/{port}/{host}/{proxied_path}
+        def initialize(self, server=None, extra=None):
+            self.server = server
+            self.extra = extra or {}
 
-        self.host = host
-
-        # rewrite uri for jupyter-server-proxy handling
-        uri = "/proxy/%s/%s" % (str(port), proxied_path)
-        self.request.uri = uri
-
-        # slash is removed during regex in handler
-        proxied_path = "/%s" % proxied_path
-
-        worker = "%s:%s" % (self.host, str(port))
-        if not check_worker_bokeh_exits(self.scheduler, worker):
-
-            async def _noop():
-                return None
-
-            msg = "Worker <%s> does not exist" % worker
-            self.set_status(400)
-            self.finish(msg)
-            return
-        return await self.proxy(port, proxied_path)
-
-    async def open(self, port, host, proxied_path):
-        # finally, proxy to other address/port
-        return await self.proxy_open(host, port, proxied_path)
-
-    def post(self, port, proxied_path):
-        return self.proxy(port, proxied_path)
-
-    def put(self, port, proxied_path):
-        return self.proxy(port, proxied_path)
-
-    def delete(self, port, proxied_path):
-        return self.proxy(port, proxied_path)
-
-    def head(self, port, proxied_path):
-        return self.proxy(port, proxied_path)
-
-    def patch(self, port, proxied_path):
-        return self.proxy(port, proxied_path)
-
-    def options(self, port, proxied_path):
-        return self.proxy(port, proxied_path)
-
-    def proxy(self, port, proxied_path):
-        # router here second
-        # returns ProxyHandler coroutine
-        return super().proxy(self.host, port, proxied_path)
+        def get(self, port, host, proxied_path):
+            worker_url = "%s:%s/%s" % (host, str(port), proxied_path)
+            msg = (
+                "Unable to route to workers through proxy.  Please install jupyter-server-proxy:<br/>> pip install jupyter-server-proxy.<br/> You can also navigate directly to the worker: <a href=http://%s>%s</a>"
+                % (worker_url, worker_url)
+            )
+            self.write(msg)
 
 
-def check_worker_bokeh_exits(scheduler, worker):
+def check_worker_dashboard_exits(scheduler, worker):
     """Check addr:port exists as a worker in scheduler list
 
     Parameters
