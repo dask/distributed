@@ -1,7 +1,6 @@
 import asyncio
 import weakref
 
-import toolz
 from tornado import gen
 
 from .cluster import Cluster
@@ -184,7 +183,8 @@ class SpecCluster(Cluster):
                 d = self.worker_spec[name]
                 cls, opts = d["cls"], d.get("options", {})
                 if "name" not in opts:
-                    opts = toolz.merge({"name": name}, opts, {"loop": self.loop})
+                    opts = opts.copy()
+                    opts["name"] = name
                 worker = cls(self.scheduler.address, **opts)
                 self._created.add(worker)
                 workers.append(worker)
