@@ -732,7 +732,7 @@ def cluster(
     start = time()
     while len(ws):
         sleep(0.1)
-        assert time() < start + 2, "Workers still around after two seconds"
+        assert time() < start + 3, ("Workers still around after two seconds", list(ws))
 
 
 @gen.coroutine
