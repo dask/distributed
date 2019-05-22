@@ -83,15 +83,28 @@ except ImportError:
 
         def get(self, port, host, proxied_path):
             worker_url = "%s:%s/%s" % (host, str(port), proxied_path)
-            msg = (
-                "<p>Unable to route to workers through proxy.  "
-                "Please conda or pip install jupyter-server-proxy and restart "
-                "your dask-scheduler process:</p>"
-                "<p><pre> conda install jupyter-server-proxy -c conda-forge </pre></p>"
-                "<p><pre> pip install jupyter-server-proxy</pre></p>"
-                "<p>You can also try navigating directly to the worker if your "
-                "network is sufficiently permissive: "
-                "<a href=http://%s>%s</a></p>" % (worker_url, worker_url)
+            msg = """
+                <p> Try navigating to <a href=http://%s>%s</a> for your worker dashboard </p>
+
+                <p>
+                Dask tried to proxy you to that page through your
+                Scheduler's dashboard connection, but you don't have
+                jupyter-server-proxy installed.  You may want to install it
+                with either conda or pip, and then restart your scheduler.
+                </p>
+
+                <p><pre> conda install jupyter-server-proxy -c conda-forge </pre></p>
+                <p><pre> pip install jupyter-server-proxy</pre></p>
+
+                <p>
+                The link above should work though if your workers are on a
+                sufficiently open network.  This is common on single machines,
+                but less common in production clusters.  Your IT administrators
+                will know more
+                </p>
+            """ % (
+                worker_url,
+                worker_url,
             )
             self.write(msg)
 
