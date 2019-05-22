@@ -812,9 +812,9 @@ class Client(Node):
             text = (
                 "<h3>Client</h3>\n" "<ul>\n" "  <li><b>Scheduler: not connected</b>\n"
             )
-        if info and "bokeh" in info["services"]:
+        if info and "dashboard" in info["services"]:
             protocol, rest = scheduler.address.split("://")
-            port = info["services"]["bokeh"]
+            port = info["services"]["dashboard"]
             if protocol == "inproc":
                 host = "localhost"
             else:

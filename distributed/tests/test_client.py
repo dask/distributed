@@ -5223,10 +5223,9 @@ def test_diagnostics_link_env_variable(loop):
     pytest.importorskip("bokeh")
     from distributed.dashboard.scheduler import BokehScheduler
 
-    with cluster(scheduler_kwargs={"services": {("bokeh", 12355): BokehScheduler}}) as (
-        s,
-        [a, b],
-    ):
+    with cluster(
+        scheduler_kwargs={"services": {("dashboard", 12355): BokehScheduler}}
+    ) as (s, [a, b]):
         with Client(s["address"], loop=loop) as c:
             with dask.config.set(
                 {"distributed.dashboard.link": "http://foo-{USER}:{port}/status"}

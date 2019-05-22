@@ -882,9 +882,9 @@ class Scheduler(ServerNode):
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
-                self.service_specs[("bokeh", dashboard_address)] = (
+                self.service_specs[("dashboard", dashboard_address)] = (
                     BokehScheduler,
-                    (service_kwargs or {}).get("bokeh", {}),
+                    (service_kwargs or {}).get("dashboard", {}),
                 )
 
         # Communication state

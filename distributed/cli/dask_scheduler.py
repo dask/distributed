@@ -196,7 +196,7 @@ def main(
         port=port,
         interface=interface,
         dashboard_address=dashboard_address if _bokeh else None,
-        service_kwargs={"bokeh": {"prefix": bokeh_prefix}},
+        service_kwargs={"dashboard": {"prefix": bokeh_prefix}},
     )
     scheduler.start()
     if not preload:

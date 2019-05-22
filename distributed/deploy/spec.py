@@ -113,7 +113,7 @@ class SpecCluster(Cluster):
             except ImportError:
                 services = {}
             else:
-                services = {("bokeh", 8787): BokehScheduler}
+                services = {("dashboard", 8787): BokehScheduler}
             scheduler = {"cls": Scheduler, "options": {"services": services}}
 
         self.scheduler_spec = scheduler
