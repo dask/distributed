@@ -856,6 +856,7 @@ class Scheduler(ServerNode):
         )
         self.digests = None
         self.service_specs = services or {}
+        self.service_kwargs = service_kwargs or {}
         self.services = {}
         self.scheduler_file = scheduler_file
         worker_ttl = worker_ttl or dask.config.get("distributed.scheduler.worker-ttl")
@@ -1002,7 +1003,7 @@ class Scheduler(ServerNode):
         self.log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
-        self.worker_setups = []
+        self.worker_plugins = []
 
         worker_handlers = {
             "task-finished": self.handle_task_finished,
@@ -1061,7 +1062,7 @@ class Scheduler(ServerNode):
             "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
-            "register_worker_callbacks": self.register_worker_callbacks,
+            "register_worker_plugin": self.register_worker_plugin,
         }
 
         self._transitions = {
@@ -1364,7 +1365,10 @@ class Scheduler(ServerNode):
 
         self.host_info[host]["last-seen"] = local_now
         frac = 1 / 20 / len(self.workers)
-        self.bandwidth = self.bandwidth * (1 - frac) + metrics["bandwidth"] * frac
+        try:
+            self.bandwidth = self.bandwidth * (1 - frac) + metrics["bandwidth"] * frac
+        except KeyError:
+            pass
 
         ws = self.workers.get(address)
         if not ws:
@@ -1509,7 +1513,7 @@ class Scheduler(ServerNode):
                     "status": "OK",
                     "time": time(),
                     "heartbeat-interval": heartbeat_interval(len(self.workers)),
-                    "worker-setups": self.worker_setups,
+                    "worker-plugins": self.worker_plugins,
                 }
             )
             yield self.handle_worker(comm=comm, worker=address)
@@ -1989,7 +1993,10 @@ class Scheduler(ServerNode):
         """ Cancel a particular key and all dependents """
         # TODO: this should be converted to use the transition mechanism
         ts = self.tasks.get(key)
-        cs = self.clients[client]
+        try:
+            cs = self.clients[client]
+        except KeyError:
+            return
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
             if retries:
                 self.loop.add_future(
@@ -3084,7 +3091,7 @@ class Scheduler(ServerNode):
                     except KeyError:  # keys left during replicate
                         pass
 
-            workers = {self.workers[w] for w in workers}
+            workers = {self.workers[w] for w in workers if w in self.workers}
             if len(workers) > 0:
                 # Keys orphaned by retiring those workers
                 keys = set.union(*[w.has_what for w in workers])
@@ -3406,14 +3413,13 @@ class Scheduler(ServerNode):
         return ts.collect(start=start, stop=stop, count=count)
 
     @gen.coroutine
-    def register_worker_callbacks(self, comm, setup=None):
+    def register_worker_plugin(self, comm, plugin, name=None):
         """ Registers a setup function, and call it on every worker """
-        if setup is None:
-            raise gen.Return({})
+        self.worker_plugins.append(plugin)
 
-        self.worker_setups.append(setup)
-
-        responses = yield self.broadcast(msg=dict(op="run", function=setup))
+        responses = yield self.broadcast(
+            msg=dict(op="plugin-add", plugin=plugin, name=name)
+        )
         raise gen.Return(responses)
 
     #####################
@@ -4357,6 +4363,19 @@ class Scheduler(ServerNode):
     ##############################
 
     def check_idle_saturated(self, ws, occ=None):
+        """ Update the status of the idle and saturated state
+
+        The scheduler keeps track of workers that are ..
+
+        -  Saturated: have enough work to stay busy
+        -  Idle: do not have enough work to stay busy
+
+        They are considered saturated if they both have enough tasks to occupy
+        all of their cores, and if the expected runtime of those tasks is large
+        enough.
+
+        This is useful for load balancing and adaptivity.
+        """
         if self.total_ncores == 0 or ws.status == "closed":
             return
         if occ is None:

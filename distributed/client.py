@@ -2,8 +2,8 @@ from __future__ import print_function, division, absolute_import
 
 import atexit
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures._base import DoneAndNotDoneFutures, CancelledError
+from concurrent.futures import ThreadPoolExecutor, CancelledError
+from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
 import copy
 from datetime import timedelta
@@ -43,6 +43,8 @@ from tornado.gen import TimeoutError
 from tornado.locks import Event, Condition, Semaphore
 from tornado.ioloop import IOLoop
 from tornado.queues import Queue
+
+from asyncio import iscoroutine
 
 from .batched import BatchedSend
 from .utils_comm import (
@@ -89,6 +91,7 @@ from .utils import (
     parse_timedelta,
     shutting_down,
     Any,
+    has_keyword,
 )
 from .versions import get_versions
 
@@ -504,12 +507,19 @@ class AllExit(Exception):
 
 
 class Client(Node):
-    """ Connect to and drive computation on a distributed Dask cluster
+    """ Connect to and submit computation to a Dask cluster
 
-    The Client connects users to a dask.distributed compute cluster.  It
-    provides an asynchronous user interface around functions and futures.  This
-    class resembles executors in ``concurrent.futures`` but also allows
-    ``Future`` objects within ``submit/map`` calls.
+    The Client connects users to a Dask cluster.  It provides an asynchronous
+    user interface around functions and futures.  This class resembles
+    executors in ``concurrent.futures`` but also allows ``Future`` objects
+    within ``submit/map`` calls.  When a Client is instantiated it takes over
+    all ``dask.compute`` and ``dask.persist`` calls by default.
+
+    It is also common to create a Client without specifying the scheduler
+    address , like ``Client()``.  In this case the Client creates a
+    ``LocalCluster`` in the background and connects to that.  Any extra
+    keywords are passed from Client to LocalCluster in this case.  See the
+    LocalCluster documentation for more information.
 
     Parameters
     ----------
@@ -1301,7 +1311,13 @@ class Client(Node):
 
         if self._start_arg is None:
             with ignoring(AttributeError):
-                self.cluster.close()
+                f = self.cluster.close()
+                if iscoroutine(f):
+
+                    async def _():
+                        await f
+
+                    self.sync(_)
 
         sync(self.loop, self._close, fast=True)
 
@@ -1636,10 +1652,11 @@ class Client(Node):
                             st = self.futures[key]
                             exception = st.exception
                             traceback = st.traceback
-                        except (AttributeError, KeyError):
-                            six.reraise(CancelledError, CancelledError(key), None)
+                        except (KeyError, AttributeError):
+                            exc = CancelledError(key)
                         else:
                             six.reraise(type(exception), exception, traceback)
+                        raise exc
                     if errors == "skip":
                         bad_keys.add(key)
                         bad_data[key] = None
@@ -3847,17 +3864,6 @@ class Client(Node):
         else:
             raise gen.Return(msgs)
 
-    @gen.coroutine
-    def _register_worker_callbacks(self, setup=None):
-        responses = yield self.scheduler.register_worker_callbacks(setup=dumps(setup))
-        results = {}
-        for key, resp in responses.items():
-            if resp["status"] == "OK":
-                results[key] = resp["result"]
-            elif resp["status"] == "error":
-                six.reraise(*clean_exception(**resp))
-        raise gen.Return(results)
-
     def register_worker_callbacks(self, setup=None):
         """
         Registers a setup callback function for all current and future workers.
@@ -3876,7 +3882,85 @@ class Client(Node):
         setup : callable(dask_worker: Worker) -> None
             Function to register and run on all workers
         """
-        return self.sync(self._register_worker_callbacks, setup=setup)
+        return self.register_worker_plugin(_WorkerSetupPlugin(setup))
+
+    @gen.coroutine
+    def _register_worker_plugin(self, plugin=None, name=None):
+        responses = yield self.scheduler.register_worker_plugin(
+            plugin=dumps(plugin), name=name
+        )
+        for response in responses.values():
+            if response["status"] == "error":
+                exc = response["exception"]
+                typ = type(exc)
+                tb = response["traceback"]
+                six.reraise(typ, exc, tb)
+        raise gen.Return(responses)
+
+    def register_worker_plugin(self, plugin=None, name=None):
+        """
+        Registers a lifecycle worker plugin for all current and future workers.
+
+        This registers a new object to handle setup and teardown for workers in
+        this cluster. The plugin will instantiate itself on all currently
+        connected workers.  It will also be run on any worker that connects in
+        the future.
+
+        The plugin should be an object with ``setup`` and ``teardown`` methods.
+        It must be serializable with the pickle or cloudpickle modules.
+
+        If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
+        used then that will control idempotency.  A a plugin with that name has
+        already registered then any future plugins will not run.
+
+        For alternatives to plugins, you may also wish to look into preload
+        scripts.
+
+        Parameters
+        ----------
+        plugin: object
+            The plugin object to pass to the workers
+        name: str, optional
+            A name for the plugin.
+            Registering a plugin with the same name will have no effect.
+
+        Examples
+        --------
+        >>> class MyPlugin:
+        ...     def __init__(self, *args, **kwargs):
+        ...         pass  # the constructor is up to you
+        ...     def setup(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def teardown(self, worker: dask.distributed.Worker):
+        ...         pass
+
+        >>> plugin = MyPlugin(1, 2, 3)
+        >>> client.register_worker_plugin(plugin)
+
+        You can get access to the plugin with the ``get_worker`` function
+
+        >>> client.register_worker_plugin(other_plugin, name='my-plugin')
+        >>> def f():
+        ...    worker = get_worker()
+        ...    plugin = worker.plugins['my-plugin']
+        ...    return plugin.my_state
+
+        >>> future = client.run(f)
+        """
+        return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
+
+
+class _WorkerSetupPlugin(object):
+    """ This is used to support older setup functions as callbacks """
+
+    def __init__(self, setup):
+        self._setup = setup
+
+    def setup(self, worker):
+        if has_keyword(self._setup, "dask_worker"):
+            return self._setup(dask_worker=worker)
+        else:
+            return self._setup()
 
 
 class Executor(Client):
@@ -4059,7 +4143,10 @@ class as_completed(object):
         except CancelledError:
             pass
         if self.with_results:
-            result = yield future._result(raiseit=False)
+            try:
+                result = yield future._result(raiseit=False)
+            except CancelledError as exc:
+                result = exc
         with self.lock:
             self.futures[future] -= 1
             if not self.futures[future]:
