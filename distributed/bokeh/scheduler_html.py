@@ -43,6 +43,7 @@ class Worker(RequestHandler):
             self.render(
                 "worker.html",
                 title="Worker: " + worker,
+                scheduler=self.server,
                 Worker=worker,
                 **toolz.merge(self.server.__dict__, ns, self.extra)
             )
@@ -56,7 +57,7 @@ class Task(RequestHandler):
                 "task.html",
                 title="Task: " + task,
                 Task=task,
-                server=self.server,
+                scheduler=self.server,
                 **toolz.merge(self.server.__dict__, ns, self.extra)
             )
 
