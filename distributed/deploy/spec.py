@@ -133,12 +133,13 @@ class SpecCluster(Cluster):
             loop=self.loop, **self.scheduler_spec["options"]
         )
         self.status = "created"
+        self._correct_state_waiting = None
 
         if not self.asynchronous:
             self._loop_runner.start()
             self.sync(self._start)
-
-        self._correct_state_waiting = None
+            self.sync(self._correct_state)
+            self.sync(self._wait_for_workers)
 
     async def _start(self):
         while self.status == "starting":

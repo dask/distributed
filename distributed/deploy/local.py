@@ -185,8 +185,11 @@ class LocalCluster(SpecCluster):
             "options": worker_kwargs,
         }
 
+        workers = {i: worker for i in range(n_workers)}
+
         super(LocalCluster, self).__init__(
             scheduler=scheduler,
+            workers=workers,
             worker=worker,
             loop=loop,
             asynchronous=asynchronous,

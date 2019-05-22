@@ -815,3 +815,17 @@ async def test_worker_class_nanny_async():
 
 if sys.version_info >= (3, 5):
     from distributed.deploy.tests.py3_test_deploy import *  # noqa F401
+
+
+def test_starts_up_sync(loop):
+    cluster = LocalCluster(
+        n_workers=2,
+        loop=loop,
+        processes=False,
+        scheduler_port=0,
+        dashboard_address=None,
+    )
+    try:
+        assert len(cluster.scheduler.workers) == 2
+    finally:
+        cluster.close()
