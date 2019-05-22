@@ -17,8 +17,8 @@ from distributed.utils import tokey
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec, slowinc, div
-from distributed.bokeh.worker import Counters, BokehWorker
-from distributed.bokeh.scheduler import (
+from distributed.dashboard.worker import Counters, BokehWorker
+from distributed.dashboard.scheduler import (
     BokehScheduler,
     SystemMonitor,
     Occupancy,
@@ -36,7 +36,7 @@ from distributed.bokeh.scheduler import (
     ProfileServer,
 )
 
-from distributed.bokeh import scheduler
+from distributed.dashboard import scheduler
 
 scheduler.PROFILING = False
 

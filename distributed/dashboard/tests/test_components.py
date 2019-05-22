@@ -7,10 +7,10 @@ pytest.importorskip("bokeh")
 from bokeh.models import ColumnDataSource, Model
 from tornado import gen
 
-from distributed.bokeh import messages
+from distributed.dashboard import messages
 from distributed.utils_test import slowinc, gen_cluster
 
-from distributed.bokeh.components import (
+from distributed.dashboard.components import (
     TaskStream,
     MemoryUsage,
     Processing,

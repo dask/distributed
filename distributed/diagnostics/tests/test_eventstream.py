@@ -26,7 +26,7 @@ def test_eventstream(c, s, *workers):
 
     assert len(es.buffer) == 11
 
-    from distributed.bokeh import messages
+    from distributed.dashboard import messages
     from distributed.diagnostics.progress_stream import task_stream_append
 
     lists = deepcopy(messages["task-events"]["rectangles"])

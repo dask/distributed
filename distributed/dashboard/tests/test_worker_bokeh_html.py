@@ -4,7 +4,7 @@ pytest.importorskip("bokeh")
 
 from tornado.httpclient import AsyncHTTPClient
 from distributed.utils_test import gen_cluster
-from distributed.bokeh.worker import BokehWorker
+from distributed.dashboard.worker import BokehWorker
 
 
 @gen_cluster(client=True, worker_kwargs={"services": {("bokeh", 0): BokehWorker}})

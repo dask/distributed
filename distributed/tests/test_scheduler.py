@@ -1174,7 +1174,7 @@ def test_correct_bad_time_estimate(c, s, *workers):
 @gen_test()
 def test_service_hosts():
     pytest.importorskip("bokeh")
-    from distributed.bokeh.scheduler import BokehScheduler
+    from distributed.dashboard.scheduler import BokehScheduler
 
     port = 0
     for url, expected in [

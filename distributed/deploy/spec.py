@@ -109,7 +109,7 @@ class SpecCluster(Cluster):
         self._created = weakref.WeakSet()
         if scheduler is None:
             try:
-                from distributed.bokeh.scheduler import BokehScheduler
+                from distributed.dashboard.scheduler import BokehScheduler
             except ImportError:
                 services = {}
             else:

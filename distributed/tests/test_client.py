@@ -5221,7 +5221,7 @@ def test_quiet_scheduler_loss(c, s):
 @pytest.mark.skipif("USER" not in os.environ, reason="no USER env variable")
 def test_diagnostics_link_env_variable(loop):
     pytest.importorskip("bokeh")
-    from distributed.bokeh.scheduler import BokehScheduler
+    from distributed.dashboard.scheduler import BokehScheduler
 
     with cluster(scheduler_kwargs={"services": {("bokeh", 12355): BokehScheduler}}) as (
         s,

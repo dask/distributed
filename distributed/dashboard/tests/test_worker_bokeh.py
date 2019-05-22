@@ -14,7 +14,7 @@ from tornado.httpclient import AsyncHTTPClient
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec
-from distributed.bokeh.worker import (
+from distributed.dashboard.worker import (
     BokehWorker,
     StateTable,
     CrossFilter,

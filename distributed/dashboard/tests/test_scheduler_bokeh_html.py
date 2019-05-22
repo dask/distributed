@@ -13,8 +13,8 @@ from tornado.httpclient import AsyncHTTPClient
 
 from dask.sizeof import sizeof
 from distributed.utils_test import gen_cluster, slowinc, inc
-from distributed.bokeh.scheduler import BokehScheduler
-from distributed.bokeh.worker import BokehWorker
+from distributed.dashboard.scheduler import BokehScheduler
+from distributed.dashboard.worker import BokehWorker
 
 
 @gen_cluster(

@@ -7,7 +7,7 @@ from tornado import gen
 from warnings import warn
 
 from distributed import Scheduler, Nanny, Worker
-from distributed.bokeh.worker import BokehWorker
+from distributed.dashboard.worker import BokehWorker
 from distributed.cli.utils import check_python_3
 from distributed.comm.addressing import uri_from_host_port
 from distributed.utils import get_ip_interface
@@ -82,7 +82,7 @@ def main(
 
     if rank == 0 and scheduler:
         try:
-            from distributed.bokeh.scheduler import BokehScheduler
+            from distributed.dashboard.scheduler import BokehScheduler
         except ImportError:
             services = {}
         else:

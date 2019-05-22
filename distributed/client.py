@@ -3852,7 +3852,7 @@ class Client(Node):
             from .diagnostics.task_stream import rectangles
 
             rects = rectangles(msgs)
-            from .bokeh.components import task_stream_figure
+            from .dashboard.components import task_stream_figure
 
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)

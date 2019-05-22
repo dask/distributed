@@ -546,7 +546,7 @@ class Worker(ServerNode):
 
         if dashboard_address is not None:
             try:
-                from distributed.bokeh.worker import BokehWorker
+                from distributed.dashboard.worker import BokehWorker
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:
