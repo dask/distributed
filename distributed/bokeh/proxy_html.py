@@ -84,11 +84,14 @@ except ImportError:
         def get(self, port, host, proxied_path):
             worker_url = "%s:%s/%s" % (host, str(port), proxied_path)
             msg = (
-                "Unable to route to workers through proxy.  "
-                "Please install jupyter-server-proxy:"
-                "<br/>> pip install jupyter-server-proxy<br/> "
-                "You can also navigate directly to the worker: "
-                "<a href=http://%s>%s</a>" % (worker_url, worker_url)
+                "<p>Unable to route to workers through proxy.  "
+                "Please conda or pip install jupyter-server-proxy and restart "
+                "your dask-scheduler process:</p>"
+                "<p><pre> conda install jupyter-server-proxy -c conda-forge </pre></p>"
+                "<p><pre> pip install jupyter-server-proxy</pre></p>"
+                "<p>You can also try navigating directly to the worker if your "
+                "network is sufficiently permissive: "
+                "<a href=http://%s>%s</a></p>" % (worker_url, worker_url)
             )
             self.write(msg)
 
