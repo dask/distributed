@@ -827,7 +827,7 @@ def test_file_descriptors(c, s):
     assert not s.rpc.open
     for addr, occ in c.rpc.occupied.items():
         for comm in occ:
-            assert comm.peer_address != s.address
+            assert comm.closed() or comm.peer_address != s.address, comm
     assert not s.stream_comms
 
     start = time()
