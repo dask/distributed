@@ -2228,14 +2228,20 @@ class Worker(ServerNode):
             assert name
 
             if name in self.plugins:
-                return
+                return {"status": "repeat"}
             else:
                 self.plugins[name] = plugin
 
                 logger.info("Starting Worker plugin %s" % name)
-                result = plugin.setup(worker=self)
-                if isinstance(result, gen.Future):
-                    result = yield result
+                try:
+                    result = plugin.setup(worker=self)
+                    if isinstance(result, gen.Future):
+                        result = yield result
+                except Exception as e:
+                    msg = error_message(e)
+                    return msg
+                else:
+                    return {"status": "OK"}
 
     @gen.coroutine
     def actor_execute(self, comm=None, actor=None, function=None, args=(), kwargs={}):

@@ -1353,11 +1353,11 @@ def test_register_worker_callbacks(c, s, a, b):
     assert list(result.values()) == [True]
     yield worker.close()
 
-    # TODO: add back in error handling logic to get this working again
-    #       or maybe handle it generally in broadcast?
-    # Final exception test
-    # with pytest.raises(ZeroDivisionError):
-    #     yield c.register_worker_callbacks(setup=lambda: 1 / 0)
+
+@gen_cluster(client=True)
+def test_register_worker_callbacks_err(c, s, a, b):
+    with pytest.raises(ZeroDivisionError):
+        yield c.register_worker_callbacks(setup=lambda: 1 / 0)
 
 
 @gen_cluster(ncores=[])

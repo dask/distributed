@@ -3848,17 +3848,6 @@ class Client(Node):
         else:
             raise gen.Return(msgs)
 
-    @gen.coroutine
-    def _register_worker_callbacks(self, setup=None):
-        responses = yield self.scheduler.register_worker_callbacks(setup=dumps(setup))
-        results = {}
-        for key, resp in responses.items():
-            if resp["status"] == "OK":
-                results[key] = resp["result"]
-            elif resp["status"] == "error":
-                six.reraise(*clean_exception(**resp))
-        raise gen.Return(results)
-
     def register_worker_callbacks(self, setup=None):
         """
         Registers a setup callback function for all current and future workers.
@@ -3878,6 +3867,19 @@ class Client(Node):
             Function to register and run on all workers
         """
         return self.register_worker_plugin(_WorkerSetupPlugin(setup))
+
+    @gen.coroutine
+    def _register_worker_plugin(self, plugin=None, name=None):
+        responses = yield self.scheduler.register_worker_plugin(
+            plugin=dumps(plugin), name=name
+        )
+        for response in responses.values():
+            if response["status"] == "error":
+                exc = response["exception"]
+                typ = type(exc)
+                tb = response["traceback"]
+                six.reraise(typ, exc, tb)
+        raise gen.Return(responses)
 
     def register_worker_plugin(self, plugin=None, name=None):
         """
@@ -3912,9 +3914,7 @@ class Client(Node):
         >>> plugin = MyPlugin(1, 2, 3)
         >>> client.register_worker_plugin(plugin)
         """
-        return self.sync(
-            self.scheduler.register_worker_plugin, plugin=dumps(plugin), name=name
-        )
+        return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
 
 class _WorkerSetupPlugin(object):
