@@ -3886,12 +3886,19 @@ class Client(Node):
         Registers a lifecycle worker plugin for all current and future workers.
 
         This registers a new object to handle setup and teardown for workers in
-        this cluster. The function will run on all currently connected workers.
-        It will also be run upon connection by any workers that are added in
+        this cluster. The plugin will instantiate itself on all currently
+        connected workers.  It will also be run on any worker that connects in
         the future.
 
-        The plugin should be a class with ``setup`` and ``teardown`` methods
-        with the following signature.
+        The plugin should be an object with ``setup`` and ``teardown`` methods.
+        It must be serializable with the pickle or cloudpickle modules.
+
+        If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
+        used then that will control idempotency.  A a plugin with that name has
+        already registered then any future plugins will not run.
+
+        For alternatives to plugins, you may also wish to look into preload
+        scripts.
 
         Parameters
         ----------
@@ -3913,6 +3920,16 @@ class Client(Node):
 
         >>> plugin = MyPlugin(1, 2, 3)
         >>> client.register_worker_plugin(plugin)
+
+        You can get access to the plugin with the ``get_worker`` function
+
+        >>> client.register_worker_plugin(other_plugin, name='my-plugin')
+        >>> def f():
+        ...    worker = get_worker()
+        ...    plugin = worker.plugins['my-plugin']
+        ...    return plugin.my_state
+
+        >>> future = client.run(f)
         """
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
