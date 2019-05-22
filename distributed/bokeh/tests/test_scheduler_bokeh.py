@@ -89,7 +89,7 @@ def test_basic(c, s, a, b):
         data = ss.source.data
         assert len(first(data.values()))
         if component is Occupancy:
-            assert all(addr.startswith("127.0.0.1:") for addr in data["bokeh_address"])
+            assert all(addr == "127.0.0.1" for addr in data["dashboard_host"])
 
 
 @gen_cluster(client=True)
