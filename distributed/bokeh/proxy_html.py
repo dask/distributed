@@ -86,7 +86,7 @@ except ImportError:
             msg = (
                 "Unable to route to workers through proxy.  "
                 "Please install jupyter-server-proxy:"
-                "<br/>> pip install jupyter-server-proxy.<br/> "
+                "<br/>> pip install jupyter-server-proxy<br/> "
                 "You can also navigate directly to the worker: "
                 "<a href=http://%s>%s</a>" % (worker_url, worker_url)
             )
