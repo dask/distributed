@@ -620,6 +620,6 @@ def test_proxy_to_workers(c, s, a, b):
         if proxy_exists:
             assert b"Crossfilter" in response_proxy.body
         else:
-            assert b"Please install jupyter-server-proxy" in response_proxy.body
+            assert b"pip install jupyter-server-proxy" in response_proxy.body
         assert response_direct.code == 200
         assert b"Crossfilter" in response_direct.body
