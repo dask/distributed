@@ -40,6 +40,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     help="Preferred network interface like 'eth0' or 'ib0'",
 )
 @click.option(
+    "--protocol",
+    type=str,
+    default=None,
+    help="Protocol like tcp, tls, or ucx",
+)
+@click.option(
     "--tls-ca-file",
     type=pem_file_option_type,
     default=None,
@@ -126,6 +132,7 @@ def main(
     pid_file,
     scheduler_file,
     interface,
+    protocol,
     local_directory,
     preload,
     preload_argv,
@@ -195,6 +202,7 @@ def main(
         host=host,
         port=port,
         interface=interface,
+        protocol=protocol,
         dashboard_address=dashboard_address if _bokeh else None,
         service_kwargs={"bokeh": {"prefix": bokeh_prefix}},
     )
