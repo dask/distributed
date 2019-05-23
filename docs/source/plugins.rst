@@ -53,8 +53,9 @@ Run with: ``dask-scheduler --preload <filename.py>``
 Accessing Full Task State
 -------------------------
 
-If you would like to access the full ``TaskState`` stored in the scheduler you
-can do this by passing and storing a reference to the scheduler as so:
+If you would like to access the full :class:`distributed.scheduler.TaskState`
+stored in the scheduler you can do this by passing and storing a reference to
+the scheduler as so:
 
 .. code-block:: python
 
