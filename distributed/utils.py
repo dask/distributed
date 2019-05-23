@@ -23,7 +23,7 @@ import tempfile
 import threading
 import warnings
 import weakref
-
+import pkgutil
 import six
 import tblib.pickling_support
 
@@ -46,7 +46,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import Queue, PY3, PY2, get_thread_identity, unicode
+from .compatibility import PY3, PY2, get_thread_identity, unicode
 from .metrics import time
 
 
@@ -727,8 +727,7 @@ def log_errors(pdb=False):
 
 def silence_logging(level, root="distributed"):
     """
-    Force all existing loggers below *root* to the given level at least
-    (or keep the existing level if less verbose).
+    Change all StreamHandlers for the given logger to the given level
     """
     if isinstance(level, str):
         level = getattr(logging, level.upper())
@@ -796,42 +795,6 @@ def truncate_exception(e, n=10000):
             return Exception("Long error message", type(e), str(e)[:n])
     else:
         return e
-
-
-if sys.version_info >= (3,):
-    # (re-)raising StopIteration is deprecated in 3.6+
-    exec(
-        """def queue_to_iterator(q):
-        while True:
-            result = q.get()
-            if isinstance(result, StopIteration):
-                return result.value
-            yield result
-        """
-    )
-else:
-    # Returning non-None from generator is a syntax error in 2.x
-    def queue_to_iterator(q):
-        while True:
-            result = q.get()
-            if isinstance(result, StopIteration):
-                raise result
-            yield result
-
-
-def _dump_to_queue(seq, q):
-    for item in seq:
-        q.put(item)
-
-
-def iterator_to_queue(seq, maxsize=0):
-    q = Queue(maxsize=maxsize)
-
-    t = threading.Thread(target=_dump_to_queue, args=(seq, q))
-    t.daemon = True
-    t.start()
-
-    return q
 
 
 def tokey(o):
@@ -1103,14 +1066,11 @@ def import_file(path):
     if ext in (".egg", ".zip", ".pyz"):
         if path not in sys.path:
             sys.path.insert(0, path)
-        if ext == ".egg":
-            import pkg_resources
-
-            pkgs = pkg_resources.find_distributions(path)
-            for pkg in pkgs:
-                names_to_import.append(pkg.project_name)
-        elif ext in (".zip", ".pyz"):
-            names_to_import.append(name)
+        if sys.version_info >= (3, 6):
+            names = (mod_info.name for mod_info in pkgutil.iter_modules([path]))
+        else:
+            names = (mod_info[1] for mod_info in pkgutil.iter_modules([path]))
+        names_to_import.extend(names)
 
     loaded = []
     if not names_to_import:
@@ -1222,6 +1182,8 @@ def parse_bytes(s):
     >>> parse_bytes('MB')
     1000000
     """
+    if isinstance(s, (int, float)):
+        return int(s)
     s = s.replace(" ", "")
     if not s[0].isdigit():
         s = "1" + s
@@ -1280,6 +1242,8 @@ def parse_timedelta(s, default="seconds"):
     >>> parse_timedelta(timedelta(seconds=3))  # also supports timedeltas
     3
     """
+    if s is None:
+        return None
     if isinstance(s, timedelta):
         return s.total_seconds()
     if isinstance(s, Number):
@@ -1530,3 +1494,18 @@ def warn_on_duration(duration, msg):
     stop = time()
     if stop - start > parse_timedelta(duration):
         warnings.warn(msg, stacklevel=2)
+
+
+def typename(typ):
+    """ Return name of type
+
+    Examples
+    --------
+    >>> from distributed import Scheduler
+    >>> typename(Scheduler)
+    'distributed.scheduler.Scheduler'
+    """
+    try:
+        return typ.__module__ + "." + typ.__name__
+    except AttributeError:
+        return str(typ)

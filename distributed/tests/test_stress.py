@@ -21,7 +21,6 @@ from distributed.utils_test import (
     inc,
     slowinc,
     slowadd,
-    slow,
     slowsum,
     bump_rlimit,
 )
@@ -114,7 +113,7 @@ def test_stress_creation_and_deletion(c, s):
 
             yield gen.sleep(delay)
 
-            yield n._close()
+            yield n.close()
             print("Killed nanny")
 
     yield gen.with_timeout(
@@ -167,7 +166,7 @@ def test_stress_scatter_death(c, s, *workers):
             else:
                 raise
         w = random.choice(alive)
-        yield w._close()
+        yield w.close()
         alive.remove(w)
 
     try:
@@ -198,7 +197,7 @@ def vsum(*args):
 
 
 @pytest.mark.avoid_travis
-@slow
+@pytest.mark.slow
 @gen_cluster(client=True, ncores=[("127.0.0.1", 1)] * 80, timeout=1000)
 def test_stress_communication(c, s, *workers):
     s.validate = False  # very slow otherwise
@@ -244,7 +243,7 @@ def test_stress_steal(c, s, *workers):
             break
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(ncores=[("127.0.0.1", 1)] * 10, client=True, timeout=120)
 def test_close_connections(c, s, *workers):
     da = pytest.importorskip("dask.array")

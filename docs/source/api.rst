@@ -152,7 +152,9 @@ Future
 Other
 -----
 
-.. autofunction:: as_completed
+.. autoclass:: as_completed
+   :members:
+
 .. autofunction:: distributed.diagnostics.progress
 .. autofunction:: wait
 .. autofunction:: fire_and_forget
@@ -172,14 +174,6 @@ Other
 .. autoclass:: Queue
    :members:
 .. autoclass:: Variable
-   :members:
-
-
-Asyncio Client
---------------
-
-.. currentmodule:: distributed.asyncio
-.. autoclass:: AioClient
    :members:
 
 

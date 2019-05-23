@@ -130,7 +130,8 @@ class Occupancy(DashboardComponent):
                     "y": [1, 2],
                     "ms": [1, 2],
                     "color": ["red", "blue"],
-                    "bokeh_address": ["", ""],
+                    "dashboard_port": ["", ""],
+                    "dashboard_host": ["", ""],
                 }
             )
 
@@ -152,7 +153,9 @@ class Occupancy(DashboardComponent):
             # fig.xaxis[0].formatter = NumeralTickFormatter(format='0.0s')
             fig.x_range.start = 0
 
-            tap = TapTool(callback=OpenURL(url="http://@bokeh_address/main"))
+            tap = TapTool(
+                callback=OpenURL(url="./proxy/@dashboard_port/@dashboard_host/status")
+            )
 
             hover = HoverTool()
             hover.tooltips = "@worker : @occupancy s."
@@ -166,10 +169,8 @@ class Occupancy(DashboardComponent):
         with log_errors():
             workers = list(self.scheduler.workers.values())
 
-            bokeh_addresses = []
-            for ws in workers:
-                addr = self.scheduler.get_worker_service_addr(ws.address, "bokeh")
-                bokeh_addresses.append("%s:%d" % addr if addr is not None else "")
+            dashboard_host = [ws.host for ws in workers]
+            dashboard_port = [ws.services.get("bokeh", "") for ws in workers]
 
             y = list(range(len(workers)))
             occupancy = [ws.occupancy for ws in workers]
@@ -199,7 +200,8 @@ class Occupancy(DashboardComponent):
                     "worker": [ws.address for ws in workers],
                     "ms": ms,
                     "color": color,
-                    "bokeh_address": bokeh_addresses,
+                    "dashboard_host": dashboard_host,
+                    "dashboard_port": dashboard_port,
                     "x": x,
                     "y": y,
                 }
@@ -219,9 +221,11 @@ class ProcessingHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Tasks Processing",
+                title="Tasks Processing (Histogram)",
                 id="bk-nprocessing-histogram-plot",
                 name="processing_hist",
+                y_axis_label="frequency",
+                tools="",
                 **kwargs
             )
 
@@ -237,7 +241,8 @@ class ProcessingHistogram(DashboardComponent):
                 right="right",
                 bottom=0,
                 top="top",
-                color="blue",
+                color="deepskyblue",
+                fill_alpha=0.5,
             )
 
     @without_property_validation
@@ -259,11 +264,14 @@ class NBytesHistogram(DashboardComponent):
             )
 
             self.root = figure(
-                title="Bytes Stored",
+                title="Bytes Stored (Histogram)",
                 name="nbytes_hist",
                 id="bk-nbytes-histogram-plot",
+                y_axis_label="frequency",
+                tools="",
                 **kwargs
             )
+
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             self.root.xaxis.major_label_orientation = -math.pi / 12
 
@@ -279,7 +287,8 @@ class NBytesHistogram(DashboardComponent):
                 right="right",
                 bottom=0,
                 top="top",
-                color="blue",
+                color="deepskyblue",
+                fill_alpha=0.5,
             )
 
     @without_property_validation
@@ -289,7 +298,7 @@ class NBytesHistogram(DashboardComponent):
         d = {"left": x[:-1], "right": x[1:], "top": counts}
         self.source.data.update(d)
 
-        self.root.title.text = "Bytes stored: " + format_bytes(nbytes.sum())
+        self.root.title.text = "Bytes stored (Histogram): " + format_bytes(nbytes.sum())
 
 
 class CurrentLoad(DashboardComponent):
@@ -310,7 +319,8 @@ class CurrentLoad(DashboardComponent):
                     "worker": ["a", "b"],
                     "y": [1, 2],
                     "nbytes-color": ["blue", "blue"],
-                    "bokeh_address": ["", ""],
+                    "dashboard_port": ["", ""],
+                    "dashboard_host": ["", ""],
                 }
             )
 
@@ -361,7 +371,11 @@ class CurrentLoad(DashboardComponent):
                 fig.yaxis.visible = False
                 fig.ygrid.visible = False
 
-                tap = TapTool(callback=OpenURL(url="http://@bokeh_address/main"))
+                tap = TapTool(
+                    callback=OpenURL(
+                        url="./proxy/@dashboard_port/@dashboard_host/status"
+                    )
+                )
                 fig.add_tools(tap)
 
                 fig.toolbar.logo = None
@@ -388,10 +402,8 @@ class CurrentLoad(DashboardComponent):
         with log_errors():
             workers = list(self.scheduler.workers.values())
 
-            bokeh_addresses = []
-            for ws in workers:
-                addr = self.scheduler.get_worker_service_addr(ws.address, "bokeh")
-                bokeh_addresses.append("%s:%d" % addr if addr is not None else "")
+            dashboard_host = [ws.host for ws in workers]
+            dashboard_port = [ws.services.get("bokeh", "") for ws in workers]
 
             y = list(range(len(workers)))
             nprocessing = [len(ws.processing) for ws in workers]
@@ -435,7 +447,8 @@ class CurrentLoad(DashboardComponent):
                     "nbytes-half": [nb / 2 for nb in nbytes],
                     "nbytes-color": nbytes_color,
                     "nbytes_text": nbytes_text,
-                    "bokeh_address": bokeh_addresses,
+                    "dashboard_host": dashboard_host,
+                    "dashboard_port": dashboard_port,
                     "worker": [ws.address for ws in workers],
                     "y": y,
                 }
@@ -938,6 +951,7 @@ class TaskProgress(DashboardComponent):
             x_range=x_range,
             y_range=y_range,
             toolbar_location=None,
+            tools="",
             **kwargs
         )
         self.root.line(  # just to define early ranges
@@ -1049,7 +1063,7 @@ class TaskProgress(DashboardComponent):
     def update(self):
         with log_errors():
             state = {"all": valmap(len, self.plugin.all), "nbytes": self.plugin.nbytes}
-            for k in ["memory", "erred", "released", "processing"]:
+            for k in ["memory", "erred", "released", "processing", "waiting"]:
                 state[k] = valmap(len, self.plugin.state[k])
             if not state["all"] and not len(self.source.data["all"]):
                 return
@@ -1060,7 +1074,7 @@ class TaskProgress(DashboardComponent):
 
             totals = {
                 k: sum(state[k].values())
-                for k in ["all", "memory", "erred", "released"]
+                for k in ["all", "memory", "erred", "released", "waiting"]
             }
             totals["processing"] = totals["all"] - sum(
                 v for k, v in totals.items() if k != "all"
@@ -1069,6 +1083,7 @@ class TaskProgress(DashboardComponent):
             self.root.title.text = (
                 "Progress -- total: %(all)s, "
                 "in-memory: %(memory)s, processing: %(processing)s, "
+                "waiting: %(waiting)s, "
                 "erred: %(erred)s" % totals
             )
 
@@ -1570,6 +1585,7 @@ class BokehScheduler(BokehServer):
         self.prefix = prefix
 
         self.server_kwargs = kwargs
+
         self.server_kwargs["prefix"] = prefix or None
 
         self.apps = {

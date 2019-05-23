@@ -6,6 +6,7 @@ import pytest
 pytest.importorskip("numpy")
 pytest.importorskip("pandas")
 
+import dask
 import dask.dataframe as dd
 import dask.bag as db
 from distributed.client import wait
@@ -73,10 +74,11 @@ def test_dataframes(c, s, a, b):
 def test__dask_array_collections(c, s, a, b):
     import dask.array as da
 
+    s.validate = False
     x_dsk = {("x", i, j): np.random.random((3, 3)) for i in range(3) for j in range(2)}
     y_dsk = {("y", i, j): np.random.random((3, 3)) for i in range(2) for j in range(3)}
-    x_futures = yield c._scatter(x_dsk)
-    y_futures = yield c._scatter(y_dsk)
+    x_futures = yield c.scatter(x_dsk)
+    y_futures = yield c.scatter(y_dsk)
 
     dt = np.random.random(0).dtype
     x_local = da.Array(x_dsk, "x", ((3, 3, 3), (3, 3)), dt)
@@ -184,3 +186,12 @@ def test_sparse_arrays(c, s, a, b):
     future = c.compute(s.sum(axis=0)[:10])
 
     yield future
+
+
+@gen_cluster(client=True, ncores=[("127.0.0.1", 1)])
+def test_delayed_none(c, s, w):
+    x = dask.delayed(None)
+    y = dask.delayed(123)
+    [xx, yy] = c.compute([x, y])
+    assert (yield xx) is None
+    assert (yield yy) == 123

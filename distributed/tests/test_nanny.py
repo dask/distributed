@@ -18,17 +18,17 @@ from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import ignoring, tmpfile
-from distributed.utils_test import gen_cluster, gen_test, slow, inc, captured_logger
+from distributed.utils_test import gen_cluster, gen_test, inc, captured_logger
 
 
 @gen_cluster(ncores=[])
 def test_nanny(s):
-    n = yield Nanny(s.ip, s.port, ncores=2, loop=s.loop)
+    n = yield Nanny(s.address, ncores=2, loop=s.loop)
 
     with rpc(n.address) as nn:
         assert n.is_alive()
         assert s.ncores[n.worker_address] == 2
-        assert s.workers[n.worker_address].services["nanny"] > 1024
+        assert s.workers[n.worker_address].nanny == n.address
 
         yield nn.kill()
         assert not n.is_alive()
@@ -43,12 +43,12 @@ def test_nanny(s):
         yield nn.instantiate()
         assert n.is_alive()
         assert s.ncores[n.worker_address] == 2
-        assert s.workers[n.worker_address].services["nanny"] > 1024
+        assert s.workers[n.worker_address].nanny == n.address
 
         yield nn.terminate()
         assert not n.is_alive()
 
-    yield n._close()
+    yield n.close()
 
 
 @gen_cluster(ncores=[])
@@ -57,7 +57,7 @@ def test_many_kills(s):
     assert n.is_alive()
     yield [n.kill() for i in range(5)]
     yield [n.kill() for i in range(5)]
-    yield n._close()
+    yield n.close()
 
 
 @gen_cluster(Worker=Nanny)
@@ -70,7 +70,7 @@ def test_str(s, a, b):
 
 @gen_cluster(ncores=[], timeout=20, client=True)
 def test_nanny_process_failure(c, s):
-    n = yield Nanny(s.ip, s.port, ncores=2, loop=s.loop)
+    n = yield Nanny(s.address, ncores=2, loop=s.loop)
     first_dir = n.worker_dir
 
     assert os.path.exists(first_dir)
@@ -102,7 +102,7 @@ def test_nanny_process_failure(c, s):
 
     second_dir = n.worker_dir
 
-    yield n._close()
+    yield n.close()
     assert not os.path.exists(second_dir)
     assert not os.path.exists(first_dir)
     assert first_dir != n.worker_dir
@@ -110,24 +110,20 @@ def test_nanny_process_failure(c, s):
     s.stop()
 
 
-def test_nanny_no_port():
-    _ = str(Nanny("127.0.0.1", 8786))
-
-
 @gen_cluster(ncores=[])
 def test_run(s):
     pytest.importorskip("psutil")
-    n = yield Nanny(s.ip, s.port, ncores=2, loop=s.loop)
+    n = yield Nanny(s.address, ncores=2, loop=s.loop)
 
     with rpc(n.address) as nn:
         response = yield nn.run(function=dumps(lambda: 1))
         assert response["status"] == "OK"
         assert response["result"] == 1
 
-    yield n._close()
+    yield n.close()
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(
     Worker=Nanny, ncores=[("127.0.0.1", 1)], worker_kwargs={"reconnect": False}
 )
@@ -159,7 +155,7 @@ def test_nanny_alt_worker_class(c, s, w1, w2):
     assert w1.Worker is Something
 
 
-@slow
+@pytest.mark.slow
 @gen_cluster(client=False, ncores=[])
 def test_nanny_death_timeout(s):
     yield s.close()
@@ -194,7 +190,7 @@ def test_num_fds(s):
 
     # Warm up
     w = yield Nanny(s.address)
-    yield w._close()
+    yield w.close()
     del w
     gc.collect()
 
@@ -203,7 +199,7 @@ def test_num_fds(s):
     for i in range(3):
         w = yield Nanny(s.address)
         yield gen.sleep(0.1)
-        yield w._close()
+        yield w.close()
 
     start = time()
     while proc.num_fds() > before:
@@ -226,7 +222,7 @@ def test_worker_uses_same_host_as_nanny(c, s):
 
         result = yield c.run(func)
         assert host in first(result.values())
-        yield n._close()
+        yield n.close()
 
 
 @gen_test()
@@ -236,7 +232,7 @@ def test_scheduler_file():
         s.start(8008)
         w = yield Nanny(scheduler_file=fn)
         assert set(s.workers) == {w.worker_address}
-        yield w._close()
+        yield w.close()
         s.stop()
 
 
@@ -301,7 +297,7 @@ def test_avoid_memory_monitor_if_zero_limit(c, s):
 
     yield c.submit(inc, 2)  # worker doesn't pause
 
-    yield nanny._close()
+    yield nanny.close()
 
 
 @gen_cluster(ncores=[], client=True)
@@ -315,16 +311,17 @@ def test_scheduler_address_config(c, s):
             yield gen.sleep(0.1)
             assert time() < start + 10
 
-    yield nanny._close()
+    yield nanny.close()
 
 
-@slow
-@gen_test()
+@pytest.mark.slow
+@gen_test(timeout=20)
 def test_wait_for_scheduler():
     with captured_logger("distributed") as log:
         w = Nanny("127.0.0.1:44737")
-        w._start()
+        w.start()
         yield gen.sleep(6)
+        yield w.close()
 
     log = log.getvalue()
     assert "error" not in log.lower(), log
@@ -338,7 +335,7 @@ def test_environment_variable(c, s):
     yield [a, b]
     results = yield c.run(lambda: os.environ["FOO"])
     assert results == {a.worker_address: "123", b.worker_address: "456"}
-    yield [a._close(), b._close()]
+    yield [a.close(), b.close()]
 
 
 @gen_cluster(ncores=[], client=True)
@@ -346,4 +343,4 @@ def test_data_types(c, s):
     w = yield Nanny(s.address, data=dict)
     r = yield c.run(lambda dask_worker: type(dask_worker.data))
     assert r[w.worker_address] == dict
-    yield w._close()
+    yield w.close()
