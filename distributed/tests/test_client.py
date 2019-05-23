@@ -3506,7 +3506,7 @@ def test_reconnect(loop):
         "127.0.0.1",
         "--port",
         "9393",
-        "--no-bokeh",
+        "--no-dashboard",
     ]
     with popen(scheduler_cli) as s:
         c = Client("127.0.0.1:9393", loop=loop)
