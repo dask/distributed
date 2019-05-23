@@ -22,6 +22,7 @@ import six
 import socket
 import warnings
 import weakref
+import webbrowser
 
 import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
@@ -785,7 +786,21 @@ class Client(Node):
         else:
             return "<%s: not connected>" % (self.__class__.__name__,)
 
-    def _repr_html_(self):
+    @property
+    def _dashboard_address(self):
+        scheduler, info = self._maybe_get_scheduler_and_info()
+        if info and "bokeh" in info["services"]:
+            protocol, rest = scheduler.address.split("://")
+            port = info["services"]["bokeh"]
+            if protocol == "inproc":
+                host = "localhost"
+            else:
+                host = rest.split(":")[0]
+
+            template = dask.config.get("distributed.dashboard.link")
+            return template.format(host=host, port=port, **os.environ)
+
+    def _maybe_get_scheduler_and_info(self):
         if (
             self.cluster
             and hasattr(self.cluster, "scheduler")
@@ -803,7 +818,10 @@ class Client(Node):
         else:
             info = False
             scheduler = self.scheduler
+        return scheduler, info
 
+    def _repr_html_(self):
+        scheduler, info = self._maybe_get_scheduler_and_info()
         if scheduler is not None:
             text = (
                 "<h3>Client</h3>\n" "<ul>\n" "  <li><b>Scheduler: </b>%s\n"
@@ -813,14 +831,8 @@ class Client(Node):
                 "<h3>Client</h3>\n" "<ul>\n" "  <li><b>Scheduler: not connected</b>\n"
             )
         if info and "bokeh" in info["services"]:
-            protocol, rest = scheduler.address.split("://")
-            port = info["services"]["bokeh"]
-            if protocol == "inproc":
-                host = "localhost"
-            else:
-                host = rest.split(":")[0]
-            template = dask.config.get("distributed.dashboard.link")
-            address = template.format(host=host, port=port, **os.environ)
+            address = self._dashboard_address
+
             text += (
                 "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n"
                 % {"web": address}
@@ -3863,6 +3875,19 @@ class Client(Node):
             raise gen.Return((msgs, figure))
         else:
             raise gen.Return(msgs)
+
+    def open_dashboard(self):
+        """
+        Open the distributed dashboard.
+
+        This may fail if the client is not running in a local process.
+        """
+        address = self._dashboard_address
+
+        if address is None:
+            raise ValueError("Dashboard is not currently running.")
+
+        webbrowser.open(self._dashboard_address)
 
     def register_worker_callbacks(self, setup=None):
         """

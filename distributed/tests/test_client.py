@@ -6,6 +6,7 @@ from collections import deque
 from concurrent.futures import CancelledError
 import gc
 import logging
+import mock
 import os
 import pickle
 import random
@@ -5234,6 +5235,24 @@ def test_diagnostics_link_env_variable(loop):
                 text = c._repr_html_()
                 link = "http://foo-" + os.environ["USER"] + ":12355/status"
                 assert link in text
+
+
+def test_open_dashboard(loop):
+    pytest.importorskip("bokeh")
+    from distributed.bokeh.scheduler import BokehScheduler
+
+    with mock.patch("distributed.client.webbrowser.open") as m:
+        with cluster(
+            scheduler_kwargs={"services": {("bokeh", 12355): BokehScheduler}}
+        ) as (s, [a, b]):
+            with Client(s["address"], loop=loop) as c:
+                c.open_dashboard()
+        assert m.call_count == 1
+
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop) as c:
+            with pytest.raises(ValueError):
+                c.open_dashboard()
 
 
 @gen_test()
