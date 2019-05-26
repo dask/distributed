@@ -878,7 +878,7 @@ class Scheduler(ServerNode):
 
         if dashboard_address is not None:
             try:
-                from distributed.dashboard.scheduler import BokehScheduler
+                from distributed.dashboard import BokehScheduler
             except ImportError:
                 logger.debug("To start diagnostics web server please install Bokeh")
             else:

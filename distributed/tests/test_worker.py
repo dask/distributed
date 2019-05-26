@@ -972,7 +972,7 @@ def test_worker_fds(s):
 @gen_cluster(ncores=[])
 def test_service_hosts_match_worker(s):
     pytest.importorskip("bokeh")
-    from distributed.dashboard.worker import BokehWorker
+    from distributed.dashboard import BokehWorker
 
     services = {("dashboard", ":0"): BokehWorker}
 
@@ -998,7 +998,7 @@ def test_service_hosts_match_worker(s):
 @gen_cluster(ncores=[])
 def test_start_services(s):
     pytest.importorskip("bokeh")
-    from distributed.dashboard.worker import BokehWorker
+    from distributed.dashboard import BokehWorker
 
     services = {("dashboard", ":1234"): BokehWorker}
 

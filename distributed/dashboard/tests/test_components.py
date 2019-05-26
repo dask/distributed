@@ -7,7 +7,6 @@ pytest.importorskip("bokeh")
 from bokeh.models import ColumnDataSource, Model
 from tornado import gen
 
-from distributed.dashboard import messages
 from distributed.utils_test import slowinc, gen_cluster
 
 from distributed.dashboard.components import (
@@ -24,7 +23,6 @@ def test_basic(Component):
     c = Component()
     assert isinstance(c.source, ColumnDataSource)
     assert isinstance(c.root, Model)
-    c.update(messages)
 
 
 @gen_cluster(client=True, check_new_threads=False)
