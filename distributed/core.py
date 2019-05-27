@@ -487,9 +487,7 @@ class Server(object):
                 pdb.set_trace()
             raise
         finally:
-            yield comm.close()  # TODO: why do we need this now?
-            #             ^ Good question :) comm.close can be a
-            # coroutine, in which case this isn't doing anything.
+            yield comm.close()
             assert comm.closed()
 
     @gen.coroutine
@@ -907,7 +905,6 @@ class ConnectionPool(object):
         for addr, comms in self.available.items():
             for comm in comms:
                 IOLoop.current().add_callback(comm.close)
-                # comm.close()
             comms.clear()
         if self.open < self.limit:
             self.event.set()
@@ -920,7 +917,6 @@ class ConnectionPool(object):
         if addr in self.available:
             comms = self.available.pop(addr)
             for comm in comms:
-                # comm.close()
                 IOLoop.current().add_callback(comm.close)
         if addr in self.occupied:
             comms = self.occupied.pop(addr)
