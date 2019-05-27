@@ -220,12 +220,16 @@ async def test_ping_pong_cupy(shape):
 
 @pytest.mark.slow
 @pytest.mark.asyncio
-async def test_large_cupy():
+@pytest.mark.parametrize("n", [
+    1_000_000_000,
+    pytest.param(2_500_000_000, marks=[pytest.mark.xfail(reason='integer type in ucx-py')]),
+])
+async def test_large_cupy(n):
     cupy = pytest.importorskip("cupy")
     address = "ucx://{}:{}".format(HOST, next(port_counter))
     com, serv_com = await get_comm_pair(address)
 
-    arr = cupy.ones(1000000000, dtype='u1')
+    arr = cupy.ones(n, dtype='u1')
     msg = {"op": "ping", "data": to_serialize(arr)}
 
     _, result = await asyncio.gather(com.write(msg), serv_com.read())
