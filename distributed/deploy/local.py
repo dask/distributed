@@ -200,7 +200,7 @@ class LocalCluster(SpecCluster):
         return "LocalCluster(%r, workers=%d, ncores=%d)" % (
             self.scheduler_address,
             len(self.workers),
-            sum(w.ncores for w in self.workers),
+            sum(w.ncores for w in self.workers.values()),
         )
 
 
