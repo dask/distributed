@@ -218,6 +218,25 @@ async def test_ping_pong_cupy(shape):
     await serv_com.close()
 
 
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_large_cupy():
+    cupy = pytest.importorskip("cupy")
+    address = "ucx://{}:{}".format(HOST, next(port_counter))
+    com, serv_com = await get_comm_pair(address)
+
+    arr = cupy.ones(1000000000, dtype='u1')
+    msg = {"op": "ping", "data": to_serialize(arr)}
+
+    _, result = await asyncio.gather(com.write(msg), serv_com.read())
+    data2 = result.pop("data")
+
+    assert result["op"] == "ping"
+    assert len(data2) == len(arr)
+    await com.close()
+    await serv_com.close()
+
+
 @pytest.mark.asyncio
 async def test_ping_pong_numba():
     np = pytest.importorskip("numpy")
