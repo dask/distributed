@@ -152,11 +152,11 @@ class UCX(Comm):
         # We need the port? Or the tag?
         return self.address
 
-    async def write(self, msg: dict, serializers=None, on_error: str = "message"):
+    async def write(self, msg: dict, serializers=('cuda', 'dask', 'pickle', 'error'), on_error: str = "message"):
         # msg can also be a list of dicts when sending batched messages
         frames = await to_frames(
             msg, serializers=serializers, on_error=on_error
-        )  # TODO: context=
+        )
         gpu_frames = b"".join(
             [
                 struct.pack("?", hasattr(frame, "__cuda_array_interface__"))
@@ -175,7 +175,7 @@ class UCX(Comm):
             await self.ep.send_obj(frame)
         return sum(map(nbytes, frames))
 
-    async def read(self, deserializers=None):
+    async def read(self, deserializers=('cuda', 'dask', 'pickle', 'error')):
         resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
         nframes, = struct.unpack("Q", obj[:8])  # first eight bytes for number of frames

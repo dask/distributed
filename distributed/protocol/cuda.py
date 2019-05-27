@@ -1,39 +1,32 @@
-"""
-Efficient serialization GPU arrays.
-"""
-import cupy
-from .serialize import dask_serialize, dask_deserialize
+import dask
+
+from . import pickle
+from .serialize import register_serialization_family
+from dask.utils import typename
+
+cuda_serialize = dask.utils.Dispatch("cuda_serialize")
+cuda_deserialize = dask.utils.Dispatch("cuda_deserialize")
 
 
-@dask_serialize.register(cupy.ndarray)
-def serialize_cupy_ndarray(x):
-    # TODO: handle non-contiguous
-    # TODO: Handle order='K' ravel
-    # TODO: 0d
+def cuda_dumps(x):
+    type_name = typename(type(x))
+    try:
+        dumps = cuda_serialize.dispatch(type(x))
+    except TypeError:
+        raise NotImplementedError(type_name)
 
-    if x.flags.c_contiguous or x.flags.f_contiguous:
-        strides = x.strides
-        data = x.ravel()  # order='K'
-    else:
-        x = cupy.ascontiguousarray(x)
-        strides = x.strides
-        data = x.ravel()
+    header, frames = dumps(x)
 
-    dtype = (0, x.dtype.str)
-
-    header = x.__cuda_array_interface__.copy()
-    header["lengths"] = (x.nbytes,)  # one per stride
-    header["compression"] = (None,)  # TODO
-    header["is_cuda"] = 1
-    header["dtype"] = dtype
-    return header, [data]
+    header["type"] = type_name
+    header["type-serialized"] = pickle.dumps(type(x))
+    header["serializer"] = "cuda"
+    return header, frames
 
 
-@dask_deserialize.register(cupy.ndarray)
-def deserialize_cupy_array(header, frames):
-    frame, = frames
-    # TODO: put this in ucx... as a kind of "fixup"
-    frame.typestr = header["typestr"]
-    frame.shape = header["shape"]
-    arr = cupy.asarray(frame)
-    return arr
+def cuda_loads(header, frames):
+    typ = pickle.loads(header["type-serialized"])
+    loads = cuda_deserialize.dispatch(typ)
+    return loads(header, frames)
+
+
+register_serialization_family("cuda", cuda_dumps, cuda_loads)

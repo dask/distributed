@@ -1,5 +1,5 @@
 import cudf
-from .serialize import dask_serialize, dask_deserialize
+from .cuda import cuda_serialize, cuda_deserialize
 from .numba import serialize_numba_ndarray, deserialize_numba_ndarray
 
 
@@ -11,7 +11,7 @@ from .numba import serialize_numba_ndarray, deserialize_numba_ndarray
 # 3. Serialize the index
 
 
-@dask_serialize.register(cudf.DataFrame)
+@cuda_serialize.register(cudf.DataFrame)
 def serialize_cudf_dataframe(x):
     sub_headers = []
     arrays = []
@@ -46,7 +46,7 @@ def serialize_cudf_dataframe(x):
     return header, arrays
 
 
-@dask_deserialize.register(cudf.DataFrame)
+@cuda_deserialize.register(cudf.DataFrame)
 def serialize_cudf_dataframe(header, frames):
     columns = header["columns"]
     n_columns = len(header["columns"])

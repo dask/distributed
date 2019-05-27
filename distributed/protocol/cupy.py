@@ -2,10 +2,10 @@
 Efficient serialization GPU arrays.
 """
 import cupy
-from .serialize import dask_serialize, dask_deserialize
+from .cuda import cuda_serialize, cuda_deserialize
 
 
-@dask_serialize.register(cupy.ndarray)
+@cuda_serialize.register(cupy.ndarray)
 def serialize_cupy_ndarray(x):
     # TODO: handle non-contiguous
     # TODO: Handle order='K' ravel
@@ -30,7 +30,7 @@ def serialize_cupy_ndarray(x):
     return header, [data]
 
 
-@dask_deserialize.register(cupy.ndarray)
+@cuda_deserialize.register(cupy.ndarray)
 def deserialize_cupy_array(header, frames):
     frame, = frames
     # TODO: put this in ucx... as a kind of "fixup"

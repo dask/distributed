@@ -1,8 +1,8 @@
 import numba.cuda
-from .serialize import dask_serialize, dask_deserialize
+from .cuda import cuda_serialize, cuda_deserialize
 
 
-@dask_serialize.register(numba.cuda.devicearray.DeviceNDArray)
+@cuda_serialize.register(numba.cuda.devicearray.DeviceNDArray)
 def serialize_numba_ndarray(x):
     # TODO: handle non-contiguous
     # TODO: handle 2d
@@ -35,7 +35,7 @@ def serialize_numba_ndarray(x):
     return header, [data]
 
 
-@dask_deserialize.register(numba.cuda.devicearray.DeviceNDArray)
+@cuda_deserialize.register(numba.cuda.devicearray.DeviceNDArray)
 def deserialize_numba_ndarray(header, frames):
     frame, = frames
     # TODO: put this in ucx... as a kind of "fixup"

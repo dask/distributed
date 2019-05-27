@@ -238,6 +238,7 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
+@pytest.mark.skip(reason="hangs")
 @pytest.mark.parametrize("processes", [True, False])
 def test_ucx_localcluster(loop, processes):
     if processes:
@@ -261,7 +262,7 @@ def test_ucx_localcluster(loop, processes):
             x.result()
             assert x.key in cluster.scheduler.tasks
             if not processes:
-                assert any(w.data == {x.key: 2} for w in cluster.workers)
+                assert any(w.data == {x.key: 2} for w in cluster.workers.values())
             assert len(cluster.scheduler.workers) == 2
 
 
@@ -279,7 +280,7 @@ def test_tcp_localcluster(loop):
         silence_logs=False,
         env=env,
     ) as cluster:
-        print(cluster.scheduler.workers)
+        pass
         # with Client(cluster) as e:
         #     x = e.submit(inc, 1)
         #     x.result()
