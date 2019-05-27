@@ -1316,18 +1316,7 @@ else:
             try:
                 return frame.nbytes
             except AttributeError:
-                try:
-                    # TODO: https://github.com/numba/numba/issues/3810
-                    # numba DeviceNDArary doesn't implement .nbytes
-                    # remove once that's fixed.
-                    return frame.dtype.itemsize * frame.size
-                except AttributeError:
-                    # XXX: nbytes fails for MemoryPointer.
-                    # Probably time to move away
-                    try:
-                        return len(frame)
-                    except TypeError:
-                        return sys.getsizeof(frame)
+                return len(frame)
 
 
 def PeriodicCallback(callback, callback_time, io_loop=None):
