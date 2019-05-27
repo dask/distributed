@@ -34,7 +34,10 @@ def serialize_cupy_ndarray(x):
 def deserialize_cupy_array(header, frames):
     frame, = frames
     # TODO: put this in ucx... as a kind of "fixup"
-    frame.typestr = header["typestr"]
-    frame.shape = header["shape"]
+    try:
+        frame.typestr = header["typestr"]
+        frame.shape = header["shape"]
+    except AttributeError:
+        pass
     arr = cupy.asarray(frame)
     return arr
