@@ -8,10 +8,10 @@ ucp = pytest.importorskip("ucp")
 from distributed import Client
 from distributed.comm import ucx, listen, connect
 from distributed.comm.registry import backends, get_backend
-from distributed.comm import ucx, parse_address, parse_host_port
+from distributed.comm import ucx, parse_address
 from distributed.protocol import to_serialize
 from distributed.deploy.local import LocalCluster
-from distributed.utils_test import gen_test, loop, inc
+from distributed.utils_test import gen_test, loop, inc  # noqa: 401
 
 from .test_comms import check_deserialize
 

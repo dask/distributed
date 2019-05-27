@@ -105,10 +105,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--interface", type=str, default=None, help="Network interface like 'eth0' or 'ib0'"
 )
 @click.option(
-    "--protocol",
-    type=str,
-    default=None,
-    help="Protocol like tcp, tls, or ucx",
+    "--protocol", type=str, default=None, help="Protocol like tcp, tls, or ucx"
 )
 @click.option("--nthreads", type=int, default=0, help="Number of threads per process.")
 @click.option(

@@ -40,10 +40,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     help="Preferred network interface like 'eth0' or 'ib0'",
 )
 @click.option(
-    "--protocol",
-    type=str,
-    default=None,
-    help="Protocol like tcp, tls, or ucx",
+    "--protocol", type=str, default=None, help="Protocol like tcp, tls, or ucx"
 )
 @click.option(
     "--tls-ca-file",
