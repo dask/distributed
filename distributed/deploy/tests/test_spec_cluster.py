@@ -116,7 +116,8 @@ async def test_broken_worker():
     assert "Broken" in str(info.value)
 
 
-def test_spec_sync(loop):
+@pytest.mark.slow
+def test_spec_close_clusters(loop):
     workers = {0: {"cls": Worker}}
     scheduler = {"cls": Scheduler, "options": {"port": 0}}
     cluster = SpecCluster(workers=workers, scheduler=scheduler, loop=loop)

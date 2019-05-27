@@ -304,4 +304,5 @@ class SpecCluster(Cluster):
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        cluster.close(timeout=10)
+        with ignoring(gen.TimeoutError):
+            cluster.close(timeout=10)
