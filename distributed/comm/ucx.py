@@ -26,11 +26,6 @@ os.environ.setdefault("UCX_TLS", "rc,cuda_copy")
 
 logger = logging.getLogger(__name__)
 MAX_MSG_LOG = 23
-PORT = 13337
-
-# set in ~/.dask/config.yaml
-# or DASK_DISTRIBUTED__COMM__UCXADDRESS
-_PORT_COUNTER = itertools.count(PORT)
 
 _INITIALIZED = False
 
@@ -41,50 +36,6 @@ def _ucp_init():
     if not _INITIALIZED:
         ucp.init()
         _INITIALIZED = True
-
-
-# ----------------------------------------------------------------------------
-# Addressing
-# TODO: Parts of these should probably be moved to `comm/addressing.py`
-# ----------------------------------------------------------------------------
-
-
-def _parse_address(addr: str, strict=False) -> tuple:
-    """
-    >>> _parse_address("ucx://10.33.225.160")
-    """
-    if not addr.startswith("ucx://"):
-        raise ValueError("Invalid url scheme {}".format(addr))
-
-    proto, address = addr.split("://", 1)
-    return proto, address
-
-
-def _parse_host_port(address: str, default_port=None) -> tuple:
-    """
-    Parse an endpoint address given in the form "host:port".
-
-    >>> _parse_host_port("10.33.225.160:13337")
-    ("10.33.225.160", 13337)
-    """
-    if address.startswith("ucx://"):
-        _, address = _parse_address(address)
-
-    # if default port is None we select the next port availabe
-    # ucx-py does not currently support random port assignment
-    import random
-
-    default_port = default_port or random.randint(1024, 65000)
-    return parse_host_port(address, default_port=default_port)
-
-
-def _unparse_host_port(host, port=None):
-    return unparse_host_port(host, port)
-
-
-def get_endpoint_address(endpoint):
-    # TODO: ucx-py: 18
-    pass
 
 
 # ----------------------------------------------------------------------------
@@ -127,20 +78,18 @@ class UCX(Comm):
     """
 
     def __init__(
-        self, ep: ucp.Endpoint, address: str, listener_instance, deserialize=True
+            self, ep: ucp.Endpoint, local_addr: str, peer_addr: str, deserialize=True
     ):
-        logger.debug("UCX.__init__ %s %s", address, listener_instance)
+        Comm.__init__(self)
         self._ep = ep
-        assert address.startswith("ucx")
-        self.address = address
-        self.listener_instance = listener_instance
-        default_port = next(_PORT_COUNTER)
-        self._host, self._port = _parse_host_port(address, default_port)
-        self._local_addr = None
+        if local_addr:
+            assert local_addr.startswith("ucx")
+        assert peer_addr.startswith("ucx")
+        self._local_addr = local_addr
+        self._peer_addr = peer_addr
         self.deserialize = deserialize
         self.comm_flag = None
-
-        # finalizer?
+        logger.debug("UCX.__init__ %s", self)
 
     @property
     def local_address(self) -> str:
@@ -148,9 +97,7 @@ class UCX(Comm):
 
     @property
     def peer_address(self) -> str:
-        # XXX: This isn't quite for the server (from UCXListener).
-        # We need the port? Or the tag?
-        return self.address
+        return self._peer_addr
 
     async def write(
         self,
@@ -193,9 +140,9 @@ class UCX(Comm):
 
         frames = []
 
-        for i, (is_gpus, size) in enumerate(zip(is_gpus, sizes)):
+        for i, (is_gpu, size) in enumerate(zip(is_gpus, sizes)):
             if size > 0:
-                resp = await self.ep.recv_obj(size, cuda=is_gpus)
+                resp = await self.ep.recv_obj(size, cuda=is_gpu)
             else:
                 resp = await self.ep.recv_future()
             frame = ucp.get_obj_from_msg(resp)
@@ -208,14 +155,10 @@ class UCX(Comm):
         return msg
 
     def abort(self):
-        # breakpoint()
         if self._ep:
             ucp.destroy_ep(self._ep)
             logger.debug("Destroyed UCX endpoint")
             self._ep = None
-        # if self.listener_instance:
-        # ucp.stop_listener(self.listener_instance)
-        # self.listener_instance = None
 
     @property
     def ep(self):
@@ -238,16 +181,13 @@ class UCXConnector(Connector):
     comm_class = UCX
     encrypted = False
 
-    client = ...  # TODO: add a client here?
-
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect: %s", address)
         _ucp_init()
-        ip, port = _parse_host_port(address)
+        ip, port = parse_host_port(address)
         ep = await ucp.get_endpoint(ip.encode(), port)
-        return self.comm_class(
-            ep, self.prefix + address, listener_instance=None, deserialize=deserialize
-        )
+        return self.comm_class( ep, local_addr=None, peer_addr=self.prefix +
+                address, deserialize=deserialize)
 
 
 class UCXListener(Listener):
@@ -259,15 +199,14 @@ class UCXListener(Listener):
     def __init__(
         self, address: str, comm_handler: None, deserialize=False, **connection_args
     ):
-        logger.debug("UCXListener.__init__")
         if not address.startswith("ucx"):
             address = "ucx://" + address
-        self.address = address
-        self.ip, self.port = _parse_host_port(address, default_port=0)
+        self.ip, self._input_port = parse_host_port(address, default_port=0)
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self._ep = None  # type: ucp.Endpoint
         self.listener_instance = None  # type: ucp.ListenerFuture
+        self.ucp_server = None
         self._task = None
 
         # XXX: The init may be required to take args like
@@ -275,21 +214,29 @@ class UCXListener(Listener):
         self.connection_args = connection_args
         self._task = None
 
+    @property
+    def port(self):
+        return self.ucp_server.port
+
+    @property
+    def address(self):
+        return 'ucx://' + self.ip + ':' + str(self.port)
+
     def start(self):
         async def serve_forever(client_ep, listener_instance):
             ucx = UCX(
-                client_ep, self.address, listener_instance, deserialize=self.deserialize
+                client_ep,
+                local_addr=self.address,
+                peer_addr=self.address,  # TODO: https://github.com/Akshay-Venkatesh/ucx-py/issues/111
+                deserialize=self.deserialize
             )
             self.listener_instance = listener_instance
             if self.comm_handler:
                 await self.comm_handler(ucx)
 
         _ucp_init()
-        # XXX: the port handling is probably incorrect.
-        # need to figure out if `server_port=None` is
-        # server_port=13337, or server_port="next free port"
-        server = ucp.start_listener(
-            serve_forever, listener_port=self.port, is_coroutine=True
+        self.ucp_server = ucp.start_listener(
+            serve_forever, listener_port=self._input_port, is_coroutine=True
         )
 
         try:
@@ -297,7 +244,7 @@ class UCXListener(Listener):
         except (RuntimeError, AttributeError):
             loop = asyncio.get_event_loop()
 
-        t = loop.create_task(server.coroutine)
+        t = loop.create_task(self.ucp_server.coroutine)
         self._task = t
 
     def stop(self):
@@ -316,7 +263,7 @@ class UCXListener(Listener):
 
     @property
     def listen_address(self):
-        return self.prefix + _unparse_host_port(*self.get_host_port())
+        return self.prefix + unparse_host_port(*self.get_host_port())
 
     @property
     def contact_address(self):
@@ -344,14 +291,14 @@ class UCXBackend(Backend):
     # This duplicates BaseTCPBackend
 
     def get_address_host(self, loc):
-        return _parse_host_port(loc)[0]
+        return parse_host_port(loc)[0]
 
     def get_address_host_port(self, loc):
-        return _parse_host_port(loc)
+        return parse_host_port(loc)
 
     def resolve_address(self, loc):
         host, port = parse_host_port(loc)
-        return _unparse_host_port(ensure_ip(host), port)
+        return unparse_host_port(ensure_ip(host), port)
 
     def get_local_address_for(self, loc):
         host, port = parse_host_port(loc)
