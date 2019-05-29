@@ -6,7 +6,6 @@ See :ref:`communcations` for more.
 .. _UCX: https://github.com/openucx/ucx
 """
 import asyncio
-import itertools
 import logging
 import struct
 
