@@ -205,9 +205,9 @@ async def test_ping_pong_cupy(shape):
 @pytest.mark.parametrize(
     "n",
     [
-        1_000_000_000,
+        int(1e9),
         pytest.param(
-            2_500_000_000, marks=[pytest.mark.xfail(reason="integer type in ucx-py")]
+            int(2.5e9), marks=[pytest.mark.xfail(reason="integer type in ucx-py")]
         ),
     ],
 )
