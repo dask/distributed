@@ -105,6 +105,8 @@ class UCX(Comm):
         serializers=("cuda", "dask", "pickle", "error"),
         on_error: str = "message",
     ):
+        if serializers is None:
+            serializers = ("cuda", "dask", "pickle", "error")
         # msg can also be a list of dicts when sending batched messages
         frames = await to_frames(msg, serializers=serializers, on_error=on_error)
         gpu_frames = b"".join(
@@ -126,6 +128,8 @@ class UCX(Comm):
         return sum(map(nbytes, frames))
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
+        if deserializers is None:
+            deserializers = ("cuda", "dask", "pickle", "error")
         resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
         nframes, = struct.unpack("Q", obj[:8])  # first eight bytes for number of frames
