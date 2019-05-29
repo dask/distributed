@@ -78,7 +78,7 @@ class UCX(Comm):
     """
 
     def __init__(
-            self, ep: ucp.Endpoint, local_addr: str, peer_addr: str, deserialize=True
+        self, ep: ucp.Endpoint, local_addr: str, peer_addr: str, deserialize=True
     ):
         Comm.__init__(self)
         self._ep = ep
@@ -190,8 +190,12 @@ class UCXConnector(Connector):
         _ucp_init()
         ip, port = parse_host_port(address)
         ep = await ucp.get_endpoint(ip.encode(), port)
-        return self.comm_class( ep, local_addr=None, peer_addr=self.prefix +
-                address, deserialize=deserialize)
+        return self.comm_class(
+            ep,
+            local_addr=None,
+            peer_addr=self.prefix + address,
+            deserialize=deserialize,
+        )
 
 
 class UCXListener(Listener):
@@ -224,7 +228,7 @@ class UCXListener(Listener):
 
     @property
     def address(self):
-        return 'ucx://' + self.ip + ':' + str(self.port)
+        return "ucx://" + self.ip + ":" + str(self.port)
 
     def start(self):
         async def serve_forever(client_ep, listener_instance):
@@ -232,7 +236,7 @@ class UCXListener(Listener):
                 client_ep,
                 local_addr=self.address,
                 peer_addr=self.address,  # TODO: https://github.com/Akshay-Venkatesh/ucx-py/issues/111
-                deserialize=self.deserialize
+                deserialize=self.deserialize,
             )
             self.listener_instance = listener_instance
             if self.comm_handler:

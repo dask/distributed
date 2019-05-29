@@ -72,8 +72,8 @@ def parse_host_port(address, default_port=None):
             raise ValueError("missing port number in address %r" % (address,))
         return default_port
 
-    if '://' in address:
-        _, address = address.split('://')
+    if "://" in address:
+        _, address = address.split("://")
     if address.startswith("["):
         # IPv6 notation: '[addr]:port' or '[addr]'.
         # The address may contain multiple colons.

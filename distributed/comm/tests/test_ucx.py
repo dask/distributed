@@ -25,7 +25,9 @@ def test_registered():
     assert isinstance(backend, ucx.UCXBackend)
 
 
-async def get_comm_pair(listen_addr='ucx://' + HOST, listen_args=None, connect_args=None, **kwargs):
+async def get_comm_pair(
+    listen_addr="ucx://" + HOST, listen_args=None, connect_args=None, **kwargs
+):
     q = asyncio.queues.Queue()
 
     async def handle_comm(comm):
@@ -201,15 +203,20 @@ async def test_ping_pong_cupy(shape):
 
 @pytest.mark.slow
 @pytest.mark.asyncio
-@pytest.mark.parametrize("n", [
-    1_000_000_000,
-    pytest.param(2_500_000_000, marks=[pytest.mark.xfail(reason='integer type in ucx-py')]),
-])
+@pytest.mark.parametrize(
+    "n",
+    [
+        1_000_000_000,
+        pytest.param(
+            2_500_000_000, marks=[pytest.mark.xfail(reason="integer type in ucx-py")]
+        ),
+    ],
+)
 async def test_large_cupy(n):
     cupy = pytest.importorskip("cupy")
     com, serv_com = await get_comm_pair()
 
-    arr = cupy.ones(n, dtype='u1')
+    arr = cupy.ones(n, dtype="u1")
     msg = {"op": "ping", "data": to_serialize(arr)}
 
     _, result = await asyncio.gather(com.write(msg), serv_com.read())
