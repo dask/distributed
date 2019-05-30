@@ -98,17 +98,17 @@ class UCX(Comm):
             serializers = ("cuda", "dask", "pickle", "error")
         # msg can also be a list of dicts when sending batched messages
         frames = await to_frames(msg, serializers=serializers, on_error=on_error)
-        gpu_frames = b"".join(
+        is_gpus = b"".join(
             [
                 struct.pack("?", hasattr(frame, "__cuda_array_interface__"))
                 for frame in frames
             ]
         )
-        size_frames = b"".join([struct.pack("Q", nbytes(frame)) for frame in frames])
+        sizes = b"".join([struct.pack("Q", nbytes(frame)) for frame in frames])
 
         nframes = struct.pack("Q", len(frames))
 
-        meta = b"".join([nframes, gpu_frames, size_frames])
+        meta = b"".join([nframes, is_gpus, sizes])
 
         await self.ep.send_obj(meta)
 
