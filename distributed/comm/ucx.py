@@ -1,7 +1,7 @@
 """
 :ref:`UCX`_ based communications for distributed.
 
-See :ref:`communcations` for more.
+See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
@@ -25,16 +25,6 @@ os.environ.setdefault("UCX_TLS", "rc,cuda_copy")
 
 logger = logging.getLogger(__name__)
 MAX_MSG_LOG = 23
-
-_INITIALIZED = False
-
-
-def _ucp_init():
-    global _INITIALIZED
-
-    if not _INITIALIZED:
-        ucp.init()
-        _INITIALIZED = True
 
 
 # ----------------------------------------------------------------------------
@@ -186,7 +176,7 @@ class UCXConnector(Connector):
 
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect: %s", address)
-        _ucp_init()
+        ucp.init()
         ip, port = parse_host_port(address)
         ep = await ucp.get_endpoint(ip.encode(), port)
         return self.comm_class(
@@ -241,7 +231,7 @@ class UCXListener(Listener):
             if self.comm_handler:
                 await self.comm_handler(ucx)
 
-        _ucp_init()
+        ucp.init()
         self.ucp_server = ucp.start_listener(
             serve_forever, listener_port=self._input_port, is_coroutine=True
         )
