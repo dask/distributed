@@ -1047,6 +1047,10 @@ class Worker(ServerNode):
             if self.batched_stream:
                 self.batched_stream.close()
 
+            if nanny and self.nanny:
+                with self.rpc(self.nanny) as r:
+                    yield r.terminate()
+
             self.stop()
             self.rpc.close()
             self._closed.set()
