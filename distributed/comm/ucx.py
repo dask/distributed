@@ -206,8 +206,6 @@ class UCXListener(Listener):
         self.ucp_server = None
         self._task = None
 
-        # XXX: The init may be required to take args like
-        # {'require_encryption': None, 'ssl_context': None}
         self.connection_args = connection_args
         self._task = None
 

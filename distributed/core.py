@@ -467,9 +467,6 @@ class Server(object):
                             if op == "close-stream":
                                 closed = True
                                 break
-                            # XXX: getting a KeyError here. Our
-                            # not stream_handlers.
-                            # It's /pdb
                             handler = self.stream_handlers[op]
                             handler(**merge(extra, msg))
                         else:

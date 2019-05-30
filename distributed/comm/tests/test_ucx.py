@@ -90,7 +90,6 @@ def test_ucx_specific():
         address = "ucx://{}:{}".format(HOST, 0)
 
         async def handle_comm(comm):
-            # XXX: failures here don't fail the build yet
             msg = await comm.read()
             msg["op"] = "pong"
             await comm.write(msg)
