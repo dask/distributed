@@ -6,6 +6,7 @@ from math import log
 from time import time
 
 import dask
+from .comm.addressing import get_address_host
 from .core import CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors, PeriodicCallback
@@ -123,11 +124,6 @@ class WorkStealing(SchedulerPlugin):
         For example a result of zero implies a task without dependencies.
         level: The location within a stealable list to place this value
         """
-        if not ts.loose_restrictions and (
-            ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
-        ):
-            return None, None  # don't steal
-
         if not ts.dependencies:  # no dependencies fast path
             return 0, 0
 
@@ -253,7 +249,7 @@ class WorkStealing(SchedulerPlugin):
                 self.scheduler.check_idle_saturated(victim)
 
             # Victim was waiting, has given up task, enact steal
-            elif state in ("waiting", "ready"):
+            elif state in ("waiting", "ready", "constrained"):
                 self.remove_key_from_stealable(ts)
                 ts.processing_on = thief
                 duration = victim.processing.pop(ts)
@@ -353,16 +349,21 @@ class WorkStealing(SchedulerPlugin):
                             stealable.discard(ts)
                             continue
                         i += 1
-                        if not idle:
+                        thieves = [
+                            ws for ws in idle if _can_steal(ws, what=ts, from_=sat)
+                        ]
+                        if not thieves:
                             break
-                        idl = idle[i % len(idle)]
+                        thief = thieves[i % len(thieves)]
 
                         duration = sat.processing.get(ts)
                         if duration is None:
                             stealable.discard(ts)
                             continue
 
-                        maybe_move_task(level, ts, sat, idl, duration, cost_multiplier)
+                        maybe_move_task(
+                            level, ts, sat, thief, duration, cost_multiplier
+                        )
 
                 if self.cost_multipliers[level] < 20:  # don't steal from public at cost
                     stealable = self.stealable_all[level]
@@ -383,10 +384,17 @@ class WorkStealing(SchedulerPlugin):
                             continue
 
                         i += 1
-                        idl = idle[i % len(idle)]
+                        thieves = [
+                            ws for ws in idle if _can_steal(ws, what=ts, from_=sat)
+                        ]
+                        if not thieves:
+                            continue
+                        thief = thieves[i % len(thieves)]
                         duration = sat.processing[ts]
 
-                        maybe_move_task(level, ts, sat, idl, duration, cost_multiplier)
+                        maybe_move_task(
+                            level, ts, sat, thief, duration, cost_multiplier
+                        )
 
             if log:
                 self.log.append(log)
@@ -415,6 +423,64 @@ class WorkStealing(SchedulerPlugin):
                 if any(x in keys for x in t):
                     out.append(t)
         return out
+
+
+def _can_steal(ws, what, from_):
+    """Determine whether worker ``ws`` can steal task ``what`` from worker
+    ``from_``.
+    """
+    if what.loose_restrictions:
+        logger.debug("Task {} has loose restrictions".format(what.key))
+        return True
+    elif not (
+        what.host_restrictions or what.worker_restrictions or what.resource_restrictions
+    ):
+        logger.debug("Task {} has no restrictions".format(what.key))
+        return True
+
+    if (
+        what.host_restrictions
+        and get_address_host(ws.address) not in what.host_restrictions
+    ):
+        logger.debug(
+            "Candidate thief {} does not satisfy host restrictions {}".format(
+                ws.address, what.host_restrictions
+            )
+        )
+        return False
+    elif what.worker_restrictions and ws.address not in what.worker_restrictions:
+        logger.debug(
+            "Candidate thief {} does not satisfy worker restrictions {}".format(
+                ws.address, what.worker_restrictions
+            )
+        )
+        return False
+
+    return _has_resources(ws, from_.resources)
+
+
+def _has_resources(ws, required_resources):
+    if required_resources is None:
+        logger.debug("No resource requirements to check")
+        return True
+
+    for resource, value in required_resources.items():
+        try:
+            supplied = ws.resources[resource]
+        except KeyError:
+            logger.debug(
+                'Worker {} does not have resource "{}"'.format(ws.address, resource)
+            )
+            return False
+        else:
+            if supplied < value:
+                logger.debug(
+                    "Worker {} has fewer resources ({}) than required ({})".format(
+                        ws.address, supplied, value
+                    )
+                )
+                return False
+    return True
 
 
 fast_tasks = {"shuffle-split"}
