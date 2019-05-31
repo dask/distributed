@@ -305,4 +305,5 @@ class SpecCluster(Cluster):
 def close_clusters():
     for cluster in list(SpecCluster._instances):
         with ignoring(gen.TimeoutError):
-            cluster.close(timeout=10)
+            if cluster.status != "closed":
+                cluster.close(timeout=10)
