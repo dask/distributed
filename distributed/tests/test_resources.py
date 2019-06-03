@@ -207,7 +207,8 @@ def test_resources_str(c, s, a, b):
     pd = pytest.importorskip("pandas")
     dd = pytest.importorskip("dask.dataframe")
 
-    a.set_resources({"MyRes": 1})
+    yield a.set_resources(MyRes=1)
+
     x = dd.from_pandas(pd.DataFrame({"A": [1, 2], "B": [3, 4]}), npartitions=1)
     y = x.apply(lambda row: row.sum(), axis=1, meta=(None, "int64"))
     yy = y.persist(resources={"MyRes": 1})
