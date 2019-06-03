@@ -3354,7 +3354,7 @@ class Client(Node):
 
         Parameters
         ----------
-        n: int
+        n : int
             Number of logs to retrive.  Maxes out at 10000 by default,
             confiruable in config.yaml::log-length
 
@@ -3369,11 +3369,11 @@ class Client(Node):
 
         Parameters
         ----------
-        n: int
+        n : int
             Number of logs to retrive.  Maxes out at 10000 by default,
             confiruable in config.yaml::log-length
-        workers: iterable
-            List of worker addresses to retrive.  Gets all workers by default.
+        workers : iterable
+            List of worker addresses to retrieve.  Gets all workers by default.
 
         Returns
         -------
@@ -3381,6 +3381,25 @@ class Client(Node):
         Logs are returned in reversed order (newest first)
         """
         return self.sync(self.scheduler.worker_logs, n=n, workers=workers)
+
+    def get_nanny_logs(self, n=None, workers=None):
+        """Get logs from nannies.
+
+        Parameters
+        ----------
+        n: int
+            Number of logs to retrive.  Maxes out at 10000 by default,
+            confiruable in config.yaml::log-length
+        workers: iterable
+            List of worker addresses to retrieve.  Gets all workers by default.
+            Note that this is the address of the worker, not the nanny.
+
+        Returns
+        -------
+        Dictionary mapping worker address to logs.
+        Logs are returned in reversed order (newest first)
+        """
+        return self.sync(self.scheduler.nanny_logs, n=n, workers=workers)
 
     def retire_workers(self, workers=None, close_workers=True, **kwargs):
         """ Retire certain workers on the scheduler
