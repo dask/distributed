@@ -152,3 +152,10 @@ class ServerNode(Node, Server):
             L = deque_handler.deque
             L = [L[-i] for i in range(min(n, len(L)))]
         return [(msg.levelname, deque_handler.format(msg)) for msg in L]
+
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, typ, value, traceback):
+        await self.close()
