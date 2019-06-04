@@ -430,12 +430,12 @@ def _can_steal(ws, what, from_):
     ``from_``.
     """
     if what.loose_restrictions:
-        logger.debug("Task {} has loose restrictions".format(what.key))
+        logger.debug("Task %s has loose restrictions", what.key)
         return True
     elif not (
         what.host_restrictions or what.worker_restrictions or what.resource_restrictions
     ):
-        logger.debug("Task {} has no restrictions".format(what.key))
+        logger.debug("Task %s has no restrictions", what.key)
         return True
 
     if (
@@ -443,16 +443,16 @@ def _can_steal(ws, what, from_):
         and get_address_host(ws.address) not in what.host_restrictions
     ):
         logger.debug(
-            "Candidate thief {} does not satisfy host restrictions {}".format(
-                ws.address, what.host_restrictions
-            )
+            "Candidate thief %s does not satisfy host restrictions %s",
+            ws.address,
+            what.host_restrictions,
         )
         return False
     elif what.worker_restrictions and ws.address not in what.worker_restrictions:
         logger.debug(
-            "Candidate thief {} does not satisfy worker restrictions {}".format(
-                ws.address, what.worker_restrictions
-            )
+            "Candidate thief %s does not satisfy worker restrictions %s",
+            ws.address,
+            what.worker_restrictions,
         )
         return False
 
@@ -468,16 +468,15 @@ def _has_resources(ws, required_resources):
         try:
             supplied = ws.resources[resource]
         except KeyError:
-            logger.debug(
-                'Worker {} does not have resource "{}"'.format(ws.address, resource)
-            )
+            logger.debug('Worker %s does not have resource "%s"', ws.address, resource)
             return False
         else:
             if supplied < value:
                 logger.debug(
-                    "Worker {} has fewer resources ({}) than required ({})".format(
-                        ws.address, supplied, value
-                    )
+                    "Worker %s has fewer resources (%s) than required (%s)",
+                    ws.address,
+                    supplied,
+                    value,
                 )
                 return False
     return True
