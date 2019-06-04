@@ -1046,7 +1046,6 @@ class Scheduler(ServerNode):
             "profile": self.get_profile,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
-            "nanny_logs": self.get_nanny_logs,
             "nbytes": self.get_nbytes,
             "versions": self.versions,
             "add_keys": self.add_keys,
@@ -4616,14 +4615,9 @@ class Scheduler(ServerNode):
         raise gen.Return({"counts": counts, "keys": keys})
 
     @gen.coroutine
-    def get_worker_logs(self, comm=None, n=None, workers=None):
-        results = yield self.broadcast(msg={"op": "get_logs", "n": n}, workers=workers)
-        raise gen.Return(results)
-
-    @gen.coroutine
-    def get_nanny_logs(self, comm=None, n=None, workers=None):
+    def get_worker_logs(self, comm=None, n=None, workers=None, nanny=False):
         results = yield self.broadcast(
-            msg={"op": "get_logs", "n": n}, workers=workers, nanny=True
+            msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
         )
         raise gen.Return(results)
 

@@ -5126,8 +5126,14 @@ def test_logs(c, s, a, b):
         for _, msg in log:
             assert "distributed.worker" in msg
 
-    n_logs = yield c.get_nanny_logs()
+    n_logs = yield c.get_worker_logs(nanny=True)
     assert set(n_logs.keys()) == {a.worker_address, b.worker_address}
+    for log in n_logs.values():
+        for _, msg in log:
+            assert "distributed.nanny" in msg
+
+    n_logs = yield c.get_worker_logs(nanny=True, workers=[a.worker_address])
+    assert set(n_logs.keys()) == {a.worker_address}
     for log in n_logs.values():
         for _, msg in log:
             assert "distributed.nanny" in msg
