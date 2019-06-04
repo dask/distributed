@@ -1,6 +1,7 @@
    <table class="table is-striped is-hoverable">
     <tr>
         <th> Worker </th>
+        <th> Name </th>
         <th> Cores </th>
         <th> Memory </th>
         <th> Memory use </th>
@@ -13,6 +14,7 @@
     {% for ws in worker_list %}
     <tr>
         <td><a href="../worker/{{ url_escape(ws.address) }}.html">{{ws.address}}</a></td>
+        <td> {{ ws.name if ws.name is not None else "" }} </td>
         <td> {{ ws.ncores }} </td>
         <td> {{ format_bytes(ws.memory_limit) }} </td>
         <td> <progress class="progress" value="{{ ws.metrics['memory'] }}" max="{{ ws.memory_limit }}"></progress> </td>
