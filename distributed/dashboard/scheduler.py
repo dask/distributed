@@ -77,7 +77,7 @@ env = Environment(
 )
 
 template_variables = {
-    "pages": ["status", "workers", "tasks", "system", "profile", "graph"]
+    "pages": ["status", "workers", "tasks", "system", "profile", "graph", "info"]
 }
 
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "theme.yaml"))
