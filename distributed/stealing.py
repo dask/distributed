@@ -347,9 +347,12 @@ class WorkStealing(SchedulerPlugin):
                             stealable.discard(ts)
                             continue
                         i += 1
-                        thieves = [
-                            ws for ws in idle if _can_steal(ws, what=ts, from_=sat)
-                        ]
+                        if _has_restrictions(ts):
+                            thieves = [
+                                ws for ws in idle if _can_steal(ws, what=ts, from_=sat)
+                            ]
+                        else:
+                            thieves = idle
                         if not thieves:
                             break
                         thief = thieves[i % len(thieves)]
@@ -382,9 +385,12 @@ class WorkStealing(SchedulerPlugin):
                             continue
 
                         i += 1
-                        thieves = [
-                            ws for ws in idle if _can_steal(ws, what=ts, from_=sat)
-                        ]
+                        if _has_restrictions(ts):
+                            thieves = [
+                                ws for ws in idle if _can_steal(ws, what=ts, from_=sat)
+                            ]
+                        else:
+                            thieves = idle
                         if not thieves:
                             continue
                         thief = thieves[i % len(thieves)]
@@ -423,17 +429,23 @@ class WorkStealing(SchedulerPlugin):
         return out
 
 
+def _has_restrictions(ts):
+    """Determine whether the given task has restrictions and whether these
+    restrictions are strict.
+    """
+    return not ts.loose_restrictions and (
+        ts.host_restrictions or ts.worker_restrictions or ts.resource_restrictions
+    )
+
+
 def _can_steal(ws, what, from_):
     """Determine whether worker ``ws`` can steal task ``what`` from worker
     ``from_``.
     """
-    if what.loose_restrictions:
-        logger.debug("Task %s has loose restrictions", what.key)
-        return True
-    elif not (
-        what.host_restrictions or what.worker_restrictions or what.resource_restrictions
-    ):
-        logger.debug("Task %s has no restrictions", what.key)
+    if not _has_restrictions(what):
+        logger.debug(
+            "Task %s has loose restrictions or no restrictions at all", what.key
+        )
         return True
 
     if (
