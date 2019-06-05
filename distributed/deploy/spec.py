@@ -28,9 +28,11 @@ class SpecCluster(Cluster):
         See example below
     scheduler: dict, optional
         A similar mapping for a scheduler
-    worker: dict
+    worker: dict, callable
         A specification of a single worker.
         This is used for any new workers that are created.
+        It can either be a dictionary spec, or a function that creates a spec
+        given the worker name, which is typically an increasing integer.
     asynchronous: bool
         If this is intended to be used directly within an event loop with
         async/await
@@ -277,7 +279,10 @@ class SpecCluster(Cluster):
         while len(self.worker_spec) < n:
             while self._i in self.worker_spec:
                 self._i += 1
-            self.worker_spec[self._i] = self.new_spec
+            if callable(self.new_spec):
+                self.worker_spec[self._i] = self.new_spec(self._i)
+            else:
+                self.worker_spec[self._i] = self.new_spec
 
         self.loop.add_callback(self._correct_state)
 
