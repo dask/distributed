@@ -271,10 +271,12 @@ class SpecCluster(Cluster):
         self._loop_runner.stop()
 
     def scale(self, n):
-        if self.status in ("closing", "closed"):
-            return
         while len(self.worker_spec) > n:
             self.worker_spec.popitem()
+
+        if self.status in ("closing", "closed"):
+            self.loop.add_callback(self._correct_state)
+            return
 
         while len(self.worker_spec) < n:
             while self._i in self.worker_spec:
