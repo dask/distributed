@@ -2,7 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 from time import sleep
 
-import pytest
 from toolz import frequencies, pluck
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -166,8 +165,7 @@ def test_adaptive_scale_down_override(c, s, *workers):
     assert len(s.workers) == 2
 
 
-@pytest.mark.xfail(reason="need to rework adaptive")
-@gen_test(timeout=30)
+@gen_test()
 def test_min_max():
     cluster = yield LocalCluster(
         0,
