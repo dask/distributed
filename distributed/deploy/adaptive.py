@@ -212,7 +212,11 @@ class Adaptive(object):
         if self.minimum is not None:
             n = max(self.minimum, n)
         workers = set(self.workers_to_close(key=self.worker_key, minimum=self.minimum))
-        if n > len(self.cluster.workers) and workers:
+        try:
+            current = len(self.cluster.worker_spec)
+        except AttributeError:
+            current = len(self.cluster.workers)
+        if n > current and workers:
             logger.info("Attempting to scale up and scale down simultaneously.")
             self.close_counts.clear()
             return {
@@ -220,7 +224,7 @@ class Adaptive(object):
                 "msg": "Trying to scale up and down simultaneously",
             }
 
-        elif n > len(self.cluster.workers):
+        elif n > current:
             self.close_counts.clear()
             return {"status": "up", "n": n}
 
