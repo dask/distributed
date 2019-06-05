@@ -130,11 +130,13 @@ def test_spec_close_clusters(loop):
 
 
 @pytest.mark.asyncio
-async def test_callable_new_worker():
-    worker = lambda i: {"cls": Worker, "options": {"ncores": i + 1}}
-    async with SpecCluster(
-        asynchronous=True, scheduler=scheduler, worker=worker
-    ) as cluster:
+async def test_new_worker_spec():
+    class MyCluster(SpecCluster):
+        def new_worker_spec(self):
+            i = len(self.worker_spec)
+            return i, {"cls": Worker, "options": {"ncores": i + 1}}
+
+    async with MyCluster(asynchronous=True, scheduler=scheduler) as cluster:
         cluster.scale(3)
         for i in range(3):
             assert cluster.worker_spec[i]["options"]["ncores"] == i + 1
