@@ -28,11 +28,9 @@ class SpecCluster(Cluster):
         See example below
     scheduler: dict, optional
         A similar mapping for a scheduler
-    worker: dict, callable
+    worker: dict
         A specification of a single worker.
         This is used for any new workers that are created.
-        It can either be a dictionary spec, or a function that creates a spec
-        given the worker name, which is typically an increasing integer.
     asynchronous: bool
         If this is intended to be used directly within an event loop with
         async/await
