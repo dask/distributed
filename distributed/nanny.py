@@ -131,6 +131,7 @@ class Nanny(ServerNode):
             "restart": self.restart,
             # cannot call it 'close' on the rpc side for naming conflict
             "terminate": self.close,
+            "close_gracefully": self.close_gracefully,
             "run": self.run,
         }
 
@@ -355,7 +356,7 @@ class Nanny(ServerNode):
                     return
 
             try:
-                if self.status not in ("closing", "closed"):
+                if self.status not in ("closing", "closed", "closing-gracefully"):
                     if self.auto_restart:
                         logger.warning("Restarting worker")
                         yield self.instantiate()
@@ -371,6 +372,14 @@ class Nanny(ServerNode):
     def _close(self, *args, **kwargs):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
+
+    def close_gracefully(self, comm=None):
+        """
+        A signal that we shouldn't try to restart workers if they go away
+
+        This is used as part of the cluster shutdown process.
+        """
+        self.status = "closing-gracefully"
 
     @gen.coroutine
     def close(self, comm=None, timeout=5, report=None):
@@ -455,7 +464,7 @@ class WorkerProcess(object):
                 env=self.env,
             ),
         )
-        self.process.daemon = True
+        self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)
         self.running = Event()
         self.stopped = Event()

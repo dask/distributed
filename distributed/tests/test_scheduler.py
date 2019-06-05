@@ -1597,3 +1597,13 @@ async def test_adaptive_target(c, s, a, b):
     while s.tasks:
         await gen.sleep(0.01)
     assert s.adaptive_target(target_duration=".1s") == 0
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager():
+    async with Scheduler(port=0) as s:
+        assert s.status == "running"
+        async with Worker(s.address) as w:
+            assert w.status == "running"
+            assert s.workers
+        assert not s.workers
