@@ -844,9 +844,9 @@ class Scheduler(ServerNode):
         self._setup_logging(logger)
 
         # Attributes
-        self.allowed_failures = allowed_failures or dask.config.get(
-            "distributed.scheduler.allowed-failures"
-        )
+        if allowed_failures is None:
+            allowed_failures = dask.config.get("distributed.scheduler.allowed-failures")
+        self.allowed_failures = allowed_failures
         self.validate = validate
         self.status = None
         self.proc = psutil.Process()

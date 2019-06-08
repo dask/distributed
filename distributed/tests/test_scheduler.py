@@ -1617,3 +1617,7 @@ async def test_allowed_failures_config():
     with dask.config.set({"distributed.scheduler.allowed_failures": 100}):
         async with Scheduler(port=0) as s:
             assert s.allowed_failures == 100
+
+    with dask.config.set({"distributed.scheduler.allowed_failures": 0}):
+        async with Scheduler(port=0) as s:
+            assert s.allowed_failures == 0
