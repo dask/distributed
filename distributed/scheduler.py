@@ -813,6 +813,9 @@ class Scheduler(ServerNode):
         report results
     * **task_duration:** ``{key-prefix: time}``
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
+    * **task_net_nbytes** ``{key-prefix:: int}``
+        Expected change in cluster memory usage, in bytes, from completing
+        a task with a given prefix
     * **coroutines:** ``[Futures]``:
         A list of active futures that control operation
     """
@@ -947,6 +950,7 @@ class Scheduler(ServerNode):
 
         # Prefix-keyed containers
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
+        self.task_net_nbytes = defaultdict(lambda: 0)
         self.unknown_durations = defaultdict(set)
 
         # Client state
@@ -2288,6 +2292,7 @@ class Scheduler(ServerNode):
                 "key": key,
                 "priority": ts.priority,
                 "duration": self.get_task_duration(ts),
+                "net_nbytes": self.task_net_nbytes[ts.prefix],
             }
             if ts.resource_restrictions:
                 msg["resource_restrictions"] = ts.resource_restrictions
@@ -3443,6 +3448,8 @@ class Scheduler(ServerNode):
     ):
         """
         Add *ts* to the set of in-memory tasks.
+
+        Mutates recommendations inplace.
         """
         if self.validate:
             assert ts not in ws.has_what
@@ -3466,9 +3473,11 @@ class Scheduler(ServerNode):
             s.discard(ts)
             if not s and not dts.who_wants:
                 recommendations[dts.key] = "released"
+                self.task_net_nbytes[ts.prefix] -= dts.nbytes
 
         if not ts.waiters and not ts.who_wants:
             recommendations[ts.key] = "released"
+            self.task_net_nbytes[ts.prefix] -= ts.nbytes
         else:
             msg = {"op": "key-in-memory", "key": ts.key}
             if type is not None:
@@ -3774,6 +3783,7 @@ class Scheduler(ServerNode):
             ############################
             if nbytes is not None:
                 ts.set_nbytes(nbytes)
+                self.task_net_nbytes[ts.prefix] += nbytes
 
             recommendations = OrderedDict()
 

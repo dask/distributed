@@ -522,6 +522,7 @@ def test_clean(c, s, a, b):
         a.data,
         a.nbytes,
         a.durations,
+        a.net_nbytes,
         a.priorities,
         a.types,
         a.threads,
@@ -1433,3 +1434,54 @@ def test_resource_limit():
         assert parse_memory_limit(hard_limit, 1, total_cores=1) == new_limit
     except OSError:
         pytest.skip("resource could not set the RSS limit")
+
+
+# @pytest.mark.slow
+@gen_cluster(client=True, timeout=100, worker_kwargs={"memory_limit": "1GB"})
+def test_avoid_sending_too_many_results(c, s, a, b):
+    b.memory_limit = 10e9
+    np = pytest.importorskip("numpy")
+    arrays = [
+        delayed(np.random.random)(10000000, pure=False, dask_key_name="x-%d" % i)
+        for i in range(1000)
+    ]
+    lens = [delayed(len)(a, dask_key_name="len-%d" % i) for i, a in enumerate(arrays)]
+    futures = c.compute(
+        lens, workers={tuple(arrays): a.address, tuple(lens): b.address}
+    )
+    from distributed.utils import format_bytes
+
+    for i in range(20):
+        yield gen.sleep(0.5)
+        print("in flight b", len(b.in_flight_tasks))
+        print(
+            "a memory",
+            len(a.data),
+            "/",
+            len(a.tasks),
+            format_bytes(sum(a.nbytes.values())),
+        )
+        # print("a outgoing", format_bytes(sum(a.outgoing_bytes.values())))
+
+        print("b memory", len(b.data))
+        assert not a.data.slow
+
+
+@gen_cluster(client=True)
+def test_outgoing_bytes(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    # assert not a.outgoing_bytes
+    x = c.submit(np.random.random, 10000000, workers=a.address)
+    yield wait(x)
+    y = c.submit(len, x, workers=b.address)
+    for i in range(100):
+        yield gen.sleep(0.01)
+        # if a.outgoing_bytes:
+        #     assert a.outgoing_bytes[b.address] == a.nbytes[x.key]
+        break
+    yield wait(y)
+    print("-" * 80)
+    print(s.task_net_nbytes)
+    # assert i < 99
+    # yield wait(y)
+    # assert not a.outgoing_bytes

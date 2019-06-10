@@ -169,7 +169,7 @@ class Worker(ServerNode):
     * **data_needed**: deque(keys)
         The keys whose data we still lack, arranged in a deque
     * **waiting_for_data**: ``{kep: {deps}}``
-        A dynamic verion of dependencies.  All dependencies that we still don't
+        A dynamic version of dependencies. All dependencies that we still don't
         have for a particular key.
     * **ready**: [keys]
         Keys that are ready to run.  Stored in a LIFO stack
@@ -309,8 +309,10 @@ class Worker(ServerNode):
         nanny=None,
         plugins=(),
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
-        **kwargs
+        special=False,
+        **kwargs,
     ):
+        self.special = special  # TODO: remove, just for testing
         self.tasks = dict()
         self.task_state = dict()
         self.dep_state = dict()
@@ -354,6 +356,7 @@ class Worker(ServerNode):
         self.priorities = dict()
         self.generation = 0
         self.durations = dict()
+        self.net_nbytes = defaultdict(lambda: 0)
         self.startstops = defaultdict(list)
         self.resource_restrictions = dict()
 
@@ -593,7 +596,7 @@ class Worker(ServerNode):
             stream_handlers=stream_handlers,
             io_loop=self.loop,
             connection_args=self.connection_args,
-            **kwargs
+            **kwargs,
         )
 
         self.scheduler = self.rpc(scheduler_addr)
@@ -642,6 +645,8 @@ class Worker(ServerNode):
 
         self.plugins = {}
         self._pending_plugins = plugins
+        self._reprioritize_count = 0
+        self._pause_count = 0
 
         Worker._instances.add(self)
 
@@ -1223,9 +1228,10 @@ class Worker(ServerNode):
         nbytes=None,
         priority=None,
         duration=None,
+        net_nbytes=None,
         resource_restrictions=None,
         actor=False,
-        **kwargs2
+        **kwargs2,
     ):
         try:
             if key in self.tasks:
@@ -1246,6 +1252,9 @@ class Worker(ServerNode):
             if priority is not None:
                 priority = tuple(priority) + (self.generation,)
                 self.generation -= 1
+
+            if net_nbytes is not None:
+                self.net_nbytes[key_split(key)] = net_nbytes
 
             if self.dep_state.get(key) == "memory":
                 self.task_state[key] = "memory"
@@ -1775,9 +1784,6 @@ class Worker(ServerNode):
             if stop - start > 0.020:
                 self.startstops[key].append(("disk-write", start, stop))
 
-        if key not in self.nbytes:
-            self.nbytes[key] = sizeof(value)
-
         self.types[key] = type(value)
 
         for dep in self.dependents.get(key, ()):
@@ -2279,6 +2285,29 @@ class Worker(ServerNode):
 
         return True
 
+    @property
+    def memory_constrained(self):
+        # TODO: cache this for some amount of time? I assume the overhead of
+        # computing the process RSS is too much for this code path.
+        proc = self.monitor.proc
+        memory = proc.memory_info().rss
+        frac = memory / self.memory_limit
+        constrained = frac > 0.25
+        return constrained
+
+    def do_special(self):
+        if not self.special:
+            return None, set()
+
+        if not self.executing:
+            # Avoid deadlocks
+            return None, set()
+
+        constrained = self.memory_constrained
+        freeing_prefix = {k for k, v in self.net_nbytes.items() if v < 0}
+        freeing_tasks = {k for _, k in self.ready if key_split(k) in freeing_prefix}
+        return constrained, freeing_tasks or set()
+
     def ensure_computing(self):
         if self.paused:
             return
@@ -2293,9 +2322,44 @@ class Worker(ServerNode):
                     self.transition(key, "executing")
                 else:
                     break
+
             while self.ready and len(self.executing) < self.ncores:
-                _, key = heapq.heappop(self.ready)
-                if self.task_state.get(key) in READY:
+                # Normally, our only concern is "do we have a free core?". If so
+                # we pop the next task off the priority queue.
+
+                # This fails when executing that task *right now* will exhaust our memory.
+                # I see two distinct cases:
+                # 1. State: We have tasks ready now that would lower our memory usage.
+                #    Soln : re-prioritize our queue to run those tasks first.
+                # 2. State: No memory-freeing tasks ready, but currently running memory-freeing
+                #           tasks.
+                #    Soln : Pause before executing new tasks. Wait for those to finish. Hope that
+                #           finishing those tasks frees memory.
+                constrained, freeing_tasks = self.do_special()
+
+                if constrained:
+                    logger.warning("*** Memory constrained scheduling! ***")
+                    if freeing_tasks:
+                        self._reprioritize_count += 1
+                        key = list(freeing_tasks)[0]
+                        logger.warning(
+                            "**** special %s from %s *****", key, self.priorities
+                        )
+                        # TODO: is this bad?
+                        self.ready = [(p, k) for (p, k) in self.ready if k != key]
+                    else:
+                        logger.warning(
+                            "*** Pausing with state\n\tready: %s\n\t executing: %s\n\twaiting: %s***",
+                            self.ready,
+                            self.executing,
+                            self.waiting_for_data,
+                        )
+                        self._pause_count += 1
+                        self.paused = True
+                        break
+                else:
+                    _, key = heapq.heappop(self.ready)
+                if key and self.task_state.get(key) in READY:
                     self.transition(key, "executing")
         except Exception as e:
             logger.exception(e)
@@ -2442,8 +2506,9 @@ class Worker(ServerNode):
             self._throttled_gc.collect()
             if not self.paused:
                 logger.warning(
-                    "Worker is at %d%% memory usage. Pausing worker.  "
+                    "Worker %s is at %d%% memory usage. Pausing worker.  "
                     "Process memory: %s -- Worker memory limit: %s",
+                    self.address,
                     int(frac * 100),
                     format_bytes(proc.memory_info().rss),
                     format_bytes(self.memory_limit),
@@ -2451,8 +2516,9 @@ class Worker(ServerNode):
                 self.paused = True
         elif self.paused:
             logger.warning(
-                "Worker is at %d%% memory usage. Resuming worker. "
+                "Worker %s is at %d%% memory usage. Resuming worker. "
                 "Process memory: %s -- Worker memory limit: %s",
+                self.address,
                 int(frac * 100),
                 format_bytes(proc.memory_info().rss),
                 format_bytes(self.memory_limit),
@@ -2468,10 +2534,11 @@ class Worker(ServerNode):
             while memory > target:
                 if not self.data.fast:
                     logger.warning(
-                        "Memory use is high but worker has no data "
+                        "Memory use on worker %s is high but worker has no data "
                         "to store to disk.  Perhaps some other process "
                         "is leaking memory?  Process memory: %s -- "
                         "Worker memory limit: %s",
+                        self.address,
                         format_bytes(proc.memory_info().rss),
                         format_bytes(self.memory_limit),
                     )

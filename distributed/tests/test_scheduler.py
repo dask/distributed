@@ -1609,6 +1609,36 @@ async def test_async_context_manager():
         assert not s.workers
 
 
+@gen_cluster(client=True)
+def test_net_nbytes(c, s, a, b):
+    dsk = {
+        "a-1": (bytearray, 1000),
+        "a-2": (bytearray, 1000),
+        "b-2": (lambda t, u: t[:10], "a-1", "a-2"),
+    }
+    x = c.get(dsk, "b-2", sync=False)
+    result = yield x
+    assert result == bytearray(10)
+    assert s.task_net_nbytes["a"] > 0
+    assert s.task_net_nbytes["b"] < 0
+
+    # now that we've learned some things, submit again, and
+    # check the workers.
+
+    dsk["b-3"] = (lambda t, u: t[:5], "a-1", "a-2")
+    x = c.get(dsk, "b-3", sync=False)
+    yield x
+    # avoid defaultdict
+    if "a" in a.net_nbytes:
+        assert a.net_nbytes["a"] > 0
+    else:
+        assert b.net_nbytes["a"] > 0
+    if "b" in a.net_nbytes:
+        assert a.net_nbytes["b"] < 0
+    else:
+        assert b.net_nbytes["b"] < 0
+
+
 @pytest.mark.asyncio
 async def test_allowed_failures_config():
     async with Scheduler(port=0, allowed_failures=10) as s:
