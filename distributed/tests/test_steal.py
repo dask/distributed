@@ -283,8 +283,7 @@ def test_steal_host_restrictions(c, s, wa, wb):
     assert len(wa.task_state) == ntasks
     assert len(wb.task_state) == 0
 
-    wc = yield Worker(s.address, loop=s.loop, ncores=1)
-    print(s.workers)
+    wc = yield Worker(s.address, ncores=1)
 
     start = time()
     while not wc.task_state or len(wa.task_state) == ntasks:
