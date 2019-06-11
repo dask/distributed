@@ -351,7 +351,7 @@ class WorkStealing(SchedulerPlugin):
                         i += 1
                         if _has_restrictions(ts):
                             thieves = [
-                                ws for ws in idle if _can_steal(ws, what=ts, from_=sat)
+                                ws for ws in idle if _can_steal(ws, ts, sat)
                             ]
                         else:
                             thieves = idle
@@ -389,7 +389,7 @@ class WorkStealing(SchedulerPlugin):
                         i += 1
                         if _has_restrictions(ts):
                             thieves = [
-                                ws for ws in idle if _can_steal(ws, what=ts, from_=sat)
+                                ws for ws in idle if _can_steal(ws, ts, sat)
                             ]
                         else:
                             thieves = idle
@@ -440,56 +440,35 @@ def _has_restrictions(ts):
     )
 
 
-def _can_steal(ws, what, from_):
-    """Determine whether worker ``ws`` can steal task ``what`` from worker
-    ``from_``.
+def _can_steal(thief, ts, victim):
+    """Determine whether worker ``thief`` can steal task ``ts`` from worker
+    ``victim``.
     """
-    if not _has_restrictions(what):
-        logger.debug(
-            "Task %s has loose restrictions or no restrictions at all", what.key
-        )
+    if not _has_restrictions(ts):
         return True
 
     if (
-        what.host_restrictions
-        and get_address_host(ws.address) not in what.host_restrictions
+        ts.host_restrictions
+        and get_address_host(thief.address) not in ts.host_restrictions
     ):
-        logger.debug(
-            "Candidate thief %s does not satisfy host restrictions %s",
-            ws.address,
-            what.host_restrictions,
-        )
         return False
-    elif what.worker_restrictions and ws.address not in what.worker_restrictions:
-        logger.debug(
-            "Candidate thief %s does not satisfy worker restrictions %s",
-            ws.address,
-            what.worker_restrictions,
-        )
+    elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
         return False
 
-    return _has_resources(ws, from_.resources)
+    return _has_resources(thief, victim.resources)
 
 
 def _has_resources(ws, required_resources):
     if required_resources is None:
-        logger.debug("No resource requirements to check")
         return True
 
     for resource, value in required_resources.items():
         try:
             supplied = ws.resources[resource]
         except KeyError:
-            logger.debug('Worker %s does not have resource "%s"', ws.address, resource)
             return False
         else:
             if supplied < value:
-                logger.debug(
-                    "Worker %s has fewer resources (%s) than required (%s)",
-                    ws.address,
-                    supplied,
-                    value,
-                )
                 return False
     return True
 
