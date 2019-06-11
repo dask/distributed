@@ -1,5 +1,6 @@
 import asyncio
 import atexit
+import logging
 import weakref
 
 from tornado import gen
@@ -7,6 +8,9 @@ from tornado import gen
 from .cluster import Cluster
 from ..utils import LoopRunner, silence_logging, ignoring
 from ..scheduler import Scheduler
+
+
+logger = logging.getLogger(__name__)
 
 
 class SpecCluster(Cluster):
@@ -142,48 +146,108 @@ class SpecCluster(Cluster):
         if not self.asynchronous:
             self._loop_runner.start()
             self.sync(self._start)
-            self.sync(self._correct_state)
-            self.sync(self._wait_for_workers)
 
-    async def _start(self):
-        while self.status == "starting":
-            await asyncio.sleep(0.01)
-        if self.status == "running":
-            return
-        if self.status == "closed":
-            raise ValueError("Cluster is closed")
+    def __repr__(self):
+        return "SpecCluster(%r, workers=%d)" % (
+            self.scheduler_address,
+            len(self.workers),
+        )
 
-        self._lock = asyncio.Lock()
-        self.status = "starting"
-        self.scheduler = await self.scheduler
+    def __await__(self):
+        return self._await_().__await__()
+
+    async def _await_(self):
+        # Wait for startup
+        await self._start()
+
+        # Wait for state to correct, reporting errors
+        start_errors = await self._correct_state(return_errors=True)
+        if start_errors:
+            self._on_startup_errors(start_errors)
+        await self._wait_for_workers()
+
+        return self
+
+    async def __aenter__(self):
+        return await self
+
+    async def __aexit__(self, typ, value, traceback):
+        with ignoring(RuntimeError):
+            await self._close()
+
+    def __enter__(self):
+        self.sync(self._start)
+        return self
+
+    def __exit__(self, typ, value, traceback):
+        self.close()
+        self._loop_runner.stop()
+
+    def __del__(self):
+        if not self.status.startswith("clos"):
+            self.close()
+        self._loop_runner.stop()
+
+    async def _start_internal(self):
+        # First wait for the scheduler to start
+        await self.scheduler
         self.status = "running"
 
-    def _correct_state(self):
+        # Wait for workers to correct
+        await self._await_()
+
+    async def _start(self):
+        if self.status == "created":
+            if not hasattr(self, "_start_future"):
+                self.status = "starting"
+                self._lock = asyncio.Lock()
+                self._start_future = asyncio.ensure_future(self._start_internal())
+            await self._start_future
+
+        elif self.status == "starting":
+            await self._start_future
+
+        elif self.status == "running":
+            pass
+
+        elif self.status in ("closing", "closed"):
+            raise ValueError("Cluster is closed")
+
+    def _correct_state(self, return_errors=False):
         if self._correct_state_waiting:
             # If people call this frequently, we only want to run it once
             return self._correct_state_waiting
         else:
-            task = asyncio.ensure_future(self._correct_state_internal())
+            task = asyncio.ensure_future(
+                self._correct_state_internal(return_errors=return_errors)
+            )
             self._correct_state_waiting = task
             return task
 
-    async def _correct_state_internal(self):
+    async def _correct_state_internal(self, return_errors=False):
         async with self._lock:
             self._correct_state_waiting = None
 
-            pre = list(set(self.workers))
-            to_close = set(self.workers) - set(self.worker_spec)
+            to_close = list(set(self.workers).difference(self.worker_spec))
+
             if to_close:
                 await self.scheduler.retire_workers(workers=list(to_close))
                 tasks = [self.workers[w].close() for w in to_close]
-                await asyncio.wait(tasks)
-                for task in tasks:  # for tornado gen.coroutine support
-                    await task
-            for name in to_close:
-                del self.workers[name]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for w_key, res in zip(to_close, results):
+                    if isinstance(res, Exception):
+                        logger.warning(
+                            "Worker %s errored during shutdown with exception: %s",
+                            w_key,
+                            res,
+                        )
+                for name in to_close:
+                    del self.workers[name]
 
-            to_open = set(self.worker_spec) - set(self.workers)
+            to_open = list(set(self.worker_spec) - set(self.workers))
             workers = []
+            start_errors = {}
+
             for name in to_open:
                 d = self.worker_spec[name]
                 cls, opts = d["cls"], d.get("options", {})
@@ -193,25 +257,23 @@ class SpecCluster(Cluster):
                 worker = cls(self.scheduler.address, **opts)
                 self._created.add(worker)
                 workers.append(worker)
+
             if workers:
-                await asyncio.wait(workers)
-                for w in workers:
-                    w._cluster = weakref.ref(self)
-                    await w  # for tornado gen.coroutine support
-            self.workers.update(dict(zip(to_open, workers)))
+                results = await asyncio.gather(*workers, return_exceptions=True)
+                for w_key, w, res in zip(to_open, workers, results):
+                    if isinstance(res, Exception):
+                        start_errors[w_key] = res
+                    else:
+                        w._cluster = weakref.ref(self)
+                        self.workers[w_key] = w
 
-    def __await__(self):
-        async def _():
-            if self.status == "created":
-                await self._start()
-            await self.scheduler
-            await self._correct_state()
-            if self.workers:
-                await asyncio.wait(list(self.workers.values()))  # maybe there are more
-            await self._wait_for_workers()
-            return self
-
-        return _().__await__()
+            if not return_errors:
+                for k, exc in sorted(start_errors.items()):
+                    logger.warning(
+                        "Worker %s failed to start with exception: %s", k, exc
+                    )
+            else:
+                return start_errors
 
     async def _wait_for_workers(self):
         # TODO: this function needs to query scheduler and worker state
@@ -225,13 +287,6 @@ class SpecCluster(Cluster):
             ):
                 raise gen.TimeoutError("Worker unexpectedly closed")
             await asyncio.sleep(0.1)
-
-    async def __aenter__(self):
-        await self
-        return self
-
-    async def __aexit__(self, typ, value, traceback):
-        await self.close()
 
     async def _close(self):
         while self.status == "closing":
@@ -256,31 +311,15 @@ class SpecCluster(Cluster):
         with ignoring(RuntimeError):  # loop closed during process shutdown
             return self.sync(self._close, callback_timeout=timeout)
 
-    def __del__(self):
-        if self.status != "closed":
-            self.close()
-
-    def __enter__(self):
-        self.sync(self._correct_state)
-        self.sync(self._wait_for_workers)
-        assert self.status == "running"
-        return self
-
-    def __exit__(self, typ, value, traceback):
-        self.close()
-        self._loop_runner.stop()
-
     def scale(self, n):
         while len(self.worker_spec) > n:
             self.worker_spec.popitem()
 
-        if self.status in ("closing", "closed"):
-            self.loop.add_callback(self._correct_state)
-            return
-
-        while len(self.worker_spec) < n:
-            k, spec = self.new_worker_spec()
-            self.worker_spec[k] = spec
+        # If we're already shutting down, don't add any workers
+        if self.status not in ("closing", "closed"):
+            while len(self.worker_spec) < n:
+                k, spec = self.new_worker_spec()
+                self.worker_spec[k] = spec
 
         self.loop.add_callback(self._correct_state)
 
@@ -314,10 +353,17 @@ class SpecCluster(Cluster):
 
     scale_up = scale  # backwards compatibility
 
-    def __repr__(self):
-        return "SpecCluster(%r, workers=%d)" % (
-            self.scheduler_address,
-            len(self.workers),
+    def _on_startup_errors(self, errors):
+        """Called when the initial workers all fail to start.
+
+        Failures for workers that are dynamically scaled up later result are
+        logged, as there's no where to raise them.
+        """
+        for k, exc in sorted(errors.items()):
+            logger.warning("Worker %s failed to start with exception: %s", k, exc)
+        raise RuntimeError(
+            "%d workers failed to properly start, see logs for more information"
+            % len(errors)
         )
 
 

@@ -108,7 +108,7 @@ async def test_scale():
 
 @pytest.mark.asyncio
 async def test_broken_worker():
-    with pytest.raises(Exception) as info:
+    with pytest.raises(RuntimeError) as info:
         async with SpecCluster(
             asynchronous=True,
             workers={"good": {"cls": Worker}, "bad": {"cls": BrokenWorker}},
@@ -116,7 +116,7 @@ async def test_broken_worker():
         ) as cluster:
             pass
 
-    assert "Broken" in str(info.value)
+    assert "1 workers failed" in str(info.value)
 
 
 @pytest.mark.slow
