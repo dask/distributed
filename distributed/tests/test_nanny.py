@@ -166,6 +166,14 @@ def test_nanny_death_timeout(s):
     assert w.status == "closed"
 
 
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_worker_death_timeout_raises():
+    with pytest.raises(gen.TimeoutError):
+        w = Nanny("192.168.1.1:1234", death_timeout=1)
+        await w
+
+
 @gen_cluster(client=True, Worker=Nanny)
 def test_random_seed(c, s, a, b):
     @gen.coroutine

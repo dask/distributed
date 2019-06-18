@@ -742,6 +742,14 @@ def test_worker_death_timeout(s):
     assert w.status == "closed"
 
 
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_worker_death_timeout_raises():
+    with pytest.raises(gen.TimeoutError):
+        w = Worker("192.168.1.1:1234", death_timeout=1)
+        await w
+
+
 @gen_cluster(client=True)
 def test_stop_doing_unnecessary_work(c, s, a, b):
     futures = c.map(slowinc, range(1000), delay=0.01)
