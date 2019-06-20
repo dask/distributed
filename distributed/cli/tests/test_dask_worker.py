@@ -300,3 +300,15 @@ def test_version_option():
     runner = CliRunner()
     result = runner.invoke(distributed.cli.dask_worker.main, ["--version"])
     assert result.exit_code == 0
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("no_nanny", [True, False])
+def test_worker_timeout(no_nanny):
+    runner = CliRunner()
+    args = ["192.168.1.100:7777", "--death-timeout=1"]
+    if no_nanny:
+        args.append("--no-nanny")
+    result = runner.invoke(distributed.cli.dask_worker.main, args)
+    assert result.exit_code != 0
+    assert str(result.exception).startswith("Timed out")
