@@ -192,7 +192,11 @@ class _PrometheusCollector(object):
             "Number of clients.",
             value=len(self.server.clients),
         )
-
+        yield GaugeMetricFamily(
+            "dask_scheduler_tasks",
+            "Number of tasks",
+            value=len(self.server.tasks)
+        )
 
 class PrometheusHandler(RequestHandler):
     _initialized = False
