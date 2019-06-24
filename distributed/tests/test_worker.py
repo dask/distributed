@@ -521,7 +521,7 @@ def test_clean(c, s, a, b):
         a.data,
         a.nbytes,
         a.durations,
-        a.net_nbytes,
+        # a.net_nbytes,
         a.priorities,
         a.types,
         a.threads,
@@ -1439,7 +1439,7 @@ def test_resource_limit():
         pytest.skip("resource could not set the RSS limit")
 
 
-# @pytest.mark.slow
+@pytest.mark.slow
 @gen_cluster(client=True, timeout=100, worker_kwargs={"memory_limit": "1GB"})
 def test_avoid_sending_too_many_results(c, s, a, b):
     b.memory_limit = 10e9
