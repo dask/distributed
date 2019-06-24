@@ -383,14 +383,3 @@ def test_version_option():
     runner = CliRunner()
     result = runner.invoke(distributed.cli.dask_scheduler.main, ["--version"])
     assert result.exit_code == 0
-
-
-def test_bokeh_deprecation():
-    pytest.importorskip("bokeh")
-
-    runner = CliRunner()
-    with pytest.warns(UserWarning, match="dashboard"):
-        runner.invoke(distributed.cli.dask_scheduler.main, ["--bokeh"])
-
-    with pytest.warns(UserWarning, match="dashboard"):
-        runner.invoke(distributed.cli.dask_scheduler.main, ["--no-bokeh"])
