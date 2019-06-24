@@ -1,6 +1,58 @@
 Changelog
 =========
 
+2.0.0 - 2019-06-25
+------------------
+
+-  **Drop support for Python 2**
+-  Typo in bokeh service_kwargs for dask-worker (#2783) `Tom Augspurger`_
+-  Update command line cli options docs (#2794) `James Bourbeau`_
+-  Remove "experimental" from TLS docs [skip ci] (#2793) `James Bourbeau`_
+-  Add warnings around ncores= keywords (#2791) `Matthew Rocklin`_
+-  Add --version option to scheduler and worker CLI (#2782) `Tom Augspurger`_
+-  Raise when workers initialization times out (#2784) `Tom Augspurger`_
+-  Replace ncores with nthreads throughout codebase (#2758) `Matthew Rocklin`_
+-  Add unknown pytest markers (#2764) `Tom Augspurger`_
+-  Delay lookup of allowed failures. (#2761) `Tom Augspurger`_
+-  Change address -> worker in ColumnDataSource for nbytes plot (#2755) `Matthew Rocklin`_
+-  Remove module state in Prometheus Handlers (#2760) `Matthew Rocklin`_
+-  Add stress test for UCX (#2759) `Matthew Rocklin`_
+-  Add nanny logs (#2744) `Tom Augspurger`_
+-  Move some of the adaptive logic into the scheduler (#2735) `Matthew Rocklin`_
+-  Add SpecCluster.new_worker_spec method (#2751) `Matthew Rocklin`_
+-  Worker dashboard fixes (#2747) `Matthew Rocklin`_
+-  Add async context managers to scheduler/worker classes (#2745) `Matthew Rocklin`_
+-  Fix the resource key representation before sending graphs (#2733) `Michael Spiegel`_
+-  Allow user to configure whether workers are daemon. (#2739) `Caleb`_
+-  Pin pytest >=4 with pip in appveyor and python 3.5 (#2737) `Matthew Rocklin`_
+-  Add Experimental UCX Comm (#2591) `Ben Zaitlen`_ `Tom Augspurger`_ `Matthew Rocklin`_
+-  Close nannies gracefully (#2731) `Matthew Rocklin`_
+-  add kwargs to progressbars (#2638) `Manuel Garrido`_
+-  Add back LocalCluster.__repr__. (#2732) `Loïc Estève`_
+-  Move bokeh module to dashboard (#2724) `Matthew Rocklin`_
+-  Close clusters at exit (#2730) `Matthew Rocklin`_
+-  Add SchedulerPlugin TaskState example (#2622) `Matt Nicolls`_
+-  Add SpecificationCluster (#2675) `Matthew Rocklin`_
+-  Replace register_worker_callbacks with worker plugins (#2453) `Matthew Rocklin`_
+-  Proxy worker dashboards from scheduler dashboard (#2715) `Ben Zaitlen`_
+-  Add docstring to Scheduler.check_idle_saturated (#2721) `Matthew Rocklin`_
+-  Refer to LocalCluster in Client docstring (#2719) `Matthew Rocklin`_
+-  Remove special casing of Scikit-Learn BaseEstimator serialization (#2713) `Matthew Rocklin`_
+-  Fix two typos in Pub class docstring (#2714) `Magnus Nord`_
+-  Support uploading files with multiple modules (#2587) `Sam Grayson`_
+-  Change the main workers bokeh page to /status (#2689) `Ben Zaitlen`_
+-  Cleanly stop periodic callbacks in Client (#2705) `Matthew Rocklin`_
+-  Disable pan tool for the Progress, Byte Stored and Tasks Processing plot (#2703) `Mathieu Dugré`_
+-  Except errors in Nanny's memory monitor if process no longer exists (#2701) `Matthew Rocklin`_
+-  Handle heartbeat when worker has just left (#2702) `Matthew Rocklin`_
+-  Modify styling of histograms for many-worker dashboard plots (#2695) `Mathieu Dugré`_
+-  Add method to wait for n workers before continuing (#2688) `Daniel Farrell`_
+-  Support computation on delayed(None) (#2697)  `Matthew Rocklin`_
+-  Cleanup localcluster (#2693)  `Matthew Rocklin`_
+-  Use 'temporary-directory' from dask.config for Worker's directory (#2654) `Matthew Rocklin`_
+-  Remove support for Iterators and Queues (#2671) `Matthew Rocklin`_
+
+
 1.28.1 - 2019-05-13
 -------------------
 
