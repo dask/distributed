@@ -13,7 +13,9 @@ import tempfile
 from time import sleep
 
 from tornado import gen
+from click.testing import CliRunner
 
+import distributed
 from distributed import Scheduler, Client
 from distributed.utils import get_ip, get_ip_interface, tmpfile
 from distributed.utils_test import (
@@ -23,6 +25,7 @@ from distributed.utils_test import (
 )
 from distributed.utils_test import loop  # noqa: F401
 from distributed.metrics import time
+import distributed.cli.dask_scheduler
 
 
 def test_defaults(loop):
@@ -53,7 +56,7 @@ def test_hostport(loop):
             ]
 
         with Client("127.0.0.1:8978", loop=loop) as c:
-            assert len(c.ncores()) == 0
+            assert len(c.nthreads()) == 0
             c.sync(f)
 
 
@@ -150,7 +153,7 @@ def test_multiple_workers(loop):
             with popen(["dask-worker", "localhost:8786", "--no-dashboard"]) as b:
                 with Client("127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
                     start = time()
-                    while len(c.ncores()) < 2:
+                    while len(c.nthreads()) < 2:
                         sleep(0.1)
                         assert time() < start + 10
 
@@ -178,7 +181,7 @@ def test_interface(loop):
         ) as a:
             with Client("tcp://127.0.0.1:%d" % Scheduler.default_port, loop=loop) as c:
                 start = time()
-                while not len(c.ncores()):
+                while not len(c.nthreads()):
                     sleep(0.1)
                     assert time() - start < 5
                 info = c.scheduler_info()
@@ -374,3 +377,9 @@ def test_preload_command_default(loop):
 
     finally:
         shutil.rmtree(tmpdir)
+
+
+def test_version_option():
+    runner = CliRunner()
+    result = runner.invoke(distributed.cli.dask_scheduler.main, ["--version"])
+    assert result.exit_code == 0

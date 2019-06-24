@@ -22,6 +22,7 @@ import textwrap
 import threading
 from time import sleep
 import uuid
+import warnings
 import weakref
 
 try:
@@ -646,7 +647,7 @@ def cluster(
             q = mp_context.Queue()
             fn = "_test_worker-%s" % uuid.uuid4()
             kwargs = merge(
-                {"ncores": 1, "local_dir": fn, "memory_limit": TOTAL_MEMORY},
+                {"nthreads": 1, "local_dir": fn, "memory_limit": TOTAL_MEMORY},
                 worker_kwargs,
             )
             proc = mp_context.Process(
@@ -678,8 +679,8 @@ def cluster(
 
             with rpc(saddr, **rpc_kwargs) as s:
                 while True:
-                    ncores = loop.run_sync(s.ncores)
-                    if len(ncores) == nworkers:
+                    nthreads = loop.run_sync(s.ncores)
+                    if len(nthreads) == nworkers:
                         break
                     if time() - start > 5:
                         raise Exception("Timeout on cluster creation")
@@ -783,7 +784,7 @@ from .worker import Worker
 
 @gen.coroutine
 def start_cluster(
-    ncores,
+    nthreads,
     scheduler_addr,
     loop,
     security=None,
@@ -798,7 +799,7 @@ def start_cluster(
     workers = [
         Worker(
             s.address,
-            ncores=ncore[1],
+            nthreads=ncore[1],
             name=i,
             security=security,
             loop=loop,
@@ -806,7 +807,7 @@ def start_cluster(
             host=ncore[0],
             **(merge(worker_kwargs, ncore[2]) if len(ncore) > 2 else worker_kwargs)
         )
-        for i, ncore in enumerate(ncores)
+        for i, ncore in enumerate(nthreads)
     ]
     # for w in workers:
     #     w.rpc = workers[0].rpc
@@ -814,7 +815,7 @@ def start_cluster(
     yield workers
 
     start = time()
-    while len(s.workers) < len(ncores) or any(
+    while len(s.workers) < len(nthreads) or any(
         comm.comm is None for comm in s.stream_comms.values()
     ):
         yield gen.sleep(0.01)
@@ -840,7 +841,8 @@ def end_cluster(s, workers):
 
 
 def gen_cluster(
-    ncores=[("127.0.0.1", 1), ("127.0.0.1", 2)],
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2)],
+    ncores=None,
     scheduler="127.0.0.1",
     timeout=10,
     security=None,
@@ -865,6 +867,10 @@ def gen_cluster(
         start
         end
     """
+    if ncores is not None:
+        warnings.warn("ncores= has moved to nthreads=")
+        nthreads = ncores
+
     worker_kwargs = merge(
         {"memory_limit": TOTAL_MEMORY, "death_timeout": 5}, worker_kwargs
     )
@@ -885,7 +891,7 @@ def gen_cluster(
                         for i in range(5):
                             try:
                                 s, ws = yield start_cluster(
-                                    ncores,
+                                    nthreads,
                                     scheduler,
                                     loop,
                                     security=security,
@@ -1406,7 +1412,7 @@ def bump_rlimit(limit, desired):
 
 
 def gen_tls_cluster(**kwargs):
-    kwargs.setdefault("ncores", [("tls://127.0.0.1", 1), ("tls://127.0.0.1", 2)])
+    kwargs.setdefault("nthreads", [("tls://127.0.0.1", 1), ("tls://127.0.0.1", 2)])
     return gen_cluster(
         scheduler="tls://127.0.0.1", security=tls_only_security(), **kwargs
     )

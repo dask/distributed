@@ -1,6 +1,7 @@
 from __future__ import print_function, division, absolute_import
 
 import pytest
+from click.testing import CliRunner
 
 pytest.importorskip("requests")
 
@@ -9,6 +10,7 @@ import sys
 import os
 from time import sleep
 
+import distributed.cli.dask_worker
 from distributed import Client
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
@@ -58,7 +60,7 @@ def test_memory_limit(loop):
             ]
         ) as worker:
             with Client("127.0.0.1:8786", loop=loop) as c:
-                while not c.ncores():
+                while not c.nthreads():
                     sleep(0.1)
                 info = c.scheduler_info()
                 [d] = info["workers"].values()
@@ -218,7 +220,7 @@ def test_contact_listen_address(loop, nanny, listen_address):
             ]
         ) as worker:
             with Client("127.0.0.1:8786") as client:
-                while not client.ncores():
+                while not client.nthreads():
                     sleep(0.1)
                 info = client.scheduler_info()
                 assert "tcp://127.0.0.2:39837" in info["workers"]
@@ -243,7 +245,7 @@ def test_respect_host_listen_address(loop, nanny, host):
             ["dask-worker", "127.0.0.1:8786", nanny, "--no-dashboard", "--host", host]
         ) as worker:
             with Client("127.0.0.1:8786") as client:
-                while not client.ncores():
+                while not client.nthreads():
                     sleep(0.1)
                 info = client.scheduler_info()
 
@@ -292,3 +294,21 @@ def test_dashboard_non_standard_ports(loop):
 
         with pytest.raises(Exception):
             requests.get("http://localhost:4833/status/")
+
+
+def test_version_option():
+    runner = CliRunner()
+    result = runner.invoke(distributed.cli.dask_worker.main, ["--version"])
+    assert result.exit_code == 0
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("no_nanny", [True, False])
+def test_worker_timeout(no_nanny):
+    runner = CliRunner()
+    args = ["192.168.1.100:7777", "--death-timeout=1"]
+    if no_nanny:
+        args.append("--no-nanny")
+    result = runner.invoke(distributed.cli.dask_worker.main, args)
+    assert result.exit_code != 0
+    assert str(result.exception).startswith("Timed out")

@@ -63,6 +63,7 @@ loop = IOLoop()
     help="Worker's Bokeh port for visual diagnostics",
 )
 @click.option("--bokeh-prefix", type=str, default=None, help="Prefix for the bokeh app")
+@click.version_option()
 def main(
     scheduler_file,
     interface,
@@ -105,7 +106,7 @@ def main(
             scheduler_file=scheduler_file,
             loop=loop,
             name=rank if scheduler else None,
-            ncores=nthreads,
+            nthreads=nthreads,
             local_dir=local_directory,
             services={("dashboard", bokeh_worker_port): BokehWorker},
             memory_limit=memory_limit,
