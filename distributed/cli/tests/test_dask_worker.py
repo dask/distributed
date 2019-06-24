@@ -315,6 +315,8 @@ def test_worker_timeout(no_nanny):
 
 
 def test_bokeh_deprecation():
+    pytest.importorskip("bokeh")
+
     runner = CliRunner()
     with pytest.warns(UserWarning, match="dashboard"):
         try:

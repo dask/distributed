@@ -386,6 +386,8 @@ def test_version_option():
 
 
 def test_bokeh_deprecation():
+    pytest.importorskip("bokeh")
+
     runner = CliRunner()
     with pytest.warns(UserWarning, match="dashboard"):
         runner.invoke(distributed.cli.dask_scheduler.main, ["--bokeh"])
