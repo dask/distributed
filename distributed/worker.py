@@ -2457,7 +2457,8 @@ class Worker(ServerNode):
                     int(frac * 100),
                     format_bytes(proc.memory_info().rss),
                     format_bytes(self.memory_limit)
-                    if self.memory_limit is not None else "None",
+                    if self.memory_limit is not None
+                    else "None",
                 )
                 self.paused = True
         elif self.paused:
@@ -2467,7 +2468,8 @@ class Worker(ServerNode):
                 int(frac * 100),
                 format_bytes(proc.memory_info().rss),
                 format_bytes(self.memory_limit)
-                if self.memory_limit is not None else "None",
+                if self.memory_limit is not None
+                else "None",
             )
             self.paused = False
             self.ensure_computing()
@@ -2486,7 +2488,8 @@ class Worker(ServerNode):
                         "Worker memory limit: %s",
                         format_bytes(proc.memory_info().rss),
                         format_bytes(self.memory_limit)
-                        if self.memory_limit is not None else "None",
+                        if self.memory_limit is not None
+                        else "None",
                     )
                     break
                 k, v, weight = self.data.fast.evict()
