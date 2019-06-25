@@ -7,7 +7,7 @@ Changelog
 -  **Drop support for Python 2**
 -  Typo in bokeh service_kwargs for dask-worker (#2783) `Tom Augspurger`_
 -  Update command line cli options docs (#2794) `James Bourbeau`_
--  Remove "experimental" from TLS docs [skip ci] (#2793) `James Bourbeau`_
+-  Remove "experimental" from TLS docs (#2793) `James Bourbeau`_
 -  Add warnings around ncores= keywords (#2791) `Matthew Rocklin`_
 -  Add --version option to scheduler and worker CLI (#2782) `Tom Augspurger`_
 -  Raise when workers initialization times out (#2784) `Tom Augspurger`_
