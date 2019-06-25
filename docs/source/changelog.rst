@@ -5,6 +5,8 @@ Changelog
 ------------------
 
 -  **Drop support for Python 2**
+-  Relax warnings before release (#2796) `Matthew Rocklin`_
+-  Deprecate --bokeh/--no-bokeh CLI (#2800) `Tom Augspurger`_
 -  Typo in bokeh service_kwargs for dask-worker (#2783) `Tom Augspurger`_
 -  Update command line cli options docs (#2794) `James Bourbeau`_
 -  Remove "experimental" from TLS docs (#2793) `James Bourbeau`_
