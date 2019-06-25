@@ -13,6 +13,7 @@ import multiprocessing
 from numbers import Number
 import operator
 import os
+import platform
 import re
 import shutil
 import socket
@@ -62,7 +63,12 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
-    if PY3 and not sys.platform.startswith("win") and "PyPy" not in sys.version:
+    if (
+        PY3
+        and not sys.platform.startswith("win")
+        and "PyPy" not in sys.version
+        and "microsoft" not in platform.uname()[3].lower()
+    ):
         method = dask.config.get("distributed.worker.multiprocessing-method")
         ctx = multiprocessing.get_context(method)
         # Makes the test suite much faster
