@@ -33,6 +33,7 @@ setup(
     },
     include_package_data=True,
     install_requires=install_requires,
+    python_requires=">=3.5",
     extras_require=extras_require,
     packages=[
         "distributed",
