@@ -275,14 +275,20 @@ class SpecCluster(Cluster):
             self.worker_spec.popitem()
 
         if self.status in ("closing", "closed"):
-            self.loop.add_callback(self._correct_state)
+            if not self.asynchronous:
+                self.sync(self._correct_state)
+            else:
+                self.loop.add_callback(self._correct_state)
             return
 
         while len(self.worker_spec) < n:
             k, spec = self.new_worker_spec()
             self.worker_spec[k] = spec
 
-        self.loop.add_callback(self._correct_state)
+        if not self.asynchronous:
+            self.sync(self._correct_state)
+        else:
+            self.loop.add_callback(self._correct_state)
 
     def new_worker_spec(self):
         """ Return name and spec for the next worker
