@@ -650,6 +650,8 @@ class Worker(ServerNode):
         self._pending_plugins = plugins
         self._reprioritize_count = 0
         self._pause_count = 0
+        self._last_check = time()
+        self._memory_constrained = False
 
         Worker._instances.add(self)
 
@@ -2297,12 +2299,16 @@ class Worker(ServerNode):
 
     @property
     def memory_constrained(self):
+        # if time() - self._last_check < self.periodic_callbacks['profile'].callback_time:
+        #     return self._memory_contrained
+
         # TODO: cache this for some amount of time? I assume the overhead of
         # computing the process RSS is too much for this code path.
         proc = self.monitor.proc
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
-        constrained = frac > 0.25
+        constrained = self.memory_target_fraction and frac > self.memory_target_fraction
+        self._memory_constrained = constrained
         return constrained
 
     def do_special(self):
@@ -2350,6 +2356,7 @@ class Worker(ServerNode):
                 if constrained:
                     logger.warning("*** Memory constrained scheduling! ***")
                     if freeing_tasks:
+                        logger.warning("*** Running freeing task ***")
                         self._reprioritize_count += 1
                         key = list(freeing_tasks)[0]
                         # logger.warning(
