@@ -2352,17 +2352,17 @@ class Worker(ServerNode):
                     if freeing_tasks:
                         self._reprioritize_count += 1
                         key = list(freeing_tasks)[0]
-                        logger.warning(
-                            "**** special %s from %s *****", key, self.priorities
-                        )
+                        # logger.warning(
+                        #     "**** special %s from %s *****", key, self.priorities
+                        # )
                         # TODO: is this bad?
                         self.ready = [(p, k) for (p, k) in self.ready if k != key]
                     else:
                         logger.warning(
-                            "*** Pausing with state\n\tready: %s\n\t executing: %s\n\twaiting: %s***",
-                            self.ready,
-                            self.executing,
-                            self.waiting_for_data,
+                            "*** Pausing with ***",
+                            # self.ready,
+                            # self.executing,
+                            # self.waiting_for_data,
                         )
                         self._pause_count += 1
                         self.paused = True
