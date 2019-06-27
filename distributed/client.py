@@ -28,7 +28,7 @@ from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply, unicode
-from dask.utils import ensure_dict, format_bytes
+from dask.utils import ensure_dict
 
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
@@ -82,6 +82,7 @@ from .utils import (
     log_errors,
     str_graph,
     key_split,
+    format_bytes,
     asciitable,
     thread_state,
     no_default,
