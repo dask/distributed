@@ -2575,9 +2575,8 @@ def test_run_coroutine(c, s, a, b):
     results = yield c.run(geninc, 1, workers=[])
     assert results == {}
 
-    with pytest.raises(RuntimeError) as exc_info:
+    with pytest.raises(RuntimeError, match="hello"):
         yield c.run(throws, 1)
-    assert "hello" in str(exc_info)
 
     if sys.version_info >= (3, 5):
         results = yield c.run(asyncinc, 2, delay=0.01)
