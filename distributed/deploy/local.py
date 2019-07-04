@@ -125,7 +125,7 @@ class LocalCluster(SpecCluster):
         self.status = None
         self.processes = processes
         security = security or Security()
-        
+
         if protocol is None:
             if host and "://" in host:
                 protocol = host.split("://")[0]
