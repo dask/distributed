@@ -233,6 +233,12 @@ YARN, Mesos, SGE, etc..).  After termination the nanny will restart the worker
 in a fresh state.
 
 
+Nanny
+~~~~~
+
+.. autoclass:: distributed.worker.Nanny
+
+
 API Documentation
 -----------------
 
