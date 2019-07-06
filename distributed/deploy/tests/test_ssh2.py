@@ -1,7 +1,9 @@
-from distributed.deploy.ssh2 import SSHCluster
-from dask.distributed import Client
-
 import pytest
+
+pytest.importorskip("asyncssh")
+
+from dask.distributed import Client
+from distributed.deploy.ssh2 import SSHCluster
 
 
 @pytest.mark.asyncio
