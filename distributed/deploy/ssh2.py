@@ -44,6 +44,19 @@ class Process:
     def __repr__(self):
         return "<SSH %s: status=%s>" % (type(self).__name__, self.status)
 
+async def _create_connection(address, validate_host):
+    if not validate_host:
+        connection = await asyncssh.connect(address, known_hosts=None)
+    else:
+        try:
+            connection = await asyncssh.connect(address)
+        except asyncssh.misc.HostKeyNotVerifiable:
+            # improve debug message when there is more support for host validation
+            logger.debug("Explicitly validating host")
+            raise asyncssh.misc.HostKeyNotVerifiable
+
+    return connection
+
 
 class Worker(Process):
     """ A Remote Dask Worker controled by SSH
@@ -55,18 +68,21 @@ class Worker(Process):
     address: str
         The hostname where we should run this worker
     kwargs:
-        TODO
+        validate_host: bool
+            Validate host key is trusted (default is False)
     """
 
     def __init__(self, scheduler: str, address: str, **kwargs):
         self.address = address
         self.scheduler = scheduler
         self.kwargs = kwargs
+        self.validate_host = self.kwargs.get('validate_host', False)
+
 
         super().__init__()
 
     async def start(self):
-        self.connection = await asyncssh.connect(self.address)
+        self.connection = await _create_connection(self.address, self.validate_host)
         self.proc = await self.connection.create_process(
             " ".join(
                 [
@@ -99,17 +115,22 @@ class Scheduler(Process):
         The hostname where we should run this worker
     kwargs:
         TODO
+        validate_host: bool
+            Validate host key is trusted (default is False)
     """
 
     def __init__(self, address: str, **kwargs):
         self.address = address
         self.kwargs = kwargs
+        self.validate_host = self.kwargs.get('validate_host', False)
 
         super().__init__()
 
     async def start(self):
         logger.debug("Created Scheduler Connection")
-        self.connection = await asyncssh.connect(self.address)
+
+        self.connection = await _create_connection(self.address, self.validate_host)
+
         self.proc = await self.connection.create_process(
             " ".join([sys.executable, "-m", "distributed.cli.dask_scheduler"])
         )
@@ -136,9 +157,9 @@ def SSHCluster(hosts, **kwargs):
     ----
     This doesn't handle any keyword arguments yet.  It is a proof of concept
     """
-    scheduler = {"cls": Scheduler, "options": {"address": hosts[0]}}
+    scheduler = {"cls": Scheduler, "options": {"address": hosts[0], "validate_host": False}}
     workers = {
-        i: {"cls": Worker, "options": {"address": host}}
+        i: {"cls": Worker, "options": {"address": host, "validate_host": False}}
         for i, host in enumerate(hosts[1:])
     }
     return SpecCluster(workers, scheduler, **kwargs)
