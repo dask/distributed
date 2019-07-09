@@ -8,7 +8,9 @@ from distributed.deploy.ssh2 import SSHCluster
 
 @pytest.mark.asyncio
 async def test_basic():
-    async with SSHCluster(["localhost"] * 3, asynchronous=True) as cluster:
+    async with SSHCluster(
+        ["localhost"] * 3, connect_kwargs=dict(known_hosts=None), asynchronous=True
+    ) as cluster:
         assert len(cluster.workers) == 2
         async with Client(cluster, asynchronous=True) as client:
             result = await client.submit(lambda x: x + 1, 10)

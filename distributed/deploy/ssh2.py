@@ -44,19 +44,6 @@ class Process:
     def __repr__(self):
         return "<SSH %s: status=%s>" % (type(self).__name__, self.status)
 
-async def _create_connection(address, validate_host):
-    if not validate_host:
-        connection = await asyncssh.connect(address, known_hosts=None)
-    else:
-        try:
-            connection = await asyncssh.connect(address)
-        except asyncssh.misc.HostKeyNotVerifiable:
-            # improve debug message when there is more support for host validation
-            logger.debug("Explicitly validating host")
-            raise asyncssh.misc.HostKeyNotVerifiable
-
-    return connection
-
 
 class Worker(Process):
     """ A Remote Dask Worker controled by SSH
@@ -67,22 +54,22 @@ class Worker(Process):
         The address of the scheduler
     address: str
         The hostname where we should run this worker
+    connect_kwargs: dict
+        kwargs to be passed to asyncssh connections
     kwargs:
-        validate_host: bool
-            Validate host key is trusted (default is False)
+        TODO
     """
 
-    def __init__(self, scheduler: str, address: str, **kwargs):
+    def __init__(self, scheduler: str, address: str, connect_kwargs: dict, **kwargs):
         self.address = address
         self.scheduler = scheduler
+        self.connect_kwargs = connect_kwargs
         self.kwargs = kwargs
-        self.validate_host = self.kwargs.get('validate_host', False)
-
 
         super().__init__()
 
     async def start(self):
-        self.connection = await _create_connection(self.address, self.validate_host)
+        self.connection = await asyncssh.connect(self.address, **self.connect_kwargs)
         self.proc = await self.connection.create_process(
             " ".join(
                 [
@@ -113,23 +100,23 @@ class Scheduler(Process):
     ----------
     address: str
         The hostname where we should run this worker
+    connect_kwargs: dict
+        kwargs to be passed to asyncssh connections
     kwargs:
         TODO
-        validate_host: bool
-            Validate host key is trusted (default is False)
     """
 
-    def __init__(self, address: str, **kwargs):
+    def __init__(self, address: str, connect_kwargs: dict, **kwargs):
         self.address = address
         self.kwargs = kwargs
-        self.validate_host = self.kwargs.get('validate_host', False)
+        self.connect_kwargs = connect_kwargs
 
         super().__init__()
 
     async def start(self):
         logger.debug("Created Scheduler Connection")
 
-        self.connection = await _create_connection(self.address, self.validate_host)
+        self.connection = await asyncssh.connect(self.address, **self.connect_kwargs)
 
         self.proc = await self.connection.create_process(
             " ".join([sys.executable, "-m", "distributed.cli.dask_scheduler"])
@@ -144,7 +131,7 @@ class Scheduler(Process):
         logger.debug("%s", line)
 
 
-def SSHCluster(hosts, **kwargs):
+def SSHCluster(hosts, connect_kwargs, **kwargs):
     """ Deploy a Dask cluster using SSH
 
     Parameters
@@ -152,14 +139,27 @@ def SSHCluster(hosts, **kwargs):
     hosts: List[str]
         List of hostnames or addresses on which to launch our cluster
         The first will be used for the scheduler and the rest for workers
-
-    TODO
+    connect_kwargs:
+        known_hosts: List[str] or None
+            The list of keys which will be used to validate the server host
+            key presented during the SSH handshake.  If this is not specified,
+            the keys will be looked up in the file .ssh/known_hosts.  If this
+            is explicitly set to None, server host key validation will be disabled.
+        TODO
+    kwargs:
+        TODO
     ----
     This doesn't handle any keyword arguments yet.  It is a proof of concept
     """
-    scheduler = {"cls": Scheduler, "options": {"address": hosts[0], "validate_host": False}}
+    scheduler = {
+        "cls": Scheduler,
+        "options": {"address": hosts[0], "connect_kwargs": connect_kwargs},
+    }
     workers = {
-        i: {"cls": Worker, "options": {"address": host, "validate_host": False}}
+        i: {
+            "cls": Worker,
+            "options": {"address": host, "connect_kwargs": connect_kwargs},
+        }
         for i, host in enumerate(hosts[1:])
     }
     return SpecCluster(workers, scheduler, **kwargs)
