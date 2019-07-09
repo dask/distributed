@@ -9,7 +9,7 @@ from distributed.deploy.ssh2 import SSHCluster
 @pytest.mark.asyncio
 async def test_basic():
     async with SSHCluster(
-        ["localhost"] * 3, connect_kwargs=dict(known_hosts=None), asynchronous=True
+        ["127.0.0.1"] * 3, connect_kwargs=dict(known_hosts=None), asynchronous=True
     ) as cluster:
         assert len(cluster.workers) == 2
         async with Client(cluster, asynchronous=True) as client:
