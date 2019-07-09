@@ -202,6 +202,9 @@ class Nanny(ServerNode):
     @gen.coroutine
     def _start(self, addr_or_port=0):
         """ Start nanny, start local process, start watching """
+        if self.status == "running":
+            return self
+
         addr_or_port = addr_or_port or self._start_address
 
         # XXX Factor this out
