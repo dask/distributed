@@ -133,7 +133,7 @@ class SpecCluster(Cluster):
         self.loop = self._loop_runner.loop
 
         self.scheduler = self.scheduler_spec["cls"](
-            loop=self.loop, **self.scheduler_spec["options"]
+            loop=self.loop, **self.scheduler_spec.get("options", {})
         )
         self.status = "created"
         self._instances.add(self)

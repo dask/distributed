@@ -200,11 +200,8 @@ class Nanny(ServerNode):
         return None if self.process is None else self.process.worker_dir
 
     @gen.coroutine
-    def _start(self, addr_or_port=0):
+    def start(self, addr_or_port=0):
         """ Start nanny, start local process, start watching """
-        if self.status == "running":
-            return self
-
         addr_or_port = addr_or_port or self._start_address
 
         # XXX Factor this out
@@ -233,13 +230,7 @@ class Nanny(ServerNode):
 
         self.start_periodic_callbacks()
 
-        raise gen.Return(self)
-
-    def __await__(self):
-        return self._start().__await__()
-
-    def start(self, addr_or_port=0):
-        self.loop.add_callback(self._start, addr_or_port)
+        return self
 
     @gen.coroutine
     def kill(self, comm=None, timeout=2):
@@ -290,7 +281,6 @@ class Nanny(ServerNode):
             )
             worker_kwargs.update(self.worker_kwargs)
             self.process = WorkerProcess(
-                worker_args=tuple(),
                 worker_kwargs=worker_kwargs,
                 worker_start_args=(start_arg,),
                 silence_logs=self.silence_logs,
@@ -427,18 +417,10 @@ class Nanny(ServerNode):
 
 class WorkerProcess(object):
     def __init__(
-        self,
-        worker_args,
-        worker_kwargs,
-        worker_start_args,
-        silence_logs,
-        on_exit,
-        worker,
-        env,
+        self, worker_kwargs, worker_start_args, silence_logs, on_exit, worker, env
     ):
         self.status = "init"
         self.silence_logs = silence_logs
-        self.worker_args = worker_args
         self.worker_kwargs = worker_kwargs
         self.worker_start_args = worker_start_args
         self.on_exit = on_exit
@@ -470,7 +452,6 @@ class WorkerProcess(object):
             target=self._run,
             name="Dask Worker process (from Nanny)",
             kwargs=dict(
-                worker_args=self.worker_args,
                 worker_kwargs=self.worker_kwargs,
                 worker_start_args=self.worker_start_args,
                 silence_logs=self.silence_logs,
@@ -610,7 +591,6 @@ class WorkerProcess(object):
     @classmethod
     def _run(
         cls,
-        worker_args,
         worker_kwargs,
         worker_start_args,
         silence_logs,
@@ -634,7 +614,7 @@ class WorkerProcess(object):
         IOLoop.clear_instance()
         loop = IOLoop()
         loop.make_current()
-        worker = Worker(*worker_args, **worker_kwargs)
+        worker = Worker(**worker_kwargs)
 
         @gen.coroutine
         def do_stop(timeout=5, executor_wait=True):
@@ -674,7 +654,7 @@ class WorkerProcess(object):
             Try to start worker and inform parent of outcome.
             """
             try:
-                yield worker._start(*worker_start_args)
+                yield worker
             except Exception as e:
                 logger.exception("Failed to start worker")
                 init_result_q.put({"uid": uid, "exception": e})

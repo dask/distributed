@@ -665,7 +665,7 @@ def test_scatter_no_workers(c, s):
     assert time() < start + 1.5
 
     w = Worker(s.address, nthreads=3)
-    yield [c.scatter(data={"y": 2}, timeout=5), w._start()]
+    yield [c.scatter(data={"y": 2}, timeout=5), w]
 
     assert w.data["y"] == 2
     yield w.close()

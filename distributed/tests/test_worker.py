@@ -978,20 +978,23 @@ def test_service_hosts_match_worker(s):
 
     services = {("dashboard", ":0"): BokehWorker}
 
-    w = Worker(s.address, services={("dashboard", ":0"): BokehWorker})
-    yield w._start("tcp://0.0.0.0")
+    w = yield Worker(
+        s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://0.0.0.0"
+    )
     sock = first(w.services["dashboard"].server._http._sockets.values())
     assert sock.getsockname()[0] in ("::", "0.0.0.0")
     yield w.close()
 
-    w = Worker(s.address, services={("dashboard", ":0"): BokehWorker})
-    yield w._start("tcp://127.0.0.1")
+    w = yield Worker(
+        s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://127.0.0.1"
+    )
     sock = first(w.services["dashboard"].server._http._sockets.values())
     assert sock.getsockname()[0] in ("::", "0.0.0.0")
     yield w.close()
 
-    w = Worker(s.address, services={("dashboard", 0): BokehWorker})
-    yield w._start("tcp://127.0.0.1")
+    w = yield Worker(
+        s.address, services={("dashboard", 0): BokehWorker}, host="tcp://127.0.0.1"
+    )
     sock = first(w.services["dashboard"].server._http._sockets.values())
     assert sock.getsockname()[0] == "127.0.0.1"
     yield w.close()
@@ -1004,8 +1007,7 @@ def test_start_services(s):
 
     services = {("dashboard", ":1234"): BokehWorker}
 
-    w = Worker(s.address, services=services)
-    yield w._start()
+    w = yield Worker(s.address, services=services)
 
     assert w.services["dashboard"].server.port == 1234
     yield w.close()

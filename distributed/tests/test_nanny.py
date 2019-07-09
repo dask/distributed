@@ -216,8 +216,7 @@ def test_num_fds(s):
 @gen_cluster(client=True, nthreads=[])
 def test_worker_uses_same_host_as_nanny(c, s):
     for host in ["tcp://0.0.0.0", "tcp://127.0.0.2"]:
-        n = Nanny(s.address)
-        yield n._start(host)
+        n = yield Nanny(s.address, host=host)
 
         def func(dask_worker):
             return dask_worker.listener.listen_address

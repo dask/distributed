@@ -1177,6 +1177,7 @@ class Scheduler(ServerNode):
         else:
             return ws.host, port
 
+    @gen.coroutine
     def start(self, addr_or_port=None, start_queues=True):
         """ Clear out old state and restart all running coroutines """
         enable_gc_diagnosis()
@@ -1239,16 +1240,8 @@ class Scheduler(ServerNode):
 
         setproctitle("dask-scheduler [%s]" % (self.address,))
 
-        return self.finished()
-
-    def __await__(self):
-        self.start()
-
-        @gen.coroutine
-        def _():
-            return self
-
-        return _().__await__()
+        yield self.finished()
+        return self
 
     @gen.coroutine
     def finished(self):

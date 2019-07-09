@@ -892,7 +892,7 @@ class Worker(ServerNode):
     #############
 
     @gen.coroutine
-    def _start(self, addr_or_port=0):
+    def start(self, addr_or_port=0):
         assert self.status is None
         addr_or_port = addr_or_port or self._start_address
 
@@ -964,21 +964,7 @@ class Worker(ServerNode):
         yield self._register_with_scheduler()
 
         self.start_periodic_callbacks()
-        raise gen.Return(self)
-
-    def __await__(self):
-        if self.status is not None:
-
-            @gen.coroutine  # idempotent
-            def _():
-                raise gen.Return(self)
-
-            return _().__await__()
-        else:
-            return self._start().__await__()
-
-    def start(self, port=0):
-        self.loop.add_callback(self._start, port)
+        return self
 
     def _close(self, *args, **kwargs):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
