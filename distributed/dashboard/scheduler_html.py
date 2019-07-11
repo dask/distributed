@@ -184,19 +184,25 @@ class _PrometheusCollector(object):
 
         yield GaugeMetricFamily(
             "dask_scheduler_workers",
-            "Number of workers.",
+            "Number of workers connected.",
             value=len(self.server.workers),
         )
         yield GaugeMetricFamily(
             "dask_scheduler_clients",
-            "Number of clients.",
+            "Number of clients connected.",
             value=len(self.server.clients),
         )
         yield GaugeMetricFamily(
-            "dask_scheduler_tasks",
-            "Number of tasks",
-            value=len(self.server.tasks)
+            "dask_scheduler_received_tasks",
+            "Number of tasks received at scheduler",
+            value=len(self.server.tasks),
         )
+        yield GaugeMetricFamily(
+            "dask_scheduler_unrunnable_tasks",
+            "Number of unrunnable tasks at scheduler",
+            value=len(self.server.unrunnable),
+        )
+
 
 class PrometheusHandler(RequestHandler):
     _initialized = False
