@@ -1184,8 +1184,7 @@ def test_service_hosts():
     ]:
         services = {("dashboard", port): BokehScheduler}
 
-        s = Scheduler(services=services)
-        yield s.start(url)
+        s = yield Scheduler(host=url, services=services)
 
         sock = first(s.services["dashboard"].server._http._sockets.values())
         if isinstance(expected, tuple):

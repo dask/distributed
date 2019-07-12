@@ -48,7 +48,6 @@ from .security import Security
 from .utils import (
     All,
     ignoring,
-    get_ip,
     get_fileno_limit,
     log_errors,
     key_split,
@@ -1178,11 +1177,9 @@ class Scheduler(ServerNode):
             return ws.host, port
 
     @gen.coroutine
-    def start(self, addr_or_port=None, start_queues=True):
+    def start(self):
         """ Clear out old state and restart all running coroutines """
         enable_gc_diagnosis()
-
-        addr_or_port = addr_or_port or self._start_address
 
         self.clear_task_state()
 
@@ -1197,21 +1194,14 @@ class Scheduler(ServerNode):
                     raise exc
 
         if self.status != "running":
-            if isinstance(addr_or_port, int):
-                # Listen on all interfaces.  `get_ip()` is not suitable
-                # as it would prevent connecting via 127.0.0.1.
-                self.listen(("", addr_or_port), listen_args=self.listen_args)
-                self.ip = get_ip()
-                listen_ip = ""
-            else:
-                self.listen(addr_or_port, listen_args=self.listen_args)
-                self.ip = get_address_host(self.listen_address)
-                listen_ip = self.ip
+            self.listen(self._start_address, listen_args=self.listen_args)
+            self.ip = get_address_host(self.listen_address)
+            listen_ip = self.ip
 
             if listen_ip == "0.0.0.0":
                 listen_ip = ""
 
-            if isinstance(addr_or_port, str) and addr_or_port.startswith("inproc://"):
+            if self._start_address.startswith("inproc://"):
                 listen_ip = "localhost"
 
             # Services listen on all addresses

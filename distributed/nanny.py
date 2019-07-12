@@ -17,7 +17,7 @@ from tornado import gen
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado.locks import Event
 
-from .comm import get_address_host, get_local_address_for, unparse_host_port
+from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
 from .core import RPCClosed, CommClosedError, coerce_to_address
 from .metrics import time
@@ -26,7 +26,6 @@ from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
-    get_ip,
     mp_context,
     silence_logging,
     json_load_robust,
@@ -112,6 +111,8 @@ class Nanny(ServerNode):
         self.preload_argv = preload_argv
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
+        if worker_port:
+            worker_kwargs["port"] = worker_port
         self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address
@@ -200,25 +201,10 @@ class Nanny(ServerNode):
         return None if self.process is None else self.process.worker_dir
 
     @gen.coroutine
-    def start(self, addr_or_port=0):
+    def start(self):
         """ Start nanny, start local process, start watching """
-        addr_or_port = addr_or_port or self._start_address
-
-        # XXX Factor this out
-        if not addr_or_port:
-            # Default address is the required one to reach the scheduler
-            self.listen(
-                get_local_address_for(self.scheduler.address),
-                listen_args=self.listen_args,
-            )
-            self.ip = get_address_host(self.address)
-        elif isinstance(addr_or_port, int):
-            # addr_or_port is an integer => assume TCP
-            self.ip = get_ip(get_address_host(self.scheduler.address))
-            self.listen((self.ip, addr_or_port), listen_args=self.listen_args)
-        else:
-            self.listen(addr_or_port, listen_args=self.listen_args)
-            self.ip = get_address_host(self.address)
+        self.listen(self._start_address, listen_args=self.listen_args)
+        self.ip = get_address_host(self.address)
 
         logger.info("        Start Nanny at: %r", self.address)
         response = yield self.instantiate()
@@ -614,6 +600,8 @@ class WorkerProcess(object):
         IOLoop.clear_instance()
         loop = IOLoop()
         loop.make_current()
+        print(worker_kwargs)
+        print(worker_start_args)
         worker = Worker(**worker_kwargs)
 
         @gen.coroutine
