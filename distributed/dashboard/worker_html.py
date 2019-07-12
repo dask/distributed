@@ -8,10 +8,7 @@ class _PrometheusCollector(object):
         self.logger = logging.getLogger("distributed.dask_worker")
         self.crick_available = True
         try:
-            import crick
-
-            # usage of import necessary to comply with flake8 F401
-            crick_version = crick._version
+            import crick  # noqa: F401
         except ImportError:
             self.crick_available = False
             self.logger.info("Digest-based metrics require crick to be installed")
