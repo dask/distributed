@@ -57,8 +57,11 @@ from distributed.cli.utils import check_python_3
     help="Username to use when establishing SSH connections.",
 )
 @click.option(
-    "--ssh-port", default=22, type=int, show_default=True,
-    help="Port to use for SSH connections."
+    "--ssh-port",
+    default=22,
+    type=int,
+    show_default=True,
+    help="Port to use for SSH connections.",
 )
 @click.option(
     "--ssh-private-key",
