@@ -236,6 +236,9 @@ in a fresh state.
 Nanny
 ~~~~~
 
+Dask workers are by default launched, monitored, and managed by a small Nanny
+process.
+
 .. autoclass:: distributed.worker.Nanny
 
 

@@ -49,7 +49,7 @@ This has some fail cases.
     called on other workers.  This function will be marked as "bad" after it
     kills a fixed number of workers (defaults to three).
 3.  Data sent out directly to the workers via a call to ``scatter()`` (instead
-    of being created via a call to ``persist()`` from a Dask task graph) is not
+    of being created from a Dask task graph via other Dask functions) is not
     kept in the scheduler, as it is often quite large, and so the loss of this
     data is irreparable.  You may wish to call ``Client.replicate`` on the data
     with a suitable replication factor to ensure that it remains long-lived or
@@ -82,4 +82,5 @@ The client provides a mechanism to restart all of the workers in the cluster.
 This is convenient if, during the course of experimentation, you find your
 workers in an inconvenient state that makes them unresponsive.  The
 ``Client.restart`` method kills all workers, flushes all scheduler state, and
-then brings all workers back online, resulting in a clean cluster.
+then brings all workers back online, resulting in a clean cluster. This
+requires the nanny process (which is started by default).
