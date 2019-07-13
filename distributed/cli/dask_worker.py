@@ -119,7 +119,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--nprocs",
     type=int,
     default=1,
-    help="Number of worker processes to launch.  Defaults to one.",
+    show_default=True,
+    help="Number of worker processes to launch.",
 )
 @click.option(
     "--name",
@@ -132,6 +133,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--memory-limit",
     default="auto",
+    show_default=True,
     help="Bytes of memory per process that the worker can use. "
     "This can be an integer (bytes), "
     "float (fraction of total system memory), "
@@ -141,11 +143,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--reconnect/--no-reconnect",
     default=True,
+    show_default=True,
     help="Reconnect to scheduler if disconnected",
 )
 @click.option(
     "--nanny/--no-nanny",
     default=True,
+    show_default=True,
     help="Start workers in nanny process for management",
 )
 @click.option("--pid-file", type=str, default="", help="File to write the process PID")
