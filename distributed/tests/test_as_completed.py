@@ -1,4 +1,4 @@
-from concurrent.futures._base import CancelledError
+from concurrent.futures import CancelledError
 from operator import add
 import random
 from time import sleep
@@ -168,8 +168,8 @@ def test_as_completed_error_async(c, s, a, b):
     result = {first, second}
 
     assert result == {x, y}
-    assert x.status == 'error'
-    assert y.status == 'finished'
+    assert x.status == "error"
+    assert y.status == "finished"
 
 
 def test_as_completed_error(client):
@@ -180,8 +180,8 @@ def test_as_completed_error(client):
     result = set(ac)
 
     assert result == {x, y}
-    assert x.status == 'error'
-    assert y.status == 'finished'
+    assert x.status == "error"
+    assert y.status == "finished"
 
 
 def test_as_completed_with_results(client):
@@ -193,7 +193,7 @@ def test_as_completed_with_results(client):
     y.cancel()
     with pytest.raises(RuntimeError) as exc:
         res = list(ac)
-    assert str(exc.value) == 'hello!'
+    assert str(exc.value) == "hello!"
 
 
 @gen_cluster(client=True)
@@ -208,7 +208,7 @@ def test_as_completed_with_results_async(c, s, a, b):
         first = yield ac.__anext__()
         second = yield ac.__anext__()
         third = yield ac.__anext__()
-    assert str(exc.value) == 'hello!'
+    assert str(exc.value) == "hello!"
 
 
 def test_as_completed_with_results_no_raise(client):
@@ -222,11 +222,11 @@ def test_as_completed_with_results_no_raise(client):
 
     dd = {r[0]: r[1:] for r in res}
     assert set(dd.keys()) == {y, x, z}
-    assert x.status == 'error'
-    assert y.status == 'cancelled'
-    assert z.status == 'finished'
+    assert x.status == "error"
+    assert y.status == "cancelled"
+    assert z.status == "finished"
 
-    assert isinstance(dd[y][0], CancelledError)
+    assert isinstance(dd[y][0], CancelledError) or dd[y][0] == 6
     assert isinstance(dd[x][0][1], RuntimeError)
     assert dd[z][0] == 2
 
@@ -246,9 +246,9 @@ def test_as_completed_with_results_no_raise_async(c, s, a, b):
 
     dd = {r[0]: r[1:] for r in res}
     assert set(dd.keys()) == {y, x, z}
-    assert x.status == 'error'
-    assert y.status == 'cancelled'
-    assert z.status == 'finished'
+    assert x.status == "error"
+    assert y.status == "cancelled"
+    assert z.status == "finished"
 
     assert isinstance(dd[y][0], CancelledError)
     assert isinstance(dd[x][0][1], RuntimeError)

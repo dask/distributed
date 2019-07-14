@@ -19,6 +19,12 @@
               <td><a class="button is-primary" href="../call-stack/{{ url_escape(Task) }}.html">Call Stack</a></td>
           </tr>
           {% end %}
+          {% if ts.type %}
+          <tr>
+              <th> Type </th>
+              <td> {{ ts.type }} </td>
+          </tr>
+          {% end %}
           {% if ts.nbytes %}
           <tr>
               <th> Bytes </th>
@@ -116,7 +122,7 @@
                   <th> Recommended Action </th>
               </thead>
 
-              {% for key, start, finish, recommendations, time in server.story(Task) %}
+              {% for key, start, finish, recommendations, time in scheduler.story(Task) %}
               <tr>
                   <td> {{ fromtimestamp(time) }} </td>
                   <td> <a href="{{ url_escape(key) }}.html">{{key}}</a> </td>

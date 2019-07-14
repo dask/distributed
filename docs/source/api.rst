@@ -19,12 +19,12 @@ API
    Client.get_executor
    Client.get_metadata
    Client.get_scheduler_logs
-   Client.get_task_stream
    Client.get_worker_logs
+   Client.get_task_stream
    Client.has_what
    Client.list_datasets
    Client.map
-   Client.ncores
+   Client.nthreads
    Client.persist
    Client.publish_dataset
    Client.profile
@@ -152,7 +152,9 @@ Future
 Other
 -----
 
-.. autofunction:: as_completed
+.. autoclass:: as_completed
+   :members:
+
 .. autofunction:: distributed.diagnostics.progress
 .. autofunction:: wait
 .. autofunction:: fire_and_forget
@@ -172,14 +174,6 @@ Other
 .. autoclass:: Queue
    :members:
 .. autoclass:: Variable
-   :members:
-
-
-Asyncio Client
---------------
-
-.. currentmodule:: distributed.asyncio
-.. autoclass:: AioClient
    :members:
 
 

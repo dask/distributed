@@ -7,6 +7,7 @@ import random
 from tornado import gen
 from tornado.gen import Return
 
+from dask.optimization import SubgraphCallable
 from toolz import merge, concat, groupby, drop
 
 from .core import rpc
@@ -31,6 +32,7 @@ def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
     _gather
     """
     from .worker import get_data_from_worker
+
     bad_addresses = set()
     missing_workers = set()
     original_who_has = who_has
@@ -56,11 +58,17 @@ def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
 
         rpcs = {addr: rpc(addr) for addr in d}
         try:
-            coroutines = {address: get_data_from_worker(rpc, keys, address,
-                                                        who=who,
-                                                        serializers=serializers,
-                                                        max_connections=False)
-                          for address, keys in d.items()}
+            coroutines = {
+                address: get_data_from_worker(
+                    rpc,
+                    keys,
+                    address,
+                    who=who,
+                    serializers=serializers,
+                    max_connections=False,
+                )
+                for address, keys in d.items()
+            }
             response = {}
             for worker, c in coroutines.items():
                 try:
@@ -68,7 +76,7 @@ def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
                 except EnvironmentError:
                     missing_workers.add(worker)
                 else:
-                    response.update(r['data'])
+                    response.update(r["data"])
         finally:
             for r in rpcs.values():
                 r.close_rpc()
@@ -90,6 +98,7 @@ class WrappedKey(object):
     only be accessed in a certain way.  Schedulers may have particular needs
     that can only be addressed by additional metadata.
     """
+
     def __init__(self, key):
         self.key = key
 
@@ -101,19 +110,19 @@ _round_robin_counter = [0]
 
 
 @gen.coroutine
-def scatter_to_workers(ncores, data, rpc=rpc, report=True, serializers=None):
+def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=None):
     """ Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
-    how many cores they have.  ncores should be a dictionary mapping worker
+    how many cores they have.  nthreads should be a dictionary mapping worker
     identities to numbers of cores.
 
     See scatter for parameter docstring
     """
-    assert isinstance(ncores, dict)
+    assert isinstance(nthreads, dict)
     assert isinstance(data, dict)
 
-    workers = list(concat([w] * nc for w, nc in ncores.items()))
+    workers = list(concat([w] * nc for w, nc in nthreads.items()))
     names, data = list(zip(*data.items()))
 
     worker_iter = drop(_round_robin_counter[0] % len(workers), cycle(workers))
@@ -121,19 +130,23 @@ def scatter_to_workers(ncores, data, rpc=rpc, report=True, serializers=None):
 
     L = list(zip(worker_iter, names, data))
     d = groupby(0, L)
-    d = {worker: {key: value for _, key, value in v}
-         for worker, v in d.items()}
+    d = {worker: {key: value for _, key, value in v} for worker, v in d.items()}
 
     rpcs = {addr: rpc(addr) for addr in d}
     try:
-        out = yield All([rpcs[address].update_data(data=v, report=report,
-                                                   serializers=serializers)
-                         for address, v in d.items()])
+        out = yield All(
+            [
+                rpcs[address].update_data(
+                    data=v, report=report, serializers=serializers
+                )
+                for address, v in d.items()
+            ]
+        )
     finally:
         for r in rpcs.values():
             r.close_rpc()
 
-    nbytes = merge(o['nbytes'] for o in out)
+    nbytes = merge(o["nbytes"] for o in out)
 
     who_has = {k: [w for w, _, _ in v] for k, v in groupby(1, L).items()}
 
@@ -177,11 +190,38 @@ def unpack_remotedata(o, byte_keys=False, myset=None):
 
     typ = type(o)
 
+    if typ is tuple:
+        if not o:
+            return o
+        if type(o[0]) is SubgraphCallable:
+            sc = o[0]
+            futures = set()
+            dsk = {
+                k: unpack_remotedata(v, byte_keys, futures) for k, v in sc.dsk.items()
+            }
+            args = tuple(unpack_remotedata(i, byte_keys, futures) for i in o[1:])
+            if futures:
+                myset.update(futures)
+                futures = (
+                    tuple(tokey(f.key) for f in futures)
+                    if byte_keys
+                    else tuple(f.key for f in futures)
+                )
+                inkeys = sc.inkeys + futures
+                return (
+                    (SubgraphCallable(dsk, sc.outkey, inkeys, sc.name),)
+                    + args
+                    + futures
+                )
+            else:
+                return o
+        else:
+            return tuple(unpack_remotedata(item, byte_keys, myset) for item in o)
     if typ in collection_types:
         if not o:
             return o
         outs = [unpack_remotedata(item, byte_keys, myset) for item in o]
-        return type(o)(outs)
+        return typ(outs)
     elif typ is dict:
         if o:
             values = [unpack_remotedata(v, byte_keys, myset) for v in o.values()]

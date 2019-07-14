@@ -7,7 +7,6 @@ from distributed.diagnostics.plugin import SchedulerPlugin
 
 @gen_cluster(client=True)
 def test_simple(c, s, a, b):
-
     class Counter(SchedulerPlugin):
         def start(self, scheduler):
             self.scheduler = scheduler
@@ -15,7 +14,7 @@ def test_simple(c, s, a, b):
             self.count = 0
 
         def transition(self, key, start, finish, *args, **kwargs):
-            if start == 'processing' and finish == 'memory':
+            if start == "processing" and finish == "memory":
                 self.count += 1
 
     counter = Counter()
@@ -35,18 +34,18 @@ def test_simple(c, s, a, b):
     assert counter not in s.plugins
 
 
-@gen_cluster(ncores=[], client=False)
+@gen_cluster(nthreads=[], client=False)
 def test_add_remove_worker(s):
     events = []
 
     class MyPlugin(SchedulerPlugin):
         def add_worker(self, worker, scheduler):
             assert scheduler is s
-            events.append(('add_worker', worker))
+            events.append(("add_worker", worker))
 
         def remove_worker(self, worker, scheduler):
             assert scheduler is s
-            events.append(('remove_worker', worker))
+            events.append(("remove_worker", worker))
 
     plugin = MyPlugin()
     s.add_plugin(plugin)
@@ -54,20 +53,20 @@ def test_add_remove_worker(s):
 
     a = Worker(s.address)
     b = Worker(s.address)
-    yield a._start()
-    yield b._start()
-    yield a._close()
-    yield b._close()
+    yield a
+    yield b
+    yield a.close()
+    yield b.close()
 
-    assert events == [('add_worker', a.address),
-                      ('add_worker', b.address),
-                      ('remove_worker', a.address),
-                      ('remove_worker', b.address),
-                      ]
+    assert events == [
+        ("add_worker", a.address),
+        ("add_worker", b.address),
+        ("remove_worker", a.address),
+        ("remove_worker", b.address),
+    ]
 
     events[:] = []
     s.remove_plugin(plugin)
-    a = Worker(s.address)
-    yield a._start()
-    yield a._close()
+    a = yield Worker(s.address)
+    yield a.close()
     assert events == []

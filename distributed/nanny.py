@@ -3,11 +3,14 @@ from __future__ import print_function, division, absolute_import
 from datetime import timedelta
 import logging
 from multiprocessing.queues import Empty
+import multiprocessing
 import os
 import psutil
 import shutil
 import threading
 import uuid
+import warnings
+import weakref
 
 import dask
 from tornado import gen
@@ -15,15 +18,22 @@ from tornado.ioloop import IOLoop, TimeoutError
 from tornado.locks import Event
 
 from .comm import get_address_host, get_local_address_for, unparse_host_port
-from .core import rpc, RPCClosed, CommClosedError, coerce_to_address
+from .comm.addressing import address_from_user_args
+from .core import RPCClosed, CommClosedError, coerce_to_address
 from .metrics import time
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
-from .utils import (get_ip, mp_context, silence_logging, json_load_robust,
-        PeriodicCallback)
-from .worker import _ncores, run, parse_memory_limit, Worker
+from .utils import (
+    get_ip,
+    mp_context,
+    silence_logging,
+    json_load_robust,
+    PeriodicCallback,
+    parse_timedelta,
+)
+from .worker import run, parse_memory_limit, Worker
 
 logger = logging.getLogger(__name__)
 
@@ -32,81 +42,139 @@ class Nanny(ServerNode):
     """ A process to manage worker processes
 
     The nanny spins up Worker processes, watches then, and kills or restarts
-    them as necessary.
+    them as necessary. It is necessary if you want to use the
+    ``Client.restart`` method, or to restart the worker automatically if
+    it gets to the terminate fractiom of its memory limit.
+
+    The parameters for the Nanny are mostly the same as those for the Worker.
+
+    See Also
+    --------
+    Worker
     """
+
+    _instances = weakref.WeakSet()
     process = None
     status = None
 
-    def __init__(self, scheduler_ip=None, scheduler_port=None,
-            scheduler_file=None, worker_port=0, ncores=None, loop=None,
-            local_dir='dask-worker-space', services=None, name=None,
-            memory_limit='auto', reconnect=True, validate=False, quiet=False,
-            resources=None, silence_logs=None, death_timeout=None, preload=(),
-            preload_argv=[], security=None, contact_address=None,
-            listen_address=None, worker_class=None, **kwargs):
+    def __init__(
+        self,
+        scheduler_ip=None,
+        scheduler_port=None,
+        scheduler_file=None,
+        worker_port=0,
+        nthreads=None,
+        ncores=None,
+        loop=None,
+        local_dir="dask-worker-space",
+        services=None,
+        name=None,
+        memory_limit="auto",
+        reconnect=True,
+        validate=False,
+        quiet=False,
+        resources=None,
+        silence_logs=None,
+        death_timeout=None,
+        preload=(),
+        preload_argv=[],
+        security=None,
+        contact_address=None,
+        listen_address=None,
+        worker_class=None,
+        env=None,
+        interface=None,
+        host=None,
+        port=None,
+        protocol=None,
+        **worker_kwargs
+    ):
+        self._setup_logging(logger)
+        self.loop = loop or IOLoop.current()
+        self.security = security or Security()
+        assert isinstance(self.security, Security)
+        self.connection_args = self.security.get_connection_args("worker")
+        self.listen_args = self.security.get_listen_args("worker")
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
-            self.scheduler_addr = cfg['address']
-        elif scheduler_ip is None and dask.config.get('scheduler-address'):
-            self.scheduler_addr = dask.config.get('scheduler-address')
+            self.scheduler_addr = cfg["address"]
+        elif scheduler_ip is None and dask.config.get("scheduler-address"):
+            self.scheduler_addr = dask.config.get("scheduler-address")
         elif scheduler_port is None:
             self.scheduler_addr = coerce_to_address(scheduler_ip)
         else:
             self.scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
+
+        if ncores is not None:
+            warnings.warn("the ncores= parameter has moved to nthreads=")
+            nthreads = ncores
+
         self._given_worker_port = worker_port
-        self.ncores = ncores or _ncores
+        self.nthreads = nthreads or multiprocessing.cpu_count()
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources
-        self.death_timeout = death_timeout
+        self.death_timeout = parse_timedelta(death_timeout)
         self.preload = preload
         self.preload_argv = preload_argv
         self.Worker = Worker if worker_class is None else worker_class
+        self.env = env or {}
+        self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address
-        self.memory_terminate_fraction = dask.config.get('distributed.worker.memory.terminate')
-
-        self.security = security or Security()
-        assert isinstance(self.security, Security)
-        self.connection_args = self.security.get_connection_args('worker')
-        self.listen_args = self.security.get_listen_args('worker')
+        self.memory_terminate_fraction = dask.config.get(
+            "distributed.worker.memory.terminate"
+        )
 
         self.local_dir = local_dir
 
-        self.loop = loop or IOLoop.current()
-        self.scheduler = rpc(self.scheduler_addr, connection_args=self.connection_args)
         self.services = services
         self.name = name
         self.quiet = quiet
         self.auto_restart = True
 
-        self.memory_limit = parse_memory_limit(memory_limit, self.ncores)
+        self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
         if silence_logs:
             silence_logging(level=silence_logs)
         self.silence_logs = silence_logs
 
-        handlers = {'instantiate': self.instantiate,
-                    'kill': self.kill,
-                    'restart': self.restart,
-                    # cannot call it 'close' on the rpc side for naming conflict
-                    'terminate': self._close,
-                    'run': self.run}
+        handlers = {
+            "instantiate": self.instantiate,
+            "kill": self.kill,
+            "restart": self.restart,
+            # cannot call it 'close' on the rpc side for naming conflict
+            "get_logs": self.get_logs,
+            "terminate": self.close,
+            "close_gracefully": self.close_gracefully,
+            "run": self.run,
+        }
 
-        super(Nanny, self).__init__(handlers, io_loop=self.loop,
-                                    connection_args=self.connection_args,
-                                    **kwargs)
+        super(Nanny, self).__init__(
+            handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
+        )
+
+        self.scheduler = self.rpc(self.scheduler_addr)
 
         if self.memory_limit:
             pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
-            self.periodic_callbacks['memory'] = pc
+            self.periodic_callbacks["memory"] = pc
+
+        self._start_address = address_from_user_args(
+            host=host,
+            port=port,
+            interface=interface,
+            protocol=protocol,
+            security=security,
+        )
 
         self._listen_address = listen_address
-        self.status = 'init'
+        Nanny._instances.add(self)
+        self.status = "init"
 
     def __repr__(self):
-        return "<Nanny: %s, threads: %d>" % (self.worker_address, self.ncores)
+        return "<Nanny: %s, threads: %d>" % (self.worker_address, self.nthreads)
 
     @gen.coroutine
     def _unregister(self, timeout=10):
@@ -116,11 +184,18 @@ class Nanny(ServerNode):
         if worker_address is None:
             return
 
-        allowed_errors = (gen.TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
+        allowed_errors = (
+            gen.TimeoutError,
+            CommClosedError,
+            EnvironmentError,
+            RPCClosed,
+        )
         try:
-            yield gen.with_timeout(timedelta(seconds=timeout),
-                                   self.scheduler.unregister(address=self.worker_address),
-                                   quiet_exceptions=allowed_errors)
+            yield gen.with_timeout(
+                timedelta(seconds=timeout),
+                self.scheduler.unregister(address=self.worker_address),
+                quiet_exceptions=allowed_errors,
+            )
         except allowed_errors:
             pass
 
@@ -135,33 +210,38 @@ class Nanny(ServerNode):
     @gen.coroutine
     def _start(self, addr_or_port=0):
         """ Start nanny, start local process, start watching """
+        addr_or_port = addr_or_port or self._start_address
 
         # XXX Factor this out
         if not addr_or_port:
             # Default address is the required one to reach the scheduler
-            self.listen(get_local_address_for(self.scheduler.address),
-                        listen_args=self.listen_args)
+            self.listen(
+                get_local_address_for(self.scheduler.address),
+                listen_args=self.listen_args,
+            )
             self.ip = get_address_host(self.address)
         elif isinstance(addr_or_port, int):
             # addr_or_port is an integer => assume TCP
-            self.ip = get_ip(
-                get_address_host(self.scheduler.address)
-            )
-            self.listen((self.ip, addr_or_port),
-                        listen_args=self.listen_args)
+            self.ip = get_ip(get_address_host(self.scheduler.address))
+            self.listen((self.ip, addr_or_port), listen_args=self.listen_args)
         else:
             self.listen(addr_or_port, listen_args=self.listen_args)
             self.ip = get_address_host(self.address)
 
-        logger.info('        Start Nanny at: %r', self.address)
+        logger.info("        Start Nanny at: %r", self.address)
         response = yield self.instantiate()
-        if response == 'running':
+        if response == "running":
             assert self.worker_address
-            self.status = 'running'
+            self.status = "running"
         else:
-            yield self._close()
+            yield self.close()
 
         self.start_periodic_callbacks()
+
+        raise gen.Return(self)
+
+    def __await__(self):
+        return self._start().__await__()
 
     def start(self, addr_or_port=0):
         self.loop.add_callback(self._start, addr_or_port)
@@ -175,11 +255,10 @@ class Nanny(ServerNode):
         """
         self.auto_restart = False
         if self.process is None:
-            raise gen.Return('OK')
+            raise gen.Return("OK")
 
         deadline = self.loop.time() + timeout
         yield self.process.kill(timeout=0.8 * (deadline - self.loop.time()))
-        yield self._unregister(deadline - self.loop.time())
 
     @gen.coroutine
     def instantiate(self, comm=None):
@@ -191,43 +270,55 @@ class Nanny(ServerNode):
             start_arg = self._listen_address
         else:
             host = self.listener.bound_address[0]
-            start_arg = self.listener.prefix + unparse_host_port(host,
-                    self._given_worker_port)
+            start_arg = self.listener.prefix + unparse_host_port(
+                host, self._given_worker_port
+            )
 
         if self.process is None:
+            worker_kwargs = dict(
+                scheduler_ip=self.scheduler_addr,
+                nthreads=self.nthreads,
+                local_dir=self.local_dir,
+                services=self.services,
+                nanny=self.address,
+                name=self.name,
+                memory_limit=self.memory_limit,
+                reconnect=self.reconnect,
+                resources=self.resources,
+                validate=self.validate,
+                silence_logs=self.silence_logs,
+                death_timeout=self.death_timeout,
+                preload=self.preload,
+                preload_argv=self.preload_argv,
+                security=self.security,
+                contact_address=self.contact_address,
+            )
+            worker_kwargs.update(self.worker_kwargs)
             self.process = WorkerProcess(
-                worker_args=(self.scheduler_addr,),
-                worker_kwargs=dict(ncores=self.ncores,
-                                   local_dir=self.local_dir,
-                                   services=self.services,
-                                   service_ports={'nanny': self.port},
-                                   name=self.name,
-                                   memory_limit=self.memory_limit,
-                                   reconnect=self.reconnect,
-                                   resources=self.resources,
-                                   validate=self.validate,
-                                   silence_logs=self.silence_logs,
-                                   death_timeout=self.death_timeout,
-                                   preload=self.preload,
-                                   preload_argv=self.preload_argv,
-                                   security=self.security,
-                                   contact_address=self.contact_address),
+                worker_args=tuple(),
+                worker_kwargs=worker_kwargs,
                 worker_start_args=(start_arg,),
                 silence_logs=self.silence_logs,
                 on_exit=self._on_exit,
-                worker=self.Worker
+                worker=self.Worker,
+                env=self.env,
             )
 
         self.auto_restart = True
         if self.death_timeout:
             try:
                 result = yield gen.with_timeout(
-                        timedelta(seconds=self.death_timeout),
-                        self.process.start()
+                    timedelta(seconds=self.death_timeout), self.process.start()
                 )
             except gen.TimeoutError:
-                yield self._close(timeout=self.death_timeout)
-                raise gen.Return('timed out')
+                yield self.close(timeout=self.death_timeout)
+                logger.exception(
+                    "Timed out connecting Nanny '%s' to scheduler '%s'",
+                    self,
+                    self.scheduler_addr,
+                )
+                raise
+
         else:
             result = yield self.process.start()
         raise gen.Return(result)
@@ -246,65 +337,84 @@ class Nanny(ServerNode):
             yield gen.with_timeout(timedelta(seconds=timeout), _())
         except gen.TimeoutError:
             logger.error("Restart timed out, returning before finished")
-            raise gen.Return('timed out')
+            raise gen.Return("timed out")
         else:
-            raise gen.Return('OK')
+            raise gen.Return("OK")
 
     def memory_monitor(self):
         """ Track worker's memory.  Restart if it goes above terminate fraction """
-        if self.status != 'running':
+        if self.status != "running":
             return
         process = self.process.process
         if process is None:
             return
         try:
             proc = psutil.Process(process.pid)
-        except psutil.NoSuchProcess:
+            memory = proc.memory_info().rss
+        except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return
-        memory = proc.memory_info().rss
         frac = memory / self.memory_limit
         if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
-            logger.warning("Worker exceeded %d%% memory budget. Restarting",
-                           100 * self.memory_terminate_fraction)
+            logger.warning(
+                "Worker exceeded %d%% memory budget. Restarting",
+                100 * self.memory_terminate_fraction,
+            )
             process.terminate()
 
     def is_alive(self):
-        return self.process is not None and self.process.status == 'running'
+        return self.process is not None and self.process.status == "running"
 
     def run(self, *args, **kwargs):
         return run(self, *args, **kwargs)
 
     @gen.coroutine
     def _on_exit(self, exitcode):
-        if self.status not in ('closing', 'closed'):
+        if self.status not in ("closing", "closed"):
             try:
                 yield self.scheduler.unregister(address=self.worker_address)
             except (EnvironmentError, CommClosedError):
                 if not self.reconnect:
-                    yield self._close()
+                    yield self.close()
                     return
 
             try:
-                if self.status not in ('closing', 'closed'):
+                if self.status not in ("closing", "closed", "closing-gracefully"):
                     if self.auto_restart:
                         logger.warning("Restarting worker")
                         yield self.instantiate()
             except Exception:
-                logger.error("Failed to restart worker after its process exited",
-                             exc_info=True)
+                logger.error(
+                    "Failed to restart worker after its process exited", exc_info=True
+                )
 
     @property
     def pid(self):
         return self.process and self.process.pid
 
+    def _close(self, *args, **kwargs):
+        warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
+        return self.close(*args, **kwargs)
+
+    def close_gracefully(self, comm=None):
+        """
+        A signal that we shouldn't try to restart workers if they go away
+
+        This is used as part of the cluster shutdown process.
+        """
+        self.status = "closing-gracefully"
+
     @gen.coroutine
-    def _close(self, comm=None, timeout=5, report=None):
+    def close(self, comm=None, timeout=5, report=None):
         """
         Close the worker process, stop all comms.
         """
-        if self.status in ('closing', 'closed'):
-            raise gen.Return('OK')
-        self.status = 'closing'
+        while self.status == "closing":
+            yield gen.sleep(0.01)
+
+        if self.status == "closed":
+            raise gen.Return("OK")
+
+        self.status = "closing"
         logger.info("Closing Nanny at %r", self.address)
         self.stop()
         try:
@@ -314,16 +424,24 @@ class Nanny(ServerNode):
             pass
         self.process = None
         self.rpc.close()
-        self.scheduler.close_rpc()
-        self.status = 'closed'
-        raise gen.Return('OK')
+        self.status = "closed"
+        if comm:
+            yield comm.write("OK")
+        yield ServerNode.close(self)
 
 
 class WorkerProcess(object):
-
-    def __init__(self, worker_args, worker_kwargs, worker_start_args,
-                 silence_logs, on_exit, worker):
-        self.status = 'init'
+    def __init__(
+        self,
+        worker_args,
+        worker_kwargs,
+        worker_start_args,
+        silence_logs,
+        on_exit,
+        worker,
+        env,
+    ):
+        self.status = "init"
         self.silence_logs = silence_logs
         self.worker_args = worker_args
         self.worker_kwargs = worker_kwargs
@@ -331,6 +449,7 @@ class WorkerProcess(object):
         self.on_exit = on_exit
         self.process = None
         self.Worker = worker
+        self.env = env
 
         # Initialized when worker is ready
         self.worker_dir = None
@@ -342,9 +461,9 @@ class WorkerProcess(object):
         Ensure the worker process is started.
         """
         enable_proctitle_on_children()
-        if self.status == 'running':
+        if self.status == "running":
             raise gen.Return(self.status)
-        if self.status == 'starting':
+        if self.status == "starting":
             yield self.running.wait()
             raise gen.Return(self.status)
 
@@ -354,27 +473,32 @@ class WorkerProcess(object):
 
         self.process = AsyncProcess(
             target=self._run,
-            kwargs=dict(worker_args=self.worker_args,
-                        worker_kwargs=self.worker_kwargs,
-                        worker_start_args=self.worker_start_args,
-                        silence_logs=self.silence_logs,
-                        init_result_q=self.init_result_q,
-                        child_stop_q=self.child_stop_q,
-                        uid=uid, Worker=self.Worker),
+            name="Dask Worker process (from Nanny)",
+            kwargs=dict(
+                worker_args=self.worker_args,
+                worker_kwargs=self.worker_kwargs,
+                worker_start_args=self.worker_start_args,
+                silence_logs=self.silence_logs,
+                init_result_q=self.init_result_q,
+                child_stop_q=self.child_stop_q,
+                uid=uid,
+                Worker=self.Worker,
+                env=self.env,
+            ),
         )
-        self.process.daemon = True
+        self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)
         self.running = Event()
         self.stopped = Event()
-        self.status = 'starting'
+        self.status = "starting"
         yield self.process.start()
         msg = yield self._wait_until_connected(uid)
         if not msg:
             raise gen.Return(self.status)
-        self.worker_address = msg['address']
-        self.worker_dir = msg['dir']
+        self.worker_address = msg["address"]
+        self.worker_dir = msg["dir"]
         assert self.worker_address
-        self.status = 'running'
+        self.status = "running"
         self.running.set()
 
         init_q.close()
@@ -392,27 +516,25 @@ class WorkerProcess(object):
         if exitcode == 255:
             return "Worker process %d was killed by unknown signal" % (pid,)
         elif exitcode >= 0:
-            return "Worker process %d exited with status %d" % (pid, exitcode,)
+            return "Worker process %d exited with status %d" % (pid, exitcode)
         else:
-            return "Worker process %d was killed by signal %d" % (pid, -exitcode,)
+            return "Worker process %d was killed by signal %d" % (pid, -exitcode)
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()
 
     @property
     def pid(self):
-        return (self.process.pid
-                if self.process and self.process.is_alive()
-                else None)
+        return self.process.pid if self.process and self.process.is_alive() else None
 
     def mark_stopped(self):
-        if self.status != 'stopped':
+        if self.status != "stopped":
             r = self.process.exitcode
             assert r is not None
             if r != 0:
                 msg = self._death_message(self.process.pid, r)
                 logger.warning(msg)
-            self.status = 'stopped'
+            self.status = "stopped"
             self.stopped.set()
             # Release resources
             self.process.close()
@@ -436,28 +558,31 @@ class WorkerProcess(object):
         loop = IOLoop.current()
         deadline = loop.time() + timeout
 
-        if self.status == 'stopped':
+        if self.status == "stopped":
             return
-        if self.status == 'stopping':
+        if self.status == "stopping":
             yield self.stopped.wait()
             return
-        assert self.status in ('starting', 'running')
-        self.status = 'stopping'
+        assert self.status in ("starting", "running")
+        self.status = "stopping"
 
         process = self.process
-        self.child_stop_q.put({
-            'op': 'stop',
-            'timeout': max(0, deadline - loop.time()) * 0.8,
-            'executor_wait': executor_wait,
-        })
+        self.child_stop_q.put(
+            {
+                "op": "stop",
+                "timeout": max(0, deadline - loop.time()) * 0.8,
+                "executor_wait": executor_wait,
+            }
+        )
         self.child_stop_q.close()
 
         while process.is_alive() and loop.time() < deadline:
             yield gen.sleep(0.05)
 
         if process.is_alive():
-            logger.warning("Worker process still alive after %d seconds, killing",
-                           timeout)
+            logger.warning(
+                "Worker process still alive after %d seconds, killing", timeout
+            )
             try:
                 yield process.terminate()
             except Exception as e:
@@ -467,7 +592,7 @@ class WorkerProcess(object):
     def _wait_until_connected(self, uid):
         delay = 0.05
         while True:
-            if self.status != 'starting':
+            if self.status != "starting":
                 return
             try:
                 msg = self.init_result_q.get_nowait()
@@ -475,23 +600,35 @@ class WorkerProcess(object):
                 yield gen.sleep(delay)
                 continue
 
-            if msg['uid'] != uid:  # ensure that we didn't cross queues
+            if msg["uid"] != uid:  # ensure that we didn't cross queues
                 continue
 
-            if 'exception' in msg:
-                logger.error("Failed while trying to start worker process: %s",
-                             msg['exception'])
+            if "exception" in msg:
+                logger.error(
+                    "Failed while trying to start worker process: %s", msg["exception"]
+                )
                 yield self.process.join()
                 raise msg
             else:
                 raise gen.Return(msg)
 
     @classmethod
-    def _run(cls, worker_args, worker_kwargs, worker_start_args,
-             silence_logs, init_result_q, child_stop_q, uid, Worker):  # pragma: no cover
+    def _run(
+        cls,
+        worker_args,
+        worker_kwargs,
+        worker_start_args,
+        silence_logs,
+        init_result_q,
+        child_stop_q,
+        uid,
+        env,
+        Worker,
+    ):  # pragma: no cover
+        os.environ.update(env)
         try:
             from dask.multiprocessing import initialize_worker_process
-        except ImportError:   # old Dask version
+        except ImportError:  # old Dask version
             pass
         else:
             initialize_worker_process()
@@ -507,10 +644,12 @@ class WorkerProcess(object):
         @gen.coroutine
         def do_stop(timeout=5, executor_wait=True):
             try:
-                yield worker._close(report=False,
-                                    nanny=False,
-                                    executor_wait=executor_wait,
-                                    timeout=timeout)
+                yield worker.close(
+                    report=False,
+                    nanny=False,
+                    executor_wait=executor_wait,
+                    timeout=timeout,
+                )
             finally:
                 loop.stop()
 
@@ -526,7 +665,7 @@ class WorkerProcess(object):
                     pass
                 else:
                     child_stop_q.close()
-                    assert msg.pop('op') == 'stop'
+                    assert msg.pop("op") == "stop"
                     loop.add_callback(do_stop, **msg)
                     break
 
@@ -543,13 +682,13 @@ class WorkerProcess(object):
                 yield worker._start(*worker_start_args)
             except Exception as e:
                 logger.exception("Failed to start worker")
-                init_result_q.put({'uid': uid, 'exception': e})
+                init_result_q.put({"uid": uid, "exception": e})
                 init_result_q.close()
             else:
                 assert worker.address
-                init_result_q.put({'address': worker.address,
-                                   'dir': worker.local_dir,
-                                   'uid': uid})
+                init_result_q.put(
+                    {"address": worker.address, "dir": worker.local_dir, "uid": uid}
+                )
                 init_result_q.close()
                 yield worker.wait_until_closed()
                 logger.info("Worker closed")
