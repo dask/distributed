@@ -412,7 +412,6 @@ def main(
         await asyncio.gather(*[n.finished() for n in nannies])
 
     install_signal_handlers(loop, cleanup=on_signal)
-
     try:
         loop.run_sync(run)
     except TimeoutError:
