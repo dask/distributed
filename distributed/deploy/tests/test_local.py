@@ -834,17 +834,21 @@ def test_starts_up_sync(loop):
 
 
 def test_dont_select_closed_worker():
-    cluster = LocalCluster(n_workers=0, processes=False, threads_per_worker=2)
-    c = Client(cluster)
-    cluster.scale(2)
-    assert c == get_client()
+    with clean(threads=False):
+        cluster = LocalCluster(n_workers=0)
+        c = Client(cluster)
+        cluster.scale(2)
+        assert c == get_client()
 
-    c.close()
-    cluster.close()
+        c.close()
+        cluster.close()
 
-    cluster2 = LocalCluster(n_workers=0, processes=False, threads_per_worker=2)
-    c2 = Client(cluster2)
-    cluster2.scale(2)
+        cluster2 = LocalCluster(n_workers=0)
+        c2 = Client(cluster2)
+        cluster2.scale(2)
 
-    current_client = get_client()
-    assert c2 == current_client
+        current_client = get_client()
+        assert c2 == current_client
+
+        cluster2.close()
+        c2.close()
