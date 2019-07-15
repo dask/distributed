@@ -393,12 +393,19 @@ def main(
 
     signal_fired = False
 
+    async def unregister_with_scheduler():
+        await asyncio.gather(*[n.scheduler.unregister(address=n.worker_address, safe=True)
+               for n in nannies])
+
     def on_signal(signum):
         nonlocal signal_fired
         signal_fired = True
-        if signum != signal.SIGINT:
+        if signum == signal.SIGINT:
+            logger.info('Unregistering workers on SIGINT')
+            loop.add_callback_from_signal(unregister_with_scheduler)
+        else:
             logger.info("Exiting on signal %d", signum)
-        asyncio.ensure_future(close_all())
+        loop.add_callback_from_signal(close_all)
 
     async def run():
         await asyncio.gather(*nannies)
