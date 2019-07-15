@@ -834,6 +834,8 @@ def test_starts_up_sync(loop):
 
 
 def test_dont_select_closed_worker():
+    # Make sure distributed does not try to reuse a client from a
+    # closed cluster (https://github.com/dask/distributed/issues/2840).
     with clean(threads=False):
         cluster = LocalCluster(n_workers=0)
         c = Client(cluster)
