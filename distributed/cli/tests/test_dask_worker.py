@@ -1,4 +1,6 @@
 import asyncio
+import signal
+
 import pytest
 from click.testing import CliRunner
 
@@ -45,6 +47,29 @@ def test_nanny_worker_ports(loop):
                     d["workers"]["tcp://127.0.0.1:9684"]["nanny"]
                     == "tcp://127.0.0.1:5273"
                 )
+
+
+def test_nanny_does_not_raise_on_signint(loop):
+    with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
+        with popen(
+                [
+                    "dask-worker",
+                    "127.0.0.1:9359",
+                    "--host",
+                    "127.0.0.1",
+                    "--worker-port",
+                    "9684",
+                    "--nanny-port",
+                    "5273",
+                    "--no-dashboard",
+                ]
+        ) as worker:
+            with Client("127.0.0.1:9359", loop=loop) as c:
+                c.submit(sleep, 5)
+                worker.send_signal(signal.SIGINT)
+                sleep(0.1)  # wait for signal handling in worker
+                assert not any((b'TimeoutError' in line)
+                               for line in worker.stderr)
 
 
 def test_memory_limit(loop):
