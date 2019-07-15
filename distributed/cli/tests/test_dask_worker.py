@@ -68,6 +68,8 @@ def test_nanny_does_not_raise_on_signint(loop):
                 c.submit(sleep, 5)
                 worker.send_signal(signal.SIGINT)
                 sleep(0.1)  # wait for signal handling in worker
+                # Note: this consumes the pipe in worker.stderr, which means
+                # that the stderr printout is lost.
                 assert not any((b'TimeoutError' in line)
                                for line in worker.stderr)
 
