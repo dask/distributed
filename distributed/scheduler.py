@@ -819,7 +819,7 @@ class Scheduler(ServerNode):
         report results
     * **task_duration:** ``{key-prefix: time}``
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
-    * **task_net_nbytes** ``{key-prefix:: int}``
+    * **task_net_nbytes** ``{key-prefix: int}``
         Expected change in cluster memory usage, in bytes, from completing
         a task with a given prefix
     * **coroutines:** ``[Futures]``:
