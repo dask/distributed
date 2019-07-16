@@ -3479,11 +3479,14 @@ class Scheduler(ServerNode):
             s.discard(ts)
             if not s and not dts.who_wants:
                 recommendations[dts.key] = "released"
-                self.task_net_nbytes[ts.prefix] -= dts.nbytes
+                print(dts, dts.nbytes, ts.prefix)
+                if dts.nbytes:
+                    self.task_net_nbytes[ts.prefix] -= dts.nbytes
 
         if not ts.waiters and not ts.who_wants:
             recommendations[ts.key] = "released"
-            self.task_net_nbytes[ts.prefix] -= ts.nbytes
+            if ts.nbytes:
+                self.task_net_nbytes[ts.prefix] -= ts.nbytes
         else:
             msg = {"op": "key-in-memory", "key": ts.key}
             if type is not None:
