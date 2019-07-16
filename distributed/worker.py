@@ -167,7 +167,7 @@ class Worker(ServerNode):
     * **data_needed**: deque(keys)
         The keys whose data we still lack, arranged in a deque
     * **waiting_for_data**: ``{kep: {deps}}``
-        A dynamic verion of dependencies.  All dependencies that we still don't
+        A dynamic version of dependencies. All dependencies that we still don't
         have for a particular key.
     * **ready**: [keys]
         Keys that are ready to run.  Stored in a LIFO stack
@@ -355,6 +355,7 @@ class Worker(ServerNode):
         self.priorities = dict()
         self.generation = 0
         self.durations = dict()
+        self.net_nbytes = defaultdict(lambda: 0)
         self.startstops = defaultdict(list)
         self.resource_restrictions = dict()
 
@@ -1233,6 +1234,7 @@ class Worker(ServerNode):
         nbytes=None,
         priority=None,
         duration=None,
+        net_nbytes=None,
         resource_restrictions=None,
         actor=False,
         **kwargs2
@@ -1256,6 +1258,9 @@ class Worker(ServerNode):
             if priority is not None:
                 priority = tuple(priority) + (self.generation,)
                 self.generation -= 1
+
+            if net_nbytes is not None:
+                self.net_nbytes[key_split(key)] = net_nbytes
 
             if self.dep_state.get(key) == "memory":
                 self.task_state[key] = "memory"
