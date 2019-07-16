@@ -2857,7 +2857,7 @@ def get_worker():
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(w for w in Worker._instances if w.status != "closed")
+            return first(w for w in Worker._instances if w.status == "running")
         except StopIteration:
             raise ValueError("No workers found")
 
