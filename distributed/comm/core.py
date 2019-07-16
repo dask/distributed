@@ -222,7 +222,7 @@ def connect(addr, timeout=None, deserialize=True, connection_args=None):
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                yield gen.sleep(0.01)
+                yield gen.sleep(0.050)
                 logger.debug("sleeping on connect")
             else:
                 _raise(error)
