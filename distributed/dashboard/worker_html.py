@@ -11,7 +11,9 @@ class _PrometheusCollector(object):
             import crick  # noqa: F401
         except ImportError:
             self.crick_available = False
-            self.logger.info("Digest-based metrics require crick to be installed")
+            self.logger.info(
+                "Not all prometheus metrics available are exported. Digest-based metrics require crick to be installed"
+            )
 
     def collect(self):
         from prometheus_client.core import GaugeMetricFamily
