@@ -3479,7 +3479,6 @@ class Scheduler(ServerNode):
             s.discard(ts)
             if not s and not dts.who_wants:
                 recommendations[dts.key] = "released"
-                print(dts, dts.nbytes, ts.prefix)
                 if dts.nbytes:
                     self.task_net_nbytes[ts.prefix] -= dts.nbytes
 
