@@ -811,7 +811,6 @@ class Worker(ServerNode):
                 middle = (start + end) / 2
 
                 if response["status"] == "missing":
-                    await self._register_with_scheduler()
                     return
                 self.scheduler_delay = response["time"] - middle
                 self.periodic_callbacks["heartbeat"].callback_time = (
