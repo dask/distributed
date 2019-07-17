@@ -225,8 +225,6 @@ class SpecCluster(Cluster):
         return _().__await__()
 
     async def _wait_for_workers(self):
-        # TODO: this function needs to query scheduler and worker state
-        # remotely without assuming that they are local
         while {
             str(d["name"])
             for d in (await self.scheduler_comm.identity())["workers"].values()
