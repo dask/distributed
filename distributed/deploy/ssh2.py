@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import warnings
 import weakref
 
 import asyncssh
@@ -8,6 +9,11 @@ import asyncssh
 from .spec import SpecCluster
 
 logger = logging.getLogger(__name__)
+
+warnings.warn(
+    "the distributed.deploy.ssh2 module is experimental "
+    "and will move/change in the future without notice"
+)
 
 
 class Process:
