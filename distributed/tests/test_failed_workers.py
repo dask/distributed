@@ -39,8 +39,7 @@ def test_submit_after_failed_worker_sync(loop):
 
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 def test_submit_after_failed_worker_async(c, s, a, b):
-    n = Nanny(s.address, nthreads=2, loop=s.loop)
-    n.start(0)
+    n = yield Nanny(s.address, nthreads=2, loop=s.loop)
     while len(s.workers) < 3:
         yield gen.sleep(0.1)
 
@@ -315,8 +314,7 @@ def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
 @gen_cluster(client=True, timeout=60, active_rpc_timeout=10)
 def test_broken_worker_during_computation(c, s, a, b):
     s.allowed_failures = 100
-    n = Nanny(s.address, nthreads=2, loop=s.loop)
-    n.start(0)
+    n = yield Nanny(s.address, nthreads=2, loop=s.loop)
 
     start = time()
     while len(s.nthreads) < 3:
@@ -374,8 +372,7 @@ def test_restart_during_computation(c, s, a, b):
 
 @gen_cluster(client=True, timeout=60)
 def test_worker_who_has_clears_after_failed_connection(c, s, a, b):
-    n = Nanny(s.address, nthreads=2, loop=s.loop)
-    n.start(0)
+    n = yield Nanny(s.address, nthreads=2, loop=s.loop)
 
     start = time()
     while len(s.nthreads) < 3:

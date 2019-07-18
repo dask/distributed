@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import asyncio
 import collections
 from contextlib import contextmanager
 import copy
@@ -783,8 +784,7 @@ from .scheduler import Scheduler
 from .worker import Worker
 
 
-@gen.coroutine
-def start_cluster(
+async def start_cluster(
     nthreads,
     scheduler_addr,
     loop,
@@ -793,7 +793,7 @@ def start_cluster(
     scheduler_kwargs={},
     worker_kwargs={},
 ):
-    s = Scheduler(
+    s = await Scheduler(
         loop=loop,
         validate=True,
         security=security,
@@ -801,7 +801,6 @@ def start_cluster(
         host=scheduler_addr,
         **scheduler_kwargs
     )
-    done = s.start()
     workers = [
         Worker(
             s.address,
@@ -818,18 +817,18 @@ def start_cluster(
     # for w in workers:
     #     w.rpc = workers[0].rpc
 
-    yield workers
+    await asyncio.gather(*workers)
 
     start = time()
     while len(s.workers) < len(nthreads) or any(
         comm.comm is None for comm in s.stream_comms.values()
     ):
-        yield gen.sleep(0.01)
+        await gen.sleep(0.01)
         if time() - start > 5:
-            yield [w.close(timeout=1) for w in workers]
-            yield s.close(fast=True)
+            await asyncio.gather(*[w.close(timeout=1) for w in workers])
+            await s.close(fast=True)
             raise Exception("Cluster creation timeout")
-    raise gen.Return((s, workers))
+    return s, workers
 
 
 @gen.coroutine

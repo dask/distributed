@@ -407,7 +407,7 @@ class Server(object):
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
-                        if type(result) is gen.Future:
+                        if hasattr(result, "__await__"):
                             self._ongoing_coroutines.add(result)
                             result = yield result
                     except (CommClosedError, CancelledError) as e:
