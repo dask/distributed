@@ -841,7 +841,7 @@ class Scheduler(ServerNode):
         idle_timeout=None,
         interface=None,
         host=None,
-        port=8786,
+        port=0,
         protocol=None,
         dashboard_address=None,
         **kwargs
@@ -1097,6 +1097,7 @@ class Scheduler(ServerNode):
             interface=interface,
             protocol=protocol,
             security=security,
+            default_port=self.default_port,
         )
 
         super(Scheduler, self).__init__(

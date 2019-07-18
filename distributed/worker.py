@@ -899,7 +899,6 @@ class Worker(ServerNode):
 
         self.listen(self._start_address, listen_args=self.listen_args)
         self.ip = get_address_host(self.address)
-        self.ip = get_address_host(self.listen_address)
 
         if self.name is None:
             self.name = self.address

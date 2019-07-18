@@ -600,8 +600,6 @@ class WorkerProcess(object):
         IOLoop.clear_instance()
         loop = IOLoop()
         loop.make_current()
-        print(worker_kwargs)
-        print(worker_start_args)
         worker = Worker(**worker_kwargs)
 
         @gen.coroutine
