@@ -119,8 +119,14 @@ class Nanny(ServerNode):
         self.preload_argv = preload_argv
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
-        if worker_port:
-            worker_kwargs["port"] = worker_port
+        worker_kwargs.update(
+            {
+                "port": worker_port,
+                "interface": interface,
+                "protocol": protocol,
+                "host": host,
+            }
+        )
         self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address

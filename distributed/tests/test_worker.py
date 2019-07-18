@@ -22,10 +22,18 @@ import tornado
 from tornado import gen
 from tornado.ioloop import TimeoutError
 
-from distributed import Nanny, get_client, wait, default_client, get_worker, Reschedule
+from distributed import (
+    Client,
+    Nanny,
+    get_client,
+    wait,
+    default_client,
+    get_worker,
+    Reschedule,
+    wait,
+)
 from distributed.compatibility import WINDOWS, cache_from_source
 from distributed.core import rpc
-from distributed.client import wait
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
@@ -1442,3 +1450,35 @@ def test_resource_limit():
         assert parse_memory_limit(hard_limit, 1, total_cores=1) == new_limit
     except OSError:
         pytest.skip("resource could not set the RSS limit")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("Worker", [Worker, Nanny])
+async def test_interface_async(loop, Worker):
+    from distributed.utils import get_ip_interface
+
+    psutil = pytest.importorskip("psutil")
+    if_names = sorted(psutil.net_if_addrs())
+    for if_name in if_names:
+        try:
+            ipv4_addr = get_ip_interface(if_name)
+        except ValueError:
+            pass
+        else:
+            if ipv4_addr == "127.0.0.1":
+                break
+    else:
+        pytest.skip(
+            "Could not find loopback interface. "
+            "Available interfaces are: %s." % (if_names,)
+        )
+
+    async with Scheduler(interface=if_name) as s:
+        assert s.address.startswith("tcp://127.0.0.1")
+        async with Worker(s.address, interface=if_name) as w:
+            assert w.address.startswith("tcp://127.0.0.1")
+            assert w.ip == "127.0.0.1"
+            async with Client(s.address, asynchronous=True) as c:
+                info = c.scheduler_info()
+                assert "tcp://127.0.0.1" in info["address"]
+                assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
