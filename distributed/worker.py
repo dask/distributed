@@ -1844,11 +1844,6 @@ class Worker(ServerNode):
                 self.incoming_count += 1
 
                 self.log.append(("receive-dep", worker, list(response["data"])))
-
-                if response["data"]:
-                    self.batched_stream.send(
-                        {"op": "add-keys", "keys": list(response["data"])}
-                    )
             except EnvironmentError as e:
                 logger.exception("Worker stream died during communication: %s", worker)
                 self.log.append(("receive-dep-failed", worker))
@@ -2817,7 +2812,7 @@ def get_worker():
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(Worker._instances)
+            return first(w for w in Worker._instances if w.status == "running")
         except StopIteration:
             raise ValueError("No workers found")
 
