@@ -226,8 +226,6 @@ class SpecCluster(Cluster):
         return _().__await__()
 
     async def _wait_for_workers(self):
-        # TODO: this function needs to query scheduler and worker state
-        # remotely without assuming that they are local
         while {
             str(d["name"])
             for d in (await self.scheduler_comm.identity())["workers"].values()
@@ -258,7 +256,6 @@ class SpecCluster(Cluster):
         async with self._lock:
             with ignoring(CommClosedError):
                 await self.scheduler_comm.close(close_workers=True)
-
         await self.scheduler.close()
         for w in self._created:
             assert w.status == "closed"
@@ -332,7 +329,8 @@ class SpecCluster(Cluster):
     scale_up = scale  # backwards compatibility
 
     def __repr__(self):
-        return "SpecCluster(%r, workers=%d)" % (
+        return "%s(%r, workers=%d)" % (
+            type(self).__name__,
             self.scheduler_address,
             len(self.workers),
         )
