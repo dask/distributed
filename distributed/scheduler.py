@@ -819,8 +819,6 @@ class Scheduler(ServerNode):
         report results
     * **task_duration:** ``{key-prefix: time}``
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
-    * **coroutines:** ``[Futures]``:
-        A list of active futures that control operation
     """
 
     default_port = 8786
@@ -897,7 +895,6 @@ class Scheduler(ServerNode):
         self.loop = loop or IOLoop.current()
         self.client_comms = dict()
         self.stream_comms = dict()
-        self.coroutines = []
         self._worker_coroutines = []
         self._ipython_kernel = None
 
@@ -1189,12 +1186,6 @@ class Scheduler(ServerNode):
             for c in self._worker_coroutines:
                 c.cancel()
 
-        for cor in self.coroutines:
-            if cor.done():
-                exc = cor.exception()
-                if exc:
-                    raise exc
-
         if self.status != "running":
             if isinstance(addr_or_port, int):
                 # Listen on all interfaces.  `get_ip()` is not suitable
@@ -1251,12 +1242,6 @@ class Scheduler(ServerNode):
         return _().__await__()
 
     @gen.coroutine
-    def finished(self):
-        """ Wait until all coroutines have ceased """
-        while any(not c.done() for c in self.coroutines):
-            yield All(self.coroutines)
-
-    @gen.coroutine
     def close(self, comm=None, fast=False, close_workers=False):
         """ Send cleanup signal to all coroutines then wait until finished
 
@@ -1301,9 +1286,6 @@ class Scheduler(ServerNode):
 
         for future in futures:
             yield future
-
-        if not fast:
-            yield self.finished()
 
         for comm in self.client_comms.values():
             comm.abort()

@@ -1621,3 +1621,13 @@ async def test_allowed_failures_config():
     with dask.config.set({"distributed.scheduler.allowed_failures": 0}):
         async with Scheduler(port=0) as s:
             assert s.allowed_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_finished():
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address) as w:
+            pass
+
+    await s.finished()
+    await w.finished()
