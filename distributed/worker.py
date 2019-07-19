@@ -423,7 +423,9 @@ class Worker(ServerNode):
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
 
-        if not host and not interface:
+        # Target interface on which we contact the scheduler by default
+        # TODO: it is unfortunate that we special-case inproc here
+        if not host and not interface and not scheduler_addr.startswith("inproc://"):
             host = get_ip(get_address_host(scheduler_addr))
 
         self._start_address = address_from_user_args(
