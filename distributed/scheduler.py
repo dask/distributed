@@ -1070,6 +1070,7 @@ class Scheduler(ServerNode):
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
             "adaptive_target": self.adaptive_target,
+            "workers_to_close": self.workers_to_close,
         }
 
         self._transitions = {
@@ -2935,7 +2936,9 @@ class Scheduler(ServerNode):
             },
         )
 
-    def workers_to_close(self, memory_ratio=None, n=None, key=None, minimum=None):
+    def workers_to_close(
+        self, comm=None, memory_ratio=None, n=None, key=None, minimum=None
+    ):
         """
         Find workers that we can close with low cost
 
@@ -4730,7 +4733,7 @@ class Scheduler(ServerNode):
         if close:
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, target_duration="5s"):
+    def adaptive_target(self, comm=None, target_duration="5s"):
         """ Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a

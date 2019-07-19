@@ -83,7 +83,6 @@ class Adaptive(object):
 
     def __init__(
         self,
-        scheduler,
         cluster=None,
         interval="1s",
         startup_cost="1s",
@@ -92,12 +91,11 @@ class Adaptive(object):
         maximum=None,
         wait_count=3,
         target_duration="5s",
-        worker_key=lambda x: x,
+        worker_key=None,
         **kwargs
     ):
         interval = parse_timedelta(interval, default="ms")
         self.worker_key = worker_key
-        self.scheduler = scheduler
         self.cluster = cluster
         self.startup_cost = parse_timedelta(startup_cost, default="s")
         self.scale_factor = scale_factor
@@ -115,13 +113,17 @@ class Adaptive(object):
         self.wait_count = wait_count
         self.target_duration = parse_timedelta(target_duration)
 
+    @property
+    def scheduler(self):
+        return self.cluster.scheduler_comm
+
     def stop(self):
         if self.cluster:
             self._adapt_callback.stop()
             self._adapt_callback = None
             del self._adapt_callback
 
-    def workers_to_close(self, **kwargs):
+    async def workers_to_close(self, **kwargs):
         """
         Determine which, if any, workers should potentially be removed from
         the cluster.
@@ -139,46 +141,49 @@ class Adaptive(object):
         --------
         Scheduler.workers_to_close
         """
-        if len(self.scheduler.workers) <= self.minimum:
+        if len(self.cluster.workers) <= self.minimum:
             return []
 
         kw = dict(self._workers_to_close_kwargs)
         kw.update(kwargs)
 
-        if self.maximum is not None and len(self.scheduler.workers) > self.maximum:
-            kw["n"] = len(self.scheduler.workers) - self.maximum
+        if self.maximum is not None and len(self.cluster.workers) > self.maximum:
+            kw["n"] = len(self.cluster.workers) - self.maximum
 
-        L = self.scheduler.workers_to_close(**kw)
-        if len(self.scheduler.workers) - len(L) < self.minimum:
-            L = L[: len(self.scheduler.workers) - self.minimum]
+        L = await self.scheduler.workers_to_close(**kw)
+        if len(self.cluster.workers) - len(L) < self.minimum:
+            L = L[: len(self.cluster.workers) - self.minimum]
 
         return L
 
-    @gen.coroutine
-    def _retire_workers(self, workers=None):
+    async def _retire_workers(self, workers=None):
         if workers is None:
-            workers = self.workers_to_close(key=self.worker_key, minimum=self.minimum)
+            workers = await self.workers_to_close(
+                key=self.worker_key, minimum=self.minimum
+            )
         if not workers:
             raise gen.Return(workers)
         with log_errors():
-            yield self.scheduler.retire_workers(
+            await self.scheduler.retire_workers(
                 workers=workers, remove=True, close_workers=True
             )
 
             logger.info("Retiring workers %s", workers)
             f = self.cluster.scale_down(workers)
             if hasattr(f, "__await__"):
-                yield f
+                await f
 
-            raise gen.Return(workers)
+            return workers
 
     async def recommendations(self, comm=None):
-        n = self.scheduler.adaptive_target(target_duration=self.target_duration)
+        n = await self.scheduler.adaptive_target(target_duration=self.target_duration)
         if self.maximum is not None:
             n = min(self.maximum, n)
         if self.minimum is not None:
             n = max(self.minimum, n)
-        workers = set(self.workers_to_close(key=self.worker_key, minimum=self.minimum))
+        workers = set(
+            await self.workers_to_close(key=self.worker_key, minimum=self.minimum)
+        )
         try:
             current = len(self.cluster.worker_spec)
         except AttributeError:
