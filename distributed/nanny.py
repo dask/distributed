@@ -408,8 +408,8 @@ class Nanny(ServerNode):
         """
         Close the worker process, stop all comms.
         """
-        while self.status == "closing":
-            yield gen.sleep(0.01)
+        if self.status == "closing":
+            yield self.finished()
 
         if self.status == "closed":
             raise gen.Return("OK")

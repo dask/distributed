@@ -1250,6 +1250,7 @@ class Scheduler(ServerNode):
         Scheduler.cleanup
         """
         if self.status.startswith("clos"):
+            yield self.finished()
             return
         self.status = "closing"
 
