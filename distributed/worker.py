@@ -50,6 +50,7 @@ from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
     funcname,
     typename,
+    get_ip,
     has_arg,
     _maybe_complex,
     log_errors,
@@ -421,6 +422,9 @@ class Worker(ServerNode):
         else:
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
+
+        if not host and not interface:
+            host = get_ip(get_address_host(scheduler_addr))
 
         self._start_address = address_from_user_args(
             host=host,

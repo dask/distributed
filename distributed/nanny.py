@@ -26,6 +26,7 @@ from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
+    get_ip,
     mp_context,
     silence_logging,
     json_load_robust,
@@ -167,6 +168,9 @@ class Nanny(ServerNode):
         if self.memory_limit:
             pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
             self.periodic_callbacks["memory"] = pc
+
+        if not host and not interface:
+            host = get_ip(get_address_host(self.scheduler.address))
 
         self._start_address = address_from_user_args(
             host=host,

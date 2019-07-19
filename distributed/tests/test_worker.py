@@ -1482,3 +1482,12 @@ async def test_interface_async(loop, Worker):
                 info = c.scheduler_info()
                 assert "tcp://127.0.0.1" in info["address"]
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("Worker", [Worker, Nanny])
+async def test_worker_listens_on_same_interface_by_default(Worker):
+    async with Scheduler(host="localhost") as s:
+        assert s.ip in {"127.0.0.1", "localhost"}
+        async with Worker(s.address) as w:
+            assert s.ip == w.ip

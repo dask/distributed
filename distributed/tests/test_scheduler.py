@@ -253,7 +253,7 @@ def test_clear_events_client_removal(c, s, a, b):
 
 @gen_cluster()
 def test_add_worker(s, a, b):
-    w = Worker(s.address, nthreads=3, host="127.0.0.1")
+    w = Worker(s.address, nthreads=3)
     w.data["x-5"] = 6
     w.data["y"] = 1
 
