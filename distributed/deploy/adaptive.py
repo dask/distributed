@@ -2,7 +2,6 @@ from __future__ import print_function, division, absolute_import
 
 from collections import deque
 import logging
-import math
 
 from tornado import gen
 
@@ -80,9 +79,6 @@ class Adaptive(object):
     resized. The default implementation checks if there are too many tasks
     per worker or too little memory available (see :meth:`Adaptive.needs_cpu`
     and :meth:`Adaptive.needs_memory`).
-
-    :meth:`Adaptive.get_scale_up_kwargs` method controls the arguments passed to
-    the cluster's ``scale_up`` method.
     '''
 
     def __init__(
@@ -107,9 +103,9 @@ class Adaptive(object):
         self.scale_factor = scale_factor
         if self.cluster:
             self._adapt_callback = PeriodicCallback(
-                self._adapt, interval * 1000, io_loop=scheduler.loop
+                self._adapt, interval * 1000, io_loop=self.loop
             )
-            self.scheduler.loop.add_callback(self._adapt_callback.start)
+            self.loop.add_callback(self._adapt_callback.start)
         self._adapting = False
         self._workers_to_close_kwargs = kwargs
         self.minimum = minimum
@@ -118,8 +114,6 @@ class Adaptive(object):
         self.close_counts = {}
         self.wait_count = wait_count
         self.target_duration = parse_timedelta(target_duration)
-
-        self.scheduler.handlers["adaptive_recommendations"] = self.recommendations
 
     def stop(self):
         if self.cluster:
@@ -178,34 +172,7 @@ class Adaptive(object):
 
             raise gen.Return(workers)
 
-    def get_scale_up_kwargs(self):
-        """
-        Get the arguments to be passed to ``self.cluster.scale_up``.
-
-        Notes
-        -----
-        By default the desired number of total workers is returned (``n``).
-        Subclasses should ensure that the return dictionary includes a key-
-        value pair for ``n``, either by implementing it or by calling the
-        parent's ``get_scale_up_kwargs``.
-
-        See Also
-        --------
-        LocalCluster.scale_up
-        """
-        target = math.ceil(self.scheduler.total_occupancy / self.target_duration)
-        instances = max(
-            1, len(self.scheduler.workers) * self.scale_factor, target, self.minimum
-        )
-
-        if self.maximum:
-            instances = min(self.maximum, instances)
-
-        instances = int(instances)
-        logger.info("Scaling up to %d workers", instances)
-        return {"n": instances}
-
-    def recommendations(self, comm=None):
+    async def recommendations(self, comm=None):
         n = self.scheduler.adaptive_target(target_duration=self.target_duration)
         if self.maximum is not None:
             n = min(self.maximum, n)
@@ -249,14 +216,13 @@ class Adaptive(object):
             self.close_counts.clear()
             return None
 
-    @gen.coroutine
-    def _adapt(self):
+    async def _adapt(self):
         if self._adapting:  # Semaphore to avoid overlapping adapt calls
             return
 
         self._adapting = True
         try:
-            recommendations = self.recommendations()
+            recommendations = await self.recommendations()
             if not recommendations:
                 return
             status = recommendations.pop("status")
@@ -264,13 +230,17 @@ class Adaptive(object):
                 f = self.cluster.scale(**recommendations)
                 self.log.append((time(), "up", recommendations))
                 if hasattr(f, "__await__"):
-                    yield f
+                    await f
 
             elif status == "down":
                 self.log.append((time(), "down", recommendations["workers"]))
-                workers = yield self._retire_workers(workers=recommendations["workers"])
+                workers = await self._retire_workers(workers=recommendations["workers"])
         finally:
             self._adapting = False
 
     def adapt(self):
-        self.scheduler.loop.add_callback(self._adapt)
+        self.loop.add_callback(self._adapt)
+
+    @property
+    def loop(self):
+        return self.cluster.loop

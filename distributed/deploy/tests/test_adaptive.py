@@ -12,21 +12,6 @@ from distributed.utils_test import loop, nodebug  # noqa: F401
 from distributed.metrics import time
 
 
-def test_get_scale_up_kwargs(loop):
-    with LocalCluster(
-        0, scheduler_port=0, silence_logs=False, dashboard_address=None, loop=loop
-    ) as cluster:
-
-        alc = Adaptive(cluster.scheduler, cluster, interval=100, scale_factor=3)
-        assert alc.get_scale_up_kwargs() == {"n": 1}
-
-        with Client(cluster, loop=loop) as c:
-            future = c.submit(lambda x: x + 1, 1)
-            assert future.result() == 2
-            assert c.nthreads()
-            assert alc.get_scale_up_kwargs() == {"n": 3}
-
-
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
 def test_simultaneous_scale_up_and_down(c, s, *workers):
     class TestAdaptive(Adaptive):
@@ -42,6 +27,10 @@ def test_simultaneous_scale_up_and_down(c, s, *workers):
 
         def scale_down(self, workers):
             assert False
+
+        @property
+        def loop(self):
+            return s.loop
 
     cluster = TestCluster()
 
@@ -153,6 +142,10 @@ def test_adaptive_scale_down_override(c, s, *workers):
         @property
         def workers(self):
             return s.workers
+
+        @property
+        def loop(self):
+            return s.loop
 
     assert len(s.workers) == 10
 
