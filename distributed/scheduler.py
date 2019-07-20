@@ -1223,7 +1223,6 @@ class Scheduler(ServerNode):
 
         setproctitle("dask-scheduler [%s]" % (self.address,))
 
-        yield self.finished()
         return self
 
     @gen.coroutine
