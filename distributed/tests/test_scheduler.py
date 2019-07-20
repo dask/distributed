@@ -1082,6 +1082,7 @@ def test_close_nanny(c, s, a, b):
         yield gen.sleep(0.1)
         assert time() < start + 5
 
+    assert not a.is_alive()
     assert a.pid is None
 
     for i in range(10):

@@ -355,7 +355,7 @@ class Nanny(ServerNode):
             process.terminate()
 
     def is_alive(self):
-        return self.process is not None and self.process.status == "running"
+        return self.process is not None and self.process.is_alive()
 
     def run(self, *args, **kwargs):
         return run(self, *args, **kwargs)
@@ -403,9 +403,10 @@ class Nanny(ServerNode):
         """
         if self.status == "closing":
             yield self.finished()
+            assert self.status == "closed"
 
         if self.status == "closed":
-            raise gen.Return("OK")
+            return "OK"
 
         self.status = "closing"
         logger.info("Closing Nanny at %r", self.address)
