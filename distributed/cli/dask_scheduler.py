@@ -1,6 +1,5 @@
 from __future__ import print_function, division, absolute_import
 
-import asyncio
 import atexit
 import dask
 import logging
@@ -237,8 +236,7 @@ def main(
 
     async def run():
         await scheduler
-        while scheduler.status != "closed":
-            await asyncio.sleep(0.100)
+        await scheduler.finished()
 
     try:
         loop.run_sync(run)
