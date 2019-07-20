@@ -169,7 +169,11 @@ class Nanny(ServerNode):
             pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
             self.periodic_callbacks["memory"] = pc
 
-        if not host and not interface:
+        if (
+            not host
+            and not interface
+            and not self.scheduler_addr.startswith("inproc://")
+        ):
             host = get_ip(get_address_host(self.scheduler.address))
 
         self._start_address = address_from_user_args(
