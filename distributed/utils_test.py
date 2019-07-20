@@ -486,7 +486,7 @@ def run_worker(q, scheduler_q, **kwargs):
         with pristine_loop() as loop:
             scheduler_addr = scheduler_q.get()
             worker = Worker(scheduler_addr, validate=True, **kwargs)
-            loop.run_sync(lambda: worker._start())
+            loop.run_sync(worker.start)
             q.put(worker.address)
             try:
 
@@ -504,7 +504,7 @@ def run_nanny(q, scheduler_q, **kwargs):
         with pristine_loop() as loop:
             scheduler_addr = scheduler_q.get()
             worker = Nanny(scheduler_addr, validate=True, **kwargs)
-            loop.run_sync(lambda: worker._start())
+            loop.run_sync(worker.start)
             q.put(worker.address)
             try:
                 loop.start()
@@ -794,9 +794,14 @@ def start_cluster(
     worker_kwargs={},
 ):
     s = Scheduler(
-        loop=loop, validate=True, security=security, port=0, **scheduler_kwargs
+        loop=loop,
+        validate=True,
+        security=security,
+        port=0,
+        host=scheduler_addr,
+        **scheduler_kwargs
     )
-    done = s.start(scheduler_addr)
+    done = s.start()
     workers = [
         Worker(
             s.address,
@@ -1554,3 +1559,16 @@ def clean(threads=not WINDOWS, processes=True, instances=True, timeout=1):
 
                         with ignoring(AttributeError):
                             del thread_state.on_event_loop_thread
+
+
+@pytest.fixture
+def cleanup():
+    with check_thread_leak():
+        with check_process_leak():
+            with check_instances():
+                reset_config()
+                dask.config.set({"distributed.comm.timeouts.connect": "5s"})
+                for name, level in logging_levels.items():
+                    logging.getLogger(name).setLevel(level)
+
+                yield
