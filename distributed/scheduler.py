@@ -48,7 +48,6 @@ from .security import Security
 from .utils import (
     All,
     ignoring,
-    get_ip,
     get_fileno_limit,
     log_errors,
     key_split,
@@ -840,7 +839,7 @@ class Scheduler(ServerNode):
         idle_timeout=None,
         interface=None,
         host=None,
-        port=8786,
+        port=0,
         protocol=None,
         dashboard_address=None,
         **kwargs
@@ -1067,6 +1066,7 @@ class Scheduler(ServerNode):
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
             "adaptive_target": self.adaptive_target,
+            "workers_to_close": self.workers_to_close,
         }
 
         self._transitions = {
@@ -1095,6 +1095,7 @@ class Scheduler(ServerNode):
             interface=interface,
             protocol=protocol,
             security=security,
+            default_port=self.default_port,
         )
 
         super(Scheduler, self).__init__(
@@ -1174,11 +1175,10 @@ class Scheduler(ServerNode):
         else:
             return ws.host, port
 
-    def start(self, addr_or_port=None, start_queues=True):
+    @gen.coroutine
+    def start(self):
         """ Clear out old state and restart all running coroutines """
         enable_gc_diagnosis()
-
-        addr_or_port = addr_or_port or self._start_address
 
         self.clear_task_state()
 
@@ -1187,21 +1187,14 @@ class Scheduler(ServerNode):
                 c.cancel()
 
         if self.status != "running":
-            if isinstance(addr_or_port, int):
-                # Listen on all interfaces.  `get_ip()` is not suitable
-                # as it would prevent connecting via 127.0.0.1.
-                self.listen(("", addr_or_port), listen_args=self.listen_args)
-                self.ip = get_ip()
-                listen_ip = ""
-            else:
-                self.listen(addr_or_port, listen_args=self.listen_args)
-                self.ip = get_address_host(self.listen_address)
-                listen_ip = self.ip
+            self.listen(self._start_address, listen_args=self.listen_args)
+            self.ip = get_address_host(self.listen_address)
+            listen_ip = self.ip
 
             if listen_ip == "0.0.0.0":
                 listen_ip = ""
 
-            if isinstance(addr_or_port, str) and addr_or_port.startswith("inproc://"):
+            if self._start_address.startswith("inproc://"):
                 listen_ip = "localhost"
 
             # Services listen on all addresses
@@ -1230,16 +1223,8 @@ class Scheduler(ServerNode):
 
         setproctitle("dask-scheduler [%s]" % (self.address,))
 
-        return self.finished()
-
-    def __await__(self):
-        self.start()
-
-        @gen.coroutine
-        def _():
-            return self
-
-        return _().__await__()
+        yield self.finished()
+        return self
 
     @gen.coroutine
     def close(self, comm=None, fast=False, close_workers=False):
@@ -2918,7 +2903,9 @@ class Scheduler(ServerNode):
             },
         )
 
-    def workers_to_close(self, memory_ratio=None, n=None, key=None, minimum=None):
+    def workers_to_close(
+        self, comm=None, memory_ratio=None, n=None, key=None, minimum=None
+    ):
         """
         Find workers that we can close with low cost
 
@@ -2980,6 +2967,10 @@ class Scheduler(ServerNode):
 
             if key is None:
                 key = lambda ws: ws.address
+            if isinstance(key, bytes) and dask.config.get(
+                "distributed.scheduler.pickle"
+            ):
+                key = pickle.loads(key)
 
             groups = groupby(key, self.workers.values())
 
@@ -3208,6 +3199,14 @@ class Scheduler(ServerNode):
         Caution: this runs arbitrary Python code on the scheduler.  This should
         eventually be phased out.  It is mostly used by diagnostics.
         """
+        if not dask.config.get("distributed.scheduler.pickle"):
+            logger.warn(
+                "Tried to call 'feed' route with custom fucntions, but "
+                "pickle is disallowed.  Set the 'distributed.scheduler.pickle'"
+                "config value to True to use the 'feed' route (this is mostly "
+                "commonly used with progress bars)"
+            )
+            return
         import pickle
 
         interval = parse_timedelta(interval)
@@ -4713,7 +4712,7 @@ class Scheduler(ServerNode):
         if close:
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, target_duration="5s"):
+    def adaptive_target(self, comm=None, target_duration="5s"):
         """ Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a
