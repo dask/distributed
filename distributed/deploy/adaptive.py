@@ -7,6 +7,7 @@ from tornado import gen
 
 from ..metrics import time
 from ..utils import log_errors, PeriodicCallback, parse_timedelta
+from ..protocol import pickle
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,8 @@ class Adaptive(object):
     async def _retire_workers(self, workers=None):
         if workers is None:
             workers = await self.workers_to_close(
-                key=self.worker_key, minimum=self.minimum
+                key=pickle.dumps(self.worker_key) if self.worker_key else None,
+                minimum=self.minimum,
             )
         if not workers:
             raise gen.Return(workers)
@@ -182,7 +184,10 @@ class Adaptive(object):
         if self.minimum is not None:
             n = max(self.minimum, n)
         workers = set(
-            await self.workers_to_close(key=self.worker_key, minimum=self.minimum)
+            await self.workers_to_close(
+                key=pickle.dumps(self.worker_key) if self.worker_key else None,
+                minimum=self.minimum,
+            )
         )
         try:
             current = len(self.cluster.worker_spec)
