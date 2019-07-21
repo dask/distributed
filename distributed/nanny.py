@@ -396,13 +396,12 @@ class Nanny(ServerNode):
         """
         self.status = "closing-gracefully"
 
-    @gen.coroutine
-    def close(self, comm=None, timeout=5, report=None):
+    async def close(self, comm=None, timeout=5, report=None):
         """
         Close the worker process, stop all comms.
         """
         if self.status == "closing":
-            yield self.finished()
+            await self.finished()
             assert self.status == "closed"
 
         if self.status == "closed":
@@ -413,15 +412,15 @@ class Nanny(ServerNode):
         self.stop()
         try:
             if self.process is not None:
-                yield self.kill(timeout=timeout)
+                await self.kill(timeout=timeout)
         except Exception:
             pass
         self.process = None
         self.rpc.close()
         self.status = "closed"
         if comm:
-            yield comm.write("OK")
-        yield ServerNode.close(self)
+            await comm.write("OK")
+        await ServerNode.close(self)
 
 
 class WorkerProcess(object):

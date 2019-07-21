@@ -111,10 +111,9 @@ def invalid_python_script(tmpdir_factory):
     return local_file
 
 
-@gen.coroutine
-def cleanup_global_workers():
+async def cleanup_global_workers():
     for worker in Worker._instances:
-        worker.close(report=False, executor_wait=False)
+        await worker.close(report=False, executor_wait=False)
 
 
 @pytest.fixture
@@ -1508,9 +1507,9 @@ def check_instances():
 
     for w in Worker._instances:
         with ignoring(RuntimeError):  # closed IOLoop
-            w.close(report=False, executor_wait=False)
+            w.loop.add_callback(w.close, report=False, executor_wait=False)
             if w.status == "running":
-                w.close()
+                w.loop.add_callback(w.close)
     Worker._instances.clear()
 
     for i in range(5):

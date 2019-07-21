@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import asyncio
 import bisect
 from collections import defaultdict, deque
 from datetime import timedelta
@@ -950,11 +951,10 @@ class Worker(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    @gen.coroutine
-    def close(self, report=True, timeout=10, nanny=True, executor_wait=True):
+    async def close(self, report=True, timeout=10, nanny=True, executor_wait=True):
         with log_errors():
             if self.status in ("closed", "closing"):
-                yield self.finished()
+                await self.finished()
                 return
 
             disable_gc_diagnosis()
@@ -967,21 +967,23 @@ class Worker(ServerNode):
 
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:
-                    yield r.close_gracefully()
+                    await r.close_gracefully()
 
             setproctitle("dask-worker [closing]")
 
-            yield [
-                plugin.teardown(self)
-                for plugin in self.plugins.values()
-                if hasattr(plugin, "teardown")
-            ]
+            await asyncio.gather(
+                *[
+                    plugin.teardown(self)
+                    for plugin in self.plugins.values()
+                    if hasattr(plugin, "teardown")
+                ]
+            )
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
             with ignoring(EnvironmentError, gen.TimeoutError):
                 if report:
-                    yield gen.with_timeout(
+                    await gen.with_timeout(
                         timedelta(seconds=timeout),
                         self.scheduler.unregister(address=self.contact_address),
                     )
@@ -1006,14 +1008,14 @@ class Worker(ServerNode):
 
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:
-                    yield r.terminate()
+                    await r.terminate()
 
             self.stop()
             self.rpc.close()
             self._closed.set()
 
             self.status = "closed"
-            yield ServerNode.close(self)
+            await ServerNode.close(self)
 
             setproctitle("dask-worker [closed]")
 
