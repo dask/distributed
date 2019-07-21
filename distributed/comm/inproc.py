@@ -246,10 +246,9 @@ class InProcListener(Listener):
         self.deserialize = deserialize
         self.listen_q = Queue()
 
-    @gen.coroutine
-    def _listen(self):
+    async def _listen(self):
         while True:
-            conn_req = yield self.listen_q.get()
+            conn_req = await self.listen_q.get()
             if conn_req is None:
                 break
             comm = InProc(
@@ -262,7 +261,7 @@ class InProcListener(Listener):
             )
             # Notify connector
             conn_req.c_loop.add_callback(conn_req.conn_event.set)
-            self.comm_handler(comm)
+            IOLoop.current().add_callback(self.comm_handler, comm)
 
     def connect_threadsafe(self, conn_req):
         self.loop.add_callback(self.listen_q.put_nowait, conn_req)

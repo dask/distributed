@@ -705,8 +705,7 @@ class Worker(ServerNode):
     # External Services #
     #####################
 
-    @gen.coroutine
-    def _register_with_scheduler(self):
+    async def _register_with_scheduler(self):
         self.periodic_callbacks["heartbeat"].stop()
         start = time()
         if self.contact_address is None:
@@ -718,21 +717,21 @@ class Worker(ServerNode):
                     "Timed out when connecting to scheduler '%s'",
                     self.scheduler.address,
                 )
-                yield self.close(timeout=1)
+                await self.close(timeout=1)
                 raise gen.TimeoutError(
                     "Timed out connecting to scheduler '%s'" % self.scheduler.address
                 )
             if self.status in ("closed", "closing"):
-                raise gen.Return
+                return
             try:
                 _start = time()
                 types = {k: typename(v) for k, v in self.data.items()}
-                comm = yield connect(
+                comm = await connect(
                     self.scheduler.address, connection_args=self.connection_args
                 )
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
-                yield comm.write(
+                await comm.write(
                     dict(
                         op="register-worker",
                         reply=False,
@@ -759,7 +758,7 @@ class Worker(ServerNode):
                     if diff < 0:
                         continue
                     future = gen.with_timeout(timedelta(seconds=diff), future)
-                response = yield future
+                response = await future
                 _end = time()
                 middle = (_start + _end) / 2
                 self.latency = (_end - start) * 0.05 + self.latency * 0.95
@@ -768,15 +767,18 @@ class Worker(ServerNode):
                 break
             except EnvironmentError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
-                yield gen.sleep(0.1)
+                await gen.sleep(0.1)
             except gen.TimeoutError:
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
             raise ValueError("Unexpected response from register: %r" % (response,))
         else:
-            yield [
-                self.plugin_add(plugin=plugin) for plugin in response["worker-plugins"]
-            ]
+            await asyncio.gather(
+                *[
+                    self.plugin_add(plugin=plugin)
+                    for plugin in response["worker-plugins"]
+                ]
+            )
 
             logger.info("        Registered to: %26s", self.scheduler.address)
             logger.info("-" * 49)
@@ -786,21 +788,20 @@ class Worker(ServerNode):
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
-    @gen.coroutine
-    def heartbeat(self):
+    async def heartbeat(self):
         if not self.heartbeat_active:
             self.heartbeat_active = True
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                response = yield self.scheduler.heartbeat_worker(
+                response = await self.scheduler.heartbeat_worker(
                     address=self.contact_address, now=time(), metrics=self.get_metrics()
                 )
                 end = time()
                 middle = (start + end) / 2
 
                 if response["status"] == "missing":
-                    yield self._register_with_scheduler()
+                    await self._register_with_scheduler()
                     return
                 self.scheduler_delay = response["time"] - middle
                 self.periodic_callbacks["heartbeat"].callback_time = (
@@ -813,10 +814,9 @@ class Worker(ServerNode):
         else:
             logger.debug("Heartbeat skipped: channel busy")
 
-    @gen.coroutine
-    def handle_scheduler(self, comm):
+    async def handle_scheduler(self, comm):
         try:
-            yield self.handle_stream(
+            await self.handle_stream(
                 comm, every_cycle=[self.ensure_communicating, self.ensure_computing]
             )
         except Exception as e:
@@ -827,7 +827,7 @@ class Worker(ServerNode):
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self._register_with_scheduler)
             else:
-                yield self.close(report=False)
+                await self.close(report=False)
 
     def start_ipython(self, comm):
         """Start an IPython kernel
@@ -842,8 +842,7 @@ class Worker(ServerNode):
             )
         return self._ipython_kernel.get_connection_info()
 
-    @gen.coroutine
-    def upload_file(self, comm, filename=None, data=None, load=True):
+    async def upload_file(self, comm, filename=None, data=None, load=True):
         out_filename = os.path.join(self.local_dir, filename)
 
         def func(data):
@@ -857,16 +856,16 @@ class Worker(ServerNode):
         if len(data) < 10000:
             data = func(data)
         else:
-            data = yield offload(func, data)
+            data = await offload(func, data)
 
         if load:
             try:
                 import_file(out_filename)
             except Exception as e:
                 logger.exception(e)
-                raise gen.Return({"status": "error", "exception": to_serialize(e)})
+                return {"status": "error", "exception": to_serialize(e)}
 
-        raise gen.Return({"status": "OK", "nbytes": len(data)})
+        return {"status": "OK", "nbytes": len(data)}
 
     def keys(self, comm=None):
         return list(self.data)
