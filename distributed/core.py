@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import asyncio
 from collections import defaultdict, deque
 from concurrent.futures import CancelledError
 from functools import partial
@@ -413,6 +414,7 @@ class Server(object):
                     try:
                         result = handler(comm, **msg)
                         if hasattr(result, "__await__"):
+                            result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = yield result
                     except (CommClosedError, CancelledError) as e:
@@ -473,7 +475,8 @@ class Server(object):
                                 closed = True
                                 break
                             handler = self.stream_handlers[op]
-                            handler(**merge(extra, msg))
+                            self.loop.add_callback(handler, **merge(extra, msg))
+                            yield gen.moment
                         else:
                             logger.error("odd message %s", msg)
                 for func in every_cycle:

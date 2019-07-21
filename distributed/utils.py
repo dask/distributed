@@ -200,8 +200,7 @@ def ignore_exceptions(coroutines, *exceptions):
     raise gen.Return(results)
 
 
-@gen.coroutine
-def All(args, quiet_exceptions=()):
+async def All(args, quiet_exceptions=()):
     """ Wait on many tasks at the same time
 
     Err once any of the tasks err.
@@ -214,32 +213,14 @@ def All(args, quiet_exceptions=()):
     quiet_exceptions: tuple, Exception
         Exception types to avoid logging if they fail
     """
-    tasks = gen.WaitIterator(*args)
-    results = [None for _ in args]
-    while not tasks.done():
+
+    async def quiet(future):
         try:
-            result = yield tasks.next()
-        except Exception:
+            return await future
+        except quiet_exceptions:
+            pass
 
-            @gen.coroutine
-            def quiet():
-                """ Watch unfinished tasks
-
-                Otherwise if they err they get logged in a way that is hard to
-                control.  They need some other task to watch them so that they
-                are not orphaned
-                """
-                for task in list(tasks._unfinished):
-                    try:
-                        yield task
-                    except quiet_exceptions:
-                        pass
-
-            quiet()
-            raise
-
-        results[tasks.current_index] = result
-    raise gen.Return(results)
+    return await asyncio.gather(*[quiet(arg) for arg in args])
 
 
 @gen.coroutine

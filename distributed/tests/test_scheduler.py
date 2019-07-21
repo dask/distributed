@@ -110,7 +110,7 @@ def test_decide_worker_with_many_independent_leaves(c, s, a, b):
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 def test_decide_worker_with_restrictions(client, s, a, b, c):
     x = client.submit(inc, 1, workers=[a.address, b.address])
-    yield wait(x)
+    yield x
     assert x.key in a.data or x.key in b.data
 
 

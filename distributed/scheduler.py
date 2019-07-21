@@ -2526,7 +2526,7 @@ class Scheduler(ServerNode):
                             self.transitions({key: "released"})
 
         self.log_event("all", {"action": "gather", "count": len(keys)})
-        raise gen.Return(result)
+        return result
 
     def clear_task_state(self):
         # XXX what about nested state such as ClientState.wants_what
@@ -2639,7 +2639,7 @@ class Scheduler(ServerNode):
             )
             comm.name = "Scheduler Broadcast"
             resp = await send_recv(comm, close=True, serializers=serializers, **msg)
-            raise gen.Return(resp)
+            return resp
 
         results = await All(
             [send_message(address) for address in addresses if address is not None]
