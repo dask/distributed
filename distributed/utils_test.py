@@ -467,13 +467,17 @@ def run_scheduler(q, nputs, port=0, **kwargs):
     # On Python 2.7 and Unix, fork() is used to spawn child processes,
     # so avoid inheriting the parent's IO loop.
     with pristine_loop() as loop:
-        scheduler = Scheduler(validate=True, host="127.0.0.1", port=port, **kwargs)
-        done = scheduler.start()
 
-        for i in range(nputs):
-            q.put(scheduler.address)
+        async def _():
+            scheduler = await Scheduler(
+                validate=True, host="127.0.0.1", port=port, **kwargs
+            )
+            for i in range(nputs):
+                q.put(scheduler.address)
+            await scheduler.finished()
+
         try:
-            loop.start()
+            loop.run_sync(_)
         finally:
             loop.close(all_fds=True)
 
@@ -485,16 +489,14 @@ def run_worker(q, scheduler_q, **kwargs):
     with log_errors():
         with pristine_loop() as loop:
             scheduler_addr = scheduler_q.get()
-            worker = Worker(scheduler_addr, validate=True, **kwargs)
-            loop.run_sync(worker.start)
-            q.put(worker.address)
+
+            async def _():
+                worker = await Worker(scheduler_addr)  # , validate=True, **kwargs)
+                q.put(worker.address)
+                await worker.finished()
+
             try:
-
-                @gen.coroutine
-                def wait_until_closed():
-                    yield worker._closed.wait()
-
-                loop.run_sync(wait_until_closed)
+                loop.run_sync(_)
             finally:
                 loop.close(all_fds=True)
 
@@ -503,13 +505,15 @@ def run_nanny(q, scheduler_q, **kwargs):
     with log_errors():
         with pristine_loop() as loop:
             scheduler_addr = scheduler_q.get()
-            worker = Nanny(scheduler_addr, validate=True, **kwargs)
-            loop.run_sync(worker.start)
-            q.put(worker.address)
+
+            async def _():
+                worker = await Nanny(scheduler_addr, validate=True, **kwargs)
+                q.put(worker.address)
+                await worker.finished()
+
             try:
-                loop.start()
+                loop.run_sync(_)
             finally:
-                loop.run_sync(worker.close)
                 loop.close(all_fds=True)
 
 
