@@ -806,7 +806,7 @@ class Client(Node):
 
         text = (
             '<h3 style="text-align: left;">Client</h3>\n'
-            '<ul style="text-align: left; list-style: none;">\n'
+            '<ul style="text-align: left; list-style: none; margin: 0; padding: 0;">\n'
         )
         if scheduler is not None:
             text += "  <li><b>Scheduler: </b>%s\n" % scheduler.address
@@ -839,7 +839,7 @@ class Client(Node):
 
             text2 = (
                 '<h3 style="text-align: left;">Cluster</h3>\n'
-                '<ul style="text-align: left; list-style:none">\n'
+                '<ul style="text-align: left; list-style:none; margin: 0; padding: 0;">\n'
                 "  <li><b>Workers: </b>%d</li>\n"
                 "  <li><b>Cores: </b>%d</li>\n"
                 "  <li><b>Memory: </b>%s</li>\n"
