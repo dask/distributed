@@ -818,8 +818,6 @@ class Scheduler(ServerNode):
         report results
     * **task_duration:** ``{key-prefix: time}``
         Time we expect certain functions to take, e.g. ``{'sum': 0.25}``
-    * **coroutines:** ``[Futures]``:
-        A list of active futures that control operation
     """
 
     default_port = 8786
@@ -896,7 +894,6 @@ class Scheduler(ServerNode):
         self.loop = loop or IOLoop.current()
         self.client_comms = dict()
         self.stream_comms = dict()
-        self.coroutines = []
         self._worker_coroutines = []
         self._ipython_kernel = None
 
@@ -1069,6 +1066,7 @@ class Scheduler(ServerNode):
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
             "adaptive_target": self.adaptive_target,
+            "workers_to_close": self.workers_to_close,
         }
 
         self._transitions = {
@@ -1188,12 +1186,6 @@ class Scheduler(ServerNode):
             for c in self._worker_coroutines:
                 c.cancel()
 
-        for cor in self.coroutines:
-            if cor.done():
-                exc = cor.exception()
-                if exc:
-                    raise exc
-
         if self.status != "running":
             self.listen(self._start_address, listen_args=self.listen_args)
             self.ip = get_address_host(self.listen_address)
@@ -1230,14 +1222,7 @@ class Scheduler(ServerNode):
         self.start_periodic_callbacks()
 
         setproctitle("dask-scheduler [%s]" % (self.address,))
-
-        yield self.finished()
-        raise gen.Return(self)
-
-    async def finished(self):
-        """ Wait until all coroutines have ceased """
-        while any(not c.done() for c in self.coroutines):
-            await All(self.coroutines)
+        return self
 
     async def close(self, comm=None, fast=False, close_workers=False):
         """ Send cleanup signal to all coroutines then wait until finished
@@ -1247,6 +1232,7 @@ class Scheduler(ServerNode):
         Scheduler.cleanup
         """
         if self.status.startswith("clos"):
+            await self.finished()
             return
         self.status = "closing"
 
@@ -1283,9 +1269,6 @@ class Scheduler(ServerNode):
 
         for future in futures:  # TODO: do all at once
             await future
-
-        if not fast:
-            await self.finished()
 
         for comm in self.client_comms.values():
             comm.abort()
@@ -2904,7 +2887,9 @@ class Scheduler(ServerNode):
             },
         )
 
-    def workers_to_close(self, memory_ratio=None, n=None, key=None, minimum=None):
+    def workers_to_close(
+        self, comm=None, memory_ratio=None, n=None, key=None, minimum=None
+    ):
         """
         Find workers that we can close with low cost
 
@@ -2966,6 +2951,10 @@ class Scheduler(ServerNode):
 
             if key is None:
                 key = lambda ws: ws.address
+            if isinstance(key, bytes) and dask.config.get(
+                "distributed.scheduler.pickle"
+            ):
+                key = pickle.loads(key)
 
             groups = groupby(key, self.workers.values())
 
@@ -3194,6 +3183,14 @@ class Scheduler(ServerNode):
         Caution: this runs arbitrary Python code on the scheduler.  This should
         eventually be phased out.  It is mostly used by diagnostics.
         """
+        if not dask.config.get("distributed.scheduler.pickle"):
+            logger.warn(
+                "Tried to call 'feed' route with custom fucntions, but "
+                "pickle is disallowed.  Set the 'distributed.scheduler.pickle'"
+                "config value to True to use the 'feed' route (this is mostly "
+                "commonly used with progress bars)"
+            )
+            return
         import pickle
 
         interval = parse_timedelta(interval)
@@ -4699,7 +4696,7 @@ class Scheduler(ServerNode):
         if close:
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, target_duration="5s"):
+    def adaptive_target(self, comm=None, target_duration="5s"):
         """ Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a

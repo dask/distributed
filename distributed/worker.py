@@ -48,6 +48,7 @@ from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
+    get_ip,
     funcname,
     typename,
     has_arg,
@@ -421,6 +422,11 @@ class Worker(ServerNode):
         else:
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
+
+        # Target interface on which we contact the scheduler by default
+        # TODO: it is unfortunate that we special-case inproc here
+        if not host and not interface and not scheduler_addr.startswith("inproc://"):
+            host = get_ip(get_address_host(scheduler_addr))
 
         self._start_address = address_from_user_args(
             host=host,
@@ -948,6 +954,7 @@ class Worker(ServerNode):
     def close(self, report=True, timeout=10, nanny=True, executor_wait=True):
         with log_errors():
             if self.status in ("closed", "closing"):
+                yield self.finished()
                 return
 
             disable_gc_diagnosis()
@@ -1844,11 +1851,6 @@ class Worker(ServerNode):
                 self.incoming_count += 1
 
                 self.log.append(("receive-dep", worker, list(response["data"])))
-
-                if response["data"]:
-                    self.batched_stream.send(
-                        {"op": "add-keys", "keys": list(response["data"])}
-                    )
             except EnvironmentError as e:
                 logger.exception("Worker stream died during communication: %s", worker)
                 self.log.append(("receive-dep-failed", worker))
@@ -2817,7 +2819,7 @@ def get_worker():
         return thread_state.execution_state["worker"]
     except AttributeError:
         try:
-            return first(Worker._instances)
+            return first(w for w in Worker._instances if w.status == "running")
         except StopIteration:
             raise ValueError("No workers found")
 

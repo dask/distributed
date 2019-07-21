@@ -63,10 +63,12 @@ pip install -q "pytest>=4" pytest-repeat pytest-faulthandler pytest-asyncio
 
 pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
 pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
+pip install -q git+https://github.com/intake/filesystem_spec.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
 pip install -q sortedcollections msgpack --no-deps
 pip install -q keras --upgrade --no-deps
+pip install -q asyncssh 
 
 if [[ $CRICK == true ]]; then
     conda install -q cython

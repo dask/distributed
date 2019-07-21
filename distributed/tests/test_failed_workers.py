@@ -127,7 +127,7 @@ def test_failed_worker_without_warning(c, s, a, b):
     assert all(len(keys) > 0 for keys in s.has_what.values())
     nthreads2 = dict(s.nthreads)
 
-    yield c._restart()
+    yield c.restart()
 
     L = c.map(inc, range(10))
     yield wait(L)
@@ -147,7 +147,7 @@ def test_restart(c, s, a, b):
 
     assert set(s.who_has) == {x.key, y.key}
 
-    f = yield c._restart()
+    f = yield c.restart()
     assert f is c
 
     assert len(s.workers) == 2
@@ -170,7 +170,7 @@ def test_restart_cleared(c, s, a, b):
     f = c.compute(x)
     yield wait([f])
 
-    yield c._restart()
+    yield c.restart()
 
     for coll in [s.tasks, s.unrunnable]:
         assert not coll
@@ -211,7 +211,7 @@ def test_restart_fast(c, s, a, b):
     L = c.map(sleep, range(10))
 
     start = time()
-    yield c._restart()
+    yield c.restart()
     assert time() - start < 10
     assert len(s.nthreads) == 2
 
@@ -254,7 +254,7 @@ def test_fast_kill(c, s, a, b):
     L = c.map(sleep, range(10))
 
     start = time()
-    yield c._restart()
+    yield c.restart()
     assert time() - start < 10
 
     assert all(x.status == "cancelled" for x in L)
@@ -301,7 +301,7 @@ def test_restart_scheduler(s, a, b):
 @gen_cluster(Worker=Nanny, client=True, timeout=60)
 def test_forgotten_futures_dont_clean_up_new_futures(c, s, a, b):
     x = c.submit(inc, 1)
-    yield c._restart()
+    yield c.restart()
     y = c.submit(inc, 1)
     del x
     import gc
@@ -363,7 +363,7 @@ def test_restart_during_computation(c, s, a, b):
 
     yield gen.sleep(0.5)
     assert s.rprocessing
-    yield c._restart()
+    yield c.restart()
     assert not s.rprocessing
 
     assert len(s.nthreads) == 2

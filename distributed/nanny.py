@@ -26,6 +26,7 @@ from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
 from .utils import (
+    get_ip,
     mp_context,
     silence_logging,
     json_load_robust,
@@ -41,7 +42,15 @@ class Nanny(ServerNode):
     """ A process to manage worker processes
 
     The nanny spins up Worker processes, watches then, and kills or restarts
-    them as necessary.
+    them as necessary. It is necessary if you want to use the
+    ``Client.restart`` method, or to restart the worker automatically if
+    it gets to the terminate fractiom of its memory limit.
+
+    The parameters for the Nanny are mostly the same as those for the Worker.
+
+    See Also
+    --------
+    Worker
     """
 
     _instances = weakref.WeakSet()
@@ -111,8 +120,14 @@ class Nanny(ServerNode):
         self.preload_argv = preload_argv
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
-        if worker_port:
-            worker_kwargs["port"] = worker_port
+        worker_kwargs.update(
+            {
+                "port": worker_port,
+                "interface": interface,
+                "protocol": protocol,
+                "host": host,
+            }
+        )
         self.worker_kwargs = worker_kwargs
 
         self.contact_address = contact_address
@@ -153,6 +168,13 @@ class Nanny(ServerNode):
         if self.memory_limit:
             pc = PeriodicCallback(self.memory_monitor, 100, io_loop=self.loop)
             self.periodic_callbacks["memory"] = pc
+
+        if (
+            not host
+            and not interface
+            and not self.scheduler_addr.startswith("inproc://")
+        ):
+            host = get_ip(get_address_host(self.scheduler.address))
 
         self._start_address = address_from_user_args(
             host=host,
@@ -333,7 +355,7 @@ class Nanny(ServerNode):
             process.terminate()
 
     def is_alive(self):
-        return self.process is not None and self.process.status == "running"
+        return self.process is not None and self.process.is_alive()
 
     def run(self, *args, **kwargs):
         return run(self, *args, **kwargs)
@@ -379,11 +401,12 @@ class Nanny(ServerNode):
         """
         Close the worker process, stop all comms.
         """
-        while self.status == "closing":
-            yield gen.sleep(0.01)
+        if self.status == "closing":
+            yield self.finished()
+            assert self.status == "closed"
 
         if self.status == "closed":
-            raise gen.Return("OK")
+            return "OK"
 
         self.status = "closing"
         logger.info("Closing Nanny at %r", self.address)

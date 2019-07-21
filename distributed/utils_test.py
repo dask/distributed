@@ -1507,9 +1507,10 @@ def check_instances():
     _global_clients.clear()
 
     for w in Worker._instances:
-        w.close(report=False, executor_wait=False)
-        if w.status == "running":
-            w.close()
+        with ignoring(RuntimeError):  # closed IOLoop
+            w.close(report=False, executor_wait=False)
+            if w.status == "running":
+                w.close()
     Worker._instances.clear()
 
     for i in range(5):
@@ -1558,3 +1559,16 @@ def clean(threads=not WINDOWS, processes=True, instances=True, timeout=1):
 
                         with ignoring(AttributeError):
                             del thread_state.on_event_loop_thread
+
+
+@pytest.fixture
+def cleanup():
+    with check_thread_leak():
+        with check_process_leak():
+            with check_instances():
+                reset_config()
+                dask.config.set({"distributed.comm.timeouts.connect": "5s"})
+                for name, level in logging_levels.items():
+                    logging.getLogger(name).setLevel(level)
+
+                yield
