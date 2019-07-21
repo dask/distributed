@@ -491,7 +491,7 @@ def run_worker(q, scheduler_q, **kwargs):
             scheduler_addr = scheduler_q.get()
 
             async def _():
-                worker = await Worker(scheduler_addr)  # , validate=True, **kwargs)
+                worker = await Worker(scheduler_addr, validate=True, **kwargs)
                 q.put(worker.address)
                 await worker.finished()
 
