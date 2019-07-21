@@ -344,6 +344,11 @@ class Nanny(ServerNode):
         try:
             proc = psutil.Process(process.pid)
             memory = proc.memory_info().rss
+            
+            # get children
+            for p in proc.children(recursive=True):
+                memory += p.memory_info().rss
+
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return
         frac = memory / self.memory_limit
