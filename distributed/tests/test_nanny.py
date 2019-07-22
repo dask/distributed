@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 from toolz import valmap, first
 from tornado import gen
+from tornado.ioloop import IOLoop
 
 import dask
 from distributed import Nanny, rpc, Scheduler, Worker
@@ -320,7 +321,7 @@ def test_scheduler_address_config(c, s):
 def test_wait_for_scheduler():
     with captured_logger("distributed") as log:
         w = Nanny("127.0.0.1:44737")
-        w.start()
+        IOLoop.current().add_callback(w.start)
         yield gen.sleep(6)
         yield w.close()
 
