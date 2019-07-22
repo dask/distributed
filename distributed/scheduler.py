@@ -44,6 +44,7 @@ from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from . import profile
 from .metrics import time
 from .node import ServerNode
+from .preloading import preload_modules
 from .proctitle import setproctitle
 from .security import Security
 from .utils import (
@@ -843,6 +844,8 @@ class Scheduler(ServerNode):
         port=0,
         protocol=None,
         dashboard_address=None,
+        preload=None,
+        preload_argv=(),
         **kwargs
     ):
         self._setup_logging(logger)
@@ -874,6 +877,13 @@ class Scheduler(ServerNode):
             self.idle_timeout = None
         self.time_started = time()
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+
+        if not preload:
+            preload = dask.config.get("distributed.scheduler.preload")
+        if not preload_argv:
+            preload_argv = dask.config.get("distributed.scheduler.preload-argv")
+        self.preload = preload
+        self.preload_argv = preload_argv
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -1218,6 +1228,8 @@ class Scheduler(ServerNode):
                     os.remove(fn)
 
             finalize(self, del_scheduler_file)
+
+        preload_modules(self.preload, parameter=self, argv=self.preload_argv)
 
         self.start_periodic_callbacks()
 

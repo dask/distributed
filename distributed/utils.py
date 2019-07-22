@@ -220,7 +220,8 @@ async def All(args, quiet_exceptions=()):
         except quiet_exceptions:
             pass
 
-    return await asyncio.gather(*[quiet(arg) for arg in args])
+    result = await asyncio.gather(*[quiet(arg) for arg in args])
+    return result
 
 
 @gen.coroutine
