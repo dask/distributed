@@ -2,7 +2,7 @@
 Efficient serialization GPU arrays.
 """
 import cupy
-from .cuda import cuda_serialize, cuda_deserialize
+from .cuda import cuda_serialize, cuda_deserialize, cuda_host_serialize, cuda_host_deserialize
 
 
 @cuda_serialize.register(cupy.ndarray)
@@ -40,3 +40,15 @@ def deserialize_cupy_array(header, frames):
         pass
     arr = cupy.asarray(frame)
     return arr
+
+
+@cuda_host_serialize.register(cupy.ndarray)
+def serialize_cupy_host_ndarray(x):
+    header, frames = serialize_cupy_ndarray(x)
+    frame, = frames
+    return header, [frame.get()]
+
+
+@cuda_host_deserialize.register(cupy.ndarray)
+def deserialize_cupy_host_array(header, frames):
+    return deserialize_cupy_array(header, frames)
