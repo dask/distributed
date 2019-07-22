@@ -1,5 +1,7 @@
+import numpy as np
 import cudf
-from .cuda import cuda_serialize, cuda_deserialize
+from numba import cuda
+from .cuda import cuda_serialize, cuda_deserialize, cuda_host_serialize, cuda_host_deserialize
 from .numba import serialize_numba_ndarray, deserialize_numba_ndarray
 
 
@@ -47,7 +49,7 @@ def serialize_cudf_dataframe(x):
 
 
 @cuda_deserialize.register(cudf.DataFrame)
-def serialize_cudf_dataframe(header, frames):
+def deserialize_cudf_dataframe(header, frames):
     columns = header["columns"]
     n_columns = len(header["columns"])
     n_masks = len(header["null_subheaders"])
@@ -72,3 +74,17 @@ def serialize_cudf_dataframe(header, frames):
         pairs.append((name, series))
 
     return cudf.DataFrame(pairs)
+
+
+@cuda_host_serialize.register(cudf.DataFrame)
+def serialize_cudf_host_dataframe(x):
+    header, frames = serialize_cudf_dataframe(x)
+    frames = [f.copy_to_host() if isinstance(f, cuda.cudadrv.devicearray.DeviceNDArray)
+              else f for f in frames]
+    return header, frames
+
+
+@cuda_host_deserialize.register(cudf.DataFrame)
+def deserialize_cudf_host_dataframe(header, frames):
+    frames = [cuda.to_device(f) if isinstance(f, np.ndarray) else f for f in frames]
+    return deserialize_cudf_dataframe(header, frames)
