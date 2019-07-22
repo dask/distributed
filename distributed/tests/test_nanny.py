@@ -20,7 +20,13 @@ from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.utils import ignoring, tmpfile
-from distributed.utils_test import gen_cluster, gen_test, inc, captured_logger
+from distributed.utils_test import (  # noqa: F401
+    gen_cluster,
+    gen_test,
+    inc,
+    captured_logger,
+    cleanup,
+)
 
 
 @gen_cluster(nthreads=[])
@@ -380,3 +386,15 @@ def test_mp_pool_worker_no_daemon(c, s, a):
             p.map(_noop, range(world_size))
 
     yield c.submit(pool_worker, 4)
+
+
+@pytest.mark.asyncio
+async def test_nanny_closes_cleanly(cleanup):
+    async with Scheduler() as s:
+        n = await Nanny(s.address)
+        assert n.process.pid
+        proc = n.process.process
+        await n.close()
+        assert not n.process
+        assert not proc.is_alive()
+        assert proc.exitcode == 0
