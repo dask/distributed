@@ -82,7 +82,7 @@ def test_nanny_process_failure(c, s):
     pid = n.pid
     assert pid is not None
     with ignoring(CommClosedError):
-        yield c._run(os._exit, 0, workers=[n.worker_address])
+        yield c.run(os._exit, 0, workers=[n.worker_address])
 
     start = time()
     while n.pid == pid:  # wait while process dies and comes back
@@ -90,6 +90,7 @@ def test_nanny_process_failure(c, s):
         assert time() - start < 5
 
     start = time()
+    yield gen.sleep(1)
     while not n.is_alive():  # wait while process comes back
         yield gen.sleep(0.01)
         assert time() - start < 5
