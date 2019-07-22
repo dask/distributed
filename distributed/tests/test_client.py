@@ -3486,7 +3486,7 @@ def test_scatter_raises_if_no_workers(c, s):
 @pytest.mark.slow
 def test_reconnect(loop):
     w = Worker("127.0.0.1", 9393, loop=loop)
-    w.start()
+    loop.add_callback(w.start)
 
     scheduler_cli = [
         "dask-scheduler",
