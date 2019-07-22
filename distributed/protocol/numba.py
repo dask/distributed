@@ -1,5 +1,5 @@
 import numba.cuda
-from .cuda import cuda_serialize, cuda_deserialize
+from .cuda import cuda_serialize, cuda_deserialize, cuda_host_serialize, cuda_host_deserialize
 
 
 @cuda_serialize.register(numba.cuda.devicearray.DeviceNDArray)
@@ -59,3 +59,16 @@ def deserialize_numba_ndarray(header, frames):
 
     arr = numba.cuda.as_cuda_array(frame)
     return arr
+
+
+@cuda_host_serialize.register(numba.cuda.devicearray.DeviceNDArray)
+def serialize_numba_host_ndarray(x):
+    header, frames = serialize_numba_ndarray(x)
+    frame, = frames
+    return header, [frame.copy_to_host()]
+
+
+@cuda_host_deserialize.register(numba.cuda.devicearray.DeviceNDArray)
+def deserialize_numba_host_ndarray(header, frames):
+    frames = [numba.cuda.to_device(frames[0])]
+    return deserialize_numba_ndarray(header, frames)

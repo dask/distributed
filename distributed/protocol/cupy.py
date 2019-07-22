@@ -30,6 +30,7 @@ def serialize_cupy_ndarray(x):
 
 
 @cuda_deserialize.register(cupy.ndarray)
+@cuda_host_deserialize.register(cupy.ndarray)
 def deserialize_cupy_array(header, frames):
     frame, = frames
     # TODO: put this in ucx... as a kind of "fixup"
@@ -47,8 +48,3 @@ def serialize_cupy_host_ndarray(x):
     header, frames = serialize_cupy_ndarray(x)
     frame, = frames
     return header, [frame.get()]
-
-
-@cuda_host_deserialize.register(cupy.ndarray)
-def deserialize_cupy_host_array(header, frames):
-    return deserialize_cupy_array(header, frames)

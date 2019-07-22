@@ -79,6 +79,8 @@ def _register_cupy():
 
 @cuda_serialize.register_lazy("numba")
 @cuda_deserialize.register_lazy("numba")
+@cuda_host_serialize.register_lazy("numba")
+@cuda_host_deserialize.register_lazy("numba")
 def _register_numba():
     from . import numba
 
