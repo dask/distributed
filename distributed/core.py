@@ -660,10 +660,12 @@ class rpc(object):
 
         for comm in list(self.comms):
             if comm and not comm.closed():
-                IOLoop.current().add_callback(_close_comm, comm)
+                # IOLoop.current().add_callback(_close_comm, comm)
+                asyncio.ensure_future(_close_comm(comm))
         for comm in list(self._created):
             if comm and not comm.closed():
-                IOLoop.current().add_callback(_close_comm, comm)
+                # IOLoop.current().add_callback(_close_comm, comm)
+                asyncio.ensure_future(_close_comm(comm))
         self.comms.clear()
 
     def __getattr__(self, key):

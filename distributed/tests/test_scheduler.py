@@ -948,7 +948,7 @@ def test_worker_breaks_and_returns(c, s, a):
 
     yield wait(future)
 
-    a.batched_stream.comm.close()
+    yield a.batched_stream.comm.close()
 
     yield gen.sleep(0.1)
     start = time()
