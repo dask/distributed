@@ -1,3 +1,5 @@
+from functools import partial
+
 import dask
 
 from . import pickle
@@ -6,12 +8,14 @@ from dask.utils import typename
 
 cuda_serialize = dask.utils.Dispatch("cuda_serialize")
 cuda_deserialize = dask.utils.Dispatch("cuda_deserialize")
+cuda_host_serialize = dask.utils.Dispatch("cuda_serialize")
+cuda_host_deserialize = dask.utils.Dispatch("cuda_deserialize")
 
 
-def cuda_dumps(x):
+def cuda_dumps(x, dispatcher=cuda_serialize):
     type_name = typename(type(x))
     try:
-        dumps = cuda_serialize.dispatch(type(x))
+        dumps = dispatcher.dispatch(type(x))
     except TypeError:
         raise NotImplementedError(type_name)
 
@@ -24,10 +28,15 @@ def cuda_dumps(x):
     return header, frames
 
 
-def cuda_loads(header, frames):
+def cuda_loads(header, frames, dispatcher=cuda_deserialize):
     typ = pickle.loads(header["type-serialized"])
-    loads = cuda_deserialize.dispatch(typ)
+    loads = dispatcher.dispatch(typ)
     return loads(header, frames)
 
 
 register_serialization_family("cuda", cuda_dumps, cuda_loads)
+register_serialization_family(
+    "cuda_host",
+    partial(cuda_dumps, dispatcher=cuda_host_serialize),
+    partial(cuda_loads, dispatcher=cuda_host_deserialize)
+)

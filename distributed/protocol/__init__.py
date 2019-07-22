@@ -4,7 +4,7 @@ from functools import partial
 
 from .compression import compressions, default_compression
 from .core import dumps, loads, maybe_compress, decompress, msgpack
-from .cuda import cuda_serialize, cuda_deserialize
+from .cuda import cuda_serialize, cuda_deserialize, cuda_host_serialize, cuda_host_deserialize
 from .serialize import (
     serialize,
     deserialize,
@@ -71,6 +71,8 @@ def _register_torch():
 
 @cuda_serialize.register_lazy("cupy")
 @cuda_deserialize.register_lazy("cupy")
+@cuda_host_serialize.register_lazy("cupy")
+@cuda_host_deserialize.register_lazy("cupy")
 def _register_cupy():
     from . import cupy
 
