@@ -26,7 +26,7 @@ class BatchedSend(object):
 
     Example
     -------
-    >>> stream = yield connect(address)
+    >>> stream = await connect(address)
     >>> bstream = BatchedSend(interval='10 ms')
     >>> bstream.start(stream)
     >>> bstream.send('Hello,')
@@ -72,11 +72,10 @@ class BatchedSend(object):
 
     __str__ = __repr__
 
-    @gen.coroutine
-    def _background_send(self):
+    async def _background_send(self):
         while not self.please_stop:
             try:
-                yield self.waker.wait(self.next_deadline)
+                await self.waker.wait(self.next_deadline)
                 self.waker.clear()
             except gen.TimeoutError:
                 pass
@@ -91,7 +90,7 @@ class BatchedSend(object):
             self.batch_count += 1
             self.next_deadline = self.loop.time() + self.interval
             try:
-                nbytes = yield self.comm.write(
+                nbytes = await self.comm.write(
                     payload, serializers=self.serializers, on_error="raise"
                 )
                 if nbytes < 1e6:
@@ -124,24 +123,23 @@ class BatchedSend(object):
         if self.next_deadline is None:
             self.waker.set()
 
-    @gen.coroutine
-    def close(self):
+    async def close(self):
         """ Flush existing messages and then close comm """
         if self.comm is None:
             return
         self.please_stop = True
         self.waker.set()
-        yield self.stopped.wait()
+        await self.stopped.wait()
         if not self.comm.closed():
             try:
                 if self.buffer:
                     self.buffer, payload = [], self.buffer
-                    yield self.comm.write(
+                    await self.comm.write(
                         payload, serializers=self.serializers, on_error="raise"
                     )
             except CommClosedError:
                 pass
-            yield self.comm.close()
+            await self.comm.close()
 
     def abort(self):
         if self.comm is None:
