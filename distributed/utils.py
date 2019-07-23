@@ -241,8 +241,7 @@ async def All(args, quiet_exceptions=()):
     return results
 
 
-@gen.coroutine
-def Any(args, quiet_exceptions=()):
+async def Any(args, quiet_exceptions=()):
     """ Wait on many tasks at the same time and return when any is finished
 
     Err once any of the tasks err.
@@ -253,11 +252,11 @@ def Any(args, quiet_exceptions=()):
     quiet_exceptions: tuple, Exception
         Exception types to avoid logging if they fail
     """
-    tasks = gen.WaitIterator(*args)
+    tasks = gen.WaitIterator(*map(asyncio.ensure_future, args))
     results = [None for _ in args]
     while not tasks.done():
         try:
-            result = yield tasks.next()
+            result = await tasks.next()
         except Exception:
 
             @gen.coroutine
@@ -279,7 +278,7 @@ def Any(args, quiet_exceptions=()):
 
         results[tasks.current_index] = result
         break
-    raise gen.Return(results)
+    return results
 
 
 def sync(loop, func, *args, callback_timeout=None, **kwargs):

@@ -1,11 +1,11 @@
 from __future__ import print_function, division, absolute_import
 
-from operator import add
-
+import asyncio
 from collections import deque
 from concurrent.futures import CancelledError
 import gc
 import logging
+from operator import add
 import os
 import pickle
 import random
@@ -5578,7 +5578,7 @@ def test_instances(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_wait_for_workers(c, s, a, b):
-    future = c.wait_for_workers(n_workers=3)
+    future = asyncio.ensure_future(c.wait_for_workers(n_workers=3))
     yield gen.sleep(0.22)  # 2 chances
     assert not future.done()
 
