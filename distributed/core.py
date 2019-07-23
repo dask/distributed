@@ -476,6 +476,7 @@ class Server(object):
                             await gen.sleep(0)
                         else:
                             logger.error("odd message %s", msg)
+
                 for func in every_cycle:
                     func()
 
@@ -650,22 +651,26 @@ class rpc(object):
         return comm
 
     def close_comms(self):
-        async def _close_comm(comm):
+        @gen.coroutine
+        def _close_comm(comm):
             # Make sure we tell the peer to close
             try:
-                await comm.write({"op": "close", "reply": False})
-                await comm.close()
+                if not comm.closed():
+                    yield comm.write({"op": "close", "reply": False})
+                    yield comm.close()
             except EnvironmentError:
                 comm.abort()
 
         for comm in list(self.comms):
             if comm and not comm.closed():
                 # IOLoop.current().add_callback(_close_comm, comm)
-                asyncio.ensure_future(_close_comm(comm))
+                task = asyncio.ensure_future(_close_comm(comm))
+                breakpoint
         for comm in list(self._created):
             if comm and not comm.closed():
                 # IOLoop.current().add_callback(_close_comm, comm)
-                asyncio.ensure_future(_close_comm(comm))
+                task = asyncio.ensure_future(_close_comm(comm))
+                breakpoint()
         self.comms.clear()
 
     def __getattr__(self, key):

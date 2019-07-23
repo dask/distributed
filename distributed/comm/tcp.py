@@ -5,6 +5,7 @@ import logging
 import socket
 import struct
 import sys
+from tornado import gen
 
 try:
     import ssl
@@ -222,13 +223,14 @@ class TCP(Comm):
                 raise CommClosedError("aborted stream on truncated data")
             return msg
 
-    async def write(self, msg, serializers=None, on_error="message"):
+    @gen.coroutine
+    def write(self, msg, serializers=None, on_error="message"):
         stream = self.stream
         bytes_since_last_yield = 0
         if stream is None:
             raise CommClosedError
 
-        frames = await to_frames(
+        frames = yield to_frames(
             msg,
             serializers=serializers,
             on_error=on_error,
@@ -255,7 +257,7 @@ class TCP(Comm):
                     future = stream.write(frame)
                     bytes_since_last_yield += nbytes(frame)
                     if bytes_since_last_yield > 32e6:
-                        await future
+                        yield future
                         bytes_since_last_yield = 0
         except StreamClosedError as e:
             stream = None
