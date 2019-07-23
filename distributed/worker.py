@@ -969,13 +969,13 @@ class Worker(ServerNode):
 
             setproctitle("dask-worker [closing]")
 
-            await asyncio.gather(
-                *[
-                    plugin.teardown(self)
-                    for plugin in self.plugins.values()
-                    if hasattr(plugin, "teardown")
-                ]
-            )
+            teardowns = [
+                plugin.teardown(self)
+                for plugin in self.plugins.values()
+                if hasattr(plugin, "teardown")
+            ]
+
+            await asyncio.gather(*[td for td in teardowns if hasattr(td, "__await__")])
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
@@ -2191,7 +2191,7 @@ class Worker(ServerNode):
                 logger.info("Starting Worker plugin %s" % name)
                 try:
                     result = plugin.setup(worker=self)
-                    if isinstance(result, gen.Future):
+                    if hasattr(result, "__await__"):
                         result = await result
                 except Exception as e:
                     msg = error_message(e)
