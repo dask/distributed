@@ -47,6 +47,13 @@ class Process:
         self.connection.close()
         self.status = "closed"
 
+    async def logs(self):
+        try:
+            async for line in self.proc.stderr:
+                yield line
+        except asyncssh.BreakReceived:
+            pass
+
     def __repr__(self):
         return "<SSH %s: status=%s>" % (type(self).__name__, self.status)
 
