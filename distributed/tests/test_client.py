@@ -4616,9 +4616,9 @@ def test_threadsafe_get(c):
 
     from concurrent.futures import ThreadPoolExecutor
 
-    e = ThreadPoolExecutor(30)
-    results = list(e.map(f, range(30)))
-    assert results and all(results)
+    with ThreadPoolExecutor(30) as e:
+        results = list(e.map(f, range(30)))
+        assert results and all(results)
 
 
 @pytest.mark.slow
