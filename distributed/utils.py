@@ -213,15 +213,31 @@ async def All(args, quiet_exceptions=()):
     quiet_exceptions: tuple, Exception
         Exception types to avoid logging if they fail
     """
-
-    async def quiet(future):
+    tasks = gen.WaitIterator(*map(asyncio.ensure_future, args))
+    results = [None for _ in args]
+    while not tasks.done():
         try:
-            return await future
-        except quiet_exceptions:
-            pass
+            result = await tasks.next()
+        except Exception:
 
-    result = await asyncio.gather(*[quiet(arg) for arg in args])
-    return result
+            @gen.coroutine
+            def quiet():
+                """ Watch unfinished tasks
+
+                Otherwise if they err they get logged in a way that is hard to
+                control.  They need some other task to watch them so that they
+                are not orphaned
+                """
+                for task in list(tasks._unfinished):
+                    try:
+                        yield task
+                    except quiet_exceptions:
+                        pass
+
+            quiet()
+            raise
+        results[tasks.current_index] = result
+    return results
 
 
 @gen.coroutine
