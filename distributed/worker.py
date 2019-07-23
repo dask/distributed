@@ -895,7 +895,7 @@ class Worker(ServerNode):
     #############
 
     async def start(self):
-        assert self.status is None
+        assert self.status is None, self.status
 
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
@@ -961,6 +961,8 @@ class Worker(ServerNode):
                 logger.info("Stopping worker at %s", self.address)
             except ValueError:  # address not available if already closed
                 logger.info("Stopping worker")
+            if self.status != "running":
+                logger.info("Closed worker has not yet started: %s", self.status)
             self.status = "closing"
 
             if nanny and self.nanny:

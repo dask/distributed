@@ -3311,11 +3311,11 @@ def test_get_foo_lost_keys(c, s, u, v, w):
 @gen_cluster(
     client=True,
     Worker=Nanny,
-    check_new_threads=False,
     worker_kwargs={"death_timeout": "500ms"},
+    clean_kwargs={"processes": False, "threads": False},
 )
 def test_bad_tasks_fail(c, s, a, b):
-    f = c.submit(sys.exit, 1)
+    f = c.submit(sys.exit, 0)
     with pytest.raises(KilledWorker) as info:
         yield f
 
@@ -4031,7 +4031,7 @@ def test_distribute_tasks_by_nthreads(c, s, a, b):
     assert len(b.data) > 2 * len(a.data)
 
 
-@gen_cluster(client=True, check_new_threads=False)
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 def test_add_done_callback(c, s, a, b):
     S = set()
 
@@ -5498,7 +5498,7 @@ def test_released_dependencies(c, s, a, b):
         assert result == 101
 
 
-@gen_cluster(client=True, check_new_threads=False)
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 def test_profile_bokeh(c, s, a, b):
     pytest.importorskip("bokeh.plotting")
     from bokeh.model import Model

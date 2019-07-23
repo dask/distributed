@@ -861,7 +861,7 @@ def gen_cluster(
     client_kwargs={},
     active_rpc_timeout=1,
     config={},
-    check_new_threads=True,
+    clean_kwargs={},
 ):
     from distributed import Client
 
@@ -890,7 +890,7 @@ def gen_cluster(
         def test_func():
             result = None
             workers = []
-            with clean(threads=check_new_threads, timeout=active_rpc_timeout) as loop:
+            with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
 
                 @gen.coroutine
                 def coro():

@@ -470,7 +470,13 @@ class WorkerProcess(object):
         self.running = Event()
         self.stopped = Event()
         self.status = "starting"
-        await self.process.start()
+        try:
+            await self.process.start()
+        except OSError:
+            logger.exception("Nanny failed to start process", exc_info=True)
+            self.process.terminate()
+            return
+
         msg = await self._wait_until_connected(uid)
         if not msg:
             return self.status
