@@ -30,6 +30,7 @@ from .metrics import time
 from . import profile
 from .system_monitor import SystemMonitor
 from .utils import (
+    is_coroutine_function,
     get_traceback,
     truncate_exception,
     ignoring,
@@ -472,10 +473,13 @@ class Server(object):
                                 closed = True
                                 break
                             handler = self.stream_handlers[op]
-                            self.loop.add_callback(handler, **merge(extra, msg))
-                            await gen.sleep(0)
+                            if is_coroutine_function(handler):
+                                self.loop.add_callback(handler, **merge(extra, msg))
+                            else:
+                                handler(**merge(extra, msg))
                         else:
                             logger.error("odd message %s", msg)
+                    await gen.sleep(0)
 
                 for func in every_cycle:
                     func()

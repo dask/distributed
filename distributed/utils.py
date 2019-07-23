@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import asyncio
 import atexit
 from collections import deque
 from contextlib import contextmanager
@@ -1395,7 +1396,6 @@ if "asyncio" in sys.modules and tornado.version_info[0] >= 5:
         )
 
     if not jupyter_event_loop_initialized:
-        import asyncio
         import tornado.platform.asyncio
 
         asyncio.set_event_loop_policy(
@@ -1487,3 +1487,7 @@ def format_dashboard_link(host, port):
     else:
         scheme = "http"
     return template.format(scheme=scheme, host=host, port=port, **os.environ)
+
+
+def is_coroutine_function(f):
+    return asyncio.iscoroutinefunction(f) or gen.is_coroutine_function(f)
