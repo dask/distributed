@@ -399,10 +399,9 @@ def map_varying(itemslists):
     return apply, list(map(varying, itemslists))
 
 
-@gen.coroutine
-def geninc(x, delay=0.02):
-    yield gen.sleep(delay)
-    raise gen.Return(x + 1)
+async def geninc(x, delay=0.02):
+    await gen.sleep(delay)
+    return x + 1
 
 
 def compile_snippet(code, dedent=True):
@@ -429,8 +428,7 @@ else:
 _readone_queues = {}
 
 
-@gen.coroutine
-def readone(comm):
+async def readone(comm):
     """
     Read one message at a time from a comm that reads lists of
     messages.
@@ -440,11 +438,10 @@ def readone(comm):
     except KeyError:
         q = _readone_queues[comm] = queues.Queue()
 
-        @gen.coroutine
-        def background_read():
+        async def background_read():
             while True:
                 try:
-                    messages = yield comm.read()
+                    messages = await comm.read()
                 except CommClosedError:
                     break
                 for msg in messages:
@@ -454,11 +451,11 @@ def readone(comm):
 
         background_read()
 
-    msg = yield q.get()
+    msg = await q.get()
     if msg is None:
         raise CommClosedError
     else:
-        raise gen.Return(msg)
+        return msg
 
 
 def run_scheduler(q, nputs, port=0, **kwargs):
@@ -537,9 +534,8 @@ def check_active_rpc(loop, active_rpc_timeout=1):
             "some RPCs left active by test: %s" % (set(rpc.active) - active_before)
         )
 
-    @gen.coroutine
-    def wait():
-        yield async_wait_for(
+    async def wait():
+        await async_wait_for(
             lambda: len(set(rpc.active) - active_before) == 0,
             timeout=active_rpc_timeout,
             fail_func=fail,
@@ -742,23 +738,20 @@ def cluster(
         assert time() < start + 5, ("Workers still around after five seconds", text)
 
 
-@gen.coroutine
-def disconnect(addr, timeout=3, rpc_kwargs=None):
+async def disconnect(addr, timeout=3, rpc_kwargs=None):
     rpc_kwargs = rpc_kwargs or {}
 
-    @gen.coroutine
-    def do_disconnect():
+    async def do_disconnect():
         with ignoring(EnvironmentError, CommClosedError):
             with rpc(addr, **rpc_kwargs) as w:
-                yield w.terminate(close=True)
+                await w.terminate(close=True)
 
     with ignoring(TimeoutError):
-        yield gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
+        await gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
 
 
-@gen.coroutine
-def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    yield [disconnect(addr, timeout, rpc_kwargs) for addr in addresses]
+async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
+    await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
 
 
 def gen_test(timeout=10):
@@ -834,17 +827,15 @@ async def start_cluster(
     return s, workers
 
 
-@gen.coroutine
-def end_cluster(s, workers):
+async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
-    @gen.coroutine
-    def end_worker(w):
+    async def end_worker(w):
         with ignoring(TimeoutError, CommClosedError, EnvironmentError):
-            yield w.close(report=False)
+            await w.close(report=False)
 
-    yield [end_worker(w) for w in workers]
-    yield s.close()  # wait until scheduler stops completely
+    await asyncio.gather(*[end_worker(w) for w in workers])
+    await s.close()  # wait until scheduler stops completely
     s.stop()
 
 
@@ -892,13 +883,12 @@ def gen_cluster(
             workers = []
             with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
 
-                @gen.coroutine
-                def coro():
+                async def coro():
                     with dask.config.set(config):
                         s = False
                         for i in range(5):
                             try:
-                                s, ws = yield start_cluster(
+                                s, ws = await start_cluster(
                                     nthreads,
                                     scheduler,
                                     loop,
@@ -919,7 +909,7 @@ def gen_cluster(
                         if s is False:
                             raise Exception("Could not start cluster")
                         if client:
-                            c = yield Client(
+                            c = await Client(
                                 s.address,
                                 loop=loop,
                                 security=security,
@@ -933,36 +923,36 @@ def gen_cluster(
                                 future = gen.with_timeout(
                                     timedelta(seconds=timeout), future
                                 )
-                            result = yield future
+                            result = await future
                             if s.validate:
                                 s.validate_state()
                         finally:
                             if client and c.status not in ("closing", "closed"):
-                                yield c._close(fast=s.status == "closed")
-                            yield end_cluster(s, workers)
-                            yield gen.with_timeout(
+                                await c._close(fast=s.status == "closed")
+                            await end_cluster(s, workers)
+                            await gen.with_timeout(
                                 timedelta(seconds=1), cleanup_global_workers()
                             )
 
                         try:
-                            c = yield default_client()
+                            c = await default_client()
                         except ValueError:
                             pass
                         else:
-                            yield c._close(fast=True)
+                            await c._close(fast=True)
 
                         for i in range(5):
                             if all(c.closed() for c in Comm._instances):
                                 break
                             else:
-                                yield gen.sleep(0.05)
+                                await gen.sleep(0.05)
                         else:
                             L = [c for c in Comm._instances if not c.closed()]
                             Comm._instances.clear()
                             # raise ValueError("Unclosed Comms", L)
                             print("Unclosed Comms", L)
 
-                        raise gen.Return(result)
+                        return result
 
                 result = loop.run_sync(
                     coro, timeout=timeout * 2 if timeout else timeout
@@ -1076,11 +1066,10 @@ def wait_for(predicate, timeout, fail_func=None, period=0.001):
             pytest.fail("condition not reached until %s seconds" % (timeout,))
 
 
-@gen.coroutine
-def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
+async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
     deadline = time() + timeout
     while not predicate():
-        yield gen.sleep(period)
+        await gen.sleep(period)
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
@@ -1120,20 +1109,18 @@ else:
     requires_ipv6 = pytest.mark.skip("ipv6 required")
 
 
-@gen.coroutine
-def assert_can_connect(addr, timeout=None, connection_args=None):
+async def assert_can_connect(addr, timeout=None, connection_args=None):
     """
     Check that it is possible to connect to the distributed *addr*
     within the given *timeout*.
     """
     if timeout is None:
         timeout = 0.5
-    comm = yield connect(addr, timeout=timeout, connection_args=connection_args)
+    comm = await connect(addr, timeout=timeout, connection_args=connection_args)
     comm.abort()
 
 
-@gen.coroutine
-def assert_cannot_connect(
+async def assert_cannot_connect(
     addr, timeout=None, connection_args=None, exception_class=EnvironmentError
 ):
     """
@@ -1143,12 +1130,11 @@ def assert_cannot_connect(
     if timeout is None:
         timeout = 0.5
     with pytest.raises(exception_class):
-        comm = yield connect(addr, timeout=timeout, connection_args=connection_args)
+        comm = await connect(addr, timeout=timeout, connection_args=connection_args)
         comm.abort()
 
 
-@gen.coroutine
-def assert_can_connect_from_everywhere_4_6(
+async def assert_can_connect_from_everywhere_4_6(
     port, timeout=None, connection_args=None, protocol="tcp"
 ):
     """
@@ -1164,11 +1150,10 @@ def assert_can_connect_from_everywhere_4_6(
             assert_can_connect("%s://[::1]:%d" % (protocol, port), *args),
             assert_can_connect("%s://[%s]:%d" % (protocol, get_ipv6(), port), *args),
         ]
-    yield futures
+    await asyncio.gather(*futures)
 
 
-@gen.coroutine
-def assert_can_connect_from_everywhere_4(
+async def assert_can_connect_from_everywhere_4(
     port, timeout=None, connection_args=None, protocol="tcp"
 ):
     """
@@ -1184,11 +1169,10 @@ def assert_can_connect_from_everywhere_4(
             assert_cannot_connect("%s://[::1]:%d" % (protocol, port), *args),
             assert_cannot_connect("%s://[%s]:%d" % (protocol, get_ipv6(), port), *args),
         ]
-    yield futures
+    await asyncio.gather(*futures)
 
 
-@gen.coroutine
-def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
+async def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is only reachable from local IPv4 addresses.
     """
@@ -1201,11 +1185,12 @@ def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
             assert_cannot_connect("tcp://[::1]:%d" % port, *args),
             assert_cannot_connect("tcp://[%s]:%d" % (get_ipv6(), port), *args),
         ]
-    yield futures
+    await asyncio.gather(*futures)
 
 
-@gen.coroutine
-def assert_can_connect_from_everywhere_6(port, timeout=None, connection_args=None):
+async def assert_can_connect_from_everywhere_6(
+    port, timeout=None, connection_args=None
+):
     """
     Check that the local *port* is reachable from all IPv6 addresses.
     """
@@ -1217,11 +1202,10 @@ def assert_can_connect_from_everywhere_6(port, timeout=None, connection_args=Non
         assert_can_connect("tcp://[::1]:%d" % port, *args),
         assert_can_connect("tcp://[%s]:%d" % (get_ipv6(), port), *args),
     ]
-    yield futures
+    await asyncio.gather(*futures)
 
 
-@gen.coroutine
-def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
+async def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is only reachable from local IPv6 addresses.
     """
@@ -1234,7 +1218,7 @@ def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
     ]
     if get_ipv6() != "::1":  # No outside IPv6 connectivity?
         futures += [assert_cannot_connect("tcp://[%s]:%d" % (get_ipv6(), port), *args)]
-    yield futures
+    await asyncio.gather(*futures)
 
 
 @contextmanager
