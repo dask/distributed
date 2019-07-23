@@ -267,7 +267,7 @@ def test_nanny_timeout(c, s, a):
     Worker=Nanny,
     worker_kwargs={"memory_limit": 1e8},
     timeout=20,
-    check_new_threads=False,
+    clean_kwargs={"threads": False},
 )
 def test_nanny_terminate(c, s, a):
     from time import sleep
