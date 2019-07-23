@@ -5343,13 +5343,13 @@ def test_de_serialization_none(s, a, b):
 
 @gen_cluster()
 def test_client_repr_closed(s, a, b):
-    c = yield Client(s.address, asynchronous=True)
+    c = yield Client(s.address, asynchronous=True, dashboard_address=None)
     yield c.close()
     c._repr_html_()
 
 
 def test_client_repr_closed_sync(loop):
-    with Client(loop=loop, processes=False) as c:
+    with Client(loop=loop, processes=False, dashboard_address=None) as c:
         c.close()
         c._repr_html_()
 

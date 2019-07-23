@@ -876,7 +876,7 @@ def gen_cluster(
         end
     """
     if ncores is not None:
-        warnings.warn("ncores= has moved to nthreads=")
+        warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
         nthreads = ncores
 
     worker_kwargs = merge(

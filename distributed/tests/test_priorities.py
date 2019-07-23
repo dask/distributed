@@ -10,7 +10,7 @@ from distributed import wait, Worker
 from distributed.utils import tokey
 
 
-@gen_cluster(client=True, ncores=[])
+@gen_cluster(client=True, nthreads=[])
 async def test_submit(c, s):
     low = c.submit(inc, 1, priority=-1)
     futures = c.map(slowinc, range(10), delay=0.1)
@@ -21,7 +21,7 @@ async def test_submit(c, s):
         assert s.tasks[low.key].state == "processing"
 
 
-@gen_cluster(client=True, ncores=[])
+@gen_cluster(client=True, nthreads=[])
 async def test_map(c, s):
     low = c.map(inc, [1, 2, 3], priority=-1)
     futures = c.map(slowinc, range(10), delay=0.1)
