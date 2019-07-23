@@ -237,11 +237,17 @@ def main(
         )
         dashboard = bokeh
 
-    sec = Security(**{k: v for k, v in [
-                        ("tls_ca_file", tls_ca_file),
-                        ("tls_worker_cert", tls_cert),
-                        ("tls_worker_key", tls_key)
-                    ] if v is not None})
+    sec = Security(
+        **{
+            k: v
+            for k, v in [
+                ("tls_ca_file", tls_ca_file),
+                ("tls_worker_cert", tls_cert),
+                ("tls_worker_key", tls_key),
+            ]
+            if v is not None
+        }
+    )
 
     if nprocs > 1 and worker_port != 0:
         logger.error(
