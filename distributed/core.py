@@ -665,12 +665,10 @@ class rpc(object):
             if comm and not comm.closed():
                 # IOLoop.current().add_callback(_close_comm, comm)
                 task = asyncio.ensure_future(_close_comm(comm))
-                breakpoint
         for comm in list(self._created):
             if comm and not comm.closed():
                 # IOLoop.current().add_callback(_close_comm, comm)
                 task = asyncio.ensure_future(_close_comm(comm))
-                breakpoint()
         self.comms.clear()
 
     def __getattr__(self, key):
