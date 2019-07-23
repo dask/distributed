@@ -501,7 +501,8 @@ def test_memory_limit_auto():
     assert isinstance(a.memory_limit, Number)
     assert isinstance(b.memory_limit, Number)
 
-    assert a.memory_limit < b.memory_limit
+    if multiprocessing.cpu_count() > 1:
+        assert a.memory_limit < b.memory_limit
 
     assert c.memory_limit == d.memory_limit
 
