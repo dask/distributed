@@ -65,10 +65,9 @@ class QueueExtension(object):
             del self.client_refcount[name]
             futures = self.queues[name]._queue
             del self.queues[name]
-            self.scheduler.client_releases_keys(
-                keys=[d["value"] for d in futures if d["type"] == "Future"],
-                client="queue-%s" % name,
-            )
+            keys = [d["value"] for d in futures if d["type"] == "Future"]
+            if keys:
+                self.scheduler.client_releases_keys(keys=keys, client="queue-%s" % name)
 
     async def put(
         self, stream=None, name=None, key=None, data=None, client=None, timeout=None
