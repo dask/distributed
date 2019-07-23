@@ -170,9 +170,11 @@ def main(
     if port is None and (not host or not re.search(r":\d", host)):
         port = 8786
 
-    sec = Security(
-        tls_ca_file=tls_ca_file, tls_scheduler_cert=tls_cert, tls_scheduler_key=tls_key
-    )
+    sec = Security(**{k: v for k, v in [
+                        ("tls_ca_file", tls_ca_file),
+                        ("tls_scheduler_cert", tls_cert),
+                        ("tls_scheduler_key", tls_key)
+                    ] if v is not None})
 
     if not host and (tls_ca_file or tls_cert or tls_key):
         host = "tls://"
