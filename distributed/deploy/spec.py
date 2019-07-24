@@ -37,11 +37,6 @@ class ProcessInterface:
 
         return _().__await__()
 
-    @property
-    def worker_address(self):
-        """ For API compatibility with Nanny. """
-        return self.address
-
     async def start(self):
         """ Start the process. """
         self.status = "running"
@@ -368,7 +363,7 @@ class SpecCluster(Cluster):
         # TODO: this is linear cost.  We should be indexing by name or something
         to_close = [w for w in self.workers.values() if w.address in workers]
         for k, v in self.workers.items():
-            if v.worker_address in workers:
+            if getattr(v, "worker_address", v.address) in workers:
                 del self.worker_spec[k]
 
         await self
