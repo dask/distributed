@@ -10,6 +10,7 @@ from distributed.comm.registry import backends, get_backend
 from distributed.comm import ucx, parse_address
 from distributed.protocol import to_serialize
 from distributed.deploy.local import LocalCluster
+from dask.dataframe.utils import assert_eq
 from distributed.utils_test import gen_test, loop, inc  # noqa: 401
 
 from .test_comms import check_deserialize
@@ -164,21 +165,29 @@ def test_ucx_deserialize():
 
 
 @pytest.mark.asyncio
-async def test_ping_pong_cudf():
+@pytest.mark.parametrize(
+    "g",
+    [
+        lambda cudf: cudf.Series([1, 2, 3]),
+        lambda cudf: cudf.DataFrame({"A": [1, 2, None], "B": [1.0, 2.0, None]}),
+    ],
+)
+async def test_ping_pong_cudf(g):
     # if this test appears after cupy an import error arises
     # *** ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `CXXABI_1.3.11'
     # not found (required by python3.7/site-packages/pyarrow/../../../libarrow.so.12)
     cudf = pytest.importorskip("cudf")
 
-    df = cudf.DataFrame({"A": [1, 2, None], "B": [1.0, 2.0, None]})
+    cudf_obj = g(cudf)
 
     com, serv_com = await get_comm_pair()
-    msg = {"op": "ping", "data": to_serialize(df)}
+    msg = {"op": "ping", "data": to_serialize(cudf_obj)}
 
     await com.write(msg)
     result = await serv_com.read()
-    data2 = result.pop("data")
+    cudf_obj_2 = result.pop("data")
     assert result["op"] == "ping"
+    assert_eq(cudf_obj, cudf_obj_2)
 
 
 @pytest.mark.asyncio
