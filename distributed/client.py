@@ -445,6 +445,7 @@ class FutureState(object):
 
     def cancel(self):
         self.status = "cancelled"
+        self.exception = CancelledError()
         self._get_event().set()
 
     def finish(self, type=None):
