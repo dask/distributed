@@ -169,7 +169,7 @@ def test_ucx_deserialize():
     "g",
     [
         lambda cudf: cudf.Series([1, 2, 3]),
-        lambda cudf: cudf.DataFrame({"A": [1, 2, None], "B": [1.0, 2.0, None]}),
+        lambda cudf: cudf.DataFrame({"a": [1, 2, None], "b": [1.0, 2.0, None]}),
     ],
 )
 async def test_ping_pong_cudf(g):
