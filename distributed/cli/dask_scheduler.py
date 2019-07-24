@@ -75,9 +75,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--dashboard/--no-dashboard",
     "dashboard",
     default=True,
-    show_default=True,
     required=False,
-    help="Launch the Dashboard",
+    help="Launch the Dashboard [default: --dashboard]",
 )
 @click.option(
     "--bokeh/--no-bokeh",
@@ -86,7 +85,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     required=False,
     help="Deprecated.  See --dashboard/--no-dashboard.",
 )
-@click.option("--show/--no-show", default=False, show_default=True, help="Show web UI")
+@click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
     "--dashboard-prefix", type=str, default=None, help="Prefix for the dashboard app"
 )

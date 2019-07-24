@@ -73,9 +73,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--dashboard/--no-dashboard",
     "dashboard",
     default=True,
-    show_default=True,
     required=False,
-    help="Launch the Dashboard",
+    help="Launch the Dashboard [default: --dashboard]",
 )
 @click.option(
     "--bokeh/--no-bokeh",
@@ -143,14 +142,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--reconnect/--no-reconnect",
     default=True,
-    show_default=True,
-    help="Reconnect to scheduler if disconnected",
+    help="Reconnect to scheduler if disconnected [default: --reconnect]",
 )
 @click.option(
     "--nanny/--no-nanny",
     default=True,
-    show_default=True,
-    help="Start workers in nanny process for management",
+    help="Start workers in nanny process for management [default: --nanny]",
 )
 @click.option("--pid-file", type=str, default="", help="File to write the process PID")
 @click.option(
