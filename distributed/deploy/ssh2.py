@@ -89,7 +89,7 @@ class Worker(Process):
                 self.status = "running"
                 break
         logger.debug("%s", line)
-        super().start()
+        await super().start()
 
 
 class Scheduler(Process):
