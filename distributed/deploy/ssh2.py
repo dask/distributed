@@ -5,7 +5,7 @@ import weakref
 
 import asyncssh
 
-from .spec import SpecCluster, SpecProcess
+from .spec import SpecCluster, ProcessInterface
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ warnings.warn(
 )
 
 
-class Process(SpecProcess):
+class Process(ProcessInterface):
     """ A superclass for SSH Workers and Nannies
 
     See Also

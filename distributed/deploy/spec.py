@@ -11,7 +11,7 @@ from ..scheduler import Scheduler
 from ..security import Security
 
 
-class SpecProcess:
+class ProcessInterface:
     """ An interface for Scheduler and Worker processes for use in SpecCluster
 
     Parameters
