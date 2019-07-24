@@ -3216,7 +3216,7 @@ class Scheduler(ServerNode):
             if teardown:
                 teardown = pickle.loads(teardown)
             state = setup(self) if setup else None
-            if isinstance(state, gen.Future):
+            if hasattr(state, "__await__"):
                 state = await state
             try:
                 while self.status == "running":
