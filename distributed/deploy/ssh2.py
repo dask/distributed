@@ -64,7 +64,7 @@ class Worker(Process):
         self.connect_kwargs = connect_kwargs
         self.kwargs = kwargs
 
-        super().__init__(**kwargs)
+        super().__init__()
 
     async def start(self):
         self.connection = await asyncssh.connect(self.address, **self.connect_kwargs)
@@ -128,7 +128,7 @@ class Scheduler(Process):
                 self.address = line.split("Scheduler at:")[1].strip()
                 break
         logger.debug("%s", line)
-        super().start()
+        await super().start()
 
 
 def SSHCluster(hosts, connect_kwargs, **kwargs):
