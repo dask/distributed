@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import asyncio
 from collections import defaultdict
 import logging
 import uuid
@@ -58,7 +59,7 @@ class VariableExtension(object):
             pass
         else:
             if old["type"] == "Future" and old["value"] != key:
-                self.release(old["value"], name)
+                asyncio.ensure_future(self.release(old["value"], name))
         if name not in self.variables:
             self.started.notify_all()
         self.variables[name] = record
