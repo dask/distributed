@@ -1,5 +1,6 @@
 from __future__ import print_function, division, absolute_import
 
+import asyncio
 import atexit
 from collections import deque
 from contextlib import contextmanager
@@ -200,8 +201,7 @@ def ignore_exceptions(coroutines, *exceptions):
     raise gen.Return(results)
 
 
-@gen.coroutine
-def All(args, quiet_exceptions=()):
+async def All(args, quiet_exceptions=()):
     """ Wait on many tasks at the same time
 
     Err once any of the tasks err.
@@ -214,11 +214,11 @@ def All(args, quiet_exceptions=()):
     quiet_exceptions: tuple, Exception
         Exception types to avoid logging if they fail
     """
-    tasks = gen.WaitIterator(*args)
+    tasks = gen.WaitIterator(*map(asyncio.ensure_future, args))
     results = [None for _ in args]
     while not tasks.done():
         try:
-            result = yield tasks.next()
+            result = await tasks.next()
         except Exception:
 
             @gen.coroutine
@@ -237,13 +237,11 @@ def All(args, quiet_exceptions=()):
 
             quiet()
             raise
-
         results[tasks.current_index] = result
-    raise gen.Return(results)
+    return results
 
 
-@gen.coroutine
-def Any(args, quiet_exceptions=()):
+async def Any(args, quiet_exceptions=()):
     """ Wait on many tasks at the same time and return when any is finished
 
     Err once any of the tasks err.
@@ -254,11 +252,11 @@ def Any(args, quiet_exceptions=()):
     quiet_exceptions: tuple, Exception
         Exception types to avoid logging if they fail
     """
-    tasks = gen.WaitIterator(*args)
+    tasks = gen.WaitIterator(*map(asyncio.ensure_future, args))
     results = [None for _ in args]
     while not tasks.done():
         try:
-            result = yield tasks.next()
+            result = await tasks.next()
         except Exception:
 
             @gen.coroutine
@@ -280,7 +278,7 @@ def Any(args, quiet_exceptions=()):
 
         results[tasks.current_index] = result
         break
-    raise gen.Return(results)
+    return results
 
 
 def sync(loop, func, *args, callback_timeout=None, **kwargs):
@@ -1397,7 +1395,6 @@ if "asyncio" in sys.modules and tornado.version_info[0] >= 5:
         )
 
     if not jupyter_event_loop_initialized:
-        import asyncio
         import tornado.platform.asyncio
 
         asyncio.set_event_loop_policy(
@@ -1491,27 +1488,25 @@ def format_dashboard_link(host, port):
     return template.format(scheme=scheme, host=host, port=port, **os.environ)
 
 
+def is_coroutine_function(f):
+    return asyncio.iscoroutinefunction(f) or gen.is_coroutine_function(f)
+
+
 class Log(str):
     """A container for logs."""
 
-    def _widget(self):
-        from ipywidgets import HTML
-
-        return HTML(value="<pre><code>{logs}</code></pre>".format(logs=self))
-
-    def _ipython_display_(self, **kwargs):
-        return self._widget()._ipython_display_(**kwargs)
+    def _repr_html_(self):
+        return "<pre><code>{log}</code></pre>".format(log=self)
 
 
 class Logs(dict):
     """A container for multiple logs."""
 
-    def _widget(self):
-        from ipywidgets import Accordion
-
-        accordion = Accordion(children=[log._widget() for log in self.values()])
-        [accordion.set_title(i, title) for i, title in enumerate(self.keys())]
-        return accordion
-
-    def _ipython_display_(self, **kwargs):
-        return self._widget()._ipython_display_(**kwargs)
+    def _repr_html_(self):
+        summaries = [
+            "<details><summary>{title}</summary>{log}</details>".format(
+                title=title, log=log._repr_html_()
+            )
+            for title, log in self.items()
+        ]
+        return "\n".join(summaries)
