@@ -45,10 +45,6 @@ class ProcessInterface:
         """ Close the process. """
         self.status = "closed"
 
-    async def logs(self):
-        """ Generator which yeilds log messages. """
-        raise NotImplementedError()
-
     def __repr__(self):
         return "<%s: status=%s>" % (type(self).__name__, self.status)
 
