@@ -319,10 +319,10 @@ class SpecCluster(Cluster):
         workers = set(workers)
 
         for k, v in self.workers.items():
-            if v.address in workers:
+            if v.worker_address in workers:
                 del self.worker_spec[k]
 
-        self.loop.add_callback(self._correct_state)
+        await self
 
     scale_up = scale  # backwards compatibility
 
