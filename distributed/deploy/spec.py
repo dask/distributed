@@ -328,7 +328,7 @@ class SpecCluster(Cluster):
 
     scale_up = scale  # backwards compatibility
 
-    def logs(self):
+    async def _logs(self):
         async def get_logs(task):
             log = ""
             async for line in task.logs():
@@ -336,15 +336,18 @@ class SpecCluster(Cluster):
             return Log(log)
 
         scheduler_logs = {
-            "scheduler - {}".format(self.scheduler.address): self.sync(
-                get_logs, self.scheduler
+            "scheduler - {}".format(self.scheduler.address): await get_logs(
+                self.scheduler
             )
         }
         worker_logs = {
-            "worker {} - {}".format(key, worker.address): self.sync(get_logs, worker)
+            "worker {} - {}".format(key, worker.address): await get_logs(worker)
             for key, worker in self.workers.items()
         }
         return Logs({**scheduler_logs, **worker_logs})
+
+    def logs(self):
+        return self.sync(self._logs)
 
     def __repr__(self):
         return "%s(%r, workers=%d)" % (
