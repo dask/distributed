@@ -371,10 +371,9 @@ class SpecCluster(Cluster):
             len(self.workers),
         )
 
-    async def _logs(self, workers=None, nanny=False):
+    async def _logs(self, workers=None):
         scheduler, workers = await asyncio.gather(
-            self.scheduler_comm.logs(),
-            self.scheduler_comm.worker_logs(workers=workers, nanny=nanny),
+            self.scheduler_comm.logs(), self.scheduler_comm.worker_logs(workers=workers)
         )
         logs = Logs()
         logs["Scheduler"] = Log("\n".join(line for level, line in scheduler))
@@ -383,7 +382,7 @@ class SpecCluster(Cluster):
 
         return logs
 
-    def logs(self, workers=None, nanny=False):
+    def logs(self, workers=None):
         """ Return logs for the scheduler and workers
 
         Parameters
@@ -391,8 +390,6 @@ class SpecCluster(Cluster):
         workers: Iterable[str], optional
             A list of worker addresses to select.
             Defaults to all workers
-        nanny: bool, optional
-            Get the logs from the nannies rather than the workers
 
         Returns
         -------
@@ -400,7 +397,7 @@ class SpecCluster(Cluster):
             A dictionary of logs, with one item for the scheduler and one for
             each worker
         """
-        return self.sync(self._logs, workers=workers, nanny=nanny)
+        return self.sync(self._logs, workers=workers)
 
 
 @atexit.register
