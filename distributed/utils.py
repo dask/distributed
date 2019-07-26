@@ -1493,14 +1493,14 @@ def is_coroutine_function(f):
 
 
 class Log(str):
-    """A container for logs."""
+    """ A container for logs """
 
     def _repr_html_(self):
         return "<pre><code>{log}</code></pre>".format(log=self)
 
 
 class Logs(dict):
-    """A container for multiple logs."""
+    """ A container for multiple logs """
 
     def _repr_html_(self):
         summaries = [
