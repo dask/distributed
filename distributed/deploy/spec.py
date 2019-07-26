@@ -6,7 +6,7 @@ from tornado import gen
 
 from .cluster import Cluster
 from ..core import rpc, CommClosedError
-from ..utils import LoopRunner, silence_logging, ignoring, Logs, Log
+from ..utils import LoopRunner, silence_logging, ignoring
 from ..scheduler import Scheduler
 from ..security import Security
 
@@ -327,27 +327,6 @@ class SpecCluster(Cluster):
         await self
 
     scale_up = scale  # backwards compatibility
-
-    async def _logs(self):
-        async def get_logs(task):
-            log = ""
-            async for line in task.logs():
-                log += "{}\n".format(line)
-            return Log(log)
-
-        scheduler_logs = {
-            "scheduler - {}".format(self.scheduler.address): await get_logs(
-                self.scheduler
-            )
-        }
-        worker_logs = {
-            "worker {} - {}".format(key, worker.address): await get_logs(worker)
-            for key, worker in self.workers.items()
-        }
-        return Logs({**scheduler_logs, **worker_logs})
-
-    def logs(self):
-        return self.sync(self._logs)
 
     def __repr__(self):
         return "%s(%r, workers=%d)" % (
