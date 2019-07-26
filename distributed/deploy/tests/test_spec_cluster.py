@@ -174,3 +174,20 @@ async def test_spec_process():
     assert proc.status == "running"
     await proc.close()
     assert proc.status == "closed"
+
+
+@pytest.mark.asyncio
+async def test_logs(cleanup):
+    worker = {"cls": Worker, "options": {"nthreads": 1}}
+    async with SpecCluster(
+        asynchronous=True, scheduler=scheduler, worker=worker
+    ) as cluster:
+        cluster.scale(1)
+        await cluster
+
+        logs = await cluster.logs()
+        assert "Scheduler" in logs
+        for worker in cluster.scheduler.workers:
+            assert worker in logs
+
+        assert "Registered" in str(logs)
