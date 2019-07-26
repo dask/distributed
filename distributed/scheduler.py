@@ -1213,7 +1213,11 @@ class Scheduler(ServerNode):
             self.status = "running"
             logger.info("  Scheduler at: %25s", self.address)
             for k, v in self.services.items():
-                logger.info("%11s at: %25s", k, "%s:%d" % (listen_ip, v.port))
+                if hasattr(v, "server"):
+                    ip = v.server.address
+                else:
+                    ip = listen_ip
+                logger.info("%11s at: %25s", k, "%s:%d" % (ip, v.port))
 
             self.loop.add_callback(self.reevaluate_occupancy)
 
