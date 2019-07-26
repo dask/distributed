@@ -1028,6 +1028,7 @@ class Scheduler(ServerNode):
             "missing-data": self.handle_missing_data,
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
+            "heartbeat-worker": self.heartbeat_worker,
         }
 
         client_handlers = {
@@ -1073,7 +1074,6 @@ class Scheduler(ServerNode):
             "retire_workers": self.retire_workers,
             "get_metadata": self.get_metadata,
             "set_metadata": self.set_metadata,
-            "heartbeat_worker": self.heartbeat_worker,
             "get_task_status": self.get_task_status,
             "get_task_stream": self.get_task_stream,
             "register_worker_plugin": self.register_worker_plugin,
@@ -1319,18 +1319,18 @@ class Scheduler(ServerNode):
     def heartbeat_worker(
         self,
         comm=None,
-        address=None,
+        worker=None,
         resolve_address=True,
         now=None,
         resources=None,
         host_info=None,
         metrics=None,
     ):
-        address = self.coerce_address(address, resolve_address)
-        address = normalize_address(address)
-        host = get_address_host(address)
-        if address not in self.workers:
-            logger.info("Received heartbeat from removed worker: %s", address)
+        worker = self.coerce_address(worker, resolve_address)
+        worker = normalize_address(worker)
+        host = get_address_host(worker)
+        if worker not in self.workers:
+            logger.info("Received heartbeat from removed worker: %s", worker)
             return
 
         local_now = time()
@@ -1345,7 +1345,7 @@ class Scheduler(ServerNode):
         except KeyError:
             pass
 
-        ws = self.workers.get(address)
+        ws = self.workers.get(worker)
         if not ws:
             return {"status": "missing"}
 
@@ -1361,15 +1361,20 @@ class Scheduler(ServerNode):
         ws.time_delay = delay
 
         if resources:
-            self.add_resources(worker=address, resources=resources)
+            self.add_resources(worker=worker, resources=resources)
 
-        self.log_event(address, merge({"action": "heartbeat"}, metrics))
+        self.log_event(worker, merge({"action": "heartbeat"}, metrics))
 
-        return {
-            "status": "OK",
-            "time": time(),
-            "heartbeat-interval": heartbeat_interval(len(self.workers)),
-        }
+        self.worker_send(
+            worker,
+            {
+                "op": "heartbeat-response",
+                "status": "OK",
+                "start": now,
+                "end": time(),
+                "heartbeat_interval": heartbeat_interval(len(self.workers)),
+            },
+        )
 
     async def add_worker(
         self,
@@ -1431,15 +1436,6 @@ class Scheduler(ServerNode):
             self.total_nthreads += nthreads
             self.aliases[name] = address
 
-            response = self.heartbeat_worker(
-                address=address,
-                resolve_address=resolve_address,
-                now=now,
-                resources=resources,
-                host_info=host_info,
-                metrics=metrics,
-            )
-
             # Do not need to adjust self.total_occupancy as self.occupancy[ws] cannot exist before this.
             self.check_idle_saturated(ws)
 
@@ -1447,6 +1443,15 @@ class Scheduler(ServerNode):
             #     self.mark_key_in_memory(key, [address])
 
             self.stream_comms[address] = BatchedSend(interval="5ms", loop=self.loop)
+
+            self.heartbeat_worker(
+                worker=address,
+                resolve_address=resolve_address,
+                now=now,
+                resources=resources,
+                host_info=host_info,
+                metrics=metrics,
+            )
 
             if ws.nthreads > len(ws.processing):
                 self.idle.add(ws)
