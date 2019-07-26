@@ -399,7 +399,7 @@ class SpecCluster(Cluster):
         logs: Dict[str]
             A dictionary of logs, with one item for the scheduler and one for
             each worker
-       """
+        """
         return self.sync(self._logs, workers=workers, nanny=nanny)
 
 
