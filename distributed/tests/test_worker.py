@@ -1498,3 +1498,21 @@ async def test_worker_listens_on_same_interface_by_default(Worker):
         assert s.ip in {"127.0.0.1", "localhost"}
         async with Worker(s.address) as w:
             assert s.ip == w.ip
+
+
+@gen_cluster(client=True)
+async def test_close_gracefully(c, s, a, b):
+    futures = c.map(slowinc, range(200), delay=0.1)
+    while not b.data:
+        await gen.sleep(0.1)
+
+    mem = set(b.data)
+    proc = set(b.executing)
+
+    await b.close_gracefully()
+
+    assert b.status == "closed"
+    assert b.address not in s.workers
+    assert mem.issubset(set(a.data))
+    for key in proc:
+        assert s.tasks[key].state in ("processing", "memory")

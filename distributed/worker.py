@@ -1019,6 +1019,22 @@ class Worker(ServerNode):
 
             setproctitle("dask-worker [closed]")
 
+    async def close_gracefully(self):
+        """ Gracefully shut down a worker
+
+        This first informs the scheduler that we're shutting down, and asks it
+        to move our data elsewhere.  Afterwards, we close as normal
+        """
+        if self.status.startswith("closing"):
+            await self.finished()
+
+        if self.status == "closed":
+            return
+
+        self.status = "closing-gracefully"
+        await self.scheduler.retire_workers(workers=[self.address])
+        await self.close()
+
     async def terminate(self, comm, report=True):
         await self.close(report=report)
         return "OK"
@@ -1535,7 +1551,7 @@ class Worker(ServerNode):
                 if key in self.dep_state:
                     self.transition_dep(key, "memory")
 
-            if report and self.batched_stream:
+            if report and self.batched_stream and self.status == "running":
                 self.send_task_state_to_scheduler(key)
             else:
                 raise CommClosedError
@@ -2272,7 +2288,7 @@ class Worker(ServerNode):
 
     async def execute(self, key, report=False):
         executor_error = None
-        if self.status in ("closing", "closed"):
+        if self.status in ("closing", "closed", "closing-gracefully"):
             return
         try:
             if key not in self.executing or key not in self.task_state:
