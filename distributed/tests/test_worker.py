@@ -1529,3 +1529,10 @@ async def test_lifetime(cleanup):
                 await b.finished()
 
                 assert set(b.data).issubset(a.data)  # successfully moved data over
+
+
+@gen_cluster(client=True, worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
+async def test_lifetime_stagger(c, s, a, b):
+    assert a.lifetime != b.lifetime
+    assert 8 <= a.lifetime <= 12
+    assert 8 <= b.lifetime <= 12

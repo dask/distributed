@@ -253,8 +253,12 @@ class Worker(ServerNode):
     nanny: str
         Address on which to contact nanny, if it exists
     lifetime: str
-        Amount of time like "1 hr" after which we gracefully shut down the worker.
+        Amount of time like "1 hour" after which we gracefully shut down the worker.
         This defaults to None, meaning no explicit shutdown time.
+    lifetime_stagger: str
+        Amount of time like "5 minutes" to stagger the lifetime value
+        The actual lifetime will selected uniformly at random between
+        lifetime +/- lifetime_stagger
     lifetime_restart: bool
         Whether or not to restart a worker after it has reached its lifetime
         Default False
@@ -317,6 +321,7 @@ class Worker(ServerNode):
         validate=False,
         profile_cycle_interval=None,
         lifetime=None,
+        lifetime_stagger="0s",
         lifetime_restart=None,
         **kwargs
     ):
@@ -662,12 +667,18 @@ class Worker(ServerNode):
         self.lifetime = lifetime or dask.config.get(
             "distributed.worker.lifetime.duration"
         )
+        lifetime_stagger = lifetime_stagger or dask.config.get(
+            "distributed.worker.lifetime.stagger"
+        )
         self.lifetime_restart = lifetime_restart or dask.config.get(
             "distributed.worker.lifetime.restart"
         )
         if isinstance(self.lifetime, str):
             self.lifetime = parse_timedelta(self.lifetime)
+        if isinstance(lifetime_stagger, str):
+            lifetime_stagger = parse_timedelta(lifetime_stagger)
         if self.lifetime:
+            self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
             self.io_loop.call_later(self.lifetime, self.close_gracefully)
 
         Worker._instances.add(self)

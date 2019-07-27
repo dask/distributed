@@ -185,6 +185,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "the worker will restart after this time",
 )
 @click.option(
+    "--lifetime-stagger",
+    type=str,
+    default="0 seconds",
+    show_default=True,
+    help="Random amount by which to stagger lifetime values",
+)
+@click.option(
     "--lifetime-restart/--no-lifetime-restart",
     "lifetime_restart",
     default=False,
@@ -236,6 +243,7 @@ def main(
     tls_key,
     dashboard_address,
     lifetime,
+    lifetime_stagger,
     lifetime_restart,
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -390,6 +398,7 @@ def main(
             service_kwargs={"dashboard": {"prefix": dashboard_prefix}},
             name=name if nprocs == 1 or not name else name + "-" + str(i),
             lifetime=lifetime,
+            lifetime_stagger=lifetime_stagger,
             lifetime_restart=lifetime_restart,
             **kwargs
         )
