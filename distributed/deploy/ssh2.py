@@ -58,7 +58,7 @@ class Worker(Process):
     connect_kwargs: dict
         kwargs to be passed to asyncssh connections
     kwargs: dict
-        These will be happed through the dask-worker CLI to the
+        These will be passed through the dask-worker CLI to the
         dask.distributed.Worker class
     """
 
@@ -117,7 +117,7 @@ class Scheduler(Process):
     connect_kwargs: dict
         kwargs to be passed to asyncssh connections
     kwargs: dict
-        These will be happed through the dask-scheduler CLI to the
+        These will be passed through the dask-scheduler CLI to the
         dask.distributed.Scheduler class
     """
 
@@ -162,12 +162,12 @@ def SSHCluster(
         List of hostnames or addresses on which to launch our cluster
         The first will be used for the scheduler and the rest for workers
     connect_kwargs:
+        Keywords to pass through to asyncssh.connect
         known_hosts: List[str] or None
             The list of keys which will be used to validate the server host
             key presented during the SSH handshake.  If this is not specified,
             the keys will be looked up in the file .ssh/known_hosts.  If this
             is explicitly set to None, server host key validation will be disabled.
-        TODO
     scheduler_kwargs:
         Keywords to pass on to dask-scheduler
     worker_kwargs:
