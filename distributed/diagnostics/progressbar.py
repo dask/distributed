@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import logging
 from timeit import default_timer
 import sys
