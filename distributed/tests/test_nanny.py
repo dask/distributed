@@ -13,9 +13,11 @@ import pytest
 from toolz import valmap, first
 from tornado import gen
 from tornado.ioloop import IOLoop
+from tornado.locks import Event
 
 import dask
 from distributed import Nanny, rpc, Scheduler, Worker
+from distributed.diagnostics import SchedulerPlugin
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -398,3 +400,26 @@ async def test_nanny_closes_cleanly(cleanup):
         assert not n.process
         assert not proc.is_alive()
         assert proc.exitcode == 0
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_lifetime(cleanup):
+    counter = 0
+    event = Event()
+
+    class Plugin(SchedulerPlugin):
+        def add_worker(self, **kwargs):
+            pass
+
+        def remove_worker(self, **kwargs):
+            nonlocal counter
+            counter += 1
+            if counter == 2:  # wait twice, then trigger closing event
+                event.set()
+
+    async with Scheduler() as s:
+        s.add_plugin(Plugin())
+        async with Nanny(s.address) as a:
+            async with Nanny(s.address, lifetime="500 ms", lifetime_restart=True) as b:
+                await event.wait()

@@ -252,6 +252,12 @@ class Worker(ServerNode):
         Resources that this worker has like ``{'GPU': 2}``
     nanny: str
         Address on which to contact nanny, if it exists
+    lifetime: str
+        Amount of time like "1 hr" after which we gracefully shut down the worker.
+        This defaults to None, meaning no explicit shutdown time.
+    lifetime_restart: bool
+        Whether or not to restart a worker after it has reached its lifetime
+        Default False
 
     Examples
     --------
@@ -311,6 +317,7 @@ class Worker(ServerNode):
         validate=False,
         profile_cycle_interval=None,
         lifetime=None,
+        lifetime_restart=None,
         **kwargs
     ):
         self.tasks = dict()
@@ -652,7 +659,12 @@ class Worker(ServerNode):
         self.plugins = {}
         self._pending_plugins = plugins
 
-        self.lifetime = lifetime or dask.config.get("distributed.worker.lifetime")
+        self.lifetime = lifetime or dask.config.get(
+            "distributed.worker.lifetime.duration"
+        )
+        self.lifetime_restart = lifetime_restart or dask.config.get(
+            "distributed.worker.lifetime.restart"
+        )
         if isinstance(self.lifetime, str):
             self.lifetime = parse_timedelta(self.lifetime)
         if self.lifetime:
@@ -956,19 +968,22 @@ class Worker(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    async def close(self, report=True, timeout=10, nanny=True, executor_wait=True):
+    async def close(
+        self, report=True, timeout=10, nanny=True, executor_wait=True, safe=False
+    ):
         with log_errors():
             if self.status in ("closed", "closing"):
                 await self.finished()
                 return
 
+            self.reconnect = False
             disable_gc_diagnosis()
 
             try:
                 logger.info("Stopping worker at %s", self.address)
             except ValueError:  # address not available if already closed
                 logger.info("Stopping worker")
-            if self.status != "running":
+            if self.status not in ("running", "closing-gracefully"):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = "closing"
 
@@ -992,7 +1007,9 @@ class Worker(ServerNode):
                 if report:
                     await gen.with_timeout(
                         timedelta(seconds=timeout),
-                        self.scheduler.unregister(address=self.contact_address),
+                        self.scheduler.unregister(
+                            address=self.contact_address, safe=safe
+                        ),
                     )
             self.scheduler.close_rpc()
             self.actor_executor._work_queue.queue.clear()
@@ -1038,9 +1055,10 @@ class Worker(ServerNode):
         if self.status == "closed":
             return
 
+        logger.info("Closing worker gracefully: %s", self.address)
         self.status = "closing-gracefully"
-        await self.scheduler.retire_workers(workers=[self.address])
-        await self.close()
+        await self.scheduler.retire_workers(workers=[self.address], remove=False)
+        await self.close(safe=True, nanny=not self.lifetime_restart)
 
     async def terminate(self, comm, report=True):
         await self.close(report=report)

@@ -2,6 +2,7 @@ from __future__ import print_function, division, absolute_import
 
 from ..utils import ignoring
 from .graph_layout import GraphLayout
+from .plugin import SchedulerPlugin
 
 with ignoring(ImportError):
     from .progressbar import progress
