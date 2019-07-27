@@ -33,7 +33,6 @@ distributed:
         key: null
         cert: null
 
-
   worker:
     blocked-handlers: []
     multiprocessing-method: forkserver
@@ -44,6 +43,7 @@ distributed:
     preload: []
     preload-argv: []
     daemon: True
+    lifetime: null          # Time after which to gracefully shutdown the worker
 
     profile:
       interval: 10ms        # Time between statistical profiling queries

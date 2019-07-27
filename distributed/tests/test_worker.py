@@ -1516,3 +1516,16 @@ async def test_close_gracefully(c, s, a, b):
     assert mem.issubset(set(a.data))
     for key in proc:
         assert s.tasks[key].state in ("processing", "memory")
+
+
+@pytest.mark.asyncio
+async def test_lifetime(cleanup):
+    async with Scheduler() as s:
+        async with Worker(s.address) as a, Worker(s.address, lifetime="2 seconds") as b:
+            async with Client(s.address, asynchronous=True) as c:
+                futures = c.map(slowinc, range(200), delay=0.1)
+                await gen.sleep(2.5)
+                assert b.status != "running"
+                await b.finished()
+
+                assert set(b.data).issubset(a.data)  # successfully moved data over

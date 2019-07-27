@@ -310,6 +310,7 @@ class Worker(ServerNode):
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
         validate=False,
         profile_cycle_interval=None,
+        lifetime=None,
         **kwargs
     ):
         self.tasks = dict()
@@ -650,6 +651,12 @@ class Worker(ServerNode):
 
         self.plugins = {}
         self._pending_plugins = plugins
+
+        self.lifetime = lifetime or dask.config.get("distributed.worker.lifetime")
+        if isinstance(self.lifetime, str):
+            self.lifetime = parse_timedelta(self.lifetime)
+        if self.lifetime:
+            self.io_loop.call_later(self.lifetime, self.close_gracefully)
 
         Worker._instances.add(self)
 
