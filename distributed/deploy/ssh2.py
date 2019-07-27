@@ -6,6 +6,9 @@ import weakref
 import asyncssh
 
 from .spec import SpecCluster, ProcessInterface
+from ..utils import cli_keywords
+from ..scheduler import Scheduler as _Scheduler
+from ..worker import Worker as _Worker
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +61,20 @@ class Worker(Process):
         TODO
     """
 
-    def __init__(self, scheduler: str, address: str, connect_kwargs: dict, **kwargs):
+    def __init__(
+        self,
+        scheduler: str,
+        address: str,
+        connect_kwargs: dict,
+        kwargs: dict,
+        loop=None,
+        name=None,
+    ):
         self.address = address
         self.scheduler = scheduler
         self.connect_kwargs = connect_kwargs
         self.kwargs = kwargs
+        self.name = name
 
         super().__init__()
 
@@ -75,15 +87,17 @@ class Worker(Process):
                     "-m",
                     "distributed.cli.dask_worker",
                     self.scheduler,
-                    "--name",  # we need to have name for SpecCluster
-                    str(self.kwargs["name"]),
+                    "--name",
+                    str(self.name),
                 ]
+                + cli_keywords(self.kwargs, cls=_Worker)
             )
         )
 
         # We watch stderr in order to get the address, then we return
         while True:
             line = await self.proc.stderr.readline()
+            logger.info(line)
             if "worker at" in line:
                 self.address = line.split("worker at:")[1].strip()
                 self.status = "running"
@@ -105,7 +119,7 @@ class Scheduler(Process):
         TODO
     """
 
-    def __init__(self, address: str, connect_kwargs: dict, **kwargs):
+    def __init__(self, address: str, connect_kwargs: dict, kwargs: dict, loop=None):
         self.address = address
         self.kwargs = kwargs
         self.connect_kwargs = connect_kwargs
@@ -118,12 +132,16 @@ class Scheduler(Process):
         self.connection = await asyncssh.connect(self.address, **self.connect_kwargs)
 
         self.proc = await self.connection.create_process(
-            " ".join([sys.executable, "-m", "distributed.cli.dask_scheduler"])
+            " ".join(
+                [sys.executable, "-m", "distributed.cli.dask_scheduler"]
+                + cli_keywords(self.kwargs, cls=_Scheduler)
+            )
         )
 
         # We watch stderr in order to get the address, then we return
         while True:
             line = await self.proc.stderr.readline()
+            logger.info(line)
             if "Scheduler at" in line:
                 self.address = line.split("Scheduler at:")[1].strip()
                 break
@@ -131,7 +149,7 @@ class Scheduler(Process):
         await super().start()
 
 
-def SSHCluster(hosts, connect_kwargs, **kwargs):
+def SSHCluster(hosts, connect_kwargs, worker_kwargs={}, scheduler_kwargs={}, **kwargs):
     """ Deploy a Dask cluster using SSH
 
     Parameters
@@ -153,12 +171,20 @@ def SSHCluster(hosts, connect_kwargs, **kwargs):
     """
     scheduler = {
         "cls": Scheduler,
-        "options": {"address": hosts[0], "connect_kwargs": connect_kwargs},
+        "options": {
+            "address": hosts[0],
+            "connect_kwargs": connect_kwargs,
+            "kwargs": scheduler_kwargs,
+        },
     }
     workers = {
         i: {
             "cls": Worker,
-            "options": {"address": host, "connect_kwargs": connect_kwargs},
+            "options": {
+                "address": host,
+                "connect_kwargs": connect_kwargs,
+                "kwargs": worker_kwargs,
+            },
         }
         for i, host in enumerate(hosts[1:])
     }
