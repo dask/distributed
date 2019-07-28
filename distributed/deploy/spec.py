@@ -198,6 +198,8 @@ class SpecCluster(Cluster):
         if self.status == "closed":
             raise ValueError("Cluster is closed")
 
+        self._lock = asyncio.Lock()
+
         if self.scheduler_spec is None:
             try:
                 from distributed.dashboard import BokehScheduler
@@ -210,7 +212,6 @@ class SpecCluster(Cluster):
             **self.scheduler_spec.get("options", {})
         )
 
-        self._lock = asyncio.Lock()
         self.status = "starting"
         self.scheduler = await self.scheduler
         self.scheduler_comm = rpc(
