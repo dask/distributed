@@ -4969,6 +4969,9 @@ class KilledWorker(Exception):
 class WorkerStatus(SchedulerPlugin):
     """
     An extension and plugin to share worker status with a remote observer
+
+    This is used in cluster managers to keep updated about the status of the
+    scheduler.
     """
 
     def __init__(self, scheduler):

@@ -33,7 +33,7 @@ async def test_specification(cleanup):
     async with SpecCluster(
         workers=worker_spec, scheduler=scheduler, asynchronous=True
     ) as cluster:
-        assert cluster.worker_spec is worker_spec
+        assert cluster.worker_spec == worker_spec
 
         assert len(cluster.workers) == 3
         assert set(cluster.workers) == set(worker_spec)
@@ -245,3 +245,20 @@ async def test_dashboard_link(cleanup):
         asynchronous=True,
     ) as cluster:
         assert "12345" in cluster.dashboard_link
+
+
+@pytest.mark.asyncio
+async def test_widget(cleanup):
+    async with SpecCluster(
+        workers=worker_spec, scheduler=scheduler, asynchronous=True
+    ) as cluster:
+
+        start = time()  # wait for all workers
+        while len(cluster.scheduler_info["workers"]) < len(cluster.worker_spec):
+            await asyncio.sleep(0.01)
+            assert time() < start + 1
+
+        if str(len(worker_spec)) not in cluster._widget_status():
+            breakpoint()
+        assert "3" in cluster._widget_status()
+        assert "GB" in cluster._widget_status()

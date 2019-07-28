@@ -1,18 +1,22 @@
 import asyncio
 import atexit
+import copy
 import weakref
 
 from tornado import gen
+from dask.utils import format_bytes
 
 from .cluster import Cluster
 from ..comm import connect
 from ..core import rpc, CommClosedError
 from ..utils import (
+    log_errors,
     LoopRunner,
     silence_logging,
     ignoring,
     Log,
     Logs,
+    PeriodicCallback,
     format_dashboard_link,
 )
 from ..scheduler import Scheduler
@@ -159,15 +163,16 @@ class SpecCluster(Cluster):
     ):
         self._created = weakref.WeakSet()
 
-        self.scheduler_spec = scheduler
-        self.worker_spec = workers or {}
-        self.new_spec = worker
+        self.scheduler_spec = copy.copy(scheduler)
+        self.worker_spec = copy.copy(workers) or {}
+        self.new_spec = copy.copy(worker)
         self.workers = {}
         self._i = 0
         self._asynchronous = asynchronous
         self.security = security or Security()
         self.scheduler_comm = None
         self.scheduler_info = {}
+        self.periodic_callbacks = {}
 
         if silence_logs:
             self._old_logging_level = silence_logging(level=silence_logs)
@@ -326,6 +331,9 @@ class SpecCluster(Cluster):
             return
         self.status = "closing"
 
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
+
         self.scale(0)
         await self._correct_state()
         async with self._lock:
@@ -449,8 +457,111 @@ class SpecCluster(Cluster):
         except KeyError:
             return ""
         else:
-            host = self.scheduler.address.split("://")[1].split(":")[0]
+            host = self.scheduler_address.split("://")[1].split(":")[0]
             return format_dashboard_link(host, port)
+
+    def _widget_status(self):
+        workers = len(self.scheduler_info["workers"])
+        cores = sum(v["nthreads"] for v in self.scheduler_info["workers"].values())
+        memory = sum(v["memory_limit"] for v in self.scheduler_info["workers"].values())
+        memory = format_bytes(memory)
+        text = """
+<div>
+  <style scoped>
+    .dataframe tbody tr th:only-of-type {
+        vertical-align: middle;
+    }
+
+    .dataframe tbody tr th {
+        vertical-align: top;
+    }
+
+    .dataframe thead th {
+        text-align: right;
+    }
+  </style>
+  <table style="text-align: right;">
+    <tr><th>Workers</th> <td>%d</td></tr>
+    <tr><th>Cores</th> <td>%d</td></tr>
+    <tr><th>Memory</th> <td>%s</td></tr>
+  </table>
+</div>
+""" % (
+            workers,
+            cores,
+            memory,
+        )
+        return text
+
+    def _widget(self):
+        """ Create IPython widget for display within a notebook """
+        try:
+            return self._cached_widget
+        except AttributeError:
+            pass
+
+        from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion
+
+        layout = Layout(width="150px")
+
+        if self.dashboard_link:
+            link = '<p><b>Dashboard: </b><a href="%s" target="_blank">%s</a></p>\n' % (
+                self.dashboard_link,
+                self.dashboard_link,
+            )
+        else:
+            link = ""
+
+        title = "<h2>%s</h2>" % type(self).__name__
+        title = HTML(title)
+        dashboard = HTML(link)
+
+        status = HTML(self._widget_status(), layout=Layout(min_width="150px"))
+
+        request = IntText(0, description="Workers", layout=layout)
+        scale = Button(description="Scale", layout=layout)
+
+        minimum = IntText(0, description="Minimum", layout=layout)
+        maximum = IntText(0, description="Maximum", layout=layout)
+        adapt = Button(description="Adapt", layout=layout)
+
+        accordion = Accordion(
+            [HBox([request, scale]), HBox([minimum, maximum, adapt])],
+            layout=Layout(min_width="500px"),
+        )
+        accordion.selected_index = None
+        accordion.set_title(0, "Manual Scaling")
+        accordion.set_title(1, "Adaptive Scaling")
+
+        box = VBox([title, HBox([status, accordion]), dashboard])
+
+        self._cached_widget = box
+
+        def adapt_cb(b):
+            self.adapt(minimum=minimum.value, maximum=maximum.value)
+
+        adapt.on_click(adapt_cb)
+
+        def scale_cb(b):
+            with log_errors():
+                n = request.value
+                with ignoring(AttributeError):
+                    self._adaptive.stop()
+                self.scale(n)
+
+        scale.on_click(scale_cb)
+
+        def update():
+            status.value = self._widget_status()
+
+        pc = PeriodicCallback(update, 500, io_loop=self.loop)
+        self.periodic_callbacks["cluster-repr"] = pc
+        pc.start()
+
+        return box
+
+    def _ipython_display_(self, **kwargs):
+        return self._widget()._ipython_display_(**kwargs)
 
 
 @atexit.register
