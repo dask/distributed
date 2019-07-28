@@ -5,6 +5,7 @@ import weakref
 from tornado import gen
 
 from .cluster import Cluster
+from ..comm import connect
 from ..core import rpc, CommClosedError
 from ..utils import LoopRunner, silence_logging, ignoring, Log, Logs
 from ..scheduler import Scheduler
@@ -159,6 +160,7 @@ class SpecCluster(Cluster):
         self._asynchronous = asynchronous
         self.security = security or Security()
         self.scheduler_comm = None
+        self.scheduler_info = {}
 
         if silence_logs:
             self._old_logging_level = silence_logging(level=silence_logs)
@@ -203,7 +205,36 @@ class SpecCluster(Cluster):
             self.scheduler.address,
             connection_args=self.security.get_connection_args("client"),
         )
+        comm = await connect(
+            self.scheduler_address,
+            connection_args=self.security.get_connection_args("client"),
+        )
+        await comm.write({"op": "subscribe-worker-status"})
+        self.scheduler_info = await comm.read()
+        self._watch_worker_status_task = asyncio.ensure_future(
+            self._watch_worker_status(comm)
+        )
         self.status = "running"
+
+    async def _watch_worker_status(self, comm):
+        """ Listen to scheduler for updates on adding and removing workers """
+        while True:
+            try:
+                msgs = await comm.read()
+            except OSError:
+                break
+
+            for op, msg in msgs:
+                if op == "add":
+                    workers = msg.pop("workers")
+                    self.scheduler_info["workers"].update(workers)
+                    self.scheduler_info.update(msg)
+                elif op == "remove":
+                    del self.scheduler_info["workers"][msg]
+                else:
+                    raise ValueError("Invalid op", op, msg)
+
+        await comm.close()
 
     def _correct_state(self):
         if self._correct_state_waiting:
@@ -294,6 +325,7 @@ class SpecCluster(Cluster):
             with ignoring(CommClosedError):
                 await self.scheduler_comm.close(close_workers=True)
         await self.scheduler.close()
+        await self._update_worker_status_task
         for w in self._created:
             assert w.status == "closed"
         self.scheduler_comm.close_rpc()

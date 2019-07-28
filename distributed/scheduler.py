@@ -41,6 +41,7 @@ from .comm import (
 from .comm.addressing import address_from_user_args
 from .compatibility import finalize, unicode, Mapping, Set
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
+from .diagnostics.plugin import SchedulerPlugin
 from . import profile
 from .metrics import time
 from .node import ServerNode
@@ -1266,7 +1267,7 @@ class Scheduler(ServerNode):
         self.periodic_callbacks.clear()
 
         self.stop_services()
-        for ext in self.extensions:
+        for ext in self.extensions.values():
             with ignoring(AttributeError):
                 ext.teardown()
         logger.info("Scheduler closing all comms")
@@ -4963,3 +4964,49 @@ class KilledWorker(Exception):
         super(KilledWorker, self).__init__(task, last_worker)
         self.task = task
         self.last_worker = last_worker
+
+
+class WorkerStatus(SchedulerPlugin):
+    """
+    An extension and plugin to share worker status with a remote observer
+    """
+
+    def __init__(self, scheduler):
+        self.scheduler = scheduler
+        self.scheduler.add_plugin(self)
+        self.scheduler.extensions["cluster-status"] = self
+
+        self.scheduler.handlers.update(
+            {"subscribe-worker-status": self.subscribe_worker_status}
+        )
+
+        self.bcomm = BatchedSend(interval="5ms", loop=scheduler.loop)
+
+    async def subscribe_worker_status(self, comm=None):
+        self.bcomm.start(comm)
+        ident = self.scheduler.identity()
+        for v in ident["workers"].values():
+            del v["metrics"]
+            del v["last_seen"]
+        return ident
+
+    def add_worker(self, worker=None, **kwargs):
+        if self.started:
+            ident = self.scheduler.workers[worker].identity()
+            del ident["metrics"]
+            del ident["last_seen"]
+            self.bcomm.send(["add", {"workers": {worker: ident}}])
+
+    def remove_worker(self, worker=None, **kwargs):
+        if self.started:
+            self.bcomm.send(["remove", worker])
+
+    def teardown(self):
+        self.bcomm.close()
+
+    @property
+    def started(self):
+        return self.bcomm.comm is not None
+
+
+DEFAULT_EXTENSIONS.append(WorkerStatus)
