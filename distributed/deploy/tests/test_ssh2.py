@@ -20,6 +20,8 @@ async def test_basic():
             assert result == 11
         assert not cluster._supports_scaling
 
+        assert "SSH" in repr(cluster)
+
 
 @pytest.mark.asyncio
 async def test_keywords():

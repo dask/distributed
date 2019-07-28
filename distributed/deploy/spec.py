@@ -87,6 +87,8 @@ class SpecCluster(Cluster):
         async/await
     silence_logs: bool
         Whether or not we should silence logging when setting up the cluster.
+    name: str, optional
+        A name to use when printing out the cluster, defaults to type name
 
     Examples
     --------
@@ -160,6 +162,7 @@ class SpecCluster(Cluster):
         loop=None,
         security=None,
         silence_logs=False,
+        name=None,
     ):
         self._created = weakref.WeakSet()
 
@@ -183,6 +186,7 @@ class SpecCluster(Cluster):
         self.status = "created"
         self._instances.add(self)
         self._correct_state_waiting = None
+        self._name = name or type(self).__name__
 
         if not self.asynchronous:
             self._loop_runner.start()
@@ -417,7 +421,7 @@ class SpecCluster(Cluster):
 
     def __repr__(self):
         return "%s(%r, workers=%d)" % (
-            type(self).__name__,
+            self._name,
             self.scheduler_address,
             len(self.workers),
         )
