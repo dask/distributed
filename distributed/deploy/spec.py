@@ -7,7 +7,14 @@ from tornado import gen
 from .cluster import Cluster
 from ..comm import connect
 from ..core import rpc, CommClosedError
-from ..utils import LoopRunner, silence_logging, ignoring, Log, Logs
+from ..utils import (
+    LoopRunner,
+    silence_logging,
+    ignoring,
+    Log,
+    Logs,
+    format_dashboard_link,
+)
 from ..scheduler import Scheduler
 from ..security import Security
 
@@ -325,7 +332,7 @@ class SpecCluster(Cluster):
             with ignoring(CommClosedError):
                 await self.scheduler_comm.close(close_workers=True)
         await self.scheduler.close()
-        await self._update_worker_status_task
+        await self._watch_worker_status_task
         for w in self._created:
             assert w.status == "closed"
         self.scheduler_comm.close_rpc()
@@ -434,6 +441,16 @@ class SpecCluster(Cluster):
             each worker
         """
         return self.sync(self._logs, scheduler=scheduler, workers=workers)
+
+    @property
+    def dashboard_link(self):
+        try:
+            port = self.scheduler_info["services"]["dashboard"]
+        except KeyError:
+            return ""
+        else:
+            host = self.scheduler.address.split("://")[1].split(":")[0]
+            return format_dashboard_link(host, port)
 
 
 @atexit.register
