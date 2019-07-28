@@ -399,6 +399,10 @@ class SpecCluster(Cluster):
 
         return self._i, self.new_spec
 
+    @property
+    def _supports_scaling(self):
+        return not not self.new_spec
+
     async def scale_down(self, workers):
         workers = set(workers)
 
@@ -518,38 +522,41 @@ class SpecCluster(Cluster):
 
         status = HTML(self._widget_status(), layout=Layout(min_width="150px"))
 
-        request = IntText(0, description="Workers", layout=layout)
-        scale = Button(description="Scale", layout=layout)
+        if self._supports_scaling:
+            request = IntText(0, description="Workers", layout=layout)
+            scale = Button(description="Scale", layout=layout)
 
-        minimum = IntText(0, description="Minimum", layout=layout)
-        maximum = IntText(0, description="Maximum", layout=layout)
-        adapt = Button(description="Adapt", layout=layout)
+            minimum = IntText(0, description="Minimum", layout=layout)
+            maximum = IntText(0, description="Maximum", layout=layout)
+            adapt = Button(description="Adapt", layout=layout)
 
-        accordion = Accordion(
-            [HBox([request, scale]), HBox([minimum, maximum, adapt])],
-            layout=Layout(min_width="500px"),
-        )
-        accordion.selected_index = None
-        accordion.set_title(0, "Manual Scaling")
-        accordion.set_title(1, "Adaptive Scaling")
+            accordion = Accordion(
+                [HBox([request, scale]), HBox([minimum, maximum, adapt])],
+                layout=Layout(min_width="500px"),
+            )
+            accordion.selected_index = None
+            accordion.set_title(0, "Manual Scaling")
+            accordion.set_title(1, "Adaptive Scaling")
+
+            def adapt_cb(b):
+                self.adapt(minimum=minimum.value, maximum=maximum.value)
+
+            adapt.on_click(adapt_cb)
+
+            def scale_cb(b):
+                with log_errors():
+                    n = request.value
+                    with ignoring(AttributeError):
+                        self._adaptive.stop()
+                    self.scale(n)
+
+            scale.on_click(scale_cb)
+        else:
+            accordion = HTML("")
 
         box = VBox([title, HBox([status, accordion]), dashboard])
 
         self._cached_widget = box
-
-        def adapt_cb(b):
-            self.adapt(minimum=minimum.value, maximum=maximum.value)
-
-        adapt.on_click(adapt_cb)
-
-        def scale_cb(b):
-            with log_errors():
-                n = request.value
-                with ignoring(AttributeError):
-                    self._adaptive.stop()
-                self.scale(n)
-
-        scale.on_click(scale_cb)
 
         def update():
             status.value = self._widget_status()
