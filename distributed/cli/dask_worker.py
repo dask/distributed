@@ -203,7 +203,6 @@ def main(
     dashboard,
     bokeh,
     bokeh_port,
-    local_directory,
     scheduler_file,
     dashboard_prefix,
     tls_ca_file,
