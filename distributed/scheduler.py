@@ -1079,6 +1079,7 @@ class Scheduler(ServerNode):
             "register_worker_plugin": self.register_worker_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
+            "subscribe_worker_status": self.subscribe_worker_status,
         }
 
         self._transitions = {
@@ -3233,6 +3234,14 @@ class Scheduler(ServerNode):
                 if teardown:
                     teardown(self, state)
 
+    def subscribe_worker_status(self, comm=None):
+        WorkerStatusPlugin(self, comm)
+        ident = self.identity()
+        for v in ident["workers"].values():
+            del v["metrics"]
+            del v["last_seen"]
+        return ident
+
     def get_processing(self, comm=None, workers=None):
         if workers is not None:
             workers = set(map(self.coerce_address, workers))
@@ -4966,50 +4975,35 @@ class KilledWorker(Exception):
         self.last_worker = last_worker
 
 
-class WorkerStatus(SchedulerPlugin):
+class WorkerStatusPlugin(SchedulerPlugin):
     """
-    An extension and plugin to share worker status with a remote observer
+    An plugin to share worker status with a remote observer
 
     This is used in cluster managers to keep updated about the status of the
     scheduler.
     """
 
-    def __init__(self, scheduler):
+    def __init__(self, scheduler, comm):
+        self.bcomm = BatchedSend(interval="5ms")
+        self.bcomm.start(comm)
+
         self.scheduler = scheduler
         self.scheduler.add_plugin(self)
-        self.scheduler.extensions["cluster-status"] = self
-
-        self.scheduler.handlers.update(
-            {"subscribe-worker-status": self.subscribe_worker_status}
-        )
-
-        self.bcomm = BatchedSend(interval="5ms", loop=scheduler.loop)
-
-    async def subscribe_worker_status(self, comm=None):
-        self.bcomm.start(comm)
-        ident = self.scheduler.identity()
-        for v in ident["workers"].values():
-            del v["metrics"]
-            del v["last_seen"]
-        return ident
 
     def add_worker(self, worker=None, **kwargs):
-        if self.started:
-            ident = self.scheduler.workers[worker].identity()
-            del ident["metrics"]
-            del ident["last_seen"]
+        ident = self.scheduler.workers[worker].identity()
+        del ident["metrics"]
+        del ident["last_seen"]
+        try:
             self.bcomm.send(["add", {"workers": {worker: ident}}])
+        except CommClosedError:
+            self.scheduler.remove_plugin(self)
 
     def remove_worker(self, worker=None, **kwargs):
-        if self.started:
+        try:
             self.bcomm.send(["remove", worker])
+        except CommClosedError:
+            self.scheduler.remove_plugin(self)
 
     def teardown(self):
         self.bcomm.close()
-
-    @property
-    def started(self):
-        return self.bcomm.comm is not None
-
-
-DEFAULT_EXTENSIONS.append(WorkerStatus)

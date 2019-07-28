@@ -221,7 +221,7 @@ class SpecCluster(Cluster):
             self.scheduler_address,
             connection_args=self.security.get_connection_args("client"),
         )
-        await comm.write({"op": "subscribe-worker-status"})
+        await comm.write({"op": "subscribe_worker_status"})
         self.scheduler_info = await comm.read()
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)

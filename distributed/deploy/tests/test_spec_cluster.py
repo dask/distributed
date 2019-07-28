@@ -60,7 +60,7 @@ def test_spec_sync(loop):
         "my-worker": {"cls": MyWorker, "options": {"nthreads": 3}},
     }
     with SpecCluster(workers=worker_spec, scheduler=scheduler, loop=loop) as cluster:
-        assert cluster.worker_spec is worker_spec
+        assert cluster.worker_spec == worker_spec
 
         assert len(cluster.workers) == 3
         assert set(cluster.workers) == set(worker_spec)
