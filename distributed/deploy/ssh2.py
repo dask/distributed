@@ -98,6 +98,8 @@ class Worker(Process):
         # We watch stderr in order to get the address, then we return
         while True:
             line = await self.proc.stderr.readline()
+            if not line.strip():
+                raise Exception("Worker failed to start")
             logger.info(line.strip())
             if "worker at" in line:
                 self.address = line.split("worker at:")[1].strip()
@@ -143,6 +145,8 @@ class Scheduler(Process):
         # We watch stderr in order to get the address, then we return
         while True:
             line = await self.proc.stderr.readline()
+            if not line.strip():
+                raise Exception("Worker failed to start")
             logger.info(line.strip())
             if "Scheduler at" in line:
                 self.address = line.split("Scheduler at:")[1].strip()
