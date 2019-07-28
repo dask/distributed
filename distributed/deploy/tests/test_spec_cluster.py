@@ -258,7 +258,5 @@ async def test_widget(cleanup):
             await asyncio.sleep(0.01)
             assert time() < start + 1
 
-        if str(len(worker_spec)) not in cluster._widget_status():
-            breakpoint()
         assert "3" in cluster._widget_status()
         assert "GB" in cluster._widget_status()
