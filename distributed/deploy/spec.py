@@ -21,9 +21,8 @@ class ProcessInterface:
 
     """
 
-    def __init__(self, loop=None):
+    def __init__(self):
         self.address = None
-        self.loop = loop
         self.lock = asyncio.Lock()
         self.status = "created"
 
@@ -194,7 +193,7 @@ class SpecCluster(Cluster):
                 services = {("dashboard", 8787): BokehScheduler}
             self.scheduler_spec = {"cls": Scheduler, "options": {"services": services}}
         self.scheduler = self.scheduler_spec["cls"](
-            loop=self.loop, **self.scheduler_spec.get("options", {})
+            **self.scheduler_spec.get("options", {})
         )
 
         self._lock = asyncio.Lock()
