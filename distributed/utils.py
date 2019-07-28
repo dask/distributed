@@ -1540,4 +1540,12 @@ def cli_keywords(d: dict, cls=None):
                     "Class %s does not support keyword %s" % (typename(cls), k)
                 )
 
-    return sum([["--" + k.replace("_", "-"), str(v)] for k, v in d.items()], [])
+    def convert_value(v):
+        out = str(v)
+        if " " in out and "'" not in out and '"' not in out:
+            out = '"' + out + '"'
+        return out
+
+    return sum(
+        [["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()], []
+    )

@@ -26,7 +26,7 @@ async def test_keywords():
         ["127.0.0.1"] * 3,
         connect_kwargs=dict(known_hosts=None),
         asynchronous=True,
-        worker_kwargs={"nthreads": 2},
+        worker_kwargs={"nthreads": 2, "memory_limit": "2 GiB"},
         scheduler_kwargs={"idle_timeout": "5s", "port": 0},
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
