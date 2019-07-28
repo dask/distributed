@@ -228,6 +228,7 @@ class SpecCluster(Cluster):
         )
         await comm.write({"op": "subscribe_worker_status"})
         self.scheduler_info = await comm.read()
+        self._watch_worker_status_comm = comm
         self._watch_worker_status_task = asyncio.ensure_future(
             self._watch_worker_status(comm)
         )
@@ -345,6 +346,7 @@ class SpecCluster(Cluster):
             with ignoring(CommClosedError):
                 await self.scheduler_comm.close(close_workers=True)
         await self.scheduler.close()
+        await self._watch_worker_status_comm.close()
         await self._watch_worker_status_task
         for w in self._created:
             assert w.status == "closed"
