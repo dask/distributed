@@ -1,6 +1,7 @@
 import datetime
 from functools import partial
 import io
+import queue
 import socket
 import sys
 from time import sleep
@@ -13,7 +14,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
-from distributed.compatibility import Queue, Empty, PY2
 from distributed.metrics import time
 from distributed.utils import (
     All,
@@ -276,8 +276,6 @@ def test_funcname():
 
 def test_ensure_bytes():
     data = [b"1", "1", memoryview(b"1"), bytearray(b"1")]
-    if PY2:
-        data.append(buffer(b"1"))  # noqa: F821
     for d in data:
         result = ensure_bytes(d)
         assert isinstance(result, bytes)
@@ -317,7 +315,7 @@ def assert_running(loop):
     """
     Raise if the given IOLoop is not running.
     """
-    q = Queue()
+    q = queue.Queue()
     loop.add_callback(q.put, 42)
     assert q.get(timeout=1) == 42
 
@@ -326,14 +324,14 @@ def assert_not_running(loop):
     """
     Raise if the given IOLoop is running.
     """
-    q = Queue()
+    q = queue.Queue()
     try:
         loop.add_callback(q.put, 42)
     except RuntimeError:
         # On AsyncIOLoop, can't add_callback() after the loop is closed
         pass
     else:
-        with pytest.raises(Empty):
+        with pytest.raises(queue.Empty):
             q.get(timeout=0.02)
 
 

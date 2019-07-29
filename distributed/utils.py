@@ -10,13 +10,14 @@ import json
 import logging
 import multiprocessing
 from numbers import Number
-import operator
 import os
 import re
 import shutil
 import socket
 from time import sleep
-from importlib import import_module
+import importlib
+from importlib.util import cache_from_source
+import inspect
 import sys
 import tempfile
 import threading
@@ -25,8 +26,6 @@ import weakref
 import pkgutil
 import six
 import tblib.pickling_support
-
-from .compatibility import cache_from_source, getargspec, invalidate_caches, reload
 
 try:
     import resource
@@ -48,7 +47,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PY3, PY2, get_thread_identity, unicode
+from .compatibility import PYPY, WINDOWS
 from .metrics import time
 
 
@@ -64,7 +63,9 @@ no_default = "__no_default__"
 
 
 def _initialize_mp_context():
-    if PY3 and not sys.platform.startswith("win") and "PyPy" not in sys.version:
+    if WINDOWS or PYPY:
+        return multiprocessing
+    else:
         method = dask.config.get("distributed.worker.multiprocessing-method")
         ctx = multiprocessing.get_context(method)
         # Makes the test suite much faster
@@ -72,10 +73,7 @@ def _initialize_mp_context():
         if "pkg_resources" in sys.modules:
             preload.append("pkg_resources")
         ctx.set_forkserver_preload(preload)
-    else:
-        ctx = multiprocessing
-
-    return ctx
+        return ctx
 
 
 mp_context = _initialize_mp_context()
@@ -97,7 +95,7 @@ def has_arg(func, argname):
     """
     while True:
         try:
-            if argname in getargspec(func).args:
+            if argname in inspect.getfullargspec(func).args:
                 return True
         except TypeError:
             break
@@ -296,14 +294,14 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         pass
 
     e = threading.Event()
-    main_tid = get_thread_identity()
+    main_tid = threading.get_ident()
     result = [None]
     error = [False]
 
     @gen.coroutine
     def f():
         try:
-            if main_tid == get_thread_identity():
+            if main_tid == threading.get_ident():
                 raise RuntimeError("sync() called from thread of running loop")
             yield gen.moment
             thread_state.asynchronous = True
@@ -550,6 +548,7 @@ def is_kernel():
 hex_pattern = re.compile("[a-f]+")
 
 
+@functools.lru_cache(100000)
 def key_split(s):
     """
     >>> key_split('x')
@@ -604,102 +603,48 @@ def key_split(s):
         return "Other"
 
 
-try:
-    from functools import lru_cache
-except ImportError:
-    lru_cache = False
-    pass
-else:
-    key_split = lru_cache(100000)(key_split)
+def key_split_group(x):
+    """A more fine-grained version of key_split
 
-if PY3:
-
-    def key_split_group(x):
-        """A more fine-grained version of key_split
-
-        >>> key_split_group('x')
-        'x'
-        >>> key_split_group('x-1')
-        'x-1'
-        >>> key_split_group('x-1-2-3')
-        'x-1-2-3'
-        >>> key_split_group(('x-2', 1))
-        'x-2'
-        >>> key_split_group("('x-2', 1)")
-        'x-2'
-        >>> key_split_group('hello-world-1')
-        'hello-world-1'
-        >>> key_split_group(b'hello-world-1')
-        'hello-world-1'
-        >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
-        'data'
-        >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
-        'myclass'
-        >>> key_split_group(None)
-        'Other'
-        >>> key_split_group('x-abcdefab')  # ignores hex
-        'x-abcdefab'
-        """
-        typ = type(x)
-        if typ is tuple:
-            return x[0]
-        elif typ is str:
-            if x[0] == "(":
-                return x.split(",", 1)[0].strip("()\"'")
-            elif len(x) == 32 and re.match(r"[a-f0-9]{32}", x):
-                return "data"
-            elif x[0] == "<":
-                return x.strip("<>").split()[0].split(".")[-1]
-            else:
-                return x
-        elif typ is bytes:
-            return key_split_group(x.decode())
+    >>> key_split_group('x')
+    'x'
+    >>> key_split_group('x-1')
+    'x-1'
+    >>> key_split_group('x-1-2-3')
+    'x-1-2-3'
+    >>> key_split_group(('x-2', 1))
+    'x-2'
+    >>> key_split_group("('x-2', 1)")
+    'x-2'
+    >>> key_split_group('hello-world-1')
+    'hello-world-1'
+    >>> key_split_group(b'hello-world-1')
+    'hello-world-1'
+    >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
+    'data'
+    >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
+    'myclass'
+    >>> key_split_group(None)
+    'Other'
+    >>> key_split_group('x-abcdefab')  # ignores hex
+    'x-abcdefab'
+    """
+    typ = type(x)
+    if typ is tuple:
+        return x[0]
+    elif typ is str:
+        if x[0] == "(":
+            return x.split(",", 1)[0].strip("()\"'")
+        elif len(x) == 32 and re.match(r"[a-f0-9]{32}", x):
+            return "data"
+        elif x[0] == "<":
+            return x.strip("<>").split()[0].split(".")[-1]
         else:
-            return "Other"
-
-
-else:
-
-    def key_split_group(x):
-        """A more fine-grained version of key_split
-
-        >>> key_split_group('x')
-        'x'
-        >>> key_split_group('x-1')
-        'x-1'
-        >>> key_split_group('x-1-2-3')
-        'x-1-2-3'
-        >>> key_split_group(('x-2', 1))
-        'x-2'
-        >>> key_split_group("('x-2', 1)")
-        'x-2'
-        >>> key_split_group('hello-world-1')
-        'hello-world-1'
-        >>> key_split_group(b'hello-world-1')
-        'hello-world-1'
-        >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
-        'data'
-        >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
-        'myclass'
-        >>> key_split_group(None)
-        'Other'
-        >>> key_split_group('x-abcdefab')  # ignores hex
-        'x-abcdefab'
-        """
-        typ = type(x)
-        if typ is tuple:
-            return x[0]
-        elif typ is str or typ is unicode:
-            if x[0] == "(":
-                return x.split(",", 1)[0].strip("()\"'")
-            elif len(x) == 32 and re.match(r"[a-f0-9]{32}", x):
-                return "data"
-            elif x[0] == "<":
-                return x.strip("<>").split()[0].split(".")[-1]
-            else:
-                return x
-        else:
-            return "Other"
+            return x
+    elif typ is bytes:
+        return key_split_group(x.decode())
+    else:
+        return "Other"
 
 
 @contextmanager
@@ -801,14 +746,14 @@ def tokey(o):
     --------
 
     >>> tokey(b'x')
-    'x'
+    b'x'
     >>> tokey('x')
     'x'
     >>> tokey(1)
     '1'
     """
     typ = type(o)
-    if typ is unicode or typ is bytes:
+    if typ is str or typ is bytes:
         return o
     else:
         return str(o)
@@ -818,7 +763,7 @@ def validate_key(k):
     """Validate a key as received on a stream.
     """
     typ = type(k)
-    if typ is not unicode and typ is not bytes:
+    if typ is not str and typ is not bytes:
         raise TypeError("Unexpected key type %s (value: %r)" % (typ, k))
 
 
@@ -968,7 +913,7 @@ def ensure_bytes(s):
         return s
     if isinstance(s, memoryview):
         return s.tobytes()
-    if isinstance(s, bytearray) or PY2 and isinstance(s, buffer):  # noqa: F821
+    if isinstance(s, bytearray):  # noqa: F821
         return bytes(s)
     if hasattr(s, "encode"):
         return s.encode()
@@ -1073,13 +1018,13 @@ def import_file(path):
     if not names_to_import:
         logger.warning("Found nothing to import from %s", filename)
     else:
-        invalidate_caches()
+        importlib.invalidate_caches()
         if tmp_python_path is not None:
             sys.path.insert(0, tmp_python_path)
         try:
             for name in names_to_import:
                 logger.info("Reload module %s from %s file", name, ext)
-                loaded.append(reload(import_module(name)))
+                loaded.append(importlib.reload(importlib.import_module(name)))
         finally:
             if tmp_python_path is not None:
                 sys.path.remove(tmp_python_path)
@@ -1208,7 +1153,7 @@ def parse_timedelta(s, default="seconds"):
     >>> parse_timedelta('300ms')
     0.3
     >>> parse_timedelta(timedelta(seconds=3))  # also supports timedeltas
-    3
+    3.0
     """
     if s is None:
         return None
@@ -1259,32 +1204,15 @@ def asciitable(columns, rows):
     return "\n".join([bar, header, bar, data, bar])
 
 
-if PY2:
-
-    def nbytes(frame, _bytes_like=(bytes, bytearray, buffer)):  # noqa: F821
-        """ Number of bytes of a frame or memoryview """
-        if isinstance(frame, _bytes_like):
-            return len(frame)
-        elif isinstance(frame, memoryview):
-            if frame.shape is None:
-                return frame.itemsize
-            else:
-                return functools.reduce(operator.mul, frame.shape, frame.itemsize)
-        else:
+def nbytes(frame, _bytes_like=(bytes, bytearray)):
+    """ Number of bytes of a frame or memoryview """
+    if isinstance(frame, _bytes_like):
+        return len(frame)
+    else:
+        try:
             return frame.nbytes
-
-
-else:
-
-    def nbytes(frame, _bytes_like=(bytes, bytearray)):
-        """ Number of bytes of a frame or memoryview """
-        if isinstance(frame, _bytes_like):
+        except AttributeError:
             return len(frame)
-        else:
-            try:
-                return frame.nbytes
-            except AttributeError:
-                return len(frame)
 
 
 def PeriodicCallback(callback, callback_time, io_loop=None):
@@ -1400,18 +1328,9 @@ if "asyncio" in sys.modules and tornado.version_info[0] >= 5:
         )
 
 
+@functools.lru_cache(1000)
 def has_keyword(func, keyword):
-    if PY3:
-        return keyword in inspect.signature(func).parameters
-    else:
-        # https://stackoverflow.com/questions/50100498/determine-keywords-of-a-tornado-coroutine
-        if gen.is_coroutine_function(func):
-            func = func.__wrapped__
-        return keyword in inspect.getargspec(func).args
-
-
-if lru_cache:
-    has_keyword = lru_cache(1000)(has_keyword)
+    return keyword in inspect.signature(func).parameters
 
 
 # from bokeh.palettes import viridis
@@ -1508,3 +1427,42 @@ class Logs(dict):
             for title, log in self.items()
         ]
         return "\n".join(summaries)
+
+
+def cli_keywords(d: dict, cls=None):
+    """ Convert a kwargs dictionary into a list of CLI keywords
+
+    Parameters
+    ----------
+    d: dict
+        The keywords to convert
+    cls: callable
+        The callable that consumes these terms to check them for validity
+
+    Examples
+    --------
+    >>> cli_keywords({"x": 123, "save_file": "foo.txt"})
+    ['--x', '123', '--save-file', 'foo.txt']
+
+    >>> from dask.distributed import Worker
+    >>> cli_keywords({"x": 123}, Worker)
+    Traceback (most recent call last):
+    ...
+    ValueError: Class distributed.worker.Worker does not support keyword x
+    """
+    if cls:
+        for k in d:
+            if not has_keyword(cls, k):
+                raise ValueError(
+                    "Class %s does not support keyword %s" % (typename(cls), k)
+                )
+
+    def convert_value(v):
+        out = str(v)
+        if " " in out and "'" not in out and '"' not in out:
+            out = '"' + out + '"'
+        return out
+
+    return sum(
+        [["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()], []
+    )

@@ -1,6 +1,6 @@
 import asyncio
 import bisect
-from collections import defaultdict, deque
+from collections import defaultdict, deque, MutableMapping
 from datetime import timedelta
 import heapq
 import logging
@@ -33,7 +33,6 @@ from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.utils import offload
 from .comm.addressing import address_from_user_args
-from .compatibility import unicode, get_thread_identity, MutableMapping
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
 from .metrics import time
@@ -116,7 +115,7 @@ class Worker(ServerNode):
         Number of nthreads used by this worker process
     * **executor:** ``concurrent.futures.ThreadPoolExecutor``:
         Executor used to perform computation
-    * **local_dir:** ``path``:
+    * **local_directory:** ``path``:
         Path on local machine to store temporary files
     * **scheduler:** ``rpc``:
         Location of scheduler.  See ``.ip/.port`` attributes.
@@ -231,7 +230,7 @@ class Worker(ServerNode):
         The object to use for storage, builds a disk-backed LRU dict by default
     nthreads: int, optional
     loop: tornado.ioloop.IOLoop
-    local_dir: str, optional
+    local_directory: str, optional
         Directory where we place local resources
     name: str, optional
     memory_limit: int, float, string
@@ -280,6 +279,7 @@ class Worker(ServerNode):
         nthreads=None,
         loop=None,
         local_dir=None,
+        local_directory=None,
         services=None,
         service_ports=None,
         service_kwargs=None,
@@ -394,9 +394,9 @@ class Worker(ServerNode):
             ("flight", "memory"): self.transition_dep_flight_memory,
         }
 
-        self.incoming_transfer_log = deque(maxlen=(100000))
+        self.incoming_transfer_log = deque(maxlen=100000)
         self.incoming_count = 0
-        self.outgoing_transfer_log = deque(maxlen=(100000))
+        self.outgoing_transfer_log = deque(maxlen=100000)
         self.outgoing_count = 0
         self.outgoing_current_count = 0
         self.repetitively_busy = 0
@@ -455,11 +455,15 @@ class Worker(ServerNode):
         if silence_logs:
             silence_logging(level=silence_logs)
 
-        if local_dir is None:
-            local_dir = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_dir):
-                os.mkdir(local_dir)
-            local_dir = os.path.join(local_dir, "dask-worker-space")
+        if local_dir is not None:
+            warnings.warn("The local_dir keyword has moved to local_directory")
+            local_directory = local_dir
+
+        if local_directory is None:
+            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            if not os.path.exists(local_directory):
+                os.mkdir(local_directory)
+            local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
             "1s",
@@ -468,9 +472,9 @@ class Worker(ServerNode):
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
         ):
-            self._workspace = WorkSpace(os.path.abspath(local_dir))
+            self._workspace = WorkSpace(os.path.abspath(local_directory))
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
-            self.local_dir = self._workdir.dir_path
+            self.local_directory = self._workdir.dir_path
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -513,7 +517,7 @@ class Worker(ServerNode):
                 from zict import Buffer, File, Func
             except ImportError:
                 raise ImportError("Please `pip install zict` for spill-to-disk workers")
-            path = os.path.join(self.local_dir, "storage")
+            path = os.path.join(self.local_directory, "storage")
             storage = Func(
                 partial(serialize_bytelist, on_error="raise"),
                 deserialize_bytes,
@@ -543,8 +547,8 @@ class Worker(ServerNode):
         self.heartbeat_active = False
         self._ipython_kernel = None
 
-        if self.local_dir not in sys.path:
-            sys.path.insert(0, self.local_dir)
+        if self.local_directory not in sys.path:
+            sys.path.insert(0, self.local_directory)
 
         self.services = {}
         self.service_specs = services or {}
@@ -676,6 +680,12 @@ class Worker(ServerNode):
         """ For API compatibility with Nanny """
         return self.address
 
+    @property
+    def local_dir(self):
+        """ For API compatibility with Nanny """
+        warnings.warn("The local_dir attribute has moved to local_directory")
+        return self.local_directory
+
     def get_metrics(self):
         core = dict(
             executing=len(self.executing),
@@ -741,7 +751,7 @@ class Worker(ServerNode):
                         now=time(),
                         resources=self.total_resources,
                         memory_limit=self.memory_limit,
-                        local_directory=self.local_dir,
+                        local_directory=self.local_directory,
                         services=self.service_ports,
                         nanny=self.nanny,
                         pid=os.getpid(),
@@ -840,10 +850,10 @@ class Worker(ServerNode):
         return self._ipython_kernel.get_connection_info()
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
-        out_filename = os.path.join(self.local_dir, filename)
+        out_filename = os.path.join(self.local_directory, filename)
 
         def func(data):
-            if isinstance(data, unicode):
+            if isinstance(data, str):
                 data = data.encode()
             with open(out_filename, "wb") as f:
                 f.write(data)
@@ -907,7 +917,7 @@ class Worker(ServerNode):
         preload_modules(
             self.preload,
             parameter=self,
-            file_dir=self.local_dir,
+            file_dir=self.local_directory,
             argv=self.preload_argv,
         )
         # Services listen on all addresses
@@ -929,7 +939,7 @@ class Worker(ServerNode):
         logger.info("              Threads: %26d", self.nthreads)
         if self.memory_limit:
             logger.info("               Memory: %26s", format_bytes(self.memory_limit))
-        logger.info("      Local Directory: %26s", self.local_dir)
+        logger.info("      Local Directory: %26s", self.local_directory)
 
         setproctitle("dask-worker [%s]" % self.address)
 
@@ -2290,8 +2300,8 @@ class Worker(ServerNode):
                     from .actor import Actor  # TODO: create local actor
 
                     data[k] = Actor(type(self.actors[k]), self.address, k, self)
-            args2 = pack_data(args, data, key_types=(bytes, unicode))
-            kwargs2 = pack_data(kwargs, data, key_types=(bytes, unicode))
+            args2 = pack_data(args, data, key_types=(bytes, str))
+            kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
             stop = time()
             if stop - start > 0.005:
                 self.startstops[key].append(("disk-read", start, stop))
@@ -2783,7 +2793,7 @@ class Worker(ServerNode):
         --------
         get_worker
         """
-        return self.active_threads[get_thread_identity()]
+        return self.active_threads[threading.get_ident()]
 
 
 def get_worker():
@@ -2933,7 +2943,7 @@ def parse_memory_limit(memory_limit, nthreads, total_cores=multiprocessing.cpu_c
         if isinstance(memory_limit, float) and memory_limit <= 1:
             memory_limit = int(memory_limit * TOTAL_MEMORY)
 
-    if isinstance(memory_limit, (unicode, str)):
+    if isinstance(memory_limit, str):
         memory_limit = parse_bytes(memory_limit)
     else:
         memory_limit = int(memory_limit)
@@ -3133,7 +3143,7 @@ def apply_function(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = get_thread_identity()
+    ident = threading.get_ident()
     with active_threads_lock:
         active_threads[ident] = key
     thread_state.start_time = time()
@@ -3173,7 +3183,7 @@ def apply_function_actor(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = get_thread_identity()
+    ident = threading.get_ident()
 
     with active_threads_lock:
         active_threads[ident] = key

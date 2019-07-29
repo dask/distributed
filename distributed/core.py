@@ -4,6 +4,7 @@ from concurrent.futures import CancelledError
 from functools import partial
 import logging
 import six
+import threading
 import traceback
 import uuid
 import weakref
@@ -15,7 +16,6 @@ from tornado import gen
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
-from .compatibility import get_thread_identity
 from .comm import (
     connect,
     listen,
@@ -205,7 +205,7 @@ class Server(object):
         self.thread_id = 0
 
         def set_thread_ident():
-            self.thread_id = get_thread_identity()
+            self.thread_id = threading.get_ident()
 
         self.io_loop.add_callback(set_thread_ident)
 

@@ -21,9 +21,9 @@ which is included as a comment at the end of this file:
    Copyright 2001-2016 Python Software Foundation; All Rights Reserved
 """
 from . import _concurrent_futures_thread as thread
-from .compatibility import Empty
 import os
 import logging
+import queue
 import threading
 import itertools
 
@@ -49,7 +49,7 @@ def _worker(executor, work_queue):
                     break
             try:
                 task = work_queue.get(timeout=1)
-            except Empty:
+            except queue.Empty:
                 continue
             if task is not None:  # sentinel
                 task.run()

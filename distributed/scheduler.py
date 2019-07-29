@@ -1,5 +1,5 @@
 import asyncio
-from collections import defaultdict, deque, OrderedDict
+from collections import defaultdict, deque, OrderedDict, Mapping, Set
 from datetime import timedelta
 from functools import partial
 import itertools
@@ -37,8 +37,8 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import address_from_user_args
-from .compatibility import finalize, unicode, Mapping, Set
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
+from .diagnostics.plugin import SchedulerPlugin
 from . import profile
 from .metrics import time
 from .node import ServerNode
@@ -1076,6 +1076,7 @@ class Scheduler(ServerNode):
             "register_worker_plugin": self.register_worker_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
+            "subscribe_worker_status": self.subscribe_worker_status,
         }
 
         self._transitions = {
@@ -1225,7 +1226,7 @@ class Scheduler(ServerNode):
                 if os.path.exists(fn):
                     os.remove(fn)
 
-            finalize(self, del_scheduler_file)
+            weakref.finalize(self, del_scheduler_file)
 
         preload_modules(self.preload, parameter=self, argv=self.preload_argv)
 
@@ -1264,7 +1265,7 @@ class Scheduler(ServerNode):
         self.periodic_callbacks.clear()
 
         self.stop_services()
-        for ext in self.extensions:
+        for ext in self.extensions.values():
             with ignoring(AttributeError):
                 ext.teardown()
         logger.info("Scheduler closing all comms")
@@ -1641,7 +1642,7 @@ class Scheduler(ServerNode):
         for key in set(priority) & touched_keys:
             ts = self.tasks[key]
             if ts.priority is None:
-                ts.priority = (-user_priority.get(key, 0), generation, priority[key])
+                ts.priority = (-(user_priority.get(key, 0)), generation, priority[key])
 
         # Ensure all runnables have a priority
         runnables = [ts for ts in touched_tasks if ts.run_spec]
@@ -2120,7 +2121,7 @@ class Scheduler(ServerNode):
             raise ValueError("Workers not the same in all collections")
 
         for w, ws in self.workers.items():
-            assert isinstance(w, (str, unicode)), (type(w), w)
+            assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.address == w
             if not ws.processing:
@@ -3230,6 +3231,14 @@ class Scheduler(ServerNode):
                 if teardown:
                     teardown(self, state)
 
+    def subscribe_worker_status(self, comm=None):
+        WorkerStatusPlugin(self, comm)
+        ident = self.identity()
+        for v in ident["workers"].values():
+            del v["metrics"]
+            del v["last_seen"]
+        return ident
+
     def get_processing(self, comm=None, workers=None):
         if workers is not None:
             workers = set(map(self.coerce_address, workers))
@@ -3694,7 +3703,7 @@ class Scheduler(ServerNode):
         try:
             ts = self.tasks[key]
             assert worker
-            assert isinstance(worker, (str, unicode))
+            assert isinstance(worker, str)
 
             if self.validate:
                 assert ts.processing_on
@@ -4961,3 +4970,37 @@ class KilledWorker(Exception):
         super(KilledWorker, self).__init__(task, last_worker)
         self.task = task
         self.last_worker = last_worker
+
+
+class WorkerStatusPlugin(SchedulerPlugin):
+    """
+    An plugin to share worker status with a remote observer
+
+    This is used in cluster managers to keep updated about the status of the
+    scheduler.
+    """
+
+    def __init__(self, scheduler, comm):
+        self.bcomm = BatchedSend(interval="5ms")
+        self.bcomm.start(comm)
+
+        self.scheduler = scheduler
+        self.scheduler.add_plugin(self)
+
+    def add_worker(self, worker=None, **kwargs):
+        ident = self.scheduler.workers[worker].identity()
+        del ident["metrics"]
+        del ident["last_seen"]
+        try:
+            self.bcomm.send(["add", {"workers": {worker: ident}}])
+        except CommClosedError:
+            self.scheduler.remove_plugin(self)
+
+    def remove_worker(self, worker=None, **kwargs):
+        try:
+            self.bcomm.send(["remove", worker])
+        except CommClosedError:
+            self.scheduler.remove_plugin(self)
+
+    def teardown(self):
+        self.bcomm.close()
