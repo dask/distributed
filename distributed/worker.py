@@ -906,6 +906,8 @@ class Worker(ServerNode):
     #############
 
     async def start(self):
+        if self.status and self.status.startswith("clos"):
+            return
         assert self.status is None, self.status
 
         enable_gc_diagnosis()

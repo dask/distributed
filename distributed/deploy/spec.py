@@ -192,7 +192,6 @@ class SpecCluster(Cluster):
             self._loop_runner.start()
             self.sync(self._start)
             self.sync(self._correct_state)
-            self.sync(self._wait_for_workers)
 
     async def _start(self):
         while self.status == "starting":
@@ -306,7 +305,6 @@ class SpecCluster(Cluster):
             await self._correct_state()
             if self.workers:
                 await asyncio.wait(list(self.workers.values()))  # maybe there are more
-            await self._wait_for_workers()
             return self
 
         return _().__await__()
@@ -367,7 +365,6 @@ class SpecCluster(Cluster):
 
     def __enter__(self):
         self.sync(self._correct_state)
-        self.sync(self._wait_for_workers)
         assert self.status == "running"
         return self
 
