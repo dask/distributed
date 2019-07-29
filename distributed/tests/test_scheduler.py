@@ -433,11 +433,10 @@ def test_filtered_communication(s, a, b):
             "keys": ["z"],
         }
     )
-
-    msg, = yield c.read()
+    (msg,) = yield c.read()
     assert msg["op"] == "key-in-memory"
     assert msg["key"] == "y"
-    msg, = yield f.read()
+    (msg,) = yield f.read()
     assert msg["op"] == "key-in-memory"
     assert msg["key"] == "z"
 
@@ -1234,7 +1233,7 @@ def test_cancel_fire_and_forget(c, s, a, b):
     assert not s.tasks
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(client=True, Worker=Nanny, clean_kwargs={"processes": False})
 def test_log_tasks_during_restart(c, s, a, b):
     future = c.submit(sys.exit, 0)
     yield wait(future)
