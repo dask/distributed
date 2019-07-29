@@ -151,6 +151,7 @@ class Adaptive(object):
         if self.maximum is not None and len(self.cluster.workers) > self.maximum:
             kw["n"] = len(self.cluster.workers) - self.maximum
 
+        breakpoint()
         L = await self.scheduler.workers_to_close(**kw)
         if len(self.cluster.workers) - len(L) < self.minimum:
             L = L[: len(self.cluster.workers) - self.minimum]
@@ -183,48 +184,44 @@ class Adaptive(object):
             n = min(self.maximum, n)
         if self.minimum is not None:
             n = max(self.minimum, n)
-        workers = set(
-            await self.workers_to_close(
-                key=pickle.dumps(self.worker_key) if self.worker_key else None,
-                minimum=self.minimum,
-            )
-        )
+
+        else:
+            workers_to_close = []
         try:
             current = len(self.cluster.worker_spec)
         except AttributeError:
             current = len(self.cluster.workers)
-        if n > current and workers:
-            logger.info("Attempting to scale up and scale down simultaneously.")
-            self.close_counts.clear()
-            return {
-                "status": "error",
-                "msg": "Trying to scale up and down simultaneously",
-            }
 
+        if n == current:
+            self.close_counts.clear()
+            return None
         elif n > current:
             self.close_counts.clear()
             return {"status": "up", "n": n}
 
-        elif workers:
+        else:
+            workers_to_close = set(
+                await self.workers_to_close(
+                    key=pickle.dumps(self.worker_key) if self.worker_key else None,
+                    minimum=self.minimum,
+                )
+            )
             d = {}
             to_close = []
             for w, c in self.close_counts.items():
-                if w in workers:
+                if w in workers_to_close:
                     if c >= self.wait_count:
                         to_close.append(w)
                     else:
                         d[w] = c
 
-            for w in workers:
+            for w in workers_to_close:
                 d[w] = d.get(w, 0) + 1
 
             self.close_counts = d
 
             if to_close:
                 return {"status": "down", "workers": to_close}
-        else:
-            self.close_counts.clear()
-            return None
 
     async def _adapt(self):
         if self._adapting:  # Semaphore to avoid overlapping adapt calls

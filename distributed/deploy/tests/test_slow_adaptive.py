@@ -1,7 +1,8 @@
+import asyncio
 import pytest
 
 from dask.distributed import Worker, Scheduler, SpecCluster, Client
-from distributed.utils_test import cleanup  # noqa: F401
+from distributed.utils_test import slowinc, cleanup  # noqa: F401
 from distributed.metrics import time
 
 
@@ -71,3 +72,27 @@ async def test_scale_up_down(cleanup):
         cluster.scale(0)
         await cluster
         assert not cluster.worker_spec
+
+
+@pytest.mark.asyncio
+async def test_adaptive(cleanup):
+    start = time()
+    async with SpecCluster(
+        scheduler=scheduler,
+        workers={"fast": {"cls": Worker, "options": {}}},
+        worker={"cls": SlowWorker, "options": {"delay": 5}},
+        asynchronous=True,
+    ) as cluster:
+        cluster.adapt(minimum=1, maximum=4, target_duration="1s", interval="20ms")
+        async with Client(cluster, asynchronous=True) as client:
+            futures = client.map(slowinc, range(200), delay=0.1)
+
+            while len(cluster.worker_spec) <= 1:
+                await asyncio.sleep(0.05)
+
+            del futures
+
+            while len(cluster.worker_spec) > 1:
+                await asyncio.sleep(0.05)
+
+            assert list(cluster.worker_spec) == ["fast"]
