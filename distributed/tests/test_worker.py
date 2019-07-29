@@ -1518,13 +1518,14 @@ async def test_close_gracefully(c, s, a, b):
         assert s.tasks[key].state in ("processing", "memory")
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_lifetime(cleanup):
     async with Scheduler() as s:
-        async with Worker(s.address) as a, Worker(s.address, lifetime="2 seconds") as b:
+        async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
             async with Client(s.address, asynchronous=True) as c:
                 futures = c.map(slowinc, range(200), delay=0.1)
-                await gen.sleep(2.5)
+                await gen.sleep(1.5)
                 assert b.status != "running"
                 await b.finished()
 
