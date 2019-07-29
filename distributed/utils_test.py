@@ -32,6 +32,7 @@ except ImportError:
     ssl = None
 
 import pytest
+import numpy as np
 import six
 
 import dask
@@ -1563,3 +1564,23 @@ def cleanup():
                     logging.getLogger(name).setLevel(level)
 
                 yield
+
+
+@gen.coroutine
+def wait_for_heartbeat(scheduler, *workers):
+    # Get scheduler-worker streams
+    scheduler_worker_streams = [scheduler.stream_comms[w.address] for w in workers]
+    # Amount of data passed through stream at that point in time
+    init_batch_counts = np.array(
+        [stream.batch_count for stream in scheduler_worker_streams]
+    )
+    # Wait for heartbeats to be executed from workers
+    yield [w.heartbeat() for w in workers]
+    # Sleep so that the scheduler has time to process the heartbeat messages
+    max_interval = max([stream.interval for stream in scheduler_worker_streams])
+    yield gen.sleep(max_interval * (1 + 0.01 * len(workers)))
+    # Check new (heartbeat) messages have arrived at scheduler
+    latest_batch_counts = np.array(
+        [stream.batch_count for stream in scheduler_worker_streams]
+    )
+    assert all(init_batch_counts < latest_batch_counts)

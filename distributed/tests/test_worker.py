@@ -48,6 +48,7 @@ from distributed.utils_test import (  # noqa: F401
     slowinc,
     gen_test,
     captured_logger,
+    wait_for_heartbeat,
 )
 from distributed.utils_test import (  # noqa: F401
     client,
@@ -1036,7 +1037,7 @@ def test_scheduler_delay(c, s, a, b):
     old = a.scheduler_delay
     assert abs(a.scheduler_delay) < 0.3
     assert abs(b.scheduler_delay) < 0.3
-    yield gen.sleep(a.periodic_callbacks["heartbeat"].callback_time / 1000 + 0.3)
+    yield wait_for_heartbeat(s, a, b)
     assert a.scheduler_delay != old
 
 

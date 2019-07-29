@@ -17,7 +17,15 @@ from dask.core import flatten
 from distributed.utils import tokey, format_dashboard_link
 from distributed.client import wait
 from distributed.metrics import time
-from distributed.utils_test import gen_cluster, inc, dec, slowinc, div, get_cert
+from distributed.utils_test import (
+    gen_cluster,
+    inc,
+    dec,
+    slowinc,
+    div,
+    get_cert,
+    wait_for_heartbeat,
+)
 from distributed.dashboard.worker import Counters, BokehWorker
 from distributed.dashboard.scheduler import (
     BokehScheduler,
@@ -340,7 +348,7 @@ def test_WorkerTable_custom_metrics(c, s, a, b):
         for name, func in metrics.items():
             w.metrics[name] = func
 
-    yield [a.heartbeat(), b.heartbeat()]
+    yield wait_for_heartbeat(s, a, b)
 
     for w in [a, b]:
         assert s.workers[w.address].metrics["metric_port"] == w.port
@@ -367,7 +375,7 @@ def test_WorkerTable_different_metrics(c, s, a, b):
 
     a.metrics["metric_a"] = metric_port
     b.metrics["metric_b"] = metric_port
-    yield [a.heartbeat(), b.heartbeat()]
+    yield wait_for_heartbeat(s, a, b)
 
     assert s.workers[a.address].metrics["metric_a"] == a.port
     assert s.workers[b.address].metrics["metric_b"] == b.port
@@ -391,7 +399,7 @@ def test_WorkerTable_metrics_with_different_metric_2(c, s, a, b):
         return worker.port
 
     a.metrics["metric_a"] = metric_port
-    yield [a.heartbeat(), b.heartbeat()]
+    yield wait_for_heartbeat(s, a, b)
 
     wt = WorkerTable(s)
     wt.update()
@@ -411,7 +419,7 @@ def test_WorkerTable_add_and_remove_metrics(c, s, a, b):
 
     a.metrics["metric_a"] = metric_port
     b.metrics["metric_b"] = metric_port
-    yield [a.heartbeat(), b.heartbeat()]
+    yield wait_for_heartbeat(s, a, b)
 
     assert s.workers[a.address].metrics["metric_a"] == a.port
     assert s.workers[b.address].metrics["metric_b"] == b.port
@@ -423,14 +431,14 @@ def test_WorkerTable_add_and_remove_metrics(c, s, a, b):
 
     # Remove 'metric_b' from worker b
     del b.metrics["metric_b"]
-    yield [a.heartbeat(), b.heartbeat()]
+    yield wait_for_heartbeat(s, a, b)
 
     wt = WorkerTable(s)
     wt.update()
     assert "metric_a" in wt.source.data
 
     del a.metrics["metric_a"]
-    yield [a.heartbeat(), b.heartbeat()]
+    yield wait_for_heartbeat(s, a, b)
 
     wt = WorkerTable(s)
     wt.update()
@@ -445,7 +453,7 @@ def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
     a.metrics["executing"] = metric
     a.metrics["cpu"] = metric
     a.metrics["metric"] = metric
-    yield [a.heartbeat(), b.heartbeat()]
+    yield wait_for_heartbeat(s, a, b)
 
     assert s.workers[a.address].metrics["executing"] != -999
     assert s.workers[a.address].metrics["cpu"] != -999

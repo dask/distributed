@@ -36,6 +36,7 @@ from distributed.utils_test import (  # noqa: F401
     cluster,
     div,
     varying,
+    wait_for_heartbeat,
 )
 from distributed.utils_test import loop, nodebug  # noqa: F401
 from dask.compatibility import apply
@@ -1509,7 +1510,7 @@ def test_bandwidth(c, s, a, b):
     x = c.submit(operator.mul, b"0", 20000, workers=a.address)
     y = c.submit(lambda x: x, x, workers=b.address)
     yield y
-    yield b.heartbeat()
+    yield wait_for_heartbeat(s, b)
     assert s.bandwidth < start  # we've learned that we're slower
     assert b.latency
 
