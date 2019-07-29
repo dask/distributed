@@ -50,3 +50,24 @@ async def test_startup(cleanup):
 
         async with Client(cluster, asynchronous=True) as client:
             await client.wait_for_workers(n_workers=2)
+
+
+@pytest.mark.asyncio
+async def test_scale_up_down(cleanup):
+    start = time()
+    async with SpecCluster(
+        scheduler=scheduler,
+        workers={
+            "slow": {"cls": SlowWorker, "options": {"delay": 5}},
+            "fast": {"cls": Worker, "options": {}},
+        },
+        asynchronous=True,
+    ) as cluster:
+        cluster.scale(1)  # remove a worker, hopefully the one we don't have
+        await cluster
+
+        assert list(cluster.worker_spec) == ["fast"]
+
+        cluster.scale(0)
+        await cluster
+        assert not cluster.worker_spec

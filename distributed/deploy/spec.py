@@ -373,6 +373,13 @@ class SpecCluster(Cluster):
         self._loop_runner.stop()
 
     def scale(self, n):
+        if len(self.worker_spec) > n:
+            not_yet_launched = set(self.worker_spec) - {
+                v["name"] for v in self.scheduler_info["workers"].values()
+            }
+            while len(self.worker_spec) > n and not_yet_launched:
+                del self.worker_spec[not_yet_launched.pop()]
+
         while len(self.worker_spec) > n:
             self.worker_spec.popitem()
 
