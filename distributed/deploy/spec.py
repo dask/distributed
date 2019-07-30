@@ -477,6 +477,7 @@ class SpecCluster(Cluster):
 
     def _widget_status(self):
         workers = len(self.scheduler_info["workers"])
+        requested = len(self.worker_spec)
         cores = sum(v["nthreads"] for v in self.scheduler_info["workers"].values())
         memory = sum(v["memory_limit"] for v in self.scheduler_info["workers"].values())
         memory = format_bytes(memory)
@@ -496,13 +497,13 @@ class SpecCluster(Cluster):
     }
   </style>
   <table style="text-align: right;">
-    <tr><th>Workers</th> <td>%d</td></tr>
+    <tr><th>Workers</th> <td>%s</td></tr>
     <tr><th>Cores</th> <td>%d</td></tr>
     <tr><th>Memory</th> <td>%s</td></tr>
   </table>
 </div>
 """ % (
-            workers,
+            workers if workers == requested else "%d / %d" % (workers, requested),
             cores,
             memory,
         )
@@ -551,6 +552,7 @@ class SpecCluster(Cluster):
 
             def adapt_cb(b):
                 self.adapt(minimum=minimum.value, maximum=maximum.value)
+                update()
 
             adapt.on_click(adapt_cb)
 
@@ -560,6 +562,7 @@ class SpecCluster(Cluster):
                     with ignoring(AttributeError):
                         self._adaptive.stop()
                     self.scale(n)
+                    update()
 
             scale.on_click(scale_cb)
         else:
