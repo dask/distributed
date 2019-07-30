@@ -139,14 +139,17 @@ class Adaptive(AdaptiveCore):
         return await self.scheduler.workers_to_close(
             target=target,
             key=pickle.dumps(self.worker_key) if self.worker_key else None,
+            attribute="name",
             **self._workers_to_close_kwargs
         )
 
     async def scale_down(self, workers):
+        if not workers:
+            return
         with log_errors():
             # Ask scheduler to cleanly retire workers
             await self.scheduler.retire_workers(
-                workers=workers, remove=True, close_workers=True
+                names=workers, remove=True, close_workers=True
             )
 
             # close workers more forcefully

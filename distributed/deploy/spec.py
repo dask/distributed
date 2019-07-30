@@ -415,12 +415,9 @@ class SpecCluster(Cluster):
         return not not self.new_spec
 
     async def scale_down(self, workers):
-        workers = set(workers)
-
-        for k, v in self.workers.items():
-            if getattr(v, "worker_address", v.address) in workers:
-                del self.worker_spec[k]
-
+        for w in workers:
+            if w in self.worker_spec:
+                del self.worker_spec[w]
         await self
 
     scale_up = scale  # backwards compatibility
