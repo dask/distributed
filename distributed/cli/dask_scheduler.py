@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import atexit
 import logging
 import gc
@@ -67,15 +65,15 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--dashboard-address",
     type=str,
     default=":8787",
+    show_default=True,
     help="Address on which to listen for diagnostics dashboard",
 )
 @click.option(
     "--dashboard/--no-dashboard",
     "dashboard",
     default=True,
-    show_default=True,
     required=False,
-    help="Launch the Dashboard",
+    help="Launch the Dashboard [default: --dashboard]",
 )
 @click.option(
     "--bokeh/--no-bokeh",
@@ -84,7 +82,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     required=False,
     help="Deprecated.  See --dashboard/--no-dashboard.",
 )
-@click.option("--show/--no-show", default=False, help="Show web UI")
+@click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
     "--dashboard-prefix", type=str, default=None, help="Prefix for the dashboard app"
 )

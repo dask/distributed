@@ -1,4 +1,3 @@
-from __future__ import print_function, division, absolute_import
 from functools import partial
 import traceback
 
@@ -13,7 +12,6 @@ except ImportError:
 import msgpack
 
 from . import pickle
-from ..compatibility import PY2
 from ..utils import has_keyword, typename
 from .compression import maybe_compress, decompress
 from .utils import (
@@ -376,8 +374,6 @@ def serialize_bytelist(x, **kwargs):
 
 def serialize_bytes(x, **kwargs):
     L = serialize_bytelist(x, **kwargs)
-    if PY2:
-        L = [bytes(y) for y in L]
     return b"".join(L)
 
 

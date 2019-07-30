@@ -1,8 +1,6 @@
-from __future__ import print_function, division, absolute_import
-
 import asyncio
 import bisect
-from collections import defaultdict, deque
+from collections import defaultdict, deque, MutableMapping
 from datetime import timedelta
 import heapq
 import logging
@@ -35,7 +33,6 @@ from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.utils import offload
 from .comm.addressing import address_from_user_args
-from .compatibility import unicode, get_thread_identity, MutableMapping
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
 from .metrics import time
@@ -591,7 +588,7 @@ class Worker(ServerNode):
             "get_data": self.get_data,
             "update_data": self.update_data,
             "delete_data": self.delete_data,
-            "terminate": self.terminate,
+            "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
             "start_ipython": self.start_ipython,
@@ -863,7 +860,7 @@ class Worker(ServerNode):
             logger.exception(e)
             raise
         finally:
-            if self.reconnect:
+            if self.reconnect and self.status == "running":
                 logger.info("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self._register_with_scheduler)
             else:
@@ -886,7 +883,7 @@ class Worker(ServerNode):
         out_filename = os.path.join(self.local_directory, filename)
 
         def func(data):
-            if isinstance(data, unicode):
+            if isinstance(data, str):
                 data = data.encode()
             with open(out_filename, "wb") as f:
                 f.write(data)
@@ -1034,13 +1031,6 @@ class Worker(ServerNode):
                         ),
                     )
             self.scheduler.close_rpc()
-            self.actor_executor._work_queue.queue.clear()
-            if isinstance(self.executor, ThreadPoolExecutor):
-                self.executor._work_queue.queue.clear()
-                self.executor.shutdown(wait=executor_wait, timeout=timeout)
-            else:
-                self.executor.shutdown(wait=False)
-            self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
             self._workdir.release()
 
             for k, v in self.services.items():
@@ -1052,9 +1042,13 @@ class Worker(ServerNode):
             if self.batched_stream:
                 self.batched_stream.close()
 
-            if nanny and self.nanny:
-                with self.rpc(self.nanny) as r:
-                    await r.terminate()
+            self.actor_executor._work_queue.queue.clear()
+            if isinstance(self.executor, ThreadPoolExecutor):
+                self.executor._work_queue.queue.clear()
+                self.executor.shutdown(wait=executor_wait, timeout=timeout)
+            else:
+                self.executor.shutdown(wait=False)
+            self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
 
             self.stop()
             self.rpc.close()
@@ -1064,6 +1058,7 @@ class Worker(ServerNode):
             await ServerNode.close(self)
 
             setproctitle("dask-worker [closed]")
+        return "OK"
 
     async def close_gracefully(self):
         """ Gracefully shut down a worker
@@ -1082,8 +1077,8 @@ class Worker(ServerNode):
         await self.scheduler.retire_workers(workers=[self.address], remove=False)
         await self.close(safe=True, nanny=not self.lifetime_restart)
 
-    async def terminate(self, comm, report=True):
-        await self.close(report=report)
+    async def terminate(self, comm, report=True, **kwargs):
+        await self.close(report=report, **kwargs)
         return "OK"
 
     async def wait_until_closed(self):
@@ -2355,8 +2350,8 @@ class Worker(ServerNode):
                     from .actor import Actor  # TODO: create local actor
 
                     data[k] = Actor(type(self.actors[k]), self.address, k, self)
-            args2 = pack_data(args, data, key_types=(bytes, unicode))
-            kwargs2 = pack_data(kwargs, data, key_types=(bytes, unicode))
+            args2 = pack_data(args, data, key_types=(bytes, str))
+            kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
             stop = time()
             if stop - start > 0.005:
                 self.startstops[key].append(("disk-read", start, stop))
@@ -2848,7 +2843,7 @@ class Worker(ServerNode):
         --------
         get_worker
         """
-        return self.active_threads[get_thread_identity()]
+        return self.active_threads[threading.get_ident()]
 
 
 def get_worker():
@@ -2998,7 +2993,7 @@ def parse_memory_limit(memory_limit, nthreads, total_cores=multiprocessing.cpu_c
         if isinstance(memory_limit, float) and memory_limit <= 1:
             memory_limit = int(memory_limit * TOTAL_MEMORY)
 
-    if isinstance(memory_limit, (unicode, str)):
+    if isinstance(memory_limit, str):
         memory_limit = parse_bytes(memory_limit)
     else:
         memory_limit = int(memory_limit)
@@ -3198,7 +3193,7 @@ def apply_function(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = get_thread_identity()
+    ident = threading.get_ident()
     with active_threads_lock:
         active_threads[ident] = key
     thread_state.start_time = time()
@@ -3238,7 +3233,7 @@ def apply_function_actor(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = get_thread_identity()
+    ident = threading.get_ident()
 
     with active_threads_lock:
         active_threads[ident] = key

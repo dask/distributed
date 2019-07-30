@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import gc
 import logging
 import os
@@ -16,8 +14,8 @@ from tornado.ioloop import IOLoop
 from tornado.locks import Event
 
 import dask
-from distributed import Nanny, rpc, Scheduler, Worker
 from distributed.diagnostics import SchedulerPlugin
+from distributed import Nanny, rpc, Scheduler, Worker, Client
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -423,3 +421,18 @@ async def test_lifetime(cleanup):
         async with Nanny(s.address) as a:
             async with Nanny(s.address, lifetime="500 ms", lifetime_restart=True) as b:
                 await event.wait()
+
+
+@pytest.mark.asyncio
+async def test_nanny_closes_cleanly(cleanup):
+    async with Scheduler() as s:
+        async with Nanny(s.address) as n:
+            async with Client(s.address, asynchronous=True) as client:
+                with client.rpc(n.worker_address) as w:
+                    IOLoop.current().add_callback(w.terminate)
+                    start = time()
+                    while n.status != "closed":
+                        await gen.sleep(0.01)
+                        assert time() < start + 5
+
+                    assert n.status == "closed"
