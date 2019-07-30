@@ -257,7 +257,7 @@ class Worker(ServerNode):
         This defaults to None, meaning no explicit shutdown time.
     lifetime_stagger: str
         Amount of time like "5 minutes" to stagger the lifetime value
-        The actual lifetime will selected uniformly at random between
+        The actual lifetime will be selected uniformly at random between
         lifetime +/- lifetime_stagger
     lifetime_restart: bool
         Whether or not to restart a worker after it has reached its lifetime
