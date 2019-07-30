@@ -1,6 +1,7 @@
 import collections
 import math
 
+from tornado.ioloop import IOLoop
 import toolz
 
 from ..metrics import time
@@ -21,25 +22,27 @@ class AdaptiveCore:
         self.interval = parse_timedelta(interval, "seconds") if interval else interval
         self.periodic_callback = None
 
-        self.plan = set()
-        self.requested = set()
-        self.observed = set()
+        def f():
+            self.periodic_callback = PeriodicCallback(self.adapt, self.interval * 1000)
+            self.periodic_callback.start()
+
+        if self.interval:
+            try:
+                self.loop.add_callback(f)
+            except AttributeError:
+                IOLoop.current().add_callback(f)
+
+        try:
+            self.plan = set()
+            self.requested = set()
+            self.observed = set()
+        except Exception:
+            pass
 
         # internal state
         self.close_counts = collections.defaultdict(int)
         self._adapting = False
         self.log = collections.deque(maxlen=10000)
-
-    def __await__(self):
-        async def f():
-            if self.interval:
-                self.periodic_callback = PeriodicCallback(
-                    self.adapt, self.interval * 1000
-                )
-                self.periodic_callback.start()
-            return self
-
-        return f().__await__()
 
     def stop(self):
         if self.periodic_callback:
@@ -47,9 +50,9 @@ class AdaptiveCore:
             self.periodic_callback = None
 
     async def target(self) -> int:
-        pass
+        raise NotImplementedError()
 
-    async def _workers_to_close(self, target: int) -> list:
+    async def workers_to_close(self, target: int) -> list:
         """
         Give a list of workers to close that brings us down to target workers
         """
@@ -86,7 +89,7 @@ class AdaptiveCore:
                 to_close.update((toolz.take(len(plan) - target, not_yet_arrived)))
 
             if target < len(plan) - len(to_close):
-                L = await self._workers_to_close(target=target)
+                L = await self.workers_to_close(target=target)
                 to_close.update(L)
 
             firmly_close = set()
@@ -100,7 +103,7 @@ class AdaptiveCore:
                     del self.close_counts[k]
 
             if firmly_close:
-                return {"status": "down", "workers": firmly_close}
+                return {"status": "down", "workers": list(firmly_close)}
             else:
                 return {"status": "same"}
 
@@ -123,5 +126,7 @@ class AdaptiveCore:
                 await self.scale_up(**recommendations)
             if status == "down":
                 await self.scale_down(**recommendations)
+        except OSError:
+            self.stop()
         finally:
             self._adapting = False

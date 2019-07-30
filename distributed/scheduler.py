@@ -2904,7 +2904,7 @@ class Scheduler(ServerNode):
         )
 
     def workers_to_close(
-        self, comm=None, memory_ratio=None, n=None, key=None, minimum=None
+        self, comm=None, memory_ratio=None, n=None, key=None, minimum=None, target=None
     ):
         """
         Find workers that we can close with low cost
@@ -2931,6 +2931,8 @@ class Scheduler(ServerNode):
             An optional callable mapping a WorkerState object to a group
             affiliation.  Groups will be closed together.  This is useful when
             closing workers must be done collectively, such as by hostname.
+        target: int
+            Target number of workers to have after we close
 
         Examples
         --------
@@ -2958,6 +2960,13 @@ class Scheduler(ServerNode):
         --------
         Scheduler.retire_workers
         """
+        if target is not None and n is None:
+            n = len(self.workers) - target
+        if n:
+            if n < 0:
+                n = 0
+            target = len(self.workers) - n
+
         if n is None and memory_ratio is None:
             memory_ratio = 2
 
@@ -2982,12 +2991,12 @@ class Scheduler(ServerNode):
             limit = sum(limit_bytes.values())
             total = sum(group_bytes.values())
 
-            def key(group):
+            def _key(group):
                 is_idle = not any(ws.processing for ws in groups[group])
                 bytes = -group_bytes[group]
                 return (is_idle, bytes)
 
-            idle = sorted(groups, key=key)
+            idle = sorted(groups, key=_key)
 
             to_close = []
             n_remain = len(self.workers)
@@ -3002,7 +3011,7 @@ class Scheduler(ServerNode):
 
                 limit -= limit_bytes[group]
 
-                if (n is not None and len(to_close) < n) or (
+                if (n is not None and n_remain - len(groups[group]) >= target) or (
                     memory_ratio is not None and limit >= memory_ratio * total
                 ):
                     to_close.append(group)

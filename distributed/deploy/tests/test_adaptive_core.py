@@ -72,7 +72,7 @@ async def test_scale_down():
 
 @pytest.mark.asyncio
 async def test_interval():
-    adapt = await MyAdaptive(interval="5 ms")
+    adapt = MyAdaptive(interval="5 ms")
     assert not adapt.plan
 
     for i in [0, 3, 1]:
