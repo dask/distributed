@@ -179,9 +179,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--lifetime",
     type=str,
     default="",
-    help="If provided, shut down the worker after this duration. "
-    "Note that if combined with --nanny (default) "
-    "the worker will restart after this time",
+    help="If provided, shut down the worker after this duration.",
 )
 @click.option(
     "--lifetime-stagger",
