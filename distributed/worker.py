@@ -319,7 +319,7 @@ class Worker(ServerNode):
         validate=False,
         profile_cycle_interval=None,
         lifetime=None,
-        lifetime_stagger="0s",
+        lifetime_stagger=None,
         lifetime_restart=None,
         **kwargs
     ):
