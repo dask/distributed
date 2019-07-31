@@ -1413,10 +1413,7 @@ class Log(str):
     """ A container for logs """
 
     def _repr_html_(self):
-        if "\n" not in self:
-            return "<pre><code>{log}</code></pre>".format(log=self)
-        else:
-            return "<pre><code>\n{log}\n</code></pre>".format(log=self)
+        return "<pre><code>\n{log}\n</code></pre>".format(log=self.rstrip())
 
 
 class Logs(dict):
