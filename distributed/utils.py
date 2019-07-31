@@ -1413,7 +1413,10 @@ class Log(str):
     """ A container for logs """
 
     def _repr_html_(self):
-        return "<pre><code>{log}</code></pre>".format(log=self)
+        if "\n" not in self:
+            return "<pre><code>{log}</code></pre>".format(log=self)
+        else:
+            return "<pre><code>\n{log}\n</code></pre>".format(log=self)
 
 
 class Logs(dict):
@@ -1421,12 +1424,12 @@ class Logs(dict):
 
     def _repr_html_(self):
         summaries = [
-            "<details><summary>{title}</summary>{log}</details>".format(
+            "<details>\n<summary>{title}</summary>\n{log}\n</details>".format(
                 title=title, log=log._repr_html_()
             )
             for title, log in self.items()
         ]
-        return "\n".join(summaries)
+        return "\n\n".join(summaries)
 
 
 def cli_keywords(d: dict, cls=None):
