@@ -798,9 +798,9 @@ class Client(Node):
             '<ul style="text-align: left; list-style: none; margin: 0; padding: 0;">\n'
         )
         if scheduler is not None:
-            text += "  <li><b>Scheduler: </b>%s\n" % scheduler.address
+            text += "  <li><b>Scheduler: </b>%s</li>\n" % scheduler.address
         else:
-            text += "  <li><b>Scheduler: not connected</b>\n"
+            text += "  <li><b>Scheduler: not connected</b></li>\n"
 
         if info and "dashboard" in info["services"]:
             protocol, rest = scheduler.address.split("://")
@@ -953,7 +953,11 @@ class Client(Node):
             self.scheduler = self.rpc(address)
         self.scheduler_comm = None
 
-        await self._ensure_connected(timeout=timeout)
+        try:
+            await self._ensure_connected(timeout=timeout)
+        except OSError:
+            await self._close()
+            raise
 
         for pc in self._periodic_callbacks.values():
             pc.start()

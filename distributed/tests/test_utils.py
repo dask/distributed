@@ -6,7 +6,6 @@ import socket
 import sys
 from time import sleep
 import traceback
-import xml.etree.ElementTree
 
 import numpy as np
 import pytest
@@ -21,6 +20,7 @@ from distributed.utils import (
     Logs,
     sync,
     is_kernel,
+    is_valid_xml,
     ensure_ip,
     str_graph,
     truncate_exception,
@@ -552,7 +552,12 @@ def test_format_bytes_compat():
 def test_logs():
     d = Logs({"123": Log("Hello"), "456": Log("World!")})
     text = d._repr_html_()
-    for line in text.split("\n"):
-        assert xml.etree.ElementTree.fromstring(line) is not None
+    assert is_valid_xml("<div>" + text + "</div>")
     assert "Hello" in text
     assert "456" in text
+
+
+def test_is_valid_xml():
+    assert is_valid_xml("<a>foo</a>")
+    with pytest.raises(Exception):
+        assert is_valid_xml("<a>foo")

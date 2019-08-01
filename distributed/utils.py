@@ -26,6 +26,7 @@ import weakref
 import pkgutil
 import six
 import tblib.pickling_support
+import xml.etree.ElementTree
 
 try:
     import resource
@@ -1413,7 +1414,7 @@ class Log(str):
     """ A container for logs """
 
     def _repr_html_(self):
-        return "<pre><code>{log}</code></pre>".format(log=self)
+        return "<pre><code>\n{log}\n</code></pre>".format(log=self.rstrip())
 
 
 class Logs(dict):
@@ -1421,12 +1422,12 @@ class Logs(dict):
 
     def _repr_html_(self):
         summaries = [
-            "<details><summary>{title}</summary>{log}</details>".format(
+            "<details>\n<summary>{title}</summary>\n{log}\n</details>".format(
                 title=title, log=log._repr_html_()
             )
             for title, log in self.items()
         ]
-        return "\n".join(summaries)
+        return "\n\n".join(summaries)
 
 
 def cli_keywords(d: dict, cls=None):
@@ -1466,3 +1467,7 @@ def cli_keywords(d: dict, cls=None):
     return sum(
         [["--" + k.replace("_", "-"), convert_value(v)] for k, v in d.items()], []
     )
+
+
+def is_valid_xml(text):
+    return xml.etree.ElementTree.fromstring(text) is not None
