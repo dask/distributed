@@ -287,33 +287,20 @@ class SpecCluster(Cluster):
             return
         self.status = "closing"
 
-        for pc in self.periodic_callbacks.values():
-            pc.stop()
-
         self.scale(0)
         await self._correct_state()
         async with self._lock:
             with ignoring(CommClosedError):
                 await self.scheduler_comm.close(close_workers=True)
+
         await self.scheduler.close()
-        await self._watch_worker_status_comm.close()
-        await self._watch_worker_status_task
         for w in self._created:
             assert w.status == "closed"
-        self.scheduler_comm.close_rpc()
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
 
-        self.status = "closed"
-
-    def close(self, timeout=None):
-        with ignoring(RuntimeError):  # loop closed during process shutdown
-            return self.sync(self._close, callback_timeout=timeout)
-
-    def __del__(self):
-        if self.status != "closed":
-            self.loop.add_callback(self.close)
+        await super()._close()
 
     def __enter__(self):
         self.sync(self._correct_state)

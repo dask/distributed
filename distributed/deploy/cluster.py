@@ -29,11 +29,13 @@ class Cluster(object):
 
     scheduler_comm: rpc  # need to implement this
     scheduler_address: str  # need to implement this
+    _supports_scaling = True
 
     def __init__(self, asynchronous):
         self.scheduler_info = {}
         self.periodic_callbacks = {}
         self._asynchronous = asynchronous
+
         self.status = "created"
 
     async def _start(self):
@@ -45,6 +47,24 @@ class Cluster(object):
             self._watch_worker_status(comm)
         )
         self.status = "running"
+
+    async def _close(self):
+        await self._watch_worker_status_comm.close()
+        await self._watch_worker_status_task
+
+        for pc in self.periodic_callbacks.values():
+            pc.stop()
+        self.scheduler_comm.close_rpc()
+
+        self.status = "closed"
+
+    def close(self, timeout=None):
+        with ignoring(RuntimeError):  # loop closed during process shutdown
+            return self.sync(self._close, callback_timeout=timeout)
+
+    def __del__(self):
+        if self.status != "closed":
+            self.loop.add_callback(self.close)
 
     async def _watch_worker_status(self, comm):
         """ Listen to scheduler for updates on adding and removing workers """
