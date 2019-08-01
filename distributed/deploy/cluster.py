@@ -8,7 +8,6 @@ from tornado import gen
 
 from .adaptive import Adaptive
 
-from ..core import rpc
 from ..utils import (
     PeriodicCallback,
     log_errors,
@@ -25,10 +24,28 @@ logger = logging.getLogger(__name__)
 
 
 class Cluster(object):
-    """ Superclass for cluster objects """
+    """ Superclass for cluster objects
 
-    scheduler_comm: rpc  # need to implement this
-    scheduler_address: str  # need to implement this
+    This class contains common functionality for Dask Cluster manager classes.
+
+    To implement this class, you must provide
+
+    1.  A ``scheduler_comm`` attribute, which is a connection to the scheduler
+        following the ``distributed.core.rpc`` API.
+    2.  Implement ``scale``, which takes an integer and scales the cluster to
+        that many workers, or else set ``_supports_scaling`` to False
+
+    For that, should should get the following:
+
+    1.  A standard ``__repr__``
+    2.  A live IPython widget
+    3.  Adaptive scaling
+    4.  Integration with dask-labextension
+    5.  A ``scheduler_info`` attribute which contains an up-to-date copy of
+        ``Scheduler.identity()``, which is used for much of the above
+    6.  Methods to gather logs
+    """
+
     _supports_scaling = True
 
     def __init__(self, asynchronous):
@@ -301,3 +318,7 @@ class Cluster(object):
 
     async def __aexit__(self, typ, value, traceback):
         await self.close()
+
+    @property
+    def scheduler_address(self):
+        return self.scheduler_comm.address

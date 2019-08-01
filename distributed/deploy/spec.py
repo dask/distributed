@@ -361,10 +361,6 @@ class SpecCluster(Cluster):
             len(self.workers),
         )
 
-    @property
-    def scheduler_address(self):
-        return self.scheduler.address
-
 
 @atexit.register
 def close_clusters():
