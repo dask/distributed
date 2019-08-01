@@ -4,33 +4,17 @@ import copy
 import weakref
 
 from tornado import gen
-from dask.utils import format_bytes
 
 from .cluster import Cluster
-from ..comm import connect
 from ..core import rpc, CommClosedError
-from ..utils import (
-    log_errors,
-    LoopRunner,
-    silence_logging,
-    ignoring,
-    Log,
-    Logs,
-    PeriodicCallback,
-    format_dashboard_link,
-)
+from ..utils import LoopRunner, silence_logging, ignoring
 from ..scheduler import Scheduler
 from ..security import Security
 
 
 class ProcessInterface:
-    """ An interface for Scheduler and Worker processes for use in SpecCluster
-
-    Parameters
-    ----------
-    loop:
-        A pointer to the running loop.
-
+    """
+    An interface for Scheduler and Worker processes for use in SpecCluster
     """
 
     def __init__(self):
@@ -171,11 +155,8 @@ class SpecCluster(Cluster):
         self.new_spec = copy.copy(worker)
         self.workers = {}
         self._i = 0
-        self._asynchronous = asynchronous
         self.security = security or Security()
         self.scheduler_comm = None
-        self.scheduler_info = {}
-        self.periodic_callbacks = {}
 
         if silence_logs:
             self._old_logging_level = silence_logging(level=silence_logs)
@@ -183,10 +164,11 @@ class SpecCluster(Cluster):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
 
-        self.status = "created"
         self._instances.add(self)
         self._correct_state_waiting = None
         self._name = name or type(self).__name__
+
+        super().__init__(asynchronous=asynchronous)
 
         if not self.asynchronous:
             self._loop_runner.start()
@@ -221,37 +203,7 @@ class SpecCluster(Cluster):
             self.scheduler.address,
             connection_args=self.security.get_connection_args("client"),
         )
-        comm = await connect(
-            self.scheduler_address,
-            connection_args=self.security.get_connection_args("client"),
-        )
-        await comm.write({"op": "subscribe_worker_status"})
-        self.scheduler_info = await comm.read()
-        self._watch_worker_status_comm = comm
-        self._watch_worker_status_task = asyncio.ensure_future(
-            self._watch_worker_status(comm)
-        )
-        self.status = "running"
-
-    async def _watch_worker_status(self, comm):
-        """ Listen to scheduler for updates on adding and removing workers """
-        while True:
-            try:
-                msgs = await comm.read()
-            except OSError:
-                break
-
-            for op, msg in msgs:
-                if op == "add":
-                    workers = msg.pop("workers")
-                    self.scheduler_info["workers"].update(workers)
-                    self.scheduler_info.update(msg)
-                elif op == "remove":
-                    del self.scheduler_info["workers"][msg]
-                else:
-                    raise ValueError("Invalid op", op, msg)
-
-        await comm.close()
+        await super()._start()
 
     def _correct_state(self):
         if self._correct_state_waiting:
@@ -429,157 +381,9 @@ class SpecCluster(Cluster):
             len(self.workers),
         )
 
-    async def _logs(self, scheduler=True, workers=True):
-        logs = Logs()
-
-        if scheduler:
-            L = await self.scheduler_comm.logs()
-            logs["Scheduler"] = Log("\n".join(line for level, line in L))
-
-        if workers:
-            d = await self.scheduler_comm.worker_logs(workers=workers)
-            for k, v in d.items():
-                logs[k] = Log("\n".join(line for level, line in v))
-
-        return logs
-
-    def logs(self, scheduler=True, workers=True):
-        """ Return logs for the scheduler and workers
-
-        Parameters
-        ----------
-        scheduler : boolean
-            Whether or not to collect logs for the scheduler
-        workers : boolean or Iterable[str], optional
-            A list of worker addresses to select.
-            Defaults to all workers if `True` or no workers if `False`
-
-        Returns
-        -------
-        logs: Dict[str]
-            A dictionary of logs, with one item for the scheduler and one for
-            each worker
-        """
-        return self.sync(self._logs, scheduler=scheduler, workers=workers)
-
     @property
-    def dashboard_link(self):
-        try:
-            port = self.scheduler_info["services"]["dashboard"]
-        except KeyError:
-            return ""
-        else:
-            host = self.scheduler_address.split("://")[1].split(":")[0]
-            return format_dashboard_link(host, port)
-
-    def _widget_status(self):
-        workers = len(self.scheduler_info["workers"])
-        requested = len(self.worker_spec)
-        cores = sum(v["nthreads"] for v in self.scheduler_info["workers"].values())
-        memory = sum(v["memory_limit"] for v in self.scheduler_info["workers"].values())
-        memory = format_bytes(memory)
-        text = """
-<div>
-  <style scoped>
-    .dataframe tbody tr th:only-of-type {
-        vertical-align: middle;
-    }
-
-    .dataframe tbody tr th {
-        vertical-align: top;
-    }
-
-    .dataframe thead th {
-        text-align: right;
-    }
-  </style>
-  <table style="text-align: right;">
-    <tr> <th>Workers</th> <td>%s</td></tr>
-    <tr> <th>Cores</th> <td>%d</td></tr>
-    <tr> <th>Memory</th> <td>%s</td></tr>
-  </table>
-</div>
-""" % (
-            workers if workers == requested else "%d / %d" % (workers, requested),
-            cores,
-            memory,
-        )
-        return text
-
-    def _widget(self):
-        """ Create IPython widget for display within a notebook """
-        try:
-            return self._cached_widget
-        except AttributeError:
-            pass
-
-        from ipywidgets import Layout, VBox, HBox, IntText, Button, HTML, Accordion
-
-        layout = Layout(width="150px")
-
-        if self.dashboard_link:
-            link = '<p><b>Dashboard: </b><a href="%s" target="_blank">%s</a></p>\n' % (
-                self.dashboard_link,
-                self.dashboard_link,
-            )
-        else:
-            link = ""
-
-        title = "<h2>%s</h2>" % type(self).__name__
-        title = HTML(title)
-        dashboard = HTML(link)
-
-        status = HTML(self._widget_status(), layout=Layout(min_width="150px"))
-
-        if self._supports_scaling:
-            request = IntText(0, description="Workers", layout=layout)
-            scale = Button(description="Scale", layout=layout)
-
-            minimum = IntText(0, description="Minimum", layout=layout)
-            maximum = IntText(0, description="Maximum", layout=layout)
-            adapt = Button(description="Adapt", layout=layout)
-
-            accordion = Accordion(
-                [HBox([request, scale]), HBox([minimum, maximum, adapt])],
-                layout=Layout(min_width="500px"),
-            )
-            accordion.selected_index = None
-            accordion.set_title(0, "Manual Scaling")
-            accordion.set_title(1, "Adaptive Scaling")
-
-            def adapt_cb(b):
-                self.adapt(minimum=minimum.value, maximum=maximum.value)
-                update()
-
-            adapt.on_click(adapt_cb)
-
-            def scale_cb(b):
-                with log_errors():
-                    n = request.value
-                    with ignoring(AttributeError):
-                        self._adaptive.stop()
-                    self.scale(n)
-                    update()
-
-            scale.on_click(scale_cb)
-        else:
-            accordion = HTML("")
-
-        box = VBox([title, HBox([status, accordion]), dashboard])
-
-        self._cached_widget = box
-
-        def update():
-            status.value = self._widget_status()
-
-        pc = PeriodicCallback(update, 500, io_loop=self.loop)
-        self.periodic_callbacks["cluster-repr"] = pc
-        pc.start()
-
-        return box
-
-    def _ipython_display_(self, **kwargs):
-        return self._widget()._ipython_display_(**kwargs)
+    def scheduler_address(self):
+        return self.scheduler.address
 
 
 @atexit.register
