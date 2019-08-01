@@ -273,13 +273,6 @@ class SpecCluster(Cluster):
                 raise gen.TimeoutError("Worker unexpectedly closed")
             await asyncio.sleep(0.1)
 
-    async def __aenter__(self):
-        await self
-        return self
-
-    async def __aexit__(self, typ, value, traceback):
-        await self.close()
-
     async def _close(self):
         while self.status == "closing":
             await asyncio.sleep(0.1)

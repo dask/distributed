@@ -294,3 +294,10 @@ class Cluster(object):
             self.scheduler_address,
             len(self.scheduler_info["workers"]),
         )
+
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, typ, value, traceback):
+        await self.close()
