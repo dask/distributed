@@ -5591,5 +5591,12 @@ def test_wait_for_workers(c, s, a, b):
     yield w.close()
 
 
+@gen_cluster(client=True)
+def test_scheduler_info(c, s, a, b):
+    assert a.scheduler_info == b.scheduler_info
+    for k in a.scheduler_info:
+        assert a.scheduler_info[k] == c.scheduler_info()[k]
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401
