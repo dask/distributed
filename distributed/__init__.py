@@ -37,3 +37,19 @@ versions = get_versions()
 __version__ = versions["version"]
 __git_revision__ = versions["full-revisionid"]
 del get_versions, versions
+
+import sys, threading
+import time
+from .profile import call_stack
+
+
+def f(idx):
+    while True:
+        time.sleep(1)
+        frame = sys._current_frames()[idx]
+        print("-" * 100)
+        print("".join(call_stack(frame)))
+
+
+thread = threading.Thread(target=f, args=(threading.get_ident(),), daemon=True)
+# thread.start()
