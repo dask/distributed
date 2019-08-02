@@ -380,6 +380,9 @@ class Nanny(ServerNode):
                     if self.auto_restart:
                         logger.warning("Restarting worker")
                         await self.instantiate()
+                elif self.status == "closing-gracefully":
+                    await self.close()
+
             except Exception:
                 logger.error(
                     "Failed to restart worker after its process exited", exc_info=True
@@ -674,17 +677,21 @@ class WorkerProcess(object):
                 init_result_q.put({"uid": uid, "exception": e})
                 init_result_q.close()
             else:
-                assert worker.address
-                init_result_q.put(
-                    {
-                        "address": worker.address,
-                        "dir": worker.local_directory,
-                        "uid": uid,
-                    }
-                )
-                init_result_q.close()
-                await worker.wait_until_closed()
-                logger.info("Worker closed")
+                try:
+                    assert worker.address
+                except ValueError:
+                    pass
+                else:
+                    init_result_q.put(
+                        {
+                            "address": worker.address,
+                            "dir": worker.local_directory,
+                            "uid": uid,
+                        }
+                    )
+                    init_result_q.close()
+                    await worker.finished()
+                    logger.info("Worker closed")
 
         try:
             loop.run_sync(run)

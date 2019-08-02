@@ -54,7 +54,15 @@ from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
-from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey, tmpfile
+from distributed.utils import (
+    ignoring,
+    mp_context,
+    sync,
+    tmp_text,
+    tokey,
+    tmpfile,
+    is_valid_xml,
+)
 from distributed.utils_test import (
     cluster,
     slowinc,
@@ -1904,6 +1912,7 @@ def test_repr_localcluster():
     try:
         text = client._repr_html_()
         assert cluster.scheduler.address in text
+        assert is_valid_xml(client._repr_html_())
     finally:
         yield client.close()
         yield cluster.close()
@@ -3318,6 +3327,7 @@ def test_bad_tasks_fail(c, s, a, b):
         yield f
 
     assert info.value.last_worker.nanny in {a.address, b.address}
+    yield [a.close(), b.close()]
 
 
 def test_get_processing_sync(c, s, a, b):
@@ -5233,6 +5243,7 @@ def test_client_timeout_2():
             yield c
         stop = time()
 
+        assert c.status == "closed"
         yield c.close()
 
         assert stop - start < 1
