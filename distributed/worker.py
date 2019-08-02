@@ -415,6 +415,7 @@ class Worker(ServerNode):
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
         self.latency = 0.001
         self._client = None
+        self._client_cleanup = False
 
         if profile_cycle_interval is None:
             profile_cycle_interval = dask.config.get("distributed.worker.profile.cycle")
@@ -1016,6 +1017,10 @@ class Worker(ServerNode):
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:
                     await r.close_gracefully()
+
+            if self._client_cleanup:
+                await self._client._close()
+                self._client = None
 
             setproctitle("dask-worker [closing]")
 
@@ -2827,6 +2832,7 @@ class Worker(ServerNode):
                 name="worker",
                 timeout=timeout,
             )
+            self._client_cleanup = True
             if not asynchronous:
                 assert self._client.status == "running"
         return self._client

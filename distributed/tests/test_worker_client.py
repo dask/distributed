@@ -15,10 +15,12 @@ from distributed import (
     get_worker,
     wait,
     get_client,
+    Scheduler,
+    Worker,
 )
 from distributed.metrics import time
 from distributed.utils_test import double, gen_cluster, inc
-from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
+from distributed.utils_test import client, cluster_fixture, cleanup, loop  # noqa: F401
 
 
 @gen_cluster(client=True)
@@ -315,3 +317,21 @@ def test_submit_different_names(s, a, b):
         assert fut > 0
     finally:
         yield c.close()
+
+
+@pytest.mark.asyncio
+async def test_different_names_for_same_address(cleanup):
+    pd = pytest.importorskip("pandas")
+    dd = pytest.importorskip("dask.dataframe")
+
+    def f(df):
+        return df.compute()
+
+    async with Scheduler(port=0, host="127.0.0.1") as s:
+        async with Worker("tcp://localhost:%d" % s.port) as w:
+            async with Client(s.address, asynchronous=True) as client:
+                df = dd.from_pandas(pd.DataFrame({"x": [1, 2, 3]}), npartitions=1)
+                future = client.submit(f, df)
+
+                result = await future
+                assert list(result.x) == [1, 2, 3]
