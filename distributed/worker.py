@@ -27,7 +27,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from . import profile, comm
+from . import profile
 from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.utils import offload
@@ -799,6 +799,7 @@ class Worker(ServerNode):
                 middle = (_start + _end) / 2
                 self.latency = (_end - start) * 0.05 + self.latency * 0.95
                 self.scheduler_delay = response["time"] - middle
+                self.scheduler_info = response["info"]
                 self.status = "running"
                 break
             except EnvironmentError:
@@ -2813,7 +2814,7 @@ class Worker(ServerNode):
         else:
             if (
                 client.scheduler
-                and client.scheduler.address == self.scheduler.address
+                and client.scheduler_info().get("id", "") == self.scheduler_info["id"]
                 or client._start_arg == self.scheduler.address
             ):
                 self._client = client
@@ -2886,7 +2887,7 @@ def get_worker():
             raise ValueError("No workers found")
 
 
-def get_client(address=None, timeout=3, resolve_address=True):
+def get_client(address=None, ident=None, timeout=3):
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
@@ -2896,10 +2897,11 @@ def get_client(address=None, timeout=3, resolve_address=True):
     address : str, optional
         The address of the scheduler to connect to. Defaults to the scheduler
         the worker is connected to.
+    ident : str
+        The identity of the scheduler, if known
+        This is mostly used by automated systems)
     timeout : int, default 3
         Timeout (in seconds) for getting the Client
-    resolve_address : bool, default True
-        Whether to resolve `address` to its canonical form.
 
     Returns
     -------
@@ -2923,20 +2925,18 @@ def get_client(address=None, timeout=3, resolve_address=True):
     worker_client
     secede
     """
-    if address and resolve_address:
-        address = comm.resolve_address(address)
     try:
         worker = get_worker()
     except ValueError:  # could not find worker
         pass
     else:
-        if not address or comm.resolve_address(worker.scheduler.address) == address:
+        if not ident or ident == worker.scheduler_info["id"]:
             return worker._get_client(timeout=timeout)
 
     from .client import _get_global_client
 
     client = _get_global_client()  # TODO: assumes the same scheduler
-    if client and (not address or client.scheduler.address == address):
+    if client and (not ident or ident == client.scheduler_info()["id"]):
         return client
     elif address:
         from .client import Client

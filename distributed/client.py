@@ -357,11 +357,15 @@ class Future(WrappedKey):
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
-        return (self.key, self.client.scheduler.address)
+        return (
+            self.key,
+            self.client.scheduler.address,
+            self.client.scheduler_info()["id"],
+        )
 
     def __setstate__(self, state):
-        key, address = state
-        c = get_client(address)
+        key, address, ident = state
+        c = get_client(address, ident)
         Future.__init__(self, key, c)
         c._send_to_scheduler(
             {
@@ -3267,7 +3271,8 @@ class Client(Node):
                                          'stored': 0,
                                          'time-delay': 0.0061032772064208984}}}
         """
-        self.sync(self._update_scheduler_info)
+        if not self.asynchronous:
+            self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
     def write_scheduler_file(self, scheduler_file):
