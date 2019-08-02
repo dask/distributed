@@ -2924,7 +2924,7 @@ def get_client(address=None, timeout=3, resolve_address=True):
     except ValueError:  # could not find worker
         pass
     else:
-        if not address or worker.scheduler.address == address:
+        if not address or comm.resolve_address(worker.scheduler.address) == address:
             return worker._get_client(timeout=timeout)
 
     from .client import _get_global_client
