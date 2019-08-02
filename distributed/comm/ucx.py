@@ -121,13 +121,9 @@ class UCX(Comm):
             deserializers = ("cuda", "dask", "pickle", "error")
         resp = await self.ep.recv_future()
         obj = ucp.get_obj_from_msg(resp)
-        try:
-            nframes, = struct.unpack(
-                "Q", obj[:8]
-            )  # first eight bytes for number of frames
-        except Exception as e:
-            breakpoint()
-            print("HELLO")
+        (nframes,) = struct.unpack(
+            "Q", obj[:8]
+        )  # first eight bytes for number of frames
 
         gpu_frame_msg = obj[
             8 : 8 + nframes

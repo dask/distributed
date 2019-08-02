@@ -1,7 +1,6 @@
-from __future__ import print_function, division, absolute_import
-
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+import importlib
 import logging
 import multiprocessing
 from numbers import Number
@@ -32,7 +31,7 @@ from distributed import (
     Reschedule,
     wait,
 )
-from distributed.compatibility import WINDOWS, cache_from_source
+from distributed.compatibility import WINDOWS
 from distributed.core import rpc
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
@@ -65,7 +64,7 @@ def test_worker_nthreads():
     try:
         assert w.executor._max_workers == multiprocessing.cpu_count()
     finally:
-        shutil.rmtree(w.local_dir)
+        shutil.rmtree(w.local_directory)
 
 
 @gen_cluster()
@@ -179,9 +178,9 @@ def dont_test_delete_data_with_missing_worker(c, a, b):
 
 @gen_cluster(client=True)
 def test_upload_file(c, s, a, b):
-    assert not os.path.exists(os.path.join(a.local_dir, "foobar.py"))
-    assert not os.path.exists(os.path.join(b.local_dir, "foobar.py"))
-    assert a.local_dir != b.local_dir
+    assert not os.path.exists(os.path.join(a.local_directory, "foobar.py"))
+    assert not os.path.exists(os.path.join(b.local_directory, "foobar.py"))
+    assert a.local_directory != b.local_directory
 
     with rpc(a.address) as aa, rpc(b.address) as bb:
         yield [
@@ -189,8 +188,8 @@ def test_upload_file(c, s, a, b):
             bb.upload_file(filename="foobar.py", data="x = 123"),
         ]
 
-    assert os.path.exists(os.path.join(a.local_dir, "foobar.py"))
-    assert os.path.exists(os.path.join(b.local_dir, "foobar.py"))
+    assert os.path.exists(os.path.join(a.local_directory, "foobar.py"))
+    assert os.path.exists(os.path.join(b.local_directory, "foobar.py"))
 
     def g():
         import foobar
@@ -203,7 +202,7 @@ def test_upload_file(c, s, a, b):
 
     yield c.close()
     yield s.close(close_workers=True)
-    assert not os.path.exists(os.path.join(a.local_dir, "foobar.py"))
+    assert not os.path.exists(os.path.join(a.local_directory, "foobar.py"))
 
 
 @pytest.mark.skip(reason="don't yet support uploading pyc files")
@@ -219,7 +218,7 @@ def test_upload_file_pyc(c, s, w):
             import foo
 
             assert foo.f() == 123
-            pyc = cache_from_source(os.path.join(dirname, "foo.py"))
+            pyc = importlib.util.cache_from_source(os.path.join(dirname, "foo.py"))
             assert os.path.exists(pyc)
             yield c.upload_file(pyc)
 
@@ -239,14 +238,14 @@ def test_upload_file_pyc(c, s, w):
 def test_upload_egg(c, s, a, b):
     eggname = "testegg-1.0.0-py3.4.egg"
     local_file = __file__.replace("test_worker.py", eggname)
-    assert not os.path.exists(os.path.join(a.local_dir, eggname))
-    assert not os.path.exists(os.path.join(b.local_dir, eggname))
-    assert a.local_dir != b.local_dir
+    assert not os.path.exists(os.path.join(a.local_directory, eggname))
+    assert not os.path.exists(os.path.join(b.local_directory, eggname))
+    assert a.local_directory != b.local_directory
 
     yield c.upload_file(filename=local_file)
 
-    assert os.path.exists(os.path.join(a.local_dir, eggname))
-    assert os.path.exists(os.path.join(b.local_dir, eggname))
+    assert os.path.exists(os.path.join(a.local_directory, eggname))
+    assert os.path.exists(os.path.join(b.local_directory, eggname))
 
     def g(x):
         import testegg
@@ -261,21 +260,21 @@ def test_upload_egg(c, s, a, b):
     yield s.close()
     yield a.close()
     yield b.close()
-    assert not os.path.exists(os.path.join(a.local_dir, eggname))
+    assert not os.path.exists(os.path.join(a.local_directory, eggname))
 
 
 @gen_cluster(client=True)
 def test_upload_pyz(c, s, a, b):
     pyzname = "mytest.pyz"
     local_file = __file__.replace("test_worker.py", pyzname)
-    assert not os.path.exists(os.path.join(a.local_dir, pyzname))
-    assert not os.path.exists(os.path.join(b.local_dir, pyzname))
-    assert a.local_dir != b.local_dir
+    assert not os.path.exists(os.path.join(a.local_directory, pyzname))
+    assert not os.path.exists(os.path.join(b.local_directory, pyzname))
+    assert a.local_directory != b.local_directory
 
     yield c.upload_file(filename=local_file)
 
-    assert os.path.exists(os.path.join(a.local_dir, pyzname))
-    assert os.path.exists(os.path.join(b.local_dir, pyzname))
+    assert os.path.exists(os.path.join(a.local_directory, pyzname))
+    assert os.path.exists(os.path.join(b.local_directory, pyzname))
 
     def g(x):
         from mytest import mytest
@@ -290,7 +289,7 @@ def test_upload_pyz(c, s, a, b):
     yield s.close()
     yield a.close()
     yield b.close()
-    assert not os.path.exists(os.path.join(a.local_dir, pyzname))
+    assert not os.path.exists(os.path.join(a.local_directory, pyzname))
 
 
 @pytest.mark.xfail(reason="Still lose time to network I/O")
@@ -805,7 +804,7 @@ def test_heartbeats(c, s, a, b):
 def test_worker_dir(worker):
     with tmpfile() as fn:
 
-        @gen_cluster(client=True, worker_kwargs={"local_dir": fn})
+        @gen_cluster(client=True, worker_kwargs={"local_directory": fn})
         def test_worker_dir(c, s, a, b):
             directories = [w.local_directory for w in s.workers.values()]
             assert all(d.startswith(fn) for d in directories)
@@ -1414,12 +1413,12 @@ def test_data_types(s):
 
 
 @gen_cluster(nthreads=[])
-def test_local_dir(s):
+def test_local_directory(s):
     with tmpfile() as fn:
         with dask.config.set(temporary_directory=fn):
             w = yield Worker(s.address)
-            assert w.local_dir.startswith(fn)
-            assert "dask-worker-space" in w.local_dir
+            assert w.local_directory.startswith(fn)
+            assert "dask-worker-space" in w.local_directory
 
 
 @pytest.mark.skipif(
@@ -1498,3 +1497,42 @@ async def test_worker_listens_on_same_interface_by_default(Worker):
         assert s.ip in {"127.0.0.1", "localhost"}
         async with Worker(s.address) as w:
             assert s.ip == w.ip
+
+
+@gen_cluster(client=True)
+async def test_close_gracefully(c, s, a, b):
+    futures = c.map(slowinc, range(200), delay=0.1)
+    while not b.data:
+        await gen.sleep(0.1)
+
+    mem = set(b.data)
+    proc = set(b.executing)
+
+    await b.close_gracefully()
+
+    assert b.status == "closed"
+    assert b.address not in s.workers
+    assert mem.issubset(set(a.data))
+    for key in proc:
+        assert s.tasks[key].state in ("processing", "memory")
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_lifetime(cleanup):
+    async with Scheduler() as s:
+        async with Worker(s.address) as a, Worker(s.address, lifetime="1 seconds") as b:
+            async with Client(s.address, asynchronous=True) as c:
+                futures = c.map(slowinc, range(200), delay=0.1)
+                await gen.sleep(1.5)
+                assert b.status != "running"
+                await b.finished()
+
+                assert set(b.data).issubset(a.data)  # successfully moved data over
+
+
+@gen_cluster(client=True, worker_kwargs={"lifetime": "10s", "lifetime_stagger": "2s"})
+async def test_lifetime_stagger(c, s, a, b):
+    assert a.lifetime != b.lifetime
+    assert 8 <= a.lifetime <= 12
+    assert 8 <= b.lifetime <= 12

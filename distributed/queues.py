@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from collections import defaultdict
 import datetime
 import logging
@@ -79,7 +77,7 @@ class QueueExtension(object):
         else:
             record = {"type": "msgpack", "value": data}
         if timeout is not None:
-            timeout = datetime.timedelta(seconds=(timeout))
+            timeout = datetime.timedelta(seconds=timeout)
         await self.queues[name].put(record, timeout=timeout)
 
     def future_release(self, name=None, key=None, client=None):

@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import asyncio
 from collections import deque
 from concurrent.futures import CancelledError
@@ -51,12 +49,20 @@ from distributed.client import (
     futures_of,
     temp_default_client,
 )
-from distributed.compatibility import PY3, WINDOWS
+from distributed.compatibility import WINDOWS
 
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
-from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey, tmpfile
+from distributed.utils import (
+    ignoring,
+    mp_context,
+    sync,
+    tmp_text,
+    tokey,
+    tmpfile,
+    is_valid_xml,
+)
 from distributed.utils_test import (
     cluster,
     slowinc,
@@ -1906,6 +1912,7 @@ def test_repr_localcluster():
     try:
         text = client._repr_html_()
         assert cluster.scheduler.address in text
+        assert is_valid_xml(client._repr_html_())
     finally:
         yield client.close()
         yield cluster.close()
@@ -3320,6 +3327,7 @@ def test_bad_tasks_fail(c, s, a, b):
         yield f
 
     assert info.value.last_worker.nanny in {a.address, b.address}
+    yield [a.close(), b.close()]
 
 
 def test_get_processing_sync(c, s, a, b):
@@ -4833,7 +4841,6 @@ def test_bytes_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_unicode_ascii_keys(c, s, a, b):
-    # cross-version unicode type (py2: unicode, py3: str)
     uni_type = type(u"")
     key = u"inc-123"
     future = c.submit(inc, 1, key=key)
@@ -4846,7 +4853,6 @@ def test_unicode_ascii_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_unicode_keys(c, s, a, b):
-    # cross-version unicode type (py2: unicode, py3: str)
     uni_type = type(u"")
     key = u"inc-123\u03bc"
     future = c.submit(inc, 1, key=key)
@@ -5036,12 +5042,7 @@ def test_client_async_before_loop_starts():
 
 
 @pytest.mark.slow
-@gen_cluster(
-    client=True,
-    Worker=Nanny if PY3 else Worker,
-    timeout=60,
-    nthreads=[("127.0.0.1", 3)] * 2,
-)
+@gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 def test_nested_compute(c, s, a, b):
     def fib(x):
         assert get_worker().get_current_task()
@@ -5242,6 +5243,7 @@ def test_client_timeout_2():
             yield c
         stop = time()
 
+        assert c.status == "closed"
         yield c.close()
 
         assert stop - start < 1

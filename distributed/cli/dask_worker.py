@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import atexit
 import logging
 import multiprocessing
@@ -11,7 +9,6 @@ import warnings
 import click
 import dask
 from distributed import Nanny, Worker
-from distributed.utils import parse_timedelta
 from distributed.security import Security
 from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.comm import get_address_host_port
@@ -73,9 +70,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--dashboard/--no-dashboard",
     "dashboard",
     default=True,
-    show_default=True,
     required=False,
-    help="Launch the Dashboard",
+    help="Launch the Dashboard [default: --dashboard]",
 )
 @click.option(
     "--bokeh/--no-bokeh",
@@ -119,7 +115,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--nprocs",
     type=int,
     default=1,
-    help="Number of worker processes to launch.  Defaults to one.",
+    show_default=True,
+    help="Number of worker processes to launch.",
 )
 @click.option(
     "--name",
@@ -132,6 +129,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--memory-limit",
     default="auto",
+    show_default=True,
     help="Bytes of memory per process that the worker can use. "
     "This can be an integer (bytes), "
     "float (fraction of total system memory), "
@@ -141,12 +139,12 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--reconnect/--no-reconnect",
     default=True,
-    help="Reconnect to scheduler if disconnected",
+    help="Reconnect to scheduler if disconnected [default: --reconnect]",
 )
 @click.option(
     "--nanny/--no-nanny",
     default=True,
-    help="Start workers in nanny process for management",
+    help="Start workers in nanny process for management [default: --nanny]",
 )
 @click.option("--pid-file", type=str, default="", help="File to write the process PID")
 @click.option(
@@ -177,6 +175,28 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--dashboard-prefix", type=str, default="", help="Prefix for the dashboard"
 )
 @click.option(
+    "--lifetime",
+    type=str,
+    default="",
+    help="If provided, shut down the worker after this duration.",
+)
+@click.option(
+    "--lifetime-stagger",
+    type=str,
+    default="0 seconds",
+    show_default=True,
+    help="Random amount by which to stagger lifetime values",
+)
+@click.option(
+    "--lifetime-restart/--no-lifetime-restart",
+    "lifetime_restart",
+    default=False,
+    show_default=True,
+    required=False,
+    help="Whether or not to restart the worker after the lifetime lapses. "
+    "This assumes that you are using the --lifetime and --nanny keywords",
+)
+@click.option(
     "--preload",
     type=str,
     multiple=True,
@@ -199,25 +219,18 @@ def main(
     nprocs,
     nanny,
     name,
-    memory_limit,
     pid_file,
-    reconnect,
     resources,
     dashboard,
     bokeh,
     bokeh_port,
-    local_directory,
     scheduler_file,
-    interface,
-    protocol,
-    death_timeout,
-    preload,
-    preload_argv,
     dashboard_prefix,
     tls_ca_file,
     tls_cert,
     tls_key,
     dashboard_address,
+    **kwargs
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -238,7 +251,15 @@ def main(
         dashboard = bokeh
 
     sec = Security(
-        tls_ca_file=tls_ca_file, tls_worker_cert=tls_cert, tls_worker_key=tls_key
+        **{
+            k: v
+            for k, v in [
+                ("tls_ca_file", tls_ca_file),
+                ("tls_worker_cert", tls_cert),
+                ("tls_worker_key", tls_key),
+            ]
+            if v is not None
+        }
     )
 
     if nprocs > 1 and worker_port != 0:
@@ -306,8 +327,6 @@ def main(
 
         atexit.register(del_pid_file)
 
-    services = {}
-
     if resources:
         resources = resources.replace(",", " ").split()
         resources = dict(pair.split("=") for pair in resources)
@@ -318,10 +337,9 @@ def main(
     loop = IOLoop.current()
 
     if nanny:
-        kwargs = {"worker_port": worker_port, "listen_address": listen_address}
+        kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
         t = Nanny
     else:
-        kwargs = {}
         if nanny_port:
             kwargs["service_ports"] = {"nanny": nanny_port}
         t = Worker
@@ -336,27 +354,15 @@ def main(
             "dask-worker SCHEDULER_ADDRESS:8786"
         )
 
-    if death_timeout is not None:
-        death_timeout = parse_timedelta(death_timeout, "s")
-
     nannies = [
         t(
             scheduler,
             scheduler_file=scheduler_file,
             nthreads=nthreads,
-            services=services,
             loop=loop,
             resources=resources,
-            memory_limit=memory_limit,
-            reconnect=reconnect,
-            local_dir=local_directory,
-            death_timeout=death_timeout,
-            preload=preload,
-            preload_argv=preload_argv,
             security=sec,
             contact_address=contact_address,
-            interface=interface,
-            protocol=protocol,
             host=host,
             port=port,
             dashboard_address=dashboard_address if dashboard else None,

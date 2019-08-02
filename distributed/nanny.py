@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from datetime import timedelta
 import logging
 from multiprocessing.queues import Empty
@@ -66,7 +64,8 @@ class Nanny(ServerNode):
         nthreads=None,
         ncores=None,
         loop=None,
-        local_dir="dask-worker-space",
+        local_dir=None,
+        local_directory="dask-worker-space",
         services=None,
         name=None,
         memory_limit="auto",
@@ -135,7 +134,11 @@ class Nanny(ServerNode):
             "distributed.worker.memory.terminate"
         )
 
-        self.local_dir = local_dir
+        if local_dir is not None:
+            warnings.warn("The local_dir keyword has moved to local_directory")
+            local_directory = local_dir
+
+        self.local_directory = local_directory
 
         self.services = services
         self.name = name
@@ -221,6 +224,12 @@ class Nanny(ServerNode):
     def worker_dir(self):
         return None if self.process is None else self.process.worker_dir
 
+    @property
+    def local_dir(self):
+        """ For API compatibility with Nanny """
+        warnings.warn("The local_dir attribute has moved to local_directory")
+        return self.local_directory
+
     async def start(self):
         """ Start nanny, start local process, start watching """
         self.listen(self._start_address, listen_args=self.listen_args)
@@ -268,7 +277,7 @@ class Nanny(ServerNode):
             worker_kwargs = dict(
                 scheduler_ip=self.scheduler_addr,
                 nthreads=self.nthreads,
-                local_dir=self.local_dir,
+                local_directory=self.local_directory,
                 services=self.services,
                 nanny=self.address,
                 name=self.name,
@@ -371,6 +380,9 @@ class Nanny(ServerNode):
                     if self.auto_restart:
                         logger.warning("Restarting worker")
                         await self.instantiate()
+                elif self.status == "closing-gracefully":
+                    await self.close()
+
             except Exception:
                 logger.error(
                     "Failed to restart worker after its process exited", exc_info=True
@@ -665,13 +677,21 @@ class WorkerProcess(object):
                 init_result_q.put({"uid": uid, "exception": e})
                 init_result_q.close()
             else:
-                assert worker.address
-                init_result_q.put(
-                    {"address": worker.address, "dir": worker.local_dir, "uid": uid}
-                )
-                init_result_q.close()
-                await worker.wait_until_closed()
-                logger.info("Worker closed")
+                try:
+                    assert worker.address
+                except ValueError:
+                    pass
+                else:
+                    init_result_q.put(
+                        {
+                            "address": worker.address,
+                            "dir": worker.local_directory,
+                            "uid": uid,
+                        }
+                    )
+                    init_result_q.close()
+                    await worker.finished()
+                    logger.info("Worker closed")
 
         try:
             loop.run_sync(run)

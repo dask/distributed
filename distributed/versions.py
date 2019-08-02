@@ -1,7 +1,5 @@
 """ utilities for package version introspection """
 
-from __future__ import print_function, division, absolute_import
-
 import platform
 import struct
 import os
@@ -53,10 +51,10 @@ def get_system_info():
     host = [
         ("python", "%d.%d.%d.%s.%s" % sys.version_info[:]),
         ("python-bits", struct.calcsize("P") * 8),
-        ("OS", "%s" % (sysname)),
-        ("OS-release", "%s" % (release)),
-        ("machine", "%s" % (machine)),
-        ("processor", "%s" % (processor)),
+        ("OS", "%s" % sysname),
+        ("OS-release", "%s" % release),
+        ("machine", "%s" % machine),
+        ("processor", "%s" % processor),
         ("byteorder", "%s" % sys.byteorder),
         ("LC_ALL", "%s" % os.environ.get("LC_ALL", "None")),
         ("LANG", "%s" % os.environ.get("LANG", "None")),

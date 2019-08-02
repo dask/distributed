@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from functools import partial
 import logging
 import math
@@ -132,8 +130,7 @@ class Occupancy(DashboardComponent):
                     "y": [1, 2],
                     "ms": [1, 2],
                     "color": ["red", "blue"],
-                    "dashboard_port": ["", ""],
-                    "dashboard_host": ["", ""],
+                    "escaped_worker": ["a", "b"],
                 }
             )
 
@@ -155,9 +152,7 @@ class Occupancy(DashboardComponent):
             # fig.xaxis[0].formatter = NumeralTickFormatter(format='0.0s')
             fig.x_range.start = 0
 
-            tap = TapTool(
-                callback=OpenURL(url="./proxy/@dashboard_port/@dashboard_host/status")
-            )
+            tap = TapTool(callback=OpenURL(url="./info/worker/@escaped_worker.html"))
 
             hover = HoverTool()
             hover.tooltips = "@worker : @occupancy s."
@@ -170,9 +165,6 @@ class Occupancy(DashboardComponent):
     def update(self):
         with log_errors():
             workers = list(self.scheduler.workers.values())
-
-            dashboard_host = [ws.host for ws in workers]
-            dashboard_port = [ws.services.get("dashboard", "") for ws in workers]
 
             y = list(range(len(workers)))
             occupancy = [ws.occupancy for ws in workers]
@@ -202,8 +194,7 @@ class Occupancy(DashboardComponent):
                     "worker": [ws.address for ws in workers],
                     "ms": ms,
                     "color": color,
-                    "dashboard_host": dashboard_host,
-                    "dashboard_port": dashboard_port,
+                    "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
                     "x": x,
                     "y": y,
                 }
@@ -321,8 +312,7 @@ class CurrentLoad(DashboardComponent):
                     "worker": ["a", "b"],
                     "y": [1, 2],
                     "nbytes-color": ["blue", "blue"],
-                    "dashboard_port": ["", ""],
-                    "dashboard_host": ["", ""],
+                    "escaped_worker": ["a", "b"],
                 }
             )
 
@@ -374,9 +364,7 @@ class CurrentLoad(DashboardComponent):
                 fig.ygrid.visible = False
 
                 tap = TapTool(
-                    callback=OpenURL(
-                        url="./proxy/@dashboard_port/@dashboard_host/status"
-                    )
+                    callback=OpenURL(url="./info/worker/@escaped_worker.html")
                 )
                 fig.add_tools(tap)
 
@@ -403,9 +391,6 @@ class CurrentLoad(DashboardComponent):
     def update(self):
         with log_errors():
             workers = list(self.scheduler.workers.values())
-
-            dashboard_host = [ws.host for ws in workers]
-            dashboard_port = [ws.services.get("dashboard", "") for ws in workers]
 
             y = list(range(len(workers)))
             nprocessing = [len(ws.processing) for ws in workers]
@@ -449,9 +434,8 @@ class CurrentLoad(DashboardComponent):
                     "nbytes-half": [nb / 2 for nb in nbytes],
                     "nbytes-color": nbytes_color,
                     "nbytes_text": nbytes_text,
-                    "dashboard_host": dashboard_host,
-                    "dashboard_port": dashboard_port,
                     "worker": [ws.address for ws in workers],
+                    "escaped_worker": [escape.url_escape(ws.address) for ws in workers],
                     "y": y,
                 }
 

@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import atexit
 import logging
 import gc
@@ -67,15 +65,15 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--dashboard-address",
     type=str,
     default=":8787",
+    show_default=True,
     help="Address on which to listen for diagnostics dashboard",
 )
 @click.option(
     "--dashboard/--no-dashboard",
     "dashboard",
     default=True,
-    show_default=True,
     required=False,
-    help="Launch the Dashboard",
+    help="Launch the Dashboard [default: --dashboard]",
 )
 @click.option(
     "--bokeh/--no-bokeh",
@@ -84,7 +82,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     required=False,
     help="Deprecated.  See --dashboard/--no-dashboard.",
 )
-@click.option("--show/--no-show", default=False, help="Show web UI")
+@click.option("--show/--no-show", default=False, help="Show web UI [default: --show]")
 @click.option(
     "--dashboard-prefix", type=str, default=None, help="Prefix for the dashboard app"
 )
@@ -136,17 +134,12 @@ def main(
     dashboard_prefix,
     use_xheaders,
     pid_file,
-    scheduler_file,
-    interface,
-    protocol,
     local_directory,
-    preload,
-    preload_argv,
     tls_ca_file,
     tls_cert,
     tls_key,
     dashboard_address,
-    idle_timeout,
+    **kwargs
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
     gc.set_threshold(g0 * 3, g1 * 3, g2 * 3)
@@ -170,7 +163,15 @@ def main(
         port = 8786
 
     sec = Security(
-        tls_ca_file=tls_ca_file, tls_scheduler_cert=tls_cert, tls_scheduler_key=tls_key
+        **{
+            k: v
+            for k, v in [
+                ("tls_ca_file", tls_ca_file),
+                ("tls_scheduler_cert", tls_cert),
+                ("tls_scheduler_key", tls_key),
+            ]
+            if v is not None
+        }
     )
 
     if not host and (tls_ca_file or tls_cert or tls_key):
@@ -209,17 +210,12 @@ def main(
 
     scheduler = Scheduler(
         loop=loop,
-        scheduler_file=scheduler_file,
         security=sec,
         host=host,
         port=port,
-        interface=interface,
-        protocol=protocol,
         dashboard_address=dashboard_address if dashboard else None,
         service_kwargs={"dashboard": {"prefix": dashboard_prefix}},
-        idle_timeout=idle_timeout,
-        preload=preload,
-        preload_argv=preload_argv,
+        **kwargs,
     )
     logger.info("Local Directory: %26s", local_directory)
     logger.info("-" * 47)

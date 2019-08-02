@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from functools import partial
 import gc
 import multiprocessing
@@ -856,3 +854,10 @@ def test_dont_select_closed_worker():
 
         cluster2.close()
         c2.close()
+
+
+def test_client_cluster_synchronous(loop):
+    with clean(threads=False):
+        with Client(loop=loop, processes=False) as c:
+            assert not c.asynchronous
+            assert not c.cluster.asynchronous

@@ -1,7 +1,5 @@
-from __future__ import print_function, division, absolute_import
-
 import asyncio
-from collections import defaultdict, deque, OrderedDict
+from collections import defaultdict, deque, OrderedDict, Mapping, Set
 from datetime import timedelta
 from functools import partial
 import itertools
@@ -39,8 +37,8 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import address_from_user_args
-from .compatibility import finalize, unicode, Mapping, Set
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
+from .diagnostics.plugin import SchedulerPlugin
 from . import profile
 from .metrics import time
 from .node import ServerNode
@@ -1078,6 +1076,7 @@ class Scheduler(ServerNode):
             "register_worker_plugin": self.register_worker_plugin,
             "adaptive_target": self.adaptive_target,
             "workers_to_close": self.workers_to_close,
+            "subscribe_worker_status": self.subscribe_worker_status,
         }
 
         self._transitions = {
@@ -1227,7 +1226,7 @@ class Scheduler(ServerNode):
                 if os.path.exists(fn):
                     os.remove(fn)
 
-            finalize(self, del_scheduler_file)
+            weakref.finalize(self, del_scheduler_file)
 
         preload_modules(self.preload, parameter=self, argv=self.preload_argv)
 
@@ -1266,7 +1265,7 @@ class Scheduler(ServerNode):
         self.periodic_callbacks.clear()
 
         self.stop_services()
-        for ext in self.extensions:
+        for ext in self.extensions.values():
             with ignoring(AttributeError):
                 ext.teardown()
         logger.info("Scheduler closing all comms")
@@ -1326,11 +1325,10 @@ class Scheduler(ServerNode):
     ):
         address = self.coerce_address(address, resolve_address)
         address = normalize_address(address)
-        host = get_address_host(address)
         if address not in self.workers:
-            logger.info("Received heartbeat from removed worker: %s", address)
-            return
+            return {"status": "missing"}
 
+        host = get_address_host(address)
         local_now = time()
         now = now or time()
         metrics = metrics or {}
@@ -1343,9 +1341,7 @@ class Scheduler(ServerNode):
         except KeyError:
             pass
 
-        ws = self.workers.get(address)
-        if not ws:
-            return {"status": "missing"}
+        ws = self.workers[address]
 
         ws.last_seen = time()
 
@@ -1643,7 +1639,7 @@ class Scheduler(ServerNode):
         for key in set(priority) & touched_keys:
             ts = self.tasks[key]
             if ts.priority is None:
-                ts.priority = (-user_priority.get(key, 0), generation, priority[key])
+                ts.priority = (-(user_priority.get(key, 0)), generation, priority[key])
 
         # Ensure all runnables have a priority
         runnables = [ts for ts in touched_tasks if ts.run_spec]
@@ -2122,7 +2118,7 @@ class Scheduler(ServerNode):
             raise ValueError("Workers not the same in all collections")
 
         for w, ws in self.workers.items():
-            assert isinstance(w, (str, unicode)), (type(w), w)
+            assert isinstance(w, str), (type(w), w)
             assert isinstance(ws, WorkerState), (type(ws), ws)
             assert ws.address == w
             if not ws.processing:
@@ -2631,7 +2627,7 @@ class Scheduler(ServerNode):
         serializers=None,
     ):
         """ Broadcast message to workers, return all results """
-        if workers is None:
+        if workers is None or workers is True:
             if hosts is None:
                 workers = list(self.workers)
             else:
@@ -2902,7 +2898,14 @@ class Scheduler(ServerNode):
         )
 
     def workers_to_close(
-        self, comm=None, memory_ratio=None, n=None, key=None, minimum=None
+        self,
+        comm=None,
+        memory_ratio=None,
+        n=None,
+        key=None,
+        minimum=None,
+        target=None,
+        attribute="address",
     ):
         """
         Find workers that we can close with low cost
@@ -2929,6 +2932,11 @@ class Scheduler(ServerNode):
             An optional callable mapping a WorkerState object to a group
             affiliation.  Groups will be closed together.  This is useful when
             closing workers must be done collectively, such as by hostname.
+        target: int
+            Target number of workers to have after we close
+        attribute : str
+            The attribute of the WorkerState object to return, like "address"
+            or "name".  Defaults to "address".
 
         Examples
         --------
@@ -2956,6 +2964,13 @@ class Scheduler(ServerNode):
         --------
         Scheduler.retire_workers
         """
+        if target is not None and n is None:
+            n = len(self.workers) - target
+        if n is not None:
+            if n < 0:
+                n = 0
+            target = len(self.workers) - n
+
         if n is None and memory_ratio is None:
             memory_ratio = 2
 
@@ -2980,12 +2995,12 @@ class Scheduler(ServerNode):
             limit = sum(limit_bytes.values())
             total = sum(group_bytes.values())
 
-            def key(group):
+            def _key(group):
                 is_idle = not any(ws.processing for ws in groups[group])
                 bytes = -group_bytes[group]
                 return (is_idle, bytes)
 
-            idle = sorted(groups, key=key)
+            idle = sorted(groups, key=_key)
 
             to_close = []
             n_remain = len(self.workers)
@@ -3000,7 +3015,7 @@ class Scheduler(ServerNode):
 
                 limit -= limit_bytes[group]
 
-                if (n is not None and len(to_close) < n) or (
+                if (n is not None and n_remain - len(groups[group]) >= target) or (
                     memory_ratio is not None and limit >= memory_ratio * total
                 ):
                     to_close.append(group)
@@ -3009,22 +3024,30 @@ class Scheduler(ServerNode):
                 else:
                     break
 
-            result = [ws.address for g in to_close for ws in groups[g]]
+            result = [getattr(ws, attribute) for g in to_close for ws in groups[g]]
             if result:
                 logger.info("Suggest closing workers: %s", result)
 
             return result
 
     async def retire_workers(
-        self, comm=None, workers=None, remove=True, close_workers=False, **kwargs
+        self,
+        comm=None,
+        workers=None,
+        remove=True,
+        close_workers=False,
+        names=None,
+        **kwargs
     ):
         """ Gracefully retire workers from cluster
 
         Parameters
         ----------
         workers: list (optional)
-            List of worker IDs to retire.
+            List of worker addresses to retire.
             If not provided we call ``workers_to_close`` which finds a good set
+        workers_names: list (optional)
+            List of worker names to retire.
         remove: bool (defaults to True)
             Whether or not to remove the worker metadata immediately or else
             wait for the worker to contact us
@@ -3046,6 +3069,11 @@ class Scheduler(ServerNode):
         Scheduler.workers_to_close
         """
         with log_errors():
+            if names is not None:
+                names = set(names)
+                workers = [
+                    ws.address for ws in self.workers.values() if ws.name in names
+                ]
             if workers is None:
                 while True:
                     try:
@@ -3056,17 +3084,16 @@ class Scheduler(ServerNode):
                                 remove=remove,
                                 close_workers=close_workers,
                             )
-                        raise gen.Return(workers)
+                        return workers
                     except KeyError:  # keys left during replicate
                         pass
-
             workers = {self.workers[w] for w in workers if w in self.workers}
-            if len(workers) > 0:
-                # Keys orphaned by retiring those workers
-                keys = set.union(*[w.has_what for w in workers])
-                keys = {ts.key for ts in keys if ts.who_has.issubset(workers)}
-            else:
-                keys = set()
+            if not workers:
+                return []
+
+            # Keys orphaned by retiring those workers
+            keys = set.union(*[w.has_what for w in workers])
+            keys = {ts.key for ts in keys if ts.who_has.issubset(workers)}
 
             other_workers = set(self.workers.values()) - workers
             if keys:
@@ -3231,6 +3258,14 @@ class Scheduler(ServerNode):
             finally:
                 if teardown:
                     teardown(self, state)
+
+    def subscribe_worker_status(self, comm=None):
+        WorkerStatusPlugin(self, comm)
+        ident = self.identity()
+        for v in ident["workers"].values():
+            del v["metrics"]
+            del v["last_seen"]
+        return ident
 
     def get_processing(self, comm=None, workers=None):
         if workers is not None:
@@ -3696,7 +3731,7 @@ class Scheduler(ServerNode):
         try:
             ts = self.tasks[key]
             assert worker
-            assert isinstance(worker, (str, unicode))
+            assert isinstance(worker, str)
 
             if self.validate:
                 assert ts.processing_on
@@ -4963,3 +4998,37 @@ class KilledWorker(Exception):
         super(KilledWorker, self).__init__(task, last_worker)
         self.task = task
         self.last_worker = last_worker
+
+
+class WorkerStatusPlugin(SchedulerPlugin):
+    """
+    An plugin to share worker status with a remote observer
+
+    This is used in cluster managers to keep updated about the status of the
+    scheduler.
+    """
+
+    def __init__(self, scheduler, comm):
+        self.bcomm = BatchedSend(interval="5ms")
+        self.bcomm.start(comm)
+
+        self.scheduler = scheduler
+        self.scheduler.add_plugin(self)
+
+    def add_worker(self, worker=None, **kwargs):
+        ident = self.scheduler.workers[worker].identity()
+        del ident["metrics"]
+        del ident["last_seen"]
+        try:
+            self.bcomm.send(["add", {"workers": {worker: ident}}])
+        except CommClosedError:
+            self.scheduler.remove_plugin(self)
+
+    def remove_worker(self, worker=None, **kwargs):
+        try:
+            self.bcomm.send(["remove", worker])
+        except CommClosedError:
+            self.scheduler.remove_plugin(self)
+
+    def teardown(self):
+        self.bcomm.close()
