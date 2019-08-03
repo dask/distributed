@@ -113,7 +113,7 @@ def test_cleanup(c, s, a, b):
 
     t_future = xx = vv._get()
     yield gen.moment
-    v._set(y)
+    yield v.set(y)
 
     future = yield t_future
     assert future.key == x_key
