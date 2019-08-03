@@ -6,6 +6,7 @@ import logging
 from operator import add
 import os
 import pickle
+import psutil
 import random
 import subprocess
 import sys
@@ -5589,6 +5590,27 @@ def test_wait_for_workers(c, s, a, b):
     yield future
     assert time() < start + 1
     yield w.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("Worker", [Worker, Nanny])
+async def test_file_descriptors_dont_leak(Worker):
+    pytest.importorskip("pandas")
+    df = dask.datasets.timeseries(freq="10s", dtypes={"x": int, "y": float})
+
+    proc = psutil.Process()
+    start = proc.num_fds()
+    async with Scheduler(port=0, dashboard_address=":0") as s:
+        async with Worker(s.address, nthreads=2) as a, Worker(
+            s.address, nthreads=2
+        ) as b:
+            async with Client(s.address, asynchronous=True) as c:
+                await df.sum().persist()
+
+    begin = time()
+    while proc.num_fds() > begin:
+        await asyncio.sleep(0.01)
+        assert time() < begin + 5, (start, proc.num_fds())
 
 
 if sys.version_info >= (3, 5):
