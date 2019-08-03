@@ -3267,7 +3267,8 @@ class Client(Node):
                                          'stored': 0,
                                          'time-delay': 0.0061032772064208984}}}
         """
-        self.sync(self._update_scheduler_info)
+        if not self.asynchronous:
+            self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
     def write_scheduler_file(self, scheduler_file):

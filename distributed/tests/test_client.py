@@ -4569,7 +4569,7 @@ def test_quiet_client_close(loop):
 @pytest.mark.slow
 def test_quiet_client_close_when_cluster_is_closed_before_client(loop):
     with captured_logger(logging.getLogger("tornado.application")) as logger:
-        cluster = LocalCluster(loop=loop, n_workers=1)
+        cluster = LocalCluster(loop=loop, n_workers=1, dashboard_address=":0")
         client = Client(cluster, loop=loop)
         cluster.close()
         client.close()
