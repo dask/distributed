@@ -5592,6 +5592,7 @@ def test_wait_for_workers(c, s, a, b):
     yield w.close()
 
 
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_file_descriptors_dont_leak(Worker):
