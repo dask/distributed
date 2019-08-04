@@ -373,7 +373,6 @@ class CurrentLoad(DashboardComponent):
                 color="blue",
             )
             rect.nonselection_glyph = None
-            uine = cpu.line(x=[100, 100], y=[0, 1], color="gray")
             hundred_span = Span(
                 location=100,
                 dimension="height",
