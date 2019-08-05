@@ -126,7 +126,7 @@ def test_server_raises_on_blocked_handlers(loop):
         assert isinstance(msg["exception"], ValueError)
         assert "'ping' handler has been explicitly disallowed" in repr(msg["exception"])
 
-        comm.close()
+        yield comm.close()
         server.stop()
 
     res = loop.run_sync(f)
@@ -445,9 +445,16 @@ def test_identity_inproc():
 
 
 def test_ports(loop):
-    port = 9877
-    server = Server({}, io_loop=loop)
-    server.listen(port)
+    for port in range(9877, 9887):
+        server = Server({}, io_loop=loop)
+        try:
+            server.listen(port)
+        except OSError:  # port already taken?
+            pass
+        else:
+            break
+    else:
+        raise Exception()
     try:
         assert server.port == port
 

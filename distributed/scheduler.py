@@ -1025,6 +1025,7 @@ class Scheduler(ServerNode):
             "missing-data": self.handle_missing_data,
             "long-running": self.handle_long_running,
             "reschedule": self.reschedule,
+            "keep-alive": lambda *args, **kwargs: None,
         }
 
         client_handlers = {
@@ -4363,7 +4364,14 @@ class Scheduler(ServerNode):
         Things may have shifted and this task may now be better suited to run
         elsewhere
         """
-        ts = self.tasks[key]
+        try:
+            ts = self.tasks[key]
+        except KeyError:
+            logger.warning(
+                "Attempting to reschedule task {}, which was not "
+                "found on the scheduler. Aborting reschedule.".format(key)
+            )
+            return
         if ts.state != "processing":
             return
         if worker and ts.processing_on.address != worker:
