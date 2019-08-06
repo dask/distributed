@@ -2864,7 +2864,7 @@ class Client(Node):
 
         def dump_to_file(dask_worker=None):
             if not os.path.isabs(remote_filename):
-                fn = os.path.join(dask_worker.local_dir, remote_filename)
+                fn = os.path.join(dask_worker.local_directory, remote_filename)
             else:
                 fn = remote_filename
             with open(fn, "wb") as f:
