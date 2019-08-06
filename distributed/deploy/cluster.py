@@ -202,9 +202,11 @@ class Cluster(object):
 
     def _widget_status(self):
         workers = len(self.scheduler_info["workers"])
-        try:
+        if hasattr(self, "worker_spec"):
+            requested = len(self.worker_spec)
+        elif hasattr(self, "workers"):
             requested = len(self.workers)
-        except AttributeError:
+        else:
             requested = workers
         cores = sum(v["nthreads"] for v in self.scheduler_info["workers"].values())
         memory = sum(v["memory_limit"] for v in self.scheduler_info["workers"].values())
