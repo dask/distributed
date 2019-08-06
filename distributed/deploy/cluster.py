@@ -84,7 +84,8 @@ class Cluster(object):
 
     def __del__(self):
         if self.status != "closed":
-            self.loop.add_callback(self.close)
+            with ignoring(AttributeError, RuntimeError):  # during closing
+                self.loop.add_callback(self.close)
 
     async def _watch_worker_status(self, comm):
         """ Listen to scheduler for updates on adding and removing workers """
