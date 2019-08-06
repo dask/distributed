@@ -114,6 +114,26 @@ def test_decide_worker_with_restrictions(client, s, a, b, c):
     assert x.key in a.data or x.key in b.data
 
 
+@gen_cluster(client=True)
+def test_decide_worker_groups_siblings(c, s, a, b):
+    # Ensure that a-0, a-1, and b-1 are all scheduled on
+    # the same worker to ensure that communication is
+    # minimized.
+    dsk = {
+        "a-0": (inc, 0),
+        "a-1": (inc, 1),
+        "b-0": (operator.add, "a-0", "a-1"),
+        "a-2": (inc, 2),
+        "a-3": (inc, 3),
+        "b-1": (operator.add, "a-2", "a-3"),
+    }
+    x = yield c.get(dsk, keys=["b-0", "b-1"], sync=False)
+    yield wait(x)
+    assert x == [3, 7]
+
+    assert all([len(x.outgoing_transfer_log) == 1 for x in [a, b]])
+
+
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
 def test_move_data_over_break_restrictions(client, s, a, b, c):
     [x] = yield client.scatter([1], workers=b.address)

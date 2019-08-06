@@ -3596,6 +3596,84 @@ class Scheduler(ServerNode):
                 pdb.set_trace()
             raise
 
+    def decide_worker_initial(self, ts: TaskState) -> WorkerState:
+        r"""
+        Decide the worker to assign a task to.
+
+        Parameters
+        ----------
+        ts : TaskState
+            This is a ready task that has no dependencies.
+
+        Returns
+        -------
+        WorkerState
+
+        Notes
+        -----
+        This prioritizes scheduling a task on a worker executing tasks that we're
+        a sibling dependency with.
+
+        Consider the following task graph (read top to bottom)
+
+        ::
+
+            a-1  a-2  a-3  a-4
+             \   /     \   /
+              b-1       b-2
+
+        If we have
+
+        * Two workers: `A` and `B`
+        * Task `a-1` is running on worker `A`
+        * We're currently scheduling task `a-2`
+
+        we'll choose to schedule `a-2` it on worker `A` as well because that will
+        minimize communication when `b-1` is eventually scheduled.
+
+        When we dont have any sibling tasks running, we assign `ts` to an idle worker,
+        or a worker with occupancy / a relatively low number of tasks.
+
+        See Also
+        --------
+        decide_worker
+        worker_objective
+        transition_waiting_processing
+        """
+        worker = None
+        # the config is just for ease of testing / benchmarking. Will remove
+        if dask.config.get("distributed.scheduler.lump_tasks", default=True):
+            for dts in ts.dependents:
+                # Figure out where my siblings are running. Note that we
+                # stop as soon as we find *a* sibling running *somewhere*.
+                # If time weren't an issue, we might find the worker with the
+                # most siblings. But that's expensive.
+                #
+                for sts in dts.dependencies:
+                    if sts.processing_on:
+                        # c[sts.processing_on] += 1
+                        worker = sts.processing_on
+                        break
+                    if sts.who_has:
+                        worker = random.choice(sts.who_has)
+                        break
+
+        if worker:
+            # ((worker, n_tasks),) = c.most_common(1)
+            return worker
+        elif self.idle:
+            if len(self.idle) < 20:  # smart but linear in small case
+                worker = min(self.idle, key=operator.attrgetter("occupancy"))
+            else:  # dumb but fast in large case
+                worker = self.idle[self.n_tasks % len(self.idle)]
+
+        elif len(self.workers) < 20:  # smart but linear in small case
+            worker = min(self.workers.values(), key=operator.attrgetter("occupancy"))
+        else:  # dumb but fast in large case
+            worker = self.workers.values()[self.n_tasks % len(self.workers)]
+
+        return worker
+
     def decide_worker(self, ts):
         """
         Decide on a worker for task *ts*.  Return a WorkerState.
@@ -3614,18 +3692,8 @@ class Scheduler(ServerNode):
                 valid_workers,
                 partial(self.worker_objective, ts),
             )
-        elif self.idle:
-            if len(self.idle) < 20:  # smart but linear in small case
-                worker = min(self.idle, key=operator.attrgetter("occupancy"))
-            else:  # dumb but fast in large case
-                worker = self.idle[self.n_tasks % len(self.idle)]
         else:
-            if len(self.workers) < 20:  # smart but linear in small case
-                worker = min(
-                    self.workers.values(), key=operator.attrgetter("occupancy")
-                )
-            else:  # dumb but fast in large case
-                worker = self.workers.values()[self.n_tasks % len(self.workers)]
+            worker = self.decide_worker_initial(ts)
 
         if self.validate:
             assert worker is None or isinstance(worker, WorkerState), (
@@ -4819,6 +4887,7 @@ def decide_worker(ts, all_workers, valid_workers, objective):
     of bytes sent between workers.  This is determined by calling the
     *objective* function.
     """
+
     deps = ts.dependencies
     assert all(dts.who_has for dts in deps)
     if ts.actor:
