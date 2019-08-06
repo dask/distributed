@@ -66,6 +66,9 @@ class Cluster(object):
         self.status = "running"
 
     async def _close(self):
+        if self.status == "closed":
+            return
+
         await self._watch_worker_status_comm.close()
         await self._watch_worker_status_task
 
