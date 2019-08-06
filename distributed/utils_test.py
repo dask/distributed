@@ -41,7 +41,6 @@ from tornado.ioloop import IOLoop
 from .client import default_client, _global_clients, Client
 from .compatibility import WINDOWS
 from .comm import Comm
-from .comm.utils import offload
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .deploy import SpecCluster
@@ -56,6 +55,7 @@ from .utils import (
     get_ip,
     get_ipv6,
     DequeHandler,
+    offload,
     reset_logger_locks,
     sync,
     iscoroutinefunction,
