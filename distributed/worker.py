@@ -45,7 +45,6 @@ from .security import Security
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
-    is_coroutine_function,
     get_ip,
     funcname,
     typename,
@@ -733,18 +732,23 @@ class Worker(ServerNode):
             in_flight=len(self.in_flight_tasks),
             bandwidth=self.bandwidth,
         )
-        custom = {
-            k: (await metric(self)) if is_coroutine_function(metric) else metric(self)
-            for k, metric in self.metrics.items()
-        }
+        custom = {}
+        for k, metric in self.metrics.items():
+            result = metric(self)
+            if hasattr(result, "__await__"):
+                result = await result
+            custom[k] = result
 
         return merge(custom, self.monitor.recent(), core)
 
     async def get_startup_information(self):
-        return {
-            k: (await f(self)) if is_coroutine_function(f) else f(self)
-            for k, f in self.startup_information.items()
-        }
+        result = {}
+        for k, f in self.startup_information.items():
+            v = f(self)
+            if hasattr(v, "__await__"):
+                v = await v
+            result[k] = v
+        return result
 
     def identity(self, comm=None):
         return {
