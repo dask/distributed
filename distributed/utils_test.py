@@ -55,11 +55,11 @@ from .utils import (
     get_ip,
     get_ipv6,
     DequeHandler,
-    offload,
     reset_logger_locks,
     sync,
     iscoroutinefunction,
     thread_state,
+    _offload_executor,
 )
 from .worker import Worker, TOTAL_MEMORY
 from .nanny import Nanny
@@ -80,7 +80,7 @@ logging_levels = {
 }
 
 
-offload(lambda: None).result()  # create thread during import
+_offload_executor.submit(lambda: None).result()  # create thread during import
 
 
 @pytest.fixture(scope="session")
