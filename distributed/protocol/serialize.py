@@ -135,6 +135,16 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
+    if isinstance(x, tuple):
+        t = [
+            serialize(i, serializers=serializers, on_error=on_error, context=context)
+            for i in x
+        ]
+        headers = [i[0] for i in t]
+        headers = {"sub-headers": headers, "is-collection": True}
+        frames = [i[1] for i in t]
+        return headers, frames
+
     tb = ""
 
     for name in serializers:
@@ -178,6 +188,15 @@ def deserialize(header, frames, deserializers=None):
     --------
     serialize
     """
+    if "is-collection" in header:
+        header = header["sub-headers"]
+        return tuple(
+            [
+                deserialize(h, f, deserializers=deserializers)
+                for h, f in zip(header, frames)
+            ]
+        )
+
     name = header.get("serializer")
     if deserializers is not None and name not in deserializers:
         raise TypeError(
