@@ -1,5 +1,6 @@
 import asyncio
-from collections import defaultdict, deque, OrderedDict, Mapping, Set
+from collections import defaultdict, deque, OrderedDict
+from collections.abc import Mapping, Set
 from datetime import timedelta
 from functools import partial
 import itertools
@@ -210,6 +211,7 @@ class WorkerState(object):
     __slots__ = (
         "actors",
         "address",
+        "extra",
         "has_what",
         "last_seen",
         "local_directory",
@@ -239,6 +241,7 @@ class WorkerState(object):
         local_directory=None,
         services=None,
         nanny=None,
+        extra=None,
     ):
         self.address = address
         self.pid = pid
@@ -262,6 +265,8 @@ class WorkerState(object):
         self.resources = {}
         self.used_resources = {}
 
+        self.extra = extra or {}
+
     @property
     def host(self):
         return get_address_host(self.address)
@@ -277,6 +282,7 @@ class WorkerState(object):
             local_directory=self.local_directory,
             services=self.services,
             nanny=self.nanny,
+            extra=self.extra,
         )
         ws.processing = {ts.key for ts in self.processing}
         return ws
@@ -305,6 +311,7 @@ class WorkerState(object):
             "services": self.services,
             "metrics": self.metrics,
             "nanny": self.nanny,
+            **self.extra,
         }
 
     @property
@@ -1385,6 +1392,7 @@ class Scheduler(ServerNode):
         services=None,
         local_directory=None,
         nanny=None,
+        extra=None,
     ):
         """ Add a new worker to the cluster """
         with log_errors():
@@ -1405,6 +1413,7 @@ class Scheduler(ServerNode):
                 local_directory=local_directory,
                 services=services,
                 nanny=nanny,
+                extra=extra,
             )
 
             if name in self.aliases:
@@ -2366,9 +2375,7 @@ class Scheduler(ServerNode):
 
         ws = ts.processing_on
         if ws is None:
-            logger.debug(
-                "Received long-running signal from duplicate task. " "Ignoring."
-            )
+            logger.debug("Received long-running signal from duplicate task. Ignoring.")
             return
 
         if compute_duration:
@@ -3071,9 +3078,11 @@ class Scheduler(ServerNode):
         """
         with log_errors():
             if names is not None:
-                names = set(names)
+                if names:
+                    logger.info("Retire worker names %s", names)
+                names = set(map(str, names))
                 workers = [
-                    ws.address for ws in self.workers.values() if ws.name in names
+                    ws.address for ws in self.workers.values() if str(ws.name) in names
                 ]
             if workers is None:
                 while True:
@@ -3091,6 +3100,7 @@ class Scheduler(ServerNode):
             workers = {self.workers[w] for w in workers if w in self.workers}
             if not workers:
                 return []
+            logger.info("Retire workers %s", workers)
 
             # Keys orphaned by retiring those workers
             keys = set.union(*[w.has_what for w in workers])
@@ -3099,6 +3109,7 @@ class Scheduler(ServerNode):
             other_workers = set(self.workers.values()) - workers
             if keys:
                 if other_workers:
+                    logger.info("Moving %d keys to other workers", len(keys))
                     await self.replicate(
                         keys=keys,
                         workers=[ws.address for ws in other_workers],
@@ -4730,7 +4741,7 @@ class Scheduler(ServerNode):
         for ws in self.workers.values():
             if ws.last_seen < now - self.worker_ttl:
                 logger.warning(
-                    "Worker failed to heartbeat within %s seconds. " "Closing: %s",
+                    "Worker failed to heartbeat within %s seconds. Closing: %s",
                     self.worker_ttl,
                     ws,
                 )

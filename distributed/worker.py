@@ -1,6 +1,7 @@
 import asyncio
 import bisect
-from collections import defaultdict, deque, MutableMapping
+from collections import defaultdict, deque
+from collections.abc import MutableMapping
 from datetime import timedelta
 import heapq
 import logging
@@ -30,7 +31,6 @@ from tornado.ioloop import IOLoop
 from . import profile, comm
 from .batched import BatchedSend
 from .comm import get_address_host, connect
-from .comm.utils import offload
 from .comm.addressing import address_from_user_args
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
@@ -56,6 +56,7 @@ from .utils import (
     thread_state,
     json_load_robust,
     key_split,
+    offload,
     PeriodicCallback,
     parse_bytes,
     parse_timedelta,
@@ -81,6 +82,10 @@ READY = ("ready", "constrained")
 
 DEFAULT_EXTENSIONS = [PubSubWorkerExtension]
 
+DEFAULT_METRICS = {}
+
+DEFAULT_STARTUP_INFORMATION = {}
+
 
 class Worker(ServerNode):
     """ Worker node in a Dask distributed cluster
@@ -97,7 +102,7 @@ class Worker(ServerNode):
 
         $ dask-worker scheduler-ip:port
 
-    Use the ``--help`` flag to see more options
+    Use the ``--help`` flag to see more options::
 
         $ dask-worker --help
 
@@ -305,7 +310,8 @@ class Worker(ServerNode):
         contact_address=None,
         memory_monitor_interval="200ms",
         extensions=None,
-        metrics=None,
+        metrics=DEFAULT_METRICS,
+        startup_information=DEFAULT_STARTUP_INFORMATION,
         data=None,
         interface=None,
         host=None,
@@ -576,6 +582,9 @@ class Worker(ServerNode):
                 )
 
         self.metrics = dict(metrics) if metrics else {}
+        self.startup_information = (
+            dict(startup_information) if startup_information else {}
+        )
 
         self.low_level_profiler = low_level_profiler
 
@@ -716,7 +725,7 @@ class Worker(ServerNode):
         )
         return self.local_directory
 
-    def get_metrics(self):
+    async def get_metrics(self):
         core = dict(
             executing=len(self.executing),
             in_memory=len(self.data),
@@ -724,9 +733,23 @@ class Worker(ServerNode):
             in_flight=len(self.in_flight_tasks),
             bandwidth=self.bandwidth,
         )
-        custom = {k: metric(self) for k, metric in self.metrics.items()}
+        custom = {}
+        for k, metric in self.metrics.items():
+            result = metric(self)
+            if hasattr(result, "__await__"):
+                result = await result
+            custom[k] = result
 
         return merge(custom, self.monitor.recent(), core)
+
+    async def get_startup_information(self):
+        result = {}
+        for k, f in self.startup_information.items():
+            v = f(self)
+            if hasattr(v, "__await__"):
+                v = await v
+            result[k] = v
+        return result
 
     def identity(self, comm=None):
         return {
@@ -785,7 +808,8 @@ class Worker(ServerNode):
                         services=self.service_ports,
                         nanny=self.nanny,
                         pid=os.getpid(),
-                        metrics=self.get_metrics(),
+                        metrics=await self.get_metrics(),
+                        extra=await self.get_startup_information(),
                     ),
                     serializers=["msgpack"],
                 )
@@ -839,7 +863,9 @@ class Worker(ServerNode):
             try:
                 start = time()
                 response = await self.scheduler.heartbeat_worker(
-                    address=self.contact_address, now=time(), metrics=self.get_metrics()
+                    address=self.contact_address,
+                    now=time(),
+                    metrics=await self.get_metrics(),
                 )
                 end = time()
                 middle = (start + end) / 2
@@ -3354,7 +3380,7 @@ async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=Tru
 
     except Exception as e:
         logger.warning(
-            " Run Failed\n" "Function: %s\n" "args:     %s\n" "kwargs:   %s\n",
+            "Run Failed\nFunction: %s\nargs:     %s\nkwargs:   %s\n",
             str(funcname(function))[:1000],
             convert_args_to_str(args, max_len=1000),
             convert_kwargs_to_str(kwargs, max_len=1000),
@@ -3368,3 +3394,21 @@ async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=Tru
 
 
 _global_workers = Worker._instances
+
+try:
+    from .diagnostics import nvml
+except ImportError:
+    pass
+else:
+
+    @gen.coroutine
+    def gpu_metric(worker):
+        result = yield offload(nvml.real_time)
+        return result
+
+    DEFAULT_METRICS["gpu"] = gpu_metric
+
+    def gpu_startup(worker):
+        return nvml.one_time()
+
+    DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup
