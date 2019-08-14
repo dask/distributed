@@ -1,5 +1,4 @@
 import asyncio
-
 import pytest
 
 ucp = pytest.importorskip("ucp")
@@ -169,6 +168,14 @@ def test_ucx_deserialize():
     "g",
     [
         lambda cudf: cudf.Series([1, 2, 3]),
+        lambda cudf: cudf.Series([]),
+        lambda cudf: cudf.DataFrame([]),
+        lambda cudf: cudf.DataFrame([1]).head(0),
+        lambda cudf: cudf.DataFrame([1.0]).head(0),
+        lambda cudf: cudf.DataFrame({"a": []}),
+        lambda cudf: cudf.DataFrame({"a": ["a"]}).head(0),
+        lambda cudf: cudf.DataFrame({"a": [1.0]}).head(0),
+        lambda cudf: cudf.DataFrame({"a": [1]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1, 2, None], "b": [1.0, 2.0, None]}),
     ],
 )
@@ -188,6 +195,8 @@ async def test_ping_pong_cudf(g):
     cudf_obj_2 = result.pop("data")
     assert result["op"] == "ping"
     assert_eq(cudf_obj, cudf_obj_2)
+    await com.close()
+    ucp.fin()
 
 
 @pytest.mark.asyncio
