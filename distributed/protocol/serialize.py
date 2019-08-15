@@ -135,14 +135,39 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
-    if isinstance(x, tuple):
-        t = [
-            serialize(i, serializers=serializers, on_error=on_error, context=context)
-            for i in x
-        ]
+    if isinstance(x, (dict, list, set, tuple)) and len(x) <= 5:
+        if isinstance(x, dict):
+            t = []
+            for k, v in x.items():
+                h, f = serialize(
+                    v, serializers=serializers, on_error=on_error, context=context
+                )
+                h["key"] = pickle.dumps(k)
+                t.append((h, f))
+        else:
+            t = [
+                serialize(
+                    i, serializers=serializers, on_error=on_error, context=context
+                )
+                for i in x
+            ]
+
+        frames = []
+        lengths = []
+        for _header, _frames in t:
+            frames.extend(_frames)
+            length = len(_frames)
+            if "is-collection" in _header and _header["is-collection"] is True:
+                length = sum(_header["frame-lengths"])
+            lengths.append(length)
+
         headers = [i[0] for i in t]
-        headers = {"sub-headers": headers, "is-collection": True}
-        frames = [i[1] for i in t]
+        headers = {
+            "sub-headers": headers,
+            "is-collection": True,
+            "frame-lengths": lengths,
+            "type-serialized": pickle.dumps(type(x)),
+        }
         return headers, frames
 
     tb = ""
@@ -189,13 +214,30 @@ def deserialize(header, frames, deserializers=None):
     serialize
     """
     if "is-collection" in header:
-        header = header["sub-headers"]
-        return tuple(
-            [
-                deserialize(h, f, deserializers=deserializers)
-                for h, f in zip(header, frames)
-            ]
-        )
+        headers = header["sub-headers"]
+        lengths = header["frame-lengths"]
+        cls = pickle.loads(header["type-serialized"])
+
+        start = 0
+        if issubclass(cls, dict):
+            c = {}
+            for h, l in zip(headers, lengths):
+                k = pickle.loads(h.pop("key"))
+                c[k] = deserialize(
+                    h, frames[start : start + l], deserializers=deserializers
+                )
+                start += l
+            return c
+        else:
+            c = []
+            for h, l in zip(headers, lengths):
+                c.append(
+                    deserialize(
+                        h, frames[start : start + l], deserializers=deserializers
+                    )
+                )
+                start += l
+            return cls(c)
 
     name = header.get("serializer")
     if deserializers is not None and name not in deserializers:
