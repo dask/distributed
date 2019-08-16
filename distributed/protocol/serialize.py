@@ -157,14 +157,7 @@ def serialize(x, serializers=None, on_error="message", context=None):
                 _header, _frames = serialize(
                     v, serializers=serializers, on_error=on_error, context=context
                 )
-                try:
-                    k = msgpack.dumps(k)
-                except Exception:
-                    k = serialize(
-                        k, serializers=serializers, on_error=on_error, context=context
-                    )
-                else:
-                    _header["key"] = k
+                _header["key"] = k
                 headers_frames.append((_header, _frames))
         else:
             headers_frames = [
@@ -243,7 +236,6 @@ def deserialize(header, frames, deserializers=None):
             d = {}
             for _header, _length in zip(headers, lengths):
                 k = _header.pop("key")
-                k = msgpack.loads(k, raw=False)
                 d[k] = deserialize(
                     _header,
                     frames[start : start + _length],
