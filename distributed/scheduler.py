@@ -2423,7 +2423,7 @@ class Scheduler(ServerNode):
         """
         if isinstance(plugin, type):
             plugin = plugin(self, **kwargs)
-
+tls://10.252.19.48:23530
         if idempotent and any(isinstance(p, type(plugin)) for p in self.plugins):
             return
 
@@ -2443,6 +2443,8 @@ class Scheduler(ServerNode):
             self.stream_comms[worker].send(msg)
         except (CommClosedError, AttributeError):
             self.loop.add_callback(self.remove_worker, address=worker)
+        except KeyError:
+            pass
 
     ############################
     # Less common interactions #
