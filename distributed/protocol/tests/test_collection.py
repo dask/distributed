@@ -57,3 +57,16 @@ def test_serialize_pandas_pandas(collection, df2, df2_serializer):
         assert (t["df2"] if isinstance(t, dict) else t[1]) is None
     else:
         assert_eq(t["df2"] if isinstance(t, dict) else t[1], df2)
+
+
+def test_large_collections_serialize_simply():
+    header, frames = serialize(tuple(range(1000)))
+    assert len(frames) == 1
+
+
+def test_nested_types():
+    x = np.ones(5)
+    header, frames = serialize([[[x]]])
+    assert "dask" in str(header)
+    assert len(frames) == 1
+    assert x.data in frames
