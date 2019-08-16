@@ -179,7 +179,7 @@ def serialize(x, serializers=None, on_error="message", context=None):
             "sub-headers": headers,
             "is-collection": True,
             "frame-lengths": lengths,
-            "type-serialized": pickle.dumps(type(x)),
+            "type-serialized": type(x).__name__,
         }
         return headers, frames
 
@@ -229,7 +229,9 @@ def deserialize(header, frames, deserializers=None):
     if "is-collection" in header:
         headers = header["sub-headers"]
         lengths = header["frame-lengths"]
-        cls = pickle.loads(header["type-serialized"])
+        cls = {"tuple": tuple, "list": list, "set": set, "dict": dict}[
+            header["type-serialized"]
+        ]
 
         start = 0
         if cls is dict:
