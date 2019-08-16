@@ -144,9 +144,13 @@ def serialize(x, serializers=None, on_error="message", context=None):
         else:
             dict_safe = True
 
-    if (type(x) in (list, set, tuple) or (type(x) is dict and dict_safe)) and len(
-        x
-    ) <= 5:
+    if (
+        type(x) in (list, set, tuple)
+        and len(x) <= 5
+        or type(x) is dict
+        and len(x) <= 5
+        and dict_safe
+    ):
         if isinstance(x, dict):
             headers_frames = []
             for k, v in x.items():
