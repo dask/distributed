@@ -6,8 +6,15 @@ from dask.dataframe.utils import assert_eq
 
 
 @pytest.mark.parametrize("collection", [tuple, dict])
-@pytest.mark.parametrize("y,y_serializer", [(np.arange(50), "dask"), (None, "pickle")])
-def test_serialize_numpy_numpy(collection, y, y_serializer):
+@pytest.mark.parametrize(
+    "y,y_serializer",
+    [
+        (np.arange(50), "dask"),
+        (pd.DataFrame({"C": ["a", "b", None], "D": [2.5, 3.5, 4.5]}), "pickle"),
+        (None, "pickle"),
+    ],
+)
+def test_serialize_collection(collection, y, y_serializer):
     x = np.arange(100)
     if issubclass(collection, dict):
         header, frames = serialize({"x": x, "y": y}, serializers=("dask", "pickle"))
@@ -25,38 +32,10 @@ def test_serialize_numpy_numpy(collection, y, y_serializer):
     if y is None:
         assert (t["y"] if isinstance(t, dict) else t[1]) is None
     else:
-        assert ((t["y"] if isinstance(t, dict) else t[1]) == y).all()
-
-
-@pytest.mark.parametrize("collection", [tuple, dict])
-@pytest.mark.parametrize(
-    "df2,df2_serializer",
-    [
-        (pd.DataFrame({"C": ["a", "b", None], "D": [2.5, 3.5, 4.5]}), "pickle"),
-        (None, "pickle"),
-    ],
-)
-def test_serialize_pandas_pandas(collection, df2, df2_serializer):
-    df1 = pd.DataFrame({"A": [1, 2, None], "B": [1.0, 2.0, None]})
-    if issubclass(collection, dict):
-        header, frames = serialize(
-            {"df1": df1, "df2": df2}, serializers=("dask", "pickle")
-        )
-    else:
-        header, frames = serialize((df1, df2), serializers=("dask", "pickle"))
-    t = deserialize(header, frames, deserializers=("dask", "pickle"))
-
-    assert header["is-collection"] is True
-    sub_headers = header["sub-headers"]
-    assert sub_headers[0]["serializer"] == "pickle"
-    assert sub_headers[1]["serializer"] == "pickle"
-    assert isinstance(t, collection)
-
-    assert_eq(t["df1"] if isinstance(t, dict) else t[0], df1)
-    if df2 is None:
-        assert (t["df2"] if isinstance(t, dict) else t[1]) is None
-    else:
-        assert_eq(t["df2"] if isinstance(t, dict) else t[1], df2)
+        if isinstance(y, pd.DataFrame):
+            assert_eq(t["y"] if isinstance(t, dict) else t[1], y)
+        else:
+            assert ((t["y"] if isinstance(t, dict) else t[1]) == y).all()
 
 
 def test_large_collections_serialize_simply():
