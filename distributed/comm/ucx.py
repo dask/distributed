@@ -117,40 +117,39 @@ class UCX(Comm):
                 await self.ep.send_obj(frame)
             return sum(map(nbytes, frames))
 
-        async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
-            with log_errors():
-                if deserializers is None:
-                    deserializers = ("cuda", "dask", "pickle", "error")
-                resp = await self.ep.recv_future()
-                obj = ucp.get_obj_from_msg(resp)
-                assert len(obj) == len(bytes(obj))
-                (nframes,) = struct.unpack(
-                    "Q", obj[:8]
-                )  # first eight bytes for number of frames
+    async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
+        with log_errors():
+            if deserializers is None:
+                deserializers = ("cuda", "dask", "pickle", "error")
+            resp = await self.ep.recv_future()
+            obj = ucp.get_obj_from_msg(resp)
+            (nframes,) = struct.unpack(
+                "Q", obj[:8]
+            )  # first eight bytes for number of frames
 
-                gpu_frame_msg = obj[
-                    8 : 8 + nframes
-                ]  # next nframes bytes for if they're GPU frames
-                is_gpus = struct.unpack("{}?".format(nframes), gpu_frame_msg)
+            gpu_frame_msg = obj[
+                8 : 8 + nframes
+            ]  # next nframes bytes for if they're GPU frames
+            is_gpus = struct.unpack("{}?".format(nframes), gpu_frame_msg)
 
-                sized_frame_msg = obj[8 + nframes :]  # then the rest for frame sizes
-                sizes = struct.unpack("{}Q".format(nframes), sized_frame_msg)
+            sized_frame_msg = obj[8 + nframes :]  # then the rest for frame sizes
+            sizes = struct.unpack("{}Q".format(nframes), sized_frame_msg)
 
-                frames = []
+            frames = []
 
-                for i, (is_gpu, size) in enumerate(zip(is_gpus, sizes)):
-                    if size > 0:
-                        resp = await self.ep.recv_obj(size, cuda=is_gpu)
-                    else:
-                        resp = await self.ep.recv_future()
-                    frame = ucp.get_obj_from_msg(resp)
-                    frames.append(frame)
+            for i, (is_gpu, size) in enumerate(zip(is_gpus, sizes)):
+                if size > 0:
+                    resp = await self.ep.recv_obj(size, cuda=is_gpu)
+                else:
+                    resp = await self.ep.recv_future()
+                frame = ucp.get_obj_from_msg(resp)
+                frames.append(frame)
 
-                msg = await from_frames(
-                    frames, deserialize=self.deserialize, deserializers=deserializers
-                )
+            msg = await from_frames(
+                frames, deserialize=self.deserialize, deserializers=deserializers
+            )
 
-                return msg
+            return msg
 
     def abort(self):
         if self._ep:
