@@ -2,10 +2,9 @@ import pytest
 from distributed.protocol import serialize, deserialize
 import pandas as pd
 import numpy as np
-from dask.dataframe.utils import assert_eq
 
 
-@pytest.mark.parametrize("collection", [tuple, dict])
+@pytest.mark.parametrize("collection", [tuple, dict, list])
 @pytest.mark.parametrize(
     "y,y_serializer",
     [
@@ -19,23 +18,23 @@ def test_serialize_collection(collection, y, y_serializer):
     if issubclass(collection, dict):
         header, frames = serialize({"x": x, "y": y}, serializers=("dask", "pickle"))
     else:
-        header, frames = serialize((x, y), serializers=("dask", "pickle"))
+        header, frames = serialize(collection((x, y)), serializers=("dask", "pickle"))
     t = deserialize(header, frames, deserializers=("dask", "pickle", "error"))
+    assert isinstance(t, collection)
 
     assert header["is-collection"] is True
     sub_headers = header["sub-headers"]
-    assert sub_headers[0]["serializer"] == "dask"
-    assert sub_headers[1]["serializer"] == y_serializer
-    assert isinstance(t, collection)
 
-    assert ((t["x"] if isinstance(t, dict) else t[0]) == x).all()
-    if y is None:
-        assert (t["y"] if isinstance(t, dict) else t[1]) is None
+    if collection is not dict:
+        assert sub_headers[0]["serializer"] == "dask"
+        assert sub_headers[1]["serializer"] == y_serializer
+
+    if collection is dict:
+        assert (t["x"] == x).all()
+        assert str(t["y"]) == str(y)
     else:
-        if isinstance(y, pd.DataFrame):
-            assert_eq(t["y"] if isinstance(t, dict) else t[1], y)
-        else:
-            assert ((t["y"] if isinstance(t, dict) else t[1]) == y).all()
+        assert (t[0] == x).all()
+        assert str(t[1]) == str(y)
 
 
 def test_large_collections_serialize_simply():
