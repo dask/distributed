@@ -192,9 +192,11 @@ async def test_ping_pong_cudf(g):
 
     await com.write(msg)
     result = await serv_com.read()
+
     cudf_obj_2 = result.pop("data")
     assert result["op"] == "ping"
     assert_eq(cudf_obj, cudf_obj_2)
+
     await com.close()
     await serv_com.close()
 
