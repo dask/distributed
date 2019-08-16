@@ -3397,7 +3397,7 @@ _global_workers = Worker._instances
 
 try:
     from .diagnostics import nvml
-except (ImportError, AttributeError):
+except Exception:
     pass
 else:
 
