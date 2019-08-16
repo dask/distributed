@@ -135,7 +135,18 @@ def serialize(x, serializers=None, on_error="message", context=None):
     if isinstance(x, Serialized):
         return x.header, x.frames
 
-    if type(x) in (dict, list, set, tuple) and len(x) <= 5:
+    # Determine whether keys are safe to be serialized with msgpack
+    if type(x) is dict and len(x) <= 5:
+        try:
+            msgpack.dumps(list(x.keys()))
+        except Exception:
+            dict_safe = False
+        else:
+            dict_safe = True
+
+    if (type(x) in (list, set, tuple) or (type(x) is dict and dict_safe)) and len(
+        x
+    ) <= 5:
         if isinstance(x, dict):
             headers_frames = []
             for k, v in x.items():
@@ -164,8 +175,6 @@ def serialize(x, serializers=None, on_error="message", context=None):
         for _header, _frames in headers_frames:
             frames.extend(_frames)
             length = len(_frames)
-            if "is-collection" in _header and _header["is-collection"] is True:
-                length = sum(_header["frame-lengths"])
             lengths.append(length)
 
         headers = [obj[0] for obj in headers_frames]
@@ -228,26 +237,27 @@ def deserialize(header, frames, deserializers=None):
         start = 0
         if cls is dict:
             d = {}
-            for h, l in zip(headers, lengths):
-                k = h.pop("key")
-                try:
-                    k = msgpack.loads(k, raw=False)
-                except Exception:
-                    k = deserialize(*h.pop("key"), deserializers=deserializers)
+            for _header, _length in zip(headers, lengths):
+                k = _header.pop("key")
+                k = msgpack.loads(k, raw=False)
                 d[k] = deserialize(
-                    h, frames[start : start + l], deserializers=deserializers
+                    _header,
+                    frames[start : start + _length],
+                    deserializers=deserializers,
                 )
-                start += l
+                start += _length
             return d
         else:
             lst = []
-            for h, l in zip(headers, lengths):
+            for _header, _length in zip(headers, lengths):
                 lst.append(
                     deserialize(
-                        h, frames[start : start + l], deserializers=deserializers
+                        _header,
+                        frames[start : start + _length],
+                        deserializers=deserializers,
                     )
                 )
-                start += l
+                start += _length
             return cls(lst)
 
     name = header.get("serializer")
