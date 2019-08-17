@@ -226,7 +226,7 @@ class SpecCluster(Cluster):
         self.status = "starting"
         self.scheduler = await self.scheduler
         self.scheduler_comm = rpc(
-            self.scheduler.external_address or self.scheduler.address,
+            getattr(self.scheduler, "external_address", None) or self.scheduler.address,
             connection_args=self.security.get_connection_args("client"),
         )
         await super()._start()
