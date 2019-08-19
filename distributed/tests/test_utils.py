@@ -151,9 +151,11 @@ def test_get_ip_interface():
         pytest.skip("test needs to be enhanced for platform %r" % (sys.platform,))
 
     non_existent_interface = "__non-existent-interface"
-    expected_error_message = ("{!r} is not a valid network interface.+"
-                              "Valid network interfaces are:".format(non_existent_interface))
-    if sys.platform == 'darwin':
+    expected_error_message = (
+        "{!r} is not a valid network interface.+"
+        "Valid network interfaces are:".format(non_existent_interface)
+    )
+    if sys.platform == "darwin":
         expected_error_message += ".+'lo0'"
     elif sys.platform.startswith("linux"):
         expected_error_message += ".+'lo'"

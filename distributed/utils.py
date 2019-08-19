@@ -173,8 +173,10 @@ def get_ip_interface(ifname):
 
     if ifname not in net_if_addrs:
         allowed_ifnames = list(net_if_addrs.keys())
-        raise KeyError('{!r} is not a valid network interface. '
-                         'Valid network interfaces are: {}'.format(ifname, allowed_ifnames))
+        raise KeyError(
+            "{!r} is not a valid network interface. "
+            "Valid network interfaces are: {}".format(ifname, allowed_ifnames)
+        )
 
     for info in net_if_addrs[ifname]:
         if info.family == socket.AF_INET:
