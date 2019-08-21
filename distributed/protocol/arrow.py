@@ -34,7 +34,7 @@ def serialize_table(tbl):
     writer = pyarrow.RecordBatchStreamWriter(sink, tbl.schema)
     writer.write_table(tbl)
     writer.close()
-    buf = memoryview(sink.getvalue())
+    buf = sink.getvalue()
     header = {}
     frames = [buf]
     return header, frames
