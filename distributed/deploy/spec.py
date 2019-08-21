@@ -347,7 +347,7 @@ class SpecCluster(Cluster):
                 threads_per_worker = self.new_spec["options"]["nthreads"]
             except KeyError:
                 raise ValueError(
-                    "to use scale(threads=...) your worker definition must include an nthreads= definition"
+                    "to use scale(cores=...) your worker definition must include an nthreads= definition"
                 )
             else:
                 n = max(n, int(math.ceil(cores / threads_per_worker)))
