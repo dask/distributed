@@ -93,6 +93,27 @@ with ignoring(ImportError):
     }
     default_compression = "lz4"
 
+
+with ignoring(ImportError):
+    import zstandard as zstd
+
+    def zstd_compress(data):
+        if isinstance(data, (memoryview, bytearray)):
+            data = bytes(data)
+        return zstd.ZstdCompressor().compress(data)
+
+    def zstd_decompress(data):
+        if isinstance(data, (memoryview, bytearray)):
+            data = bytes(data)
+        return zstd.ZstdDecompressor().decompress(data)
+
+    compressions["zstd"] = {
+        "compress": zstd_compress,
+        "decompress": zstd_decompress,
+    }
+    default_compression = "zstd"
+    
+    
 with ignoring(ImportError):
     import blosc
 
