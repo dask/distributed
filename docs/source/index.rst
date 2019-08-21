@@ -125,7 +125,6 @@ Contents
    :caption: Developer Documentation
 
    changelog
-   ec2
    communications
    develop
    foundations
