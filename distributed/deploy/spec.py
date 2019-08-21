@@ -334,27 +334,23 @@ class SpecCluster(Cluster):
     def scale(self, n=0, memory=None, cores=None):
         if memory is not None:
             try:
-                n = max(
-                    n,
-                    int(
-                        math.ceil(
-                            parse_bytes(memory)
-                            / parse_bytes(self.new_spec["options"]["memory_limit"])
-                        )
-                    ),
-                )
+                limit = self.new_spec["options"]["memory_limit"]
             except KeyError:
                 raise ValueError(
                     "to use scale(memory=...) your worker definition must include a memory_limit definition"
                 )
+            else:
+                n = max(n, int(math.ceil(parse_bytes(memory) / parse_bytes(limit))))
 
         if cores is not None:
             try:
-                n = max(n, int(math.ceil(cores / self.new_spec["options"]["nthreads"])))
+                threads_per_worker = self.new_spec["options"]["nthreads"]
             except KeyError:
                 raise ValueError(
                     "to use scale(threads=...) your worker definition must include an nthreads= definition"
                 )
+            else:
+                n = max(n, int(math.ceil(cores / threads_per_worker)))
 
         if len(self.worker_spec) > n:
             not_yet_launched = set(self.worker_spec) - {
