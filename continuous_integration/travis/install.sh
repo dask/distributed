@@ -28,6 +28,7 @@ source activate test-environment
 
 # Install dependencies
 conda install -q \
+    zstandard \
     bokeh \
     click \
     coverage \
