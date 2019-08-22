@@ -28,6 +28,7 @@ source activate test-environment
 
 # Install dependencies
 conda install -q \
+    pyyaml \
     zstandard \
     bokeh \
     click \
