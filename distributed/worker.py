@@ -740,7 +740,7 @@ class Worker(ServerNode):
                 if hasattr(result, "__await__"):
                     result = await result
                 custom[k] = result
-            except Exception:
+            except Exception:  # TODO: log error once
                 pass
 
         return merge(custom, self.monitor.recent(), core)
