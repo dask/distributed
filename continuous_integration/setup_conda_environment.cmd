@@ -50,6 +50,7 @@ call activate %CONDA_ENV%
 %PIP_INSTALL% git+https://github.com/dask/dask --upgrade
 %PIP_INSTALL% git+https://github.com/joblib/joblib.git --upgrade
 %PIP_INSTALL% git+https://github.com/dask/zict --upgrade
+%PIP_INSTALL% zstandard
 
 %PIP_INSTALL% "pytest>=4" pytest-repeat pytest-timeout pytest-faulthandler sortedcollections pytest-asyncio
 
