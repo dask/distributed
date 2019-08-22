@@ -2423,7 +2423,6 @@ class Scheduler(ServerNode):
         """
         if isinstance(plugin, type):
             plugin = plugin(self, **kwargs)
-tls://10.252.19.48:23530
         if idempotent and any(isinstance(p, type(plugin)) for p in self.plugins):
             return
 
