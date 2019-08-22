@@ -94,21 +94,23 @@ with ignoring(ImportError):
     default_compression = "lz4"
 
 with ignoring(ImportError):
-    _import_policy = dask.config.get("distributed.comm.zstd.import_policy", 'default')
-    os.environ['PYTHON_ZSTANDARD_IMPORT_POLICY'] = _import_policy
+    _import_policy = dask.config.get("distributed.comm.zstd.import_policy", "default")
+    os.environ["PYTHON_ZSTANDARD_IMPORT_POLICY"] = _import_policy
 
     import zstandard as zstd
 
     zstd_level = dask.config.get("distributed.comm.zstd.level", None)
     zstd_kwargs = dict(
         write_checksum=dask.config.get("distributed.comm.zstd.write_checksum", None),
-        write_content_size=dask.config.get("distributed.comm.zstd.write_content_size", True),
+        write_content_size=dask.config.get(
+            "distributed.comm.zstd.write_content_size", True
+        ),
         write_dict_id=dask.config.get("distributed.comm.zstd.write_dict_id", True),
         threads=dask.config.get("distributed.comm.zstd.threads", 0),
     )
 
     if zstd_level is not None:
-        zstd_kwargs['level'] = zstd_level
+        zstd_kwargs["level"] = zstd_level
 
     zstd_compressor = zstd.ZstdCompressor(**zstd_kwargs)
     zstd_decompressor = zstd.ZstdDecompressor()
@@ -123,10 +125,7 @@ with ignoring(ImportError):
             data = bytes(data)
         return zstd_decompressor.decompress(data)
 
-    compressions["zstd"] = {
-        "compress": zstd_compress,
-        "decompress": zstd_decompress,
-    }
+    compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
     default_compression = "zstd"
 
 with ignoring(ImportError):
