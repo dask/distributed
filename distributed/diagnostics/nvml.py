@@ -3,6 +3,7 @@ import pynvml
 need_pynvml_init = True
 handles = None
 
+
 def _initialize_pynvml():
     global need_pynvml_init, handles
     pynvml.nvmlInit()
@@ -29,4 +30,3 @@ def one_time():
         "memory-total": [pynvml.nvmlDeviceGetMemoryInfo(h).total for h in handles],
         "name": [pynvml.nvmlDeviceGetName(h).decode() for h in handles],
     }
-
