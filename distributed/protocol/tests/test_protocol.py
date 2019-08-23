@@ -4,7 +4,7 @@ import dask
 import pytest
 
 from distributed.protocol import loads, dumps, msgpack, maybe_compress, to_serialize
-from distributed.protocol.compression import compressions
+from distributed.protocol.compression import compressions, default_compression
 from distributed.protocol.serialize import Serialize, Serialized, serialize, deserialize
 from distributed.utils import nbytes
 
@@ -229,7 +229,7 @@ def test_maybe_compress_memoryviews():
     try:
         import blosc  # noqa: F401
     except ImportError:
-        assert compression == "lz4"
+        assert compression == default_compression
         assert len(payload) < x.nbytes * 0.75
     else:
         assert compression == "blosc"
