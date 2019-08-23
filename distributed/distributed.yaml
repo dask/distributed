@@ -71,6 +71,15 @@ distributed:
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
 
+    # Facebook's Zstandard - Fast real-time compression algorithm;  reference https://pypi.org/project/zstandard/
+    zstd:
+      import_policy: default    # one of "default", "cffi_fallback", "cext", "cffi"; use as zstandard module import policy.
+      level: null               # Integer value between 1 and 22; compression level.
+      write_checksum: null      # If True, write 4 byte more content checksum, for decompressor verification.
+      write_content_size: True  # write `decompressed content size` in header of compressed data (if compressor knows the size)
+      write_dict_id: True       # whether the dictionary ID will be written into the compressed data.
+      threads: 0                # multiple threads compression, 0:disabled;  -1: number of detected logical CPUs; 1+: as is.
+
     timeouts:
       connect: 10s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
