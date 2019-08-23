@@ -1,5 +1,9 @@
+import pytest
+
+
 def test_zstd():
-    import zstandard, zstandard as zstd, six, cffi, dask, distributed.protocol.compression as compr
+    zstandard = pytest.importorskip("zstandard")
+    import zstandard as zstd, six, cffi, dask, distributed.protocol.compression as compr
 
     original_data = b"".join(
         [
@@ -47,6 +51,3 @@ def test_zstd():
                         "FAILED, zstandard compression, config:%s, value:%s" % (cfg, v)
                     )
                     raise
-
-
-test_zstd()
