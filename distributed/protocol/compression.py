@@ -94,19 +94,17 @@ with ignoring(ImportError):
     default_compression = "lz4"
 
 with ignoring(ImportError):
-    _import_policy = dask.config.get("distributed.comm.zstd.import_policy", "default")
+    _import_policy = dask.config.get("distributed.comm.zstd.import_policy")
     os.environ["PYTHON_ZSTANDARD_IMPORT_POLICY"] = _import_policy
 
     import zstandard as zstd
 
-    zstd_level = dask.config.get("distributed.comm.zstd.level", None)
+    zstd_level = dask.config.get("distributed.comm.zstd.level")
     zstd_kwargs = dict(
-        write_checksum=dask.config.get("distributed.comm.zstd.write_checksum", None),
-        write_content_size=dask.config.get(
-            "distributed.comm.zstd.write_content_size", True
-        ),
-        write_dict_id=dask.config.get("distributed.comm.zstd.write_dict_id", True),
-        threads=dask.config.get("distributed.comm.zstd.threads", 0),
+        write_checksum=dask.config.get("distributed.comm.zstd.write_checksum"),
+        write_content_size=dask.config.get("distributed.comm.zstd.write_content_size"),
+        write_dict_id=dask.config.get("distributed.comm.zstd.write_dict_id"),
+        threads=dask.config.get("distributed.comm.zstd.threads")
     )
 
     if zstd_level is not None:
