@@ -1,7 +1,20 @@
 import pytest
 
 
-def test_zstd():
+@pytest.mark.parametrize(
+    "cfg,values",
+    [
+        # 'cffi' is NOT support by "pip install zstandard"
+        # but AVAILABLE by manual install zstandard with "python setup.py install"
+        ("distributed.comm.zstd.import_policy", ["default", "cffi_fallback", "cext"]),
+        ("distributed.comm.zstd.level", range(1, 23)),
+        ("distributed.comm.zstd.write_checksum", [False, True]),
+        ("distributed.comm.zstd.write_content_size", [True]),
+        ("distributed.comm.zstd.write_dict_id", [False, True]),
+        ("distributed.comm.zstd.threads", range(-1, 100, 1)),
+    ],
+)
+def test_zstd(cfg, values):
     zstandard = pytest.importorskip("zstandard")
     import zstandard as zstd, six, cffi, dask, distributed.protocol.compression as compr
 
@@ -15,39 +28,24 @@ def test_zstd():
         ]
     )
 
-    zstd_config_kwargs = [
-        # 'cffi' is NOT support by "pip install zstandard"
-        # but AVAILABLE by manual install zstandard with "python setup.py install"
-        ("distributed.comm.zstd.import_policy", ["default", "cffi_fallback", "cext"]),
-        ("distributed.comm.zstd.level", range(1, 23)),
-        ("distributed.comm.zstd.write_checksum", [False, True]),
-        ("distributed.comm.zstd.write_content_size", [True]),
-        ("distributed.comm.zstd.write_dict_id", [False, True]),
-        ("distributed.comm.zstd.threads", range(-1, 100, 1)),
-    ]
-
-    for cfg, values in zstd_config_kwargs:
-        for v in values:
-            with dask.config.set({cfg: v}):
-                assert dask.config.get(cfg) == v, "check config:%s, value:%s" % (cfg, v)
-                try:
-                    six.moves.reload_module(cffi)
-                    six.moves.reload_module(zstandard)
-                    six.moves.reload_module(zstd)
-                    six.moves.reload_module(compr)
-                    compress, decompress = (
-                        compr.compressions["zstd"]["compress"],
-                        compr.compressions["zstd"]["decompress"],
-                    )
-                    data = decompress(compress(original_data))
-                    if data == original_data:
-                        print(
-                            "PASSED, Zstandard compression, config:%s, value:%s"
-                            % (cfg, v)
-                        )
-                        continue
-                except Exception as e:
+    for v in values:
+        with dask.config.set({cfg: v}):
+            assert dask.config.get(cfg) == v, "check config:%s, value:%s" % (cfg, v)
+            try:
+                six.moves.reload_module(cffi)
+                six.moves.reload_module(zstandard)
+                six.moves.reload_module(zstd)
+                six.moves.reload_module(compr)
+                compress, decompress = (
+                    compr.compressions["zstd"]["compress"],
+                    compr.compressions["zstd"]["decompress"],
+                )
+                data = decompress(compress(original_data))
+                if data == original_data:
                     print(
-                        "FAILED, zstandard compression, config:%s, value:%s" % (cfg, v)
+                        "PASSED, Zstandard compression, config:%s, value:%s" % (cfg, v)
                     )
-                    raise
+                    continue
+            except Exception as e:
+                print("FAILED, zstandard compression, config:%s, value:%s" % (cfg, v))
+                raise
