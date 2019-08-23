@@ -104,7 +104,7 @@ with ignoring(ImportError):
         write_checksum=dask.config.get("distributed.comm.zstd.write_checksum"),
         write_content_size=dask.config.get("distributed.comm.zstd.write_content_size"),
         write_dict_id=dask.config.get("distributed.comm.zstd.write_dict_id"),
-        threads=dask.config.get("distributed.comm.zstd.threads")
+        threads=dask.config.get("distributed.comm.zstd.threads"),
     )
 
     if zstd_level is not None:
