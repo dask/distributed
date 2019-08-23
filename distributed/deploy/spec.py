@@ -1,6 +1,7 @@
 import asyncio
 import atexit
 import copy
+import logging
 import math
 import weakref
 
@@ -11,6 +12,9 @@ from ..core import rpc, CommClosedError
 from ..utils import LoopRunner, silence_logging, ignoring, parse_bytes
 from ..scheduler import Scheduler
 from ..security import Security
+
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessInterface:
@@ -275,6 +279,16 @@ class SpecCluster(Cluster):
                     w._cluster = weakref.ref(self)
                     await w  # for tornado gen.coroutine support
             self.workers.update(dict(zip(to_open, workers)))
+
+    def _update_worker_status(self, op, msg):
+        if op == "remove":
+            worker_id = self.scheduler_info["workers"][msg]["name"]
+            #if worker_id.isdigit():
+            #    worker_id = int(worker_id)
+            if worker_id in self.workers.keys():
+                logger.warning("Worker {} of name {} has been unexpectedly removed from the Scheduler.".format(msg, worker_id))
+                del self.workers[worker_id]
+        super()._update_worker_status(op, msg)
 
     def __await__(self):
         async def _():
