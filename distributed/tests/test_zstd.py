@@ -4,9 +4,10 @@ import pytest
 @pytest.mark.parametrize(
     "cfg,values",
     [
-        # 'cffi' is NOT support by "pip install zstandard"
-        # but AVAILABLE by manual install zstandard with "python setup.py install"
-        ("distributed.comm.zstd.import_policy", ["default", "cffi_fallback", "cext"]),
+        (
+            "distributed.comm.zstd.import_policy",
+            ["default", "cffi_fallback", "cext", "cffi"],
+        ),
         ("distributed.comm.zstd.level", range(1, 23)),
         ("distributed.comm.zstd.write_checksum", [False, True]),
         ("distributed.comm.zstd.write_content_size", [True]),
@@ -30,7 +31,6 @@ def test_zstd(cfg, values):
 
     for v in values:
         with dask.config.set({cfg: v}):
-            assert dask.config.get(cfg) == v, "check config:%s, value:%s" % (cfg, v)
             try:
                 six.moves.reload_module(cffi)
                 six.moves.reload_module(zstandard)

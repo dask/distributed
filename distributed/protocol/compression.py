@@ -114,14 +114,10 @@ with ignoring(ImportError):
     zstd_decompressor = zstd.ZstdDecompressor()
 
     def zstd_compress(data):
-        if isinstance(data, (memoryview, bytearray)):
-            data = bytes(data)
-        return zstd_compressor.compress(data)
+        return zstd_compressor.compress(bytes(data))
 
     def zstd_decompress(data):
-        if isinstance(data, (memoryview, bytearray)):
-            data = bytes(data)
-        return zstd_decompressor.decompress(data)
+        return zstd_decompressor.decompress(bytes(data))
 
     compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
     default_compression = "zstd"
