@@ -2312,6 +2312,7 @@ class Worker(ServerNode):
 
         if iscoroutinefunction(func):
             result = await func(*args, **kwargs)
+            notify_task_finished(self.plugins, result)
         elif separate_thread:
             result = await self.executor_submit(
                 name,
@@ -2324,12 +2325,15 @@ class Worker(ServerNode):
                     name,
                     self.active_threads,
                     self.active_threads_lock,
+                    self.plugins,
                 ),
                 executor=self.actor_executor,
             )
         else:
             result = func(*args, **kwargs)
-        return {"status": "OK", "result": to_serialize(result)}
+            notify_task_finished(self.plugins, result)
+
+        raise {"status": "OK", "result": to_serialize(result)}
 
     def actor_attribute(self, comm=None, actor=None, attribute=None):
         value = getattr(self.actors[actor], attribute)
@@ -2416,6 +2420,7 @@ class Worker(ServerNode):
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
+                        self.plugins,
                     ),
                 )
             except RuntimeError as e:
@@ -3228,6 +3233,7 @@ def apply_function(
     active_threads,
     active_threads_lock,
     time_delay,
+    plugins,
 ):
     """ Run a function, collect information
 
@@ -3244,6 +3250,8 @@ def apply_function(
     start = time()
     try:
         result = function(*args, **kwargs)
+        notify_task_finished(plugins, result)
+
     except Exception as e:
         msg = error_message(e)
         msg["op"] = "task-erred"
@@ -3267,7 +3275,7 @@ def apply_function(
 
 
 def apply_function_actor(
-    function, args, kwargs, execution_state, key, active_threads, active_threads_lock
+    function, args, kwargs, execution_state, key, active_threads, active_threads_lock, plugins,
 ):
     """ Run a function, collect information
 
@@ -3285,11 +3293,18 @@ def apply_function_actor(
 
     result = function(*args, **kwargs)
 
+    notify_task_finished(plugins, result)
+
     with active_threads_lock:
         del active_threads[ident]
 
     return result
 
+
+def notify_task_finished(plugins, result):
+    for plugin in plugins.values():
+        if hasattr(plugin, "task_finished"):
+            plugin.task_finished(result)
 
 def get_msg_safe_str(msg):
     """ Make a worker msg, which contains args and kwargs, safe to cast to str:

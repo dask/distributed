@@ -7,6 +7,7 @@ class MyPlugin:
 
     def __init__(self, data):
         self.data = data
+        self.expected_results = []
 
     def setup(self, worker):
         assert isinstance(worker, Worker)
@@ -17,6 +18,13 @@ class MyPlugin:
     def teardown(self, worker):
         assert isinstance(worker, Worker)
         self.worker._my_plugin_status = "teardown"
+
+    def task_finished(self, result):
+        if len(self.expected_results) > 0:
+            assert result == self.expected_results.pop(0)
+
+    def add_expected_result(self, result):
+        self.expected_results.append(result)
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -65,3 +73,15 @@ def test_duplicate_with_no_name(c, s, a, b):
 
     yield c.register_worker_plugin(plugin, name="foo")
     assert len(a.plugins) == len(b.plugins) == 3
+
+
+@gen_cluster(client=True)
+def test_called_on_task_finished(c, s, a, b):
+    plugin = MyPlugin(10)
+
+    plugin.add_expected_result(20)
+    plugin.add_expected_result(40)
+
+    yield c.register_worker_plugin(plugin)
+    yield c.submit(lambda x: x * 2, 10)
+    yield c.submit(lambda x: x * 2, 20)
