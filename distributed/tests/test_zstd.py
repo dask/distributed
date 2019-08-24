@@ -17,7 +17,7 @@ import pytest
 )
 def test_zstd(cfg, values):
     zstandard = pytest.importorskip("zstandard")
-    import zstandard as zstd, six, cffi, dask, distributed.protocol.compression as compr
+    import zstandard as zstd, importlib, cffi, dask, distributed.protocol.compression as compr
 
     original_data = b"".join(
         [
@@ -31,21 +31,13 @@ def test_zstd(cfg, values):
 
     for v in values:
         with dask.config.set({cfg: v}):
-            try:
-                six.moves.reload_module(cffi)
-                six.moves.reload_module(zstandard)
-                six.moves.reload_module(zstd)
-                six.moves.reload_module(compr)
-                compress, decompress = (
-                    compr.compressions["zstd"]["compress"],
-                    compr.compressions["zstd"]["decompress"],
-                )
-                data = decompress(compress(original_data))
-                if data == original_data:
-                    print(
-                        "PASSED, Zstandard compression, config:%s, value:%s" % (cfg, v)
-                    )
-                    continue
-            except Exception as e:
-                print("FAILED, zstandard compression, config:%s, value:%s" % (cfg, v))
-                raise
+            importlib.reload(cffi)
+            importlib.reload(zstandard)
+            importlib.reload(zstd)
+            importlib.reload(compr)
+            compress, decompress = (
+                compr.compressions["zstd"]["compress"],
+                compr.compressions["zstd"]["decompress"],
+            )
+            data = decompress(compress(original_data))
+            assert data == original_data, "config:%s, value:%s" % (cfg, v)
