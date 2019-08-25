@@ -754,6 +754,21 @@ class Client(Node):
             )
 
     def __repr__(self):
+        text = "%s(%r, workers=%d, threads=%d" % (
+            getattr(self, "_name", type(self).__name__),
+            self.scheduler_address,
+            len(self.workers),
+            sum(w["nthreads"] for w in self.scheduler_info["workers"].values()),
+        )
+
+        memory = [w["memory_limit"] for w in self.scheduler_info["workers"].values()]
+        if all(memory):
+            text += ", memory=" + format_bytes(sum(memory))
+
+        text += ")"
+        return text
+
+    def __repr__(self):
         # Note: avoid doing I/O here...
         info = self._scheduler_identity
         addr = info.get("address")
@@ -761,12 +776,18 @@ class Client(Node):
             workers = info.get("workers", {})
             nworkers = len(workers)
             nthreads = sum(w["nthreads"] for w in workers.values())
-            return "<%s: scheduler=%r processes=%d cores=%d>" % (
+            text = "<%s: %r processes=%d cores=%d" % (
                 self.__class__.__name__,
                 addr,
                 nworkers,
                 nthreads,
             )
+            memory = [w["memory_limit"] for w in workers.values()]
+            if all(memory):
+                text += ", memory=" + format_bytes(sum(memory))
+            text += ">"
+            return text
+
         elif self.scheduler is not None:
             return "<%s: scheduler=%r>" % (
                 self.__class__.__name__,

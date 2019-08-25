@@ -1882,12 +1882,16 @@ def test_badly_serialized_input_stderr(capsys, c):
 
 def test_repr(loop):
     funcs = [str, repr, lambda x: x._repr_html_()]
-    with cluster(nworkers=3) as (s, [a, b, c]):
+    with cluster(nworkers=3, worker_kwargs={"memory_limit": "2 GB"}) as (s, [a, b, c]):
         with Client(s["address"], loop=loop) as c:
             for func in funcs:
                 text = func(c)
                 assert c.scheduler.address in text
                 assert "3" in text
+                assert "6" in text
+                assert "GB" in text
+                if "<table" not in text:
+                    assert len(text) < 80
 
         for func in funcs:
             text = func(c)
