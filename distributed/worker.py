@@ -2311,9 +2311,9 @@ class Worker(ServerNode):
         name = key_split(key) + "." + function
 
         if iscoroutinefunction(func):
-            notify_task_started(self.plugins, self, args, kwargs)
+            notify_task_started(self.plugins, self, key, args, kwargs)
             result = await func(*args, **kwargs)
-            notify_task_finished(self.plugins, self, result)
+            notify_task_finished(self.plugins, self, key, result)
         elif separate_thread:
             result = await self.executor_submit(
                 name,
@@ -2331,11 +2331,11 @@ class Worker(ServerNode):
                 executor=self.actor_executor,
             )
         else:
-            notify_task_started(self.plugins, self, args, kwargs)
+            notify_task_started(self.plugins, self, key, args, kwargs)
             result = func(*args, **kwargs)
-            notify_task_finished(self.plugins, self, result)
+            notify_task_finished(self.plugins, self, key, result)
 
-        raise {"status": "OK", "result": to_serialize(result)}
+        return {"status": "OK", "result": to_serialize(result)}
 
     def actor_attribute(self, comm=None, actor=None, attribute=None):
         value = getattr(self.actors[actor], attribute)
@@ -3251,14 +3251,16 @@ def apply_function(
     thread_state.key = key
     start = time()
     try:
-        notify_task_started(plugins, execution_state['worker'], args, kwargs)
+        notify_task_started(plugins, execution_state['worker'], key, args, kwargs)
         result = function(*args, **kwargs)
-        notify_task_finished(plugins, execution_state['worker'], result)
+        notify_task_finished(plugins, execution_state['worker'], key, result)
 
     except Exception as e:
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
+
+        notify_task_finished(plugins, execution_state['worker'], key, result)
     else:
         msg = {
             "op": "task-finished",
@@ -3294,9 +3296,9 @@ def apply_function_actor(
     thread_state.execution_state = execution_state
     thread_state.key = key
 
-    notify_task_started(plugins, execution_state['worker'], args, kwargs)
+    notify_task_started(plugins, execution_state['worker'], key, args, kwargs)
     result = function(*args, **kwargs)
-    notify_task_finished(plugins, execution_state['worker'], result)
+    notify_task_finished(plugins, execution_state['worker'], key, result)
 
     with active_threads_lock:
         del active_threads[ident]
@@ -3304,16 +3306,16 @@ def apply_function_actor(
     return result
 
 
-def notify_task_started(plugins, worker, args, kwargs):
+def notify_task_started(plugins, worker, key, args, kwargs):
     for plugin in plugins.values():
         if hasattr(plugin, "task_started"):
-            plugin.task_started(worker, args, kwargs)
+            plugin.task_started(worker, key, args, kwargs)
 
 
-def notify_task_finished(plugins, worker, result):
+def notify_task_finished(plugins, worker, key, result):
     for plugin in plugins.values():
         if hasattr(plugin, "task_finished"):
-            plugin.task_finished(worker, result)
+            plugin.task_finished(worker, key, result)
 
 
 def get_msg_safe_str(msg):

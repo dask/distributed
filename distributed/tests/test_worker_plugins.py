@@ -19,7 +19,7 @@ class MyPlugin:
         assert isinstance(worker, Worker)
         self.worker._my_plugin_status = "teardown"
 
-    def task_started(self, worker, args, kwargs):
+    def task_started(self, worker, key, args, kwargs):
         assert isinstance(worker, Worker)
 
         if len(self.expected_args) > 0:
@@ -27,7 +27,7 @@ class MyPlugin:
             if _args is not None: assert args == _args
             if _kwargs is not None: assert kwargs == _kwargs
 
-    def task_finished(self, worker, result):
+    def task_finished(self, worker, key, result):
         assert isinstance(worker, Worker)
 
         if len(self.expected_results) > 0:
