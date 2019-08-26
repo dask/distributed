@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import cloudpickle
 import pickle
 from collections import defaultdict
@@ -8,6 +6,7 @@ import json
 import operator
 import sys
 from time import sleep
+import logging
 
 import dask
 from dask import delayed
@@ -25,6 +24,7 @@ from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
 from distributed.utils import tmpfile
 from distributed.utils_test import (  # noqa: F401
+    captured_logger,
     cleanup,
     inc,
     dec,
@@ -433,11 +433,10 @@ def test_filtered_communication(s, a, b):
             "keys": ["z"],
         }
     )
-
-    msg, = yield c.read()
+    (msg,) = yield c.read()
     assert msg["op"] == "key-in-memory"
     assert msg["key"] == "y"
-    msg, = yield f.read()
+    (msg,) = yield f.read()
     assert msg["op"] == "key-in-memory"
     assert msg["key"] == "z"
 
@@ -1234,7 +1233,9 @@ def test_cancel_fire_and_forget(c, s, a, b):
     assert not s.tasks
 
 
-@gen_cluster(client=True, Worker=Nanny)
+@gen_cluster(
+    client=True, Worker=Nanny, clean_kwargs={"processes": False, "threads": False}
+)
 def test_log_tasks_during_restart(c, s, a, b):
     future = c.submit(sys.exit, 0)
     yield wait(future)
@@ -1259,6 +1260,15 @@ def test_reschedule(c, s, a, b):
     yield wait(x)
     assert sum(future.key in b.data for future in x) >= 3
     assert sum(future.key in a.data for future in x) <= 1
+
+
+@gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
+def test_reschedule_warns(c, s, a, b):
+    with captured_logger(logging.getLogger("distributed.scheduler")) as sched:
+        s.reschedule(key="__this-key-does-not-exist__")
+
+    assert "not found on the scheduler" in sched.getvalue()
+    assert "Aborting reschedule" in sched.getvalue()
 
 
 @gen_cluster(client=True)
@@ -1617,3 +1627,17 @@ async def test_finished():
 
     await s.finished()
     await w.finished()
+
+
+@pytest.mark.asyncio
+async def test_retire_names_str(cleanup):
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address, name="0") as a:
+            async with Worker(s.address, name="1") as b:
+                async with Client(s.address, asynchronous=True) as c:
+                    futures = c.map(inc, range(10))
+                    await wait(futures)
+                    assert a.data and b.data
+                    await s.retire_workers(names=[0])
+                    assert all(f.done() for f in futures)
+                    assert len(b.data) == 10

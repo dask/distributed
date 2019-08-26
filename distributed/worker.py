@@ -1,8 +1,7 @@
-from __future__ import print_function, division, absolute_import
-
 import asyncio
 import bisect
 from collections import defaultdict, deque
+from collections.abc import MutableMapping
 from datetime import timedelta
 import heapq
 import logging
@@ -28,14 +27,11 @@ except ImportError:
     from toolz import pluck, partial, merge, first
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 
 from . import profile, comm
 from .batched import BatchedSend
 from .comm import get_address_host, connect
-from .comm.utils import offload
 from .comm.addressing import address_from_user_args
-from .compatibility import unicode, get_thread_identity, MutableMapping
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
 from .metrics import time
@@ -60,6 +56,7 @@ from .utils import (
     thread_state,
     json_load_robust,
     key_split,
+    offload,
     PeriodicCallback,
     parse_bytes,
     parse_timedelta,
@@ -85,6 +82,10 @@ READY = ("ready", "constrained")
 
 DEFAULT_EXTENSIONS = [PubSubWorkerExtension]
 
+DEFAULT_METRICS = {}
+
+DEFAULT_STARTUP_INFORMATION = {}
+
 
 class Worker(ServerNode):
     """ Worker node in a Dask distributed cluster
@@ -101,7 +102,7 @@ class Worker(ServerNode):
 
         $ dask-worker scheduler-ip:port
 
-    Use the ``--help`` flag to see more options
+    Use the ``--help`` flag to see more options::
 
         $ dask-worker --help
 
@@ -118,7 +119,7 @@ class Worker(ServerNode):
         Number of nthreads used by this worker process
     * **executor:** ``concurrent.futures.ThreadPoolExecutor``:
         Executor used to perform computation
-    * **local_dir:** ``path``:
+    * **local_directory:** ``path``:
         Path on local machine to store temporary files
     * **scheduler:** ``rpc``:
         Location of scheduler.  See ``.ip/.port`` attributes.
@@ -233,7 +234,7 @@ class Worker(ServerNode):
         The object to use for storage, builds a disk-backed LRU dict by default
     nthreads: int, optional
     loop: tornado.ioloop.IOLoop
-    local_dir: str, optional
+    local_directory: str, optional
         Directory where we place local resources
     name: str, optional
     memory_limit: int, float, string
@@ -252,6 +253,16 @@ class Worker(ServerNode):
         Resources that this worker has like ``{'GPU': 2}``
     nanny: str
         Address on which to contact nanny, if it exists
+    lifetime: str
+        Amount of time like "1 hour" after which we gracefully shut down the worker.
+        This defaults to None, meaning no explicit shutdown time.
+    lifetime_stagger: str
+        Amount of time like "5 minutes" to stagger the lifetime value
+        The actual lifetime will be selected uniformly at random between
+        lifetime +/- lifetime_stagger
+    lifetime_restart: bool
+        Whether or not to restart a worker after it has reached its lifetime
+        Default False
 
     Examples
     --------
@@ -282,6 +293,7 @@ class Worker(ServerNode):
         nthreads=None,
         loop=None,
         local_dir=None,
+        local_directory=None,
         services=None,
         service_ports=None,
         service_kwargs=None,
@@ -298,7 +310,8 @@ class Worker(ServerNode):
         contact_address=None,
         memory_monitor_interval="200ms",
         extensions=None,
-        metrics=None,
+        metrics=DEFAULT_METRICS,
+        startup_information=DEFAULT_STARTUP_INFORMATION,
         data=None,
         interface=None,
         host=None,
@@ -310,6 +323,9 @@ class Worker(ServerNode):
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
         validate=False,
         profile_cycle_interval=None,
+        lifetime=None,
+        lifetime_stagger=None,
+        lifetime_restart=None,
         **kwargs
     ):
         self.tasks = dict()
@@ -396,9 +412,9 @@ class Worker(ServerNode):
             ("flight", "memory"): self.transition_dep_flight_memory,
         }
 
-        self.incoming_transfer_log = deque(maxlen=(100000))
+        self.incoming_transfer_log = deque(maxlen=100000)
         self.incoming_count = 0
-        self.outgoing_transfer_log = deque(maxlen=(100000))
+        self.outgoing_transfer_log = deque(maxlen=100000)
         self.outgoing_count = 0
         self.outgoing_current_count = 0
         self.repetitively_busy = 0
@@ -457,11 +473,15 @@ class Worker(ServerNode):
         if silence_logs:
             silence_logging(level=silence_logs)
 
-        if local_dir is None:
-            local_dir = dask.config.get("temporary-directory") or os.getcwd()
-            if not os.path.exists(local_dir):
-                os.mkdir(local_dir)
-            local_dir = os.path.join(local_dir, "dask-worker-space")
+        if local_dir is not None:
+            warnings.warn("The local_dir keyword has moved to local_directory")
+            local_directory = local_dir
+
+        if local_directory is None:
+            local_directory = dask.config.get("temporary-directory") or os.getcwd()
+            if not os.path.exists(local_directory):
+                os.mkdir(local_directory)
+            local_directory = os.path.join(local_directory, "dask-worker-space")
 
         with warn_on_duration(
             "1s",
@@ -470,9 +490,9 @@ class Worker(ServerNode):
             "Consider specifying a local-directory to point workers to write "
             "scratch data to a local disk.",
         ):
-            self._workspace = WorkSpace(os.path.abspath(local_dir))
+            self._workspace = WorkSpace(os.path.abspath(local_directory))
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
-            self.local_dir = self._workdir.dir_path
+            self.local_directory = self._workdir.dir_path
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -515,7 +535,7 @@ class Worker(ServerNode):
                 from zict import Buffer, File, Func
             except ImportError:
                 raise ImportError("Please `pip install zict` for spill-to-disk workers")
-            path = os.path.join(self.local_dir, "storage")
+            path = os.path.join(self.local_directory, "storage")
             storage = Func(
                 partial(serialize_bytelist, on_error="raise"),
                 deserialize_bytes,
@@ -531,7 +551,6 @@ class Worker(ServerNode):
         self.actors = {}
         self.loop = loop or IOLoop.current()
         self.status = None
-        self._closed = Event()
         self.reconnect = reconnect
         self.executor = executor or ThreadPoolExecutor(
             self.nthreads, thread_name_prefix="Dask-Worker-Threads'"
@@ -545,8 +564,8 @@ class Worker(ServerNode):
         self.heartbeat_active = False
         self._ipython_kernel = None
 
-        if self.local_dir not in sys.path:
-            sys.path.insert(0, self.local_dir)
+        if self.local_directory not in sys.path:
+            sys.path.insert(0, self.local_directory)
 
         self.services = {}
         self.service_specs = services or {}
@@ -563,6 +582,9 @@ class Worker(ServerNode):
                 )
 
         self.metrics = dict(metrics) if metrics else {}
+        self.startup_information = (
+            dict(startup_information) if startup_information else {}
+        )
 
         self.low_level_profiler = low_level_profiler
 
@@ -573,7 +595,7 @@ class Worker(ServerNode):
             "get_data": self.get_data,
             "update_data": self.update_data,
             "delete_data": self.delete_data,
-            "terminate": self.terminate,
+            "terminate": self.close,
             "ping": pingpong,
             "upload_file": self.upload_file,
             "start_ipython": self.start_ipython,
@@ -651,6 +673,23 @@ class Worker(ServerNode):
         self.plugins = {}
         self._pending_plugins = plugins
 
+        self.lifetime = lifetime or dask.config.get(
+            "distributed.worker.lifetime.duration"
+        )
+        lifetime_stagger = lifetime_stagger or dask.config.get(
+            "distributed.worker.lifetime.stagger"
+        )
+        self.lifetime_restart = lifetime_restart or dask.config.get(
+            "distributed.worker.lifetime.restart"
+        )
+        if isinstance(self.lifetime, str):
+            self.lifetime = parse_timedelta(self.lifetime)
+        if isinstance(lifetime_stagger, str):
+            lifetime_stagger = parse_timedelta(lifetime_stagger)
+        if self.lifetime:
+            self.lifetime += (random.random() * 2 - 1) * lifetime_stagger
+            self.io_loop.call_later(self.lifetime, self.close_gracefully)
+
         Worker._instances.add(self)
 
     ##################
@@ -678,7 +717,15 @@ class Worker(ServerNode):
         """ For API compatibility with Nanny """
         return self.address
 
-    def get_metrics(self):
+    @property
+    def local_dir(self):
+        """ For API compatibility with Nanny """
+        warnings.warn(
+            "The local_dir attribute has moved to local_directory", stacklevel=2
+        )
+        return self.local_directory
+
+    async def get_metrics(self):
         core = dict(
             executing=len(self.executing),
             in_memory=len(self.data),
@@ -686,9 +733,30 @@ class Worker(ServerNode):
             in_flight=len(self.in_flight_tasks),
             bandwidth=self.bandwidth,
         )
-        custom = {k: metric(self) for k, metric in self.metrics.items()}
+        custom = {}
+        for k, metric in self.metrics.items():
+            try:
+                result = metric(self)
+                if hasattr(result, "__await__"):
+                    result = await result
+                custom[k] = result
+            except Exception:  # TODO: log error once
+                pass
 
         return merge(custom, self.monitor.recent(), core)
+
+    async def get_startup_information(self):
+        result = {}
+        for k, f in self.startup_information.items():
+            try:
+                v = f(self)
+                if hasattr(v, "__await__"):
+                    v = await v
+                result[k] = v
+            except Exception:  # TODO: log error once
+                pass
+
+        return result
 
     def identity(self, comm=None):
         return {
@@ -743,11 +811,12 @@ class Worker(ServerNode):
                         now=time(),
                         resources=self.total_resources,
                         memory_limit=self.memory_limit,
-                        local_directory=self.local_dir,
+                        local_directory=self.local_directory,
                         services=self.service_ports,
                         nanny=self.nanny,
                         pid=os.getpid(),
-                        metrics=self.get_metrics(),
+                        metrics=await self.get_metrics(),
+                        extra=await self.get_startup_information(),
                     ),
                     serializers=["msgpack"],
                 )
@@ -784,6 +853,13 @@ class Worker(ServerNode):
 
         self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.batched_stream.start(comm)
+        pc = PeriodicCallback(
+            lambda: self.batched_stream.send({"op": "keep-alive"}),
+            60000,
+            io_loop=self.io_loop,
+        )
+        self.periodic_callbacks["keep-alive"] = pc
+        pc.start()
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
@@ -794,7 +870,9 @@ class Worker(ServerNode):
             try:
                 start = time()
                 response = await self.scheduler.heartbeat_worker(
-                    address=self.contact_address, now=time(), metrics=self.get_metrics()
+                    address=self.contact_address,
+                    now=time(),
+                    metrics=await self.get_metrics(),
                 )
                 end = time()
                 middle = (start + end) / 2
@@ -822,9 +900,9 @@ class Worker(ServerNode):
             logger.exception(e)
             raise
         finally:
-            if self.reconnect:
+            if self.reconnect and self.status == "running":
                 logger.info("Connection to scheduler broken.  Reconnecting...")
-                self.loop.add_callback(self._register_with_scheduler)
+                self.loop.add_callback(self.heartbeat)
             else:
                 await self.close(report=False)
 
@@ -842,10 +920,10 @@ class Worker(ServerNode):
         return self._ipython_kernel.get_connection_info()
 
     async def upload_file(self, comm, filename=None, data=None, load=True):
-        out_filename = os.path.join(self.local_dir, filename)
+        out_filename = os.path.join(self.local_directory, filename)
 
         def func(data):
-            if isinstance(data, unicode):
+            if isinstance(data, str):
                 data = data.encode()
             with open(out_filename, "wb") as f:
                 f.write(data)
@@ -895,6 +973,8 @@ class Worker(ServerNode):
     #############
 
     async def start(self):
+        if self.status and self.status.startswith("clos"):
+            return
         assert self.status is None, self.status
 
         enable_gc_diagnosis()
@@ -909,7 +989,7 @@ class Worker(ServerNode):
         preload_modules(
             self.preload,
             parameter=self,
-            file_dir=self.local_dir,
+            file_dir=self.local_directory,
             argv=self.preload_argv,
         )
         # Services listen on all addresses
@@ -931,7 +1011,7 @@ class Worker(ServerNode):
         logger.info("              Threads: %26d", self.nthreads)
         if self.memory_limit:
             logger.info("               Memory: %26s", format_bytes(self.memory_limit))
-        logger.info("      Local Directory: %26s", self.local_dir)
+        logger.info("      Local Directory: %26s", self.local_directory)
 
         setproctitle("dask-worker [%s]" % self.address)
 
@@ -949,19 +1029,22 @@ class Worker(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    async def close(self, report=True, timeout=10, nanny=True, executor_wait=True):
+    async def close(
+        self, report=True, timeout=10, nanny=True, executor_wait=True, safe=False
+    ):
         with log_errors():
             if self.status in ("closed", "closing"):
                 await self.finished()
                 return
 
+            self.reconnect = False
             disable_gc_diagnosis()
 
             try:
                 logger.info("Stopping worker at %s", self.address)
             except ValueError:  # address not available if already closed
                 logger.info("Stopping worker")
-            if self.status != "running":
+            if self.status not in ("running", "closing-gracefully"):
                 logger.info("Closed worker has not yet started: %s", self.status)
             self.status = "closing"
 
@@ -985,16 +1068,11 @@ class Worker(ServerNode):
                 if report:
                     await gen.with_timeout(
                         timedelta(seconds=timeout),
-                        self.scheduler.unregister(address=self.contact_address),
+                        self.scheduler.unregister(
+                            address=self.contact_address, safe=safe
+                        ),
                     )
             self.scheduler.close_rpc()
-            self.actor_executor._work_queue.queue.clear()
-            if isinstance(self.executor, ThreadPoolExecutor):
-                self.executor._work_queue.queue.clear()
-                self.executor.shutdown(wait=executor_wait, timeout=timeout)
-            else:
-                self.executor.shutdown(wait=False)
-            self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
             self._workdir.release()
 
             for k, v in self.services.items():
@@ -1006,25 +1084,47 @@ class Worker(ServerNode):
             if self.batched_stream:
                 self.batched_stream.close()
 
-            if nanny and self.nanny:
-                with self.rpc(self.nanny) as r:
-                    await r.terminate()
+            self.actor_executor._work_queue.queue.clear()
+            if isinstance(self.executor, ThreadPoolExecutor):
+                self.executor._work_queue.queue.clear()
+                self.executor.shutdown(wait=executor_wait, timeout=timeout)
+            else:
+                self.executor.shutdown(wait=False)
+            self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
 
             self.stop()
             self.rpc.close()
-            self._closed.set()
 
             self.status = "closed"
             await ServerNode.close(self)
 
             setproctitle("dask-worker [closed]")
+        return "OK"
 
-    async def terminate(self, comm, report=True):
-        await self.close(report=report)
+    async def close_gracefully(self):
+        """ Gracefully shut down a worker
+
+        This first informs the scheduler that we're shutting down, and asks it
+        to move our data elsewhere.  Afterwards, we close as normal
+        """
+        if self.status.startswith("closing"):
+            await self.finished()
+
+        if self.status == "closed":
+            return
+
+        logger.info("Closing worker gracefully: %s", self.address)
+        self.status = "closing-gracefully"
+        await self.scheduler.retire_workers(workers=[self.address], remove=False)
+        await self.close(safe=True, nanny=not self.lifetime_restart)
+
+    async def terminate(self, comm, report=True, **kwargs):
+        await self.close(report=report, **kwargs)
         return "OK"
 
     async def wait_until_closed(self):
-        await self._closed.wait()
+        warnings.warn("wait_until_closed has moved to finished()")
+        await self.finished()
         assert self.status == "closed"
 
     ################
@@ -1535,7 +1635,7 @@ class Worker(ServerNode):
                 if key in self.dep_state:
                     self.transition_dep(key, "memory")
 
-            if report and self.batched_stream:
+            if report and self.batched_stream and self.status == "running":
                 self.send_task_state_to_scheduler(key)
             else:
                 raise CommClosedError
@@ -2272,7 +2372,7 @@ class Worker(ServerNode):
 
     async def execute(self, key, report=False):
         executor_error = None
-        if self.status in ("closing", "closed"):
+        if self.status in ("closing", "closed", "closing-gracefully"):
             return
         try:
             if key not in self.executing or key not in self.task_state:
@@ -2292,8 +2392,8 @@ class Worker(ServerNode):
                     from .actor import Actor  # TODO: create local actor
 
                     data[k] = Actor(type(self.actors[k]), self.address, k, self)
-            args2 = pack_data(args, data, key_types=(bytes, unicode))
-            kwargs2 = pack_data(kwargs, data, key_types=(bytes, unicode))
+            args2 = pack_data(args, data, key_types=(bytes, str))
+            kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
             stop = time()
             if stop - start > 0.005:
                 self.startstops[key].append(("disk-read", start, stop))
@@ -2785,7 +2885,7 @@ class Worker(ServerNode):
         --------
         get_worker
         """
-        return self.active_threads[get_thread_identity()]
+        return self.active_threads[threading.get_ident()]
 
 
 def get_worker():
@@ -2935,7 +3035,7 @@ def parse_memory_limit(memory_limit, nthreads, total_cores=multiprocessing.cpu_c
         if isinstance(memory_limit, float) and memory_limit <= 1:
             memory_limit = int(memory_limit * TOTAL_MEMORY)
 
-    if isinstance(memory_limit, (unicode, str)):
+    if isinstance(memory_limit, str):
         memory_limit = parse_bytes(memory_limit)
     else:
         memory_limit = int(memory_limit)
@@ -3135,7 +3235,7 @@ def apply_function(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = get_thread_identity()
+    ident = threading.get_ident()
     with active_threads_lock:
         active_threads[ident] = key
     thread_state.start_time = time()
@@ -3175,7 +3275,7 @@ def apply_function_actor(
     -------
     msg: dictionary with status, result/error, timings, etc..
     """
-    ident = get_thread_identity()
+    ident = threading.get_ident()
 
     with active_threads_lock:
         active_threads[ident] = key
@@ -3287,7 +3387,7 @@ async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=Tru
 
     except Exception as e:
         logger.warning(
-            " Run Failed\n" "Function: %s\n" "args:     %s\n" "kwargs:   %s\n",
+            "Run Failed\nFunction: %s\nargs:     %s\nkwargs:   %s\n",
             str(funcname(function))[:1000],
             convert_args_to_str(args, max_len=1000),
             convert_kwargs_to_str(kwargs, max_len=1000),
@@ -3301,3 +3401,21 @@ async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=Tru
 
 
 _global_workers = Worker._instances
+
+try:
+    from .diagnostics import nvml
+except Exception:
+    pass
+else:
+
+    @gen.coroutine
+    def gpu_metric(worker):
+        result = yield offload(nvml.real_time)
+        return result
+
+    DEFAULT_METRICS["gpu"] = gpu_metric
+
+    def gpu_startup(worker):
+        return nvml.one_time()
+
+    DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup

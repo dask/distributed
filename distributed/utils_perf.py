@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from collections import deque
 import gc
 import logging
@@ -7,7 +5,7 @@ import threading
 
 from dask.utils import format_bytes
 
-from .compatibility import PY2, PYPY
+from .compatibility import PYPY
 from .metrics import thread_time
 
 
@@ -44,7 +42,7 @@ class ThrottledGC(object):
         elapsed = max(collect_start - self.last_collect, MIN_RUNTIME)
         if self.last_gc_duration / elapsed < self.max_in_gc_frac:
             self.logger.debug(
-                "Calling gc.collect(). %0.3fs elapsed since " "previous call.", elapsed
+                "Calling gc.collect(). %0.3fs elapsed since previous call.", elapsed
             )
             gc.collect()
             self.last_collect = collect_start
@@ -52,7 +50,7 @@ class ThrottledGC(object):
             if self.last_gc_duration > self.warn_if_longer:
                 self.logger.warning(
                     "gc.collect() took %0.3fs. This is usually"
-                    " a sign that the some tasks handle too"
+                    " a sign that some tasks handle too"
                     " many Python objects at the same time."
                     " Rechunking the work into smaller tasks"
                     " might help.",
@@ -147,7 +145,7 @@ class GCDiagnosis(object):
         self._enabled = False
 
     def enable(self):
-        if PY2 or PYPY:
+        if PYPY:
             return
         assert not self._enabled
         self._fractional_timer = FractionalTimer(n_samples=self.N_SAMPLES)
@@ -165,7 +163,7 @@ class GCDiagnosis(object):
         self._enabled = True
 
     def disable(self):
-        if PY2 or PYPY:
+        if PYPY:
             return
         assert self._enabled
         gc.callbacks.remove(self._gc_callback)
@@ -232,7 +230,7 @@ def enable_gc_diagnosis():
     """
     Ask to enable global GC diagnosis.
     """
-    if PY2 or PYPY:
+    if PYPY:
         return
     global _gc_diagnosis_users
     with _gc_diagnosis_lock:
@@ -247,7 +245,7 @@ def disable_gc_diagnosis(force=False):
     """
     Ask to disable global GC diagnosis.
     """
-    if PY2 or PYPY:
+    if PYPY:
         return
     global _gc_diagnosis_users
     with _gc_diagnosis_lock:

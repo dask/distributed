@@ -1,5 +1,4 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 import random
 from time import sleep
 import sys
@@ -101,7 +100,7 @@ def test_timeout_sync(client):
 
 
 @gen_cluster(client=True)
-def test_cleanup(c, s, a, b):
+async def test_cleanup(c, s, a, b):
     v = Variable("v")
     vv = Variable("v")
 
@@ -109,17 +108,17 @@ def test_cleanup(c, s, a, b):
     y = c.submit(lambda x: x + 1, 20)
     x_key = x.key
 
-    yield v.set(x)
+    await v.set(x)
     del x
-    yield gen.sleep(0.1)
+    await gen.sleep(0.1)
 
-    t_future = xx = vv._get()
-    yield gen.moment
-    v._set(y)
+    t_future = xx = asyncio.ensure_future(vv._get())
+    await gen.sleep(0)
+    asyncio.ensure_future(v.set(y))
 
-    future = yield t_future
+    future = await t_future
     assert future.key == x_key
-    result = yield future
+    result = await future
     assert result == 11
 
 

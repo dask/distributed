@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from contextlib import contextmanager
 import sys
 
@@ -306,7 +304,7 @@ def test_tls_listen_connect():
             listener.contact_address,
             connection_args=forced_cipher_sec.get_connection_args("worker"),
         )
-        cipher, _, _, = comm.extra_info["cipher"]
+        cipher, _, _ = comm.extra_info["cipher"]
         assert cipher in [FORCED_CIPHER] + TLS_13_CIPHERS
         comm.abort()
 

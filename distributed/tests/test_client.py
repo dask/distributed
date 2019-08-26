@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import asyncio
 from collections import deque
 from concurrent.futures import CancelledError
@@ -8,6 +6,7 @@ import logging
 from operator import add
 import os
 import pickle
+import psutil
 import random
 import subprocess
 import sys
@@ -51,12 +50,20 @@ from distributed.client import (
     futures_of,
     temp_default_client,
 )
-from distributed.compatibility import PY3, WINDOWS
+from distributed.compatibility import WINDOWS
 
 from distributed.metrics import time
 from distributed.scheduler import Scheduler, KilledWorker
 from distributed.sizeof import sizeof
-from distributed.utils import ignoring, mp_context, sync, tmp_text, tokey, tmpfile
+from distributed.utils import (
+    ignoring,
+    mp_context,
+    sync,
+    tmp_text,
+    tokey,
+    tmpfile,
+    is_valid_xml,
+)
 from distributed.utils_test import (
     cluster,
     slowinc,
@@ -1523,9 +1530,9 @@ def test_upload_file_egg(c, s, a, b):
         return package_1.a, package_2.b
 
     # c.upload_file tells each worker to
-    # - put this file in their local_dir
+    # - put this file in their local_directory
     # - modify their sys.path to include it
-    # we don't care about the local_dir
+    # we don't care about the local_directory
     # but we do care about restoring the path
 
     with save_sys_modules():
@@ -1575,19 +1582,19 @@ def test_upload_file_egg(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_upload_large_file(c, s, a, b):
-    assert a.local_dir
-    assert b.local_dir
+    assert a.local_directory
+    assert b.local_directory
     with tmp_text("myfile", "abc") as fn:
         with tmp_text("myfile2", "def") as fn2:
             yield c._upload_large_file(fn, remote_filename="x")
             yield c._upload_large_file(fn2)
 
             for w in [a, b]:
-                assert os.path.exists(os.path.join(w.local_dir, "x"))
-                assert os.path.exists(os.path.join(w.local_dir, "myfile2"))
-                with open(os.path.join(w.local_dir, "x")) as f:
+                assert os.path.exists(os.path.join(w.local_directory, "x"))
+                assert os.path.exists(os.path.join(w.local_directory, "myfile2"))
+                with open(os.path.join(w.local_directory, "x")) as f:
                     assert f.read() == "abc"
-                with open(os.path.join(w.local_dir, "myfile2")) as f:
+                with open(os.path.join(w.local_directory, "myfile2")) as f:
                     assert f.read() == "def"
 
 
@@ -1906,6 +1913,7 @@ def test_repr_localcluster():
     try:
         text = client._repr_html_()
         assert cluster.scheduler.address in text
+        assert is_valid_xml(client._repr_html_())
     finally:
         yield client.close()
         yield cluster.close()
@@ -3312,7 +3320,7 @@ def test_get_foo_lost_keys(c, s, u, v, w):
     client=True,
     Worker=Nanny,
     worker_kwargs={"death_timeout": "500ms"},
-    clean_kwargs={"threads": False},
+    clean_kwargs={"threads": False, "processes": False},
 )
 def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
@@ -3320,6 +3328,7 @@ def test_bad_tasks_fail(c, s, a, b):
         yield f
 
     assert info.value.last_worker.nanny in {a.address, b.address}
+    yield [a.close(), b.close()]
 
 
 def test_get_processing_sync(c, s, a, b):
@@ -4560,7 +4569,7 @@ def test_quiet_client_close(loop):
 @pytest.mark.slow
 def test_quiet_client_close_when_cluster_is_closed_before_client(loop):
     with captured_logger(logging.getLogger("tornado.application")) as logger:
-        cluster = LocalCluster(loop=loop, n_workers=1)
+        cluster = LocalCluster(loop=loop, n_workers=1, dashboard_address=":0")
         client = Client(cluster, loop=loop)
         cluster.close()
         client.close()
@@ -4833,7 +4842,6 @@ def test_bytes_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_unicode_ascii_keys(c, s, a, b):
-    # cross-version unicode type (py2: unicode, py3: str)
     uni_type = type(u"")
     key = u"inc-123"
     future = c.submit(inc, 1, key=key)
@@ -4846,7 +4854,6 @@ def test_unicode_ascii_keys(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_unicode_keys(c, s, a, b):
-    # cross-version unicode type (py2: unicode, py3: str)
     uni_type = type(u"")
     key = u"inc-123\u03bc"
     future = c.submit(inc, 1, key=key)
@@ -5036,12 +5043,7 @@ def test_client_async_before_loop_starts():
 
 
 @pytest.mark.slow
-@gen_cluster(
-    client=True,
-    Worker=Nanny if PY3 else Worker,
-    timeout=60,
-    nthreads=[("127.0.0.1", 3)] * 2,
-)
+@gen_cluster(client=True, Worker=Nanny, timeout=60, nthreads=[("127.0.0.1", 3)] * 2)
 def test_nested_compute(c, s, a, b):
     def fib(x):
         assert get_worker().get_current_task()
@@ -5178,7 +5180,7 @@ def test_scatter_direct(s, a, b):
         yield gen.sleep(0.10)
         assert time() < start + 5
 
-    yield c._close()
+    yield c.close()
 
 
 @pytest.mark.skipif(sys.version_info[0] < 3, reason="cloudpickle Py27 issue")
@@ -5195,7 +5197,7 @@ def test_client_name(s, a, b):
         c = yield Client(s.address, asynchronous=True)
         assert any("hello-world" in name for name in list(s.clients))
 
-    yield c._close()
+    yield c.close()
 
 
 def test_client_doesnt_close_given_loop(loop, s, a, b):
@@ -5242,6 +5244,7 @@ def test_client_timeout_2():
             yield c
         stop = time()
 
+        assert c.status == "closed"
         yield c.close()
 
         assert stop - start < 1
@@ -5299,7 +5302,7 @@ def test_turn_off_pickle(direct):
             with pytest.raises(TypeError):
                 yield c.run_on_scheduler(lambda: inc)
         finally:
-            yield c._close()
+            yield c.close()
 
     test()
 
@@ -5322,7 +5325,7 @@ def test_de_serialization(s, a, b):
         with pytest.raises(TypeError):
             result = yield future
     finally:
-        yield c._close()
+        yield c.close()
 
 
 @gen_cluster()
@@ -5338,7 +5341,7 @@ def test_de_serialization_none(s, a, b):
         with pytest.raises(TypeError):
             result = yield future
     finally:
-        yield c._close()
+        yield c.close()
 
 
 @gen_cluster()
@@ -5587,6 +5590,28 @@ def test_wait_for_workers(c, s, a, b):
     yield future
     assert time() < start + 1
     yield w.close()
+
+
+@pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("Worker", [Worker, Nanny])
+async def test_file_descriptors_dont_leak(Worker):
+    pytest.importorskip("pandas")
+    df = dask.datasets.timeseries(freq="10s", dtypes={"x": int, "y": float})
+
+    proc = psutil.Process()
+    start = proc.num_fds()
+    async with Scheduler(port=0, dashboard_address=":0") as s:
+        async with Worker(s.address, nthreads=2) as a, Worker(
+            s.address, nthreads=2
+        ) as b:
+            async with Client(s.address, asynchronous=True) as c:
+                await df.sum().persist()
+
+    begin = time()
+    while proc.num_fds() > begin:
+        await asyncio.sleep(0.01)
+        assert time() < begin + 5, (start, proc.num_fds())
 
 
 if sys.version_info >= (3, 5):

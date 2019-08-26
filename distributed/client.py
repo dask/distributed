@@ -1,7 +1,6 @@
-from __future__ import print_function, division, absolute_import
-
 import atexit
 from collections import defaultdict
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
@@ -9,6 +8,7 @@ import copy
 from datetime import timedelta
 import errno
 from functools import partial
+import html
 import itertools
 import json
 import logging
@@ -19,6 +19,7 @@ import uuid
 import threading
 import six
 import socket
+from queue import Queue as pyQueue
 import warnings
 import weakref
 
@@ -26,7 +27,7 @@ import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
-from dask.compatibility import apply, unicode
+from dask.compatibility import apply
 from dask.utils import ensure_dict, format_bytes
 
 try:
@@ -55,13 +56,6 @@ from .utils_comm import (
     gather_from_workers,
 )
 from .cfexecutor import ClientExecutor
-from .compatibility import (
-    Queue as pyQueue,
-    isqueue,
-    html_escape,
-    StopAsyncIteration,
-    Iterator,
-)
 from .core import connect, rpc, clean_exception, CommClosedError, PooledRPCCall
 from .metrics import time
 from .node import Node
@@ -400,7 +394,7 @@ class Future(WrappedKey):
             return "<Future: status: %s, key: %s>" % (self.status, self.key)
 
     def _repr_html_(self):
-        text = "<b>Future: %s</b> " % html_escape(key_split(self.key))
+        text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
         text += (
             '<font color="gray">status: </font>'
             '<font color="%(color)s">%(status)s</font>, '
@@ -414,7 +408,7 @@ class Future(WrappedKey):
             except AttributeError:
                 typ = str(self.type)
             text += '<font color="gray">type: </font>%s, ' % typ
-        text += '<font color="gray">key: </font>%s' % html_escape(str(self.key))
+        text += '<font color="gray">key: </font>%s' % html.escape(str(self.key))
         return text
 
     def __await__(self):
@@ -805,9 +799,9 @@ class Client(Node):
             '<ul style="text-align: left; list-style: none; margin: 0; padding: 0;">\n'
         )
         if scheduler is not None:
-            text += "  <li><b>Scheduler: </b>%s\n" % scheduler.address
+            text += "  <li><b>Scheduler: </b>%s</li>\n" % scheduler.address
         else:
-            text += "  <li><b>Scheduler: not connected</b>\n"
+            text += "  <li><b>Scheduler: not connected</b></li>\n"
 
         if info and "dashboard" in info["services"]:
             protocol, rest = scheduler.address.split("://")
@@ -912,7 +906,7 @@ class Client(Node):
                 pass
             except Exception:
                 logger.info(
-                    "Tried to start cluster and received an error. " "Proceeding.",
+                    "Tried to start cluster and received an error. Proceeding.",
                     exc_info=True,
                 )
             address = self.cluster.scheduler_address
@@ -932,7 +926,9 @@ class Client(Node):
 
             try:
                 self.cluster = await LocalCluster(
-                    loop=self.loop, asynchronous=True, **self._startup_kwargs
+                    loop=self.loop,
+                    asynchronous=self._asynchronous,
+                    **self._startup_kwargs
                 )
             except (OSError, socket.error) as e:
                 if e.errno != errno.EADDRINUSE:
@@ -958,7 +954,11 @@ class Client(Node):
             self.scheduler = self.rpc(address)
         self.scheduler_comm = None
 
-        await self._ensure_connected(timeout=timeout)
+        try:
+            await self._ensure_connected(timeout=timeout)
+        except OSError:
+            await self._close()
+            raise
 
         for pc in self._periodic_callbacks.values():
             pc.start()
@@ -1024,6 +1024,11 @@ class Client(Node):
             await comm.write(
                 {"op": "register-client", "client": self.id, "reply": False}
             )
+        except Exception as e:
+            if self.status == "closed":
+                return
+            else:
+                raise
         finally:
             self._connecting_to_scheduler = False
         if timeout is not None:
@@ -1516,7 +1521,7 @@ class Client(Node):
         if not callable(func):
             raise TypeError("First input to map must be a callable function")
 
-        if all(map(isqueue, iterables)) or all(
+        if all(isinstance(it, pyQueue) for it in iterables) or all(
             isinstance(i, Iterator) for i in iterables
         ):
             raise TypeError(
@@ -1785,7 +1790,7 @@ class Client(Node):
         --------
         Client.scatter: Send data out to cluster
         """
-        if isqueue(futures):
+        if isinstance(futures, pyQueue):
             raise TypeError(
                 "Dask no longer supports gathering over Iterators and Queues. "
                 "Consider using a normal for loop and Client.submit/gather"
@@ -1822,7 +1827,7 @@ class Client(Node):
         if isinstance(workers, six.string_types + (Number,)):
             workers = [workers]
         if isinstance(data, dict) and not all(
-            isinstance(k, (bytes, unicode)) for k in data
+            isinstance(k, (bytes, str)) for k in data
         ):
             d = await self._scatter(keymap(tokey, data), workers, broadcast)
             raise gen.Return({k: d[tokey(k)] for k in data})
@@ -1991,7 +1996,7 @@ class Client(Node):
         """
         if timeout == no_default:
             timeout = self._timeout
-        if isqueue(data) or isinstance(data, Iterator):
+        if isinstance(data, pyQueue) or isinstance(data, Iterator):
             raise TypeError(
                 "Dask no longer supports mapping over Iterators or Queues."
                 "Consider using a normal for loop and Client.submit"
@@ -2379,9 +2384,7 @@ class Client(Node):
             dsk3 = {k: v for k, v in dsk2.items() if k is not v}
             for future in extra_futures:
                 if future.client is not self:
-                    msg = (
-                        "Inputs contain futures that were created by " "another client."
-                    )
+                    msg = "Inputs contain futures that were created by another client."
                     raise ValueError(msg)
 
             if restrictions:
@@ -2856,7 +2859,7 @@ class Client(Node):
 
         def dump_to_file(dask_worker=None):
             if not os.path.isabs(remote_filename):
-                fn = os.path.join(dask_worker.local_dir, remote_filename)
+                fn = os.path.join(dask_worker.local_directory, remote_filename)
             else:
                 fn = remote_filename
             with open(fn, "wb") as f:
@@ -3263,7 +3266,8 @@ class Client(Node):
                                          'stored': 0,
                                          'time-delay': 0.0061032772064208984}}}
         """
-        self.sync(self._update_scheduler_info)
+        if not self.asynchronous:
+            self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
     def write_scheduler_file(self, scheduler_file):
@@ -3480,7 +3484,7 @@ class Client(Node):
                     errs.append("%s\n%s" % (pkg, asciitable(["", "version"], rows)))
 
                 raise ValueError(
-                    "Mismatched versions found\n" "\n" "%s" % ("\n\n".join(errs))
+                    "Mismatched versions found\n\n%s" % ("\n\n".join(errs))
                 )
 
         return result
@@ -3962,7 +3966,7 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         wait_for = Any
     else:
         raise NotImplementedError(
-            "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are " "supported"
+            "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"
         )
 
     future = wait_for({f._state.wait() for f in fs})
@@ -4261,7 +4265,7 @@ def default_client(c=None):
     else:
         raise ValueError(
             "No clients found\n"
-            "Start an client and point it to the scheduler address\n"
+            "Start a client and point it to the scheduler address\n"
             "  from distributed import Client\n"
             "  client = Client('ip-addr-of-scheduler:8786')\n"
         )

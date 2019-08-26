@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import atexit
 import logging
 import math
@@ -82,7 +80,7 @@ class LocalCluster(SpecCluster):
 
     Pass extra keyword arguments to Bokeh
 
-    >>> LocalCluster(service_kwargs={'bokeh': {'prefix': '/foo'}})  # doctest: +SKIP
+    >>> LocalCluster(service_kwargs={'dashboard': {'prefix': '/foo'}})  # doctest: +SKIP
     """
 
     def __init__(

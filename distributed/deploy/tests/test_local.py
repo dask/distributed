@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from functools import partial
 import gc
 import multiprocessing
@@ -197,7 +195,7 @@ def test_Client_solo(loop):
 def test_duplicate_clients():
     pytest.importorskip("bokeh")
     c1 = yield Client(processes=False, silence_logs=False, dashboard_address=9876)
-    with pytest.warns(Exception) as info:
+    with pytest.warns(Warning) as info:
         c2 = yield Client(processes=False, silence_logs=False, dashboard_address=9876)
 
     assert "dashboard" in c1.cluster.scheduler.services
@@ -856,3 +854,32 @@ def test_dont_select_closed_worker():
 
         cluster2.close()
         c2.close()
+
+
+def test_client_cluster_synchronous(loop):
+    with clean(threads=False):
+        with Client(loop=loop, processes=False) as c:
+            assert not c.asynchronous
+            assert not c.cluster.asynchronous
+
+
+@pytest.mark.asyncio
+async def test_scale_memory_cores(cleanup):
+    async with LocalCluster(
+        n_workers=0,
+        processes=False,
+        threads_per_worker=2,
+        memory_limit="2GB",
+        asynchronous=True,
+    ) as cluster:
+        cluster.scale(cores=4)
+        assert len(cluster.worker_spec) == 2
+
+        cluster.scale(memory="6GB")
+        assert len(cluster.worker_spec) == 3
+
+        cluster.scale(cores=1)
+        assert len(cluster.worker_spec) == 1
+
+        cluster.scale(memory="7GB")
+        assert len(cluster.worker_spec) == 4

@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import six
 
 import dask
@@ -125,7 +123,7 @@ def get_address_host_port(addr, strict=False):
         return backend.get_address_host_port(loc)
     except NotImplementedError:
         raise ValueError(
-            "don't know how to extract host and port " "for address %r" % (addr,)
+            "don't know how to extract host and port for address %r" % (addr,)
         )
 
 

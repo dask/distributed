@@ -1,11 +1,10 @@
-from __future__ import print_function, division, absolute_import
-
 import errno
 import logging
 import socket
 import struct
 import sys
 from tornado import gen
+import weakref
 
 try:
     import ssl
@@ -19,7 +18,6 @@ from tornado.iostream import StreamClosedError, IOStream
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
-from ..compatibility import finalize, PY3
 from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import (
     ensure_bytes,
@@ -158,7 +156,7 @@ class TCP(Comm):
         self._peer_addr = peer_addr
         self.stream = stream
         self.deserialize = deserialize
-        self._finalizer = finalize(self, self._get_finalizer())
+        self._finalizer = weakref.finalize(self, self._get_finalizer())
         self._finalizer.atexit = False
         self._extra = {}
 
@@ -199,7 +197,7 @@ class TCP(Comm):
             frames = []
             for length in lengths:
                 if length:
-                    if PY3 and self._iostream_has_read_into:
+                    if self._iostream_has_read_into:
                         frame = bytearray(length)
                         n = await stream.read_into(frame)
                         assert n == length, (n, length)
@@ -242,7 +240,7 @@ class TCP(Comm):
             length_bytes = [struct.pack("Q", len(frames))] + [
                 struct.pack("Q", x) for x in lengths
             ]
-            if PY3 and sum(lengths) < 2 ** 17:  # 128kiB
+            if sum(lengths) < 2 ** 17:  # 128kiB
                 b = b"".join(length_bytes + frames)  # small enough, send in one go
                 stream.write(b)
             else:
@@ -270,13 +268,17 @@ class TCP(Comm):
 
         return sum(map(nbytes, frames))
 
-    async def close(self):
+    @gen.coroutine
+    def close(self):
+        # We use gen.coroutine here rather than async def to avoid errors like
+        # Task was destroyed but it is pending!
+        # Triggered by distributed.deploy.tests.test_local::test_silent_startup
         stream, self.stream = self.stream, None
         if stream is not None and not stream.closed():
             try:
                 # Flush the stream's write buffer by waiting for a last write.
                 if stream.writing():
-                    await stream.write(b"")
+                    yield stream.write(b"")
                 stream.socket.shutdown(socket.SHUT_RDWR)
             except EnvironmentError:
                 pass
@@ -340,11 +342,8 @@ class RequireEncryptionMixin(object):
 
 
 class BaseTCPConnector(Connector, RequireEncryptionMixin):
-    if PY3:  # see github PR #2403 discussion for more info
-        _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
-        _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
-    else:
-        _resolver = None
+    _executor = ThreadPoolExecutor(2, thread_name_prefix="TCP-Executor")
+    _resolver = netutil.ExecutorResolver(close_executor=False, executor=_executor)
     client = TCPClient(resolver=_resolver)
 
     async def connect(self, address, deserialize=True, **connection_args):

@@ -1,14 +1,74 @@
 import asyncio
 import atexit
+import copy
+import math
 import weakref
 
 from tornado import gen
 
 from .cluster import Cluster
 from ..core import rpc, CommClosedError
-from ..utils import LoopRunner, silence_logging, ignoring
+from ..utils import LoopRunner, silence_logging, ignoring, parse_bytes
 from ..scheduler import Scheduler
 from ..security import Security
+
+
+class ProcessInterface:
+    """
+    An interface for Scheduler and Worker processes for use in SpecCluster
+
+    This interface is responsible to submit a worker or scheduler process to a
+    resource manager like Kubernetes, Yarn, or SLURM/PBS/SGE/...
+    It should implement the methods below, like ``start`` and ``close``
+    """
+
+    def __init__(self):
+        self.address = None
+        self.external_address = None
+        self.lock = asyncio.Lock()
+        self.status = "created"
+
+    def __await__(self):
+        async def _():
+            async with self.lock:
+                if self.status == "created":
+                    await self.start()
+                    assert self.status == "running"
+            return self
+
+        return _().__await__()
+
+    async def start(self):
+        """ Submit the process to the resource manager
+
+        For workers this doesn't have to wait until the process actually starts,
+        but can return once the resource manager has the request, and will work
+        to make the job exist in the future
+
+        For the scheduler we will expect the scheduler's ``.address`` attribute
+        to be avaialble after this completes.
+        """
+        self.status = "running"
+
+    async def close(self):
+        """ Close the process
+
+        This will be called by the Cluster object when we scale down a node,
+        but only after we ask the Scheduler to close the worker gracefully.
+        This method should kill the process a bit more forcefully and does not
+        need to worry about shutting down gracefully
+        """
+        self.status = "closed"
+
+    def __repr__(self):
+        return "<%s: status=%s>" % (type(self).__name__, self.status)
+
+    async def __aenter__(self):
+        await self
+        return self
+
+    async def __aexit__(self, *args, **kwargs):
+        await self.close()
 
 
 class SpecCluster(Cluster):
@@ -38,6 +98,8 @@ class SpecCluster(Cluster):
         async/await
     silence_logs: bool
         Whether or not we should silence logging when setting up the cluster.
+    name: str, optional
+        A name to use when printing out the cluster, defaults to type name
 
     Examples
     --------
@@ -111,15 +173,15 @@ class SpecCluster(Cluster):
         loop=None,
         security=None,
         silence_logs=False,
+        name=None,
     ):
         self._created = weakref.WeakSet()
 
-        self.scheduler_spec = scheduler
-        self.worker_spec = workers or {}
-        self.new_spec = worker
+        self.scheduler_spec = copy.copy(scheduler)
+        self.worker_spec = copy.copy(workers) or {}
+        self.new_spec = copy.copy(worker)
         self.workers = {}
         self._i = 0
-        self._asynchronous = asynchronous
         self.security = security or Security()
         self.scheduler_comm = None
 
@@ -129,15 +191,16 @@ class SpecCluster(Cluster):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
 
-        self.status = "created"
         self._instances.add(self)
         self._correct_state_waiting = None
+        self._name = name or type(self).__name__
+
+        super().__init__(asynchronous=asynchronous)
 
         if not self.asynchronous:
             self._loop_runner.start()
             self.sync(self._start)
             self.sync(self._correct_state)
-            self.sync(self._wait_for_workers)
 
     async def _start(self):
         while self.status == "starting":
@@ -146,6 +209,8 @@ class SpecCluster(Cluster):
             return
         if self.status == "closed":
             raise ValueError("Cluster is closed")
+
+        self._lock = asyncio.Lock()
 
         if self.scheduler_spec is None:
             try:
@@ -156,17 +221,16 @@ class SpecCluster(Cluster):
                 services = {("dashboard", 8787): BokehScheduler}
             self.scheduler_spec = {"cls": Scheduler, "options": {"services": services}}
         self.scheduler = self.scheduler_spec["cls"](
-            loop=self.loop, **self.scheduler_spec.get("options", {})
+            **self.scheduler_spec.get("options", {})
         )
 
-        self._lock = asyncio.Lock()
         self.status = "starting"
         self.scheduler = await self.scheduler
         self.scheduler_comm = rpc(
-            self.scheduler.address,
+            getattr(self.scheduler, "external_address", None) or self.scheduler.address,
             connection_args=self.security.get_connection_args("client"),
         )
-        self.status = "running"
+        await super()._start()
 
     def _correct_state(self):
         if self._correct_state_waiting:
@@ -220,7 +284,6 @@ class SpecCluster(Cluster):
             await self._correct_state()
             if self.workers:
                 await asyncio.wait(list(self.workers.values()))  # maybe there are more
-            await self._wait_for_workers()
             return self
 
         return _().__await__()
@@ -237,13 +300,6 @@ class SpecCluster(Cluster):
                 raise gen.TimeoutError("Worker unexpectedly closed")
             await asyncio.sleep(0.1)
 
-    async def __aenter__(self):
-        await self
-        return self
-
-    async def __aexit__(self, typ, value, traceback):
-        await self.close()
-
     async def _close(self):
         while self.status == "closing":
             await asyncio.sleep(0.1)
@@ -256,27 +312,18 @@ class SpecCluster(Cluster):
         async with self._lock:
             with ignoring(CommClosedError):
                 await self.scheduler_comm.close(close_workers=True)
+
         await self.scheduler.close()
         for w in self._created:
             assert w.status == "closed"
-        self.scheduler_comm.close_rpc()
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
 
-        self.status = "closed"
-
-    def close(self, timeout=None):
-        with ignoring(RuntimeError):  # loop closed during process shutdown
-            return self.sync(self._close, callback_timeout=timeout)
-
-    def __del__(self):
-        if self.status != "closed":
-            self.loop.add_callback(self.close)
+        await super()._close()
 
     def __enter__(self):
         self.sync(self._correct_state)
-        self.sync(self._wait_for_workers)
         assert self.status == "running"
         return self
 
@@ -284,7 +331,34 @@ class SpecCluster(Cluster):
         self.close()
         self._loop_runner.stop()
 
-    def scale(self, n):
+    def scale(self, n=0, memory=None, cores=None):
+        if memory is not None:
+            try:
+                limit = self.new_spec["options"]["memory_limit"]
+            except KeyError:
+                raise ValueError(
+                    "to use scale(memory=...) your worker definition must include a memory_limit definition"
+                )
+            else:
+                n = max(n, int(math.ceil(parse_bytes(memory) / parse_bytes(limit))))
+
+        if cores is not None:
+            try:
+                threads_per_worker = self.new_spec["options"]["nthreads"]
+            except KeyError:
+                raise ValueError(
+                    "to use scale(cores=...) your worker definition must include an nthreads= definition"
+                )
+            else:
+                n = max(n, int(math.ceil(cores / threads_per_worker)))
+
+        if len(self.worker_spec) > n:
+            not_yet_launched = set(self.worker_spec) - {
+                v["name"] for v in self.scheduler_info["workers"].values()
+            }
+            while len(self.worker_spec) > n and not_yet_launched:
+                del self.worker_spec[not_yet_launched.pop()]
+
         while len(self.worker_spec) > n:
             self.worker_spec.popitem()
 
@@ -315,22 +389,21 @@ class SpecCluster(Cluster):
 
         return self._i, self.new_spec
 
+    @property
+    def _supports_scaling(self):
+        return not not self.new_spec
+
     async def scale_down(self, workers):
-        workers = set(workers)
-
-        # TODO: this is linear cost.  We should be indexing by name or something
-        to_close = [w for w in self.workers.values() if w.address in workers]
-        for k, v in self.workers.items():
-            if v.worker_address in workers:
-                del self.worker_spec[k]
-
+        for w in workers:
+            if w in self.worker_spec:
+                del self.worker_spec[w]
         await self
 
     scale_up = scale  # backwards compatibility
 
     def __repr__(self):
         return "%s(%r, workers=%d)" % (
-            type(self).__name__,
+            self._name,
             self.scheduler_address,
             len(self.workers),
         )

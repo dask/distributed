@@ -1,17 +1,15 @@
-from __future__ import print_function, division, absolute_import
-
 import asyncio
 import collections
 from contextlib import contextmanager
 import copy
 from datetime import timedelta
 import functools
-import gc
 from glob import glob
 import itertools
 import logging
 import logging.config
 import os
+import queue
 import re
 import shutil
 import signal
@@ -41,9 +39,8 @@ from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
 from .client import default_client, _global_clients, Client
-from .compatibility import PY3, Empty, WINDOWS
+from .compatibility import WINDOWS
 from .comm import Comm
-from .comm.utils import offload
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .deploy import SpecCluster
@@ -62,6 +59,7 @@ from .utils import (
     sync,
     iscoroutinefunction,
     thread_state,
+    _offload_executor,
 )
 from .worker import Worker, TOTAL_MEMORY
 from .nanny import Nanny
@@ -82,7 +80,7 @@ logging_levels = {
 }
 
 
-offload(lambda: None).result()  # create thread during import
+_offload_executor.submit(lambda: None).result()  # create thread during import
 
 
 @pytest.fixture(scope="session")
@@ -225,11 +223,6 @@ def nodebug(func):
     A decorator to disable debug facilities during timing-sensitive tests.
     Warning: this doesn't affect already created IOLoops.
     """
-    if not PY3:
-        # py.test's runner magic breaks horridly on Python 2
-        # when a test function is wrapped, so avoid it
-        # (incidently, asyncio is irrelevant anyway)
-        return func
 
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
@@ -517,10 +510,6 @@ def run_nanny(q, scheduler_q, **kwargs):
 @contextmanager
 def check_active_rpc(loop, active_rpc_timeout=1):
     active_before = set(rpc.active)
-    if active_before and not PY3:
-        # On Python 2, try to avoid dangling comms before forking workers
-        gc.collect()
-        active_before = set(rpc.active)
     yield
     # Some streams can take a bit of time to notice their peer
     # has closed, and keep a coroutine (*) waiting for a CommClosedError
@@ -647,7 +636,7 @@ def cluster(
             q = mp_context.Queue()
             fn = "_test_worker-%s" % uuid.uuid4()
             kwargs = merge(
-                {"nthreads": 1, "local_dir": fn, "memory_limit": TOTAL_MEMORY},
+                {"nthreads": 1, "local_directory": fn, "memory_limit": TOTAL_MEMORY},
                 worker_kwargs,
             )
             proc = mp_context.Process(
@@ -664,7 +653,7 @@ def cluster(
         try:
             for worker in workers:
                 worker["address"] = worker["queue"].get(timeout=5)
-        except Empty:
+        except queue.Empty:
             raise pytest.xfail.Exception("Worker failed to start in test")
 
         saddr = scheduler_q.get()
@@ -1458,21 +1447,24 @@ def check_thread_leak():
 
 
 @contextmanager
-def check_process_leak():
+def check_process_leak(check=True):
     for proc in mp_context.active_children():
         proc.terminate()
 
     yield
 
-    for i in range(100):
-        if not set(mp_context.active_children()):
-            break
+    if check:
+        for i in range(100):
+            if not set(mp_context.active_children()):
+                break
+            else:
+                sleep(0.2)
         else:
-            sleep(0.2)
-    else:
-        assert not mp_context.active_children()
+            assert not mp_context.active_children()
 
     _cleanup_dangling()
+    for proc in mp_context.active_children():
+        proc.terminate()
 
 
 @contextmanager
@@ -1528,14 +1520,14 @@ def check_instances():
 
 
 @contextmanager
-def clean(threads=not WINDOWS, instances=True, timeout=1):
+def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
     @contextmanager
     def null():
         yield
 
     with check_thread_leak() if threads else null():
         with pristine_loop() as loop:
-            with check_process_leak():
+            with check_process_leak(check=processes):
                 with check_instances() if instances else null():
                     with check_active_rpc(loop, timeout):
                         reset_config()
