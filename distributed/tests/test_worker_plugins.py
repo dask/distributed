@@ -1,13 +1,13 @@
 from distributed.utils_test import gen_cluster
 from distributed import Worker
 
-
 class MyPlugin:
     name = "MyPlugin"
 
     def __init__(self, data):
         self.data = data
         self.expected_results = []
+        self.expected_args = []
 
     def setup(self, worker):
         assert isinstance(worker, Worker)
@@ -19,13 +19,25 @@ class MyPlugin:
         assert isinstance(worker, Worker)
         self.worker._my_plugin_status = "teardown"
 
-    def task_finished(self, result):
+    def task_started(self, worker, args, kwargs):
+        assert isinstance(worker, Worker)
+
+        if len(self.expected_args) > 0:
+            _args, _kwargs = self.expected_args.pop(0)
+            if _args is not None: assert args == _args
+            if _kwargs is not None: assert kwargs == _kwargs
+
+    def task_finished(self, worker, result):
+        assert isinstance(worker, Worker)
+
         if len(self.expected_results) > 0:
             assert result == self.expected_results.pop(0)
 
-    def add_expected_result(self, result):
+    def expect_task_returns(self, result):
         self.expected_results.append(result)
 
+    def expect_task_called_with(self, args=(), kwargs=None):
+        self.expected_args.append((args, kwargs))
 
 @gen_cluster(client=True, nthreads=[])
 def test_create_with_client(c, s):
@@ -74,13 +86,23 @@ def test_duplicate_with_no_name(c, s, a, b):
     yield c.register_worker_plugin(plugin, name="foo")
     assert len(a.plugins) == len(b.plugins) == 3
 
+@gen_cluster(client=True)
+def test_called_on_task_started(c, s, a, b):
+    plugin = MyPlugin(10)
+
+    plugin.expect_task_called_with(args=(10,))
+    plugin.expect_task_called_with(args=(20,))
+
+    yield c.register_worker_plugin(plugin)
+    yield c.submit(lambda x: x, 10)
+    yield c.submit(lambda x: x, 20)
 
 @gen_cluster(client=True)
 def test_called_on_task_finished(c, s, a, b):
     plugin = MyPlugin(10)
 
-    plugin.add_expected_result(20)
-    plugin.add_expected_result(40)
+    plugin.expect_task_returns(20)
+    plugin.expect_task_returns(40)
 
     yield c.register_worker_plugin(plugin)
     yield c.submit(lambda x: x * 2, 10)
