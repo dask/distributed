@@ -2041,7 +2041,7 @@ def test_repr_sync(c):
     assert c.scheduler.address in s
     assert c.scheduler.address in r
     assert str(2) in s  # nworkers
-    assert "cores" in s
+    assert "cores" in s or "threads" in s
 
 
 @gen_cluster(client=True)
