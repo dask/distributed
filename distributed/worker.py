@@ -3251,16 +3251,16 @@ def apply_function(
     thread_state.key = key
     start = time()
     try:
-        notify_task_started(plugins, execution_state['worker'], key, args, kwargs)
+        notify_task_started(plugins, execution_state["worker"], key, args, kwargs)
         result = function(*args, **kwargs)
-        notify_task_finished(plugins, execution_state['worker'], key, result)
+        notify_task_finished(plugins, execution_state["worker"], key, result)
 
     except Exception as e:
         msg = error_message(e)
         msg["op"] = "task-erred"
         msg["actual-exception"] = e
 
-        notify_task_finished(plugins, execution_state['worker'], key, result)
+        notify_task_finished(plugins, execution_state["worker"], key, result)
     else:
         msg = {
             "op": "task-finished",
@@ -3280,7 +3280,14 @@ def apply_function(
 
 
 def apply_function_actor(
-    function, args, kwargs, execution_state, key, active_threads, active_threads_lock, plugins,
+    function,
+    args,
+    kwargs,
+    execution_state,
+    key,
+    active_threads,
+    active_threads_lock,
+    plugins,
 ):
     """ Run a function, collect information
 
@@ -3296,9 +3303,9 @@ def apply_function_actor(
     thread_state.execution_state = execution_state
     thread_state.key = key
 
-    notify_task_started(plugins, execution_state['worker'], key, args, kwargs)
+    notify_task_started(plugins, execution_state["worker"], key, args, kwargs)
     result = function(*args, **kwargs)
-    notify_task_finished(plugins, execution_state['worker'], key, result)
+    notify_task_finished(plugins, execution_state["worker"], key, result)
 
     with active_threads_lock:
         del active_threads[ident]

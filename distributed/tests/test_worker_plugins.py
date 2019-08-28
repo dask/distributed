@@ -1,6 +1,7 @@
 from distributed.utils_test import gen_cluster
 from distributed import Worker
 
+
 class MyPlugin:
     name = "MyPlugin"
 
@@ -24,8 +25,10 @@ class MyPlugin:
 
         if len(self.expected_args) > 0:
             _args, _kwargs = self.expected_args.pop(0)
-            if _args is not None: assert args == _args
-            if _kwargs is not None: assert kwargs == _kwargs
+            if _args is not None:
+                assert args == _args
+            if _kwargs is not None:
+                assert kwargs == _kwargs
 
     def task_finished(self, worker, key, result):
         assert isinstance(worker, Worker)
@@ -38,6 +41,7 @@ class MyPlugin:
 
     def expect_task_called_with(self, args=(), kwargs=None):
         self.expected_args.append((args, kwargs))
+
 
 @gen_cluster(client=True, nthreads=[])
 def test_create_with_client(c, s):
@@ -86,6 +90,7 @@ def test_duplicate_with_no_name(c, s, a, b):
     yield c.register_worker_plugin(plugin, name="foo")
     assert len(a.plugins) == len(b.plugins) == 3
 
+
 @gen_cluster(client=True)
 def test_called_on_task_started(c, s, a, b):
     plugin = MyPlugin(10)
@@ -96,6 +101,7 @@ def test_called_on_task_started(c, s, a, b):
     yield c.register_worker_plugin(plugin)
     yield c.submit(lambda x: x, 10)
     yield c.submit(lambda x: x, 20)
+
 
 @gen_cluster(client=True)
 def test_called_on_task_finished(c, s, a, b):
