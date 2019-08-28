@@ -560,6 +560,31 @@ def test_connection_pool():
 
 
 @gen_test()
+def test_connection_pool_respects_limit():
+
+    limit = 5
+
+    @gen.coroutine
+    def ping(comm, delay=0.01):
+        yield gen.sleep(delay)
+        raise gen.Return("pong")
+
+    @gen.coroutine
+    def do_ping(pool, port):
+        assert pool.open <= limit
+        yield pool(ip="127.0.0.1", port=port).ping()
+        assert pool.open <= limit
+
+    servers = [Server({"ping": ping}) for i in range(10)]
+    for server in servers:
+        server.listen(0)
+
+    pool = ConnectionPool(limit=limit)
+
+    yield [do_ping(pool, s.port) for s in servers]
+
+
+@gen_test()
 def test_connection_pool_tls():
     """
     Make sure connection args are supported.
@@ -619,7 +644,7 @@ def test_connection_pool_remove():
     rpc.collect()
     comm = yield rpc.connect(serv.address)
     rpc.remove(serv.address)
-    rpc.reuse(serv.address, comm)
+    # rpc.reuse(serv.address, comm)
 
     rpc.close()
 
