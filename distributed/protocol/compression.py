@@ -4,7 +4,7 @@ Record known compressors
 Includes utilities for determining whether or not to compress
 """
 import logging
-import os, random
+import os, random, importlib
 
 import dask
 from toolz import identity, partial
@@ -98,6 +98,8 @@ with ignoring(ImportError):
     os.environ["PYTHON_ZSTANDARD_IMPORT_POLICY"] = _import_policy
 
     import zstandard as zstd
+
+    importlib.reload(zstd)
 
     zstd_level = dask.config.get("distributed.comm.zstd.level")
     zstd_kwargs = dict(
