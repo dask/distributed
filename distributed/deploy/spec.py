@@ -22,7 +22,7 @@ class ProcessInterface:
     It should implement the methods below, like ``start`` and ``close``
     """
 
-    def __init__(self):
+    def __init__(self, scheduler=None, name=None):
         self.address = None
         self.external_address = None
         self.lock = asyncio.Lock()
@@ -333,24 +333,32 @@ class SpecCluster(Cluster):
 
     def scale(self, n=0, memory=None, cores=None):
         if memory is not None:
-            try:
-                limit = self.new_spec["options"]["memory_limit"]
-            except KeyError:
+            for name in ["memory_limit", "memory"]:
+                try:
+                    limit = self.new_spec["options"][name]
+                except KeyError:
+                    pass
+                else:
+                    n = max(n, int(math.ceil(parse_bytes(memory) / parse_bytes(limit))))
+                    break
+            else:
                 raise ValueError(
                     "to use scale(memory=...) your worker definition must include a memory_limit definition"
                 )
-            else:
-                n = max(n, int(math.ceil(parse_bytes(memory) / parse_bytes(limit))))
 
         if cores is not None:
-            try:
-                threads_per_worker = self.new_spec["options"]["nthreads"]
-            except KeyError:
+            for name in ["nthreads", "ncores", "threads", "cores"]:
+                try:
+                    threads_per_worker = self.new_spec["options"][name]
+                except KeyError:
+                    pass
+                else:
+                    n = max(n, int(math.ceil(cores / threads_per_worker)))
+                    break
+            else:
                 raise ValueError(
                     "to use scale(cores=...) your worker definition must include an nthreads= definition"
                 )
-            else:
-                n = max(n, int(math.ceil(cores / threads_per_worker)))
 
         if len(self.worker_spec) > n:
             not_yet_launched = set(self.worker_spec) - {
@@ -367,8 +375,7 @@ class SpecCluster(Cluster):
             return
 
         while len(self.worker_spec) < n:
-            k, spec = self.new_worker_spec()
-            self.worker_spec[k] = spec
+            self.worker_spec.update(self.new_worker_spec())
 
         self.loop.add_callback(self._correct_state)
 
@@ -377,8 +384,7 @@ class SpecCluster(Cluster):
 
         Returns
         -------
-        name: identifier for worker
-        spec: dict
+        d: dict mapping names to worker specs
 
         See Also
         --------
@@ -387,7 +393,7 @@ class SpecCluster(Cluster):
         while self._i in self.worker_spec:
             self._i += 1
 
-        return self._i, self.new_spec
+        return {self._i: self.new_spec}
 
     @property
     def _supports_scaling(self):
