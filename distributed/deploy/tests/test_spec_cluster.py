@@ -152,7 +152,7 @@ async def test_new_worker_spec(cleanup):
     class MyCluster(SpecCluster):
         def new_worker_spec(self):
             i = len(self.worker_spec)
-            return i, {"cls": Worker, "options": {"nthreads": i + 1}}
+            return {i: {"cls": Worker, "options": {"nthreads": i + 1}}}
 
     async with MyCluster(asynchronous=True, scheduler=scheduler) as cluster:
         cluster.scale(3)
@@ -283,3 +283,17 @@ async def test_scale_cores_memory(cleanup):
             cluster.scale(memory="5GB")
 
         assert "memory" in str(info.value)
+
+
+@pytest.mark.asyncio
+async def test_ProcessInterfaceValid(cleanup):
+    async with SpecCluster(
+        scheduler=scheduler, worker={"cls": ProcessInterface}, asynchronous=True
+    ) as cluster:
+        cluster.scale(2)
+        await cluster
+        assert len(cluster.worker_spec) == len(cluster.workers) == 2
+
+        cluster.scale(1)
+        await cluster
+        assert len(cluster.worker_spec) == len(cluster.workers) == 1
