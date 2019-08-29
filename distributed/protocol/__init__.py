@@ -82,4 +82,4 @@ def _register_numba():
 @cuda_serialize.register_lazy("cudf")
 @cuda_deserialize.register_lazy("cudf")
 def _register_cudf():
-    from . import cudf
+    from cudf.comm import serialize
