@@ -642,9 +642,12 @@ def test_connection_pool_remove():
     assert rpc.open == 4
 
     rpc.collect()
+
+    # this pattern of calls (esp. `reuse` after `remove`)
+    # can happen in case of worker failures:
     comm = yield rpc.connect(serv.address)
     rpc.remove(serv.address)
-    # rpc.reuse(serv.address, comm)
+    rpc.reuse(serv.address, comm)
 
     rpc.close()
 

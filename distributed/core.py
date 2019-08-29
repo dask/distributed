@@ -897,13 +897,18 @@ class ConnectionPool(object):
         """
         Reuse an open communication to the given address.  For internal use.
         """
-        self.occupied[addr].remove(comm)
-        if comm.closed():
-            self.semaphore.release()
+        # if the pool is asked to re-use a comm it does not know about, ignore
+        # this comm: just close it.
+        if comm not in self.occupied[addr]:
+            IOLoop.current().add_callback(comm.close)
         else:
-            self.available[addr].add(comm)
-            if self.semaphore.locked() and self._n_connecting > 0:
-                self.collect()
+            self.occupied[addr].remove(comm)
+            if comm.closed():
+                self.semaphore.release()
+            else:
+                self.available[addr].add(comm)
+                if self.semaphore.locked() and self._n_connecting > 0:
+                    self.collect()
 
     def collect(self):
         """
