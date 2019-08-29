@@ -1,0 +1,20 @@
+dashboard:
+  theme: light
+
+  light:
+    css: path/to/my.css
+    colors:
+      task_stream_palette: Blues8
+      good: blue
+      stressed: red
+      critical: black
+
+    bokeh_theme:
+      attrs:
+        Plot:
+          background_fill_color: null
+          border_fill_color: null
+  # dark:
+  #   ...
+  # name-of-third-theme:
+  #   ..

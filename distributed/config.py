@@ -10,14 +10,14 @@ from .compatibility import logging_names
 
 config = dask.config.config
 
+for config_fn in ["distributed.yaml", "dashboard.yaml"]:
+    fn = os.path.join(os.path.dirname(__file__), config_fn)
+    dask.config.ensure_file(source=fn)
 
-fn = os.path.join(os.path.dirname(__file__), "distributed.yaml")
-dask.config.ensure_file(source=fn)
+    with open(fn) as f:
+        defaults = yaml.safe_load(f)
 
-with open(fn) as f:
-    defaults = yaml.safe_load(f)
-
-dask.config.update_defaults(defaults)
+    dask.config.update_defaults(defaults)
 
 aliases = {
     "allowed-failures": "distributed.scheduler.allowed-failures",

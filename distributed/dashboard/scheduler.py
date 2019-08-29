@@ -4,6 +4,7 @@ import math
 from numbers import Number
 from operator import add
 import os
+import importlib
 
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -30,7 +31,6 @@ from bokeh.models import (
 )
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
-from bokeh.palettes import Viridis11
 from bokeh.themes import Theme
 from bokeh.transform import factor_cmap
 from bokeh.io import curdoc
@@ -81,7 +81,11 @@ template_variables = {
     "pages": ["status", "workers", "tasks", "system", "profile", "graph", "info"]
 }
 
-BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "theme.yaml"))
+DASHBOARD_THEME = dask.config.get("dashboard").get(dask.config.get("dashboard.theme"))
+BOKEH_THEME = Theme(json=DASHBOARD_THEME.get("bokeh_theme"))
+PALETTE = importlib.import_module(
+    "bokeh.palettes.{}".format(DASHBOARD_THEME.get("colors.task_stream_palette"))
+)
 
 nan = float("nan")
 inf = float("inf")
@@ -591,7 +595,7 @@ class StealingEvents(DashboardComponent):
             total_duration += duration
 
         try:
-            color = Viridis11[level]
+            color = PALETTE[level]
         except (KeyError, IndexError):
             color = "black"
 
