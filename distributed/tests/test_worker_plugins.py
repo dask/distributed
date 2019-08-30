@@ -1,3 +1,5 @@
+import pytest
+
 from distributed.utils_test import gen_cluster
 from distributed import Worker
 
@@ -7,8 +9,9 @@ class MyPlugin:
 
     def __init__(self, data):
         self.data = data
-        self.expected_results = []
         self.expected_args = []
+        self.expected_exceptions = []
+        self.expected_results = []
 
     def setup(self, worker):
         assert isinstance(worker, Worker)
@@ -36,11 +39,20 @@ class MyPlugin:
         if len(self.expected_results) > 0:
             assert result == self.expected_results.pop(0)
 
+    def task_failed(self, worker, key, exception):
+        assert isinstance(worker, Worker)
+
+        if len(self.expected_exceptions) > 0:
+            assert isinstance(exception, self.expected_exceptions.pop())
+
     def expect_task_returns(self, result):
         self.expected_results.append(result)
 
     def expect_task_called_with(self, args=(), kwargs=None):
         self.expected_args.append((args, kwargs))
+
+    def expect_exception(self, exception_class):
+        self.expected_exceptions.append(exception_class)
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -89,6 +101,23 @@ def test_duplicate_with_no_name(c, s, a, b):
 
     yield c.register_worker_plugin(plugin, name="foo")
     assert len(a.plugins) == len(b.plugins) == 3
+
+
+@gen_cluster(client=True)
+def test_failing_task(c, s, a, b):
+    class MyException(Exception):
+        pass
+
+    def failing_task(x):
+        raise MyException()
+
+    plugin = MyPlugin(10)
+
+    plugin.expect_exception(MyException)
+
+    yield c.register_worker_plugin(plugin)
+    with pytest.raises(Exception):
+        yield c.submit(failing_task, None)
 
 
 @gen_cluster(client=True)
