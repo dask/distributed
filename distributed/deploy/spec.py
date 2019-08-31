@@ -26,7 +26,7 @@ class ProcessInterface:
     It should implement the methods below, like ``start`` and ``close``
     """
 
-    def __init__(self):
+    def __init__(self, scheduler=None, name=None):
         self.address = None
         self.external_address = None
         self.lock = asyncio.Lock()
@@ -164,6 +164,23 @@ class SpecCluster(Cluster):
     Also note that uniformity of the specification is not required.  Other API
     could be added externally (in subclasses) that adds workers of different
     specifications into the same dictionary.
+
+    If a single entry in the spec will generate multiple dask workers then
+    please provide a `"group"` element to the spec, that includes the suffixes
+    that will be added to each name (this should be handled by your worker
+    class).
+
+    >>> cluster.worker_spec
+    {
+        0: {"cls": MultiWorker, "options": {"processes": 3}, "group": ["-0", "-1", -2"]}
+        1: {"cls": MultiWorker, "options": {"processes": 2}, "group": ["-0", "-1"]}
+    }
+
+    These suffixes should correspond to the names used by the workers when
+    they deploy.
+
+    >>> [ws.name for ws in cluster.scheduler.workers.values()]
+    ["0-0", "0-1", "0-2", "1-0", "1-1"]
     """
 
     _instances = weakref.WeakSet()
@@ -302,18 +319,6 @@ class SpecCluster(Cluster):
 
         return _().__await__()
 
-    async def _wait_for_workers(self):
-        while {
-            str(d["name"])
-            for d in (await self.scheduler_comm.identity())["workers"].values()
-        } != set(map(str, self.workers)):
-            if (
-                any(w.status == "closed" for w in self.workers.values())
-                and self.scheduler.status == "running"
-            ):
-                raise gen.TimeoutError("Worker unexpectedly closed")
-            await asyncio.sleep(0.1)
-
     async def _close(self):
         while self.status == "closing":
             await asyncio.sleep(0.1)
@@ -347,24 +352,32 @@ class SpecCluster(Cluster):
 
     def scale(self, n=0, memory=None, cores=None):
         if memory is not None:
-            try:
-                limit = self.new_spec["options"]["memory_limit"]
-            except KeyError:
+            for name in ["memory_limit", "memory"]:
+                try:
+                    limit = self.new_spec["options"][name]
+                except KeyError:
+                    pass
+                else:
+                    n = max(n, int(math.ceil(parse_bytes(memory) / parse_bytes(limit))))
+                    break
+            else:
                 raise ValueError(
                     "to use scale(memory=...) your worker definition must include a memory_limit definition"
                 )
-            else:
-                n = max(n, int(math.ceil(parse_bytes(memory) / parse_bytes(limit))))
 
         if cores is not None:
-            try:
-                threads_per_worker = self.new_spec["options"]["nthreads"]
-            except KeyError:
+            for name in ["nthreads", "ncores", "threads", "cores"]:
+                try:
+                    threads_per_worker = self.new_spec["options"][name]
+                except KeyError:
+                    pass
+                else:
+                    n = max(n, int(math.ceil(cores / threads_per_worker)))
+                    break
+            else:
                 raise ValueError(
                     "to use scale(cores=...) your worker definition must include an nthreads= definition"
                 )
-            else:
-                n = max(n, int(math.ceil(cores / threads_per_worker)))
 
         if len(self.worker_spec) > n:
             not_yet_launched = set(self.worker_spec) - {
@@ -381,8 +394,7 @@ class SpecCluster(Cluster):
             return
 
         while len(self.worker_spec) < n:
-            k, spec = self.new_worker_spec()
-            self.worker_spec[k] = spec
+            self.worker_spec.update(self.new_worker_spec())
 
         self.loop.add_callback(self._correct_state)
 
@@ -391,8 +403,7 @@ class SpecCluster(Cluster):
 
         Returns
         -------
-        name: identifier for worker
-        spec: dict
+        d: dict mapping names to worker specs
 
         See Also
         --------
@@ -401,13 +412,25 @@ class SpecCluster(Cluster):
         while self._i in self.worker_spec:
             self._i += 1
 
-        return self._i, self.new_spec
+        return {self._i: self.new_spec}
 
     @property
     def _supports_scaling(self):
         return not not self.new_spec
 
     async def scale_down(self, workers):
+        # We may have groups, if so, map worker addresses to job names
+        if not all(w in self.worker_spec for w in workers):
+            mapping = {}
+            for name, spec in self.worker_spec.items():
+                if "group" in spec:
+                    for suffix in spec["group"]:
+                        mapping[str(name) + suffix] = name
+                else:
+                    mapping[name] = name
+
+            workers = {mapping.get(w, w) for w in workers}
+
         for w in workers:
             if w in self.worker_spec:
                 del self.worker_spec[w]
@@ -415,12 +438,29 @@ class SpecCluster(Cluster):
 
     scale_up = scale  # backwards compatibility
 
-    def __repr__(self):
-        return "%s(%r, workers=%d)" % (
-            self._name,
-            self.scheduler_address,
-            len(self.workers),
-        )
+    @property
+    def plan(self):
+        out = set()
+        for name, spec in self.worker_spec.items():
+            if "group" in spec:
+                out.update({str(name) + suffix for suffix in spec["group"]})
+            else:
+                out.add(name)
+        return out
+
+    @property
+    def requested(self):
+        out = set()
+        for name in self.workers:
+            try:
+                spec = self.worker_spec[name]
+            except KeyError:
+                continue
+            if "group" in spec:
+                out.update({str(name) + suffix for suffix in spec["group"]})
+            else:
+                out.add(name)
+        return out
 
 
 @atexit.register
