@@ -205,6 +205,7 @@ class SpecCluster(Cluster):
         self._i = 0
         self.security = security or Security()
         self.scheduler_comm = None
+        self._futures = set()
 
         if silence_logs:
             self._old_logging_level = silence_logging(level=silence_logs)
@@ -301,9 +302,10 @@ class SpecCluster(Cluster):
     def _update_worker_status(self, op, msg):
         if op == "remove":
             worker_id = self.scheduler_info["workers"][msg]["name"]
-            # if worker_id.isdigit():
-            #    worker_id = int(worker_id)
             if worker_id in self.workers:
+                self._futures.add(
+                    asyncio.ensure_future(self.workers[worker_id].close())
+                )
                 del self.workers[worker_id]
         super()._update_worker_status(op, msg)
 
@@ -328,13 +330,15 @@ class SpecCluster(Cluster):
 
         self.scale(0)
         await self._correct_state()
+        for future in self._futures:
+            await future
         async with self._lock:
             with ignoring(CommClosedError):
                 await self.scheduler_comm.close(close_workers=True)
 
         await self.scheduler.close()
         for w in self._created:
-            assert w.status == "closed"
+            assert w.status == "closed", w.status
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
