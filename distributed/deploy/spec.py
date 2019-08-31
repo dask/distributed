@@ -271,13 +271,14 @@ class SpecCluster(Cluster):
             if to_close:
                 if self.scheduler.status == "running":
                     await self.scheduler_comm.retire_workers(workers=list(to_close))
-                tasks = [self.workers[w].close() for w in to_close]
+                tasks = [self.workers[w].close() for w in to_close if w in self.workers]
                 await asyncio.wait(tasks)
                 for task in tasks:  # for tornado gen.coroutine support
                     with ignoring(RuntimeError):
                         await task
             for name in to_close:
-                del self.workers[name]
+                if name in self.workers:
+                    del self.workers[name]
 
             to_open = set(self.worker_spec) - set(self.workers)
             workers = []
@@ -300,10 +301,14 @@ class SpecCluster(Cluster):
     def _update_worker_status(self, op, msg):
         if op == "remove":
             worker_id = self.scheduler_info["workers"][msg]["name"]
-            #if worker_id.isdigit():
+            # if worker_id.isdigit():
             #    worker_id = int(worker_id)
-            if worker_id in self.workers.keys():
-                logger.warning("Worker {} of name {} has been unexpectedly removed from the Scheduler.".format(msg, worker_id))
+            if worker_id in self.workers:
+                logger.warning(
+                    "Worker {} of name {} has been unexpectedly removed from the Scheduler.".format(
+                        msg, worker_id
+                    )
+                )
                 del self.workers[worker_id]
         super()._update_worker_status(op, msg)
 
