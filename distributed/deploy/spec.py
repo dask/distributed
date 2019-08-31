@@ -304,11 +304,6 @@ class SpecCluster(Cluster):
             # if worker_id.isdigit():
             #    worker_id = int(worker_id)
             if worker_id in self.workers:
-                logger.warning(
-                    "Worker {} of name {} has been unexpectedly removed from the Scheduler.".format(
-                        msg, worker_id
-                    )
-                )
                 del self.workers[worker_id]
         super()._update_worker_status(op, msg)
 
