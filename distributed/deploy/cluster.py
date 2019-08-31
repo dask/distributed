@@ -107,10 +107,9 @@ class Cluster(object):
             self.scheduler_info["workers"].update(workers)
             self.scheduler_info.update(msg)
         elif op == "remove":
-             del self.scheduler_info["workers"][msg]
+            del self.scheduler_info["workers"][msg]
         else:
             raise ValueError("Invalid op", op, msg)
-
 
     def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
         """ Turn on adaptivity
