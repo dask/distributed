@@ -1,5 +1,6 @@
 from collections import deque
 import logging
+from functools import partial
 
 import dask
 from .progress_stream import color_of
@@ -9,6 +10,11 @@ from ..metrics import time
 
 
 logger = logging.getLogger(__name__)
+
+DASHBOARD_THEME = partial(
+    dask.config.get,
+    config=dask.config.get("dashboard").get(dask.config.get("dashboard.theme")),
+)
 
 
 class TaskStreamPlugin(SchedulerPlugin):
@@ -156,13 +162,13 @@ def color_of_message(msg):
         split = key_split(msg["key"])
         return color_of(split)
     else:
-        return "black"
+        return DASHBOARD_THEME("colors.critical")
 
 
 colors = {
-    "transfer": "red",
-    "disk-write": "orange",
-    "disk-read": "orange",
+    "transfer": DASHBOARD_THEME("colors.stressed"),
+    "disk-write": DASHBOARD_THEME("colors.notice"),
+    "disk-read": DASHBOARD_THEME("colors.notice"),
     "deserialize": "gray",
     "compute": color_of_message,
 }
