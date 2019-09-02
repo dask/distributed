@@ -1,10 +1,28 @@
 from distutils.version import LooseVersion
 import os
 import warnings
+from functools import partial
+
+import dask
 
 import bokeh
 from bokeh.server.server import Server
 from tornado import web
+
+DASHBOARD_THEME = partial(
+    dask.config.get,
+    config=dask.config.get("dashboard").get(dask.config.get("dashboard.theme")),
+)
+
+
+class ThemeHandler(web.RequestHandler):
+    @staticmethod
+    def get_template_path():
+        return os.path.join(os.path.dirname(__file__), "templates")
+
+    def get(self):
+        self.set_header("Content-Type", "text/css")
+        self.render("theme.css", **DASHBOARD_THEME("page_theme"))
 
 
 if LooseVersion(bokeh.__version__) < LooseVersion("0.13.0"):
@@ -41,11 +59,12 @@ class BokehServer(object):
                 self.server.start()
 
                 handlers = [
+                    (self.prefix + r"/statics/css/theme.css", ThemeHandler, {}),
                     (
                         self.prefix + r"/statics/(.*)",
                         web.StaticFileHandler,
                         {"path": os.path.join(os.path.dirname(__file__), "static")},
-                    )
+                    ),
                 ]
 
                 self.server._tornado.add_handlers(r".*", handlers)

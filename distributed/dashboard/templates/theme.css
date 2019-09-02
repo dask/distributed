@@ -1,0 +1,24 @@
+html {
+  background: {{ background }};
+}
+
+.navbar ul {
+  background-color: {{ navbar['background'] }};
+}
+
+.navbar li a {
+  color: {{ navbar['text'] }};
+}
+
+.navbar li.active {
+  color: {{ navbar_active['text'] }};
+  background-color: {{ navbar_active['background'] }};
+}
+
+.navbar li:hover {
+  background-color: {{ navbar_hover['background'] }};
+}
+
+.navbar li:hover a {
+  color: {{ navbar_active['text'] }};
+}

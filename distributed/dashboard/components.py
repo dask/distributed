@@ -22,7 +22,6 @@ from bokeh.models import (
     Button,
     Select,
 )
-from bokeh.palettes import Spectral9
 from bokeh.plotting import figure
 import dask
 from tornado import gen
@@ -41,6 +40,8 @@ else:
 
 profile_interval = dask.config.get("distributed.worker.profile.interval")
 profile_interval = parse_timedelta(profile_interval, default="ms")
+
+DASHBOARD_THEME = dask.config.get("dashboard").get(dask.config.get("dashboard.theme"))
 
 
 class DashboardComponent(object):
@@ -290,7 +291,7 @@ class Processing(DashboardComponent):
             source=self.source,
             left=0,
             right="right",
-            color=Spectral9[0],
+            color=DASHBOARD_THEME.get("good"),
             top="top",
             bottom="bottom",
         )
@@ -474,7 +475,11 @@ class ProfileTimePlot(DashboardComponent):
         )
         self.ts_plot.line("time", "count", source=self.ts_source)
         self.ts_plot.circle(
-            "time", "count", source=self.ts_source, color=None, selection_color="orange"
+            "time",
+            "count",
+            source=self.ts_source,
+            color=None,
+            selection_color=DASHBOARD_THEME.get("notice"),
         )
         self.ts_plot.yaxis.visible = False
         self.ts_plot.grid.visible = False
@@ -626,7 +631,11 @@ class ProfileServer(DashboardComponent):
         )
         self.ts_plot.line("time", "count", source=self.ts_source)
         self.ts_plot.circle(
-            "time", "count", source=self.ts_source, color=None, selection_color="orange"
+            "time",
+            "count",
+            source=self.ts_source,
+            color=None,
+            selection_color=DASHBOARD_THEME.get("notice"),
         )
         self.ts_plot.yaxis.visible = False
         self.ts_plot.grid.visible = False

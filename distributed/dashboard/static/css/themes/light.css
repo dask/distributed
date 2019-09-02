@@ -1,0 +1,19 @@
+html {
+  background: #FAFAFA;
+}
+
+.navbar ul {
+  background-color: #EEE;
+}
+
+.navbar li.active {
+  background-color: rgba(234, 170, 109, 0.7);
+}
+
+.navbar li a {
+  color: black;
+}
+
+.navbar li:hover {
+  background-color: #eaaa6d;
+}

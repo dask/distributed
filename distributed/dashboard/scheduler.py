@@ -4,7 +4,6 @@ import math
 from numbers import Number
 from operator import add
 import os
-import importlib
 
 from bokeh.layouts import column, row
 from bokeh.models import (
@@ -55,7 +54,7 @@ from .core import BokehServer
 from .worker import SystemMonitor, counters_doc
 from .utils import transpose, BOKEH_VERSION, without_property_validation
 from ..metrics import time
-from ..utils import log_errors, format_time
+from ..utils import log_errors, format_time, palette
 from ..diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
 from ..diagnostics.progress import AllProgress
 from ..diagnostics.graph_layout import GraphLayout
@@ -77,15 +76,15 @@ env = Environment(
     loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), "templates"))
 )
 
+DASHBOARD_THEME = partial(
+    dask.config.get,
+    config=dask.config.get("dashboard").get(dask.config.get("dashboard.theme")),
+)
+BOKEH_THEME = Theme(json=DASHBOARD_THEME("bokeh_theme"))
+
 template_variables = {
     "pages": ["status", "workers", "tasks", "system", "profile", "graph", "info"]
 }
-
-DASHBOARD_THEME = dask.config.get("dashboard").get(dask.config.get("dashboard.theme"))
-BOKEH_THEME = Theme(json=DASHBOARD_THEME.get("bokeh_theme"))
-PALETTE = importlib.import_module(
-    "bokeh.palettes.{}".format(DASHBOARD_THEME.get("colors.task_stream_palette"))
-)
 
 nan = float("nan")
 inf = float("inf")
@@ -134,7 +133,10 @@ class Occupancy(DashboardComponent):
                     "x": [0.0, 0.1],
                     "y": [1, 2],
                     "ms": [1, 2],
-                    "color": ["red", "blue"],
+                    "color": [
+                        DASHBOARD_THEME("colors.stressed"),
+                        DASHBOARD_THEME("colors.good"),
+                    ],
                     "escaped_worker": ["a", "b"],
                 }
             )
@@ -179,11 +181,11 @@ class Occupancy(DashboardComponent):
             color = []
             for ws in workers:
                 if ws in self.scheduler.idle:
-                    color.append("red")
+                    color.append(DASHBOARD_THEME("colors.stressed"))
                 elif ws in self.scheduler.saturated:
-                    color.append("green")
+                    color.append(DASHBOARD_THEME("colors.alternative_good"))
                 else:
-                    color.append("blue")
+                    color.append(DASHBOARD_THEME("colors.good"))
 
             if total:
                 self.root.title.text = "Occupancy -- total time: %s  wall time: %s" % (
@@ -310,7 +312,10 @@ class CurrentLoad(DashboardComponent):
                 {
                     "nprocessing": [1, 2],
                     "nprocessing-half": [0.5, 1],
-                    "nprocessing-color": ["red", "blue"],
+                    "nprocessing-color": [
+                        DASHBOARD_THEME("colors.stressed"),
+                        DASHBOARD_THEME("colors.good"),
+                    ],
                     "nbytes": [1, 2],
                     "nbytes-half": [0.5, 1],
                     "nbytes_text": ["1B", "2B"],
@@ -318,7 +323,10 @@ class CurrentLoad(DashboardComponent):
                     "cpu-half": [0.5, 1],
                     "worker": ["a", "b"],
                     "y": [1, 2],
-                    "nbytes-color": ["blue", "blue"],
+                    "nbytes-color": [
+                        DASHBOARD_THEME("colors.good"),
+                        DASHBOARD_THEME("colors.good"),
+                    ],
                     "escaped_worker": ["a", "b"],
                 }
             )
@@ -374,7 +382,7 @@ class CurrentLoad(DashboardComponent):
                 y="y",
                 width="cpu",
                 height=1,
-                color="blue",
+                color=DASHBOARD_THEME("colors.good"),
             )
             rect.nonselection_glyph = None
             hundred_span = Span(
@@ -440,11 +448,11 @@ class CurrentLoad(DashboardComponent):
             processing_color = []
             for ws in workers:
                 if ws in self.scheduler.idle:
-                    processing_color.append("red")
+                    processing_color.append(DASHBOARD_THEME("colors.stressed"))
                 elif ws in self.scheduler.saturated:
-                    processing_color.append("green")
+                    processing_color.append(DASHBOARD_THEME("colors.alternative_good"))
                 else:
-                    processing_color.append("blue")
+                    processing_color.append(DASHBOARD_THEME("colors.good"))
 
             nbytes = [ws.metrics["memory"] for ws in workers]
             nbytes_text = [format_bytes(nb) for nb in nbytes]
@@ -460,11 +468,11 @@ class CurrentLoad(DashboardComponent):
                     max_limit = limit
 
                 if nb > limit:
-                    nbytes_color.append("red")
+                    nbytes_color.append(DASHBOARD_THEME("colors.stressed"))
                 elif nb > limit / 2:
-                    nbytes_color.append("orange")
+                    nbytes_color.append(DASHBOARD_THEME("colors.notice"))
                 else:
-                    nbytes_color.append("blue")
+                    nbytes_color.append(DASHBOARD_THEME("colors.good"))
 
             now = time()
             if any(nprocessing) or self.last + 1 < now:
@@ -509,8 +517,18 @@ class StealingTimeSeries(DashboardComponent):
             x_range=x_range,
             **kwargs
         )
-        fig.line(source=self.source, x="time", y="idle", color="red")
-        fig.line(source=self.source, x="time", y="saturated", color="green")
+        fig.line(
+            source=self.source,
+            x="time",
+            y="idle",
+            color=DASHBOARD_THEME("colors.stressed"),
+        )
+        fig.line(
+            source=self.source,
+            x="time",
+            y="saturated",
+            color=DASHBOARD_THEME("colors.alternative_good"),
+        )
         fig.yaxis.minor_tick_line_color = None
 
         fig.add_tools(
@@ -595,9 +613,9 @@ class StealingEvents(DashboardComponent):
             total_duration += duration
 
         try:
-            color = PALETTE[level]
+            color = palette[level]
         except (KeyError, IndexError):
-            color = "black"
+            color = DASHBOARD_THEME("colors.critical")
 
         radius = math.sqrt(min(total_duration, 10)) * 30 + 2
 

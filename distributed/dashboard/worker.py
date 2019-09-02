@@ -2,7 +2,6 @@ from functools import partial
 import logging
 import math
 import os
-import importlib
 
 from bokeh.layouts import row, column, widgetbox
 from bokeh.models import (
@@ -51,11 +50,11 @@ env = Environment(
 )
 
 
-DASHBOARD_THEME = dask.config.get("dashboard").get(dask.config.get("dashboard.theme"))
-BOKEH_THEME = Theme(json=DASHBOARD_THEME.get("bokeh_theme"))
-PALETTE = importlib.import_module(
-    "bokeh.palettes.{}".format(DASHBOARD_THEME.get("colors.task_stream_palette"))
+DASHBOARD_THEME = partial(
+    dask.config.get,
+    config=dask.config.get("dashboard").get(dask.config.get("dashboard.theme")),
 )
+BOKEH_THEME = Theme(json=DASHBOARD_THEME("bokeh_theme"))
 
 template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
 

@@ -1367,26 +1367,45 @@ def has_keyword(func, keyword):
 
 # from bokeh.palettes import viridis
 # palette = viridis(18)
-palette = [
-    "#440154",
-    "#471669",
-    "#472A79",
-    "#433C84",
-    "#3C4D8A",
-    "#355D8C",
-    "#2E6C8E",
-    "#287A8E",
-    "#23898D",
-    "#1E978A",
-    "#20A585",
-    "#2EB27C",
-    "#45BF6F",
-    "#64CB5D",
-    "#88D547",
-    "#AFDC2E",
-    "#D7E219",
-    "#FDE724",
-]
+# palette = [
+#     "#00FF00",
+#     "#471669",
+#     "#472A79",
+#     "#433C84",
+#     "#3C4D8A",
+#     "#355D8C",
+#     "#2E6C8E",
+#     "#287A8E",
+#     "#23898D",
+#     "#1E978A",
+#     "#20A585",
+#     "#2EB27C",
+#     "#45BF6F",
+#     "#64CB5D",
+#     "#88D547",
+#     "#AFDC2E",
+#     "#D7E219",
+#     "#FDE724",
+# ]
+DASHBOARD_THEME = functools.partial(
+    dask.config.get,
+    config=dask.config.get("dashboard").get(dask.config.get("dashboard.theme")),
+)
+if isinstance(DASHBOARD_THEME("colors.task_stream_palette"), list):
+    palette = DASHBOARD_THEME("colors.task_stream_palette")
+else:
+    try:
+        palette = getattr(
+            importlib.import_module("bokeh.palettes"),
+            DASHBOARD_THEME("colors.task_stream_palette"),
+        )
+    except Exception as e:
+        logger.error(
+            "Bokeh has no palette %s", DASHBOARD_THEME("colors.task_stream_palette")
+        )
+        from bokeh.palettes import Viridis8
+
+        palette = Viridis8
 
 
 @toolz.memoize

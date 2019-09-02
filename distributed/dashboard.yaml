@@ -2,10 +2,23 @@ dashboard:
   theme: light
 
   light:
-    css: path/to/my.css
+    page_theme:
+      background: "#FAFAFA"
+      navbar:
+        text: black
+        background: "#EEE"
+      navbar_active:
+        text: black
+        background: "rgba(234, 170, 109, 0.7)"
+      navbar_hover:
+        text: black
+        background: "#eaaa6d"
+
     colors:
-      task_stream_palette: Blues8
+      task_stream_palette: Viridis8
       good: blue
+      alternative_good: green
+      notice: orange
       stressed: red
       critical: black
 
@@ -14,7 +27,39 @@ dashboard:
         Plot:
           background_fill_color: null
           border_fill_color: null
-  # dark:
-  #   ...
-  # name-of-third-theme:
-  #   ..
+
+  dark:
+    page_theme:
+      background: "rgba(0,0,0,0.92)"
+      navbar:
+        text: "#FDA061"
+        background: "#000"
+      navbar_active:
+        text: "#000"
+        background: "#FDA061"
+      navbar_hover:
+        text: "#000"
+        background: "#eaaa6d"
+
+    colors:
+      task_stream_palette: Pastel2_8
+      good: lightblue
+      alternative_good: lightgreen
+      notice: lightorange
+      stressed: lightred
+      critical: white
+
+    bokeh_theme:
+      attrs:
+        Figure:
+          background_fill_color: null
+          border_fill_color: null
+          outline_line_color: null
+        Grid:
+          grid_line_dash: [6, 4]
+          grid_line_alpha: .3
+        Title:
+          text_color: "white"
+        Plot:
+          background_fill_color: null
+          border_fill_color: null
