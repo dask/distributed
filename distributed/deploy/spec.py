@@ -5,11 +5,12 @@ import logging
 import math
 import weakref
 
+import dask
 from tornado import gen
 
 from .cluster import Cluster
 from ..core import rpc, CommClosedError
-from ..utils import LoopRunner, silence_logging, ignoring, parse_bytes
+from ..utils import LoopRunner, silence_logging, ignoring, parse_bytes, parse_timedelta
 from ..scheduler import Scheduler
 from ..security import Security
 
@@ -301,12 +302,18 @@ class SpecCluster(Cluster):
 
     def _update_worker_status(self, op, msg):
         if op == "remove":
-            worker_id = self.scheduler_info["workers"][msg]["name"]
-            if worker_id in self.workers:
-                self._futures.add(
-                    asyncio.ensure_future(self.workers[worker_id].close())
-                )
-                del self.workers[worker_id]
+            name = self.scheduler_info["workers"][msg]["name"]
+
+            def f():
+                if name in self.workers and msg not in self.scheduler_info:
+                    self._futures.add(asyncio.ensure_future(self.workers[name].close()))
+                    del self.workers[name]
+
+            delay = parse_timedelta(
+                dask.config.get("distributed.deploy.lost-worker-timeout")
+            )
+
+            asyncio.get_event_loop().call_later(delay, f)
         super()._update_worker_status(op, msg)
 
     def __await__(self):
