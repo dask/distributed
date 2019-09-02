@@ -21,16 +21,55 @@ dashboard:
       notice: orange
       stressed: red
       critical: black
+      text: black
 
     bokeh_theme:
       attrs:
+        Axis:
+          major_tick_line_alpha: 0
+          major_tick_line_color: "#5B5B5B"
+          minor_tick_line_alpha: 0
+          minor_tick_line_color: "#5B5B5B"
+          axis_line_alpha: 0
+          axis_line_color: "#5B5B5B"
+          major_label_text_color: "#5B5B5B"
+          major_label_text_font: Helvetica
+          major_label_text_font_size: 1.025em
+          axis_label_standoff: 10
+          axis_label_text_color: "#5B5B5B"
+          axis_label_text_font: Helvetica
+          axis_label_text_font_size: 1.25em
+          axis_label_text_font_style: normal
+        Legend:
+          spacing: 8
+          glyph_width: 15
+          label_standoff: 8
+          label_text_color: "#5B5B5B"
+          label_text_font: Helvetica
+          label_text_font_size: 1.025em
+          border_line_alpha: 0
+          background_fill_alpha: 0.25
+        ColorBar:
+          title_text_color: "#5B5B5B"
+          title_text_font: Helvetica
+          title_text_font_size: 1.025em
+          title_text_font_style: normal
+          major_label_text_color: "#5B5B5B"
+          major_label_text_font: Helvetica
+          major_label_text_font_size: 1.025em
+          major_tick_line_alpha: 0
+          bar_line_alpha: 0
+        Title:
+          text_color: "#5B5B5B"
+          text_font: Helvetica
+          text_font_size: 1.15em
         Plot:
           background_fill_color: null
           border_fill_color: null
 
   dark:
     page_theme:
-      background: "rgba(0,0,0,0.92)"
+      background: "#141414"
       navbar:
         text: "#FDA061"
         background: "#000"
@@ -42,24 +81,65 @@ dashboard:
         background: "#eaaa6d"
 
     colors:
-      task_stream_palette: Pastel2_8
-      good: lightblue
-      alternative_good: lightgreen
-      notice: lightorange
-      stressed: lightred
-      critical: white
+      task_stream_palette: Plasma8
+      good: "#5201A3"
+      alternative_good: "#8908A5"
+      notice: "#ee6c4d"
+      stressed: "#ff0054"
+      critical: "#729ea1"
+      text: white
 
     bokeh_theme:
       attrs:
         Figure:
-          background_fill_color: null
-          border_fill_color: null
-          outline_line_color: null
+          background_fill_color: "#141414"
+          border_fill_color: "#141414"
+          outline_line_color: "#E0E0E0"
+          outline_line_alpha: 0.25
         Grid:
           grid_line_dash: [6, 4]
-          grid_line_alpha: .3
+          grid_line_color: "#E0E0E0"
+          grid_line_alpha: 0.25
+        Axis:
+          major_tick_line_alpha: 0
+          major_tick_line_color: "#E0E0E0"
+          minor_tick_line_alpha: 0
+          minor_tick_line_color: "#E0E0E0"
+          axis_line_alpha: 0
+          axis_line_color: "#E0E0E0"
+          major_label_text_color: "#E0E0E0"
+          major_label_text_font: Helvetica
+          major_label_text_font_size: 1.025em
+          axis_label_standoff: 10
+          axis_label_text_color: "#E0E0E0"
+          axis_label_text_font: Helvetica
+          axis_label_text_font_size: 1.25em
+          axis_label_text_font_style: normal
+        Legend:
+          spacing: 8
+          glyph_width: 15
+          label_standoff: 8
+          label_text_color: "#E0E0E0"
+          label_text_font: Helvetica
+          label_text_font_size: 1.025em
+          border_line_alpha: 0
+          background_fill_alpha: 0.25
+          background_fill_color: "#20262B"
+        ColorBar:
+          title_text_color: "#E0E0E0"
+          title_text_font: Helvetica
+          title_text_font_size: 1.025em
+          title_text_font_style: normal
+          major_label_text_color: "#E0E0E0"
+          major_label_text_font: Helvetica
+          major_label_text_font_size: 1.025em
+          background_fill_color: "#15191C"
+          major_tick_line_alpha: 0
+          bar_line_alpha: 0
         Title:
-          text_color: "white"
+          text_color: "#E0E0E0"
+          text_font: Helvetica
+          text_font_size: 1.15em
         Plot:
           background_fill_color: null
           border_fill_color: null

@@ -1064,6 +1064,7 @@ class TaskProgress(DashboardComponent):
             x="left",
             x_offset=5,
             text_font_size=value("10pt"),
+            text_color=DASHBOARD_THEME("colors.text"),
         )
         self.root.text(
             source=self.source,
@@ -1073,6 +1074,7 @@ class TaskProgress(DashboardComponent):
             x_offset=-5,
             text_align="right",
             text_font_size=value("10pt"),
+            text_color=DASHBOARD_THEME("colors.text"),
         )
         self.root.ygrid.visible = False
         self.root.yaxis.minor_tick_line_alpha = 0
