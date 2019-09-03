@@ -2315,8 +2315,9 @@ class Worker(ServerNode):
             try:
                 result = await func(*args, **kwargs)
                 notify_task_finished(self.plugins, self, key, result)
-            except Exception as e:
-                notify_task_failed(self.plugins, self, key, e)
+            except Exception:
+                exc_type, exc_value, exc_tb = sys.exc_info()
+                notify_task_failed(self.plugins, self, key, exc_type, exc_value, exc_tb)
                 raise
 
         elif separate_thread:
@@ -2340,8 +2341,9 @@ class Worker(ServerNode):
             try:
                 result = func(*args, **kwargs)
                 notify_task_finished(self.plugins, self, key, result)
-            except Exception as e:
-                notify_task_failed(self.plugins, self, key, e)
+            except Exception:
+                exc_type, exc_value, exc_tb = sys.exc_info()
+                notify_task_failed(self.plugins, self, key, exc_type, exc_value, exc_tb)
                 raise
 
         return {"status": "OK", "result": to_serialize(result)}
@@ -3267,12 +3269,15 @@ def apply_function(
         result = function(*args, **kwargs)
         notify_task_finished(plugins, execution_state["worker"], key, result)
 
-    except Exception as e:
-        notify_task_failed(plugins, execution_state["worker"], key, e)
+    except Exception:
+        exc_type, exc_value, exc_tb = sys.exc_info()
+        notify_task_failed(
+            plugins, execution_state["worker"], key, exc_type, exc_value, exc_tb
+        )
 
-        msg = error_message(e)
+        msg = error_message(exc_value)
         msg["op"] = "task-erred"
-        msg["actual-exception"] = e
+        msg["actual-exception"] = exc_value
 
     else:
         msg = {
@@ -3320,8 +3325,11 @@ def apply_function_actor(
     try:
         result = function(*args, **kwargs)
         notify_task_finished(plugins, execution_state["worker"], key, result)
-    except Exception as e:
-        notify_task_failed(plugins, execution_state["worker"], key, e)
+    except Exception:
+        exc_type, exc_value, exc_tb = sys.exc_info()
+        notify_task_failed(
+            plugins, execution_state["worker"], key, exc_type, exc_value, exc_tb
+        )
         raise
 
     with active_threads_lock:
@@ -3342,10 +3350,10 @@ def notify_task_finished(plugins, worker, key, result):
             plugin.task_finished(worker, key, result)
 
 
-def notify_task_failed(plugins, worker, key, error):
+def notify_task_failed(plugins, worker, key, exc_type, exc_value, exc_tb):
     for plugin in plugins.values():
         if hasattr(plugin, "task_failed"):
-            plugin.task_failed(worker, key, error)
+            plugin.task_failed(worker, key, exc_type, exc_value, exc_tb)
 
 
 def get_msg_safe_str(msg):

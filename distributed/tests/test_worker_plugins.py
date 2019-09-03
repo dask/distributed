@@ -39,11 +39,11 @@ class MyPlugin:
         if len(self.expected_results) > 0:
             assert result == self.expected_results.pop(0)
 
-    def task_failed(self, worker, key, exception):
+    def task_failed(self, worker, key, exc_type, exc_value, exc_tb):
         assert isinstance(worker, Worker)
 
         if len(self.expected_exceptions) > 0:
-            assert isinstance(exception, self.expected_exceptions.pop())
+            assert exc_type == self.expected_exceptions.pop()
 
     def expect_task_returns(self, result):
         self.expected_results.append(result)
