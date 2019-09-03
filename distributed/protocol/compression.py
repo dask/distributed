@@ -4,7 +4,7 @@ Record known compressors
 Includes utilities for determining whether or not to compress
 """
 import logging
-import os, random, importlib
+import random
 
 import dask
 from toolz import identity, partial
@@ -93,36 +93,25 @@ with ignoring(ImportError):
     }
     default_compression = "lz4"
 
+
 with ignoring(ImportError):
-    _import_policy = dask.config.get("distributed.comm.zstd.import_policy")
-    os.environ["PYTHON_ZSTANDARD_IMPORT_POLICY"] = _import_policy
+    import zstandard
 
-    import zstandard as zstd
-
-    importlib.reload(zstd)
-
-    zstd_level = dask.config.get("distributed.comm.zstd.level")
-    zstd_kwargs = dict(
-        write_checksum=dask.config.get("distributed.comm.zstd.write_checksum"),
-        write_content_size=dask.config.get("distributed.comm.zstd.write_content_size"),
-        write_dict_id=dask.config.get("distributed.comm.zstd.write_dict_id"),
+    zstd_compressor = zstandard.ZstdCompressor(
+        level=dask.config.get("distributed.comm.zstd.level"),
         threads=dask.config.get("distributed.comm.zstd.threads"),
     )
 
-    if zstd_level is not None:
-        zstd_kwargs["level"] = zstd_level
-
-    zstd_compressor = zstd.ZstdCompressor(**zstd_kwargs)
-    zstd_decompressor = zstd.ZstdDecompressor()
+    zstd_decompressor = zstandard.ZstdDecompressor()
 
     def zstd_compress(data):
-        return zstd_compressor.compress(ensure_bytes(data))
+        return zstd_compressor.compress(data)
 
     def zstd_decompress(data):
-        return zstd_decompressor.decompress(ensure_bytes(data))
+        return zstd_decompressor.decompress(data)
 
     compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
-    default_compression = "zstd"
+
 
 with ignoring(ImportError):
     import blosc

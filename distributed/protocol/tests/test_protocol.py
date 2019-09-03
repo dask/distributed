@@ -4,7 +4,7 @@ import dask
 import pytest
 
 from distributed.protocol import loads, dumps, msgpack, maybe_compress, to_serialize
-from distributed.protocol.compression import compressions, default_compression
+from distributed.protocol.compression import compressions
 from distributed.protocol.serialize import Serialize, Serialized, serialize, deserialize
 from distributed.utils import nbytes
 
@@ -57,34 +57,26 @@ def test_small_and_big():
     # assert loads([big_header, big]) == {'y': d['y']}
 
 
-def test_maybe_compress():
-    pass
+@pytest.mark.parametrize(
+    "lib,compression",
+    [(None, None), ("zlib", "zlib"), ("lz4", "lz4"), ("zstandard", "zstd")],
+)
+def test_maybe_compress(lib, compression):
+    if lib:
+        pytest.importorskip(lib)
 
     try_converters = [bytes, memoryview]
-    try_compressions = ["zlib", "lz4"]
 
-    payload = b"123"
-
-    with dask.config.set({"distributed.comm.compression": None}):
+    with dask.config.set({"distributed.comm.compression": compression}):
         for f in try_converters:
+            payload = b"123"
             assert maybe_compress(f(payload)) == (None, payload)
 
-    for compression in try_compressions:
-        try:
-            __import__(compression)
-        except ImportError:
-            continue
-
-        with dask.config.set({"distributed.comm.compression": compression}):
-            for f in try_converters:
-                payload = b"123"
-                assert maybe_compress(f(payload)) == (None, payload)
-
-                payload = b"0" * 10000
-                rc, rd = maybe_compress(f(payload))
-                # For some reason compressing memoryviews can force blosc...
-                assert rc in (compression, "blosc")
-                assert compressions[rc]["decompress"](rd) == payload
+            payload = b"0" * 10000
+            rc, rd = maybe_compress(f(payload))
+            # For some reason compressing memoryviews can force blosc...
+            assert rc in (compression, "blosc")
+            assert compressions[rc]["decompress"](rd) == payload
 
 
 def test_maybe_compress_sample():
@@ -229,7 +221,7 @@ def test_maybe_compress_memoryviews():
     try:
         import blosc  # noqa: F401
     except ImportError:
-        assert compression == default_compression
+        assert compression == "lz4"
         assert len(payload) < x.nbytes * 0.75
     else:
         assert compression == "blosc"
