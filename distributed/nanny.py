@@ -75,7 +75,7 @@ class Nanny(ServerNode):
         resources=None,
         silence_logs=None,
         death_timeout=None,
-        preload=(),
+        preload=None,
         preload_argv=[],
         security=None,
         contact_address=None,
