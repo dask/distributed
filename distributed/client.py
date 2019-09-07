@@ -2426,10 +2426,12 @@ class Client(Node):
             if isinstance(retries, Number) and retries > 0:
                 retries = {k: retries for k in dsk3}
 
+            tasks = valmap(dumps_task, dsk3)
+
             self._send_to_scheduler(
                 {
                     "op": "update-graph",
-                    "tasks": valmap(dumps_task, dsk3),
+                    "tasks": tasks,
                     "dependencies": dependencies,
                     "keys": list(flatkeys),
                     "restrictions": restrictions or {},

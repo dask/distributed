@@ -851,6 +851,7 @@ class Scheduler(ServerNode):
         dashboard_address=None,
         preload=None,
         preload_argv=(),
+        resources_auto={},
         **kwargs
     ):
         self._setup_logging(logger)
@@ -1002,6 +1003,7 @@ class Scheduler(ServerNode):
         self.total_occupancy = 0
         self.host_info = defaultdict(dict)
         self.resources = defaultdict(dict)
+        self.resources_auto = resources_auto
         self.aliases = dict()
 
         self._task_state_collections = [self.unrunnable]
@@ -1681,6 +1683,20 @@ class Scheduler(ServerNode):
                 for k in loose_restrictions:
                     ts = self.tasks[k]
                     ts.loose_restrictions = True
+
+        if self.resources_auto:
+            resources = resources or defaultdict(dict)
+
+            for resource, d in self.resources_auto.items():
+                names = d["names"]
+                for k, serialized in tasks.items():
+                    if any(
+                        name in frame
+                        for name in names
+                        for frame in serialized.frames
+                        if len(frame) < 1000
+                    ):
+                        resources[k].setdefault(resource, d["value"])
 
         if resources:
             for k, v in resources.items():

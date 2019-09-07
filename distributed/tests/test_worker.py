@@ -1570,3 +1570,19 @@ async def test_bad_startup(cleanup):
             w = await Worker(s.address, startup_information={"bad": bad_startup})
         except Exception:
             pytest.fail("Startup exception was raised")
+
+
+@pytest.mark.asyncio
+async def test_auto_resource(cleanup):
+    da = pytest.importorskip("dask.array")
+    import numpy as np
+
+    resources = {"exp": {"names": [b"exp"], "value": 1}}
+    async with Scheduler(port=0, resources_auto=resources) as s:
+        async with Worker(s.address, resources={"exp": 1}) as a:
+            async with Worker(s.address) as b:
+                async with Client(s.address, asynchronous=True) as c:
+                    x = np.exp(da.arange(15, chunks=5))
+                    x = x.persist()
+                    await x
+                    assert len({k for k in a.data if "exp" in k}) == 3
