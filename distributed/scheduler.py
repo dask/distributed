@@ -45,6 +45,7 @@ from .metrics import time
 from .node import ServerNode
 from .preloading import preload_modules
 from .proctitle import setproctitle
+from .protocol import Serialized
 from .security import Security
 from .utils import (
     All,
@@ -1003,8 +1004,11 @@ class Scheduler(ServerNode):
         self.total_occupancy = 0
         self.host_info = defaultdict(dict)
         self.resources = defaultdict(dict)
-        self.resources_auto = resources_auto
         self.aliases = dict()
+
+        if resources_auto is None:
+            resources_auto = dask.config.get("distributed.scheduler.resources.auto")
+        self.resources_auto = resources_auto
 
         self._task_state_collections = [self.unrunnable]
 
@@ -1690,13 +1694,17 @@ class Scheduler(ServerNode):
             for resource, d in self.resources_auto.items():
                 names = d["names"]
                 for k, serialized in tasks.items():
-                    if any(
-                        name in frame
-                        for name in names
-                        for frame in serialized.frames
-                        if len(frame) < 1000
-                    ):
-                        resources[k].setdefault(resource, d["value"])
+                    if type(serialized) is Serialized:
+                        if any(
+                            name in frame
+                            for name in names
+                            for frame in serialized.frames
+                            if len(frame) < 1000
+                        ):
+                            resources[k].setdefault(resource, d["value"])
+                    elif type(serialized) is dict:
+                        if any(name in serialized["function"] for name in names):
+                            resources[k].setdefault(resource, d["value"])
 
         if resources:
             for k, v in resources.items():

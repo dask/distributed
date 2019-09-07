@@ -1575,14 +1575,18 @@ async def test_bad_startup(cleanup):
 @pytest.mark.asyncio
 async def test_auto_resource(cleanup):
     da = pytest.importorskip("dask.array")
-    import numpy as np
 
-    resources = {"exp": {"names": [b"exp"], "value": 1}}
+    resources = {
+        "arange": {"names": [b"arange"], "value": 1},
+        "ones": {"names": [b"ones"], "value": 1},
+    }
     async with Scheduler(port=0, resources_auto=resources) as s:
-        async with Worker(s.address, resources={"exp": 1}) as a:
-            async with Worker(s.address) as b:
+        async with Worker(s.address, resources={"arange": 1}) as a:
+            async with Worker(s.address, resources={"ones": 1}) as b:
                 async with Client(s.address, asynchronous=True) as c:
-                    x = np.exp(da.arange(15, chunks=5))
-                    x = x.persist()
+                    x = da.arange(15, chunks=5) + 1
+                    y = da.ones(15, chunks=5)
+                    x, y = dask.persist(x, y)
                     await x
-                    assert len({k for k in a.data if "exp" in k}) == 3
+                    assert len({k for k in a.data if "add" in k}) >= 3
+                    assert len(b.data) == 3 and all("ones" in k for k in b.data)
