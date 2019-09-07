@@ -33,6 +33,7 @@ import pytest
 import six
 
 import dask
+import dask.config
 from toolz import merge, memoize, assoc
 from tornado import gen, queues
 from tornado.gen import TimeoutError
@@ -1251,14 +1252,13 @@ def new_config(new_config):
     """
     Temporarily change configuration dictionary.
     """
-    from .config import defaults
-
     config = dask.config.config
     orig_config = copy.deepcopy(config)
     try:
         config.clear()
-        config.update(copy.deepcopy(defaults))
-        dask.config.update(config, new_config)
+        for default in dask.config.defaults:
+            dask.config.update(config, default, priority="old")
+        dask.config.update(config, new_config, priority="new")
         initialize_logging(config)
         yield
     finally:
