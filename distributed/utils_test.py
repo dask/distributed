@@ -45,6 +45,7 @@ from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .deploy import SpecCluster
 from .metrics import time
+from .platform import PLATFORM_MEMORY_LIMIT
 from .process import _cleanup_dangling
 from .proctitle import enable_proctitle_on_children
 from .security import Security
@@ -61,7 +62,7 @@ from .utils import (
     thread_state,
     _offload_executor,
 )
-from .worker import Worker, TOTAL_MEMORY
+from .worker import Worker
 from .nanny import Nanny
 
 try:
@@ -636,7 +637,11 @@ def cluster(
             q = mp_context.Queue()
             fn = "_test_worker-%s" % uuid.uuid4()
             kwargs = merge(
-                {"nthreads": 1, "local_directory": fn, "memory_limit": TOTAL_MEMORY},
+                {
+                    "nthreads": 1,
+                    "local_directory": fn,
+                    "memory_limit": PLATFORM_MEMORY_LIMIT,
+                },
                 worker_kwargs,
             )
             proc = mp_context.Process(
@@ -860,7 +865,7 @@ def gen_cluster(
         nthreads = ncores
 
     worker_kwargs = merge(
-        {"memory_limit": TOTAL_MEMORY, "death_timeout": 5}, worker_kwargs
+        {"memory_limit": PLATFORM_MEMORY_LIMIT, "death_timeout": 5}, worker_kwargs
     )
 
     def _(func):
