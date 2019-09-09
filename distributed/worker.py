@@ -19,7 +19,7 @@ import psutil
 import dask
 from dask.core import istask
 from dask.compatibility import apply
-from dask.utils import format_bytes
+from dask.utils import format_bytes, funcname
 
 try:
     from cytoolz import pluck, partial, merge, first
@@ -45,7 +45,6 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
     get_ip,
-    funcname,
     typename,
     has_arg,
     _maybe_complex,
