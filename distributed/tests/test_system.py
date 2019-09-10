@@ -3,7 +3,7 @@ import os
 import psutil
 import pytest
 
-from distributed.platform import cpu_count, memory_limit
+from distributed.system import cpu_count, memory_limit
 
 
 def test_cpu_count():

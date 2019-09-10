@@ -10,9 +10,9 @@ import dask
 from dask.utils import ignoring
 from distributed import Nanny, Worker
 from distributed.security import Security
+from distributed.system import CPU_COUNT
 from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.comm import get_address_host_port
-from distributed.platform import PLATFORM_CPU_COUNT
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
     enable_proctitle_on_children,
@@ -316,7 +316,7 @@ def main(
         port = worker_port
 
     if not nthreads:
-        nthreads = PLATFORM_CPU_COUNT // nprocs
+        nthreads = CPU_COUNT // nprocs
 
     if pid_file:
         with open(pid_file, "w") as f:

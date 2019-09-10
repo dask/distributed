@@ -6,7 +6,7 @@ import pytest
 from distributed.protocol import loads, dumps, msgpack, maybe_compress, to_serialize
 from distributed.protocol.compression import compressions
 from distributed.protocol.serialize import Serialize, Serialized, serialize, deserialize
-from distributed.platform import PLATFORM_MEMORY_LIMIT
+from distributed.system import MEMORY_LIMIT
 from distributed.utils import nbytes
 
 
@@ -104,7 +104,7 @@ def test_large_bytes():
 def test_large_messages():
     np = pytest.importorskip("numpy")
     pytest.importorskip("lz4")
-    if PLATFORM_MEMORY_LIMIT < 8e9:
+    if MEMORY_LIMIT < 8e9:
         pytest.skip("insufficient memory")
 
     x = np.random.randint(0, 255, size=200000000, dtype="u1")
@@ -123,7 +123,7 @@ def test_large_messages():
 
 
 def test_large_messages_map():
-    if PLATFORM_MEMORY_LIMIT < 8e9:
+    if MEMORY_LIMIT < 8e9:
         pytest.skip("insufficient memory")
 
     x = {i: "mystring_%d" % i for i in range(100000)}

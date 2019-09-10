@@ -21,8 +21,8 @@ from .metrics import time
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
-from .platform import PLATFORM_CPU_COUNT
 from .security import Security
+from .system import CPU_COUNT
 from .utils import (
     get_ip,
     mp_context,
@@ -110,7 +110,7 @@ class Nanny(ServerNode):
             nthreads = ncores
 
         self._given_worker_port = worker_port
-        self.nthreads = nthreads or PLATFORM_CPU_COUNT
+        self.nthreads = nthreads or CPU_COUNT
         self.reconnect = reconnect
         self.validate = validate
         self.resources = resources

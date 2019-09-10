@@ -3,7 +3,7 @@ import sys
 
 import psutil
 
-__all__ = ("memory_limit", "cpu_count", "PLATFORM_MEMORY_LIMIT", "PLATFORM_CPU_COUNT")
+__all__ = ("memory_limit", "cpu_count", "MEMORY_LIMIT", "CPU_COUNT")
 
 
 def memory_limit():
@@ -75,5 +75,5 @@ def cpu_count():
     return count
 
 
-PLATFORM_MEMORY_LIMIT = memory_limit()
-PLATFORM_CPU_COUNT = cpu_count()
+MEMORY_LIMIT = memory_limit()
+CPU_COUNT = cpu_count()

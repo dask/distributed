@@ -26,7 +26,7 @@ except ImportError:
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from . import profile, comm
+from . import profile, comm, system
 from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
@@ -34,7 +34,6 @@ from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to
 from .diskutils import WorkSpace
 from .metrics import time
 from .node import ServerNode
-from .platform import PLATFORM_MEMORY_LIMIT, PLATFORM_CPU_COUNT
 from .preloading import preload_modules
 from .proctitle import setproctitle
 from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytelist
@@ -237,7 +236,7 @@ class Worker(ServerNode):
     memory_limit: int, float, string
         Number of bytes of memory that this worker should use.
         Set to zero for no limit.  Set to 'auto' to calculate
-        as PLATFORM_MEMORY_LIMIT * min(1, nthreads / total_cores)
+        as system.MEMORY_LIMIT * min(1, nthreads / total_cores)
         Use strings or numbers like 5GB or 5e9
     memory_target_fraction: float
         Fraction of memory to try to stay beneath
@@ -453,7 +452,7 @@ class Worker(ServerNode):
             warnings.warn("the ncores= parameter has moved to nthreads=")
             nthreads = ncores
 
-        self.nthreads = nthreads or PLATFORM_CPU_COUNT
+        self.nthreads = nthreads or system.CPU_COUNT
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
         self.death_timeout = parse_timedelta(death_timeout)
@@ -3021,23 +3020,23 @@ class Reschedule(Exception):
     pass
 
 
-def parse_memory_limit(memory_limit, nthreads, total_cores=PLATFORM_CPU_COUNT):
+def parse_memory_limit(memory_limit, nthreads, total_cores=system.CPU_COUNT):
     if memory_limit is None:
         return None
 
     if memory_limit == "auto":
-        memory_limit = int(PLATFORM_MEMORY_LIMIT * min(1, nthreads / total_cores))
+        memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
     with ignoring(ValueError, TypeError):
         memory_limit = float(memory_limit)
         if isinstance(memory_limit, float) and memory_limit <= 1:
-            memory_limit = int(memory_limit * PLATFORM_MEMORY_LIMIT)
+            memory_limit = int(memory_limit * system.MEMORY_LIMIT)
 
     if isinstance(memory_limit, str):
         memory_limit = parse_bytes(memory_limit)
     else:
         memory_limit = int(memory_limit)
 
-    return min(memory_limit, PLATFORM_MEMORY_LIMIT)
+    return min(memory_limit, system.MEMORY_LIMIT)
 
 
 async def get_data_from_worker(

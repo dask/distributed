@@ -29,12 +29,12 @@ from distributed import (
     get_worker,
     Reschedule,
     wait,
+    system,
 )
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
-from distributed.platform import PLATFORM_CPU_COUNT
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
 from distributed.utils import tmpfile
 from distributed.utils_test import (  # noqa: F401
@@ -62,7 +62,7 @@ from distributed.utils_test import (  # noqa: F401
 def test_worker_nthreads():
     w = Worker("127.0.0.1", 8019)
     try:
-        assert w.executor._max_workers == PLATFORM_CPU_COUNT
+        assert w.executor._max_workers == system.CPU_COUNT
     finally:
         shutil.rmtree(w.local_directory)
 
@@ -500,7 +500,7 @@ def test_memory_limit_auto():
     assert isinstance(a.memory_limit, Number)
     assert isinstance(b.memory_limit, Number)
 
-    if PLATFORM_CPU_COUNT > 1:
+    if system.CPU_COUNT > 1:
         assert a.memory_limit < b.memory_limit
 
     assert c.memory_limit == d.memory_limit
@@ -1442,7 +1442,7 @@ def test_resource_limit(monkeypatch):
     new_limit = 1024 * 1024 * 200
     import distributed.worker
 
-    monkeypatch.setattr(distributed.worker, "PLATFORM_MEMORY_LIMIT", new_limit)
+    monkeypatch.setattr(distributed.system, "MEMORY_LIMIT", new_limit)
     assert parse_memory_limit("250MiB", 1, total_cores=1) == new_limit
 
 

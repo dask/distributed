@@ -4,7 +4,6 @@ from zlib import crc32
 import numpy as np
 import pytest
 
-from distributed.platform import PLATFORM_MEMORY_LIMIT
 from distributed.protocol import (
     serialize,
     deserialize,
@@ -17,6 +16,7 @@ from distributed.protocol import (
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
 from distributed.protocol.numpy import itemsize
 from distributed.protocol.compression import maybe_compress
+from distributed.system import MEMORY_LIMIT
 from distributed.utils import tmpfile, nbytes
 from distributed.utils_test import gen_cluster
 
@@ -152,7 +152,7 @@ def test_memmap():
 
 @pytest.mark.slow
 def test_dumps_serialize_numpy_large():
-    if PLATFORM_MEMORY_LIMIT < 2e9:
+    if MEMORY_LIMIT < 2e9:
         pytest.skip("insufficient memory")
     x = np.random.random(size=int(BIG_BYTES_SHARD_SIZE * 2 // 8)).view("u1")
     assert x.nbytes == BIG_BYTES_SHARD_SIZE * 2

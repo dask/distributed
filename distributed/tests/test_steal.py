@@ -12,8 +12,8 @@ from tornado import gen
 from distributed import Nanny, Worker, wait, worker_client
 from distributed.config import config
 from distributed.metrics import time
-from distributed.platform import PLATFORM_MEMORY_LIMIT
 from distributed.scheduler import key_split
+from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (
     slowinc,
     slowadd,
@@ -170,9 +170,7 @@ def test_new_worker_steals(c, s, a):
     while len(a.task_state) < 10:
         yield gen.sleep(0.01)
 
-    b = yield Worker(
-        s.address, loop=s.loop, nthreads=1, memory_limit=PLATFORM_MEMORY_LIMIT
-    )
+    b = yield Worker(s.address, loop=s.loop, nthreads=1, memory_limit=MEMORY_LIMIT)
 
     result = yield total
     assert result == sum(map(inc, range(100)))
@@ -337,7 +335,7 @@ def test_dont_steal_few_saturated_tasks_many_workers(c, s, a, *rest):
 @gen_cluster(
     client=True,
     nthreads=[("127.0.0.1", 1)] * 10,
-    worker_kwargs={"memory_limit": PLATFORM_MEMORY_LIMIT},
+    worker_kwargs={"memory_limit": MEMORY_LIMIT},
 )
 def test_steal_when_more_tasks(c, s, a, *rest):
     s.extensions["stealing"]._pc.callback_time = 20

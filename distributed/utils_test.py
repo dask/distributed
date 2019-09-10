@@ -38,6 +38,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
+from . import system
 from .client import default_client, _global_clients, Client
 from .compatibility import WINDOWS
 from .comm import Comm
@@ -45,7 +46,6 @@ from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .deploy import SpecCluster
 from .metrics import time
-from .platform import PLATFORM_MEMORY_LIMIT
 from .process import _cleanup_dangling
 from .proctitle import enable_proctitle_on_children
 from .security import Security
@@ -640,7 +640,7 @@ def cluster(
                 {
                     "nthreads": 1,
                     "local_directory": fn,
-                    "memory_limit": PLATFORM_MEMORY_LIMIT,
+                    "memory_limit": system.MEMORY_LIMIT,
                 },
                 worker_kwargs,
             )
@@ -865,7 +865,7 @@ def gen_cluster(
         nthreads = ncores
 
     worker_kwargs = merge(
-        {"memory_limit": PLATFORM_MEMORY_LIMIT, "death_timeout": 5}, worker_kwargs
+        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 5}, worker_kwargs
     )
 
     def _(func):

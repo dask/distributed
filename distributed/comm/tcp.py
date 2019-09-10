@@ -18,7 +18,7 @@ from tornado.iostream import StreamClosedError, IOStream
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
-from ..platform import PLATFORM_MEMORY_LIMIT
+from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import (
     ensure_bytes,
@@ -39,7 +39,7 @@ from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concre
 logger = logging.getLogger(__name__)
 
 
-MAX_BUFFER_SIZE = PLATFORM_MEMORY_LIMIT / 2
+MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
 def set_tcp_timeout(stream):
