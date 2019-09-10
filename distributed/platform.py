@@ -46,9 +46,18 @@ def cpu_count():
     Takes the minimum value from the following locations:
 
     - Total system cpus available on the host.
+    - CPU Affinity (if set)
     - Cgroups limit (if set)
     """
     count = os.cpu_count()
+
+    # Check CPU affinity if available
+    try:
+        affinity_count = len(psutil.Process().cpu_affinity())
+        if affinity_count > 0:
+            count = min(count, affinity_count)
+    except Exception:
+        pass
 
     # Check cgroups if available
     if sys.platform == "linux":
