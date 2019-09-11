@@ -852,7 +852,7 @@ class Scheduler(ServerNode):
         dashboard_address=None,
         preload=None,
         preload_argv=(),
-        resources_auto={},
+        resources_auto=None,
         **kwargs
     ):
         self._setup_logging(logger)
