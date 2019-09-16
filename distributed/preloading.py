@@ -78,12 +78,6 @@ def _import_module(name, file_dir=None):
     Nest dict of names to extracted module interface components if present
     in imported module.
     """
-    if "\n" in name:  # not a name, actually the text of the script
-        with tmpfile(extension=".py") as fn:
-            with open(fn, mode="w") as f:
-                f.write(name)
-            return _import_module(fn, file_dir=file_dir)
-
     if name.endswith(".py"):
         # name is a file path
         if file_dir is not None:
@@ -97,11 +91,18 @@ def _import_module(name, file_dir=None):
         else:
             module = import_file(name)[0]
 
-    else:
+    elif " " not in name:
         # name is a module name
         if name not in sys.modules:
             import_module(name)
         module = sys.modules[name]
+
+    else:
+        # not a name, actually the text of the script
+        with tmpfile(extension=".py") as fn:
+            with open(fn, mode="w") as f:
+                f.write(name)
+            return _import_module(fn, file_dir=file_dir)
 
     logger.info("Import preload module: %s", name)
     return {
