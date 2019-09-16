@@ -24,6 +24,13 @@ def test_cpu_count_cgroups(dirname, monkeypatch):
 
     monkeypatch.setattr(os, "cpu_count", mycpu_count)
 
+    class MyProcess(object):
+        def cpu_affinity(self):
+            # No affinity set
+            return []
+
+    monkeypatch.setattr(psutil, "Process", MyProcess)
+
     if dirname:
         paths = {
             "/sys/fs/cgroup/%s/cpu.cfs_quota_us" % dirname: io.StringIO("2005"),
