@@ -385,10 +385,9 @@ class SpecCluster(Cluster):
             with ignoring(KeyError):
                 return parse_bytes(self.new_spec["options"][name])
 
-        if not self.new_spec:
-            raise ValueError(
-                "to use scale(memory=...) your worker definition must include a memory_limit definition"
-            )
+        raise ValueError(
+            "to use scale(memory=...) your worker definition must include a memory_limit definition"
+        )
 
     def scale(self, n=0, memory=None, cores=None):
         if memory is not None:
