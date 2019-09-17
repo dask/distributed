@@ -32,11 +32,6 @@ async def get_comm_pair(
     async def handle_comm(comm):
         await q.put(comm)
 
-    # Workaround for hanging test in
-    # pytest distributed/comm/tests/test_ucx.py::test_comm_objs -vs --count=2
-    # on the second time through.
-    ucp._libs.ucp_py.fin()
-
     listener = listen(listen_addr, handle_comm, connection_args=listen_args, **kwargs)
     with listener:
         comm = await connect(
@@ -93,6 +88,7 @@ def test_ucx_specific():
             msg = await comm.read()
             msg["op"] = "pong"
             await comm.write(msg)
+            await comm.read()
             assert comm.closed() is False
             await comm.close()
             assert comm.closed
@@ -118,11 +114,9 @@ def test_ucx_specific():
                 await asyncio.sleep(delay)
             msg = await comm.read()
             assert msg == {"op": "pong", "data": key}
+            await comm.write({"op": "client closed"})
             l.append(key)
             return comm
-            assert comm.closed() is False
-            await comm.close()
-            assert comm.closed
 
         comm = await client_communicate(key=1234, delay=0.5)
 
@@ -264,42 +258,35 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
-@pytest.mark.skip(reason="hangs")
-@pytest.mark.parametrize("processes", [True, False])
-def test_ucx_localcluster(loop, processes):
-    if processes:
-        kwargs = {"env": {"UCX_MEMTYPE_CACHE": "n"}}
-    else:
-        kwargs = {}
-
+def test_ucx_localcluster(loop):
     ucx_addr = ucp.get_address()
     with LocalCluster(
         protocol="ucx",
-        interface="ib0",
+        host=HOST,
         dashboard_address=None,
         n_workers=2,
         threads_per_worker=1,
-        processes=processes,
+        processes=False,
         loop=loop,
-        **kwargs
     ) as cluster:
         with Client(cluster) as client:
             x = client.submit(inc, 1)
             x.result()
             assert x.key in cluster.scheduler.tasks
-            if not processes:
-                assert any(w.data == {x.key: 2} for w in cluster.workers.values())
+            assert any(w.data == {x.key: 2} for w in cluster.workers.values())
             assert len(cluster.scheduler.workers) == 2
 
 
+@pytest.mark.skip(reason="TCP not supported")
 def test_tcp_localcluster(loop):
     ucx_addr = "127.0.0.1"
     port = 13337
     env = {"UCX_MEMTYPE_CACHE": "n"}
     with LocalCluster(
-        2,
+        n_workers=2,
+        protocol="ucx://",
+        host=HOST,
         scheduler_port=port,
-        ip=ucx_addr,
         processes=True,
         threads_per_worker=1,
         dashboard_address=None,
@@ -332,7 +319,7 @@ async def test_stress():
     chunksize = "10 MB"
 
     async with LocalCluster(
-        protocol="ucx", interface="ib0", asynchronous=True
+        protocol="ucx://", host=HOST, dashboard_address=None, asynchronous=True
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             rs = da.random.RandomState()
