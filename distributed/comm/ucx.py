@@ -182,7 +182,7 @@ class UCX(Comm):
     def abort(self):
         if self._ep is not None:
             logger.debug("Destroyed UCX endpoint")
-            IOLoop.current().spawn_callback(self._ep.signal_shutdown)
+            IOLoop.current().add_callback(self._ep.signal_shutdown)
             self._ep = None
 
     @property
