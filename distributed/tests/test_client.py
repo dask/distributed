@@ -91,6 +91,7 @@ from distributed.utils_test import (
 from distributed.utils_test import (  # noqa: F401
     client as c,
     client_secondary as c2,
+    async_client as ac,
     cluster_fixture,
     loop,
     loop_in_thread,
@@ -3722,6 +3723,11 @@ def test_get_versions(c):
 
     v = c.get_versions(packages=["requests"])
     assert dict(v["client"]["packages"]["optional"])["requests"] == requests.__version__
+
+
+@pytest.mark.asyncio
+async def test_async_get_versions(ac):
+    await ac.get_versions(check=True)
 
 
 def test_threaded_get_within_distributed(c):
