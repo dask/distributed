@@ -70,15 +70,15 @@ class Worker(Process):
         self,
         scheduler: str,
         address: str,
-        worker_module: str,
         connect_kwargs: dict,
         kwargs: dict,
+        worker_module="distributed.cli.dask_worker",
         loop=None,
         name=None,
     ):
         self.address = address
         self.scheduler = scheduler
-        self.worker_module = worker_module or "distributed.cli.dask_worker"
+        self.worker_module = worker_module
         self.connect_kwargs = connect_kwargs
         self.kwargs = kwargs
         self.name = name
@@ -166,7 +166,7 @@ def SSHCluster(
     connect_kwargs={},
     worker_kwargs={},
     scheduler_kwargs={},
-    worker_module=None,
+    worker_module="distributed.cli.dask_worker",
     **kwargs
 ):
     """ Deploy a Dask cluster using SSH
@@ -226,9 +226,9 @@ def SSHCluster(
             "cls": Worker,
             "options": {
                 "address": host,
-                "worker_module": worker_module,
                 "connect_kwargs": connect_kwargs,
                 "kwargs": worker_kwargs,
+                "worker_module": worker_module,
             },
         }
         for i, host in enumerate(hosts[1:])
