@@ -171,6 +171,7 @@ def test_ucx_deserialize():
         lambda cudf: cudf.DataFrame({"a": [1.0]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1]}).head(0),
         lambda cudf: cudf.DataFrame({"a": [1, 2, None], "b": [1.0, 2.0, None]}),
+        lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
     ],
 )
 async def test_ping_pong_cudf(g):
