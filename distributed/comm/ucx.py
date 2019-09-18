@@ -99,84 +99,82 @@ class UCX(Comm):
         serializers=("cuda", "dask", "pickle", "error"),
         on_error: str = "message",
     ):
-        if self.closed():
-            raise CommClosedError
+        with log_errors():
+            if self.closed():
+                raise CommClosedError
 
-        if serializers is None:
-            serializers = ("cuda", "dask", "pickle", "error")
-        # msg can also be a list of dicts when sending batched messages
-        frames = await to_frames(msg, serializers=serializers, on_error=on_error)
+            if serializers is None:
+                serializers = ("cuda", "dask", "pickle", "error")
+            # msg can also be a list of dicts when sending batched messages
+            frames = await to_frames(msg, serializers=serializers, on_error=on_error)
 
-        # Send meta data
-        await self.ep.send(np.array([len(frames)], dtype=np.uint64))
-        await self.ep.send(
-            np.array(
-                [hasattr(f, "__cuda_array_interface__") for f in frames], dtype=np.bool
+            # Send meta data
+            await self.ep.send(np.array([len(frames)], dtype=np.uint64))
+            await self.ep.send(
+                np.array(
+                    [hasattr(f, "__cuda_array_interface__") for f in frames],
+                    dtype=np.bool,
+                )
             )
-        )
-        await self.ep.send(np.array([nbytes(f) for f in frames], dtype=np.uint64))
-        # Send frames
-        for frame in frames:
-            if nbytes(frame) > 0:
-                if hasattr(frame, "__array_interface__") or hasattr(
-                    frame, "__cuda_array_interface__"
-                ):
-                    await self.ep.send(frame)
-                else:
-                    await self.ep.send(np.frombuffer(frame, dtype=np.uint8))
-        return sum(map(nbytes, frames))
+            await self.ep.send(np.array([nbytes(f) for f in frames], dtype=np.uint64))
+            # Send frames
+            for frame in frames:
+                if nbytes(frame) > 0:
+                    if hasattr(frame, "__array_interface__") or hasattr(
+                        frame, "__cuda_array_interface__"
+                    ):
+                        await self.ep.send(frame)
+                    else:
+                        await self.ep.send(np.frombuffer(frame, dtype=np.uint8))
+            return sum(map(nbytes, frames))
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
-        if self.closed():
-            raise CommClosedError
+        with log_errors():
+            if self.closed():
+                raise CommClosedError
 
-        if deserializers is None:
-            deserializers = ("cuda", "dask", "pickle", "error")
+            if deserializers is None:
+                deserializers = ("cuda", "dask", "pickle", "error")
 
-        try:
-            # Recv meta data
-            nframes = np.empty(1, dtype=np.uint64)
-            await self.ep.recv(nframes)
-            is_cudas = np.empty(nframes[0], dtype=np.bool)
-            await self.ep.recv(is_cudas)
-            sizes = np.empty(nframes[0], dtype=np.uint64)
-            await self.ep.recv(sizes)
-        except (ucp.exceptions.UCXCanceled, ucp.exceptions.UCXCloseError):
-            if self._ep is not None and not self._ep.closed():
-                await self._ep.shutdown()
-                self._ep.close()
-            self._ep = None
-            raise CommClosedError()
-        else:
-            # Recv frames
-            frames = []
-            for is_cuda, size in zip(is_cudas.tolist(), sizes.tolist()):
-                if size > 0:
-                    if is_cuda:
-                        frame = numba.cuda.device_array((size,), dtype=np.uint8)
+            try:
+                # Recv meta data
+                nframes = np.empty(1, dtype=np.uint64)
+                await self.ep.recv(nframes)
+                is_cudas = np.empty(nframes[0], dtype=np.bool)
+                await self.ep.recv(is_cudas)
+                sizes = np.empty(nframes[0], dtype=np.uint64)
+                await self.ep.recv(sizes)
+            except (ucp.exceptions.UCXCanceled, ucp.exceptions.UCXCloseError):
+                if self._ep is not None and not self._ep.closed():
+                    await self._ep.shutdown()
+                    self._ep.close()
+                self._ep = None
+                raise CommClosedError()
+            else:
+                # Recv frames
+                frames = []
+                for is_cuda, size in zip(is_cudas.tolist(), sizes.tolist()):
+                    if size > 0:
+                        if is_cuda:
+                            frame = numba.cuda.device_array((size,), dtype=np.uint8)
+                        else:
+                            frame = np.empty(size, dtype=np.uint8)
+                        await self.ep.recv(frame)
+                        if is_cuda:
+                            frames.append(frame)
+                        else:
+                            frames.append(frame.tobytes())
                     else:
-                        frame = np.empty(size, dtype=np.uint8)
-                    await self.ep.recv(frame)
-                    if is_cuda:
-                        frames.append(frame)
-                    else:
-                        frames.append(frame.tobytes())
-                else:
-                    if is_cuda:
-                        frames.append(numba.cuda.device_array((0,), dtype=np.uint8))
-                    else:
-                        frames.append(b"")
-            msg = await from_frames(
-                frames, deserialize=self.deserialize, deserializers=deserializers
-            )
-            return msg
+                        if is_cuda:
+                            frames.append(numba.cuda.device_array((0,), dtype=np.uint8))
+                        else:
+                            frames.append(b"")
+                msg = await from_frames(
+                    frames, deserialize=self.deserialize, deserializers=deserializers
+                )
+                return msg
 
     async def close(self):
-        t = (
-            "ep: %s, closed: %s" % (hex(self._ep.uid), self._ep.closed())
-            if self._ep
-            else "N/A"
-        )
         if self._ep is not None and not self._ep.closed():
             await self._ep.signal_shutdown()
             self._ep = None
