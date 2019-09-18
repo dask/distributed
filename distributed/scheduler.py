@@ -959,6 +959,7 @@ class Scheduler(ServerNode):
         self.unrunnable = set()
 
         self.n_tasks = 0
+        self.task_counts = {state: 0 for state in ALL_TASK_STATES}
         self.task_metadata = dict()
         self.datasets = dict()
 
@@ -1159,9 +1160,11 @@ class Scheduler(ServerNode):
             "id": str(self.id),
             "address": self.address,
             "services": {key: v.port for (key, v) in self.services.items()},
+            "task_counts": self.task_counts,
             "workers": {
                 worker.address: worker.identity() for worker in self.workers.values()
             },
+            "time": time(),
         }
         return d
 
@@ -4315,6 +4318,16 @@ class Scheduler(ServerNode):
                     ts.state,
                     dict(recommendations),
                 )
+            if finish2 == "forgotten":
+                # Not keeping track of forgotten tasks
+                self.task_counts[start] -= 1
+            elif start == "released" and finish2 == "waiting":
+                # Newly added tasks which are waiting to be processed
+                self.task_counts[finish2] += 1
+            else:
+                self.task_counts[start] -= 1
+                self.task_counts[finish2] += 1
+
             if self.plugins:
                 # Temporarily put back forgotten key for plugin to retrieve it
                 if ts.state == "forgotten":

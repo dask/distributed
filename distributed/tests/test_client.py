@@ -53,7 +53,7 @@ from distributed.client import (
 from distributed.compatibility import WINDOWS
 
 from distributed.metrics import time
-from distributed.scheduler import Scheduler, KilledWorker
+from distributed.scheduler import Scheduler, KilledWorker, ALL_TASK_STATES
 from distributed.sizeof import sizeof
 from distributed.utils import (
     ignoring,
@@ -3690,6 +3690,16 @@ def test_scheduler_info(c):
     info = c.scheduler_info()
     assert isinstance(info, dict)
     assert len(info["workers"]) == 2
+
+
+def test_scheduler_info_task_counts(c):
+    info = c.scheduler_info()
+    assert info["task_counts"].keys() == ALL_TASK_STATES
+    assert all(i == 0 for i in info["task_counts"].values())
+    futures = c.map(inc, range(7))
+    wait(futures)
+    info = c.scheduler_info()
+    assert info["task_counts"]["memory"] == 7
 
 
 def test_write_scheduler_file(c):
