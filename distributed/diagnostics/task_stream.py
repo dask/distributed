@@ -4,7 +4,7 @@ import logging
 import dask
 from .progress_stream import color_of
 from .plugin import SchedulerPlugin
-from ..utils import key_split, format_time, parse_timedelta
+from ..utils import key_split, format_time, parse_timedelta, format_bytes_to_string
 from ..metrics import time
 
 
@@ -126,9 +126,18 @@ def rectangles(msgs, workers=None, start_boundary=0):
             if type(color) is not str:
                 color = color(msg)
 
+            if action == "transfer":
+                data = msg["nbytes"]
+                formatted_duration = (
+                    f"{format_time(stop - start)} {format_bytes_to_string(data)}"
+                )
+
+            else:
+                formatted_duration = format_time(stop - start)
+
             L_start.append((start + stop) / 2 * 1000)
             L_duration.append(1000 * (stop - start))
-            L_duration_text.append(format_time(stop - start))
+            L_duration_text.append(formatted_duration)
             L_key.append(key)
             L_name.append(prefix[action] + name)
             L_color.append(color)

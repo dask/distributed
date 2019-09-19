@@ -39,6 +39,7 @@ from distributed.utils import (
     thread_state,
     LoopRunner,
     parse_bytes,
+    format_bytes_to_string,
     parse_timedelta,
     warn_on_duration,
     format_dashboard_link,
@@ -505,6 +506,15 @@ def test_parse_bytes():
     assert parse_bytes("1e6") == 1000000
     assert parse_bytes("1e6 kB") == 1000000000
     assert parse_bytes("MB") == 1000000
+
+
+def test_format_bytes_to_string():
+    assert "100 B" == format_bytes_to_string(100)
+    assert "100.00 MBs" == format_bytes_to_string(100000000)
+    assert "5.00 KBs" == format_bytes_to_string(5000)
+    assert "5.40 KBs" == format_bytes_to_string(5400)
+    assert "27.30 GBs" == format_bytes_to_string(2.73e10)
+    assert "7.31 GBs" == format_bytes_to_string(7.312324234e9)
 
 
 def test_parse_timedelta():
