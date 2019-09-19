@@ -348,9 +348,7 @@ class WorkStealing(SchedulerPlugin):
                             continue
                         i += 1
                         if _has_restrictions(ts):
-                            thieves = [
-                                ws for ws in idle if _can_steal(ws, ts, sat)
-                            ]
+                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
                         else:
                             thieves = idle
                         if not thieves:
@@ -386,9 +384,7 @@ class WorkStealing(SchedulerPlugin):
 
                         i += 1
                         if _has_restrictions(ts):
-                            thieves = [
-                                ws for ws in idle if _can_steal(ws, ts, sat)
-                            ]
+                            thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
                         else:
                             thieves = idle
                         if not thieves:

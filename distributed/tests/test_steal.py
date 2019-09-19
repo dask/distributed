@@ -223,7 +223,9 @@ def test_dont_steal_worker_restrictions(c, s, a, b):
     assert len(b.task_state) == 0
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2), ("127.0.0.1", 2)])
+@gen_cluster(
+    client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.1", 2), ("127.0.0.1", 2)]
+)
 def test_steal_worker_restrictions(c, s, wa, wb, wc):
     future = c.submit(slowinc, 1, delay=0.1, workers={wa.address, wb.address})
     yield future
@@ -316,7 +318,9 @@ def test_dont_steal_resource_restrictions(c, s, a, b):
     assert len(b.task_state) == 0
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}})], timeout=3)
+@gen_cluster(
+    client=True, nthreads=[("127.0.0.1", 1, {"resources": {"A": 2}})], timeout=3
+)
 def test_steal_resource_restrictions(c, s, a):
     future = c.submit(slowinc, 1, delay=0.10, workers=a.address)
     yield future
