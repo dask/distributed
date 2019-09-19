@@ -259,22 +259,30 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
-def test_ucx_localcluster(loop):
+@pytest.mark.parametrize("processes", [True, False])
+def test_ucx_localcluster(loop, processes):
+    if processes:
+        kwargs = {"env": {"UCX_MEMTYPE_CACHE": "n"}}
+    else:
+        kwargs = {}
+
     ucx_addr = ucp.get_address()
     with LocalCluster(
         protocol="ucx",
-        host=HOST,
+        interface="ib0",
         dashboard_address=None,
         n_workers=2,
         threads_per_worker=1,
-        processes=False,
+        processes=processes,
         loop=loop,
+        **kwargs
     ) as cluster:
         with Client(cluster) as client:
             x = client.submit(inc, 1)
             x.result()
             assert x.key in cluster.scheduler.tasks
-            assert any(w.data == {x.key: 2} for w in cluster.workers.values())
+            if not processes:
+                assert any(w.data == {x.key: 2} for w in cluster.workers.values())
             assert len(cluster.scheduler.workers) == 2
 
 
