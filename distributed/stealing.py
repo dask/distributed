@@ -453,16 +453,12 @@ def _can_steal(thief, ts, victim):
     elif ts.worker_restrictions and thief.address not in ts.worker_restrictions:
         return False
 
-    return _has_resources(thief, victim.resources)
-
-
-def _has_resources(ws, required_resources):
-    if required_resources is None:
+    if victim.resources is None:
         return True
 
-    for resource, value in required_resources.items():
+    for resource, value in victim.resources.items():
         try:
-            supplied = ws.resources[resource]
+            supplied = thief.resources[resource]
         except KeyError:
             return False
         else:
