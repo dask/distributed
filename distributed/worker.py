@@ -1163,10 +1163,29 @@ class Worker(ServerNode):
         ):
             max_connections = max_connections * 2
 
+        proc = self.monitor.proc
+        memory = proc.memory_info().rss
+        frac = memory / self.memory_limit
+
         if (
             max_connections is not False
             and self.outgoing_current_count > max_connections
         ):
+            return {"status": "busy"}
+        elif self.paused:
+            logger.warning(
+                "Worker %s is paused and cannot respond to data request from %s.",
+                self.address,
+                who,
+            )
+            return {"status": "busy"}
+
+        elif self.memory_pause_fraction and frac > self.memory_pause_fraction:
+            logger.warning(
+                "Worker %s is no longer busy. Responding to data request from %s.",
+                self.address,
+                who,
+            )
             return {"status": "busy"}
 
         self.outgoing_current_count += 1

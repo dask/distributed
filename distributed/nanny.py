@@ -30,6 +30,7 @@ from .utils import (
     json_load_robust,
     PeriodicCallback,
     parse_timedelta,
+    format_time,
 )
 from .worker import run, parse_memory_limit, Worker
 
@@ -69,6 +70,7 @@ class Nanny(ServerNode):
         services=None,
         name=None,
         memory_limit="auto",
+        memory_terminate_violations=None,
         reconnect=True,
         validate=False,
         quiet=False,
@@ -133,6 +135,13 @@ class Nanny(ServerNode):
         self.memory_terminate_fraction = dask.config.get(
             "distributed.worker.memory.terminate"
         )
+        self._last_memory_ok = None
+
+        if memory_terminate_violations is None:
+            memory_terminate_violations = dask.config.get(
+                "distributed.worker.memory.terminate_violations"
+            )
+        self.memory_terminate_violations = parse_timedelta(memory_terminate_violations)
 
         if local_dir is not None:
             warnings.warn("The local_dir keyword has moved to local_directory")
@@ -350,12 +359,37 @@ class Nanny(ServerNode):
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return
         frac = memory / self.memory_limit
+        now = time()
+
         if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
-            logger.warning(
-                "Worker exceeded %d%% memory budget. Restarting",
-                100 * self.memory_terminate_fraction,
-            )
-            process.terminate()
+
+            if self._last_memory_ok is None:
+                self._last_memory_ok = now
+
+            if (now - self._last_memory_ok) >= self.memory_terminate_violations:
+                logger.warning(
+                    "Worker %s exceeded %d%% memory budget. Restarting.",
+                    self.worker_address,
+                    100 * self.memory_terminate_fraction,
+                )
+                process.terminate()
+                self._last_memory_ok = None
+            else:
+                time_bad = now - self._last_memory_ok
+                logger.warning(
+                    "Worker %s exceeded %d%% memory budget. Terminating in %s unless memory returns to normal.",
+                    self.worker_address,
+                    100 * self.memory_terminate_fraction,
+                    format_time(self.memory_terminate_violations - time_bad),
+                )
+        else:
+            if self._last_memory_ok:
+                self._last_memory_ok = None
+                logger.info(
+                    "Worker %s now under %d%% memory budget.",
+                    self.worker_address,
+                    100 * self.memory_terminate_fraction,
+                )
 
     def is_alive(self):
         return self.process is not None and self.process.is_alive()
