@@ -112,6 +112,7 @@ Contents
    local-cluster
    ipython
    Joblib Integration <https://ml.dask.org/joblib.html>
+   monitoring-dask-cluster
    publish
    queues
    resources
