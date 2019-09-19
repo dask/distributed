@@ -1,4 +1,4 @@
-Monitoring dask cluster
+Prometheus Monitoring
 -----------------------
 
 Prometheus_ is a widely popular tool for monitoring and alerting a wide variety of systems. Dask.distributed exposes
