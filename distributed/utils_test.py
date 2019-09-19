@@ -44,7 +44,7 @@ from .compatibility import WINDOWS
 from .comm import Comm
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
-from .deploy import LocalCluster, SpecCluster
+from .deploy import SpecCluster
 from .metrics import time
 from .process import _cleanup_dangling
 from .proctitle import enable_proctitle_on_children
@@ -570,13 +570,6 @@ def client_secondary(loop, cluster_fixture):
     scheduler, workers = cluster_fixture
     with Client(scheduler["address"], loop=loop) as client:
         yield client
-
-
-@pytest.fixture
-async def async_client():
-    async with LocalCluster(asynchronous=True) as cluster:
-        async with Client(cluster, asynchronous=True) as client:
-            yield client
 
 
 @contextmanager
