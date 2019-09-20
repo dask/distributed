@@ -824,10 +824,10 @@ class Client(Node):
 
                 address = format_dashboard_link(host, port)
 
-        text += (
-            "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n"
-            % {"web": address}
-        )
+            text += (
+                "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n"
+                % {"web": address}
+            )
 
         text += "</ul>\n"
 
