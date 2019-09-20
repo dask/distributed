@@ -76,14 +76,14 @@ class Worker(Process):
         loop=None,
         name=None,
     ):
+        super().__init__()
+
         self.address = address
         self.scheduler = scheduler
         self.worker_module = worker_module or "distributed.cli.dask_worker"
         self.connect_kwargs = connect_kwargs
         self.kwargs = kwargs
         self.name = name
-
-        super().__init__()
 
     async def start(self):
         self.connection = await asyncssh.connect(self.address, **self.connect_kwargs)
@@ -130,11 +130,11 @@ class Scheduler(Process):
     """
 
     def __init__(self, address: str, connect_kwargs: dict, kwargs: dict):
+        super().__init__()
+
         self.address = address
         self.kwargs = kwargs
         self.connect_kwargs = connect_kwargs
-
-        super().__init__()
 
     async def start(self):
         logger.debug("Created Scheduler Connection")
