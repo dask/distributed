@@ -97,7 +97,7 @@ class Worker(Process):
                     "--name",
                     str(self.name),
                 ]
-                + cli_keywords(self.kwargs, cls=_Worker)
+                + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
             )
         )
 
