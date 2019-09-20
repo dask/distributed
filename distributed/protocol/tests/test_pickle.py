@@ -6,6 +6,7 @@ import weakref
 import pytest
 
 from distributed.protocol.pickle import dumps, loads
+from distributed.utils_test import captured_logger
 
 
 def test_pickle_data():
@@ -46,3 +47,14 @@ def test_pickle_functions():
         gc.collect()
         assert wr() is None
         assert wr2() is None
+
+
+def test_pickle_deserialize_unsubscriptable():
+    # Regression test for https://github.com/dask/distributed/issues/2971
+    with captured_logger("distributed.protocol.pickle") as logger:
+        try:
+            loads(123)  # Raises deserialization error
+        except TypeError:
+            pass
+    out = logger.getvalue()
+    assert "a bytes-like object is required" in out

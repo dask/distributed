@@ -58,5 +58,10 @@ def loads(x):
     try:
         return pickle.loads(x)
     except Exception:
-        logger.info("Failed to deserialize %s", x[:10000], exc_info=True)
+        try:
+            x_trunc = x[:10000]
+        except TypeError:
+            # Not subscriptable
+            x_trunc = str(x)[:10000]
+        logger.info("Failed to deserialize %s", x_trunc, exc_info=True)
         raise
