@@ -1464,7 +1464,7 @@ class Logs(dict):
         return "\n".join(summaries)
 
 
-def cli_keywords(d: dict, cls=None):
+def cli_keywords(d: dict, cls=None, cmd=None):
     """ Convert a kwargs dictionary into a list of CLI keywords
 
     Parameters
@@ -1473,6 +1473,9 @@ def cli_keywords(d: dict, cls=None):
         The keywords to convert
     cls: callable
         The callable that consumes these terms to check them for validity
+    cmd: string or object
+        A string with the name of a module, or the module containing a
+        click-generated command with a "main" function, or the function itself
 
     Examples
     --------
@@ -1485,12 +1488,38 @@ def cli_keywords(d: dict, cls=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
-    if cls:
+    cmd_params = set()
+    cmd_orig = cmd
+    if cmd:
+        if isinstance(cmd, str):
+            try:
+                from importlib import import_module
+                cmd = import_module(cmd)
+            except ImportError:
+                raise ImportError("Module for command %s is not available" % cmd)
+
+        import click
+        if isinstance(getattr(cmd, "main"), click.core.Command):
+            cmd = cmd.main
+        if isinstance(cmd, click.core.Command):
+            click_params = set([p.human_readable_name for p in cmd.params if isinstance(p,
+                click.core.Option)])
+
+    if cls or cmd_params != set():
         for k in d:
-            if not has_keyword(cls, k):
-                raise ValueError(
-                    "Class %s does not support keyword %s" % (typename(cls), k)
-                )
+            if not has_keyword(cls, k) and k not in cmd_params:
+                if cls and cmd:
+                    raise ValueError(
+                        "Neither class %s or module %s support keyword %s" % (typename(cls) % cmd_orig, k)
+                    )
+                elif cls:
+                    raise ValueError(
+                        "Class %s does not support keyword %s" % (typename(cls), k)
+                    )
+                elif cls:
+                    raise ValueError(
+                        "Module %s does not support keyword %s" % (typename(cls), k)
+                    )
 
     def convert_value(v):
         out = str(v)
