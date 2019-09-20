@@ -2,7 +2,7 @@ import asyncio
 
 import dask
 from dask.distributed import SpecCluster, Worker, Client, Scheduler, Nanny
-from distributed.deploy.spec import close_clusters, ProcessInterface
+from distributed.deploy.spec import close_clusters, ProcessInterface, run_workers
 from distributed.metrics import time
 from distributed.utils_test import loop, cleanup  # noqa: F401
 from distributed.utils import is_valid_xml
@@ -400,3 +400,17 @@ async def test_MultiWorker(cleanup):
             future = client.submit(lambda x: x + 1, 10)
             await future
             assert len(cluster.workers) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_workers(cleanup):
+    async with Scheduler(port=0) as s:
+        workers = await run_workers(s.address, worker_spec)
+        async with Client(s.address, asynchronous=True) as c:
+            await c.wait_for_workers(len(worker_spec))
+
+            await asyncio.gather(*[w.close() for w in workers.values()])
+
+            assert not s.workers
+
+            await asyncio.gather(*[w.finished() for w in workers.values()])

@@ -7,6 +7,7 @@ import weakref
 
 import dask
 from tornado import gen
+from tornado.locks import Event
 
 from .adaptive import Adaptive
 from .cluster import Cluster
@@ -33,6 +34,7 @@ class ProcessInterface:
         self.external_address = None
         self.lock = asyncio.Lock()
         self.status = "created"
+        self._event_finished = Event()
 
     def __await__(self):
         async def _():
@@ -65,6 +67,11 @@ class ProcessInterface:
         need to worry about shutting down gracefully
         """
         self.status = "closed"
+        self._event_finished.set()
+
+    async def finished(self):
+        """ Wait until the server has finished """
+        await self._event_finished.wait()
 
     def __repr__(self):
         return "<%s: status=%s>" % (type(self).__name__, self.status)
@@ -539,6 +546,15 @@ class SpecCluster(Cluster):
             )
 
         return super().adapt(*args, minimum=minimum, maximum=maximum, **kwargs)
+
+
+async def run_workers(scheduler: str, spec: dict, name=None):
+    workers = {k: d["cls"](scheduler, **d.get("options", {})) for k, d in spec.items()}
+    if workers:
+        await asyncio.gather(*workers.values())
+        for w in workers.values():
+            await w  # for tornado gen.coroutine support
+    return workers
 
 
 @atexit.register
