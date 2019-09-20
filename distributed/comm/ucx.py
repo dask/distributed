@@ -17,8 +17,6 @@ from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors
 
 from tornado.ioloop import IOLoop
 import ucp
-
-# TODO: remove dependency on Numpy and Numba
 import numpy as np
 import numba.cuda
 
@@ -125,7 +123,7 @@ class UCX(Comm):
                     ):
                         await self.ep.send(frame)
                     else:
-                        await self.ep.send(np.frombuffer(frame, dtype=np.uint8))
+                        await self.ep.send(frame)
             return sum(map(nbytes, frames))
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
@@ -163,7 +161,7 @@ class UCX(Comm):
                         if is_cuda:
                             frames.append(frame)
                         else:
-                            frames.append(frame.tobytes())
+                            frames.append(frame.data)
                     else:
                         if is_cuda:
                             frames.append(numba.cuda.device_array((0,), dtype=np.uint8))
