@@ -637,9 +637,7 @@ class Client(Node):
         self._gather_future = None
 
         # Communication
-        self.security = security or Security()
         self.scheduler_comm = None
-        assert isinstance(self.security, Security)
 
         if address is None:
             address = dask.config.get("scheduler-address", None)
@@ -654,7 +652,10 @@ class Client(Node):
             with ignoring(AttributeError):
                 loop = address.loop
             if security is None:
-                self.security = self.cluster.security
+                security = self.cluster.security
+
+        self.security = security or Security()
+        assert isinstance(self.security, Security)
 
         if name == "worker":
             self.connection_args = self.security.get_connection_args("worker")
