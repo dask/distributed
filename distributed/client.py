@@ -641,11 +641,6 @@ class Client(Node):
         self.scheduler_comm = None
         assert isinstance(self.security, Security)
 
-        if name == "worker":
-            self.connection_args = self.security.get_connection_args("worker")
-        else:
-            self.connection_args = self.security.get_connection_args("client")
-
         if address is None:
             address = dask.config.get("scheduler-address", None)
             if address:
@@ -658,6 +653,13 @@ class Client(Node):
             self.cluster = address
             with ignoring(AttributeError):
                 loop = address.loop
+            if security is None:
+                self.security = self.cluster.security
+
+        if name == "worker":
+            self.connection_args = self.security.get_connection_args("worker")
+        else:
+            self.connection_args = self.security.get_connection_args("client")
 
         self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
