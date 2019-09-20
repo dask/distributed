@@ -1149,17 +1149,6 @@ def parse_bytes(s):
     return int(result)
 
 
-def format_bytes_to_string(b):
-    if b < 1000:
-        return "%i B" % (b,)
-    elif 1000 <= b < 1000 ** 2:
-        return "%.2f KBs" % (b / 1000,)
-    elif 1000 ** 2 <= b < 1000 ** 3:
-        return "%.2f MBs" % (b / 1000 ** 2,)
-    else:
-        return "%.2f GBs" % (b / 1000 ** 3,)
-
-
 timedelta_sizes = {
     "s": 1,
     "ms": 1e-3,

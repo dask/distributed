@@ -2,9 +2,10 @@ from collections import deque
 import logging
 
 import dask
+from dask.utils import format_bytes
 from .progress_stream import color_of
 from .plugin import SchedulerPlugin
-from ..utils import key_split, format_time, parse_timedelta, format_bytes_to_string
+from ..utils import key_split, format_time, parse_timedelta
 from ..metrics import time
 
 
@@ -128,10 +129,10 @@ def rectangles(msgs, workers=None, start_boundary=0):
 
             if action == "transfer":
                 data = msg["nbytes"]
-                formatted_duration = (
-                    f"{format_time(stop - start)} {format_bytes_to_string(data)}"
+                formatted_duration = "%s %s" % (
+                    format_time(stop - start),
+                    format_bytes(data),
                 )
-
             else:
                 formatted_duration = format_time(stop - start)
 
