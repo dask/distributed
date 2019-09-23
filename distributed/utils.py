@@ -1494,23 +1494,31 @@ def cli_keywords(d: dict, cls=None, cmd=None):
         if isinstance(cmd, str):
             try:
                 from importlib import import_module
+
                 cmd = import_module(cmd)
             except ImportError:
                 raise ImportError("Module for command %s is not available" % cmd)
 
         import click
+
         if isinstance(getattr(cmd, "main"), click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
-            click_params = set([p.human_readable_name for p in cmd.params if isinstance(p,
-                click.core.Option)])
+            click_params = set(
+                [
+                    p.human_readable_name
+                    for p in cmd.params
+                    if isinstance(p, click.core.Option)
+                ]
+            )
 
     if cls or cmd_params != set():
         for k in d:
             if not has_keyword(cls, k) and k not in cmd_params:
                 if cls and cmd:
                     raise ValueError(
-                        "Neither class %s or module %s support keyword %s" % (typename(cls) % cmd_orig, k)
+                        "Neither class %s or module %s support keyword %s"
+                        % (typename(cls) % cmd_orig, k)
                     )
                 elif cls:
                     raise ValueError(
