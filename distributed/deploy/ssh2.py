@@ -70,7 +70,6 @@ class Worker(Process):
         self,
         scheduler: str,
         address: str,
-        worker_module: str,
         connect_kwargs: dict,
         kwargs: dict,
         worker_module="distributed.cli.dask_worker",
@@ -227,7 +226,6 @@ def SSHCluster(
             "cls": Worker,
             "options": {
                 "address": host,
-                "worker_module": worker_module,
                 "connect_kwargs": connect_kwargs,
                 "kwargs": worker_kwargs,
                 "worker_module": worker_module,
