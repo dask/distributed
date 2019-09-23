@@ -173,8 +173,10 @@ class UCX(Comm):
                 return msg
 
     async def close(self):
-        if self._ep is not None and not self._ep.closed():
-            await self._ep.signal_shutdown()
+        if self._ep is not None:
+            if not self._ep.closed():
+                await self._ep.signal_shutdown()
+                self._ep.close()
             self._ep = None
 
     def abort(self):
