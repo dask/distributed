@@ -290,6 +290,37 @@ def test_nanny_terminate(c, s, a):
         assert "memory" in out.lower()
 
 
+@gen_cluster(
+    nthreads=[("127.0.0.1", 1)],
+    client=True,
+    Worker=Nanny,
+    worker_kwargs={"memory_limit": 1e8, "memory_terminate_violations": "3s"},
+    timeout=20,
+    clean_kwargs={"threads": False},
+)
+@pytest.mark.slow
+def test_nanny_terminate_violations(c, s, a):
+    from time import sleep
+
+    def leak():
+        L = []
+        while True:
+            L.append(b"0" * 5000000)
+            sleep(0.01)
+
+    proc = a.process.pid
+    with captured_logger(logging.getLogger("distributed.nanny")) as logger:
+        future = c.submit(leak)
+        start = time()
+        while a.process.pid == proc:
+            yield gen.sleep(0.1)
+            assert 3 < time() < start + 10
+        out = logger.getvalue()
+        assert "restart" in out.lower()
+        assert "memory" in out.lower()
+        assert "terminating in" in out.lower()
+
+
 @gen_cluster(nthreads=[], client=True)
 def test_avoid_memory_monitor_if_zero_limit(c, s):
     nanny = yield Nanny(s.address, loop=s.loop, memory_limit=0)
