@@ -99,7 +99,7 @@ class UCX(Comm):
     ):
         with log_errors():
             if self.closed():
-                raise CommClosedError
+                raise CommClosedError("Endpoint is closed -- unable to send message")
 
             if serializers is None:
                 serializers = ("cuda", "dask", "pickle", "error")
@@ -129,7 +129,7 @@ class UCX(Comm):
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
         with log_errors():
             if self.closed():
-                raise CommClosedError
+                raise CommClosedError("Endpoint is closed -- unable to read message")
 
             if deserializers is None:
                 deserializers = ("cuda", "dask", "pickle", "error")
@@ -147,7 +147,7 @@ class UCX(Comm):
                     await self._ep.shutdown()
                     self._ep.close()
                 self._ep = None
-                raise CommClosedError()
+                raise CommClosedError("While reading, the connection was canceled")
             else:
                 # Recv frames
                 frames = []
@@ -185,7 +185,7 @@ class UCX(Comm):
 
     @property
     def ep(self):
-        if self._ep:
+        if self._ep is not None:
             return self._ep
         else:
             raise CommClosedError("UCX Endpoint is closed")
