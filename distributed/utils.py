@@ -1504,7 +1504,7 @@ def cli_keywords(d: dict, cls=None, cmd=None):
         if isinstance(getattr(cmd, "main"), click.core.Command):
             cmd = cmd.main
         if isinstance(cmd, click.core.Command):
-            click_params = set(
+            cmd_params = set(
                 [
                     p.human_readable_name
                     for p in cmd.params

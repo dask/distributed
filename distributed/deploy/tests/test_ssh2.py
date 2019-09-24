@@ -30,7 +30,7 @@ async def test_keywords():
         ["127.0.0.1"] * 3,
         connect_kwargs=dict(known_hosts=None),
         asynchronous=True,
-        worker_kwargs={"nthreads": 2, "memory_limit": "2 GiB", "death_timeout": "5s"},
+        worker_kwargs={"nthreads": 2, "memory_limit": "2 GiB", "death_timeout": "5s", "nprocs": 2},
         scheduler_kwargs={"idle_timeout": "5s", "port": 0},
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
@@ -40,4 +40,18 @@ async def test_keywords():
                 )
             ) == 5
             d = client.scheduler_info()["workers"]
+            assert all(v["nprocs"] == 2 for v in d.values())
             assert all(v["nthreads"] == 2 for v in d.values())
+
+
+@pytest.mark.asyncio
+async def test_unimplemented_options():
+    with pytest.raises(Exception):
+        async with SSHCluster(
+            ["127.0.0.1"] * 3,
+            connect_kwargs=dict(known_hosts=None),
+            asynchronous=True,
+            worker_kwargs={"nthreads": 2, "memory_limit": "2 GiB", "death_timeout": "5s", "unimplemented_option": 2},
+            scheduler_kwargs={"idle_timeout": "5s", "port": 0},
+        ) as cluster:
+            assert (cluster)
