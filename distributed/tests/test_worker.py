@@ -357,17 +357,17 @@ def test_error_message():
     assert "Hello" in str(msg["exception"])
 
     max_error_len = 100
-    with dask.config.set({"distributed.admin.max_error_len": max_error_len}):
-        msg = error_message(RuntimeError("-"*max_error_len))
+    with dask.config.set({"distributed.admin.max-error-length": max_error_len}):
+        msg = error_message(RuntimeError("-" * max_error_len))
         assert len(msg["text"]) <= max_error_len
-        assert len(msg["text"]) < max_error_len*2
-        msg = error_message(RuntimeError("-"*max_error_len*20))
+        assert len(msg["text"]) < max_error_len * 2
+        msg = error_message(RuntimeError("-" * max_error_len * 20))
         cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
         assert len(cut_text) == max_error_len
 
     max_error_len = 1000000
-    with dask.config.set({"distributed.admin.max_error_len": max_error_len}):
-        msg = error_message(RuntimeError("-"*max_error_len*2))
+    with dask.config.set({"distributed.admin.max-error-length": max_error_len}):
+        msg = error_message(RuntimeError("-" * max_error_len * 2))
         cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
         assert len(cut_text) == max_error_len
         assert len(msg["text"]) > 10100  # default + 100

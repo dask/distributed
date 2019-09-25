@@ -969,7 +969,7 @@ def error_message(e, status="error"):
     --------
     clean_exception: deserialize and unpack message into exception/traceback
     """
-    MAX_ERROR_LEN = dask.config.get("distributed.admin.max_error_len")
+    MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tb = get_traceback()
     e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:
