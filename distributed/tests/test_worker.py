@@ -353,9 +353,6 @@ def test_error_message():
         def __str__(self):
             return "MyException(%s)" % self.args
 
-        def __getnewargs__(self):
-            return self.args
-
     msg = error_message(MyException("Hello", "World!"))
     assert "Hello" in str(msg["exception"])
 
