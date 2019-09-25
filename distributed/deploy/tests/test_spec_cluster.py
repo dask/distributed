@@ -23,7 +23,7 @@ class BrokenWorker(Worker):
 
 
 worker_spec = {
-    0: {"cls": Worker, "options": {"nthreads": 1}},
+    0: {"cls": "dask.distributed.Worker", "options": {"nthreads": 1}},
     1: {"cls": Worker, "options": {"nthreads": 2}},
     "my-worker": {"cls": MyWorker, "options": {"nthreads": 3}},
 }
@@ -373,6 +373,8 @@ async def test_MultiWorker(cleanup):
             await cluster
             assert len(cluster.worker_spec) == 2
             await client.wait_for_workers(4)
+            while len(cluster.scheduler_info["workers"]) < 4:
+                await asyncio.sleep(0.01)
 
             assert "workers=4" in repr(cluster)
 

@@ -1520,3 +1520,20 @@ weakref.finalize(_offload_executor, _offload_executor.shutdown)
 @gen.coroutine
 def offload(fn, *args, **kwargs):
     return (yield _offload_executor.submit(fn, *args, **kwargs))
+
+
+def import_term(name: str):
+    """ Return the fully qualified term
+
+    Examples
+    --------
+    >>> import_term("math.sin")
+    <function math.sin(x, /)>
+    """
+    try:
+        module_name, attr_name = name.rsplit(".", 1)
+    except ValueError:
+        return importlib.import_module(name)
+
+    module = importlib.import_module(module_name)
+    return getattr(module, attr_name)
