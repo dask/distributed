@@ -570,6 +570,7 @@ class TaskState(object):
         "loose_restrictions",
         # === Task state ===
         "state",
+        "time_started",
         # Whether some dependencies were forgotten
         "has_lost_dependencies",
         # If in 'waiting' state, which tasks need to complete
@@ -598,6 +599,7 @@ class TaskState(object):
         self.prefix = key_split(key)
         self.run_spec = run_spec
         self.state = None
+        self.time_started = None
         self.exception = self.traceback = self.exception_blame = None
         self.suspicious = self.retries = 0
         self.nbytes = None
@@ -3674,6 +3676,7 @@ class Scheduler(ServerNode):
             ws.occupancy += duration + comm
             self.total_occupancy += duration + comm
             ts.state = "processing"
+            ts.time_started = time()
             self.consume_resources(ts, ws)
             self.check_idle_saturated(ws)
             self.n_tasks += 1
@@ -4718,8 +4721,12 @@ class Scheduler(ServerNode):
 
         new = 0
         nbytes = 0
+        current_time = time()
         for ts in ws.processing:
             duration = self.get_task_duration(ts)
+            # duration is at 'least' current running time
+            if ts.prefix in self.unknown_durations and ts.time_started:
+                duration = current_time - ts.time_started
             comm = self.get_comm_cost(ts, ws)
             ws.processing[ts] = duration + comm
             new += duration + comm
