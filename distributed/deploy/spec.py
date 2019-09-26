@@ -212,7 +212,7 @@ class SpecCluster(Cluster):
         if silence_logs:
             self._old_logging_level = silence_logging(level=silence_logs)
             self._old_bokeh_logging_level = silence_logging(
-                level=silence_logs, root='bokeh'
+                level=silence_logs, root="bokeh"
             )
 
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
@@ -354,7 +354,7 @@ class SpecCluster(Cluster):
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
         if hasattr(self, "_old_bokeh_logging_level"):
-            silence_logging(self._old_bokeh_logging_level, root='bokeh')
+            silence_logging(self._old_bokeh_logging_level, root="bokeh")
 
         await super()._close()
 
