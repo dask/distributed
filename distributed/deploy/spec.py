@@ -565,7 +565,7 @@ async def run_workers(scheduler: str, spec: dict, name=None):
         cls = d["cls"]
         if isinstance(cls, str):
             cls = import_term(cls)
-        workers[k] = cls(scheduler, **d.get("options", {}))
+        workers[k] = cls(scheduler, **d.get("opts", {}))
 
     if workers:
         await asyncio.gather(*workers.values())
