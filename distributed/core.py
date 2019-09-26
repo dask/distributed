@@ -3,14 +3,12 @@ from collections import defaultdict, deque
 from concurrent.futures import CancelledError
 from functools import partial
 import logging
-import six
 import threading
 import traceback
 import uuid
 import weakref
 
 import dask
-from six import string_types
 from toolz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -47,23 +45,12 @@ class RPCClosed(IOError):
 logger = logging.getLogger(__name__)
 
 
-def get_total_physical_memory():
-    try:
-        import psutil
-
-        return psutil.virtual_memory().total / 2
-    except ImportError:
-        return 2e9
-
-
 def raise_later(exc):
     def _raise(*args, **kwargs):
         raise exc
 
     return _raise
 
-
-MAX_BUFFER_SIZE = get_total_physical_memory()
 
 tick_maximum_delay = parse_timedelta(
     dask.config.get("distributed.admin.tick.limit"), default="ms"
@@ -316,7 +303,7 @@ class Server(object):
             addr = unparse_host_port(*port_or_addr)
         else:
             addr = port_or_addr
-            assert isinstance(addr, string_types)
+            assert isinstance(addr, str)
         self.listener = listen(
             addr,
             self.handle_comm,
@@ -556,7 +543,8 @@ async def send_recv(comm, reply=True, serializers=None, deserializers=None, **kw
 
     if isinstance(response, dict) and response.get("status") == "uncaught-error":
         if comm.deserialize:
-            six.reraise(*clean_exception(**response))
+            typ, exc, tb = clean_exception(**response)
+            raise exc.with_traceback(tb)
         else:
             raise Exception(response["text"])
     return response
@@ -980,10 +968,10 @@ def error_message(e, status="error"):
     See Also
     --------
     clean_exception: deserialize and unpack message into exception/traceback
-    six.reraise: raise exception/traceback
     """
+    MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tb = get_traceback()
-    e2 = truncate_exception(e, 1000)
+    e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:
         e3 = protocol.pickle.dumps(e2)
         protocol.pickle.loads(e3)
@@ -995,7 +983,7 @@ def error_message(e, status="error"):
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
 
-    if len(tb2) > 10000:
+    if len(tb2) > MAX_ERROR_LEN:
         tb_result = None
     else:
         tb_result = protocol.to_serialize(tb)
@@ -1022,6 +1010,6 @@ def clean_exception(exception, traceback, **kwargs):
             traceback = protocol.pickle.loads(traceback)
         except (TypeError, AttributeError):
             traceback = None
-    elif isinstance(traceback, string_types):
+    elif isinstance(traceback, str):
         traceback = None  # happens if the traceback failed serializing
     return type(exception), exception, traceback

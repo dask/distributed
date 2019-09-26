@@ -95,17 +95,21 @@ class Cluster(object):
             except OSError:
                 break
 
-            for op, msg in msgs:
-                if op == "add":
-                    workers = msg.pop("workers")
-                    self.scheduler_info["workers"].update(workers)
-                    self.scheduler_info.update(msg)
-                elif op == "remove":
-                    del self.scheduler_info["workers"][msg]
-                else:
-                    raise ValueError("Invalid op", op, msg)
+            with log_errors():
+                for op, msg in msgs:
+                    self._update_worker_status(op, msg)
 
         await comm.close()
+
+    def _update_worker_status(self, op, msg):
+        if op == "add":
+            workers = msg.pop("workers")
+            self.scheduler_info["workers"].update(workers)
+            self.scheduler_info.update(msg)
+        elif op == "remove":
+            del self.scheduler_info["workers"][msg]
+        else:
+            raise ValueError("Invalid op", op, msg)
 
     def adapt(self, Adaptive=Adaptive, **kwargs) -> Adaptive:
         """ Turn on adaptivity
@@ -203,7 +207,10 @@ class Cluster(object):
     def _widget_status(self):
         workers = len(self.scheduler_info["workers"])
         if hasattr(self, "worker_spec"):
-            requested = len(self.worker_spec)
+            requested = sum(
+                1 if "group" not in each else len(each["group"])
+                for each in self.worker_spec.values()
+            )
         elif hasattr(self, "workers"):
             requested = len(self.workers)
         else:
@@ -361,7 +368,7 @@ class Cluster(object):
         text = "%s(%r, workers=%d, threads=%d" % (
             self._cluster_class_name,
             self.scheduler_address,
-            len(self.workers),
+            len(self.scheduler_info["workers"]),
             sum(w["nthreads"] for w in self.scheduler_info["workers"].values()),
         )
 

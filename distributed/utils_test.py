@@ -5,6 +5,7 @@ import copy
 from datetime import timedelta
 import functools
 from glob import glob
+import io
 import itertools
 import logging
 import logging.config
@@ -30,7 +31,6 @@ except ImportError:
     ssl = None
 
 import pytest
-import six
 
 import dask
 from toolz import merge, memoize, assoc
@@ -38,6 +38,7 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
+from . import system
 from .client import default_client, _global_clients, Client
 from .compatibility import WINDOWS
 from .comm import Comm
@@ -61,7 +62,7 @@ from .utils import (
     thread_state,
     _offload_executor,
 )
-from .worker import Worker, TOTAL_MEMORY
+from .worker import Worker
 from .nanny import Nanny
 
 try:
@@ -190,7 +191,7 @@ def pristine_loop():
 
 @contextmanager
 def mock_ipython():
-    import mock
+    from unittest import mock
     from distributed._ipython_utils import remote_magic
 
     ip = mock.Mock()
@@ -636,7 +637,11 @@ def cluster(
             q = mp_context.Queue()
             fn = "_test_worker-%s" % uuid.uuid4()
             kwargs = merge(
-                {"nthreads": 1, "local_directory": fn, "memory_limit": TOTAL_MEMORY},
+                {
+                    "nthreads": 1,
+                    "local_directory": fn,
+                    "memory_limit": system.MEMORY_LIMIT,
+                },
                 worker_kwargs,
             )
             proc = mp_context.Process(
@@ -860,7 +865,7 @@ def gen_cluster(
         nthreads = ncores
 
     worker_kwargs = merge(
-        {"memory_limit": TOTAL_MEMORY, "death_timeout": 5}, worker_kwargs
+        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 5}, worker_kwargs
     )
 
     def _(func):
@@ -1221,7 +1226,7 @@ def captured_logger(logger, level=logging.INFO, propagate=None):
     if propagate is not None:
         orig_propagate = logger.propagate
         logger.propagate = propagate
-    sio = six.StringIO()
+    sio = io.StringIO()
     logger.handlers[:] = [logging.StreamHandler(sio)]
     logger.setLevel(level)
     try:
@@ -1239,7 +1244,7 @@ def captured_handler(handler):
     """
     assert isinstance(handler, logging.StreamHandler)
     orig_stream = handler.stream
-    handler.stream = six.StringIO()
+    handler.stream = io.StringIO()
     try:
         yield handler.stream
     finally:

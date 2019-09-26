@@ -3,6 +3,7 @@ import pytest
 import shutil
 import sys
 import tempfile
+import pytest
 
 import dask
 from distributed import Client, Scheduler, Worker, Nanny
