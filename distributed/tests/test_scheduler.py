@@ -22,7 +22,7 @@ from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
 from distributed.worker import dumps_function, dumps_task
-from distributed.utils import tmpfile
+from distributed.utils import tmpfile, typename
 from distributed.utils_test import (  # noqa: F401
     captured_logger,
     cleanup,
@@ -1523,6 +1523,10 @@ def test_bandwidth(c, s, a, b):
     yield b.heartbeat()
     assert s.bandwidth < start  # we've learned that we're slower
     assert b.latency
+    assert a.address in b.bandwidth_workers
+    assert bytes in b.bandwidth_types
+    assert typename(bytes) in s.bandwidth_types
+    assert (b.address, a.address) in s.bandwidth_workers
 
 
 @gen_cluster()

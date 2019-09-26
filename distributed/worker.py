@@ -20,9 +20,9 @@ from dask.compatibility import apply
 from dask.utils import format_bytes
 
 try:
-    from cytoolz import pluck, partial, merge, first
+    from cytoolz import pluck, partial, merge, first, keymap
 except ImportError:
-    from toolz import pluck, partial, merge, first
+    from toolz import pluck, partial, merge, first, keymap
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -417,6 +417,8 @@ class Worker(ServerNode):
         self.outgoing_current_count = 0
         self.repetitively_busy = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.bandwidth_workers = defaultdict(float)
+        self.bandwidth_types = defaultdict(float)
         self.latency = 0.001
         self._client = None
 
@@ -729,7 +731,11 @@ class Worker(ServerNode):
             in_memory=len(self.data),
             ready=len(self.ready),
             in_flight=len(self.in_flight_tasks),
-            bandwidth=self.bandwidth,
+            bandwidth={
+                "total": self.bandwidth,
+                "workers": dict(self.bandwidth_workers),
+                "types": keymap(typename, self.bandwidth_types),
+            },
         )
         custom = {}
         for k, metric in self.metrics.items():
@@ -1923,6 +1929,15 @@ class Worker(ServerNode):
                 )
                 if total_bytes > 10000:
                     self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
+                    self.bandwidth_workers[worker] = (
+                        self.bandwidth_workers[worker] * 0.95 + bandwidth * 0.05
+                    )
+                    types = set(map(type, response["data"].values()))
+                    if len(types) == 1:
+                        [typ] = types
+                        self.bandwidth_types[typ] = (
+                            self.bandwidth_types[typ] * 0.95 + bandwidth * 0.05
+                        )
                 if self.digests is not None:
                     self.digests["transfer-bandwidth"].add(total_bytes / duration)
                     self.digests["transfer-duration"].add(duration)

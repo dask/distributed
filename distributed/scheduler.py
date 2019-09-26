@@ -881,6 +881,8 @@ class Scheduler(ServerNode):
             self.idle_timeout = None
         self.time_started = time()
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.bandwidth_workers = defaultdict(float)
+        self.bandwidth_types = defaultdict(float)
 
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
@@ -1344,7 +1346,17 @@ class Scheduler(ServerNode):
         self.host_info[host]["last-seen"] = local_now
         frac = 1 / 20 / len(self.workers)
         try:
-            self.bandwidth = self.bandwidth * (1 - frac) + metrics["bandwidth"] * frac
+            self.bandwidth = (
+                self.bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
+            )
+            for other, value in metrics["bandwidth"]["workers"].items():
+                self.bandwidth_workers[address, other] = (
+                    self.bandwidth_workers[address, other] * (1 - frac) + value * frac
+                )
+            for typ, value in metrics["bandwidth"]["types"].items():
+                self.bandwidth_types[typ] = (
+                    self.bandwidth_types[typ] * (1 - frac) + value * frac
+                )
         except KeyError:
             pass
 
