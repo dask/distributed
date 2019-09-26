@@ -1344,19 +1344,26 @@ class Scheduler(ServerNode):
         host_info = host_info or {}
 
         self.host_info[host]["last-seen"] = local_now
-        frac = 1 / 20 / len(self.workers)
+        frac = 1 / len(self.workers)
         try:
             self.bandwidth = (
                 self.bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
             )
             for other, value in metrics["bandwidth"]["workers"].items():
-                self.bandwidth_workers[address, other] = (
-                    self.bandwidth_workers[address, other] * (1 - frac) + value * frac
-                )
+                if (address, other) not in self.bandwidth_workers:
+                    self.bandwidth_workers[address, other] = value
+                else:
+                    self.bandwidth_workers[address, other] = (
+                        self.bandwidth_workers[address, other] * (1 - frac)
+                        + value * frac
+                    )
             for typ, value in metrics["bandwidth"]["types"].items():
-                self.bandwidth_types[typ] = (
-                    self.bandwidth_types[typ] * (1 - frac) + value * frac
-                )
+                if typ not in self.bandwidth_types:
+                    self.bandwidth_types[typ] = value
+                else:
+                    self.bandwidth_types[typ] = (
+                        self.bandwidth_types[typ] * (1 - frac) + value * frac
+                    )
         except KeyError:
             pass
 

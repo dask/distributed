@@ -1929,15 +1929,21 @@ class Worker(ServerNode):
                 )
                 if total_bytes > 10000:
                     self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
-                    self.bandwidth_workers[worker] = (
-                        self.bandwidth_workers[worker] * 0.95 + bandwidth * 0.05
-                    )
+                    if worker not in self.bandwidth_workers:
+                        self.bandwidth_workers[worker] = bandwidth
+                    else:
+                        self.bandwidth_workers[worker] = (
+                            self.bandwidth_workers[worker] * 0.95 + bandwidth * 0.05
+                        )
                     types = set(map(type, response["data"].values()))
                     if len(types) == 1:
                         [typ] = types
-                        self.bandwidth_types[typ] = (
-                            self.bandwidth_types[typ] * 0.95 + bandwidth * 0.05
-                        )
+                        if typ not in self.bandwidth_types:
+                            self.bandwidth_types[typ] = bandwidth
+                        else:
+                            self.bandwidth_types[typ] = (
+                                self.bandwidth_types[typ] * 0.95 + bandwidth * 0.05
+                            )
                 if self.digests is not None:
                     self.digests["transfer-bandwidth"].add(total_bytes / duration)
                     self.digests["transfer-duration"].add(duration)
