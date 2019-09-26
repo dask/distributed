@@ -295,6 +295,65 @@ class NBytesHistogram(DashboardComponent):
         self.root.title.text = "Bytes stored (Histogram): " + format_bytes(nbytes.sum())
 
 
+class BandwidthTypes(DashboardComponent):
+    """ How many tasks are on each worker """
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.last = 0
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {"bandwidth": [1, 2], "bandwidth-half": [0.5, 1], "type": ["a", "b"]}
+            )
+
+            fig = figure(
+                title="Bandwidth by Type",
+                tools="",
+                id="bk-bandwidth-type-plot",
+                name="bandwidth_type_histogram",
+                y_range=["a", "b"],
+                **kwargs
+            )
+            rect = fig.rect(
+                source=self.source,
+                x="bandwidth-half",
+                y="type",
+                width="bandwidth",
+                height=1,
+                color="blue",
+            )
+            fig.x_range.start = 0
+            fig.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            rect.nonselection_glyph = None
+
+            fig.xaxis.minor_tick_line_alpha = 0
+            fig.ygrid.visible = False
+
+            fig.toolbar.logo = None
+            fig.toolbar_location = None
+
+            hover = HoverTool()
+            hover.tooltips = "@type: @bandwidth"
+            hover.point_policy = "follow_mouse"
+            fig.add_tools(hover)
+
+            self.fig = fig
+
+    # @without_property_validation
+    def update(self):
+        with log_errors():
+            bw = self.scheduler.bandwidth_types
+            self.fig.y_range.factors = list(sorted(bw))
+            result = {
+                "bandwidth": bw.values(),
+                "bandwidth-half": [b / 2 for b in bw.values()],
+                "type": bw.keys(),
+            }
+            self.fig.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
+
+            update(self.source, result)
+
+
 class CurrentLoad(DashboardComponent):
     """ How many tasks are on each worker """
 
@@ -1596,6 +1655,15 @@ def individual_workers_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+def individual_bandwidth_types(scheduler, extra, doc):
+    with log_errors():
+        bw = BandwidthTypes(scheduler)
+        bw.update()
+        add_periodic_callback(doc, bw, 500)
+        doc.add_root(bw.fig)
+        doc.theme = BOKEH_THEME
+
+
 def profile_doc(scheduler, extra, doc):
     with log_errors():
         doc.title = "Dask: Profile"
@@ -1703,6 +1771,7 @@ applications = {
     "/individual-cpu": individual_cpu_doc,
     "/individual-nprocessing": individual_nprocessing_doc,
     "/individual-workers": individual_workers_doc,
+    "/individual-bandwidth-types": individual_bandwidth_types,
 }
 
 try:
