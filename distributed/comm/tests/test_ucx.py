@@ -270,7 +270,7 @@ def test_ucx_localcluster(loop, processes):
         n_workers=2,
         threads_per_worker=1,
         processes=processes,
-        loop=loop
+        loop=loop,
     ) as cluster:
         with Client(cluster) as client:
             x = client.submit(inc, 1)
@@ -290,10 +290,7 @@ async def test_stress():
     chunksize = "10 MB"
 
     async with LocalCluster(
-        protocol="ucx",
-        dashboard_address=None,
-        asynchronous=True,
-        processes=False
+        protocol="ucx", dashboard_address=None, asynchronous=True, processes=False
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             rs = da.random.RandomState()
