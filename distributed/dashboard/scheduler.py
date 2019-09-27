@@ -1759,7 +1759,7 @@ def individual_workers_doc(scheduler, extra, doc):
 
 def individual_bandwidth_types(scheduler, extra, doc):
     with log_errors():
-        bw = BandwidthTypes(scheduler)
+        bw = BandwidthTypes(scheduler, sizing_mode="stretch_both")
         bw.update()
         add_periodic_callback(doc, bw, 500)
         doc.add_root(bw.fig)
@@ -1768,7 +1768,7 @@ def individual_bandwidth_types(scheduler, extra, doc):
 
 def individual_bandwidth_workers(scheduler, extra, doc):
     with log_errors():
-        bw = BandwidthWorkers(scheduler)
+        bw = BandwidthWorkers(scheduler, sizing_mode="stretch_both")
         bw.update()
         add_periodic_callback(doc, bw, 500)
         doc.add_root(bw.fig)
