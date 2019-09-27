@@ -918,8 +918,6 @@ class Client(Node):
             # Ensure the cluster is started (no-op if already running)
             try:
                 await self.cluster
-            except AttributeError:  # Some clusters don't have this method
-                pass
             except Exception:
                 logger.info(
                     "Tried to start cluster and received an error. Proceeding.",
