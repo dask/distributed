@@ -1963,6 +1963,10 @@ class Scheduler(ServerNode):
             if not self.workers:
                 logger.info("Lost all workers")
 
+            for w in self.workers:
+                self.bandwidth_workers.pop((address, w), None)
+                self.bandwidth_workers.pop((w, address), None)
+
             def remove_worker_from_events():
                 # If the worker isn't registered anymore after the delay, remove from events
                 if address not in self.workers and address in self.events:

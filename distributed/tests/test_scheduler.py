@@ -1529,6 +1529,25 @@ def test_bandwidth(c, s, a, b):
     assert (b.address, a.address) in s.bandwidth_workers
 
 
+@gen_cluster(client=True, Worker=Nanny)
+async def test_bandwidth_clear(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    x = c.submit(np.arange, 1000000, workers=[a.worker_address], pure=False)
+    y = c.submit(np.arange, 1000000, workers=[b.worker_address], pure=False)
+    z = c.submit(operator.add, x, y)  # force communication
+    await z
+
+    async def f(dask_worker):
+        await dask_worker.heartbeat()
+
+    await c.run(f)
+
+    assert s.bandwidth_workers
+
+    await s.restart()
+    assert not s.bandwidth_workers
+
+
 @gen_cluster()
 def test_workerstate_clean(s, a, b):
     ws = s.workers[a.address].clean()
