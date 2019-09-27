@@ -27,7 +27,7 @@ async def test_text(cleanup):
 
 @pytest.mark.asyncio
 async def test_file(cleanup, tmp_path):
-    fn = tmp_path / "foo.yaml"
+    fn = str(tmp_path / "foo.yaml")
     with open(fn, "w") as f:
         yaml.dump(
             {
