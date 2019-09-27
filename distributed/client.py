@@ -652,7 +652,7 @@ class Client(Node):
             with ignoring(AttributeError):
                 loop = address.loop
             if security is None:
-                security = self.cluster.security
+                security = getattr(self.cluster, "security", None)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -917,7 +917,7 @@ class Client(Node):
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
             try:
-                await self.cluster._start()
+                await self.cluster
             except AttributeError:  # Some clusters don't have this method
                 pass
             except Exception:
@@ -1266,7 +1266,7 @@ class Client(Node):
                 self._release_key(key=key)
             if self._start_arg is None:
                 with ignoring(AttributeError):
-                    await self.cluster._close()
+                    await self.cluster.close()
             self.rpc.close()
             self.status = "closed"
             if _get_global_client() is self:
