@@ -8,6 +8,7 @@ import os
 from bokeh.layouts import column, row
 from bokeh.models import (
     ColumnDataSource,
+    ColorBar,
     DataRange1d,
     HoverTool,
     ResetTool,
@@ -32,7 +33,7 @@ from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
 from bokeh.themes import Theme
-from bokeh.transform import factor_cmap
+from bokeh.transform import factor_cmap, linear_cmap
 from bokeh.io import curdoc
 import dask
 from dask.utils import format_bytes
@@ -296,14 +297,19 @@ class NBytesHistogram(DashboardComponent):
 
 
 class BandwidthTypes(DashboardComponent):
-    """ How many tasks are on each worker """
+    """ Bar chart showing bandwidth per type """
 
     def __init__(self, scheduler, **kwargs):
         with log_errors():
             self.last = 0
             self.scheduler = scheduler
             self.source = ColumnDataSource(
-                {"bandwidth": [1, 2], "bandwidth-half": [0.5, 1], "type": ["a", "b"]}
+                {
+                    "bandwidth": [1, 2],
+                    "bandwidth-half": [0.5, 1],
+                    "type": ["a", "b"],
+                    "bandwidth_text": ["1", "2"],
+                }
             )
 
             fig = figure(
@@ -333,13 +339,13 @@ class BandwidthTypes(DashboardComponent):
             fig.toolbar_location = None
 
             hover = HoverTool()
-            hover.tooltips = "@type: @bandwidth"
+            hover.tooltips = "@type: @bandwidth_text / s"
             hover.point_policy = "follow_mouse"
             fig.add_tools(hover)
 
             self.fig = fig
 
-    # @without_property_validation
+    @without_property_validation
     def update(self):
         with log_errors():
             bw = self.scheduler.bandwidth_types
@@ -348,6 +354,102 @@ class BandwidthTypes(DashboardComponent):
                 "bandwidth": bw.values(),
                 "bandwidth-half": [b / 2 for b in bw.values()],
                 "type": bw.keys(),
+                "bandwidth_text": list(map(format_bytes, bw.values())),
+            }
+            self.fig.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
+
+            update(self.source, result)
+
+
+class BandwidthWorkers(DashboardComponent):
+    """ How many tasks are on each worker """
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.last = 0
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "bandwidth": [1, 2],
+                    "source": ["a", "b"],
+                    "destination": ["a", "b"],
+                    "bandwidth_text": ["1", "2"],
+                }
+            )
+
+            values = [hex(x)[2:] for x in range(64, 256)][::-1]
+            mapper = linear_cmap(
+                field_name="bandwidth",
+                palette=["#" + x + x + "FF" for x in values],
+                low=0,
+                high=1,
+            )
+
+            fig = figure(
+                title="Bandwidth by Worker",
+                tools="",
+                id="bk-bandwidth-worker-plot",
+                name="bandwidth_worker_heatmap",
+                x_range=["a", "b"],
+                y_range=["a", "b"],
+                **kwargs
+            )
+            fig.xaxis.major_label_orientation = -math.pi / 12
+            rect = fig.rect(
+                source=self.source,
+                x="source",
+                y="destination",
+                color=mapper,
+                height=1,
+                width=1,
+            )
+
+            self.color_map = mapper["transform"]
+            color_bar = ColorBar(
+                color_mapper=self.color_map,
+                label_standoff=12,
+                border_line_color=None,
+                location=(0, 0),
+            )
+            color_bar.formatter = NumeralTickFormatter(format="0 b")
+            fig.add_layout(color_bar, "right")
+
+            fig.toolbar.logo = None
+            fig.toolbar_location = None
+
+            hover = HoverTool()
+            hover.tooltips = """
+            <div>
+                <p><b>Source:</b> @source </p>
+                <p><b>Destination:</b> @destination </p>
+                <p><b>Bandwidth:</b> @bandwidth_text / s</p>
+            </div>
+            """
+            hover.point_policy = "follow_mouse"
+            fig.add_tools(hover)
+
+            self.fig = fig
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            bw = self.scheduler.bandwidth_workers
+            if not bw:
+                return
+            x, y, value = zip(*[(a, b, c) for (a, b), c in bw.items()])
+
+            if self.color_map.high < max(value):
+                self.color_map.high = max(value)
+
+            factors = list(sorted(set(x + y)))
+            self.fig.x_range.factors = factors
+            self.fig.y_range.factors = factors
+
+            result = {
+                "source": x,
+                "destination": y,
+                "bandwidth": value,
+                "bandwidth_text": list(map(format_bytes, value)),
             }
             self.fig.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
 
@@ -1664,6 +1766,15 @@ def individual_bandwidth_types(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+def individual_bandwidth_workers(scheduler, extra, doc):
+    with log_errors():
+        bw = BandwidthWorkers(scheduler)
+        bw.update()
+        add_periodic_callback(doc, bw, 500)
+        doc.add_root(bw.fig)
+        doc.theme = BOKEH_THEME
+
+
 def profile_doc(scheduler, extra, doc):
     with log_errors():
         doc.title = "Dask: Profile"
@@ -1772,6 +1883,7 @@ applications = {
     "/individual-nprocessing": individual_nprocessing_doc,
     "/individual-workers": individual_workers_doc,
     "/individual-bandwidth-types": individual_bandwidth_types,
+    "/individual-bandwidth-workers": individual_bandwidth_workers,
 }
 
 try:
