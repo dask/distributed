@@ -351,9 +351,9 @@ class BandwidthTypes(DashboardComponent):
             bw = self.scheduler.bandwidth_types
             self.fig.y_range.factors = list(sorted(bw))
             result = {
-                "bandwidth": bw.values(),
+                "bandwidth": list(bw.values()),
                 "bandwidth-half": [b / 2 for b in bw.values()],
-                "type": bw.keys(),
+                "type": list(bw.keys()),
                 "bandwidth_text": list(map(format_bytes, bw.values())),
             }
             self.fig.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
