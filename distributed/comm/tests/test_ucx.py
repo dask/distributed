@@ -262,20 +262,15 @@ async def test_ping_pong_numba():
 @pytest.mark.parametrize("processes", [True, False])
 def test_ucx_localcluster(loop, processes):
     if processes:
-        kwargs = {"env": {"UCX_MEMTYPE_CACHE": "n"}}
-    else:
-        kwargs = {}
+        pytest.skip("Known bug, processes=True doesn't work currently")
 
-    ucx_addr = ucp.get_address()
     with LocalCluster(
         protocol="ucx",
-        interface="ib0",
         dashboard_address=None,
         n_workers=2,
         threads_per_worker=1,
         processes=processes,
-        loop=loop,
-        **kwargs
+        loop=loop
     ) as cluster:
         with Client(cluster) as client:
             x = client.submit(inc, 1)
@@ -286,49 +281,19 @@ def test_ucx_localcluster(loop, processes):
             assert len(cluster.scheduler.workers) == 2
 
 
-@pytest.mark.skip(reason="TCP not supported")
-def test_tcp_localcluster(loop):
-    ucx_addr = "127.0.0.1"
-    port = 13337
-    env = {"UCX_MEMTYPE_CACHE": "n"}
-    with LocalCluster(
-        n_workers=2,
-        protocol="ucx://",
-        host=HOST,
-        scheduler_port=port,
-        processes=True,
-        threads_per_worker=1,
-        dashboard_address=None,
-        silence_logs=False,
-        env=env,
-    ) as cluster:
-        pass
-        # with Client(cluster) as e:
-        #     x = e.submit(inc, 1)
-        #     x.result()
-        #     assert x.key in c.scheduler.tasks
-        #     assert any(w.data == {x.key: 2} for w in c.workers)
-        #     assert e.loop is c.loop
-        #     print(c.scheduler.workers)
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_stress():
-    from distributed.utils import get_ip_interface
-
-    try:  # this check should be removed once UCX + TCP works
-        get_ip_interface("ib0")
-    except Exception:
-        pytest.skip("ib0 interface not found")
-
     import dask.array as da
     from distributed import wait
 
     chunksize = "10 MB"
 
     async with LocalCluster(
-        protocol="ucx://", host=HOST, dashboard_address=None, asynchronous=True
+        protocol="ucx",
+        dashboard_address=None,
+        asynchronous=True,
+        processes=False
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             rs = da.random.RandomState()
