@@ -1517,7 +1517,7 @@ def test_idle_timeout(c, s, a, b):
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
 def test_bandwidth(c, s, a, b):
     start = s.bandwidth
-    x = c.submit(operator.mul, b"0", 20000, workers=a.address)
+    x = c.submit(operator.mul, b"0", 1000000, workers=a.address)
     y = c.submit(lambda x: x, x, workers=b.address)
     yield y
     yield b.heartbeat()
