@@ -1927,7 +1927,7 @@ class Worker(ServerNode):
                         "who": worker,
                     }
                 )
-                if total_bytes > 10000:
+                if total_bytes > 1000000:
                     self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
                     if worker not in self.bandwidth_workers:
                         self.bandwidth_workers[worker] = bandwidth
