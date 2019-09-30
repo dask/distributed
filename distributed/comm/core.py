@@ -212,7 +212,9 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
                 )
                 with ignoring(gen.TimeoutError):
                     comm = await gen.with_timeout(
-                        timedelta(seconds=1), future, quiet_exceptions=EnvironmentError
+                        timedelta(seconds=min(deadline - time(), 1)),
+                        future,
+                        quiet_exceptions=EnvironmentError,
                     )
                     break
             if not comm:
