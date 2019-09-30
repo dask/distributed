@@ -1163,33 +1163,23 @@ class Worker(ServerNode):
         ):
             max_connections = max_connections * 2
 
-        proc = self.monitor.proc
-        memory = proc.memory_info().rss
-        if self.memory_limit:
-            frac = memory / self.memory_limit
+        if self.paused:
+            max_connections = 1
+            throttle_msg = " Throttling outgoing connections because worker is paused."
         else:
-            # memory_limit = 0 means no limit
-            frac = 0
+            throttle_msg = ""
 
         if (
             max_connections is not False
             and self.outgoing_current_count > max_connections
         ):
             logger.warning(
-                "Worker %s has too many open connections to respond to data request from %s (%d/%d)",
+                "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",
                 self.address,
                 who,
                 self.outgoing_current_count,
                 max_connections,
-            )
-            return {"status": "busy"}
-        elif self.paused or (
-            self.memory_pause_fraction and (frac > self.memory_pause_fraction)
-        ):
-            logger.warning(
-                "Worker %s is paused and cannot respond to data request from %s.",
-                self.address,
-                who,
+                throttle_msg,
             )
             return {"status": "busy"}
 
