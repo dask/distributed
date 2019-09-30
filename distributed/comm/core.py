@@ -207,7 +207,7 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
     # This starts a thread
     while True:
         try:
-            while deadline - time():
+            while deadline - time() > 0:
                 future = connector.connect(
                     loc, deserialize=deserialize, **(connection_args or {})
                 )
