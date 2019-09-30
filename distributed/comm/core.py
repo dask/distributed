@@ -1,14 +1,13 @@
 from abc import ABC, abstractmethod, abstractproperty
 from datetime import timedelta
 import logging
-from warnings import ignoring
 import weakref
 
 import dask
 from tornado import gen
 
 from ..metrics import time
-from ..utils import parse_timedelta
+from ..utils import parse_timedelta, ignoring
 from . import registry
 from .addressing import parse_address
 
