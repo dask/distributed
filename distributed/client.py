@@ -652,7 +652,7 @@ class Client(Node):
             with ignoring(AttributeError):
                 loop = address.loop
             if security is None:
-                security = self.cluster.security
+                security = getattr(self.cluster, "security", None)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -786,10 +786,12 @@ class Client(Node):
             return "<%s: not connected>" % (self.__class__.__name__,)
 
     def _repr_html_(self):
+        from .scheduler import Scheduler
+
         if (
             self.cluster
             and hasattr(self.cluster, "scheduler")
-            and self.cluster.scheduler
+            and isinstance(self.cluster.scheduler, Scheduler)
         ):
             info = self.cluster.scheduler.identity()
             scheduler = self.cluster.scheduler
@@ -917,9 +919,7 @@ class Client(Node):
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
             try:
-                await self.cluster._start()
-            except AttributeError:  # Some clusters don't have this method
-                pass
+                await self.cluster
             except Exception:
                 logger.info(
                     "Tried to start cluster and received an error. Proceeding.",
@@ -1266,7 +1266,7 @@ class Client(Node):
                 self._release_key(key=key)
             if self._start_arg is None:
                 with ignoring(AttributeError):
-                    await self.cluster._close()
+                    await self.cluster.close()
             self.rpc.close()
             self.status = "closed"
             if _get_global_client() is self:
@@ -3463,18 +3463,19 @@ class Client(Node):
 
         >>> c.get_versions(packages=['sklearn', 'geopandas'])  # doctest: +SKIP
         """
+        return self.sync(self._get_versions, check=check, packages=packages)
+
+    async def _get_versions(self, check=False, packages=[]):
         client = get_versions(packages=packages)
         try:
-            scheduler = sync(self.loop, self.scheduler.versions, packages=packages)
+            scheduler = await self.scheduler.versions(packages=packages)
         except KeyError:
             scheduler = None
         except TypeError:  # packages keyword not supported
-            scheduler = sync(self.loop, self.scheduler.versions)  # this raises
+            scheduler = await self.scheduler.versions()  # this raises
 
-        workers = sync(
-            self.loop,
-            self.scheduler.broadcast,
-            msg={"op": "versions", "packages": packages},
+        workers = await self.scheduler.broadcast(
+            msg={"op": "versions", "packages": packages}
         )
         result = {"scheduler": scheduler, "workers": workers, "client": client}
 
