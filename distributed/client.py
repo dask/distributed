@@ -1336,6 +1336,7 @@ class Client(Node):
             self._loop_runner.stop()
 
     async def _shutdown(self):
+        logger.info("Shutting down scheduler from Client")
         if self.cluster:
             await self.cluster.close()
         else:
