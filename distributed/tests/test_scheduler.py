@@ -1515,18 +1515,19 @@ def test_idle_timeout(c, s, a, b):
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
-def test_bandwidth(c, s, a, b):
+async def test_bandwidth(c, s, a, b):
     start = s.bandwidth
     x = c.submit(operator.mul, b"0", 1000000, workers=a.address)
     y = c.submit(lambda x: x, x, workers=b.address)
-    yield y
-    yield b.heartbeat()
+    await y
+    await b.heartbeat()
     assert s.bandwidth < start  # we've learned that we're slower
     assert b.latency
-    assert a.address in b.bandwidth_workers
-    assert bytes in b.bandwidth_types
     assert typename(bytes) in s.bandwidth_types
     assert (b.address, a.address) in s.bandwidth_workers
+
+    await a.close()
+    assert not s.bandwidth_workers
 
 
 @gen_cluster(client=True, Worker=Nanny)

@@ -210,6 +210,7 @@ class WorkerState(object):
     __slots__ = (
         "actors",
         "address",
+        "bandwidth",
         "extra",
         "has_what",
         "last_seen",
@@ -257,6 +258,7 @@ class WorkerState(object):
         self.metrics = {}
         self.last_seen = 0
         self.time_delay = 0
+        self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
 
         self.actors = set()
         self.has_what = set()
@@ -1349,21 +1351,22 @@ class Scheduler(ServerNode):
             self.bandwidth = (
                 self.bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
             )
-            for other, value in metrics["bandwidth"]["workers"].items():
+            for other, (bw, count) in metrics["bandwidth"]["workers"].items():
                 if (address, other) not in self.bandwidth_workers:
-                    self.bandwidth_workers[address, other] = value
+                    self.bandwidth_workers[address, other] = bw / count
                 else:
-                    self.bandwidth_workers[address, other] = (
-                        self.bandwidth_workers[address, other] * (1 - frac)
-                        + value * frac
-                    )
-            for typ, value in metrics["bandwidth"]["types"].items():
+                    alpha = (1 - frac) ** count
+                    self.bandwidth_workers[address, other] = self.bandwidth_workers[
+                        address, other
+                    ] * alpha + bw * (1 - alpha)
+            for typ, (bw, count) in metrics["bandwidth"]["types"].items():
                 if typ not in self.bandwidth_types:
-                    self.bandwidth_types[typ] = value
+                    self.bandwidth_types[typ] = bw / count
                 else:
-                    self.bandwidth_types[typ] = (
-                        self.bandwidth_types[typ] * (1 - frac) + value * frac
-                    )
+                    alpha = (1 - frac) ** count
+                    self.bandwidth_types[typ] = self.bandwidth_types[
+                        typ
+                    ] * alpha + bw * (1 - alpha)
         except KeyError:
             pass
 
