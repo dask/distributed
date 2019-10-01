@@ -1336,9 +1336,11 @@ class Client(Node):
             self._loop_runner.stop()
 
     async def _shutdown(self):
-        with ignoring(CommClosedError):
-            await self.scheduler.terminate(close_workers=True)
-        await self.close()
+        if self.cluster:
+            await self.cluster.close()
+        else:
+            with ignoring(CommClosedError):
+                await self.scheduler.terminate(close_workers=True)
 
     def shutdown(self):
         """ Shut down the connected scheduler and workers

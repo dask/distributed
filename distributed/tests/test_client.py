@@ -5647,5 +5647,14 @@ async def test_shutdown(cleanup):
             assert w.status == "closed"
 
 
+@pytest.mark.asyncio
+async def test_shutdown_localcluster(cleanup):
+    async with LocalCluster(n_workers=1, asynchronous=True, processes=False) as lc:
+        async with Client(lc, asynchronous=True) as c:
+            await c.shutdown()
+
+        assert lc.scheduler.status == "closed"
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401
