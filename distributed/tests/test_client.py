@@ -5636,5 +5636,16 @@ async def test_dashboard_link_cluster(cleanup):
             assert "http://foo.com" in client._repr_html_()
 
 
+@pytest.mark.asyncio
+async def test_shutdown(cleanup):
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                await c.shutdown()
+
+            assert s.status == "closed"
+            assert w.status == "closed"
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401
