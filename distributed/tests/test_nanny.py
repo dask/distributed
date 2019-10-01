@@ -291,34 +291,55 @@ def test_nanny_terminate(c, s, a):
 
 
 @gen_cluster(
-    nthreads=[("127.0.0.1", 1)],
+    nthreads=[("127.0.0.1", 1)] * 8,
     client=True,
     Worker=Nanny,
-    worker_kwargs={"memory_limit": 1e8, "memory_terminate_violations": "3s"},
+    worker_kwargs={"memory_limit": 2e8, "memory_pause_fraction": 0.6},
     timeout=20,
     clean_kwargs={"threads": False},
 )
-@pytest.mark.slow
-def test_nanny_terminate_violations(c, s, a):
-    from time import sleep
+def test_nanny_throttle(c, s, *workers):
+    def data(size, i):
+        return b"0" * size
 
-    def leak():
-        L = []
-        while True:
-            L.append(b"0" * 5000000)
-            sleep(0.01)
-
+    a = workers[0]
     proc = a.process.pid
-    with captured_logger(logging.getLogger("distributed.nanny")) as logger:
-        future = c.submit(leak)
+    from distributed import wait
+
+    with captured_logger(logging.getLogger("distributed.worker")) as logger:
+        size = int(0.05 * a.memory_limit)
+        futures = [
+            c.submit(data, size, i, workers=[a.worker_address]) for i in range(12)
+        ]
+        yield wait(futures)
+
+        def check(dask_worker):
+            self = dask_worker
+            proc = self.monitor.proc
+            memory = proc.memory_info().rss
+            frac = memory / self.memory_limit
+            return frac, self.paused, self.memory_pause_fraction
+
         start = time()
-        while a.process.pid == proc:
+        while True:
+            paused = yield c.run(check)
+            if not paused[a.worker_address][1]:
+                assert time() - start < 5
+            else:
+                break
             yield gen.sleep(0.1)
-            assert 3 < time() < start + 10
+
+        n = len(workers)
+        result = c.map(
+            lambda x, i: x[i],
+            [futures[0]] * n,
+            range(n),
+            workers=[w.worker_address for w in workers[1:]],
+        )
+        yield result[0]
+
         out = logger.getvalue()
-        assert "restart" in out.lower()
-        assert "memory" in out.lower()
-        assert "terminating in" in out.lower()
+        assert "throttle" in out.lower()
 
 
 @gen_cluster(nthreads=[], client=True)

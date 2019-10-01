@@ -2563,7 +2563,6 @@ class Worker(ServerNode):
             while memory > target:
                 if not self.data.fast:
                     logger.warning(
-                        "Memory use is high but worker has no data "
                         "to store to disk.  Perhaps some other process "
                         "is leaking memory?  Process memory: %s -- "
                         "Worker memory limit: %s",
