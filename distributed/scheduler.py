@@ -39,7 +39,7 @@ from .comm import (
 )
 from .comm.addressing import address_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
-from .diagnostics.plugin import SchedulerPlugin
+from .diagnostics.scheduler_plugin import SchedulerPlugin
 from . import profile
 from .metrics import time
 from .node import ServerNode

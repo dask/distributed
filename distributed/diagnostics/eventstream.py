@@ -1,6 +1,6 @@
 import logging
 
-from .plugin import SchedulerPlugin
+from .scheduler_plugin import SchedulerPlugin
 
 from ..core import connect, coerce_to_address
 from ..worker import dumps_function

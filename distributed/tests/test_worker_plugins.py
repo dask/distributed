@@ -7,11 +7,9 @@ from distributed import Worker
 class MyPlugin:
     name = "MyPlugin"
 
-    def __init__(self, data):
+    def __init__(self, data, expected_transitions=None):
         self.data = data
-        self.expected_args = []
-        self.expected_exceptions = []
-        self.expected_results = []
+        self.expected_transitions = expected_transitions
 
     def setup(self, worker):
         assert isinstance(worker, Worker)
@@ -19,40 +17,20 @@ class MyPlugin:
         self.worker._my_plugin_status = "setup"
         self.worker._my_plugin_data = self.data
 
-    def teardown(self, worker):
-        assert isinstance(worker, Worker)
+        self.observed_transitions = []
+
+    def teardown(self):
         self.worker._my_plugin_status = "teardown"
 
-    def task_started(self, worker, key, args, kwargs):
-        assert isinstance(worker, Worker)
+        if self.expected_transitions is not None:
+            assert len(self.observed_transitions) == len(self.expected_transitions)
+            for expected, real in zip(
+                self.expected_transitions, self.observed_transitions
+            ):
+                assert expected == real
 
-        if len(self.expected_args) > 0:
-            _args, _kwargs = self.expected_args.pop(0)
-            if _args is not None:
-                assert args == _args
-            if _kwargs is not None:
-                assert kwargs == _kwargs
-
-    def task_finished(self, worker, key, result):
-        assert isinstance(worker, Worker)
-
-        if len(self.expected_results) > 0:
-            assert result == self.expected_results.pop(0)
-
-    def task_failed(self, worker, key, exc_type, exc_value, exc_tb):
-        assert isinstance(worker, Worker)
-
-        if len(self.expected_exceptions) > 0:
-            assert exc_type == self.expected_exceptions.pop()
-
-    def expect_task_returns(self, result):
-        self.expected_results.append(result)
-
-    def expect_task_called_with(self, args=(), kwargs=None):
-        self.expected_args.append((args, kwargs))
-
-    def expect_exception(self, exception_class):
-        self.expected_exceptions.append(exception_class)
+    def transition(self, key, start, finish, **kwargs):
+        self.observed_transitions.append((key, start, finish))
 
 
 @gen_cluster(client=True, nthreads=[])
@@ -74,71 +52,34 @@ def test_create_on_construction(c, s, a, b):
     assert a._my_plugin_data == 5
 
 
-@gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
-def test_idempotence_with_name(c, s, a, b):
-    a._my_plugin_data = 100
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+def test_normal_task_transitions_called(c, s, w):
+    expected_transitions = [
+        ("task", "waiting", "ready"),
+        ("task", "ready", "executing"),
+        ("task", "executing", "memory"),
+    ]
 
-    yield c.register_worker_plugin(MyPlugin(5))
+    plugin = MyPlugin(1, expected_transitions=expected_transitions)
 
-    assert a._my_plugin_data == 100  # call above has no effect
+    yield c.register_worker_plugin(plugin)
+    yield c.submit(lambda x: x, 1, key="task")
 
 
-@gen_cluster(client=True, worker_kwargs={"plugins": [MyPlugin(5)]})
-def test_duplicate_with_no_name(c, s, a, b):
-    assert len(a.plugins) == len(b.plugins) == 1
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+def test_failing_task_transitions_called(c, s, w):
+    def failing(x):
+        raise Exception()
 
-    plugin = MyPlugin(10)
-    plugin.name = "other-name"
+    expected_transitions = [
+        ("task", "waiting", "ready"),
+        ("task", "ready", "executing"),
+        ("task", "executing", "error"),
+    ]
+
+    plugin = MyPlugin(1, expected_transitions=expected_transitions)
 
     yield c.register_worker_plugin(plugin)
 
-    assert len(a.plugins) == len(b.plugins) == 2
-
-    assert a._my_plugin_data == 10
-
-    yield c.register_worker_plugin(plugin)
-    assert len(a.plugins) == len(b.plugins) == 2
-
-    yield c.register_worker_plugin(plugin, name="foo")
-    assert len(a.plugins) == len(b.plugins) == 3
-
-
-@gen_cluster(client=True)
-def test_failing_task(c, s, a, b):
-    class MyException(Exception):
-        pass
-
-    def failing_task(x):
-        raise MyException()
-
-    plugin = MyPlugin(10)
-
-    plugin.expect_exception(MyException)
-
-    yield c.register_worker_plugin(plugin)
     with pytest.raises(Exception):
-        yield c.submit(failing_task, None)
-
-
-@gen_cluster(client=True)
-def test_called_on_task_started(c, s, a, b):
-    plugin = MyPlugin(10)
-
-    plugin.expect_task_called_with(args=(10,))
-    plugin.expect_task_called_with(args=(20,))
-
-    yield c.register_worker_plugin(plugin)
-    yield c.submit(lambda x: x, 10)
-    yield c.submit(lambda x: x, 20)
-
-
-@gen_cluster(client=True)
-def test_called_on_task_finished(c, s, a, b):
-    plugin = MyPlugin(10)
-
-    plugin.expect_task_returns(20)
-    plugin.expect_task_returns(40)
-
-    yield c.register_worker_plugin(plugin)
-    yield c.submit(lambda x: x * 2, 10)
-    yield c.submit(lambda x: x * 2, 20)
+        yield c.submit(failing, 1, key="task")

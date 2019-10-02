@@ -5,7 +5,7 @@ from timeit import default_timer
 from toolz import groupby, valmap
 from tornado import gen
 
-from .plugin import SchedulerPlugin
+from .scheduler_plugin import SchedulerPlugin
 from ..utils import key_split, key_split_group, log_errors, tokey
 
 

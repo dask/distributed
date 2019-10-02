@@ -1055,7 +1055,7 @@ class Worker(ServerNode):
             setproctitle("dask-worker [closing]")
 
             teardowns = [
-                plugin.teardown(self)
+                plugin.teardown()
                 for plugin in self.plugins.values()
                 if hasattr(plugin, "teardown")
             ]
@@ -1522,6 +1522,7 @@ class Worker(ServerNode):
         self.task_state[key] = state or finish
         if self.validate:
             self.validate_key(key)
+        self._notify_transition(key, start, finish, **kwargs)
 
     def transition_waiting_ready(self, key):
         try:
@@ -2311,15 +2312,7 @@ class Worker(ServerNode):
         name = key_split(key) + "." + function
 
         if iscoroutinefunction(func):
-            notify_task_started(self.plugins, self, key, args, kwargs)
-            try:
-                result = await func(*args, **kwargs)
-                notify_task_finished(self.plugins, self, key, result)
-            except Exception:
-                exc_type, exc_value, exc_tb = sys.exc_info()
-                notify_task_failed(self.plugins, self, key, exc_type, exc_value, exc_tb)
-                raise
-
+            result = await func(*args, **kwargs)
         elif separate_thread:
             result = await self.executor_submit(
                 name,
@@ -2332,20 +2325,11 @@ class Worker(ServerNode):
                     name,
                     self.active_threads,
                     self.active_threads_lock,
-                    self.plugins,
                 ),
                 executor=self.actor_executor,
             )
         else:
-            notify_task_started(self.plugins, self, key, args, kwargs)
-            try:
-                result = func(*args, **kwargs)
-                notify_task_finished(self.plugins, self, key, result)
-            except Exception:
-                exc_type, exc_value, exc_tb = sys.exc_info()
-                notify_task_failed(self.plugins, self, key, exc_type, exc_value, exc_tb)
-                raise
-
+            result = func(*args, **kwargs)
         return {"status": "OK", "result": to_serialize(result)}
 
     def actor_attribute(self, comm=None, actor=None, attribute=None):
@@ -2433,7 +2417,6 @@ class Worker(ServerNode):
                         self.active_threads,
                         self.active_threads_lock,
                         self.scheduler_delay,
-                        self.plugins,
                     ),
                 )
             except RuntimeError as e:
@@ -2697,6 +2680,13 @@ class Worker(ServerNode):
 
         result = {k: profile.call_stack(frame) for k, frame in frames.items()}
         return result
+
+    def _notify_transition(self, key, start, finish, **kwargs):
+        for plugin in self.plugins.values():
+            try:
+                plugin.transition(key, start, finish, **kwargs)
+            except Exception:
+                logger.info("Plugin failed with exception", exc_info=True)
 
     ##############
     # Validation #
@@ -3246,7 +3236,6 @@ def apply_function(
     active_threads,
     active_threads_lock,
     time_delay,
-    plugins,
 ):
     """ Run a function, collect information
 
@@ -3260,25 +3249,13 @@ def apply_function(
     thread_state.start_time = time()
     thread_state.execution_state = execution_state
     thread_state.key = key
-
-    notify_task_started(plugins, execution_state["worker"], key, args, kwargs)
-
     start = time()
-
     try:
         result = function(*args, **kwargs)
-        notify_task_finished(plugins, execution_state["worker"], key, result)
-
-    except Exception:
-        exc_type, exc_value, exc_tb = sys.exc_info()
-        notify_task_failed(
-            plugins, execution_state["worker"], key, exc_type, exc_value, exc_tb
-        )
-
-        msg = error_message(exc_value)
+    except Exception as e:
+        msg = error_message(e)
         msg["op"] = "task-erred"
-        msg["actual-exception"] = exc_value
-
+        msg["actual-exception"] = e
     else:
         msg = {
             "op": "task-finished",
@@ -3298,14 +3275,7 @@ def apply_function(
 
 
 def apply_function_actor(
-    function,
-    args,
-    kwargs,
-    execution_state,
-    key,
-    active_threads,
-    active_threads_lock,
-    plugins,
+    function, args, kwargs, execution_state, key, active_threads, active_threads_lock
 ):
     """ Run a function, collect information
 
@@ -3321,39 +3291,12 @@ def apply_function_actor(
     thread_state.execution_state = execution_state
     thread_state.key = key
 
-    notify_task_started(plugins, execution_state["worker"], key, args, kwargs)
-    try:
-        result = function(*args, **kwargs)
-        notify_task_finished(plugins, execution_state["worker"], key, result)
-    except Exception:
-        exc_type, exc_value, exc_tb = sys.exc_info()
-        notify_task_failed(
-            plugins, execution_state["worker"], key, exc_type, exc_value, exc_tb
-        )
-        raise
+    result = function(*args, **kwargs)
 
     with active_threads_lock:
         del active_threads[ident]
 
     return result
-
-
-def notify_task_started(plugins, worker, key, args, kwargs):
-    for plugin in plugins.values():
-        if hasattr(plugin, "task_started"):
-            plugin.task_started(worker, key, args, kwargs)
-
-
-def notify_task_finished(plugins, worker, key, result):
-    for plugin in plugins.values():
-        if hasattr(plugin, "task_finished"):
-            plugin.task_finished(worker, key, result)
-
-
-def notify_task_failed(plugins, worker, key, exc_type, exc_value, exc_tb):
-    for plugin in plugins.values():
-        if hasattr(plugin, "task_failed"):
-            plugin.task_failed(worker, key, exc_type, exc_value, exc_tb)
 
 
 def get_msg_safe_str(msg):

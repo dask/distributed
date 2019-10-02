@@ -1,6 +1,6 @@
 from ..utils import ignoring
 from .graph_layout import GraphLayout
-from .plugin import SchedulerPlugin
+from .scheduler_plugin import SchedulerPlugin
 
 with ignoring(ImportError):
     from .progressbar import progress

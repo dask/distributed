@@ -1,7 +1,7 @@
 Scheduler Plugins
 =================
 
-.. autoclass:: distributed.diagnostics.plugin.SchedulerPlugin
+.. autoclass:: distributed.diagnostics.scheduler_plugin.SchedulerPlugin
    :members:
 
 
