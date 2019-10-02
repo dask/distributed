@@ -307,8 +307,12 @@ class SpecCluster(Cluster):
 
             def f():
                 if (
-                    msg in [w.worker_address for w in self.workers.values()]
+                    name in self.workers
                     and msg not in self.scheduler_info["workers"]
+                    and not any(
+                        d["name"] == name
+                        for d in self.scheduler_info["workers"].values()
+                    )
                 ):
                     self._futures.add(asyncio.ensure_future(self.workers[name].close()))
                     del self.workers[name]
