@@ -116,12 +116,7 @@ class UCX(Comm):
             # Send frames
             for frame in frames:
                 if nbytes(frame) > 0:
-                    if hasattr(frame, "__array_interface__") or hasattr(
-                        frame, "__cuda_array_interface__"
-                    ):
-                        await self.ep.send(frame)
-                    else:
-                        await self.ep.send(frame)
+                    await self.ep.send(frame)
             return sum(map(nbytes, frames))
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
@@ -156,10 +151,7 @@ class UCX(Comm):
                         else:
                             frame = np.empty(size, dtype=np.uint8)
                         await self.ep.recv(frame)
-                        if is_cuda:
-                            frames.append(frame)
-                        else:
-                            frames.append(frame.data)
+                        frames.append(frame)
                     else:
                         if is_cuda:
                             frames.append(numba.cuda.device_array((0,), dtype=np.uint8))
