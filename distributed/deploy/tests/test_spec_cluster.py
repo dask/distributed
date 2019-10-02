@@ -160,7 +160,7 @@ async def test_unexpected_closed_worker(cleanup):
 @pytest.mark.asyncio
 async def test_restart(cleanup):
     # Regression test for https://github.com/dask/distributed/issues/3062
-    worker = {"cls": Worker, "options": {"nthreads": 1}}
+    worker = {"cls": Nanny, "options": {"nthreads": 1}}
     with dask.config.set({"distributed.deploy.lost-worker-timeout": "2s"}):
         async with SpecCluster(
             asynchronous=True, scheduler=scheduler, worker=worker
