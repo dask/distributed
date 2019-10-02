@@ -16,7 +16,6 @@ from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors
 from tornado.ioloop import IOLoop
 import ucp
 import numpy as np
-import numba.cuda
 
 import os
 
@@ -31,6 +30,23 @@ MAX_MSG_LOG = 23
 # ----------------------------------------------------------------------------
 # Comm Interface
 # ----------------------------------------------------------------------------
+
+# Let's find the function, `cuda_array`, to use when allocating new CUDA arrays
+try:
+    import rmm
+
+    cuda_array = lambda n: rmm.device_array(n, dtype=np.uint8)
+except ImportError:
+    try:
+        import numba.cuda
+
+        cuda_array = lambda n: numba.cuda.device_array((n,), dtype=np.uint8)
+    except ImportError:
+
+        def cuda_array(n):
+            raise RuntimeError(
+                "In order to send/recv CUDA arrays, Numba or RMM is required"
+            )
 
 
 class UCX(Comm):
@@ -147,14 +163,14 @@ class UCX(Comm):
                 for is_cuda, size in zip(is_cudas.tolist(), sizes.tolist()):
                     if size > 0:
                         if is_cuda:
-                            frame = numba.cuda.device_array((size,), dtype=np.uint8)
+                            frame = cuda_array(size)
                         else:
                             frame = np.empty(size, dtype=np.uint8)
                         await self.ep.recv(frame)
                         frames.append(frame)
                     else:
                         if is_cuda:
-                            frames.append(numba.cuda.device_array((0,), dtype=np.uint8))
+                            frames.append(cuda_array(size))
                         else:
                             frames.append(b"")
                 msg = await from_frames(
