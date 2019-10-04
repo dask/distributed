@@ -27,7 +27,7 @@ from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
-from dask.utils import ensure_dict, format_bytes
+from dask.utils import ensure_dict, format_bytes, funcname
 
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
@@ -69,7 +69,6 @@ from .worker import dumps_task, get_client, get_worker, secede
 from .utils import (
     All,
     sync,
-    funcname,
     ignoring,
     tokey,
     log_errors,
@@ -1336,14 +1335,25 @@ class Client(Node):
         if self._should_close_loop and not shutting_down():
             self._loop_runner.stop()
 
-    def shutdown(self, *args, **kwargs):
-        """ Deprecated, see close instead
+    async def _shutdown(self):
+        logger.info("Shutting down scheduler from Client")
+        if self.cluster:
+            await self.cluster.close()
+        else:
+            with ignoring(CommClosedError):
+                await self.scheduler.terminate(close_workers=True)
 
-        This was deprecated because "shutdown" was sometimes confusingly
-        thought to refer to the cluster rather than the client
+    def shutdown(self):
+        """ Shut down the connected scheduler and workers
+
+        Note, this may disrupt other clients that may be using the same
+        scheudler and workers.
+
+        See also
+        --------
+        Client.close: close only this client
         """
-        warnings.warn("Shutdown is deprecated.  Please use close instead")
-        return self.close(*args, **kwargs)
+        return self.sync(self._shutdown)
 
     def get_executor(self, **kwargs):
         """
