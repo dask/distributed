@@ -1182,7 +1182,7 @@ class Worker(ServerNode):
             max_connections is not False
             and self.outgoing_current_count > max_connections
         ):
-            logger.warning(
+            logger.debug(
                 "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",
                 self.address,
                 who,
@@ -2581,6 +2581,7 @@ class Worker(ServerNode):
             while memory > target:
                 if not self.data.fast:
                     logger.warning(
+                        "Memory use is high but worker has no data "
                         "to store to disk.  Perhaps some other process "
                         "is leaking memory?  Process memory: %s -- "
                         "Worker memory limit: %s",

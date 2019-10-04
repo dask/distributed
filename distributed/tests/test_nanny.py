@@ -15,7 +15,7 @@ from tornado.locks import Event
 
 import dask
 from distributed.diagnostics import SchedulerPlugin
-from distributed import Nanny, rpc, Scheduler, Worker, Client
+from distributed import Nanny, rpc, Scheduler, Worker, Client, wait
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -298,48 +298,47 @@ def test_nanny_terminate(c, s, a):
     timeout=20,
     clean_kwargs={"threads": False},
 )
-def test_nanny_throttle(c, s, *workers):
-    def data(size, i):
+async def test_nanny_throttle(c, s, *workers):
+    def data(size):
         return b"0" * size
 
     a = workers[0]
     proc = a.process.pid
-    from distributed import wait
 
-    with captured_logger(logging.getLogger("distributed.worker")) as logger:
-        size = int(0.05 * a.memory_limit)
-        futures = [
-            c.submit(data, size, i, workers=[a.worker_address]) for i in range(12)
-        ]
-        yield wait(futures)
+    size = int(0.05 * a.memory_limit)
+    futures = [
+        c.submit(data, size, workers=[a.worker_address], pure=False) for i in range(12)
+    ]
+    await wait(futures)
 
-        def check(dask_worker):
-            self = dask_worker
-            proc = self.monitor.proc
-            memory = proc.memory_info().rss
-            frac = memory / self.memory_limit
-            return frac, self.paused, self.memory_pause_fraction
+    def check(dask_worker):
+        self = dask_worker
+        proc = self.monitor.proc
+        memory = proc.memory_info().rss
+        frac = memory / self.memory_limit
+        return frac, self.paused, self.memory_pause_fraction
 
-        start = time()
-        while True:
-            paused = yield c.run(check)
-            if not paused[a.worker_address][1]:
-                assert time() - start < 5
-            else:
-                break
-            yield gen.sleep(0.1)
+    start = time()
+    while True:
+        paused = await c.run(check)
+        if not paused[a.worker_address][1]:
+            assert time() - start < 5, paused[a.worker_address]
+        else:
+            break
+        await gen.sleep(0.1)
 
-        n = len(workers)
-        result = c.map(
-            lambda x, i: x[i],
-            [futures[0]] * n,
-            range(n),
-            workers=[w.worker_address for w in workers[1:]],
-        )
-        yield result[0]
-
-        out = logger.getvalue()
-        assert "throttle" in out.lower()
+    await c.run(lambda: logging.getLogger("distributed.worker").setLevel(logging.DEBUG))
+    n = len(workers)
+    result = c.map(
+        lambda x, i: x[i],
+        [futures[0]] * n,
+        range(n),
+        workers=[w.worker_address for w in workers[1:]],
+    )
+    await result[0]
+    wlogs = await c.get_worker_logs(workers=[a.worker_address])
+    wlogs = "\n".join(x[1] for x in wlogs[a.worker_address])
+    assert "throttling" in wlogs.lower()
 
 
 @gen_cluster(nthreads=[], client=True)
