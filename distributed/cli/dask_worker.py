@@ -3,6 +3,7 @@ import atexit
 import logging
 import gc
 import os
+import signal
 from sys import exit
 import warnings
 
@@ -384,8 +385,13 @@ def main(
         if nanny:
             await asyncio.gather(*[n.close(timeout=2) for n in nannies])
 
+    signal_fired = False
+
     def on_signal(signum):
-        logger.info("Exiting on signal %d", signum)
+        nonlocal signal_fired
+        signal_fired = True
+        if signum != signal.SIGINT:
+            logger.info("Exiting on signal %d", signum)
         asyncio.ensure_future(close_all())
 
     async def run():
@@ -398,7 +404,8 @@ def main(
         loop.run_sync(run)
     except TimeoutError:
         # We already log the exception in nanny / worker. Don't do it again.
-        raise TimeoutError("Timed out starting worker.") from None
+        if not signal_fired:
+            logger.info("Timed out starting worker")
     except KeyboardInterrupt:
         pass
     finally:
