@@ -226,6 +226,11 @@ class SpecCluster(Cluster):
             self.sync(self._start)
             self.sync(self._correct_state)
 
+    async def periodic_correct(self):
+        while True:
+            await asyncio.sleep(10)  # make a param?
+            await self._correct_state()
+
     async def _start(self):
         while self.status == "starting":
             await asyncio.sleep(0.01)
@@ -255,6 +260,8 @@ class SpecCluster(Cluster):
             connection_args=self.security.get_connection_args("client"),
         )
         await super()._start()
+        self.periodic_tasks = {}
+        self.periodic_tasks["correct"] = asyncio.create_task(self.periodic_correct())
 
     def _correct_state(self):
         if self._correct_state_waiting:
@@ -350,6 +357,8 @@ class SpecCluster(Cluster):
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
+        for task in self.periodic_tasks.values():
+            task.cancel()
 
         await super()._close()
 
