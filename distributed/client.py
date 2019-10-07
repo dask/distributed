@@ -27,7 +27,7 @@ from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
-from dask.utils import ensure_dict, format_bytes
+from dask.utils import ensure_dict, format_bytes, funcname
 
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
@@ -69,7 +69,6 @@ from .worker import dumps_task, get_client, get_worker, secede
 from .utils import (
     All,
     sync,
-    funcname,
     ignoring,
     tokey,
     log_errors,
@@ -652,7 +651,7 @@ class Client(Node):
             with ignoring(AttributeError):
                 loop = address.loop
             if security is None:
-                security = self.cluster.security
+                security = getattr(self.cluster, "security", None)
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
@@ -786,10 +785,12 @@ class Client(Node):
             return "<%s: not connected>" % (self.__class__.__name__,)
 
     def _repr_html_(self):
+        from .scheduler import Scheduler
+
         if (
             self.cluster
             and hasattr(self.cluster, "scheduler")
-            and self.cluster.scheduler
+            and isinstance(self.cluster.scheduler, Scheduler)
         ):
             info = self.cluster.scheduler.identity()
             scheduler = self.cluster.scheduler
@@ -917,9 +918,7 @@ class Client(Node):
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
             try:
-                await self.cluster._start()
-            except AttributeError:  # Some clusters don't have this method
-                pass
+                await self.cluster
             except Exception:
                 logger.info(
                     "Tried to start cluster and received an error. Proceeding.",
@@ -1266,7 +1265,7 @@ class Client(Node):
                 self._release_key(key=key)
             if self._start_arg is None:
                 with ignoring(AttributeError):
-                    await self.cluster._close()
+                    await self.cluster.close()
             self.rpc.close()
             self.status = "closed"
             if _get_global_client() is self:
@@ -1336,14 +1335,25 @@ class Client(Node):
         if self._should_close_loop and not shutting_down():
             self._loop_runner.stop()
 
-    def shutdown(self, *args, **kwargs):
-        """ Deprecated, see close instead
+    async def _shutdown(self):
+        logger.info("Shutting down scheduler from Client")
+        if self.cluster:
+            await self.cluster.close()
+        else:
+            with ignoring(CommClosedError):
+                await self.scheduler.terminate(close_workers=True)
 
-        This was deprecated because "shutdown" was sometimes confusingly
-        thought to refer to the cluster rather than the client
+    def shutdown(self):
+        """ Shut down the connected scheduler and workers
+
+        Note, this may disrupt other clients that may be using the same
+        scheudler and workers.
+
+        See also
+        --------
+        Client.close: close only this client
         """
-        warnings.warn("Shutdown is deprecated.  Please use close instead")
-        return self.close(*args, **kwargs)
+        return self.sync(self._shutdown)
 
     def get_executor(self, **kwargs):
         """
