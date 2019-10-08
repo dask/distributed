@@ -644,9 +644,13 @@ class Client(Node):
                 logger.info("Config value `scheduler-address` found: %s", address)
 
         if address is not None and kwargs:
-            raise ValueError(
-                "Unexpected keyword arguments: {}".format(str(sorted(kwargs)))
-            )
+            unused_arg = [
+                arg for arg in kwargs if arg not in ["silence_logs"] and kwargs.get(arg) != None
+            ]
+            if unused_arg and any(unused_arg):
+                raise ValueError(
+                    "Unexpected keyword arguments: {}".format(str(sorted(kwargs)))
+                )
 
         if isinstance(address, (rpc, PooledRPCCall)):
             self.scheduler = address
