@@ -11,10 +11,10 @@ from distributed.utils_test import loop  # noqa: F401
 async def test_basic():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
-        connect_kwargs=dict(known_hosts=None),
+        connect_options=dict(known_hosts=None),
         asynchronous=True,
-        scheduler_kwargs={"port": 0, "idle_timeout": "5s"},
-        worker_kwargs={"death_timeout": "5s"},
+        scheduler_options={"port": 0, "idle_timeout": "5s"},
+        worker_options={"death_timeout": "5s"},
     ) as cluster:
         assert len(cluster.workers) == 2
         async with Client(cluster, asynchronous=True) as client:
@@ -29,10 +29,10 @@ async def test_basic():
 async def test_keywords():
     async with SSHCluster(
         ["127.0.0.1"] * 3,
-        connect_kwargs=dict(known_hosts=None),
+        connect_options=dict(known_hosts=None),
         asynchronous=True,
-        worker_kwargs={"nthreads": 2, "memory_limit": "2 GiB", "death_timeout": "5s"},
-        scheduler_kwargs={"idle_timeout": "5s", "port": 0},
+        worker_options={"nthreads": 2, "memory_limit": "2 GiB", "death_timeout": "5s"},
+        scheduler_options={"idle_timeout": "5s", "port": 0},
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert (
