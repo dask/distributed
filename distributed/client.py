@@ -4140,12 +4140,12 @@ class as_completed(object):
 
     async def _track_future(self, future):
         try:
-            await _wait(future)
+            await _wait(future, timeout=self.timeout)
         except CancelledError:
             pass
         if self.with_results:
             try:
-                result = await future._result(raiseit=False, timeout=timeout)
+                result = await future._result(raiseit=False, timeout=self.timeout)
             except CancelledError as exc:
                 result = exc
         with self.lock:
