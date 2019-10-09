@@ -2682,11 +2682,12 @@ class Worker(ServerNode):
         return result
 
     def _notify_transition(self, key, start, finish, **kwargs):
-        for plugin in self.plugins.values():
-            try:
-                plugin.transition(key, start, finish, **kwargs)
-            except Exception:
-                logger.info("Plugin failed with exception", exc_info=True)
+        for name, plugin in self.plugins.items():
+            if hasattr(plugin, "transition"):
+                try:
+                    plugin.transition(key, start, finish, **kwargs)
+                except Exception:
+                    logger.info("Plugin '%s' failed with exception" % name, exc_info=True)
 
     ##############
     # Validation #
