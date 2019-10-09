@@ -645,11 +645,13 @@ class Client(Node):
 
         if address is not None and kwargs:
             unused_arg = [
-                arg for arg in kwargs if arg not in ["silence_logs"] and kwargs.get(arg) != None
+                arg
+                for arg in kwargs
+                if arg not in ["silence_logs"] and kwargs.get(arg) is not None
             ]
             if unused_arg and any(unused_arg):
                 raise ValueError(
-                    "Unexpected keyword arguments: {}".format(str(sorted(kwargs)))
+                    "Unexpected keyword arguments: {}".format(str(sorted(unused_arg)))
                 )
 
         if isinstance(address, (rpc, PooledRPCCall)):
