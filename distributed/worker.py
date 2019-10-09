@@ -2687,7 +2687,9 @@ class Worker(ServerNode):
                 try:
                     plugin.transition(key, start, finish, **kwargs)
                 except Exception:
-                    logger.info("Plugin '%s' failed with exception" % name, exc_info=True)
+                    logger.info(
+                        "Plugin '%s' failed with exception" % name, exc_info=True
+                    )
 
     ##############
     # Validation #
