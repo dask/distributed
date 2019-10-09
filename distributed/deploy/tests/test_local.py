@@ -225,7 +225,7 @@ def test_Client_unused_kwargs_with_cluster(loop):
             c = Client(cluster, n_workers=2, dashboard_port=8000, silence_logs=None)
         assert (
             str(argexcept.value)
-            == "Unexpected keyword arguments: ['dashboard_port', 'n_workers']"
+            == "Unexpected keyword arguments: ['dashboard_port', 'n_workers', 'silence_logs']"
         )
 
 
@@ -236,7 +236,7 @@ def test_Client_unused_kwargs_with_address(loop):
         )
     assert (
         str(argexcept.value)
-        == "Unexpected keyword arguments: ['dashboard_port', 'n_workers']"
+        == "Unexpected keyword arguments: ['dashboard_port', 'n_workers', 'silence_logs']"
     )
 
 
