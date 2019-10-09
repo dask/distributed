@@ -224,8 +224,8 @@ class Future(WrappedKey):
         else:
             return result
 
-    async def _result(self, raiseit=True):
-        await self._state.wait()
+    async def _result(self, raiseit=True, timeout=None):
+        await asyncio.wait_for(self._state.wait(), timeout=timeout)
         if self.status == "error":
             exc = clean_exception(self._state.exception, self._state.traceback)
             if raiseit:
@@ -4117,9 +4117,10 @@ class as_completed(object):
     3
     """
 
-    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True):
+    def __init__(self, futures=None, loop=None, with_results=False, raise_errors=True, timeout=None):
         if futures is None:
             futures = []
+        self.timeout = timeout
         self.futures = defaultdict(lambda: 0)
         self.queue = pyQueue()
         self.lock = threading.Lock()
@@ -4144,7 +4145,7 @@ class as_completed(object):
             pass
         if self.with_results:
             try:
-                result = await future._result(raiseit=False)
+                result = await future._result(raiseit=False, timeout=timeout)
             except CancelledError as exc:
                 result = exc
         with self.lock:

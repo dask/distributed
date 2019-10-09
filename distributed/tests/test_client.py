@@ -3416,6 +3416,12 @@ def test_as_completed_list(c):
     assert set(c.gather(seq2)) == {1, 2, 3, 4, 5}
 
 
+def test_as_completed_list_timeout(c):
+    seq = c.map(lambda x: slowinc(x, 1), range(5))
+    seq2 = list(as_completed(seq, timeout=.1))
+    assert set(c.gather(seq2)) == {1, 2, 3, 4, 5}
+
+
 def test_as_completed_results(c):
     seq = c.map(inc, range(5))
     seq2 = list(as_completed(seq, with_results=True))
