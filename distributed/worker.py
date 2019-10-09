@@ -1055,7 +1055,7 @@ class Worker(ServerNode):
             setproctitle("dask-worker [closing]")
 
             teardowns = [
-                plugin.teardown()
+                plugin.teardown(self)
                 for plugin in self.plugins.values()
                 if hasattr(plugin, "teardown")
             ]

@@ -1,10 +1,11 @@
 import pytest
 
+from distributed.diagnostics.plugin import WorkerPlugin
 from distributed.utils_test import gen_cluster
 from distributed import Worker
 
 
-class MyPlugin:
+class MyPlugin(WorkerPlugin):
     name = "MyPlugin"
 
     def __init__(self, data, expected_transitions=None):
@@ -19,7 +20,7 @@ class MyPlugin:
 
         self.observed_transitions = []
 
-    def teardown(self):
+    def teardown(self, worker):
         self.worker._my_plugin_status = "teardown"
 
         if self.expected_transitions is not None:

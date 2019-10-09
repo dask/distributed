@@ -5,7 +5,7 @@ from time import time
 
 import dask
 from .core import CommClosedError
-from .diagnostics.scheduler_plugin import SchedulerPlugin
+from .diagnostics.plugin import SchedulerPlugin
 from .utils import log_errors, PeriodicCallback
 
 try:

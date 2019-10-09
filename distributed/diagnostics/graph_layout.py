@@ -1,4 +1,4 @@
-from .scheduler_plugin import SchedulerPlugin
+from .plugin import SchedulerPlugin
 
 
 class GraphLayout(SchedulerPlugin):

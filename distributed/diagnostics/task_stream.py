@@ -3,7 +3,7 @@ import logging
 
 import dask
 from .progress_stream import color_of
-from .scheduler_plugin import SchedulerPlugin
+from .plugin import SchedulerPlugin
 from ..utils import key_split, format_time, parse_timedelta
 from ..metrics import time
 
