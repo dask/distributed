@@ -3879,7 +3879,9 @@ class Client(Node):
         on all currently connected workers. It will also be run on any worker
         that connects in the future.
 
-        The plugin should be an instance of a subclass of WorkerPlugin. It must be
+        The plugin may include methods ``setup``, ``teardown``, and
+        ``transition``.  See the ``dask.distributed.WorkerPlugin`` class or the
+        examples below for the interface and docstrings.  It must be
         serializable with the pickle or cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
@@ -3906,7 +3908,7 @@ class Client(Node):
         ...         pass
         ...     def teardown(self, worker: dask.distributed.Worker):
         ...         pass
-        ...     def transition(self, key, start, finish, *args, **kwargs):
+        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -3924,7 +3926,7 @@ class Client(Node):
 
         See Also
         --------
-        distributed.diagnostics.plugin.WorkerPlugin
+        distributed.WorkerPlugin
         """
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 

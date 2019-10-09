@@ -1,8 +1,7 @@
 import pytest
 
-from distributed.diagnostics.plugin import WorkerPlugin
+from distributed import Worker, WorkerPlugin
 from distributed.utils_test import gen_cluster
-from distributed import Worker
 
 
 class MyPlugin(WorkerPlugin):
@@ -84,3 +83,11 @@ def test_failing_task_transitions_called(c, s, w):
 
     with pytest.raises(Exception):
         yield c.submit(failing, 1, key="task")
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)], client=True)
+async def test_empty_plugin(c, s, w):
+    class EmptyPlugin:
+        pass
+
+    await c.register_worker_plugin(EmptyPlugin())
