@@ -17,9 +17,8 @@ from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec, slowinc, div, get_cert
 from distributed.dashboard.worker import Counters, BokehWorker
-from distributed.dashboard.scheduler import (
-    applications,
-    BokehScheduler,
+from distributed.dashboard.scheduler import applications, BokehScheduler
+from distributed.dashboard.components.scheduler import (
     SystemMonitor,
     Occupancy,
     StealingTimeSeries,

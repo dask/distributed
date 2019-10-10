@@ -28,13 +28,13 @@ import dask
 from tornado import gen
 import toolz
 
-from .utils import without_property_validation, BOKEH_VERSION
-from ..diagnostics.progress_stream import nbytes_bar
-from .. import profile
-from ..utils import log_errors, parse_timedelta
+from distributed.dashboard.utils import without_property_validation, BOKEH_VERSION
+from distributed.diagnostics.progress_stream import nbytes_bar
+from distributed import profile
+from distributed.utils import log_errors, parse_timedelta
 
 if dask.config.get("distributed.dashboard.export-tool"):
-    from .export_tool import ExportTool
+    from distributed.dashboard.export_tool import ExportTool
 else:
     ExportTool = None
 
