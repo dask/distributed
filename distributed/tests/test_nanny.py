@@ -323,6 +323,7 @@ async def test_nanny_throttle(c, s, *workers):
         paused = await c.run(check)
         if not paused[a.worker_address][1]:
             assert time() - start < 5, paused[a.worker_address]
+            futures.append(c.submit(data, size, workers=[a.worker_address], pure=False))
         else:
             break
         await gen.sleep(0.1)
