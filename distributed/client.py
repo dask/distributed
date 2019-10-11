@@ -3861,7 +3861,7 @@ class Client(Node):
             from .diagnostics.task_stream import rectangles
 
             rects = rectangles(msgs)
-            from .dashboard.components.shared import task_stream_figure
+            from .dashboard.components.scheduler import task_stream_figure
 
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
