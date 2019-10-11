@@ -9,7 +9,7 @@ try:
 except ImportError:
     np = False
 
-from .worker import counters_doc
+from .components.worker import counters_doc
 from .components.scheduler import (
     systemmonitor_doc,
     stealing_doc,

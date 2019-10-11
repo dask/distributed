@@ -45,14 +45,14 @@ try:
 except ImportError:
     np = False
 
-from distributed.dashboard import components
-from distributed.dashboard.components import (
+from distributed.dashboard.components import add_periodic_callback
+from distributed.dashboard.components.shared import (
     DashboardComponent,
     ProfileTimePlot,
     ProfileServer,
-    add_periodic_callback,
+    TaskStream,
 )
-from distributed.dashboard.worker import SystemMonitor
+from distributed.dashboard.components.worker import SystemMonitor
 from distributed.dashboard.utils import (
     transpose,
     BOKEH_VERSION,
@@ -885,7 +885,7 @@ class Events(DashboardComponent):
                     self.source.stream(new, 10000)
 
 
-class TaskStream(components.TaskStream):
+class SchedulerTaskStream(TaskStream):
     def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", **kwargs):
         self.scheduler = scheduler
         self.offset = 0
@@ -897,7 +897,7 @@ class TaskStream(components.TaskStream):
         self.index = max(0, self.plugin.index - n_rectangles)
         self.workers = dict()
 
-        components.TaskStream.__init__(
+        TaskStream.__init__(
             self, n_rectangles=n_rectangles, clear_interval=clear_interval, **kwargs
         )
 
@@ -1603,7 +1603,7 @@ def workers_doc(scheduler, extra, doc):
 
 def tasks_doc(scheduler, extra, doc):
     with log_errors():
-        ts = TaskStream(
+        ts = SchedulerTaskStream(
             scheduler,
             n_rectangles=dask.config.get(
                 "distributed.scheduler.dashboard.tasks.task-stream-length"
@@ -1635,7 +1635,7 @@ def graph_doc(scheduler, extra, doc):
 
 def status_doc(scheduler, extra, doc):
     with log_errors():
-        task_stream = TaskStream(
+        task_stream = SchedulerTaskStream(
             scheduler,
             n_rectangles=dask.config.get(
                 "distributed.scheduler.dashboard.status.task-stream-length"
@@ -1680,7 +1680,7 @@ def status_doc(scheduler, extra, doc):
 
 
 def individual_task_stream_doc(scheduler, extra, doc):
-    task_stream = TaskStream(
+    task_stream = SchedulerTaskStream(
         scheduler, n_rectangles=1000, clear_interval="10s", sizing_mode="stretch_both"
     )
     task_stream.update()

@@ -7,7 +7,7 @@ from tornado import gen
 
 from distributed.utils_test import slowinc, gen_cluster
 
-from distributed.dashboard.components import (
+from distributed.dashboard.components.shared import (
     TaskStream,
     MemoryUsage,
     Processing,
