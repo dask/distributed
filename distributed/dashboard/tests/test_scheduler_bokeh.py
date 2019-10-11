@@ -305,6 +305,9 @@ def test_WorkerTable(c, s, a, b):
     wt = WorkerTable(s)
     wt.update()
     assert all(wt.source.data.values())
+    assert all(
+        isinstance(v, (str, int, float)) for L in wt.source.data.values() for v in L
+    )
     assert all(len(v) == 2 for v in wt.source.data.values())
 
     nthreads = wt.source.data["nthreads"]
