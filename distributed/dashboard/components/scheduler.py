@@ -1790,6 +1790,14 @@ def individual_nbytes_doc(scheduler, extra, doc):
     doc.theme = BOKEH_THEME
 
 
+def individual_memory_use_doc(scheduler, extra, doc):
+    memory_use = MemoryUse(scheduler, sizing_mode="stretch_both")
+    memory_use.update()
+    add_periodic_callback(doc, memory_use, 100)
+    doc.add_root(memory_use.root)
+    doc.theme = BOKEH_THEME
+
+
 def individual_cpu_doc(scheduler, extra, doc):
     current_load = CurrentLoad(scheduler, sizing_mode="stretch_both")
     current_load.update()
