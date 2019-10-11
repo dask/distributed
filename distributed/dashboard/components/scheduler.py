@@ -22,6 +22,7 @@ from bokeh.models import (
     value,
     LinearAxis,
     NumeralTickFormatter,
+    BoxZoomTool,
     BasicTicker,
     NumberFormatter,
     BoxSelectTool,
@@ -49,7 +50,6 @@ from distributed.dashboard.components.shared import (
     DashboardComponent,
     ProfileTimePlot,
     ProfileServer,
-    TaskStream,
     SystemMonitor,
 )
 from distributed.dashboard.utils import (
@@ -58,7 +58,7 @@ from distributed.dashboard.utils import (
     without_property_validation,
 )
 from distributed.metrics import time
-from distributed.utils import log_errors, format_time
+from distributed.utils import log_errors, format_time, parse_timedelta
 from distributed.diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
 from distributed.diagnostics.progress import AllProgress
 from distributed.diagnostics.graph_layout import GraphLayout
@@ -68,6 +68,11 @@ try:
     from cytoolz.curried import map, concat, groupby, valmap, first
 except ImportError:
     from toolz.curried import map, concat, groupby, valmap, first
+
+if dask.config.get("distributed.dashboard.export-tool"):
+    from distributed.dashboard.export_tool import ExportTool
+else:
+    ExportTool = None
 
 logger = logging.getLogger(__name__)
 
@@ -884,7 +889,7 @@ class Events(DashboardComponent):
                     self.source.stream(new, 10000)
 
 
-class SchedulerTaskStream(TaskStream):
+class TaskStream(DashboardComponent):
     def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", **kwargs):
         self.scheduler = scheduler
         self.offset = 0
@@ -895,10 +900,15 @@ class SchedulerTaskStream(TaskStream):
             self.plugin = es[0]
         self.index = max(0, self.plugin.index - n_rectangles)
         self.workers = dict()
+        self.n_rectangles = n_rectangles
+        clear_interval = parse_timedelta(clear_interval, default="ms")
+        self.clear_interval = clear_interval
+        self.last = 0
 
-        TaskStream.__init__(
-            self, n_rectangles=n_rectangles, clear_interval=clear_interval, **kwargs
-        )
+        self.source, self.root = task_stream_figure(clear_interval, **kwargs)
+
+        # Required for update callback
+        self.task_stream_index = [0]
 
     @without_property_validation
     def update(self):
@@ -943,6 +953,90 @@ class SchedulerTaskStream(TaskStream):
                 )
             else:
                 self.source.stream(rectangles, self.n_rectangles)
+
+
+def task_stream_figure(clear_interval="20s", **kwargs):
+    """
+    kwargs are applied to the bokeh.models.plots.Plot constructor
+    """
+    clear_interval = parse_timedelta(clear_interval, default="ms")
+
+    source = ColumnDataSource(
+        data=dict(
+            start=[time() - clear_interval],
+            duration=[0.1],
+            key=["start"],
+            name=["start"],
+            color=["white"],
+            duration_text=["100 ms"],
+            worker=["foo"],
+            y=[0],
+            worker_thread=[1],
+            alpha=[0.0],
+        )
+    )
+
+    x_range = DataRange1d(range_padding=0)
+    y_range = DataRange1d(range_padding=0)
+
+    root = figure(
+        name="task_stream",
+        title="Task Stream",
+        id="bk-task-stream-plot",
+        x_range=x_range,
+        y_range=y_range,
+        toolbar_location="above",
+        x_axis_type="datetime",
+        min_border_right=35,
+        tools="",
+        **kwargs
+    )
+
+    rect = root.rect(
+        source=source,
+        x="start",
+        y="y",
+        width="duration",
+        height=0.4,
+        fill_color="color",
+        line_color="color",
+        line_alpha=0.6,
+        fill_alpha="alpha",
+        line_width=3,
+    )
+    rect.nonselection_glyph = None
+
+    root.yaxis.major_label_text_alpha = 0
+    root.yaxis.minor_tick_line_alpha = 0
+    root.yaxis.major_tick_line_alpha = 0
+    root.xgrid.visible = False
+
+    hover = HoverTool(
+        point_policy="follow_mouse",
+        tooltips="""
+            <div>
+                <span style="font-size: 12px; font-weight: bold;">@name:</span>&nbsp;
+                <span style="font-size: 10px; font-family: Monaco, monospace;">@duration_text</span>
+            </div>
+            """,
+    )
+
+    tap = TapTool(callback=OpenURL(url="/profile?key=@name"))
+
+    root.add_tools(
+        hover,
+        tap,
+        BoxZoomTool(),
+        ResetTool(),
+        PanTool(dimensions="width"),
+        WheelZoomTool(dimensions="width"),
+    )
+    if ExportTool:
+        export = ExportTool()
+        export.register_plot(root)
+        root.add_tools(export)
+
+    return source, root
 
 
 class GraphPlot(DashboardComponent):
@@ -1602,7 +1696,7 @@ def workers_doc(scheduler, extra, doc):
 
 def tasks_doc(scheduler, extra, doc):
     with log_errors():
-        ts = SchedulerTaskStream(
+        ts = TaskStream(
             scheduler,
             n_rectangles=dask.config.get(
                 "distributed.scheduler.dashboard.tasks.task-stream-length"
@@ -1634,7 +1728,7 @@ def graph_doc(scheduler, extra, doc):
 
 def status_doc(scheduler, extra, doc):
     with log_errors():
-        task_stream = SchedulerTaskStream(
+        task_stream = TaskStream(
             scheduler,
             n_rectangles=dask.config.get(
                 "distributed.scheduler.dashboard.status.task-stream-length"
@@ -1679,7 +1773,7 @@ def status_doc(scheduler, extra, doc):
 
 
 def individual_task_stream_doc(scheduler, extra, doc):
-    task_stream = SchedulerTaskStream(
+    task_stream = TaskStream(
         scheduler, n_rectangles=1000, clear_interval="10s", sizing_mode="stretch_both"
     )
     task_stream.update()

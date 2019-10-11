@@ -1,7 +1,4 @@
 import asyncio
-from bisect import bisect
-from operator import add
-from time import time
 import weakref
 
 from bokeh.layouts import row, column
@@ -11,14 +8,8 @@ from bokeh.models import (
     DataRange1d,
     LinearAxis,
     HoverTool,
-    BoxZoomTool,
-    ResetTool,
-    PanTool,
-    WheelZoomTool,
     Range1d,
     Quad,
-    TapTool,
-    OpenURL,
     Button,
     Select,
     NumeralTickFormatter,
@@ -44,137 +35,6 @@ else:
 
 profile_interval = dask.config.get("distributed.worker.profile.interval")
 profile_interval = parse_timedelta(profile_interval, default="ms")
-
-
-class TaskStream(DashboardComponent):
-    """ Task Stream
-
-    The start and stop time of tasks as they occur on each core of the cluster.
-    """
-
-    def __init__(self, n_rectangles=1000, clear_interval="20s", **kwargs):
-        """
-        kwargs are applied to the bokeh.models.plots.Plot constructor
-        """
-        self.n_rectangles = n_rectangles
-        clear_interval = parse_timedelta(clear_interval, default="ms")
-        self.clear_interval = clear_interval
-        self.last = 0
-
-        self.source, self.root = task_stream_figure(clear_interval, **kwargs)
-
-        # Required for update callback
-        self.task_stream_index = [0]
-
-    @without_property_validation
-    def update(self, messages):
-        with log_errors():
-            index = messages["task-events"]["index"]
-            rectangles = messages["task-events"]["rectangles"]
-
-            if not index or index[-1] == self.task_stream_index[0]:
-                return
-
-            ind = bisect(index, self.task_stream_index[0])
-            rectangles = {
-                k: [v[i] for i in range(ind, len(index))] for k, v in rectangles.items()
-            }
-            self.task_stream_index[0] = index[-1]
-
-            # If there has been a significant delay then clear old rectangles
-            if rectangles["start"]:
-                m = min(map(add, rectangles["start"], rectangles["duration"]))
-                if m > self.last:
-                    self.last, last = m, self.last
-                    if m > last + self.clear_interval:
-                        self.source.data.update(rectangles)
-                        return
-
-            self.source.stream(rectangles, self.n_rectangles)
-
-
-def task_stream_figure(clear_interval="20s", **kwargs):
-    """
-    kwargs are applied to the bokeh.models.plots.Plot constructor
-    """
-    clear_interval = parse_timedelta(clear_interval, default="ms")
-
-    source = ColumnDataSource(
-        data=dict(
-            start=[time() - clear_interval],
-            duration=[0.1],
-            key=["start"],
-            name=["start"],
-            color=["white"],
-            duration_text=["100 ms"],
-            worker=["foo"],
-            y=[0],
-            worker_thread=[1],
-            alpha=[0.0],
-        )
-    )
-
-    x_range = DataRange1d(range_padding=0)
-    y_range = DataRange1d(range_padding=0)
-
-    root = figure(
-        name="task_stream",
-        title="Task Stream",
-        id="bk-task-stream-plot",
-        x_range=x_range,
-        y_range=y_range,
-        toolbar_location="above",
-        x_axis_type="datetime",
-        min_border_right=35,
-        tools="",
-        **kwargs
-    )
-
-    rect = root.rect(
-        source=source,
-        x="start",
-        y="y",
-        width="duration",
-        height=0.4,
-        fill_color="color",
-        line_color="color",
-        line_alpha=0.6,
-        fill_alpha="alpha",
-        line_width=3,
-    )
-    rect.nonselection_glyph = None
-
-    root.yaxis.major_label_text_alpha = 0
-    root.yaxis.minor_tick_line_alpha = 0
-    root.yaxis.major_tick_line_alpha = 0
-    root.xgrid.visible = False
-
-    hover = HoverTool(
-        point_policy="follow_mouse",
-        tooltips="""
-            <div>
-                <span style="font-size: 12px; font-weight: bold;">@name:</span>&nbsp;
-                <span style="font-size: 10px; font-family: Monaco, monospace;">@duration_text</span>
-            </div>
-            """,
-    )
-
-    tap = TapTool(callback=OpenURL(url="/profile?key=@name"))
-
-    root.add_tools(
-        hover,
-        tap,
-        BoxZoomTool(),
-        ResetTool(),
-        PanTool(dimensions="width"),
-        WheelZoomTool(dimensions="width"),
-    )
-    if ExportTool:
-        export = ExportTool()
-        export.register_plot(root)
-        root.add_tools(export)
-
-    return source, root
 
 
 class MemoryUsage(DashboardComponent):

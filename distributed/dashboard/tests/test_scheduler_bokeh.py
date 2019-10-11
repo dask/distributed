@@ -25,7 +25,7 @@ from distributed.dashboard.components.scheduler import (
     StealingTimeSeries,
     StealingEvents,
     Events,
-    SchedulerTaskStream,
+    TaskStream,
     TaskProgress,
     MemoryUse,
     CurrentLoad,
@@ -70,7 +70,7 @@ def test_simple(c, s, a, b):
 
 @gen_cluster(client=True, worker_kwargs=dict(services={"dashboard": BokehWorker}))
 def test_basic(c, s, a, b):
-    for component in [SystemMonitor, Occupancy, StealingTimeSeries]:
+    for component in [TaskStream, SystemMonitor, Occupancy, StealingTimeSeries]:
         ss = component(s)
 
         ss.update()
@@ -131,7 +131,7 @@ def test_events(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_task_stream(c, s, a, b):
-    ts = SchedulerTaskStream(s)
+    ts = TaskStream(s)
 
     futures = c.map(slowinc, range(10), delay=0.001)
 
@@ -157,7 +157,7 @@ def test_task_stream(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_task_stream_n_rectangles(c, s, a, b):
-    ts = SchedulerTaskStream(s, n_rectangles=10)
+    ts = TaskStream(s, n_rectangles=10)
     futures = c.map(slowinc, range(10), delay=0.001)
     yield wait(futures)
     ts.update()
@@ -167,19 +167,19 @@ def test_task_stream_n_rectangles(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_task_stream_second_plugin(c, s, a, b):
-    ts = SchedulerTaskStream(s, n_rectangles=10, clear_interval=10)
+    ts = TaskStream(s, n_rectangles=10, clear_interval=10)
     ts.update()
     futures = c.map(inc, range(10))
     yield wait(futures)
     ts.update()
 
-    ts2 = SchedulerTaskStream(s, n_rectangles=5, clear_interval=10)
+    ts2 = TaskStream(s, n_rectangles=5, clear_interval=10)
     ts2.update()
 
 
 @gen_cluster(client=True)
 def test_task_stream_clear_interval(c, s, a, b):
-    ts = SchedulerTaskStream(s, clear_interval=200)
+    ts = TaskStream(s, clear_interval=200)
 
     yield wait(c.map(inc, range(10)))
     ts.update()
@@ -626,7 +626,7 @@ def test_proxy_to_workers(c, s, a, b):
 async def test_lots_of_tasks(c, s, a, b):
     import toolz
 
-    ts = SchedulerTaskStream(s)
+    ts = TaskStream(s)
     ts.update()
     futures = c.map(toolz.identity, range(100))
     await wait(futures)
