@@ -18,7 +18,7 @@ from tornado.ioloop import IOLoop
 import ucp
 import numpy as np
 
-ucp.init(options=dask.config.get("ucx"))
+ucp.init(options=dask.config.get("ucx"), env_takes_precedence=True)
 
 logger = logging.getLogger(__name__)
 MAX_MSG_LOG = 23
