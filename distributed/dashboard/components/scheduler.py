@@ -1,4 +1,3 @@
-# TODO Separate components into more logical chunks
 import logging
 import math
 from numbers import Number
@@ -51,8 +50,8 @@ from distributed.dashboard.components.shared import (
     ProfileTimePlot,
     ProfileServer,
     TaskStream,
+    SystemMonitor,
 )
-from distributed.dashboard.components.worker import SystemMonitor
 from distributed.dashboard.utils import (
     transpose,
     BOKEH_VERSION,
