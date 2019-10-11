@@ -1,3 +1,4 @@
+# TODO Separate components into more logical chunks
 import logging
 import math
 from numbers import Number

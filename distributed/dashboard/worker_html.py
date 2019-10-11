@@ -1,3 +1,4 @@
+# TODO Move contents of this file into worker.py
 import logging
 from .utils import RequestHandler, redirect
 

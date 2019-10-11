@@ -63,6 +63,9 @@ class DashboardComponent(object):
         """ Reads from bokeh.distributed.messages and updates self.source """
 
 
+# TODO Separate components into more logical chunks
+
+
 class TaskStream(DashboardComponent):
     """ Task Stream
 
@@ -682,6 +685,7 @@ class ProfileServer(DashboardComponent):
         self.ts_source.data.update({"time": times, "count": counts})
 
 
+# TODO Move add_periodic_callback to utils?
 def add_periodic_callback(doc, component, interval):
     """ Add periodic callback to doc in a way that avoids reference cycles
 

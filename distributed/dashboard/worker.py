@@ -53,6 +53,7 @@ BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "theme.yaml"))
 template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
 
 
+# TODO Move DashboardComponents into components submodule
 class StateTable(DashboardComponent):
     """ Currently running tasks """
 
