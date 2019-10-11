@@ -306,7 +306,9 @@ def test_WorkerTable(c, s, a, b):
     wt.update()
     assert all(wt.source.data.values())
     assert all(
-        isinstance(v, (str, int, float)) for L in wt.source.data.values() for v in L
+        not v or isinstance(v, (str, int, float))
+        for L in wt.source.data.values()
+        for v in L
     ), {type(v).__name__ for L in wt.source.data.values() for v in L}
     assert all(len(v) == 2 for v in wt.source.data.values())
 
