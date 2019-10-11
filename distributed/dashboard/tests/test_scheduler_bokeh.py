@@ -32,7 +32,7 @@ from distributed.dashboard.components.scheduler import (
     ProcessingHistogram,
     NBytesHistogram,
     WorkerTable,
-    GraphPlot,
+    TaskGraph,
     ProfileServer,
 )
 
@@ -438,8 +438,8 @@ def test_WorkerTable_custom_metric_overlap_with_core_metric(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_GraphPlot(c, s, a, b):
-    gp = GraphPlot(s)
+def test_TaskGraph(c, s, a, b):
+    gp = TaskGraph(s)
     futures = c.map(inc, range(5))
     total = c.submit(sum, futures)
     yield total
@@ -478,8 +478,8 @@ def test_GraphPlot(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_GraphPlot_clear(c, s, a, b):
-    gp = GraphPlot(s)
+def test_TaskGraph_clear(c, s, a, b):
+    gp = TaskGraph(s)
     futures = c.map(inc, range(5))
     total = c.submit(sum, futures)
     yield total
@@ -502,9 +502,9 @@ def test_GraphPlot_clear(c, s, a, b):
 
 
 @gen_cluster(client=True, timeout=30)
-def test_GraphPlot_complex(c, s, a, b):
+def test_TaskGraph_complex(c, s, a, b):
     da = pytest.importorskip("dask.array")
-    gp = GraphPlot(s)
+    gp = TaskGraph(s)
     x = da.random.random((2000, 2000), chunks=(1000, 1000))
     y = ((x + x.T) - x.mean(axis=0)).persist()
     yield wait(y)
@@ -533,12 +533,12 @@ def test_GraphPlot_complex(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_GraphPlot_order(c, s, a, b):
+def test_TaskGraph_order(c, s, a, b):
     x = c.submit(inc, 1)
     y = c.submit(div, 1, 0)
     yield wait(y)
 
-    gp = GraphPlot(s)
+    gp = TaskGraph(s)
     gp.update()
 
     assert gp.node_source.data["state"][gp.layout.index[y.key]] == "erred"

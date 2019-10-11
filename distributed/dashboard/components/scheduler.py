@@ -1039,7 +1039,7 @@ def task_stream_figure(clear_interval="20s", **kwargs):
     return source, root
 
 
-class GraphPlot(DashboardComponent):
+class TaskGraph(DashboardComponent):
     """
     A dynamic node-link diagram for the task graph on the scheduler
 
@@ -1715,7 +1715,7 @@ def tasks_doc(scheduler, extra, doc):
 
 def graph_doc(scheduler, extra, doc):
     with log_errors():
-        graph = GraphPlot(scheduler, sizing_mode="stretch_both")
+        graph = TaskGraph(scheduler, sizing_mode="stretch_both")
         doc.title = "Dask: Task Graph"
         graph.update()
         add_periodic_callback(doc, graph, 200)
@@ -1816,7 +1816,7 @@ def individual_progress_doc(scheduler, extra, doc):
 
 def individual_graph_doc(scheduler, extra, doc):
     with log_errors():
-        graph = GraphPlot(scheduler, sizing_mode="stretch_both")
+        graph = TaskGraph(scheduler, sizing_mode="stretch_both")
         graph.update()
 
         add_periodic_callback(doc, graph, 200)
