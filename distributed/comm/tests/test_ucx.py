@@ -262,22 +262,20 @@ async def test_ping_pong_numba(cleanup):
     assert result["op"] == "ping"
 
 
-@pytest.mark.parametrize("processes", [True, False])
-def test_ucx_localcluster(loop, processes, cleanup):
-    if processes:
-        pytest.skip("Known bug, processes=True doesn't work currently")
-
-    with LocalCluster(
+@pytest.mark.parametrize("processes", [False])
+@pytest.mark.asyncio
+async def test_ucx_localcluster(processes, cleanup):
+    async with LocalCluster(
         protocol="ucx",
         dashboard_address=None,
         n_workers=2,
         threads_per_worker=1,
         processes=processes,
-        loop=loop,
+        asynchronous=True,
     ) as cluster:
-        with Client(cluster) as client:
+        with Client(cluster, asynchronous=True) as client:
             x = client.submit(inc, 1)
-            x.result()
+            await x.result()
             assert x.key in cluster.scheduler.tasks
             if not processes:
                 assert any(w.data == {x.key: 2} for w in cluster.workers.values())
