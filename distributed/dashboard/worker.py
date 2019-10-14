@@ -2,8 +2,6 @@ from functools import partial
 import logging
 import os
 
-from bokeh.application.handlers.function import FunctionHandler
-from bokeh.application import Application
 from bokeh.themes import Theme
 from toolz import merge
 
@@ -152,31 +150,15 @@ class BokehWorker(BokehServer):
             prefix = "/" + prefix
         self.prefix = prefix
 
-        extra = {"prefix": prefix}
-
-        extra.update(template_variables)
-
-        status = Application(FunctionHandler(partial(status_doc, worker, extra)))
-        crossfilter = Application(
-            FunctionHandler(partial(crossfilter_doc, worker, extra))
-        )
-        systemmonitor = Application(
-            FunctionHandler(partial(systemmonitor_doc, worker, extra))
-        )
-        counters = Application(FunctionHandler(partial(counters_doc, worker, extra)))
-        profile = Application(FunctionHandler(partial(profile_doc, worker, extra)))
-        profile_server = Application(
-            FunctionHandler(partial(profile_server_doc, worker, extra))
-        )
-
         self.apps = {
-            "/status": status,
-            "/counters": counters,
-            "/crossfilter": crossfilter,
-            "/system": systemmonitor,
-            "/profile": profile,
-            "/profile-server": profile_server,
+            "/status": status_doc,
+            "/counters": counters_doc,
+            "/crossfilter": crossfilter_doc,
+            "/system": systemmonitor_doc,
+            "/profile": profile_doc,
+            "/profile-server": profile_server_doc,
         }
+        self.apps = {k: partial(v, worker, self.extra) for k, v in self.apps.items()}
 
         self.loop = io_loop or worker.loop
         self.server = None

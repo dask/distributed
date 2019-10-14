@@ -1862,7 +1862,7 @@ def individual_workers_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
-def individual_bandwidth_types(scheduler, extra, doc):
+def individual_bandwidth_types_doc(scheduler, extra, doc):
     with log_errors():
         bw = BandwidthTypes(scheduler, sizing_mode="stretch_both")
         bw.update()
@@ -1871,7 +1871,7 @@ def individual_bandwidth_types(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
-def individual_bandwidth_workers(scheduler, extra, doc):
+def individual_bandwidth_workers_doc(scheduler, extra, doc):
     with log_errors():
         bw = BandwidthWorkers(scheduler, sizing_mode="stretch_both")
         bw.update()

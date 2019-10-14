@@ -34,8 +34,8 @@ from .components.scheduler import (
     individual_cpu_doc,
     individual_nprocessing_doc,
     individual_workers_doc,
-    individual_bandwidth_types,
-    individual_bandwidth_workers,
+    individual_bandwidth_types_doc,
+    individual_bandwidth_workers_doc,
 )
 from .core import BokehServer
 from .worker import counters_doc
@@ -394,8 +394,8 @@ applications = {
     "/individual-cpu": individual_cpu_doc,
     "/individual-nprocessing": individual_nprocessing_doc,
     "/individual-workers": individual_workers_doc,
-    "/individual-bandwidth-types": individual_bandwidth_types,
-    "/individual-bandwidth-workers": individual_bandwidth_workers,
+    "/individual-bandwidth-types": individual_bandwidth_types_doc,
+    "/individual-bandwidth-workers": individual_bandwidth_workers_doc,
 }
 
 try:
