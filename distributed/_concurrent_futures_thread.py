@@ -159,6 +159,9 @@ class ThreadPoolExecutor(_base.Executor):
     def shutdown(self, wait=True):
         with self._shutdown_lock:
             self._shutdown = True
+            if not wait:  # clear work queue of pending work
+                while not self._work_queue.empty():
+                    self._work_queue.get()
             self._work_queue.put(None)
         if wait:
             for t in self._threads:
