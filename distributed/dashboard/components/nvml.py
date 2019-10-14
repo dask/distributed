@@ -14,7 +14,7 @@ from bokeh.models import (
 from tornado import escape
 from dask.utils import format_bytes
 from distributed.utils import log_errors
-from distributed.dashboard.scheduler import BOKEH_THEME
+from distributed.dashboard.components.scheduler import BOKEH_THEME
 from distributed.dashboard.utils import without_property_validation, update
 
 
