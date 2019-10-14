@@ -294,41 +294,43 @@ def test_nanny_terminate(c, s, a):
     nthreads=[("127.0.0.1", 1)] * 8,
     client=True,
     Worker=Nanny,
-    worker_kwargs={"memory_limit": 2e8, "memory_pause_fraction": 0.6},
+    worker_kwargs={"memory_limit": 2e8},
     timeout=20,
     clean_kwargs={"threads": False},
 )
 async def test_nanny_throttle(c, s, *workers):
+    # Verify that get_data requests are throttled when the worker
+    # with the data is at high-memory by
+    # 1. Allocation some data on a worker
+    # 2. Pausing that worker
+    # 3. Requesting data from that worker from many other workers
+    a = workers[0]
+    proc = a.process.pid
+    size = 1000
+
     def data(size):
         return b"0" * size
 
-    a = workers[0]
-    proc = a.process.pid
-
-    size = int(0.05 * a.memory_limit)
-    futures = [
-        c.submit(data, size, workers=[a.worker_address], pure=False) for i in range(12)
-    ]
-    await wait(futures)
+    def patch(dask_worker):
+        # Patch paused and memory_monitor on the one worker
+        # This is is very fragile, since a refactor of memory_monitor to
+        # remove _memory_monitoring will break this test.
+        dask_worker._memory_monitoring = True
+        dask_worker.paused = True
 
     def check(dask_worker):
-        self = dask_worker
-        proc = self.monitor.proc
-        memory = proc.memory_info().rss
-        frac = memory / self.memory_limit
-        return frac, self.paused, self.memory_pause_fraction
+        return dask_worker.paused
 
-    start = time()
-    while True:
-        paused = await c.run(check)
-        if not paused[a.worker_address][1]:
-            assert time() - start < 5, paused[a.worker_address]
-            futures.append(c.submit(data, size, workers=[a.worker_address], pure=False))
-        else:
-            break
-        await gen.sleep(0.1)
+    futures = [
+        c.submit(data, size, workers=[a.worker_address], pure=False) for i in range(4)
+    ]
+    await wait(futures)
+    await c.run(patch, workers=[a.worker_address])
+    paused = await c.run(check)
+    assert paused[a.worker_address]
 
     await c.run(lambda: logging.getLogger("distributed.worker").setLevel(logging.DEBUG))
+    # Cluster is in the correct state, now for the test.
     n = len(workers)
     result = c.map(
         lambda x, i: x[i],
