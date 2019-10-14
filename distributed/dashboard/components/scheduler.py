@@ -55,7 +55,9 @@ from distributed.dashboard.components.shared import (
 from distributed.dashboard.utils import (
     transpose,
     BOKEH_VERSION,
+    PROFILING,
     without_property_validation,
+    update,
 )
 from distributed.metrics import time
 from distributed.utils import log_errors, format_time, parse_timedelta
@@ -65,9 +67,9 @@ from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 
 try:
-    from cytoolz.curried import map, concat, groupby, valmap, first
+    from cytoolz.curried import map, concat, groupby, valmap
 except ImportError:
-    from toolz.curried import map, concat, groupby, valmap, first
+    from toolz.curried import map, concat, groupby, valmap
 
 if dask.config.get("distributed.dashboard.export-tool"):
     from distributed.dashboard.export_tool import ExportTool
@@ -75,9 +77,6 @@ else:
     ExportTool = None
 
 logger = logging.getLogger(__name__)
-
-
-PROFILING = False
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -89,36 +88,6 @@ BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "..", "theme.yaml"))
 
 nan = float("nan")
 inf = float("inf")
-
-
-@without_property_validation
-def update(source, data):
-    """ Update source with data
-
-    This checks a few things first
-
-    1.  If the data is the same, then don't update
-    2.  If numpy is available and the data is numeric, then convert to numpy
-        arrays
-    3.  If profiling then perform the update in another callback
-    """
-    if not np or not any(isinstance(v, np.ndarray) for v in source.data.values()):
-        if source.data == data:
-            return
-    if np and len(data[first(data)]) > 10:
-        d = {}
-        for k, v in data.items():
-            if type(v) is not np.ndarray and isinstance(v[0], Number):
-                d[k] = np.array(v)
-            else:
-                d[k] = v
-    else:
-        d = data
-
-    if PROFILING:
-        curdoc().add_next_tick_callback(lambda: source.data.update(d))
-    else:
-        source.data.update(d)
 
 
 class Occupancy(DashboardComponent):

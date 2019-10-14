@@ -21,7 +21,11 @@ from tornado import gen
 import toolz
 
 from distributed.dashboard.components import DashboardComponent
-from distributed.dashboard.utils import without_property_validation, BOKEH_VERSION
+from distributed.dashboard.utils import (
+    without_property_validation,
+    BOKEH_VERSION,
+    update,
+)
 from distributed.diagnostics.progress_stream import nbytes_bar
 from distributed import profile
 from distributed.utils import log_errors, parse_timedelta
@@ -104,7 +108,7 @@ class MemoryUsage(DashboardComponent):
             if not msg:
                 return
             nb = nbytes_bar(msg["nbytes"])
-            self.source.data.update(nb)
+            update(self.source, nb)
             self.root.title.text = "Memory Use: %0.2f MB" % (
                 sum(msg["nbytes"].values()) / 1e6
             )
@@ -174,7 +178,7 @@ class Processing(DashboardComponent):
             elif x_range.end > 2 * max_right + cores:  # way out there, walk back
                 x_range.end = x_range.end * 0.95 + max_right * 0.05
 
-            self.source.data.update(data)
+            update(self.source, data)
 
     @staticmethod
     def processing_update(msg):
@@ -226,7 +230,7 @@ class ProfilePlot(DashboardComponent):
                 data = profile.plot_data(self.states[ind], profile_interval)
                 del self.states[:]
                 self.states.extend(data.pop("states"))
-                self.source.data.update(data)
+                update(self.source, data)
                 self.source.selected = old
 
         if BOKEH_VERSION >= "1.0.0":
@@ -240,7 +244,7 @@ class ProfilePlot(DashboardComponent):
             self.state = state
             data = profile.plot_data(self.state, profile_interval)
             self.states = data.pop("states")
-            self.source.data.update(data)
+            update(self.source, data)
 
 
 class ProfileTimePlot(DashboardComponent):
@@ -293,7 +297,7 @@ class ProfileTimePlot(DashboardComponent):
                 del self.states[:]
                 self.states.extend(data.pop("states"))
                 changing[0] = True  # don't recursively trigger callback
-                self.source.data.update(data)
+                update(self.source, data)
                 if isinstance(new, list):  # bokeh >= 1.0
                     self.source.selected.indices = old
                 else:
@@ -375,7 +379,7 @@ class ProfileTimePlot(DashboardComponent):
             self.state = state
             data = profile.plot_data(self.state, profile_interval)
             self.states = data.pop("states")
-            self.source.data.update(data)
+            update(self.source, data)
 
             if metadata is not None and metadata["counts"]:
                 self.task_names = ["All"] + sorted(metadata["keys"])
@@ -445,7 +449,7 @@ class ProfileServer(DashboardComponent):
                 del self.states[:]
                 self.states.extend(data.pop("states"))
                 changing[0] = True  # don't recursively trigger callback
-                self.source.data.update(data)
+                update(self.source, data)
                 if isinstance(new, list):  # bokeh >= 1.0
                     self.source.selected.indices = old
                 else:
@@ -512,14 +516,14 @@ class ProfileServer(DashboardComponent):
             self.state = state
             data = profile.plot_data(self.state, profile_interval)
             self.states = data.pop("states")
-            self.source.data.update(data)
+            update(self.source, data)
 
     @without_property_validation
     def trigger_update(self):
         self.state = profile.get_profile(self.log, start=self.start, stop=self.stop)
         data = profile.plot_data(self.state, profile_interval)
         self.states = data.pop("states")
-        self.source.data.update(data)
+        update(self.source, data)
         times = [t * 1000 for t, _ in self.log]
         counts = list(toolz.pluck("count", toolz.pluck(1, self.log)))
         self.ts_source.data.update({"time": times, "count": counts})
@@ -532,7 +536,7 @@ class SystemMonitor(DashboardComponent):
         names = worker.monitor.quantities
         self.last = 0
         self.source = ColumnDataSource({name: [] for name in names})
-        self.source.data.update(self.get_data())
+        update(self.source, self.get_data())
 
         x_range = DataRange1d(follow="end", follow_interval=20000, range_padding=0)
 

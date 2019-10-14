@@ -29,7 +29,7 @@ from distributed.dashboard.components.shared import (
     ProfileServer,
     SystemMonitor,
 )
-from distributed.dashboard.utils import transpose, without_property_validation
+from distributed.dashboard.utils import transpose, without_property_validation, update
 from distributed.diagnostics.progress_stream import color_of
 from distributed.metrics import time
 from distributed.utils import log_errors, key_split, format_time
@@ -79,7 +79,7 @@ class StateTable(DashboardComponent):
                 "Connections": [len(w.in_flight_workers)],
                 "Serving": [len(w._comms)],
             }
-            self.source.data.update(d)
+            update(self.source, d)
 
 
 class CommunicatingStream(DashboardComponent):
@@ -362,7 +362,7 @@ class CrossFilter(DashboardComponent):
                     len(self.source.data["stop"])
                     and min(out["start"]) > self.source.data["stop"][-1] + 10
                 ):
-                    self.source.data.update(out)
+                    update(self.source, out)
                 else:
                     self.source.stream(out, rollover=1000)
 
