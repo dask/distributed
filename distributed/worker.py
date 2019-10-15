@@ -1164,7 +1164,7 @@ class Worker(ServerNode):
 
         if (
             max_connections is not False
-            and self.outgoing_current_count > max_connections
+            and self.outgoing_current_count >= max_connections
         ):
             logger.debug(
                 "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",

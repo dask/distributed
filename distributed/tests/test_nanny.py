@@ -326,7 +326,7 @@ async def test_nanny_throttle(c, s, *workers):
     ]
     await wait(futures)
     await c.run(patch, workers=[a.worker_address])
-    paused = await c.run(check)
+    paused = await c.run(check, workers=[a.worker_address])
     assert paused[a.worker_address]
 
     await c.run(lambda: logging.getLogger("distributed.worker").setLevel(logging.DEBUG))
