@@ -3576,12 +3576,8 @@ def test_reconnect_timeout(c, s):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.skipif(
-    sys.version_info[0] == 2, reason="Semaphore.acquire doesn't support timeout option"
-)
-# @pytest.mark.xfail(reason="TODO: intermittent failures")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
-def test_open_close_many_workers(loop, worker, count, repeat):
+def test_open_close_many_workers(loop, worker, count, repeat, tmpdir):
     psutil = pytest.importorskip("psutil")
     proc = psutil.Process()
 
@@ -3595,21 +3591,24 @@ def test_open_close_many_workers(loop, worker, count, repeat):
 
         @gen.coroutine
         def start_worker(sleep, duration, repeat=1):
-            for i in range(repeat):
-                yield gen.sleep(sleep)
-                if not status:
-                    return
-                w = worker(s["address"], loop=loop)
-                running[w] = None
-                workers.add(w)
-                yield w
-                addr = w.worker_address
-                running[w] = addr
-                yield gen.sleep(duration)
-                yield w.close()
-                del w
-                yield gen.moment
-            done.release()
+            from distributed.utils import log_errors
+
+            with log_errors():
+                for i in range(repeat):
+                    yield gen.sleep(sleep)
+                    if not status:
+                        return
+                    w = worker(s["address"], local_directory=str(tmpdir), timeout=10)
+                    running[w] = None
+                    workers.add(w)
+                    yield w
+                    addr = w.worker_address
+                    running[w] = addr
+                    yield gen.sleep(duration)
+                    yield w.close()
+                    del w
+                    yield gen.moment
+                done.release()
 
         for i in range(count):
             loop.add_callback(
