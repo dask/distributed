@@ -88,11 +88,10 @@ def test_no_circular_references(cleanup, loop):
 
     ref = weakref.ref(SpecCluster(scheduler=scheduler, loop=loop))
 
-    for i in range(50):
+    for i in range(100):
         if ref() is None:
             break
         time.sleep(0.1)
-        print(i)
     else:
         assert False
 
