@@ -25,8 +25,8 @@ def deserialize_numba_ndarray(header, frames):
     if strides is None:
         itemsize = np.dtype(header["typestr"]).itemsize
         strides = list(header["shape"][1:]) + [itemsize]
-        for i in range(len(strides)-1, 0, -1):
-            strides[i-1] *= strides[i]
+        for i in range(len(strides) - 1, 0, -1):
+            strides[i - 1] *= strides[i]
         strides = tuple(strides)
 
     arr = numba.cuda.devicearray.DeviceNDArray(
