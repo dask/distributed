@@ -178,6 +178,12 @@ class AdaptiveCore:
         self._adapting = True
 
         try:
+
+            if len(self.plan) != len(self.requested):
+                # Ensure that the number of planned and requested workers
+                # stay in sync.
+                await self.cluster
+
             target = await self.safe_target()
             recommendations = await self.recommendations(target)
 
