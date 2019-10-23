@@ -40,5 +40,5 @@ Available metrics are as following
 | dask_worker_task_duration_median_seconds    | Median task runtime at worker.                 |           |  Yes   |
 +---------------------------------------------+------------------------------------------------+-----------+--------+
 | dask_worker_transfer_bandwidth_median_bytes | Bandwidth for transfer at worker in Bytes.     |           |  Yes   |
-+=========================+===================+================================================+===========+========+
++---------------------------------------------+------------------------------------------------+-----------+--------+
 
