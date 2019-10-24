@@ -132,31 +132,33 @@ async def test_scale(cleanup):
         assert len(cluster.workers) == 2
 
 
+@pytest.mark.slow
 @pytest.mark.asyncio
 async def test_adaptive_killed_worker(cleanup):
-    with dask.config.set({"distributed.deploy.lost-worker-timeout": 1}):
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": 0.1}):
 
-        with SpecCluster(
+        async with SpecCluster(
+            asynchronous=True,
             worker={"cls": Nanny, "options": {"nthreads": 1}},
             scheduler={"cls": Scheduler, "options": {"port": 0}},
         ) as cluster:
 
-            with Client(cluster) as client:
+            async with Client(cluster, asynchronous=True) as client:
 
                 cluster.adapt(minimum=1, maximum=1)
 
                 # Scale up a cluster with 1 worker.
                 while len(cluster.workers) != 1:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.01)
 
-                future = client.submit(sleep, 5)
+                future = client.submit(sleep, 0.1)
 
                 # Kill the only worker.
-                worker_id = next(iter(cluster.workers))
+                [worker_id] = cluster.workers
                 await cluster.workers[worker_id].kill()
 
                 # Wait for the worker to re-spawn and finish sleeping.
-                future.result(timeout=10)
+                await future.result(timeout=5)
 
 
 @pytest.mark.asyncio
