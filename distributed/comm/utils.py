@@ -1,5 +1,6 @@
 import logging
 import socket
+import gc
 
 from tornado import gen
 
@@ -62,6 +63,8 @@ def from_frames(frames, deserialize=True, deserializers=None):
 
     if deserialize and size > FRAME_OFFLOAD_THRESHOLD:
         res = yield offload(_from_frames)
+        # offload() may result in cyclic references
+        gc.collect()
     else:
         res = _from_frames()
 
