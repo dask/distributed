@@ -1,11 +1,10 @@
 import logging
 import socket
-import gc
 
 from tornado import gen
 
 from .. import protocol
-from ..utils import get_ip, get_ipv6, nbytes, offload
+from ..utils import get_ip, get_ipv6, nbytes, offload, offload_to_current_event_loop
 
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,7 @@ def to_frames(msg, serializers=None, on_error="message", context=None):
             logger.exception(e)
             raise
 
-    res = yield offload(_to_frames)
+    res = yield offload_to_current_event_loop(_to_frames)
 
     raise gen.Return(res)
 
@@ -62,7 +61,7 @@ def from_frames(frames, deserialize=True, deserializers=None):
             raise
 
     if deserialize and size > FRAME_OFFLOAD_THRESHOLD:
-        res = yield offload(_from_frames)
+        res = yield offload_to_current_event_loop(_from_frames)
     else:
         res = _from_frames()
 
