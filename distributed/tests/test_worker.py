@@ -1500,7 +1500,7 @@ async def test_interface_async(loop, Worker):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
 @pytest.mark.parametrize("protocol", ["tcp", "ucx"])
-async def test_protocol_from_scheduler_address(loop, Worker, protocol):
+async def test_protocol_from_scheduler_address(Worker, protocol):
     if protocol == "ucx":
         ucp = pytest.importorskip("ucp")
 
