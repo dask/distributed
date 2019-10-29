@@ -1499,6 +1499,22 @@ async def test_interface_async(loop, Worker):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
+@pytest.mark.parametrize("protocol", ["tcp", "ucx"])
+async def test_protocol_from_scheduler_address(loop, Worker, protocol):
+    if protocol == "ucx":
+        ucp = pytest.importorskip("ucp")
+
+    async with Scheduler(protocol=protocol) as s:
+        assert s.address.startswith(protocol)
+        async with Worker(s.address) as w:
+            assert w.address.startswith(protocol)
+            async with Client(s.address, asynchronous=True) as c:
+                info = c.scheduler_info()
+                assert info["address"].startswith(protocol)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_worker_listens_on_same_interface_by_default(Worker):
     async with Scheduler(host="localhost") as s:
         assert s.ip in {"127.0.0.1", "localhost"}
