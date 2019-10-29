@@ -165,7 +165,7 @@ class UCX(Comm):
                 await self.ep.recv(sizes)
             except (ucp.exceptions.UCXCanceled, ucp.exceptions.UCXCloseError):
                 if self._ep is not None and not self._ep.closed():
-                    await self._ep.shutdown()
+                    await self._ep.signal_shutdown()
                     self._ep.close()
                 self._ep = None
                 raise CommClosedError("While reading, the connection was canceled")
