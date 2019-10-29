@@ -14,7 +14,6 @@ from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors
 
 from tornado.ioloop import IOLoop
-import ucp
 import numpy as np
 
 import os
@@ -32,7 +31,7 @@ MAX_MSG_LOG = 23
 # Comm Interface
 # ----------------------------------------------------------------------------
 
-# Let's find the function, `cuda_array`, to use when allocating new CUDA arrays
+# Find the function, `cuda_array()`, to use when allocating new CUDA arrays
 try:
     import rmm
 
@@ -48,6 +47,20 @@ except ImportError:
             raise RuntimeError(
                 "In order to send/recv CUDA arrays, Numba or RMM is required"
             )
+
+
+# In order to avoid double init when forking/spawning new processes (multiprocess),
+# we make sure only to import and initialize UCX once at first use.
+ucp = None
+
+
+def init_once():
+    import ucp as _ucp
+
+    global ucp
+    if ucp is None:
+        _ucp.init()
+        ucp = _ucp
 
 
 class UCX(Comm):
@@ -84,9 +97,7 @@ class UCX(Comm):
     4. Read all the data frames.
     """
 
-    def __init__(
-        self, ep: ucp.Endpoint, local_addr: str, peer_addr: str, deserialize=True
-    ):
+    def __init__(self, ep, local_addr: str, peer_addr: str, deserialize=True):
         Comm.__init__(self)
         self._ep = ep
         if local_addr:
@@ -211,6 +222,7 @@ class UCXConnector(Connector):
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect: %s", address)
         ip, port = parse_host_port(address)
+        init_once()
         ep = await ucp.create_endpoint(ip, port)
         return self.comm_class(
             ep,
@@ -256,6 +268,7 @@ class UCXListener(Listener):
             if self.comm_handler:
                 await self.comm_handler(ucx)
 
+        init_once()
         self.ucp_server = ucp.create_listener(serve_forever, port=self._input_port)
 
     def stop(self):
