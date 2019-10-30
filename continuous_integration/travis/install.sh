@@ -28,7 +28,8 @@ source activate test-environment
 
 # Install dependencies
 conda install -q \
-    bokeh \
+    -c defaults -c bokeh \
+    bokeh>=1.4.0rc1 \
     click \
     coverage \
     dask \
