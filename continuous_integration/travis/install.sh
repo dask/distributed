@@ -28,7 +28,7 @@ source activate test-environment
 
 # Install dependencies
 conda install -q \
-    -c defaults -c bokeh \
+    -c defaults -c bokeh/label/dev \
     bokeh>=1.4.0rc1 \
     click \
     coverage \
