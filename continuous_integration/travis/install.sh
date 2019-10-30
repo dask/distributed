@@ -27,7 +27,7 @@ conda create -q -n test-environment python=$PYTHON
 source activate test-environment
 
 # Install dependencies
-conda install -q \
+conda install \
     -c defaults -c bokeh/label/dev \
     bokeh>=1.4.0rc1 \
     click \
