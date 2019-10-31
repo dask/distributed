@@ -1,3 +1,4 @@
+import asyncio
 import cloudpickle
 import pickle
 from collections import defaultdict
@@ -1688,3 +1689,15 @@ def test_get_task_duration():
         assert s.get_task_duration(ts_pref2_2) == 0.5  # default
         assert len(s.unknown_durations) == 1
         assert len(s.unknown_durations["prefix_2"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_no_dangilng_asyncio_tasks(cleanup):
+    start = asyncio.all_tasks()
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address, name="0") as a:
+            async with Client(s.address, asynchronous=True) as c:
+                await asyncio.sleep(0.01)
+
+    tasks = asyncio.all_tasks()
+    assert tasks == start

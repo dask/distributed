@@ -1,3 +1,4 @@
+import asyncio
 from functools import partial
 import gc
 import subprocess
@@ -1004,3 +1005,13 @@ async def test_capture_security(cleanup, temporary):
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert client.security == cluster.security
+
+
+@pytest.mark.asyncio
+async def test_no_dangilng_asyncio_tasks(cleanup):
+    start = asyncio.all_tasks()
+    async with LocalCluster(asynchronous=True, processes=False):
+        await asyncio.sleep(0.01)
+
+    tasks = asyncio.all_tasks()
+    assert tasks == start
