@@ -640,7 +640,7 @@ class rpc(object):
         self.comms[comm] = False  # mark as taken
         return comm
 
-    async def close_comms(self):
+    def close_comms(self):
         async def _close_comm(comm):
             # Make sure we tell the peer to close
             try:
@@ -662,8 +662,8 @@ class rpc(object):
                 task = asyncio.ensure_future(_close_comm(comm))
                 tasks.append(task)
 
-        await asyncio.gather(*tasks)
         self.comms.clear()
+        return tasks
 
     def __getattr__(self, key):
         async def send_recv_from_rpc(**kwargs):
@@ -685,11 +685,11 @@ class rpc(object):
 
         return send_recv_from_rpc
 
-    async def close_rpc(self):
+    def close_rpc(self):
         if self.status != "closed":
             rpc.active.discard(self)
         self.status = "closed"
-        await self.close_comms()
+        return asyncio.gather(*self.close_comms())
 
     def __enter__(self):
         return self
