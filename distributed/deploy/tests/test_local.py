@@ -456,7 +456,7 @@ def test_silent_startup():
 
         if __name__ == "__main__":
             with LocalCluster(1, dashboard_address=None, scheduler_port=0):
-                sleep(1.5)
+                sleep(.1)
         """
 
     out = subprocess.check_output(

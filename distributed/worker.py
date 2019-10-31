@@ -1063,7 +1063,7 @@ class Worker(ServerNode):
                             address=self.contact_address, safe=safe
                         ),
                     )
-            self.scheduler.close_rpc()
+            await self.scheduler.close_rpc()
             self._workdir.release()
 
             for k, v in self.services.items():
