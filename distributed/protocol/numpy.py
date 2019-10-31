@@ -46,8 +46,8 @@ def serialize_numpy_ndarray(x):
 
     # Only serialize non-broadcasted data for arrays with zero strided axes
     if 0 in x.strides:
-        broadcast_to = x.shape
-        x = x[tuple(slice(None) if s != 0 else 0 for s in x.strides)]
+        broadcast_to = (x.shape, x.flags.writeable)
+        x = x[tuple(slice(None) if s != 0 else slice(1) for s in x.strides)]
     else:
         broadcast_to = None
 
@@ -108,7 +108,9 @@ def deserialize_numpy_ndarray(header, frames):
         )
 
         if header.get("broadcast_to"):
-            x = np.broadcast_to(x, header["broadcast_to"])
+            shape, writeable = header["broadcast_to"]
+            x = np.broadcast_to(x, shape)
+            x.setflags(write=writeable)
 
         return x
 

@@ -271,12 +271,29 @@ def test_large_numpy_array():
     ],
 )
 def test_zero_strided_numpy_array(x):
+    assert 0 in x.strides
     header, frames = serialize(x)
-    assert header["broadcast_to"] == x.shape
     y = deserialize(header, frames)
     np.testing.assert_equal(x, y)
     # Ensure we transmit fewer bytes than the full array
     assert sum(map(nbytes, frames)) < x.nbytes
+
+
+def test_writeable_zero_strided_numpy_array():
+    a = np.arange(5)
+    # as_strided can create writeable zero-strided arrays
+    x = np.lib.stride_tricks.as_strided(
+        a, strides=(0,) + a.strides, shape=(3,) + a.shape, writeable=True
+    )
+    assert 0 in x.strides
+    header, frames = serialize(x)
+    y = deserialize(header, frames)
+    np.testing.assert_equal(x, y)
+    # Ensure we transmit fewer bytes than the full array
+    assert sum(map(nbytes, frames)) < x.nbytes
+    # Ensure both x and y are both writeable
+    assert x.flags.writeable
+    assert y.flags.writeable
 
 
 def test_non_zero_strided_array():
