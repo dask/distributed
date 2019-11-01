@@ -1695,7 +1695,7 @@ def test_get_task_duration():
 @pytest.mark.skipif(
     sys.version_info < (3, 7), reason="asyncio.all_tasks not implemented"
 )
-async def test_no_dangilng_asyncio_tasks(cleanup):
+async def test_no_danglng_asyncio_tasks(cleanup):
     start = asyncio.all_tasks()
     async with Scheduler(port=0) as s:
         async with Worker(s.address, name="0") as a:

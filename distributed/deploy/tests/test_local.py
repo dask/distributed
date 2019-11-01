@@ -1011,7 +1011,7 @@ async def test_capture_security(cleanup, temporary):
 @pytest.mark.skipif(
     sys.version_info < (3, 7), reason="asyncio.all_tasks not implemented"
 )
-async def test_no_dangilng_asyncio_tasks(cleanup):
+async def test_no_danglng_asyncio_tasks(cleanup):
     start = asyncio.all_tasks()
     async with LocalCluster(asynchronous=True, processes=False):
         await asyncio.sleep(0.01)
