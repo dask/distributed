@@ -6,6 +6,7 @@ See :ref:`communications` for more.
 .. _UCX: https://github.com/openucx/ucx
 """
 import logging
+import concurrent
 
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
@@ -126,26 +127,33 @@ class UCX(Comm):
         with log_errors():
             if self.closed():
                 raise CommClosedError("Endpoint is closed -- unable to send message")
-
-            if serializers is None:
-                serializers = ("cuda", "dask", "pickle", "error")
-            # msg can also be a list of dicts when sending batched messages
-            frames = await to_frames(msg, serializers=serializers, on_error=on_error)
-
-            # Send meta data
-            await self.ep.send(np.array([len(frames)], dtype=np.uint64))
-            await self.ep.send(
-                np.array(
-                    [hasattr(f, "__cuda_array_interface__") for f in frames],
-                    dtype=np.bool,
+            try:
+                if serializers is None:
+                    serializers = ("cuda", "dask", "pickle", "error")
+                # msg can also be a list of dicts when sending batched messages
+                frames = await to_frames(
+                    msg, serializers=serializers, on_error=on_error
                 )
-            )
-            await self.ep.send(np.array([nbytes(f) for f in frames], dtype=np.uint64))
-            # Send frames
-            for frame in frames:
-                if nbytes(frame) > 0:
-                    await self.ep.send(frame)
-            return sum(map(nbytes, frames))
+
+                # Send meta data
+                await self.ep.send(np.array([len(frames)], dtype=np.uint64))
+                await self.ep.send(
+                    np.array(
+                        [hasattr(f, "__cuda_array_interface__") for f in frames],
+                        dtype=np.bool,
+                    )
+                )
+                await self.ep.send(
+                    np.array([nbytes(f) for f in frames], dtype=np.uint64)
+                )
+                # Send frames
+                for frame in frames:
+                    if nbytes(frame) > 0:
+                        await self.ep.send(frame)
+                return sum(map(nbytes, frames))
+            except (ucp.exceptions.UCXBaseException):
+                self.abort()
+                raise CommClosedError("While writing, the connection was closed")
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
         with log_errors():
@@ -163,12 +171,12 @@ class UCX(Comm):
                 await self.ep.recv(is_cudas)
                 sizes = np.empty(nframes[0], dtype=np.uint64)
                 await self.ep.recv(sizes)
-            except (ucp.exceptions.UCXCanceled, ucp.exceptions.UCXCloseError):
-                if self._ep is not None and not self._ep.closed():
-                    await self._ep.signal_shutdown()
-                    self._ep.close()
-                self._ep = None
-                raise CommClosedError("While reading, the connection was canceled")
+            except (
+                ucp.exceptions.UCXBaseException,
+                concurrent.futures._base.CancelledError,
+            ):
+                self.abort()
+                raise CommClosedError("While reading, the connection was closed")
             else:
                 # Recv frames
                 frames = []
@@ -192,15 +200,12 @@ class UCX(Comm):
 
     async def close(self):
         if self._ep is not None:
-            if not self._ep.closed():
-                await self._ep.signal_shutdown()
-                self._ep.close()
+            await self._ep.close()
             self._ep = None
 
     def abort(self):
         if self._ep is not None:
-            logger.debug("Destroyed UCX endpoint")
-            IOLoop.current().add_callback(self._ep.signal_shutdown)
+            self._ep.abort()
             self._ep = None
 
     @property
