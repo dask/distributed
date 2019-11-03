@@ -859,7 +859,7 @@ class Events(DashboardComponent):
 
 
 class TaskStream(DashboardComponent):
-    def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", **kwargs):
+    def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", clear_multipler=10, **kwargs):
         self.scheduler = scheduler
         self.offset = 0
         es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
@@ -871,6 +871,7 @@ class TaskStream(DashboardComponent):
         self.workers = dict()
         self.n_rectangles = n_rectangles
         clear_interval = parse_timedelta(clear_interval, default="ms")
+        self.clear_multiplier = clear_multipler
         self.clear_interval = clear_interval
         self.last = 0
 
@@ -904,7 +905,12 @@ class TaskStream(DashboardComponent):
             if first_end > self.last:
                 last = self.last
                 self.last = first_end
-                if first_end > last + self.clear_interval * 1000:
+                # use moving average of previous rectangles and the value set in self.clear_interval to determine
+                # when to reset the view. Only reset when at least self.clear_multiplier x the moving average of the
+                # last 50 rectangles and at least self.clear_interval.
+                clear_interval_enhanced = np.maximum(np.mean(rectangles["duration"][-50:]) * self.clear_multiplier,
+                                                    self.clear_interval)
+                if first_end > last + clear_interval_enhanced * 1000:
                     self.offset = min(rectangles["start"])
                     self.source.data.update({k: [] for k in rectangles})
 
