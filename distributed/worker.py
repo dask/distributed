@@ -976,18 +976,19 @@ class Worker(ServerNode):
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        self.listen(self._start_address, listen_args=self.listen_args)
-        self.ip = get_address_host(self.address)
-
-        if self.name is None:
-            self.name = self.address
-
         preload_modules(
             self.preload,
             parameter=self,
             file_dir=self.local_directory,
             argv=self.preload_argv,
         )
+
+        self.listen(self._start_address, listen_args=self.listen_args)
+        self.ip = get_address_host(self.address)
+
+        if self.name is None:
+            self.name = self.address
+
         # Services listen on all addresses
         # Note Nanny is not a "real" service, just some metadata
         # passed in service_ports...

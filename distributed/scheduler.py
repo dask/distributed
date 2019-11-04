@@ -1206,6 +1206,8 @@ class Scheduler(ServerNode):
 
         self.clear_task_state()
 
+        preload_modules(self.preload, parameter=self, argv=self.preload_argv)
+
         with ignoring(AttributeError):
             for c in self._worker_coroutines:
                 c.cancel()
@@ -1242,8 +1244,6 @@ class Scheduler(ServerNode):
                     os.remove(fn)
 
             weakref.finalize(self, del_scheduler_file)
-
-        preload_modules(self.preload, parameter=self, argv=self.preload_argv)
 
         self.start_periodic_callbacks()
 
