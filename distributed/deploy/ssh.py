@@ -112,7 +112,7 @@ class Worker(Process):
 
 
 class Scheduler(Process):
-    """ A Remote Dask Scheduler controled by SSH
+    """ A Remote Dask Scheduler controlled by SSH
 
     Parameters
     ----------
@@ -191,7 +191,7 @@ def SSHCluster(
     The SSHCluster function deploys a Dask Scheduler and Workers for you on a
     set of machine addresses that you provide.  The first address will be used
     for the scheduler while the rest will be used for the workers (feel free to
-    repeat the first hostname if you want to have the scheudler and worker
+    repeat the first hostname if you want to have the scheduler and worker
     co-habitate one machine.)
 
     You may configure the scheduler and workers by passing
