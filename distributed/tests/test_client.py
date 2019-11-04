@@ -5655,7 +5655,7 @@ async def test_shutdown_localcluster(cleanup):
 
 
 @pytest.mark.asyncio
-async def test_config_inherit_by_subprocess(cleanup):
+async def test_config_inherited_by_subprocess(cleanup):
     def f(x):
         return dask.config.get("foo") + 1
 
