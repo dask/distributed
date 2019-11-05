@@ -19,6 +19,12 @@ def itemsize(dt):
     return result
 
 
+def _zero_strided_slice(x):
+    """ Collapse array dimensions with a zero stride
+    """
+    return x[tuple(slice(None) if s != 0 else slice(1) for s in x.strides)]
+
+
 @dask_serialize.register(np.ndarray)
 def serialize_numpy_ndarray(x):
     if x.dtype.hasobject:
@@ -47,7 +53,7 @@ def serialize_numpy_ndarray(x):
     # Only serialize non-broadcasted data for arrays with zero strided axes
     if 0 in x.strides:
         broadcast_to = (x.shape, x.flags.writeable)
-        x = x[tuple(slice(None) if s != 0 else slice(1) for s in x.strides)]
+        x = _zero_strided_slice(x)
     else:
         broadcast_to = None
 
