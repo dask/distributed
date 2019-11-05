@@ -10,6 +10,7 @@ import warnings
 import weakref
 
 import dask
+from dask.system import CPU_COUNT
 from tornado import gen
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado.locks import Event
@@ -22,7 +23,6 @@ from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
-from .system import CPU_COUNT
 from .utils import (
     get_ip,
     mp_context,
