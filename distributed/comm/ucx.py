@@ -18,8 +18,6 @@ from .registry import Backend, backends
 from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors
 
-from tornado.ioloop import IOLoop
-
 
 os.environ.setdefault("UCX_RNDV_SCHEME", "put_zcopy")
 os.environ.setdefault("UCX_MEMTYPE_CACHE", "n")
