@@ -7,6 +7,10 @@ See :ref:`communications` for more.
 """
 import logging
 import concurrent
+import os
+
+import dask
+import numpy as np
 
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
@@ -15,53 +19,49 @@ from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors
 
 from tornado.ioloop import IOLoop
-import numpy as np
 
-import os
 
 os.environ.setdefault("UCX_RNDV_SCHEME", "put_zcopy")
 os.environ.setdefault("UCX_MEMTYPE_CACHE", "n")
-os.environ.setdefault("UCX_TLS", "tcp,sockcm,rc,cuda_copy,cuda_ipc")
+os.environ.setdefault("UCX_TLS", "all")
 os.environ.setdefault("UCX_SOCKADDR_TLS_PRIORITY", "sockcm")
 
 logger = logging.getLogger(__name__)
-MAX_MSG_LOG = 23
-
-
-# ----------------------------------------------------------------------------
-# Comm Interface
-# ----------------------------------------------------------------------------
-
-# Find the function, `cuda_array()`, to use when allocating new CUDA arrays
-try:
-    import rmm
-
-    cuda_array = lambda n: rmm.device_array(n, dtype=np.uint8)
-except ImportError:
-    try:
-        import numba.cuda
-
-        cuda_array = lambda n: numba.cuda.device_array((n,), dtype=np.uint8)
-    except ImportError:
-
-        def cuda_array(n):
-            raise RuntimeError(
-                "In order to send/recv CUDA arrays, Numba or RMM is required"
-            )
 
 
 # In order to avoid double init when forking/spawning new processes (multiprocess),
 # we make sure only to import and initialize UCX once at first use.
 ucp = None
+cuda_array = None
 
 
 def init_once():
+    global ucp, cuda_array
+    if ucp is not None:
+        return
+
     import ucp as _ucp
 
-    global ucp
-    if ucp is None:
-        _ucp.init()
-        ucp = _ucp
+    ucp = _ucp
+    options = dask.config.get("ucx", default={})
+    ucp.init(options=options)
+
+    # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
+    try:
+        import rmm
+
+        cuda_array = lambda n: rmm.device_array(n, dtype=np.uint8)
+    except ImportError:
+        try:
+            import numba.cuda
+
+            cuda_array = lambda n: numba.cuda.device_array((n,), dtype=np.uint8)
+        except ImportError:
+
+            def cuda_array(n):
+                raise RuntimeError(
+                    "In order to send/recv CUDA arrays, Numba or RMM is required"
+                )
 
 
 class UCX(Comm):
