@@ -29,7 +29,7 @@ class ProcessInterface:
     """
 
     def __init__(self, scheduler=None, name=None):
-        self.address = None
+        self.address = getattr(self, "address", None)
         self.external_address = None
         self.lock = asyncio.Lock()
         self.status = "created"
@@ -75,6 +75,19 @@ class ProcessInterface:
 
     async def __aexit__(self, *args, **kwargs):
         await self.close()
+
+
+class NoOpAwaitable(object):
+    """An awaitable object that always returns None.
+
+    Useful to return from a method that can be called in both asynchronous and
+    synchronous contexts"""
+
+    def __await__(self):
+        async def f():
+            return None
+
+        return f().__await__()
 
 
 class SpecCluster(Cluster):
@@ -211,6 +224,9 @@ class SpecCluster(Cluster):
 
         if silence_logs:
             self._old_logging_level = silence_logging(level=silence_logs)
+            self._old_bokeh_logging_level = silence_logging(
+                level=silence_logs, root="bokeh"
+            )
 
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
@@ -306,7 +322,14 @@ class SpecCluster(Cluster):
             name = self.scheduler_info["workers"][msg]["name"]
 
             def f():
-                if name in self.workers and msg not in self.scheduler_info:
+                if (
+                    name in self.workers
+                    and msg not in self.scheduler_info["workers"]
+                    and not any(
+                        d["name"] == name
+                        for d in self.scheduler_info["workers"].values()
+                    )
+                ):
                     self._futures.add(asyncio.ensure_future(self.workers[name].close()))
                     del self.workers[name]
 
@@ -350,6 +373,8 @@ class SpecCluster(Cluster):
 
         if hasattr(self, "_old_logging_level"):
             silence_logging(self._old_logging_level)
+        if hasattr(self, "_old_bokeh_logging_level"):
+            silence_logging(self._old_bokeh_logging_level, root="bokeh")
 
         await super()._close()
 
@@ -406,14 +431,14 @@ class SpecCluster(Cluster):
         while len(self.worker_spec) > n:
             self.worker_spec.popitem()
 
-        if self.status in ("closing", "closed"):
-            self.loop.add_callback(self._correct_state)
-            return
-
-        while len(self.worker_spec) < n:
-            self.worker_spec.update(self.new_worker_spec())
+        if self.status not in ("closing", "closed"):
+            while len(self.worker_spec) < n:
+                self.worker_spec.update(self.new_worker_spec())
 
         self.loop.add_callback(self._correct_state)
+
+        if self.asynchronous:
+            return NoOpAwaitable()
 
     def new_worker_spec(self):
         """ Return name and spec for the next worker

@@ -210,6 +210,7 @@ class WorkerState(object):
     __slots__ = (
         "actors",
         "address",
+        "bandwidth",
         "extra",
         "has_what",
         "last_seen",
@@ -257,6 +258,7 @@ class WorkerState(object):
         self.metrics = {}
         self.last_seen = 0
         self.time_delay = 0
+        self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
 
         self.actors = set()
         self.has_what = set()
@@ -881,6 +883,8 @@ class Scheduler(ServerNode):
             self.idle_timeout = None
         self.time_started = time()
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.bandwidth_workers = defaultdict(float)
+        self.bandwidth_types = defaultdict(float)
 
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
@@ -964,6 +968,10 @@ class Scheduler(ServerNode):
 
         # Prefix-keyed containers
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
+        for k, v in dask.config.get(
+            "distributed.scheduler.default-task-durations", {}
+        ).items():
+            self.task_duration[k] = parse_timedelta(v)
         self.unknown_durations = defaultdict(set)
 
         # Client state
@@ -1342,9 +1350,27 @@ class Scheduler(ServerNode):
         host_info = host_info or {}
 
         self.host_info[host]["last-seen"] = local_now
-        frac = 1 / 20 / len(self.workers)
+        frac = 1 / len(self.workers)
         try:
-            self.bandwidth = self.bandwidth * (1 - frac) + metrics["bandwidth"] * frac
+            self.bandwidth = (
+                self.bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
+            )
+            for other, (bw, count) in metrics["bandwidth"]["workers"].items():
+                if (address, other) not in self.bandwidth_workers:
+                    self.bandwidth_workers[address, other] = bw / count
+                else:
+                    alpha = (1 - frac) ** count
+                    self.bandwidth_workers[address, other] = self.bandwidth_workers[
+                        address, other
+                    ] * alpha + bw * (1 - alpha)
+            for typ, (bw, count) in metrics["bandwidth"]["types"].items():
+                if typ not in self.bandwidth_types:
+                    self.bandwidth_types[typ] = bw / count
+                else:
+                    alpha = (1 - frac) ** count
+                    self.bandwidth_types[typ] = self.bandwidth_types[
+                        typ
+                    ] * alpha + bw * (1 - alpha)
         except KeyError:
             pass
 
@@ -1943,6 +1969,10 @@ class Scheduler(ServerNode):
 
             if not self.workers:
                 logger.info("Lost all workers")
+
+            for w in self.workers:
+                self.bandwidth_workers.pop((address, w), None)
+                self.bandwidth_workers.pop((w, address), None)
 
             def remove_worker_from_events():
                 # If the worker isn't registered anymore after the delay, remove from events
@@ -2612,8 +2642,7 @@ class Scheduler(ServerNode):
                     "timeout.  Continuuing with restart process"
                 )
             finally:
-                for nanny in nannies:
-                    nanny.close_rpc()
+                await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
 
             await self.start()
 

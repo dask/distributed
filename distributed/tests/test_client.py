@@ -91,6 +91,7 @@ from distributed.utils_test import (
 from distributed.utils_test import (  # noqa: F401
     client as c,
     client_secondary as c2,
+    cleanup,
     cluster_fixture,
     loop,
     loop_in_thread,
@@ -3321,10 +3322,7 @@ def test_get_foo_lost_keys(c, s, u, v, w):
 
 @pytest.mark.slow
 @gen_cluster(
-    client=True,
-    Worker=Nanny,
-    worker_kwargs={"death_timeout": "500ms"},
-    clean_kwargs={"threads": False, "processes": False},
+    client=True, Worker=Nanny, clean_kwargs={"threads": False, "processes": False}
 )
 def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
@@ -3575,10 +3573,7 @@ def test_reconnect_timeout(c, s):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.skipif(
-    sys.version_info[0] == 2, reason="Semaphore.acquire doesn't support timeout option"
-)
-# @pytest.mark.xfail(reason="TODO: intermittent failures")
+@pytest.mark.xfail(reason="TODO: intermittent failures")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
 def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip("psutil")
@@ -3722,6 +3717,11 @@ def test_get_versions(c):
 
     v = c.get_versions(packages=["requests"])
     assert dict(v["client"]["packages"]["optional"])["requests"] == requests.__version__
+
+
+@gen_cluster(client=True)
+async def test_async_get_versions(c, s, a, b):
+    await c.get_versions(check=True)
 
 
 def test_threaded_get_within_distributed(c):
@@ -5004,9 +5004,7 @@ def test_profile_keys(c, s, a, b):
 @gen_cluster()
 def test_client_with_name(s, a, b):
     with captured_logger("distributed.scheduler") as sio:
-        client = yield Client(
-            s.address, asynchronous=True, name="foo", silence_logs=False
-        )
+        client = yield Client(s.address, asynchronous=True, name="foo")
         assert "foo" in client.id
         yield client.close()
 
@@ -5350,7 +5348,7 @@ def test_de_serialization_none(s, a, b):
 
 @gen_cluster()
 def test_client_repr_closed(s, a, b):
-    c = yield Client(s.address, asynchronous=True, dashboard_address=None)
+    c = yield Client(s.address, asynchronous=True)
     yield c.close()
     c._repr_html_()
 
@@ -5616,6 +5614,50 @@ async def test_file_descriptors_dont_leak(Worker):
     while proc.num_fds() > begin:
         await asyncio.sleep(0.01)
         assert time() < begin + 5, (start, proc.num_fds())
+
+
+@pytest.mark.asyncio
+async def test_dashboard_link_cluster(cleanup):
+    class MyCluster(LocalCluster):
+        @property
+        def dashboard_link(self):
+            return "http://foo.com"
+
+    async with MyCluster(processes=False, asynchronous=True) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            assert "http://foo.com" in client._repr_html_()
+
+
+@pytest.mark.asyncio
+async def test_shutdown(cleanup):
+    async with Scheduler(port=0) as s:
+        async with Worker(s.address) as w:
+            async with Client(s.address, asynchronous=True) as c:
+                await c.shutdown()
+
+            assert s.status == "closed"
+            assert w.status == "closed"
+
+
+@pytest.mark.asyncio
+async def test_shutdown_localcluster(cleanup):
+    async with LocalCluster(n_workers=1, asynchronous=True, processes=False) as lc:
+        async with Client(lc, asynchronous=True) as c:
+            await c.shutdown()
+
+        assert lc.scheduler.status == "closed"
+
+
+@pytest.mark.asyncio
+async def test_config_inherited_by_subprocess(cleanup):
+    def f(x):
+        return dask.config.get("foo") + 1
+
+    with dask.config.set(foo=100):
+        async with LocalCluster(n_workers=1, asynchronous=True, processes=True) as lc:
+            async with Client(lc, asynchronous=True) as c:
+                result = await c.submit(f, 1)
+                assert result == 101
 
 
 if sys.version_info >= (3, 5):

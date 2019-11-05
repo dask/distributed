@@ -17,12 +17,12 @@ import weakref
 import dask
 from dask.core import istask
 from dask.compatibility import apply
-from dask.utils import format_bytes
+from dask.utils import format_bytes, funcname
 
 try:
-    from cytoolz import pluck, partial, merge, first
+    from cytoolz import pluck, partial, merge, first, keymap
 except ImportError:
-    from toolz import pluck, partial, merge, first
+    from toolz import pluck, partial, merge, first, keymap
 from tornado import gen
 from tornado.ioloop import IOLoop
 
@@ -43,7 +43,6 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
     get_ip,
-    funcname,
     typename,
     has_arg,
     _maybe_complex,
@@ -417,6 +416,10 @@ class Worker(ServerNode):
         self.outgoing_current_count = 0
         self.repetitively_busy = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.bandwidth_workers = defaultdict(
+            lambda: (0, 0)
+        )  # bw/count recent transfers
+        self.bandwidth_types = defaultdict(lambda: (0, 0))  # bw/count recent transfers
         self.latency = 0.001
         self._client = None
 
@@ -436,6 +439,11 @@ class Worker(ServerNode):
         else:
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
+
+        if protocol is None:
+            protocol_address = scheduler_addr.split("://")
+            if len(protocol_address) == 2:
+                protocol = protocol_address[0]
 
         # Target interface on which we contact the scheduler by default
         # TODO: it is unfortunate that we special-case inproc here
@@ -729,7 +737,11 @@ class Worker(ServerNode):
             in_memory=len(self.data),
             ready=len(self.ready),
             in_flight=len(self.in_flight_tasks),
-            bandwidth=self.bandwidth,
+            bandwidth={
+                "total": self.bandwidth,
+                "workers": dict(self.bandwidth_workers),
+                "types": keymap(typename, self.bandwidth_types),
+            },
         )
         custom = {}
         for k, metric in self.metrics.items():
@@ -777,17 +789,6 @@ class Worker(ServerNode):
             self.contact_address = self.address
         logger.info("-" * 49)
         while True:
-            if self.death_timeout and time() > start + self.death_timeout:
-                logger.exception(
-                    "Timed out when connecting to scheduler '%s'",
-                    self.scheduler.address,
-                )
-                await self.close(timeout=1)
-                raise gen.TimeoutError(
-                    "Timed out connecting to scheduler '%s'" % self.scheduler.address
-                )
-            if self.status in ("closed", "closing"):
-                return
             try:
                 _start = time()
                 types = {k: typename(v) for k, v in self.data.items()}
@@ -819,11 +820,6 @@ class Worker(ServerNode):
                     serializers=["msgpack"],
                 )
                 future = comm.read(deserializers=["msgpack"])
-                if self.death_timeout:
-                    diff = self.death_timeout - (time() - start)
-                    if diff < 0:
-                        continue
-                    future = gen.with_timeout(timedelta(seconds=diff), future)
                 response = await future
                 _end = time()
                 middle = (_start + _end) / 2
@@ -882,6 +878,8 @@ class Worker(ServerNode):
                 self.periodic_callbacks["heartbeat"].callback_time = (
                     response["heartbeat-interval"] * 1000
                 )
+                self.bandwidth_workers.clear()
+                self.bandwidth_types.clear()
             except CommClosedError:
                 logger.warning("Heartbeat to scheduler failed")
             finally:
@@ -1070,7 +1068,7 @@ class Worker(ServerNode):
                             address=self.contact_address, safe=safe
                         ),
                     )
-            self.scheduler.close_rpc()
+            await self.scheduler.close_rpc()
             self._workdir.release()
 
             for k, v in self.services.items():
@@ -1163,10 +1161,24 @@ class Worker(ServerNode):
         ):
             max_connections = max_connections * 2
 
+        if self.paused:
+            max_connections = 1
+            throttle_msg = " Throttling outgoing connections because worker is paused."
+        else:
+            throttle_msg = ""
+
         if (
             max_connections is not False
-            and self.outgoing_current_count > max_connections
+            and self.outgoing_current_count >= max_connections
         ):
+            logger.debug(
+                "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",
+                self.address,
+                who,
+                self.outgoing_current_count,
+                max_connections,
+                throttle_msg,
+            )
             return {"status": "busy"}
 
         self.outgoing_current_count += 1
@@ -1506,6 +1518,7 @@ class Worker(ServerNode):
         self.task_state[key] = state or finish
         if self.validate:
             self.validate_key(key)
+        self._notify_transition(key, start, finish, **kwargs)
 
     def transition_waiting_ready(self, key):
         try:
@@ -1921,8 +1934,17 @@ class Worker(ServerNode):
                         "who": worker,
                     }
                 )
-                if total_bytes > 10000:
+                if total_bytes > 1000000:
                     self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
+                    bw, cnt = self.bandwidth_workers[worker]
+                    self.bandwidth_workers[worker] = (bw + bandwidth, cnt + 1)
+
+                    types = set(map(type, response["data"].values()))
+                    if len(types) == 1:
+                        [typ] = types
+                        bw, cnt = self.bandwidth_types[typ]
+                        self.bandwidth_types[typ] = (bw + bandwidth, cnt + 1)
+
                 if self.digests is not None:
                     self.digests["transfer-bandwidth"].add(total_bytes / duration)
                     self.digests["transfer-duration"].add(duration)
@@ -2275,15 +2297,16 @@ class Worker(ServerNode):
                 self.plugins[name] = plugin
 
                 logger.info("Starting Worker plugin %s" % name)
-                try:
-                    result = plugin.setup(worker=self)
-                    if hasattr(result, "__await__"):
-                        result = await result
-                except Exception as e:
-                    msg = error_message(e)
-                    return msg
-                else:
-                    return {"status": "OK"}
+                if hasattr(plugin, "setup"):
+                    try:
+                        result = plugin.setup(worker=self)
+                        if hasattr(result, "__await__"):
+                            result = await result
+                    except Exception as e:
+                        msg = error_message(e)
+                        return msg
+
+                return {"status": "OK"}
 
     async def actor_execute(
         self, comm=None, actor=None, function=None, args=(), kwargs={}
@@ -2693,6 +2716,16 @@ class Worker(ServerNode):
 
         result = {k: profile.call_stack(frame) for k, frame in frames.items()}
         return result
+
+    def _notify_transition(self, key, start, finish, **kwargs):
+        for name, plugin in self.plugins.items():
+            if hasattr(plugin, "transition"):
+                try:
+                    plugin.transition(key, start, finish, **kwargs)
+                except Exception:
+                    logger.info(
+                        "Plugin '%s' failed with exception" % name, exc_info=True
+                    )
 
     ##############
     # Validation #

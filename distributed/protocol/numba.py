@@ -1,61 +1,36 @@
+import numpy as np
 import numba.cuda
 from .cuda import cuda_serialize, cuda_deserialize
 
 
 @cuda_serialize.register(numba.cuda.devicearray.DeviceNDArray)
 def serialize_numba_ndarray(x):
-    # TODO: handle non-contiguous
-    # TODO: handle 2d
-    # TODO: 0d
-
-    if x.flags["C_CONTIGUOUS"] or x.flags["F_CONTIGUOUS"]:
-        strides = x.strides
-        if x.ndim > 1:
-            data = x.ravel()  # order='K'
-        else:
-            data = x
-    else:
-        raise ValueError("Array must be contiguous")
-        x = numba.ascontiguousarray(x)
-        strides = x.strides
-        if x.ndim > 1:
-            data = x.ravel()
-        else:
-            data = x
-
-    dtype = (0, x.dtype.str)
-    nbytes = data.dtype.itemsize * data.size
-
-    # used in the ucx comms for gpu/cpu message passing
-    # 'lengths' set by dask
+    # Making sure `x` is behaving
+    if not x.is_c_contiguous():
+        shape = x.shape
+        t = numba.cuda.device_array(shape, dtype=x.dtype)
+        t.copy_to_device(x)
+        x = t
     header = x.__cuda_array_interface__.copy()
-    header["is_cuda"] = 1
-    header["dtype"] = dtype
-    return header, [data]
+    return header, [x]
 
 
 @cuda_deserialize.register(numba.cuda.devicearray.DeviceNDArray)
 def deserialize_numba_ndarray(header, frames):
     (frame,) = frames
-    # TODO: put this in ucx... as a kind of "fixup"
-    if isinstance(frame, bytes):
-        import numpy as np
+    shape = header["shape"]
+    strides = header["strides"]
 
-        arr2 = np.frombuffer(frame, header["typestr"])
-        return numba.cuda.to_device(arr2)
+    # Starting with __cuda_array_interface__ version 2, strides can be None,
+    # meaning the array is C-contiguous, so we have to calculate it.
+    if strides is None:
+        itemsize = np.dtype(header["typestr"]).itemsize
+        strides = tuple((np.cumprod((1,) + shape[:0:-1]) * itemsize).tolist())
 
-    frame.typestr = header["typestr"]
-    frame.shape = header["shape"]
-
-    # numba & cupy don't properly roundtrip length-zero arrays.
-    if frame.shape[0] == 0:
-        arr = numba.cuda.device_array(
-            header["shape"],
-            header["typestr"]
-            # strides?
-            # order?
-        )
-        return arr
-
-    arr = numba.cuda.as_cuda_array(frame)
+    arr = numba.cuda.devicearray.DeviceNDArray(
+        shape,
+        strides,
+        np.dtype(header["typestr"]),
+        gpu_data=numba.cuda.as_cuda_array(frame).gpu_data,
+    )
     return arr

@@ -1,4 +1,6 @@
 import asyncio
+import re
+from time import sleep
 
 import dask
 from dask.distributed import SpecCluster, Worker, Client, Scheduler, Nanny
@@ -124,6 +126,40 @@ async def test_scale(cleanup):
         await cluster
         assert len(cluster.workers) == 1
 
+        # Can use with await
+        await cluster.scale(2)
+        await cluster
+        assert len(cluster.workers) == 2
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_adaptive_killed_worker(cleanup):
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": 0.1}):
+
+        async with SpecCluster(
+            asynchronous=True,
+            worker={"cls": Nanny, "options": {"nthreads": 1}},
+            scheduler={"cls": Scheduler, "options": {"port": 0}},
+        ) as cluster:
+
+            async with Client(cluster, asynchronous=True) as client:
+
+                cluster.adapt(minimum=1, maximum=1)
+
+                # Scale up a cluster with 1 worker.
+                while len(cluster.workers) != 1:
+                    await asyncio.sleep(0.01)
+
+                future = client.submit(sleep, 0.1)
+
+                # Kill the only worker.
+                [worker_id] = cluster.workers
+                await cluster.workers[worker_id].kill()
+
+                # Wait for the worker to re-spawn and finish sleeping.
+                await future.result(timeout=5)
+
 
 @pytest.mark.asyncio
 async def test_unexpected_closed_worker(cleanup):
@@ -154,6 +190,26 @@ async def test_unexpected_closed_worker(cleanup):
 
             await cluster
             assert len(cluster.workers) == 2
+
+
+@pytest.mark.slow
+@pytest.mark.asyncio
+async def test_restart(cleanup):
+    # Regression test for https://github.com/dask/distributed/issues/3062
+    worker = {"cls": Nanny, "options": {"nthreads": 1}}
+    with dask.config.set({"distributed.deploy.lost-worker-timeout": "2s"}):
+        async with SpecCluster(
+            asynchronous=True, scheduler=scheduler, worker=worker
+        ) as cluster:
+            async with Client(cluster, asynchronous=True) as client:
+                cluster.scale(2)
+                await cluster
+                assert len(cluster.workers) == 2
+
+                await client.restart()
+                await asyncio.sleep(3)
+
+                assert len(cluster.workers) == 2
 
 
 @pytest.mark.asyncio
@@ -375,6 +431,8 @@ async def test_MultiWorker(cleanup):
             await client.wait_for_workers(4)
 
             assert "workers=4" in repr(cluster)
+            workers_line = re.search("(Workers.+)", cluster._widget_status()).group(1)
+            assert re.match("Workers.*<td>4</td>", workers_line)
 
             cluster.scale(1)
             await cluster
