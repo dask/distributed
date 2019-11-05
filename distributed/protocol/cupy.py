@@ -6,25 +6,15 @@ from .cuda import cuda_serialize, cuda_deserialize
 from distutils.version import LooseVersion
 
 
-class PatchedDeviceArray(object):
+class PatchedCudaArrayInterface(object):
     # TODO: This class wont be necessary
     #       once Cupy<7.0 is no longer supported
     def __init__(self, ary):
-        self.parent = ary
-        self.vsn = LooseVersion(cupy.__version__)
-
-    def __getattr__(self, name):
-        if name == "parent":
-            raise AttributeError()
-        if self.vsn >= "7.0.0" or name != "__cuda_array_interface__":
-            return getattr(self.parent, name)
-        else:
-            # Cupy<7.0 cannot handle
-            # __cuda_array_interface__['strides'] == None
-            rtn = self.parent.__cuda_array_interface__
-            if rtn.get("strides") is None:
-                rtn.pop("strides")
-            return rtn
+        vsn = LooseVersion(cupy.__version__)
+        cai = ary.__cuda_array_interface__
+        if vsn < "7.0.0" and cai.get("strides") is None:
+            cai.pop("strides")
+        self.__cuda_array_interface__ = cai
 
 
 @cuda_serialize.register(cupy.ndarray)
@@ -43,6 +33,6 @@ def deserialize_cupy_array(header, frames):
     arr = cupy.ndarray(
         header["shape"],
         dtype=header["typestr"],
-        memptr=cupy.asarray(PatchedDeviceArray(frame)).data,
+        memptr=cupy.asarray(PatchedCudaArrayInterface(frame)).data,
     )
     return arr
