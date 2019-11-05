@@ -13,7 +13,7 @@ class PatchedCudaArrayInterface(object):
         vsn = LooseVersion(cupy.__version__)
         cai = ary.__cuda_array_interface__
         if vsn < "7.0.0" and cai.get("strides") is None:
-            cai.pop("strides")
+            cai.pop("strides", None)
         self.__cuda_array_interface__ = cai
 
 
@@ -30,9 +30,9 @@ def serialize_cupy_ndarray(x):
 @cuda_deserialize.register(cupy.ndarray)
 def deserialize_cupy_array(header, frames):
     (frame,) = frames
+    if not isinstance(frame, cupy.ndarray):
+        frame = PatchedCudaArrayInterface(frame)
     arr = cupy.ndarray(
-        header["shape"],
-        dtype=header["typestr"],
-        memptr=cupy.asarray(PatchedCudaArrayInterface(frame)).data,
+        header["shape"], dtype=header["typestr"], memptr=cupy.asarray(frame).data
     )
     return arr
