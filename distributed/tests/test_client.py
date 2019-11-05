@@ -3322,10 +3322,7 @@ def test_get_foo_lost_keys(c, s, u, v, w):
 
 @pytest.mark.slow
 @gen_cluster(
-    client=True,
-    Worker=Nanny,
-    worker_kwargs={"death_timeout": "500ms"},
-    clean_kwargs={"threads": False, "processes": False},
+    client=True, Worker=Nanny, clean_kwargs={"threads": False, "processes": False}
 )
 def test_bad_tasks_fail(c, s, a, b):
     f = c.submit(sys.exit, 0)
@@ -3576,10 +3573,7 @@ def test_reconnect_timeout(c, s):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.skipif(
-    sys.version_info[0] == 2, reason="Semaphore.acquire doesn't support timeout option"
-)
-# @pytest.mark.xfail(reason="TODO: intermittent failures")
+@pytest.mark.xfail(reason="TODO: intermittent failures")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
 def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip("psutil")
@@ -5652,6 +5646,18 @@ async def test_shutdown_localcluster(cleanup):
             await c.shutdown()
 
         assert lc.scheduler.status == "closed"
+
+
+@pytest.mark.asyncio
+async def test_config_inherited_by_subprocess(cleanup):
+    def f(x):
+        return dask.config.get("foo") + 1
+
+    with dask.config.set(foo=100):
+        async with LocalCluster(n_workers=1, asynchronous=True, processes=True) as lc:
+            async with Client(lc, asynchronous=True) as c:
+                result = await c.submit(f, 1)
+                assert result == 101
 
 
 if sys.version_info >= (3, 5):
