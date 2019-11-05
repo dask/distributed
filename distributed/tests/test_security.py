@@ -10,7 +10,6 @@ import pytest
 from tornado import gen
 
 from distributed.comm import connect, listen
-from distributed.compatibility import WINDOWS
 from distributed.security import Security
 from distributed.utils_test import get_cert, gen_test
 
@@ -151,7 +150,6 @@ def test_tls_config_for_role():
         sec.get_tls_config_for_role("supervisor")
 
 
-@pytest.mark.xfail(WINDOWS, reason="Unknown TLS cipher issues on Windows")
 def test_connection_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
@@ -198,14 +196,13 @@ def test_connection_args():
     basic_checks(ctx)
     if sys.version_info >= (3, 6):
         supported_ciphers = ctx.get_ciphers()
-        tls_12_ciphers = [c for c in supported_ciphers if c["protocol"] == "TLSv1.2"]
+        tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
         assert len(tls_12_ciphers) == 1
-        tls_13_ciphers = [c for c in supported_ciphers if c["protocol"] == "TLSv1.3"]
+        tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
         if len(tls_13_ciphers):
             assert len(tls_13_ciphers) == 3
 
 
-@pytest.mark.xfail(WINDOWS, reason="Unknown TLS cipher issues on Windows")
 def test_listen_args():
     def basic_checks(ctx):
         assert ctx.verify_mode == ssl.CERT_REQUIRED
@@ -252,9 +249,9 @@ def test_listen_args():
     basic_checks(ctx)
     if sys.version_info >= (3, 6):
         supported_ciphers = ctx.get_ciphers()
-        tls_12_ciphers = [c for c in supported_ciphers if c["protocol"] == "TLSv1.2"]
+        tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
         assert len(tls_12_ciphers) == 1
-        tls_13_ciphers = [c for c in supported_ciphers if c["protocol"] == "TLSv1.3"]
+        tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
         if len(tls_13_ciphers):
             assert len(tls_13_ciphers) == 3
 
