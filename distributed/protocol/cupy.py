@@ -19,7 +19,7 @@ class PatchedDeviceArray(object):
         if self.vsn >= "7.0.0" or name != "__cuda_array_interface__":
             return getattr(self.parent, name)
         else:
-            # Cupy<7.0 cannot handle 
+            # Cupy<7.0 cannot handle
             # __cuda_array_interface__['strides'] == None
             rtn = self.parent.__cuda_array_interface__
             if rtn.get("strides") is None:
@@ -41,8 +41,8 @@ def serialize_cupy_ndarray(x):
 def deserialize_cupy_array(header, frames):
     (frame,) = frames
     arr = cupy.ndarray(
-        header["shape"], dtype=header["typestr"], memptr=cupy.asarray(
-            PatchedDeviceArray(frame)
-        ).data
+        header["shape"],
+        dtype=header["typestr"],
+        memptr=cupy.asarray(PatchedDeviceArray(frame)).data,
     )
     return arr
