@@ -1411,7 +1411,7 @@ class Client(Node):
         func: callable
         *args:
         **kwargs:
-        pure: bool (defaults to opposite of `actor(s)`)
+        pure: bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
         workers: set, iterable of sets
@@ -1534,7 +1534,7 @@ class Client(Node):
             List-like objects to map over.  They should have the same length.
         key: str, list
             Prefix for task names if string.  Explicit names if list.
-        pure: bool (defaults to opposite of `actor(s)`)
+        pure: bool (defaults to True)
             Whether or not the function is pure.  Set ``pure=False`` for
             impure functions like ``np.random.random``.
         workers: set, iterable of sets
