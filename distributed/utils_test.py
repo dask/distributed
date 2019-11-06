@@ -1,16 +1,16 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 import collections
 from contextlib import contextmanager
 import copy
 from datetime import timedelta
 import functools
-import gc
 from glob import glob
+import io
 import itertools
 import logging
 import logging.config
 import os
+import queue
 import re
 import shutil
 import signal
@@ -31,7 +31,6 @@ except ImportError:
     ssl = None
 
 import pytest
-import six
 
 import dask
 from toolz import merge, memoize, assoc
@@ -39,10 +38,10 @@ from tornado import gen, queues
 from tornado.gen import TimeoutError
 from tornado.ioloop import IOLoop
 
+from . import system
 from .client import default_client, _global_clients, Client
-from .compatibility import PY3, Empty, WINDOWS
+from .compatibility import WINDOWS
 from .comm import Comm
-from .comm.utils import offload
 from .config import initialize_logging
 from .core import connect, rpc, CommClosedError
 from .deploy import SpecCluster
@@ -61,8 +60,9 @@ from .utils import (
     sync,
     iscoroutinefunction,
     thread_state,
+    _offload_executor,
 )
-from .worker import Worker, TOTAL_MEMORY
+from .worker import Worker
 from .nanny import Nanny
 
 try:
@@ -81,7 +81,7 @@ logging_levels = {
 }
 
 
-offload(lambda: None).result()  # create thread during import
+_offload_executor.submit(lambda: None).result()  # create thread during import
 
 
 @pytest.fixture(scope="session")
@@ -110,10 +110,9 @@ def invalid_python_script(tmpdir_factory):
     return local_file
 
 
-@gen.coroutine
-def cleanup_global_workers():
+async def cleanup_global_workers():
     for worker in Worker._instances:
-        worker.close(report=False, executor_wait=False)
+        await worker.close(report=False, executor_wait=False)
 
 
 @pytest.fixture
@@ -192,7 +191,7 @@ def pristine_loop():
 
 @contextmanager
 def mock_ipython():
-    import mock
+    from unittest import mock
     from distributed._ipython_utils import remote_magic
 
     ip = mock.Mock()
@@ -225,11 +224,6 @@ def nodebug(func):
     A decorator to disable debug facilities during timing-sensitive tests.
     Warning: this doesn't affect already created IOLoops.
     """
-    if not PY3:
-        # py.test's runner magic breaks horridly on Python 2
-        # when a test function is wrapped, so avoid it
-        # (incidently, asyncio is irrelevant anyway)
-        return func
 
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
@@ -399,10 +393,9 @@ def map_varying(itemslists):
     return apply, list(map(varying, itemslists))
 
 
-@gen.coroutine
-def geninc(x, delay=0.02):
-    yield gen.sleep(delay)
-    raise gen.Return(x + 1)
+async def geninc(x, delay=0.02):
+    await gen.sleep(delay)
+    return x + 1
 
 
 def compile_snippet(code, dedent=True):
@@ -429,8 +422,7 @@ else:
 _readone_queues = {}
 
 
-@gen.coroutine
-def readone(comm):
+async def readone(comm):
     """
     Read one message at a time from a comm that reads lists of
     messages.
@@ -440,11 +432,10 @@ def readone(comm):
     except KeyError:
         q = _readone_queues[comm] = queues.Queue()
 
-        @gen.coroutine
-        def background_read():
+        async def background_read():
             while True:
                 try:
-                    messages = yield comm.read()
+                    messages = await comm.read()
                 except CommClosedError:
                     break
                 for msg in messages:
@@ -454,11 +445,11 @@ def readone(comm):
 
         background_read()
 
-    msg = yield q.get()
+    msg = await q.get()
     if msg is None:
         raise CommClosedError
     else:
-        raise gen.Return(msg)
+        return msg
 
 
 def run_scheduler(q, nputs, port=0, **kwargs):
@@ -467,13 +458,17 @@ def run_scheduler(q, nputs, port=0, **kwargs):
     # On Python 2.7 and Unix, fork() is used to spawn child processes,
     # so avoid inheriting the parent's IO loop.
     with pristine_loop() as loop:
-        scheduler = Scheduler(validate=True, host="127.0.0.1", port=port, **kwargs)
-        done = scheduler.start()
 
-        for i in range(nputs):
-            q.put(scheduler.address)
+        async def _():
+            scheduler = await Scheduler(
+                validate=True, host="127.0.0.1", port=port, **kwargs
+            )
+            for i in range(nputs):
+                q.put(scheduler.address)
+            await scheduler.finished()
+
         try:
-            loop.start()
+            loop.run_sync(_)
         finally:
             loop.close(all_fds=True)
 
@@ -485,16 +480,14 @@ def run_worker(q, scheduler_q, **kwargs):
     with log_errors():
         with pristine_loop() as loop:
             scheduler_addr = scheduler_q.get()
-            worker = Worker(scheduler_addr, validate=True, **kwargs)
-            loop.run_sync(lambda: worker._start())
-            q.put(worker.address)
+
+            async def _():
+                worker = await Worker(scheduler_addr, validate=True, **kwargs)
+                q.put(worker.address)
+                await worker.finished()
+
             try:
-
-                @gen.coroutine
-                def wait_until_closed():
-                    yield worker._closed.wait()
-
-                loop.run_sync(wait_until_closed)
+                loop.run_sync(_)
             finally:
                 loop.close(all_fds=True)
 
@@ -503,23 +496,21 @@ def run_nanny(q, scheduler_q, **kwargs):
     with log_errors():
         with pristine_loop() as loop:
             scheduler_addr = scheduler_q.get()
-            worker = Nanny(scheduler_addr, validate=True, **kwargs)
-            loop.run_sync(lambda: worker._start())
-            q.put(worker.address)
+
+            async def _():
+                worker = await Nanny(scheduler_addr, validate=True, **kwargs)
+                q.put(worker.address)
+                await worker.finished()
+
             try:
-                loop.start()
+                loop.run_sync(_)
             finally:
-                loop.run_sync(worker.close)
                 loop.close(all_fds=True)
 
 
 @contextmanager
 def check_active_rpc(loop, active_rpc_timeout=1):
     active_before = set(rpc.active)
-    if active_before and not PY3:
-        # On Python 2, try to avoid dangling comms before forking workers
-        gc.collect()
-        active_before = set(rpc.active)
     yield
     # Some streams can take a bit of time to notice their peer
     # has closed, and keep a coroutine (*) waiting for a CommClosedError
@@ -533,9 +524,8 @@ def check_active_rpc(loop, active_rpc_timeout=1):
             "some RPCs left active by test: %s" % (set(rpc.active) - active_before)
         )
 
-    @gen.coroutine
-    def wait():
-        yield async_wait_for(
+    async def wait():
+        await async_wait_for(
             lambda: len(set(rpc.active) - active_before) == 0,
             timeout=active_rpc_timeout,
             fail_func=fail,
@@ -647,7 +637,11 @@ def cluster(
             q = mp_context.Queue()
             fn = "_test_worker-%s" % uuid.uuid4()
             kwargs = merge(
-                {"nthreads": 1, "local_dir": fn, "memory_limit": TOTAL_MEMORY},
+                {
+                    "nthreads": 1,
+                    "local_directory": fn,
+                    "memory_limit": system.MEMORY_LIMIT,
+                },
                 worker_kwargs,
             )
             proc = mp_context.Process(
@@ -664,7 +658,7 @@ def cluster(
         try:
             for worker in workers:
                 worker["address"] = worker["queue"].get(timeout=5)
-        except Empty:
+        except queue.Empty:
             raise pytest.xfail.Exception("Worker failed to start in test")
 
         saddr = scheduler_q.get()
@@ -738,23 +732,20 @@ def cluster(
         assert time() < start + 5, ("Workers still around after five seconds", text)
 
 
-@gen.coroutine
-def disconnect(addr, timeout=3, rpc_kwargs=None):
+async def disconnect(addr, timeout=3, rpc_kwargs=None):
     rpc_kwargs = rpc_kwargs or {}
 
-    @gen.coroutine
-    def do_disconnect():
+    async def do_disconnect():
         with ignoring(EnvironmentError, CommClosedError):
             with rpc(addr, **rpc_kwargs) as w:
-                yield w.terminate(close=True)
+                await w.terminate(close=True)
 
     with ignoring(TimeoutError):
-        yield gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
+        await gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
 
 
-@gen.coroutine
-def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
-    yield [disconnect(addr, timeout, rpc_kwargs) for addr in addresses]
+async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
+    await asyncio.gather(*[disconnect(addr, timeout, rpc_kwargs) for addr in addresses])
 
 
 def gen_test(timeout=10):
@@ -783,8 +774,7 @@ from .scheduler import Scheduler
 from .worker import Worker
 
 
-@gen.coroutine
-def start_cluster(
+async def start_cluster(
     nthreads,
     scheduler_addr,
     loop,
@@ -793,10 +783,14 @@ def start_cluster(
     scheduler_kwargs={},
     worker_kwargs={},
 ):
-    s = Scheduler(
-        loop=loop, validate=True, security=security, port=0, **scheduler_kwargs
+    s = await Scheduler(
+        loop=loop,
+        validate=True,
+        security=security,
+        port=0,
+        host=scheduler_addr,
+        **scheduler_kwargs
     )
-    done = s.start(scheduler_addr)
     workers = [
         Worker(
             s.address,
@@ -813,31 +807,29 @@ def start_cluster(
     # for w in workers:
     #     w.rpc = workers[0].rpc
 
-    yield workers
+    await asyncio.gather(*workers)
 
     start = time()
     while len(s.workers) < len(nthreads) or any(
         comm.comm is None for comm in s.stream_comms.values()
     ):
-        yield gen.sleep(0.01)
+        await gen.sleep(0.01)
         if time() - start > 5:
-            yield [w.close(timeout=1) for w in workers]
-            yield s.close(fast=True)
+            await asyncio.gather(*[w.close(timeout=1) for w in workers])
+            await s.close(fast=True)
             raise Exception("Cluster creation timeout")
-    raise gen.Return((s, workers))
+    return s, workers
 
 
-@gen.coroutine
-def end_cluster(s, workers):
+async def end_cluster(s, workers):
     logger.debug("Closing out test cluster")
 
-    @gen.coroutine
-    def end_worker(w):
+    async def end_worker(w):
         with ignoring(TimeoutError, CommClosedError, EnvironmentError):
-            yield w.close(report=False)
+            await w.close(report=False)
 
-    yield [end_worker(w) for w in workers]
-    yield s.close()  # wait until scheduler stops completely
+    await asyncio.gather(*[end_worker(w) for w in workers])
+    await s.close()  # wait until scheduler stops completely
     s.stop()
 
 
@@ -854,7 +846,7 @@ def gen_cluster(
     client_kwargs={},
     active_rpc_timeout=1,
     config={},
-    check_new_threads=True,
+    clean_kwargs={},
 ):
     from distributed import Client
 
@@ -869,11 +861,11 @@ def gen_cluster(
         end
     """
     if ncores is not None:
-        warnings.warn("ncores= has moved to nthreads=")
+        warnings.warn("ncores= has moved to nthreads=", stacklevel=2)
         nthreads = ncores
 
     worker_kwargs = merge(
-        {"memory_limit": TOTAL_MEMORY, "death_timeout": 5}, worker_kwargs
+        {"memory_limit": system.MEMORY_LIMIT, "death_timeout": 10}, worker_kwargs
     )
 
     def _(func):
@@ -883,15 +875,14 @@ def gen_cluster(
         def test_func():
             result = None
             workers = []
-            with clean(threads=check_new_threads, timeout=active_rpc_timeout) as loop:
+            with clean(timeout=active_rpc_timeout, **clean_kwargs) as loop:
 
-                @gen.coroutine
-                def coro():
+                async def coro():
                     with dask.config.set(config):
                         s = False
                         for i in range(5):
                             try:
-                                s, ws = yield start_cluster(
+                                s, ws = await start_cluster(
                                     nthreads,
                                     scheduler,
                                     loop,
@@ -912,7 +903,7 @@ def gen_cluster(
                         if s is False:
                             raise Exception("Could not start cluster")
                         if client:
-                            c = yield Client(
+                            c = await Client(
                                 s.address,
                                 loop=loop,
                                 security=security,
@@ -926,36 +917,36 @@ def gen_cluster(
                                 future = gen.with_timeout(
                                     timedelta(seconds=timeout), future
                                 )
-                            result = yield future
+                            result = await future
                             if s.validate:
                                 s.validate_state()
                         finally:
                             if client and c.status not in ("closing", "closed"):
-                                yield c._close(fast=s.status == "closed")
-                            yield end_cluster(s, workers)
-                            yield gen.with_timeout(
+                                await c._close(fast=s.status == "closed")
+                            await end_cluster(s, workers)
+                            await gen.with_timeout(
                                 timedelta(seconds=1), cleanup_global_workers()
                             )
 
                         try:
-                            c = yield default_client()
+                            c = await default_client()
                         except ValueError:
                             pass
                         else:
-                            yield c._close(fast=True)
+                            await c._close(fast=True)
 
                         for i in range(5):
                             if all(c.closed() for c in Comm._instances):
                                 break
                             else:
-                                yield gen.sleep(0.05)
+                                await gen.sleep(0.05)
                         else:
                             L = [c for c in Comm._instances if not c.closed()]
                             Comm._instances.clear()
                             # raise ValueError("Unclosed Comms", L)
                             print("Unclosed Comms", L)
 
-                        raise gen.Return(result)
+                        return result
 
                 result = loop.run_sync(
                     coro, timeout=timeout * 2 if timeout else timeout
@@ -1069,11 +1060,10 @@ def wait_for(predicate, timeout, fail_func=None, period=0.001):
             pytest.fail("condition not reached until %s seconds" % (timeout,))
 
 
-@gen.coroutine
-def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
+async def async_wait_for(predicate, timeout, fail_func=None, period=0.001):
     deadline = time() + timeout
     while not predicate():
-        yield gen.sleep(period)
+        await gen.sleep(period)
         if time() > deadline:
             if fail_func is not None:
                 fail_func()
@@ -1113,20 +1103,18 @@ else:
     requires_ipv6 = pytest.mark.skip("ipv6 required")
 
 
-@gen.coroutine
-def assert_can_connect(addr, timeout=None, connection_args=None):
+async def assert_can_connect(addr, timeout=None, connection_args=None):
     """
     Check that it is possible to connect to the distributed *addr*
     within the given *timeout*.
     """
     if timeout is None:
         timeout = 0.5
-    comm = yield connect(addr, timeout=timeout, connection_args=connection_args)
+    comm = await connect(addr, timeout=timeout, connection_args=connection_args)
     comm.abort()
 
 
-@gen.coroutine
-def assert_cannot_connect(
+async def assert_cannot_connect(
     addr, timeout=None, connection_args=None, exception_class=EnvironmentError
 ):
     """
@@ -1136,12 +1124,11 @@ def assert_cannot_connect(
     if timeout is None:
         timeout = 0.5
     with pytest.raises(exception_class):
-        comm = yield connect(addr, timeout=timeout, connection_args=connection_args)
+        comm = await connect(addr, timeout=timeout, connection_args=connection_args)
         comm.abort()
 
 
-@gen.coroutine
-def assert_can_connect_from_everywhere_4_6(
+async def assert_can_connect_from_everywhere_4_6(
     port, timeout=None, connection_args=None, protocol="tcp"
 ):
     """
@@ -1157,11 +1144,10 @@ def assert_can_connect_from_everywhere_4_6(
             assert_can_connect("%s://[::1]:%d" % (protocol, port), *args),
             assert_can_connect("%s://[%s]:%d" % (protocol, get_ipv6(), port), *args),
         ]
-    yield futures
+    await asyncio.gather(*futures)
 
 
-@gen.coroutine
-def assert_can_connect_from_everywhere_4(
+async def assert_can_connect_from_everywhere_4(
     port, timeout=None, connection_args=None, protocol="tcp"
 ):
     """
@@ -1177,11 +1163,10 @@ def assert_can_connect_from_everywhere_4(
             assert_cannot_connect("%s://[::1]:%d" % (protocol, port), *args),
             assert_cannot_connect("%s://[%s]:%d" % (protocol, get_ipv6(), port), *args),
         ]
-    yield futures
+    await asyncio.gather(*futures)
 
 
-@gen.coroutine
-def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
+async def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is only reachable from local IPv4 addresses.
     """
@@ -1194,11 +1179,12 @@ def assert_can_connect_locally_4(port, timeout=None, connection_args=None):
             assert_cannot_connect("tcp://[::1]:%d" % port, *args),
             assert_cannot_connect("tcp://[%s]:%d" % (get_ipv6(), port), *args),
         ]
-    yield futures
+    await asyncio.gather(*futures)
 
 
-@gen.coroutine
-def assert_can_connect_from_everywhere_6(port, timeout=None, connection_args=None):
+async def assert_can_connect_from_everywhere_6(
+    port, timeout=None, connection_args=None
+):
     """
     Check that the local *port* is reachable from all IPv6 addresses.
     """
@@ -1210,11 +1196,10 @@ def assert_can_connect_from_everywhere_6(port, timeout=None, connection_args=Non
         assert_can_connect("tcp://[::1]:%d" % port, *args),
         assert_can_connect("tcp://[%s]:%d" % (get_ipv6(), port), *args),
     ]
-    yield futures
+    await asyncio.gather(*futures)
 
 
-@gen.coroutine
-def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
+async def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
     """
     Check that the local *port* is only reachable from local IPv6 addresses.
     """
@@ -1227,7 +1212,7 @@ def assert_can_connect_locally_6(port, timeout=None, connection_args=None):
     ]
     if get_ipv6() != "::1":  # No outside IPv6 connectivity?
         futures += [assert_cannot_connect("tcp://[%s]:%d" % (get_ipv6(), port), *args)]
-    yield futures
+    await asyncio.gather(*futures)
 
 
 @contextmanager
@@ -1241,7 +1226,7 @@ def captured_logger(logger, level=logging.INFO, propagate=None):
     if propagate is not None:
         orig_propagate = logger.propagate
         logger.propagate = propagate
-    sio = six.StringIO()
+    sio = io.StringIO()
     logger.handlers[:] = [logging.StreamHandler(sio)]
     logger.setLevel(level)
     try:
@@ -1259,7 +1244,7 @@ def captured_handler(handler):
     """
     assert isinstance(handler, logging.StreamHandler)
     orig_stream = handler.stream
-    handler.stream = six.StringIO()
+    handler.stream = io.StringIO()
     try:
         yield handler.stream
     finally:
@@ -1274,10 +1259,10 @@ def new_config(new_config):
     from .config import defaults
 
     config = dask.config.config
-    orig_config = config.copy()
+    orig_config = copy.deepcopy(config)
     try:
         config.clear()
-        config.update(defaults.copy())
+        config.update(copy.deepcopy(defaults))
         dask.config.update(config, new_config)
         initialize_logging(config)
         yield
@@ -1341,15 +1326,18 @@ def tls_config():
     ca_file = get_cert("tls-ca-cert.pem")
     keycert = get_cert("tls-key-cert.pem")
 
-    c = {
-        "tls": {
-            "ca-file": ca_file,
-            "client": {"cert": keycert},
-            "scheduler": {"cert": keycert},
-            "worker": {"cert": keycert},
+    return {
+        "distributed": {
+            "comm": {
+                "tls": {
+                    "ca-file": ca_file,
+                    "client": {"cert": keycert},
+                    "scheduler": {"cert": keycert},
+                    "worker": {"cert": keycert},
+                }
+            }
         }
     }
-    return c
 
 
 def tls_only_config():
@@ -1358,7 +1346,7 @@ def tls_only_config():
     plain TCP communications.
     """
     c = tls_config()
-    c["require-encryption"] = True
+    c["distributed"]["comm"]["require-encryption"] = True
     return c
 
 
@@ -1464,20 +1452,24 @@ def check_thread_leak():
 
 
 @contextmanager
-def check_process_leak():
-    start_children = set(mp_context.active_children())
+def check_process_leak(check=True):
+    for proc in mp_context.active_children():
+        proc.terminate()
 
     yield
 
-    for i in range(50):
-        if not set(mp_context.active_children()) - start_children:
-            break
+    if check:
+        for i in range(100):
+            if not set(mp_context.active_children()):
+                break
+            else:
+                sleep(0.2)
         else:
-            sleep(0.2)
-    else:
-        assert not mp_context.active_children()
+            assert not mp_context.active_children()
 
     _cleanup_dangling()
+    for proc in mp_context.active_children():
+        proc.terminate()
 
 
 @contextmanager
@@ -1503,9 +1495,10 @@ def check_instances():
     _global_clients.clear()
 
     for w in Worker._instances:
-        w.close(report=False, executor_wait=False)
-        if w.status == "running":
-            w.close()
+        with ignoring(RuntimeError):  # closed IOLoop
+            w.loop.add_callback(w.close, report=False, executor_wait=False)
+            if w.status == "running":
+                w.loop.add_callback(w.close)
     Worker._instances.clear()
 
     for i in range(5):
@@ -1532,14 +1525,14 @@ def check_instances():
 
 
 @contextmanager
-def clean(threads=not WINDOWS, processes=True, instances=True, timeout=1):
+def clean(threads=not WINDOWS, instances=True, timeout=1, processes=True):
     @contextmanager
     def null():
         yield
 
     with check_thread_leak() if threads else null():
         with pristine_loop() as loop:
-            with check_process_leak() if processes else null():
+            with check_process_leak(check=processes):
                 with check_instances() if instances else null():
                     with check_active_rpc(loop, timeout):
                         reset_config()
@@ -1554,3 +1547,16 @@ def clean(threads=not WINDOWS, processes=True, instances=True, timeout=1):
 
                         with ignoring(AttributeError):
                             del thread_state.on_event_loop_thread
+
+
+@pytest.fixture
+def cleanup():
+    with check_thread_leak():
+        with check_process_leak():
+            with check_instances():
+                reset_config()
+                dask.config.set({"distributed.comm.timeouts.connect": "5s"})
+                for name, level in logging_levels.items():
+                    logging.getLogger(name).setLevel(level)
+
+                yield

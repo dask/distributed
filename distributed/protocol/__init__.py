@@ -1,6 +1,5 @@
-from __future__ import print_function, division, absolute_import
-
 from functools import partial
+from distutils.version import LooseVersion
 
 from .compression import compressions, default_compression
 from .core import dumps, loads, maybe_compress, decompress, msgpack
@@ -84,4 +83,9 @@ def _register_numba():
 @cuda_serialize.register_lazy("cudf")
 @cuda_deserialize.register_lazy("cudf")
 def _register_cudf():
-    from . import cudf
+    import cudf
+
+    if LooseVersion(cudf.__version__) > "0.9":
+        from cudf.comm import serialize
+    else:
+        from . import cudf

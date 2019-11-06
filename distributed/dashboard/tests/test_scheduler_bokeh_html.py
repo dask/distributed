@@ -1,17 +1,16 @@
-from __future__ import print_function, division, absolute_import
-
 import json
 import re
-import xml.etree.ElementTree
 
 import pytest
 
 pytest.importorskip("bokeh")
 
 from tornado.escape import url_escape
-from tornado.httpclient import AsyncHTTPClient
+from tornado.httpclient import AsyncHTTPClient, HTTPClientError, HTTPRequest
+from tornado.websocket import websocket_connect
 
 from dask.sizeof import sizeof
+from distributed.utils import is_valid_xml
 from distributed.utils_test import gen_cluster, slowinc, inc
 from distributed.dashboard import BokehScheduler, BokehWorker
 
@@ -47,8 +46,27 @@ def test_connect(c, s, a, b):
         if suffix.endswith(".json"):
             json.loads(body)
         else:
-            assert xml.etree.ElementTree.fromstring(body) is not None
+            assert is_valid_xml(body)
             assert not re.search("href=./", body)  # no absolute links
+
+
+@gen_cluster(
+    client=True,
+    nthreads=[],
+    scheduler_kwargs={"services": {("dashboard", 0): BokehScheduler}},
+)
+def test_worker_404(c, s):
+    http_client = AsyncHTTPClient()
+    with pytest.raises(HTTPClientError) as err:
+        yield http_client.fetch(
+            "http://localhost:%d/info/worker/unknown" % s.services["dashboard"].port
+        )
+    assert err.value.code == 404
+    with pytest.raises(HTTPClientError) as err:
+        yield http_client.fetch(
+            "http://localhost:%d/info/task/unknown" % s.services["dashboard"].port
+        )
+    assert err.value.code == 404
 
 
 @gen_cluster(
@@ -68,12 +86,12 @@ def test_prefix(c, s, a, b):
         if suffix.endswith(".json"):
             json.loads(body)
         else:
-            assert xml.etree.ElementTree.fromstring(body) is not None
+            assert is_valid_xml(body)
 
 
 @gen_cluster(
     client=True,
-    check_new_threads=False,
+    clean_kwargs={"threads": False},
     scheduler_kwargs={"services": {("dashboard", 0): BokehScheduler}},
 )
 def test_prometheus(c, s, a, b):
@@ -98,7 +116,7 @@ def test_prometheus(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    check_new_threads=False,
+    clean_kwargs={"threads": False},
     scheduler_kwargs={"services": {("dashboard", 0): BokehScheduler}},
 )
 def test_health(c, s, a, b):
@@ -136,3 +154,26 @@ def test_task_page(c, s, a, b):
     assert "int" in body
     assert a.address in body
     assert "memory" in body
+
+
+@gen_cluster(
+    client=True,
+    scheduler_kwargs={
+        "services": {
+            ("dashboard", 0): (
+                BokehScheduler,
+                {"allow_websocket_origin": ["good.invalid"]},
+            )
+        }
+    },
+)
+def test_allow_websocket_origin(c, s, a, b):
+    url = (
+        "ws://localhost:%d/status/ws?bokeh-protocol-version=1.0&bokeh-session-id=1"
+        % s.services["dashboard"].port
+    )
+    with pytest.raises(HTTPClientError) as err:
+        yield websocket_connect(
+            HTTPRequest(url, headers={"Origin": "http://evil.invalid"})
+        )
+    assert err.value.code == 403

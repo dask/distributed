@@ -3,8 +3,6 @@ Record known compressors
 
 Includes utilities for determining whether or not to compress
 """
-from __future__ import print_function, division, absolute_import
-
 import logging
 import random
 
@@ -94,6 +92,26 @@ with ignoring(ImportError):
         "decompress": _fixed_lz4_decompress,
     }
     default_compression = "lz4"
+
+
+with ignoring(ImportError):
+    import zstandard
+
+    zstd_compressor = zstandard.ZstdCompressor(
+        level=dask.config.get("distributed.comm.zstd.level"),
+        threads=dask.config.get("distributed.comm.zstd.threads"),
+    )
+
+    zstd_decompressor = zstandard.ZstdDecompressor()
+
+    def zstd_compress(data):
+        return zstd_compressor.compress(data)
+
+    def zstd_decompress(data):
+        return zstd_decompressor.decompress(data)
+
+    compressions["zstd"] = {"compress": zstd_compress, "decompress": zstd_decompress}
+
 
 with ignoring(ImportError):
     import blosc

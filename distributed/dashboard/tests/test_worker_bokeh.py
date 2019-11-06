@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from operator import add, sub
 import re
 from time import sleep
@@ -16,8 +14,8 @@ from distributed.client import wait
 from distributed.metrics import time
 from distributed.utils_test import gen_cluster, inc, dec
 from distributed.dashboard.scheduler import BokehScheduler
-from distributed.dashboard.worker import (
-    BokehWorker,
+from distributed.dashboard.worker import BokehWorker
+from distributed.dashboard.components.worker import (
     StateTable,
     CrossFilter,
     CommunicatingStream,
@@ -169,7 +167,7 @@ def test_CommunicatingStream(c, s, a, b):
 
 @gen_cluster(
     client=True,
-    check_new_threads=False,
+    clean_kwargs={"threads": False},
     worker_kwargs={"services": {("dashboard", 0): BokehWorker}},
 )
 def test_prometheus(c, s, a, b):

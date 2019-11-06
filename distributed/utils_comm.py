@@ -1,11 +1,8 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 from collections import defaultdict
 from itertools import cycle
+import logging
 import random
-
-from tornado import gen
-from tornado.gen import Return
 
 from dask.optimization import SubgraphCallable
 from toolz import merge, concat, groupby, drop
@@ -13,9 +10,10 @@ from toolz import merge, concat, groupby, drop
 from .core import rpc
 from .utils import All, tokey
 
+logger = logging.getLogger(__name__)
 
-@gen.coroutine
-def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
+
+async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
     """ Gather data directly from peers
 
     Parameters
@@ -59,33 +57,40 @@ def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
         rpcs = {addr: rpc(addr) for addr in d}
         try:
             coroutines = {
-                address: get_data_from_worker(
-                    rpc,
-                    keys,
-                    address,
-                    who=who,
-                    serializers=serializers,
-                    max_connections=False,
+                address: asyncio.ensure_future(
+                    get_data_from_worker(
+                        rpc,
+                        keys,
+                        address,
+                        who=who,
+                        serializers=serializers,
+                        max_connections=False,
+                    )
                 )
                 for address, keys in d.items()
             }
             response = {}
             for worker, c in coroutines.items():
                 try:
-                    r = yield c
+                    r = await c
                 except EnvironmentError:
+                    missing_workers.add(worker)
+                except ValueError as e:
+                    logger.info(
+                        "Got an unexpected error while collecting from workers: %s", e
+                    )
                     missing_workers.add(worker)
                 else:
                     response.update(r["data"])
         finally:
             for r in rpcs.values():
-                r.close_rpc()
+                await r.close_rpc()
 
         bad_addresses |= {v for k, v in rev.items() if k not in response}
         results.update(response)
 
     bad_keys = {k: list(original_who_has[k]) for k in all_bad_keys}
-    raise Return((results, bad_keys, list(missing_workers)))
+    return (results, bad_keys, list(missing_workers))
 
 
 class WrappedKey(object):
@@ -109,8 +114,7 @@ class WrappedKey(object):
 _round_robin_counter = [0]
 
 
-@gen.coroutine
-def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=None):
+async def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=None):
     """ Scatter data directly to workers
 
     This distributes data in a round-robin fashion to a set of workers based on
@@ -134,7 +138,7 @@ def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=None):
 
     rpcs = {addr: rpc(addr) for addr in d}
     try:
-        out = yield All(
+        out = await All(
             [
                 rpcs[address].update_data(
                     data=v, report=report, serializers=serializers
@@ -144,13 +148,13 @@ def scatter_to_workers(nthreads, data, rpc=rpc, report=True, serializers=None):
         )
     finally:
         for r in rpcs.values():
-            r.close_rpc()
+            await r.close_rpc()
 
     nbytes = merge(o["nbytes"] for o in out)
 
     who_has = {k: [w for w, _, _ in v] for k, v in groupby(1, L).items()}
 
-    raise Return((names, who_has, nbytes))
+    return (names, who_has, nbytes)
 
 
 collection_types = (tuple, list, set, frozenset)

@@ -1,12 +1,9 @@
-from __future__ import print_function, division, absolute_import
-
 import sys
 from zlib import crc32
 
 import numpy as np
 import pytest
 
-from distributed.compatibility import PY2
 from distributed.protocol import (
     serialize,
     deserialize,
@@ -17,10 +14,11 @@ from distributed.protocol import (
     msgpack,
 )
 from distributed.protocol.utils import BIG_BYTES_SHARD_SIZE
-from distributed.utils import tmpfile, nbytes
-from distributed.utils_test import gen_cluster
 from distributed.protocol.numpy import itemsize
 from distributed.protocol.compression import maybe_compress
+from distributed.system import MEMORY_LIMIT
+from distributed.utils import tmpfile, nbytes
+from distributed.utils_test import gen_cluster
 
 
 def test_serialize():
@@ -79,7 +77,7 @@ def test_dumps_serialize_numpy(x):
     header, frames = serialize(x)
     if "compression" in header:
         frames = decompress(header, frames)
-    buffer_interface = buffer if PY2 else memoryview  # noqa: F821
+    buffer_interface = memoryview
     for frame in frames:
         assert isinstance(frame, (bytes, buffer_interface))
     y = deserialize(header, frames)
@@ -107,7 +105,7 @@ def test_dumps_serialize_numpy(x):
     ],
 )
 def test_serialize_numpy_ma_masked_array(x):
-    y, = loads(dumps([to_serialize(x)]))
+    (y,) = loads(dumps([to_serialize(x)]))
     assert x.data.dtype == y.data.dtype
     np.testing.assert_equal(x.data, y.data)
     np.testing.assert_equal(x.mask, y.mask)
@@ -115,19 +113,19 @@ def test_serialize_numpy_ma_masked_array(x):
 
 
 def test_serialize_numpy_ma_masked():
-    y, = loads(dumps([to_serialize(np.ma.masked)]))
+    (y,) = loads(dumps([to_serialize(np.ma.masked)]))
     assert y is np.ma.masked
 
 
 def test_dumps_serialize_numpy_custom_dtype():
-    from six.moves import builtins
+    import builtins
 
     test_rational = pytest.importorskip("numpy.core.test_rational")
     rational = test_rational.rational
     try:
         builtins.rational = (
-            rational
-        )  # Work around https://github.com/numpy/numpy/issues/9160
+            rational  # Work around https://github.com/numpy/numpy/issues/9160
+        )
         x = np.array([1], dtype=rational)
         header, frames = serialize(x)
         y = deserialize(header, frames)
@@ -154,9 +152,8 @@ def test_memmap():
 
 @pytest.mark.slow
 def test_dumps_serialize_numpy_large():
-    psutil = pytest.importorskip("psutil")
-    if psutil.virtual_memory().total < 2e9:
-        return
+    if MEMORY_LIMIT < 2e9:
+        pytest.skip("insufficient memory")
     x = np.random.random(size=int(BIG_BYTES_SHARD_SIZE * 2 // 8)).view("u1")
     assert x.nbytes == BIG_BYTES_SHARD_SIZE * 2
     frames = dumps([to_serialize(x)])

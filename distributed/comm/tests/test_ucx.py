@@ -1,5 +1,4 @@
 import asyncio
-
 import pytest
 
 ucp = pytest.importorskip("ucp")
@@ -10,6 +9,7 @@ from distributed.comm.registry import backends, get_backend
 from distributed.comm import ucx, parse_address
 from distributed.protocol import to_serialize
 from distributed.deploy.local import LocalCluster
+from dask.dataframe.utils import assert_eq
 from distributed.utils_test import gen_test, loop, inc  # noqa: 401
 
 from .test_comms import check_deserialize
@@ -31,11 +31,6 @@ async def get_comm_pair(
 
     async def handle_comm(comm):
         await q.put(comm)
-
-    # Workaround for hanging test in
-    # pytest distributed/comm/tests/test_ucx.py::test_comm_objs -vs --count=2
-    # on the second time through.
-    ucp._libs.ucp_py.reader_added = 0
 
     listener = listen(listen_addr, handle_comm, connection_args=listen_args, **kwargs)
     with listener:
@@ -93,6 +88,7 @@ def test_ucx_specific():
             msg = await comm.read()
             msg["op"] = "pong"
             await comm.write(msg)
+            await comm.read()
             assert comm.closed() is False
             await comm.close()
             assert comm.closed
@@ -118,11 +114,9 @@ def test_ucx_specific():
                 await asyncio.sleep(delay)
             msg = await comm.read()
             assert msg == {"op": "pong", "data": key}
+            await comm.write({"op": "client closed"})
             l.append(key)
             return comm
-            assert comm.closed() is False
-            await comm.close()
-            assert comm.closed
 
         comm = await client_communicate(key=1234, delay=0.5)
 
@@ -164,21 +158,42 @@ def test_ucx_deserialize():
 
 
 @pytest.mark.asyncio
-async def test_ping_pong_cudf():
+@pytest.mark.parametrize(
+    "g",
+    [
+        lambda cudf: cudf.Series([1, 2, 3]),
+        lambda cudf: cudf.Series([]),
+        lambda cudf: cudf.DataFrame([]),
+        lambda cudf: cudf.DataFrame([1]).head(0),
+        lambda cudf: cudf.DataFrame([1.0]).head(0),
+        lambda cudf: cudf.DataFrame({"a": []}),
+        lambda cudf: cudf.DataFrame({"a": ["a"]}).head(0),
+        lambda cudf: cudf.DataFrame({"a": [1.0]}).head(0),
+        lambda cudf: cudf.DataFrame({"a": [1]}).head(0),
+        lambda cudf: cudf.DataFrame({"a": [1, 2, None], "b": [1.0, 2.0, None]}),
+        lambda cudf: cudf.DataFrame({"a": ["Check", "str"], "b": ["Sup", "port"]}),
+    ],
+)
+async def test_ping_pong_cudf(g):
     # if this test appears after cupy an import error arises
     # *** ImportError: /usr/lib/x86_64-linux-gnu/libstdc++.so.6: version `CXXABI_1.3.11'
     # not found (required by python3.7/site-packages/pyarrow/../../../libarrow.so.12)
     cudf = pytest.importorskip("cudf")
 
-    df = cudf.DataFrame({"A": [1, 2, None], "B": [1.0, 2.0, None]})
+    cudf_obj = g(cudf)
 
     com, serv_com = await get_comm_pair()
-    msg = {"op": "ping", "data": to_serialize(df)}
+    msg = {"op": "ping", "data": to_serialize(cudf_obj)}
 
     await com.write(msg)
     result = await serv_com.read()
-    data2 = result.pop("data")
+
+    cudf_obj_2 = result.pop("data")
     assert result["op"] == "ping"
+    assert_eq(cudf_obj, cudf_obj_2)
+
+    await com.close()
+    await serv_com.close()
 
 
 @pytest.mark.asyncio
@@ -244,24 +259,15 @@ async def test_ping_pong_numba():
     assert result["op"] == "ping"
 
 
-@pytest.mark.skip(reason="hangs")
 @pytest.mark.parametrize("processes", [True, False])
 def test_ucx_localcluster(loop, processes):
-    if processes:
-        kwargs = {"env": {"UCX_MEMTYPE_CACHE": "n"}}
-    else:
-        kwargs = {}
-
-    ucx_addr = ucp.get_address()
     with LocalCluster(
         protocol="ucx",
-        interface="ib0",
         dashboard_address=None,
         n_workers=2,
         threads_per_worker=1,
         processes=processes,
         loop=loop,
-        **kwargs,
     ) as cluster:
         with Client(cluster) as client:
             x = client.submit(inc, 1)
@@ -272,47 +278,16 @@ def test_ucx_localcluster(loop, processes):
             assert len(cluster.scheduler.workers) == 2
 
 
-def test_tcp_localcluster(loop):
-    ucx_addr = "127.0.0.1"
-    port = 13337
-    env = {"UCX_MEMTYPE_CACHE": "n"}
-    with LocalCluster(
-        2,
-        scheduler_port=port,
-        ip=ucx_addr,
-        processes=True,
-        threads_per_worker=1,
-        dashboard_address=None,
-        silence_logs=False,
-        env=env,
-    ) as cluster:
-        pass
-        # with Client(cluster) as e:
-        #     x = e.submit(inc, 1)
-        #     x.result()
-        #     assert x.key in c.scheduler.tasks
-        #     assert any(w.data == {x.key: 2} for w in c.workers)
-        #     assert e.loop is c.loop
-        #     print(c.scheduler.workers)
-
-
 @pytest.mark.slow
 @pytest.mark.asyncio
 async def test_stress():
-    from distributed.utils import get_ip_interface
-
-    try:  # this check should be removed once UCX + TCP works
-        get_ip_interface("ib0")
-    except Exception:
-        pytest.skip("ib0 interface not found")
-
     import dask.array as da
     from distributed import wait
 
     chunksize = "10 MB"
 
     async with LocalCluster(
-        protocol="ucx", interface="ib0", asynchronous=True
+        protocol="ucx", dashboard_address=None, asynchronous=True, processes=False
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             rs = da.random.RandomState()

@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from datetime import timedelta
 from time import sleep
 
@@ -223,7 +221,7 @@ def test_Future_knows_status_immediately(c, s, a, b):
 @gen_cluster(client=True)
 def test_erred_future(c, s, a, b):
     future = c.submit(div, 1, 0)
-    q = Queue()
+    q = yield Queue()
     yield q.put(future)
     yield gen.sleep(0.1)
     future2 = yield q.get()
@@ -236,10 +234,7 @@ def test_erred_future(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_close(c, s, a, b):
-    q = Queue()
-
-    while q.name not in s.extensions["queues"].queues:
-        yield gen.sleep(0.01)
+    q = yield Queue()
 
     q.close()
     q.close()
@@ -250,7 +245,7 @@ def test_close(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_timeout(c, s, a, b):
-    q = Queue("v", maxsize=1)
+    q = yield Queue("v", maxsize=1)
 
     start = time()
     with pytest.raises(gen.TimeoutError):

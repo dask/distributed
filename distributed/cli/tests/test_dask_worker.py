@@ -1,5 +1,4 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 import pytest
 from click.testing import CliRunner
 
@@ -11,11 +10,11 @@ import os
 from time import sleep
 
 import distributed.cli.dask_worker
-from distributed import Client
+from distributed import Client, Scheduler
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
 from distributed.utils_test import popen, terminate_process, wait_for_port
-from distributed.utils_test import loop  # noqa: F401
+from distributed.utils_test import loop, cleanup  # noqa: F401
 
 
 def test_nanny_worker_ports(loop):
@@ -182,7 +181,7 @@ def test_nprocs_requires_nanny(loop):
 def test_nprocs_expands_name(loop):
     with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
-            ["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "foo"]
+            ["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "0"]
         ) as worker:
             with popen(["dask-worker", "127.0.0.1:8786", "--nprocs", "2"]) as worker:
                 with Client("tcp://127.0.0.1:8786", loop=loop) as c:
@@ -193,7 +192,7 @@ def test_nprocs_expands_name(loop):
 
                     info = c.scheduler_info()
                     names = [d["name"] for d in info["workers"].values()]
-                    foos = [n for n in names if n.startswith("foo")]
+                    foos = [n for n in names if n.startswith("0-")]
                     assert len(foos) == 2
                     assert len(set(names)) == 4
 
@@ -268,29 +267,30 @@ def test_dashboard_non_standard_ports(loop):
     except ImportError:
         proxy_exists = False
 
-    with popen(["dask-scheduler", "--port", "3449"]):
+    with popen(["dask-scheduler", "--port", "3449"]) as s:
         with popen(
-            ["dask-worker", "tcp://127.0.0.1:3449", "--dashboard-address", ":4833"]
+            [
+                "dask-worker",
+                "tcp://127.0.0.1:3449",
+                "--dashboard-address",
+                ":4833",
+                "--host",
+                "127.0.0.1",
+            ]
         ) as proc:
             with Client("127.0.0.1:3449", loop=loop) as c:
+                c.wait_for_workers(1)
                 pass
 
-            start = time()
-            while True:
-                try:
-                    response = requests.get("http://127.0.0.1:4833/status")
+                response = requests.get("http://127.0.0.1:4833/status")
+                assert response.ok
+                redirect_resp = requests.get("http://127.0.0.1:4833/main")
+                redirect_resp.ok
+                # TEST PROXYING WORKS
+                if proxy_exists:
+                    url = "http://127.0.0.1:8787/proxy/4833/127.0.0.1/status"
+                    response = requests.get(url)
                     assert response.ok
-                    redirect_resp = requests.get("http://127.0.0.1:4833/main")
-                    redirect_resp.ok
-                    # TEST PROXYING WORKS
-                    if proxy_exists:
-                        url = "http://127.0.0.1:8787/proxy/4833/127.0.0.1/status"
-                        response = requests.get(url)
-                        assert response.ok
-                    break
-                except Exception:
-                    sleep(0.5)
-                    assert time() < start + 20
 
         with pytest.raises(Exception):
             requests.get("http://localhost:4833/status/")
@@ -311,7 +311,6 @@ def test_worker_timeout(no_nanny):
         args.append("--no-nanny")
     result = runner.invoke(distributed.cli.dask_worker.main, args)
     assert result.exit_code != 0
-    assert str(result.exception).startswith("Timed out")
 
 
 def test_bokeh_deprecation():
@@ -331,3 +330,13 @@ def test_bokeh_deprecation():
         except ValueError:
             # didn't pass scheduler
             pass
+
+
+@pytest.mark.asyncio
+async def test_integer_names(cleanup):
+    async with Scheduler(port=0) as s:
+        with popen(["dask-worker", s.address, "--name", "123"]) as worker:
+            while not s.workers:
+                await asyncio.sleep(0.01)
+            [ws] = s.workers.values()
+            assert ws.name == 123

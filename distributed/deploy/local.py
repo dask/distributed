@@ -1,14 +1,12 @@
-from __future__ import print_function, division, absolute_import
-
 import atexit
 import logging
 import math
-import multiprocessing
 import warnings
 import weakref
 
 from dask.utils import factors
 
+from .. import system
 from .spec import SpecCluster
 from ..nanny import Nanny
 from ..scheduler import Scheduler
@@ -58,7 +56,10 @@ class LocalCluster(SpecCluster):
         like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
-    security : Security
+    security : Security or bool, optional
+        Configures communication security in this cluster. Can be a security
+        object, or True. If True, temporary self-signed credentials will
+        be created automatically.
     protocol: str (optional)
         Protocol to use like ``tcp://``, ``tls://``, ``inproc://``
         This defaults to sensible choice given other keyword arguments like
@@ -82,7 +83,7 @@ class LocalCluster(SpecCluster):
 
     Pass extra keyword arguments to Bokeh
 
-    >>> LocalCluster(service_kwargs={'bokeh': {'prefix': '/foo'}})  # doctest: +SKIP
+    >>> LocalCluster(service_kwargs={'dashboard': {'prefix': '/foo'}})  # doctest: +SKIP
     """
 
     def __init__(
@@ -124,7 +125,15 @@ class LocalCluster(SpecCluster):
 
         self.status = None
         self.processes = processes
-        security = security or Security()
+
+        if security is None:
+            # Falsey values load the default configuration
+            security = Security()
+        elif security is True:
+            # True indicates self-signed temporary credentials should be used
+            security = Security.temporary()
+        elif not isinstance(security, Security):
+            raise TypeError("security must be a Security object")
 
         if protocol is None:
             if host and "://" in host:
@@ -148,14 +157,12 @@ class LocalCluster(SpecCluster):
                 n_workers, threads_per_worker = nprocesses_nthreads()
             else:
                 n_workers = 1
-                threads_per_worker = multiprocessing.cpu_count()
+                threads_per_worker = system.CPU_COUNT
         if n_workers is None and threads_per_worker is not None:
-            n_workers = max(1, multiprocessing.cpu_count() // threads_per_worker)
+            n_workers = max(1, system.CPU_COUNT // threads_per_worker)
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
-            threads_per_worker = max(
-                1, int(math.ceil(multiprocessing.cpu_count() / n_workers))
-            )
+            threads_per_worker = max(1, int(math.ceil(system.CPU_COUNT / n_workers)))
         if n_workers and "memory_limit" not in worker_kwargs:
             worker_kwargs["memory_limit"] = parse_memory_limit("auto", 1, n_workers)
 
@@ -200,14 +207,7 @@ class LocalCluster(SpecCluster):
             loop=loop,
             asynchronous=asynchronous,
             silence_logs=silence_logs,
-        )
-
-    def __repr__(self):
-        return "%s(%r, workers=%d, nthreads=%d)" % (
-            type(self).__name__,
-            self.scheduler_address,
-            len(self.workers),
-            sum(w.nthreads for w in self.workers.values()),
+            security=security,
         )
 
     def start_worker(self, *args, **kwargs):
@@ -217,7 +217,7 @@ class LocalCluster(SpecCluster):
         )
 
 
-def nprocesses_nthreads(n=multiprocessing.cpu_count()):
+def nprocesses_nthreads(n=system.CPU_COUNT):
     """
     The default breakdown of processes and threads for a given number of cores
 

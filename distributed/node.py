@@ -1,12 +1,12 @@
-from __future__ import print_function, division, absolute_import
-
-import warnings
+import asyncio
 import logging
+import warnings
+import weakref
 
 from tornado.ioloop import IOLoop
+from tornado import gen
 import dask
 
-from .compatibility import unicode, finalize
 from .core import Server, ConnectionPool
 from .versions import get_versions
 from .utils import DequeHandler
@@ -96,7 +96,7 @@ class ServerNode(Node, Server):
             else:
                 port = 0
 
-            if isinstance(port, (str, unicode)):
+            if isinstance(port, str):
                 port = port.split(":")
 
             if isinstance(port, (tuple, list)):
@@ -142,7 +142,7 @@ class ServerNode(Node, Server):
             logging.Formatter(dask.config.get("distributed.admin.log-format"))
         )
         logger.addHandler(self._deque_handler)
-        finalize(self, logger.removeHandler, self._deque_handler)
+        weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
     def get_logs(self, comm=None, n=None):
         deque_handler = self._deque_handler
@@ -159,3 +159,28 @@ class ServerNode(Node, Server):
 
     async def __aexit__(self, typ, value, traceback):
         await self.close()
+
+    def __await__(self):
+        if self.status == "running":
+            return gen.sleep(0).__await__()
+        else:
+            future = self.start()
+            timeout = getattr(self, "death_timeout", 0)
+            if timeout:
+
+                async def wait_for(future, timeout=None):
+                    try:
+                        await asyncio.wait_for(future, timeout=timeout)
+                    except Exception:
+                        await self.close(timeout=1)
+                        raise gen.TimeoutError(
+                            "{} failed to start in {} seconds".format(
+                                type(self).__name__, timeout
+                            )
+                        )
+
+                future = wait_for(future, timeout=timeout)
+            return future.__await__()
+
+    async def start(self):  # subclasses should implement this
+        return self

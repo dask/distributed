@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import pytest
 
 pytest.importorskip("bokeh")
@@ -8,9 +6,7 @@ from bokeh.models import ColumnDataSource, Model
 from tornado import gen
 
 from distributed.utils_test import slowinc, gen_cluster
-
-from distributed.dashboard.components import (
-    TaskStream,
+from distributed.dashboard.components.shared import (
     MemoryUsage,
     Processing,
     ProfilePlot,
@@ -18,14 +14,14 @@ from distributed.dashboard.components import (
 )
 
 
-@pytest.mark.parametrize("Component", [TaskStream, MemoryUsage, Processing])
+@pytest.mark.parametrize("Component", [MemoryUsage, Processing])
 def test_basic(Component):
     c = Component()
     assert isinstance(c.source, ColumnDataSource)
     assert isinstance(c.root, Model)
 
 
-@gen_cluster(client=True, check_new_threads=False)
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 def test_profile_plot(c, s, a, b):
     p = ProfilePlot()
     assert not p.source.data["left"]
@@ -34,7 +30,7 @@ def test_profile_plot(c, s, a, b):
     assert len(p.source.data["left"]) >= 1
 
 
-@gen_cluster(client=True, check_new_threads=False)
+@gen_cluster(client=True, clean_kwargs={"threads": False})
 def test_profile_time_plot(c, s, a, b):
     from bokeh.io import curdoc
 

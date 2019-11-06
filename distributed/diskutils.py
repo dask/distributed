@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import errno
 import glob
 import logging
@@ -7,11 +5,11 @@ import os
 import shutil
 import stat
 import tempfile
+import weakref
 
 import dask
 
 from . import locket
-from .compatibility import finalize
 
 
 logger = logging.getLogger(__name__)
@@ -73,7 +71,7 @@ class WorkDir(object):
                 raise
             workspace._known_locks.add(self._lock_path)
 
-            self._finalizer = finalize(
+            self._finalizer = weakref.finalize(
                 self,
                 self._finalize,
                 workspace,
@@ -82,7 +80,7 @@ class WorkDir(object):
                 self.dir_path,
             )
         else:
-            self._finalizer = finalize(
+            self._finalizer = weakref.finalize(
                 self, self._finalize, workspace, None, None, self.dir_path
             )
 
@@ -239,7 +237,7 @@ class WorkSpace(object):
             self._purge_leftovers()
         except OSError:
             logger.error(
-                "Failed to clean up lingering worker directories " "in path: %s ",
+                "Failed to clean up lingering worker directories in path: %s ",
                 exc_info=True,
             )
         return WorkDir(self, **kwargs)

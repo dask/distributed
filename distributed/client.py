@@ -1,7 +1,6 @@
-from __future__ import print_function, division, absolute_import
-
 import atexit
 from collections import defaultdict
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, CancelledError
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
@@ -9,7 +8,7 @@ import copy
 from datetime import timedelta
 import errno
 from functools import partial
-from glob import glob
+import html
 import itertools
 import json
 import logging
@@ -18,8 +17,8 @@ import os
 import sys
 import uuid
 import threading
-import six
 import socket
+from queue import Queue as pyQueue
 import warnings
 import weakref
 
@@ -27,8 +26,8 @@ import dask
 from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
-from dask.compatibility import apply, unicode
-from dask.utils import ensure_dict, format_bytes
+from dask.compatibility import apply
+from dask.utils import ensure_dict, format_bytes, funcname
 
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
@@ -44,6 +43,7 @@ from tornado.locks import Event, Condition, Semaphore
 from tornado.ioloop import IOLoop
 from tornado.queues import Queue
 
+import asyncio
 from asyncio import iscoroutine
 
 from .batched import BatchedSend
@@ -55,13 +55,6 @@ from .utils_comm import (
     gather_from_workers,
 )
 from .cfexecutor import ClientExecutor
-from .compatibility import (
-    Queue as pyQueue,
-    isqueue,
-    html_escape,
-    StopAsyncIteration,
-    Iterator,
-)
 from .core import connect, rpc, clean_exception, CommClosedError, PooledRPCCall
 from .metrics import time
 from .node import Node
@@ -73,10 +66,10 @@ from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
 from .worker import dumps_task, get_client, get_worker, secede
+from .diagnostics.plugin import WorkerPlugin
 from .utils import (
     All,
     sync,
-    funcname,
     ignoring,
     tokey,
     log_errors,
@@ -225,38 +218,38 @@ class Future(WrappedKey):
         # shorten error traceback
         result = self.client.sync(self._result, callback_timeout=timeout, raiseit=False)
         if self.status == "error":
-            six.reraise(*result)
+            typ, exc, tb = result
+            raise exc.with_traceback(tb)
         elif self.status == "cancelled":
             raise result
         else:
             return result
 
-    @gen.coroutine
-    def _result(self, raiseit=True):
-        yield self._state.wait()
+    async def _result(self, raiseit=True):
+        await self._state.wait()
         if self.status == "error":
             exc = clean_exception(self._state.exception, self._state.traceback)
             if raiseit:
-                six.reraise(*exc)
+                typ, exc, tb = exc
+                raise exc.with_traceback(tb)
             else:
-                raise gen.Return(exc)
+                return exc
         elif self.status == "cancelled":
             exception = CancelledError(self.key)
             if raiseit:
                 raise exception
             else:
-                raise gen.Return(exception)
+                return exception
         else:
-            result = yield self.client._gather([self])
-            raise gen.Return(result[0])
+            result = await self.client._gather([self])
+            return result[0]
 
-    @gen.coroutine
-    def _exception(self):
-        yield self._state.wait()
+    async def _exception(self):
+        await self._state.wait()
         if self.status == "error":
-            raise gen.Return(self._state.exception)
+            return self._state.exception
         else:
-            raise gen.Return(None)
+            return None
 
     def exception(self, timeout=None, **kwargs):
         """ Return the exception of a failed task
@@ -321,13 +314,12 @@ class Future(WrappedKey):
         """ Returns True if the future has been cancelled """
         return self._state.status == "cancelled"
 
-    @gen.coroutine
-    def _traceback(self):
-        yield self._state.wait()
+    async def _traceback(self):
+        await self._state.wait()
         if self.status == "error":
-            raise gen.Return(self._state.traceback)
+            return self._state.traceback
         else:
-            raise gen.Return(None)
+            return None
 
     def traceback(self, timeout=None, **kwargs):
         """ Return the traceback of a failed task
@@ -403,7 +395,7 @@ class Future(WrappedKey):
             return "<Future: status: %s, key: %s>" % (self.status, self.key)
 
     def _repr_html_(self):
-        text = "<b>Future: %s</b> " % html_escape(key_split(self.key))
+        text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
         text += (
             '<font color="gray">status: </font>'
             '<font color="%(color)s">%(status)s</font>, '
@@ -417,7 +409,7 @@ class Future(WrappedKey):
             except AttributeError:
                 typ = str(self.type)
             text += '<font color="gray">type: </font>%s, ' % typ
-        text += '<font color="gray">key: </font>%s' % html_escape(str(self.key))
+        text += '<font color="gray">key: </font>%s' % html.escape(str(self.key))
         return text
 
     def __await__(self):
@@ -448,6 +440,7 @@ class FutureState(object):
 
     def cancel(self):
         self.status = "cancelled"
+        self.exception = CancelledError()
         self._get_event().set()
 
     def finish(self, type=None):
@@ -480,19 +473,17 @@ class FutureState(object):
         if self._event is not None:
             self._event.clear()
 
-    @gen.coroutine
-    def wait(self, timeout=None):
-        yield self._get_event().wait(timeout)
+    async def wait(self, timeout=None):
+        await self._get_event().wait(timeout)
 
     def __repr__(self):
         return "<%s: %s>" % (self.__class__.__name__, self.status)
 
 
-@gen.coroutine
-def done_callback(future, callback):
+async def done_callback(future, callback):
     """ Coroutine that waits on future, then calls callback """
     while future.status == "pending":
-        yield future._state.wait()
+        await future._state.wait()
     callback(future)
 
 
@@ -532,8 +523,10 @@ class Client(Node):
         Claim this scheduler as the global dask scheduler
     scheduler_file: string (optional)
         Path to a file with scheduler information if available
-    security: (optional)
-        Optional security information
+    security: Security or bool, optional
+        Optional security information. If creating a local cluster can also
+        pass in ``True``, in which case temporary self-signed credentials will
+        be created automatically.
     asynchronous: bool (False by default)
         Set to True if using this client within async/await functions or within
         Tornado gen.coroutines.  Otherwise this should remain False for normal
@@ -646,19 +639,17 @@ class Client(Node):
         self._gather_future = None
 
         # Communication
-        self.security = security or Security()
         self.scheduler_comm = None
-        assert isinstance(self.security, Security)
-
-        if name == "worker":
-            self.connection_args = self.security.get_connection_args("worker")
-        else:
-            self.connection_args = self.security.get_connection_args("client")
 
         if address is None:
             address = dask.config.get("scheduler-address", None)
             if address:
                 logger.info("Config value `scheduler-address` found: %s", address)
+
+        if address is not None and kwargs:
+            raise ValueError(
+                "Unexpected keyword arguments: {}".format(str(sorted(kwargs)))
+            )
 
         if isinstance(address, (rpc, PooledRPCCall)):
             self.scheduler = address
@@ -667,6 +658,23 @@ class Client(Node):
             self.cluster = address
             with ignoring(AttributeError):
                 loop = address.loop
+            if security is None:
+                security = getattr(self.cluster, "security", None)
+
+        if security is None:
+            security = Security()
+        elif security is True:
+            security = Security.temporary()
+            self._startup_kwargs["security"] = security
+        elif not isinstance(security, Security):
+            raise TypeError("security must be a Security object")
+
+        self.security = security
+
+        if name == "worker":
+            self.connection_args = self.security.get_connection_args("worker")
+        else:
+            self.connection_args = self.security.get_connection_args("client")
 
         self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
@@ -771,12 +779,18 @@ class Client(Node):
             workers = info.get("workers", {})
             nworkers = len(workers)
             nthreads = sum(w["nthreads"] for w in workers.values())
-            return "<%s: scheduler=%r processes=%d cores=%d>" % (
+            text = "<%s: %r processes=%d threads=%d" % (
                 self.__class__.__name__,
                 addr,
                 nworkers,
                 nthreads,
             )
+            memory = [w["memory_limit"] for w in workers.values()]
+            if all(memory):
+                text += ", memory=" + format_bytes(sum(memory))
+            text += ">"
+            return text
+
         elif self.scheduler is not None:
             return "<%s: scheduler=%r>" % (
                 self.__class__.__name__,
@@ -786,10 +800,12 @@ class Client(Node):
             return "<%s: not connected>" % (self.__class__.__name__,)
 
     def _repr_html_(self):
+        from .scheduler import Scheduler
+
         if (
             self.cluster
             and hasattr(self.cluster, "scheduler")
-            and self.cluster.scheduler
+            and isinstance(self.cluster.scheduler, Scheduler)
         ):
             info = self.cluster.scheduler.identity()
             scheduler = self.cluster.scheduler
@@ -804,22 +820,29 @@ class Client(Node):
             info = self._scheduler_identity
             scheduler = self.scheduler
 
+        text = (
+            '<h3 style="text-align: left;">Client</h3>\n'
+            '<ul style="text-align: left; list-style: none; margin: 0; padding: 0;">\n'
+        )
         if scheduler is not None:
-            text = (
-                "<h3>Client</h3>\n" "<ul>\n" "  <li><b>Scheduler: </b>%s\n"
-            ) % scheduler.address
+            text += "  <li><b>Scheduler: </b>%s</li>\n" % scheduler.address
         else:
-            text = (
-                "<h3>Client</h3>\n" "<ul>\n" "  <li><b>Scheduler: not connected</b>\n"
-            )
+            text += "  <li><b>Scheduler: not connected</b></li>\n"
+
         if info and "dashboard" in info["services"]:
-            protocol, rest = scheduler.address.split("://")
-            port = info["services"]["dashboard"]
-            if protocol == "inproc":
-                host = "localhost"
-            else:
-                host = rest.split(":")[0]
-            address = format_dashboard_link(host, port)
+            try:
+                address = self.cluster.dashboard_link
+            except AttributeError:
+                protocol, rest = scheduler.address.split("://")
+
+                port = info["services"]["dashboard"]
+                if protocol == "inproc":
+                    host = "localhost"
+                else:
+                    host = rest.split(":")[0]
+
+                address = format_dashboard_link(host, port)
+
             text += (
                 "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n"
                 % {"web": address}
@@ -837,8 +860,8 @@ class Client(Node):
                 memory = ""
 
             text2 = (
-                "<h3>Cluster</h3>\n"
-                "<ul>\n"
+                '<h3 style="text-align: left;">Cluster</h3>\n'
+                '<ul style="text-align: left; list-style:none; margin: 0; padding: 0;">\n'
                 "  <li><b>Workers: </b>%d</li>\n"
                 "  <li><b>Cores: </b>%d</li>\n"
                 "  <li><b>Memory: </b>%s</li>\n"
@@ -867,7 +890,7 @@ class Client(Node):
         self.status = "connecting"
 
         if self.asynchronous:
-            self._started = self._start(**kwargs)
+            self._started = asyncio.ensure_future(self._start(**kwargs))
         else:
             sync(self.loop, self._start, **kwargs)
 
@@ -876,9 +899,8 @@ class Client(Node):
             return self._started.__await__()
         else:
 
-            @gen.coroutine
-            def _():
-                raise gen.Return(self)
+            async def _():
+                return self
 
             return _().__await__()
 
@@ -901,8 +923,7 @@ class Client(Node):
                 "Message: %s" % (self.status, msg)
             )
 
-    @gen.coroutine
-    def _start(self, timeout=no_default, **kwargs):
+    async def _start(self, timeout=no_default, **kwargs):
         if timeout == no_default:
             timeout = self._timeout
         if timeout is not None:
@@ -912,18 +933,16 @@ class Client(Node):
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
             try:
-                yield self.cluster._start()
-            except AttributeError:  # Some clusters don't have this method
-                pass
+                await self.cluster
             except Exception:
                 logger.info(
-                    "Tried to start cluster and received an error. " "Proceeding.",
+                    "Tried to start cluster and received an error. Proceeding.",
                     exc_info=True,
                 )
             address = self.cluster.scheduler_address
         elif self.scheduler_file is not None:
             while not os.path.exists(self.scheduler_file):
-                yield gen.sleep(0.01)
+                await gen.sleep(0.01)
             for i in range(10):
                 try:
                     with open(self.scheduler_file) as f:
@@ -931,33 +950,33 @@ class Client(Node):
                     address = cfg["address"]
                     break
                 except (ValueError, KeyError):  # JSON file not yet flushed
-                    yield gen.sleep(0.01)
+                    await gen.sleep(0.01)
         elif self._start_arg is None:
             from .deploy import LocalCluster
 
             try:
-                self.cluster = LocalCluster(
-                    loop=self.loop, asynchronous=True, **self._startup_kwargs
+                self.cluster = await LocalCluster(
+                    loop=self.loop,
+                    asynchronous=self._asynchronous,
+                    **self._startup_kwargs
                 )
-                yield self.cluster
             except (OSError, socket.error) as e:
                 if e.errno != errno.EADDRINUSE:
                     raise
                 # The default port was taken, use a random one
-                self.cluster = LocalCluster(
+                self.cluster = await LocalCluster(
                     scheduler_port=0,
                     loop=self.loop,
                     asynchronous=True,
                     **self._startup_kwargs
                 )
-                yield self.cluster
 
             # Wait for all workers to be ready
             # XXX should be a LocalCluster method instead
             while not self.cluster.workers or len(self.cluster.scheduler.workers) < len(
                 self.cluster.workers
             ):
-                yield gen.sleep(0.01)
+                await gen.sleep(0.01)
 
             address = self.cluster.scheduler_address
 
@@ -965,18 +984,21 @@ class Client(Node):
             self.scheduler = self.rpc(address)
         self.scheduler_comm = None
 
-        yield self._ensure_connected(timeout=timeout)
+        try:
+            await self._ensure_connected(timeout=timeout)
+        except OSError:
+            await self._close()
+            raise
 
         for pc in self._periodic_callbacks.values():
             pc.start()
 
-        self._handle_scheduler_coroutine = self._handle_report()
+        self._handle_scheduler_coroutine = asyncio.ensure_future(self._handle_report())
         self.coroutines.append(self._handle_scheduler_coroutine)
 
-        raise gen.Return(self)
+        return self
 
-    @gen.coroutine
-    def _reconnect(self):
+    async def _reconnect(self):
         with log_errors():
             assert self.scheduler_comm.comm.closed()
 
@@ -991,11 +1013,11 @@ class Client(Node):
             deadline = self.loop.time() + timeout
             while timeout > 0 and self.status == "connecting":
                 try:
-                    yield self._ensure_connected(timeout=timeout)
+                    await self._ensure_connected(timeout=timeout)
                     break
                 except EnvironmentError:
                     # Wait a bit before retrying
-                    yield gen.sleep(0.1)
+                    await gen.sleep(0.1)
                     timeout = deadline - self.loop.time()
             else:
                 logger.error(
@@ -1003,10 +1025,9 @@ class Client(Node):
                     "seconds, closing client",
                     self._timeout,
                 )
-                yield self._close()
+                await self._close()
 
-    @gen.coroutine
-    def _ensure_connected(self, timeout=None):
+    async def _ensure_connected(self, timeout=None):
         if (
             self.scheduler_comm
             and not self.scheduler_comm.closed()
@@ -1018,27 +1039,32 @@ class Client(Node):
         self._connecting_to_scheduler = True
 
         try:
-            comm = yield connect(
+            comm = await connect(
                 self.scheduler.address,
                 timeout=timeout,
                 connection_args=self.connection_args,
             )
             comm.name = "Client->Scheduler"
             if timeout is not None:
-                yield gen.with_timeout(
+                await gen.with_timeout(
                     timedelta(seconds=timeout), self._update_scheduler_info()
                 )
             else:
-                yield self._update_scheduler_info()
-            yield comm.write(
+                await self._update_scheduler_info()
+            await comm.write(
                 {"op": "register-client", "client": self.id, "reply": False}
             )
+        except Exception as e:
+            if self.status == "closed":
+                return
+            else:
+                raise
         finally:
             self._connecting_to_scheduler = False
         if timeout is not None:
-            msg = yield gen.with_timeout(timedelta(seconds=timeout), comm.read())
+            msg = await gen.with_timeout(timedelta(seconds=timeout), comm.read())
         else:
-            msg = yield comm.read()
+            msg = await comm.read()
         assert len(msg) == 1
         assert msg[0]["op"] == "stream-start"
 
@@ -1055,21 +1081,19 @@ class Client(Node):
 
         logger.debug("Started scheduling coroutines. Synchronized")
 
-    @gen.coroutine
-    def _update_scheduler_info(self):
+    async def _update_scheduler_info(self):
         if self.status not in ("running", "connecting"):
             return
         try:
-            self._scheduler_identity = yield self.scheduler.identity()
+            self._scheduler_identity = await self.scheduler.identity()
         except EnvironmentError:
             logger.debug("Not able to query scheduler for identity")
 
-    @gen.coroutine
-    def _wait_for_workers(self, n_workers=0):
-        info = yield self.scheduler.identity()
+    async def _wait_for_workers(self, n_workers=0):
+        info = await self.scheduler.identity()
         while n_workers and len(info["workers"]) < n_workers:
-            yield gen.sleep(0.1)
-            info = yield self.scheduler.identity()
+            await gen.sleep(0.1)
+            info = await self.scheduler.identity()
 
     def wait_for_workers(self, n_workers=0):
         """Blocking call to wait for n workers before continuing"""
@@ -1084,14 +1108,12 @@ class Client(Node):
             self.start()
         return self
 
-    @gen.coroutine
-    def __aenter__(self):
-        yield self._started
-        raise gen.Return(self)
+    async def __aenter__(self):
+        await self._started
+        return self
 
-    @gen.coroutine
-    def __aexit__(self, typ, value, traceback):
-        yield self._close()
+    async def __aexit__(self, typ, value, traceback):
+        await self._close()
 
     def __exit__(self, type, value, traceback):
         self.close()
@@ -1121,8 +1143,7 @@ class Client(Node):
                 {"op": "client-releases-keys", "keys": [key], "client": self.id}
             )
 
-    @gen.coroutine
-    def _handle_report(self):
+    async def _handle_report(self):
         """ Listen to scheduler """
         with log_errors():
             try:
@@ -1130,13 +1151,13 @@ class Client(Node):
                     if self.scheduler_comm is None:
                         break
                     try:
-                        msgs = yield self.scheduler_comm.comm.read()
+                        msgs = await self.scheduler_comm.comm.read()
                     except CommClosedError:
                         if self.status == "running":
                             logger.info("Client report stream closed to scheduler")
                             logger.info("Reconnecting...")
                             self.status = "connecting"
-                            yield self._reconnect()
+                            await self._reconnect()
                             continue
                         else:
                             break
@@ -1148,7 +1169,8 @@ class Client(Node):
                         logger.debug("Client receives message %s", msg)
 
                         if "status" in msg and "error" in msg["status"]:
-                            six.reraise(*clean_exception(**msg))
+                            typ, exc, tb = clean_exception(**msg)
+                            raise exc.with_traceback(tb)
 
                         op = msg.pop("op")
 
@@ -1212,8 +1234,7 @@ class Client(Node):
         logger.warning("Scheduler exception:")
         logger.exception(exception)
 
-    @gen.coroutine
-    def _close(self, fast=False):
+    async def _close(self, fast=False):
         """ Send close signal and wait until scheduler completes """
         self.status = "closing"
 
@@ -1243,7 +1264,7 @@ class Client(Node):
             # Give the scheduler 'stream-closed' message 100ms to come through
             # This makes the shutdown slightly smoother and quieter
             with ignoring(AttributeError, gen.TimeoutError):
-                yield gen.with_timeout(
+                await gen.with_timeout(
                     timedelta(milliseconds=100),
                     self._handle_scheduler_coroutine,
                     quiet_exceptions=(CancelledError,),
@@ -1254,12 +1275,12 @@ class Client(Node):
                 and self.scheduler_comm.comm
                 and not self.scheduler_comm.comm.closed()
             ):
-                yield self.scheduler_comm.close()
+                await self.scheduler_comm.close()
             for key in list(self.futures):
                 self._release_key(key=key)
             if self._start_arg is None:
                 with ignoring(AttributeError):
-                    yield self.cluster._close()
+                    await self.cluster.close()
             self.rpc.close()
             self.status = "closed"
             if _get_global_client() is self:
@@ -1275,9 +1296,9 @@ class Client(Node):
             del self.coroutines[:]
             if not fast:
                 with ignoring(TimeoutError):
-                    yield gen.with_timeout(timedelta(seconds=2), list(coroutines))
+                    await gen.with_timeout(timedelta(seconds=2), list(coroutines))
             with ignoring(AttributeError):
-                self.scheduler.close_rpc()
+                await self.scheduler.close_rpc()
             self.scheduler = None
 
         self.status = "closed"
@@ -1329,14 +1350,25 @@ class Client(Node):
         if self._should_close_loop and not shutting_down():
             self._loop_runner.stop()
 
-    def shutdown(self, *args, **kwargs):
-        """ Deprecated, see close instead
+    async def _shutdown(self):
+        logger.info("Shutting down scheduler from Client")
+        if self.cluster:
+            await self.cluster.close()
+        else:
+            with ignoring(CommClosedError):
+                await self.scheduler.terminate(close_workers=True)
 
-        This was deprecated because "shutdown" was sometimes confusingly
-        thought to refer to the cluster rather than the client
+    def shutdown(self):
+        """ Shut down the connected scheduler and workers
+
+        Note, this may disrupt other clients that may be using the same
+        scheudler and workers.
+
+        See also
+        --------
+        Client.close: close only this client
         """
-        warnings.warn("Shutdown is deprecated.  Please use close instead")
-        return self.close(*args, **kwargs)
+        return self.sync(self._shutdown)
 
     def get_executor(self, **kwargs):
         """
@@ -1444,7 +1476,7 @@ class Client(Node):
         if allow_other_workers and workers is None:
             raise ValueError("Only use allow_other_workers= if using workers=")
 
-        if isinstance(workers, six.string_types + (Number,)):
+        if isinstance(workers, (str, Number)):
             workers = [workers]
         if workers is not None:
             restrictions = {skey: workers}
@@ -1553,7 +1585,7 @@ class Client(Node):
         if not callable(func):
             raise TypeError("First input to map must be a callable function")
 
-        if all(map(isqueue, iterables)) or all(
+        if all(isinstance(it, pyQueue) for it in iterables) or all(
             isinstance(i, Iterator) for i in iterables
         ):
             raise TypeError(
@@ -1603,7 +1635,7 @@ class Client(Node):
                 }
             )
 
-        if isinstance(workers, six.string_types + (Number,)):
+        if isinstance(workers, (str, Number)):
             workers = [workers]
         if isinstance(workers, (list, set)):
             if workers and isinstance(first(workers), (list, set)):
@@ -1649,8 +1681,7 @@ class Client(Node):
 
         return [futures[tokey(k)] for k in keys]
 
-    @gen.coroutine
-    def _gather(self, futures, errors="raise", direct=None, local_worker=None):
+    async def _gather(self, futures, errors="raise", direct=None, local_worker=None):
         unpacked, future_set = unpack_remotedata(futures, byte_keys=True)
         keys = [tokey(future.key) for future in future_set]
         bad_data = dict()
@@ -1667,11 +1698,10 @@ class Client(Node):
                 if w.scheduler.address == self.scheduler.address:
                     direct = True
 
-        @gen.coroutine
-        def wait(k):
+        async def wait(k):
             """ Want to stop the All(...) early if we find an error """
             st = self.futures[k]
-            yield st.wait()
+            await st.wait()
             if st.status != "finished" and errors == "raise":
                 raise AllExit()
 
@@ -1679,7 +1709,7 @@ class Client(Node):
             logger.debug("Waiting on futures to clear before gather")
 
             with ignoring(AllExit):
-                yield All(
+                await All(
                     [wait(key) for key in keys if key in self.futures],
                     quiet_exceptions=AllExit,
                 )
@@ -1699,7 +1729,7 @@ class Client(Node):
                         except (KeyError, AttributeError):
                             exc = CancelledError(key)
                         else:
-                            six.reraise(type(exception), exception, traceback)
+                            raise exception.with_traceback(traceback)
                         raise exc
                     if errors == "skip":
                         bad_keys.add(key)
@@ -1718,15 +1748,17 @@ class Client(Node):
             # We now do an actual remote communication with workers or scheduler
             if self._gather_future:  # attach onto another pending gather request
                 self._gather_keys |= set(keys)
-                response = yield self._gather_future
+                response = await self._gather_future
             else:  # no one waiting, go ahead
                 self._gather_keys = set(keys)
-                future = self._gather_remote(direct, local_worker)
+                future = asyncio.ensure_future(
+                    self._gather_remote(direct, local_worker)
+                )
                 if self._gather_keys is None:
                     self._gather_future = None
                 else:
                     self._gather_future = future
-                response = yield future
+                response = await future
 
             if response["status"] == "error":
                 log = logger.warning if errors == "raise" else logger.debug
@@ -1750,40 +1782,39 @@ class Client(Node):
 
         data.update(response["data"])
         result = pack_data(unpacked, merge(data, bad_data))
-        raise gen.Return(result)
+        return result
 
-    @gen.coroutine
-    def _gather_remote(self, direct, local_worker):
+    async def _gather_remote(self, direct, local_worker):
         """ Perform gather with workers or scheduler
 
         This method exists to limit and batch many concurrent gathers into a
         few.  In controls access using a Tornado semaphore, and picks up keys
         from other requests made recently.
         """
-        yield self._gather_semaphore.acquire()
+        await self._gather_semaphore.acquire()
         keys = list(self._gather_keys)
         self._gather_keys = None  # clear state, these keys are being sent off
         self._gather_future = None
 
         try:
             if direct or local_worker:  # gather directly from workers
-                who_has = yield self.scheduler.who_has(keys=keys)
-                data2, missing_keys, missing_workers = yield gather_from_workers(
+                who_has = await self.scheduler.who_has(keys=keys)
+                data2, missing_keys, missing_workers = await gather_from_workers(
                     who_has, rpc=self.rpc, close=False
                 )
                 response = {"status": "OK", "data": data2}
                 if missing_keys:
                     keys2 = [key for key in keys if key not in data2]
-                    response = yield self.scheduler.gather(keys=keys2)
+                    response = await self.scheduler.gather(keys=keys2)
                     if response["status"] == "OK":
                         response["data"].update(data2)
 
             else:  # ask scheduler to gather data for us
-                response = yield self.scheduler.gather(keys=keys)
+                response = await self.scheduler.gather(keys=keys)
         finally:
             self._gather_semaphore.release()
 
-        raise gen.Return(response)
+        return response
 
     def gather(self, futures, errors="raise", direct=None, asynchronous=None):
         """ Gather futures from distributed memory
@@ -1823,7 +1854,7 @@ class Client(Node):
         --------
         Client.scatter: Send data out to cluster
         """
-        if isqueue(futures):
+        if isinstance(futures, pyQueue):
             raise TypeError(
                 "Dask no longer supports gathering over Iterators and Queues. "
                 "Consider using a normal for loop and Client.submit/gather"
@@ -1845,8 +1876,7 @@ class Client(Node):
                 asynchronous=asynchronous,
             )
 
-    @gen.coroutine
-    def _scatter(
+    async def _scatter(
         self,
         data,
         workers=None,
@@ -1858,12 +1888,12 @@ class Client(Node):
     ):
         if timeout == no_default:
             timeout = self._timeout
-        if isinstance(workers, six.string_types + (Number,)):
+        if isinstance(workers, (str, Number)):
             workers = [workers]
         if isinstance(data, dict) and not all(
-            isinstance(k, (bytes, unicode)) for k in data
+            isinstance(k, (bytes, str)) for k in data
         ):
-            d = yield self._scatter(keymap(tokey, data), workers, broadcast)
+            d = await self._scatter(keymap(tokey, data), workers, broadcast)
             raise gen.Return({k: d[tokey(k)] for k in data})
 
         if isinstance(data, type(range(0))):
@@ -1903,7 +1933,7 @@ class Client(Node):
         if local_worker:  # running within task
             local_worker.update_data(data=data, report=False)
 
-            yield self.scheduler.update_data(
+            await self.scheduler.update_data(
                 who_has={key: [local_worker.address] for key in data},
                 nbytes=valmap(sizeof, data),
                 client=self.id,
@@ -1916,22 +1946,22 @@ class Client(Node):
                 start = time()
                 while not nthreads:
                     if nthreads is not None:
-                        yield gen.sleep(0.1)
+                        await gen.sleep(0.1)
                     if time() > start + timeout:
                         raise gen.TimeoutError("No valid workers found")
-                    nthreads = yield self.scheduler.ncores(workers=workers)
+                    nthreads = await self.scheduler.ncores(workers=workers)
                 if not nthreads:
                     raise ValueError("No valid workers")
 
-                _, who_has, nbytes = yield scatter_to_workers(
+                _, who_has, nbytes = await scatter_to_workers(
                     nthreads, data2, report=False, rpc=self.rpc
                 )
 
-                yield self.scheduler.update_data(
+                await self.scheduler.update_data(
                     who_has=who_has, nbytes=nbytes, client=self.id
                 )
             else:
-                yield self.scheduler.scatter(
+                await self.scheduler.scatter(
                     data=data2,
                     workers=workers,
                     client=self.id,
@@ -1945,7 +1975,7 @@ class Client(Node):
 
         if direct and broadcast:
             n = None if broadcast is True else broadcast
-            yield self._replicate(list(out.values()), workers=workers, n=n)
+            await self._replicate(list(out.values()), workers=workers, n=n)
 
         if issubclass(input_type, (list, tuple, set, frozenset)):
             out = input_type(out[k] for k in names)
@@ -1953,7 +1983,7 @@ class Client(Node):
         if unpack:
             assert len(out) == 1
             out = list(out.values())[0]
-        raise gen.Return(out)
+        return out
 
     def scatter(
         self,
@@ -2030,7 +2060,7 @@ class Client(Node):
         """
         if timeout == no_default:
             timeout = self._timeout
-        if isqueue(data) or isinstance(data, Iterator):
+        if isinstance(data, pyQueue) or isinstance(data, Iterator):
             raise TypeError(
                 "Dask no longer supports mapping over Iterators or Queues."
                 "Consider using a normal for loop and Client.submit"
@@ -2052,10 +2082,9 @@ class Client(Node):
             hash=hash,
         )
 
-    @gen.coroutine
-    def _cancel(self, futures, force=False):
+    async def _cancel(self, futures, force=False):
         keys = list({tokey(f.key) for f in futures_of(futures)})
-        yield self.scheduler.cancel(keys=keys, client=self.id, force=force)
+        await self.scheduler.cancel(keys=keys, client=self.id, force=force)
         for k in keys:
             st = self.futures.pop(k, None)
             if st is not None:
@@ -2077,10 +2106,9 @@ class Client(Node):
         """
         return self.sync(self._cancel, futures, asynchronous=asynchronous, force=force)
 
-    @gen.coroutine
-    def _retry(self, futures):
+    async def _retry(self, futures):
         keys = list({tokey(f.key) for f in futures_of(futures)})
-        response = yield self.scheduler.retry(keys=keys, client=self.id)
+        response = await self.scheduler.retry(keys=keys, client=self.id)
         for key in response:
             st = self.futures[key]
             st.retry()
@@ -2201,15 +2229,14 @@ class Client(Node):
         """
         return self.sync(self.scheduler.publish_list, **kwargs)
 
-    @gen.coroutine
-    def _get_dataset(self, name):
-        out = yield self.scheduler.publish_get(name=name, client=self.id)
+    async def _get_dataset(self, name):
+        out = await self.scheduler.publish_get(name=name, client=self.id)
         if out is None:
             raise KeyError("Dataset '%s' not found" % name)
 
         with temp_default_client(self):
             data = out["data"]
-        raise gen.Return(data)
+        return data
 
     def get_dataset(self, name, **kwargs):
         """
@@ -2222,15 +2249,15 @@ class Client(Node):
         """
         return self.sync(self._get_dataset, name, **kwargs)
 
-    @gen.coroutine
-    def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
-        response = yield self.scheduler.run_function(
+    async def _run_on_scheduler(self, function, *args, wait=True, **kwargs):
+        response = await self.scheduler.run_function(
             function=dumps(function), args=dumps(args), kwargs=dumps(kwargs), wait=wait
         )
         if response["status"] == "error":
-            six.reraise(*clean_exception(**response))
+            typ, exc, tb = clean_exception(**response)
+            raise exc.with_traceback(tb)
         else:
-            raise gen.Return(response["result"])
+            return response["result"]
 
     def run_on_scheduler(self, function, *args, **kwargs):
         """ Run a function on the scheduler process
@@ -2264,9 +2291,10 @@ class Client(Node):
         """
         return self.sync(self._run_on_scheduler, function, *args, **kwargs)
 
-    @gen.coroutine
-    def _run(self, function, *args, nanny=False, workers=None, wait=True, **kwargs):
-        responses = yield self.scheduler.broadcast(
+    async def _run(
+        self, function, *args, nanny=False, workers=None, wait=True, **kwargs
+    ):
+        responses = await self.scheduler.broadcast(
             msg=dict(
                 op="run",
                 function=dumps(function),
@@ -2282,9 +2310,10 @@ class Client(Node):
             if resp["status"] == "OK":
                 results[key] = resp["result"]
             elif resp["status"] == "error":
-                six.reraise(*clean_exception(**resp))
+                typ, exc, tb = clean_exception(**resp)
+                raise exc.with_traceback(tb)
         if wait:
-            raise gen.Return(results)
+            return results
 
     def run(self, function, *args, **kwargs):
         """
@@ -2421,9 +2450,7 @@ class Client(Node):
             dsk3 = {k: v for k, v in dsk2.items() if k is not v}
             for future in extra_futures:
                 if future.client is not self:
-                    msg = (
-                        "Inputs contain futures that were created by " "another client."
-                    )
+                    msg = "Inputs contain futures that were created by another client."
                     raise ValueError(msg)
 
             if restrictions:
@@ -2869,46 +2896,13 @@ class Client(Node):
         else:
             return result
 
-    @gen.coroutine
-    def _upload_environment(self, zipfile):
-        name = os.path.split(zipfile)[1]
-        yield self._upload_large_file(zipfile, name)
-
-        def unzip(dask_worker=None):
-            from distributed.utils import log_errors
-            import zipfile
-            import shutil
-
-            with log_errors():
-                a = os.path.join(dask_worker.worker_dir, name)
-                b = os.path.join(dask_worker.local_dir, name)
-                c = os.path.dirname(b)
-                shutil.move(a, b)
-
-                with zipfile.ZipFile(b) as f:
-                    f.extractall(path=c)
-
-                for fn in glob(os.path.join(c, name[:-4], "bin", "*")):
-                    st = os.stat(fn)
-                    os.chmod(fn, st.st_mode | 64)  # chmod u+x fn
-
-                assert os.path.exists(os.path.join(c, name[:-4]))
-                return c
-
-        yield self._run(unzip, nanny=True)
-        raise gen.Return(name[:-4])
-
-    def upload_environment(self, name, zipfile):
-        return self.sync(self._upload_environment, name, zipfile)
-
-    @gen.coroutine
-    def _restart(self, timeout=no_default):
+    async def _restart(self, timeout=no_default):
         if timeout == no_default:
             timeout = self._timeout * 2
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
         self._restart_event = Event()
         try:
-            yield self._restart_event.wait(self.loop.time() + timeout)
+            await self._restart_event.wait(self.loop.time() + timeout)
         except gen.TimeoutError:
             logger.error("Restart timed out after %f seconds", timeout)
             pass
@@ -2916,7 +2910,7 @@ class Client(Node):
         with self._refcount_lock:
             self.refcount.clear()
 
-        raise gen.Return(self)
+        return self
 
     def restart(self, **kwargs):
         """ Restart the distributed network
@@ -2926,12 +2920,11 @@ class Client(Node):
         """
         return self.sync(self._restart, **kwargs)
 
-    @gen.coroutine
-    def _upload_file(self, filename, raise_on_error=True):
+    async def _upload_file(self, filename, raise_on_error=True):
         with open(filename, "rb") as f:
             data = f.read()
         _, fn = os.path.split(filename)
-        d = yield self.scheduler.broadcast(
+        d = await self.scheduler.broadcast(
             msg={"op": "upload_file", "filename": fn, "data": to_serialize(data)}
         )
 
@@ -2940,25 +2933,24 @@ class Client(Node):
             if raise_on_error:
                 raise exceptions[0]
             else:
-                raise gen.Return(exceptions[0])
+                return exceptions[0]
 
         assert all(len(data) == v["nbytes"] for v in d.values())
 
-    @gen.coroutine
-    def _upload_large_file(self, local_filename, remote_filename=None):
+    async def _upload_large_file(self, local_filename, remote_filename=None):
         if remote_filename is None:
             remote_filename = os.path.split(local_filename)[1]
 
         with open(local_filename, "rb") as f:
             data = f.read()
 
-        [future] = yield self._scatter([data])
+        [future] = await self._scatter([data])
         key = future.key
-        yield self._replicate(future)
+        await self._replicate(future)
 
         def dump_to_file(dask_worker=None):
             if not os.path.isabs(remote_filename):
-                fn = os.path.join(dask_worker.local_dir, remote_filename)
+                fn = os.path.join(dask_worker.local_directory, remote_filename)
             else:
                 fn = remote_filename
             with open(fn, "wb") as f:
@@ -2966,7 +2958,7 @@ class Client(Node):
 
             return len(dask_worker.data[key])
 
-        response = yield self._run(dump_to_file)
+        response = await self._run(dump_to_file)
 
         assert all(len(data) == v for v in response.values())
 
@@ -2996,11 +2988,10 @@ class Client(Node):
         else:
             return result
 
-    @gen.coroutine
-    def _rebalance(self, futures=None, workers=None):
-        yield _wait(futures)
+    async def _rebalance(self, futures=None, workers=None):
+        await _wait(futures)
         keys = list({tokey(f.key) for f in self.futures_of(futures)})
-        result = yield self.scheduler.rebalance(keys=keys, workers=workers)
+        result = await self.scheduler.rebalance(keys=keys, workers=workers)
         assert result["status"] == "OK"
 
     def rebalance(self, futures=None, workers=None, **kwargs):
@@ -3023,12 +3014,11 @@ class Client(Node):
         """
         return self.sync(self._rebalance, futures, workers, **kwargs)
 
-    @gen.coroutine
-    def _replicate(self, futures, n=None, workers=None, branching_factor=2):
+    async def _replicate(self, futures, n=None, workers=None, branching_factor=2):
         futures = self.futures_of(futures)
-        yield _wait(futures)
+        await _wait(futures)
         keys = {tokey(f.key) for f in futures}
-        yield self.scheduler.replicate(
+        await self.scheduler.replicate(
             keys=list(keys), n=n, workers=workers, branching_factor=branching_factor
         )
 
@@ -3295,7 +3285,7 @@ class Client(Node):
         >>> client.profile()  # call on collections
         >>> client.profile(filename='dask-profile.html')  # save to html file
         """
-        if isinstance(workers, six.string_types + (Number,)):
+        if isinstance(workers, (str, Number)):
             workers = [workers]
 
         return self.sync(
@@ -3309,8 +3299,7 @@ class Client(Node):
             filename=filename,
         )
 
-    @gen.coroutine
-    def _profile(
+    async def _profile(
         self,
         key=None,
         start=None,
@@ -3320,10 +3309,10 @@ class Client(Node):
         plot=False,
         filename=None,
     ):
-        if isinstance(workers, six.string_types + (Number,)):
+        if isinstance(workers, (str, Number)):
             workers = [workers]
 
-        state = yield self.scheduler.profile(
+        state = await self.scheduler.profile(
             key=key,
             workers=workers,
             merge_workers=merge_workers,
@@ -3347,10 +3336,10 @@ class Client(Node):
                 from bokeh.plotting import save
 
                 save(figure, title="Dask Profile", filename=filename)
-            raise gen.Return((state, figure))
+            return (state, figure)
 
         else:
-            raise gen.Return(state)
+            return state
 
     def scheduler_info(self, **kwargs):
         """ Basic information about the workers in the cluster
@@ -3368,7 +3357,8 @@ class Client(Node):
                                          'stored': 0,
                                          'time-delay': 0.0061032772064208984}}}
         """
-        self.sync(self._update_scheduler_info)
+        if not self.asynchronous:
+            self.sync(self._update_scheduler_info)
         return self._scheduler_identity
 
     def write_scheduler_file(self, scheduler_file):
@@ -3545,18 +3535,19 @@ class Client(Node):
 
         >>> c.get_versions(packages=['sklearn', 'geopandas'])  # doctest: +SKIP
         """
+        return self.sync(self._get_versions, check=check, packages=packages)
+
+    async def _get_versions(self, check=False, packages=[]):
         client = get_versions(packages=packages)
         try:
-            scheduler = sync(self.loop, self.scheduler.versions, packages=packages)
+            scheduler = await self.scheduler.versions(packages=packages)
         except KeyError:
             scheduler = None
         except TypeError:  # packages keyword not supported
-            scheduler = sync(self.loop, self.scheduler.versions)  # this raises
+            scheduler = await self.scheduler.versions()  # this raises
 
-        workers = sync(
-            self.loop,
-            self.scheduler.broadcast,
-            msg={"op": "versions", "packages": packages},
+        workers = await self.scheduler.broadcast(
+            msg={"op": "versions", "packages": packages}
         )
         result = {"scheduler": scheduler, "workers": workers, "client": client}
 
@@ -3585,7 +3576,7 @@ class Client(Node):
                     errs.append("%s\n%s" % (pkg, asciitable(["", "version"], rows)))
 
                 raise ValueError(
-                    "Mismatched versions found\n" "\n" "%s" % ("\n\n".join(errs))
+                    "Mismatched versions found\n\n%s" % ("\n\n".join(errs))
                 )
 
         return result
@@ -3596,15 +3587,14 @@ class Client(Node):
     def start_ipython(self, *args, **kwargs):
         raise Exception("Method moved to start_ipython_workers")
 
-    @gen.coroutine
-    def _start_ipython_workers(self, workers):
+    async def _start_ipython_workers(self, workers):
         if workers is None:
-            workers = yield self.scheduler.ncores()
+            workers = await self.scheduler.ncores()
 
-        responses = yield self.scheduler.broadcast(
+        responses = await self.scheduler.broadcast(
             msg=dict(op="start_ipython"), workers=workers
         )
-        raise gen.Return((workers, responses))
+        return workers, responses
 
     def start_ipython_workers(
         self, workers=None, magic_names=False, qtconsole=False, qtconsole_args=None
@@ -3657,12 +3647,12 @@ class Client(Node):
         --------
         Client.start_ipython_scheduler: start ipython on the scheduler
         """
-        if isinstance(workers, six.string_types + (Number,)):
+        if isinstance(workers, (str, Number)):
             workers = [workers]
 
         (workers, info_dict) = sync(self.loop, self._start_ipython_workers, workers)
 
-        if magic_names and isinstance(magic_names, six.string_types):
+        if magic_names and isinstance(magic_names, str):
             if "*" in magic_names:
                 magic_names = [
                     magic_names.replace("*", str(i)) for i in range(len(workers))
@@ -3919,16 +3909,15 @@ class Client(Node):
             filename=filename,
         )
 
-    @gen.coroutine
-    def _get_task_stream(
+    async def _get_task_stream(
         self, start=None, stop=None, count=None, plot=False, filename="task-stream.html"
     ):
-        msgs = yield self.scheduler.get_task_stream(start=start, stop=stop, count=count)
+        msgs = await self.scheduler.get_task_stream(start=start, stop=stop, count=count)
         if plot:
             from .diagnostics.task_stream import rectangles
 
             rects = rectangles(msgs)
-            from .dashboard.components import task_stream_figure
+            from .dashboard.components.scheduler import task_stream_figure
 
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
@@ -3936,9 +3925,9 @@ class Client(Node):
                 from bokeh.plotting import save
 
                 save(figure, title="Dask Task Stream", filename=filename)
-            raise gen.Return((msgs, figure))
+            return (msgs, figure)
         else:
-            raise gen.Return(msgs)
+            return msgs
 
     def register_worker_callbacks(self, setup=None):
         """
@@ -3960,9 +3949,8 @@ class Client(Node):
         """
         return self.register_worker_plugin(_WorkerSetupPlugin(setup))
 
-    @gen.coroutine
-    def _register_worker_plugin(self, plugin=None, name=None):
-        responses = yield self.scheduler.register_worker_plugin(
+    async def _register_worker_plugin(self, plugin=None, name=None):
+        responses = await self.scheduler.register_worker_plugin(
             plugin=dumps(plugin), name=name
         )
         for response in responses.values():
@@ -3970,20 +3958,22 @@ class Client(Node):
                 exc = response["exception"]
                 typ = type(exc)
                 tb = response["traceback"]
-                six.reraise(typ, exc, tb)
-        raise gen.Return(responses)
+                raise exc.with_traceback(tb)
+        return responses
 
     def register_worker_plugin(self, plugin=None, name=None):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
-        This registers a new object to handle setup and teardown for workers in
-        this cluster. The plugin will instantiate itself on all currently
-        connected workers.  It will also be run on any worker that connects in
-        the future.
+        This registers a new object to handle setup, task state transitions and
+        teardown for workers in this cluster. The plugin will instantiate itself
+        on all currently connected workers. It will also be run on any worker
+        that connects in the future.
 
-        The plugin should be an object with ``setup`` and ``teardown`` methods.
-        It must be serializable with the pickle or cloudpickle modules.
+        The plugin may include methods ``setup``, ``teardown``, and
+        ``transition``.  See the ``dask.distributed.WorkerPlugin`` class or the
+        examples below for the interface and docstrings.  It must be
+        serializable with the pickle or cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
         used then that will control idempotency.  A a plugin with that name has
@@ -3994,7 +3984,7 @@ class Client(Node):
 
         Parameters
         ----------
-        plugin: object
+        plugin: WorkerPlugin
             The plugin object to pass to the workers
         name: str, optional
             A name for the plugin.
@@ -4002,12 +3992,14 @@ class Client(Node):
 
         Examples
         --------
-        >>> class MyPlugin:
+        >>> class MyPlugin(WorkerPlugin):
         ...     def __init__(self, *args, **kwargs):
         ...         pass  # the constructor is up to you
         ...     def setup(self, worker: dask.distributed.Worker):
         ...         pass
         ...     def teardown(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -4022,11 +4014,15 @@ class Client(Node):
         ...    return plugin.my_state
 
         >>> future = client.run(f)
+
+        See Also
+        --------
+        distributed.WorkerPlugin
         """
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
 
-class _WorkerSetupPlugin(object):
+class _WorkerSetupPlugin(WorkerPlugin):
     """ This is used to support older setup functions as callbacks """
 
     def __init__(self, setup):
@@ -4055,8 +4051,7 @@ ALL_COMPLETED = "ALL_COMPLETED"
 FIRST_COMPLETED = "FIRST_COMPLETED"
 
 
-@gen.coroutine
-def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
+async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
     if timeout is not None and not isinstance(timeout, Number):
         raise TypeError(
             "timeout= keyword received a non-numeric value.\n"
@@ -4071,13 +4066,13 @@ def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
         wait_for = Any
     else:
         raise NotImplementedError(
-            "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are " "supported"
+            "Only return_when='ALL_COMPLETED' and 'FIRST_COMPLETED' are supported"
         )
 
     future = wait_for({f._state.wait() for f in fs})
     if timeout is not None:
         future = gen.with_timeout(timedelta(seconds=timeout), future)
-    yield future
+    await future
 
     done, not_done = (
         {fu for fu in fs if fu.status != "pending"},
@@ -4087,7 +4082,7 @@ def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
     if cancelled:
         raise CancelledError(cancelled)
 
-    raise gen.Return(DoneAndNotDoneFutures(done, not_done))
+    return DoneAndNotDoneFutures(done, not_done)
 
 
 def wait(fs, timeout=None, return_when=ALL_COMPLETED):
@@ -4106,32 +4101,32 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     return result
 
 
-@gen.coroutine
-def _as_completed(fs, queue):
+async def _as_completed(fs, queue):
     fs = futures_of(fs)
     groups = groupby(lambda f: f.key, fs)
     firsts = [v[0] for v in groups.values()]
-    wait_iterator = gen.WaitIterator(*[f._state.wait() for f in firsts])
+    wait_iterator = gen.WaitIterator(
+        *map(asyncio.ensure_future, [f._state.wait() for f in firsts])
+    )
 
     while not wait_iterator.done():
-        yield wait_iterator.next()
+        await wait_iterator.next()
         # TODO: handle case of restarted futures
         future = firsts[wait_iterator.current_index]
         for f in groups[future.key]:
             queue.put_nowait(f)
 
 
-@gen.coroutine
-def _first_completed(futures):
+async def _first_completed(futures):
     """ Return a single completed future
 
     See Also:
         _as_completed
     """
     q = Queue()
-    yield _as_completed(futures, q)
-    result = yield q.get()
-    raise gen.Return(result)
+    await _as_completed(futures, q)
+    result = await q.get()
+    return result
 
 
 class as_completed(object):
@@ -4212,15 +4207,14 @@ class as_completed(object):
         with self.thread_condition:
             self.thread_condition.notify()
 
-    @gen.coroutine
-    def _track_future(self, future):
+    async def _track_future(self, future):
         try:
-            yield _wait(future)
+            await _wait(future)
         except CancelledError:
             pass
         if self.with_results:
             try:
-                result = yield future._result(raiseit=False)
+                result = await future._result(raiseit=False)
             except CancelledError as exc:
                 result = exc
         with self.lock:
@@ -4280,7 +4274,8 @@ class as_completed(object):
         if self.with_results:
             future, result = res
             if self.raise_errors and future.status == "error":
-                six.reraise(*result)
+                typ, exc, tb = result
+                raise exc.with_traceback(tb)
         return res
 
     def __next__(self):
@@ -4291,16 +4286,15 @@ class as_completed(object):
                 self.thread_condition.wait(timeout=0.100)
         return self._get_and_raise()
 
-    @gen.coroutine
-    def __anext__(self):
+    async def __anext__(self):
         if not self.futures and self.queue.empty():
             raise StopAsyncIteration
         while self.queue.empty():
             if not self.futures:
                 raise StopAsyncIteration
-            yield self.condition.wait()
+            await self.condition.wait()
 
-        raise gen.Return(self._get_and_raise())
+        return self._get_and_raise()
 
     next = __next__
 
@@ -4372,7 +4366,7 @@ def default_client(c=None):
     else:
         raise ValueError(
             "No clients found\n"
-            "Start an client and point it to the scheduler address\n"
+            "Start a client and point it to the scheduler address\n"
             "  from distributed import Client\n"
             "  client = Client('ip-addr-of-scheduler:8786')\n"
         )
@@ -4486,7 +4480,7 @@ class get_task_stream(object):
 
     To share this file with others you may wish to upload and serve it online.
     A common way to do this is to upload the file as a gist, and then serve it
-    on https://rawgit.com ::
+    on https://raw.githack.com ::
 
        $ pip install gist
        $ gist task-stream.html
@@ -4494,7 +4488,7 @@ class get_task_stream(object):
 
     You can then navigate to that site, click the "Raw" button to the right of
     the ``task-stream.html`` file, and then provide that URL to
-    https://rawgit.com .  This process should provide a sharable link that
+    https://raw.githack.com .  This process should provide a sharable link that
     others can use to see your task stream plot.
 
     See Also
@@ -4522,13 +4516,11 @@ class get_task_stream(object):
             L, self.figure = L
         self.data.extend(L)
 
-    @gen.coroutine
-    def __aenter__(self):
-        raise gen.Return(self)
+    async def __aenter__(self):
+        return self
 
-    @gen.coroutine
-    def __aexit__(self, typ, value, traceback):
-        L = yield self.client.get_task_stream(
+    async def __aexit__(self, typ, value, traceback):
+        L = await self.client.get_task_stream(
             start=self.start, plot=self._plot, filename=self._filename
         )
         if self._plot:

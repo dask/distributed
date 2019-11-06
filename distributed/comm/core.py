@@ -1,16 +1,13 @@
-from __future__ import print_function, division, absolute_import
-
-from abc import ABCMeta, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod, abstractproperty
 from datetime import timedelta
 import logging
 import weakref
 
 import dask
-from six import with_metaclass
 from tornado import gen
 
 from ..metrics import time
-from ..utils import parse_timedelta
+from ..utils import parse_timedelta, ignoring
 from . import registry
 from .addressing import parse_address
 
@@ -26,7 +23,7 @@ class FatalCommClosedError(CommClosedError):
     pass
 
 
-class Comm(with_metaclass(ABCMeta)):
+class Comm(ABC):
     """
     A message-oriented communication object, representing an established
     communication channel.  There should be only one reader and one
@@ -131,7 +128,7 @@ class Comm(with_metaclass(ABCMeta)):
             )
 
 
-class Listener(with_metaclass(ABCMeta)):
+class Listener(ABC):
     @abstractmethod
     def start(self):
         """
@@ -167,7 +164,7 @@ class Listener(with_metaclass(ABCMeta)):
         self.stop()
 
 
-class Connector(with_metaclass(ABCMeta)):
+class Connector(ABC):
     @abstractmethod
     def connect(self, address, deserialize=True):
         """
@@ -178,8 +175,7 @@ class Connector(with_metaclass(ABCMeta)):
         """
 
 
-@gen.coroutine
-def connect(addr, timeout=None, deserialize=True, connection_args=None):
+async def connect(addr, timeout=None, deserialize=True, connection_args=None):
     """
     Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
     and yield a ``Comm`` object.  If the connection attempt fails, it is
@@ -192,6 +188,7 @@ def connect(addr, timeout=None, deserialize=True, connection_args=None):
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
     connector = backend.get_connector()
+    comm = None
 
     start = time()
     deadline = start + timeout
@@ -209,29 +206,32 @@ def connect(addr, timeout=None, deserialize=True, connection_args=None):
     # This starts a thread
     while True:
         try:
-            future = connector.connect(
-                loc, deserialize=deserialize, **(connection_args or {})
-            )
-            comm = yield gen.with_timeout(
-                timedelta(seconds=deadline - time()),
-                future,
-                quiet_exceptions=EnvironmentError,
-            )
+            while deadline - time() > 0:
+                future = connector.connect(
+                    loc, deserialize=deserialize, **(connection_args or {})
+                )
+                with ignoring(gen.TimeoutError):
+                    comm = await gen.with_timeout(
+                        timedelta(seconds=min(deadline - time(), 1)),
+                        future,
+                        quiet_exceptions=EnvironmentError,
+                    )
+                    break
+            if not comm:
+                _raise(error)
         except FatalCommClosedError:
             raise
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                yield gen.sleep(0.01)
+                await gen.sleep(0.01)
                 logger.debug("sleeping on connect")
             else:
                 _raise(error)
-        except gen.TimeoutError:
-            _raise(error)
         else:
             break
 
-    raise gen.Return(comm)
+    return comm
 
 
 def listen(addr, handle_comm, deserialize=True, connection_args=None):

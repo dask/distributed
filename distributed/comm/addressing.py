@@ -1,7 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
-import six
-
 import dask
 
 from . import registry
@@ -20,7 +16,7 @@ def parse_address(addr, strict=False):
 
     If strict is set to true the address must have a scheme.
     """
-    if not isinstance(addr, six.string_types):
+    if not isinstance(addr, str):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
     scheme, sep, loc = addr.rpartition("://")
     if strict and not sep:
@@ -125,7 +121,7 @@ def get_address_host_port(addr, strict=False):
         return backend.get_address_host_port(loc)
     except NotImplementedError:
         raise ValueError(
-            "don't know how to extract host and port " "for address %r" % (addr,)
+            "don't know how to extract host and port for address %r" % (addr,)
         )
 
 
@@ -211,7 +207,13 @@ def uri_from_host_port(host_arg, port_arg, default_port):
 
 
 def address_from_user_args(
-    host=None, port=None, interface=None, protocol=None, peer=None, security=None
+    host=None,
+    port=None,
+    interface=None,
+    protocol=None,
+    peer=None,
+    security=None,
+    default_port=0,
 ):
     """ Get an address to listen on from common user provided arguments """
     if security and security.require_encryption and not protocol:
@@ -235,7 +237,7 @@ def address_from_user_args(
         host = protocol.rstrip("://") + "://" + host
 
     if host or port:
-        addr = uri_from_host_port(host, port, 0)
+        addr = uri_from_host_port(host, port, default_port)
     else:
         addr = ""
 

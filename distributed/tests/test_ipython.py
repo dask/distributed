@@ -1,6 +1,4 @@
-from __future__ import print_function, division, absolute_import
-
-import mock
+from unittest import mock
 
 import pytest
 from toolz import first

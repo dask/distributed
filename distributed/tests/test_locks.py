@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import pickle
 from time import sleep
 
@@ -13,7 +11,7 @@ from distributed.utils_test import client, cluster_fixture, loop  # noqa F401
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 8)] * 2)
 def test_lock(c, s, a, b):
-    c.set_metadata("locked", False)
+    yield c.set_metadata("locked", False)
 
     def f(x):
         client = get_client()

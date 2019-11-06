@@ -2,10 +2,6 @@
 Various functional tests for TLS networking.
 Most are taken from other test files and adapted.
 """
-
-from __future__ import print_function, division, absolute_import
-
-
 from tornado import gen
 
 from distributed import Nanny, worker_client, Queue
@@ -19,8 +15,8 @@ from distributed.utils_test import gen_tls_cluster, inc, double, slowinc, slowad
 def test_Queue(c, s, a, b):
     assert s.address.startswith("tls://")
 
-    x = Queue("x")
-    y = Queue("y")
+    x = yield Queue("x")
+    y = yield Queue("y")
 
     size = yield x.qsize()
     assert size == 0

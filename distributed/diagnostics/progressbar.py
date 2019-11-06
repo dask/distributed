@@ -1,17 +1,14 @@
-from __future__ import print_function, division, absolute_import
-
 import logging
+import html
 from timeit import default_timer
 import sys
 import weakref
 
 from toolz import valmap
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 from .progress import format_time, Progress, MultiProgress
 
-from ..compatibility import html_escape
 from ..core import connect, coerce_to_address, CommClosedError
 from ..client import default_client, futures_of
 from ..protocol.pickle import dumps
@@ -46,16 +43,14 @@ class ProgressBar(object):
     def elapsed(self):
         return default_timer() - self._start_time
 
-    @gen.coroutine
-    def listen(self):
+    async def listen(self):
         complete = self.complete
         keys = self.keys
 
-        @gen.coroutine
-        def setup(scheduler):
+        async def setup(scheduler):
             p = Progress(keys, scheduler, complete=complete)
-            yield p.setup()
-            raise gen.Return(p)
+            await p.setup()
+            return p
 
         def function(scheduler, p):
             result = {
@@ -67,13 +62,13 @@ class ProgressBar(object):
                 result.update(p.extra)
             return result
 
-        self.comm = yield connect(
+        self.comm = await connect(
             self.scheduler,
             connection_args=self.client().connection_args if self.client else None,
         )
         logger.debug("Progressbar Connected to scheduler")
 
-        yield self.comm.write(
+        await self.comm.write(
             {
                 "op": "feed",
                 "setup": dumps(setup),
@@ -85,7 +80,7 @@ class ProgressBar(object):
 
         while True:
             try:
-                response = yield self.comm.read(
+                response = await self.comm.read(
                     deserializers=self.client()._deserializers if self.client else None
                 )
             except CommClosedError:
@@ -94,7 +89,7 @@ class ProgressBar(object):
             self.status = response["status"]
             self._draw_bar(**response)
             if response["status"] in ("error", "finished"):
-                yield self.comm.close()
+                await self.comm.close()
                 self._draw_stop(**response)
                 break
 
@@ -240,17 +235,15 @@ class MultiProgressBar(object):
     def elapsed(self):
         return default_timer() - self._start_time
 
-    @gen.coroutine
-    def listen(self):
+    async def listen(self):
         complete = self.complete
         keys = self.keys
         func = self.func
 
-        @gen.coroutine
-        def setup(scheduler):
+        async def setup(scheduler):
             p = MultiProgress(keys, scheduler, complete=complete, func=func)
-            yield p.setup()
-            raise gen.Return(p)
+            await p.setup()
+            return p
 
         def function(scheduler, p):
             result = {
@@ -262,13 +255,13 @@ class MultiProgressBar(object):
                 result.update(p.extra)
             return result
 
-        self.comm = yield connect(
+        self.comm = await connect(
             self.scheduler,
             connection_args=self.client().connection_args if self.client else None,
         )
         logger.debug("Progressbar Connected to scheduler")
 
-        yield self.comm.write(
+        await self.comm.write(
             {
                 "op": "feed",
                 "setup": dumps(setup),
@@ -278,14 +271,14 @@ class MultiProgressBar(object):
         )
 
         while True:
-            response = yield self.comm.read(
+            response = await self.comm.read(
                 deserializers=self.client()._deserializers if self.client else None
             )
             self._last_response = response
             self.status = response["status"]
             self._draw_bar(**response)
             if response["status"] in ("error", "finished"):
-                yield self.comm.close()
+                await self.comm.close()
                 self._draw_stop(**response)
                 break
         logger.debug("Progressbar disconnected from scheduler")
@@ -339,7 +332,7 @@ class MultiProgressWidget(MultiProgressBar):
                 '<div style="padding: 0px 10px 0px 10px;'
                 " text-align:left; word-wrap: "
                 'break-word;">'
-                + html_escape(key.decode() if isinstance(key, bytes) else key)
+                + html.escape(key.decode() if isinstance(key, bytes) else key)
                 + "</div>"
             )
             for key in all

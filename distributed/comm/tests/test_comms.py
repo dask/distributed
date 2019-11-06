@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from functools import partial
 import os
 import sys
@@ -11,7 +9,6 @@ import pytest
 from tornado import gen, ioloop, locks, queues
 from tornado.concurrent import Future
 
-from distributed.compatibility import PY3
 from distributed.metrics import time
 from distributed.utils import get_ip, get_ipv6
 from distributed.utils_test import (
@@ -333,8 +330,7 @@ def test_comm_failure_threading():
         yield connect("tcp://localhost:28400", 0.052)
     max_thread_count = yield sleep_future
     # 2 is the number set by BaseTCPConnector.executor (ThreadPoolExecutor)
-    if PY3:
-        assert max_thread_count <= 2 + original_thread_count
+    assert max_thread_count <= 2 + original_thread_count
 
     # tcp.TLSConnector()
     sleep_future = sleep_for_60ms()
@@ -345,8 +341,7 @@ def test_comm_failure_threading():
             connection_args={"ssl_context": get_client_ssl_context()},
         )
     max_thread_count = yield sleep_future
-    if PY3:
-        assert max_thread_count <= 2 + original_thread_count
+    assert max_thread_count <= 2 + original_thread_count
 
 
 @gen.coroutine
@@ -532,7 +527,7 @@ def check_client_server(
 @gen_test()
 def test_ucx_client_server():
     pytest.importorskip("distributed.comm.ucx")
-    import ucp
+    ucp = pytest.importorskip("ucp")
 
     addr = ucp.get_address()
     yield check_client_server("ucx://" + addr)
@@ -800,14 +795,14 @@ def test_inproc_comm_closed_explicit_2():
             assert comm.closed()
             listener_errors.append(True)
         else:
-            comm.close()
+            yield comm.close()
 
     listener = listen("inproc://", handle_comm)
     listener.start()
     contact_addr = listener.contact_address
 
     comm = yield connect(contact_addr)
-    comm.close()
+    yield comm.close()
     assert comm.closed()
     start = time()
     while len(listener_errors) < 1:
@@ -821,7 +816,7 @@ def test_inproc_comm_closed_explicit_2():
         yield comm.write("foo")
 
     comm = yield connect(contact_addr)
-    comm.write("foo")
+    yield comm.write("foo")
     with pytest.raises(CommClosedError):
         yield comm.read()
     with pytest.raises(CommClosedError):
@@ -829,15 +824,15 @@ def test_inproc_comm_closed_explicit_2():
     assert comm.closed()
 
     comm = yield connect(contact_addr)
-    comm.write("foo")
+    yield comm.write("foo")
 
     start = time()
     while not comm.closed():
         yield gen.sleep(0.01)
         assert time() < start + 2
 
-    comm.close()
-    comm.close()
+    yield comm.close()
+    yield comm.close()
 
 
 #
@@ -969,7 +964,7 @@ def check_deserialize(addr):
         assert deserialize(ser.header, ser.frames) == 456
 
         assert isinstance(to_ser, list)
-        to_ser, = to_ser
+        (to_ser,) = to_ser
         # The to_serialize() value could have been actually serialized
         # or not (it's a transport-specific optimization)
         if isinstance(to_ser, Serialized):
@@ -1021,7 +1016,7 @@ def check_deserialize(addr):
             assert isinstance(ser, Serialized)
             assert deserialize(ser.header, ser.frames) == _uncompressible
             assert isinstance(to_ser, list)
-            to_ser, = to_ser
+            (to_ser,) = to_ser
             # The to_serialize() value could have been actually serialized
             # or not (it's a transport-specific optimization)
             if isinstance(to_ser, Serialized):
