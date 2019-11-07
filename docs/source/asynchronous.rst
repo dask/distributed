@@ -58,11 +58,10 @@ function to run the asynchronous function:
 
    async def f():
        future = client.submit(lambda x: x + 1, 10)
-       results = await client.gather(futures, asynchronous=True)
-       return results
+       result = await client.gather(future, asynchronous=True)
+       return result
 
    client.sync(f)
-
 
 
 Python 2 Compatibility
@@ -99,7 +98,6 @@ Python 3 with Tornado or Asyncio
    # Or use asyncio
    import asyncio
    asyncio.get_event_loop().run_until_complete(f())
-
 
 
 Python 2/3 with Tornado
