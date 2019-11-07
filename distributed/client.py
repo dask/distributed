@@ -27,7 +27,7 @@ from dask.base import tokenize, normalize_token, collections_to_dsk
 from dask.core import flatten, get_dependencies
 from dask.optimization import SubgraphCallable
 from dask.compatibility import apply
-from dask.utils import ensure_dict, format_bytes
+from dask.utils import ensure_dict, format_bytes, funcname
 
 try:
     from cytoolz import first, groupby, merge, valmap, keymap
@@ -66,10 +66,10 @@ from .security import Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
 from .worker import dumps_task, get_client, get_worker, secede
+from .diagnostics.plugin import WorkerPlugin
 from .utils import (
     All,
     sync,
-    funcname,
     ignoring,
     tokey,
     log_errors,
@@ -523,8 +523,10 @@ class Client(Node):
         Claim this scheduler as the global dask scheduler
     scheduler_file: string (optional)
         Path to a file with scheduler information if available
-    security: (optional)
-        Optional security information
+    security: Security or bool, optional
+        Optional security information. If creating a local cluster can also
+        pass in ``True``, in which case temporary self-signed credentials will
+        be created automatically.
     asynchronous: bool (False by default)
         Set to True if using this client within async/await functions or within
         Tornado gen.coroutines.  Otherwise this should remain False for normal
@@ -644,6 +646,11 @@ class Client(Node):
             if address:
                 logger.info("Config value `scheduler-address` found: %s", address)
 
+        if address is not None and kwargs:
+            raise ValueError(
+                "Unexpected keyword arguments: {}".format(str(sorted(kwargs)))
+            )
+
         if isinstance(address, (rpc, PooledRPCCall)):
             self.scheduler = address
         elif hasattr(address, "scheduler_address"):
@@ -652,10 +659,17 @@ class Client(Node):
             with ignoring(AttributeError):
                 loop = address.loop
             if security is None:
-                security = self.cluster.security
+                security = getattr(self.cluster, "security", None)
 
-        self.security = security or Security()
-        assert isinstance(self.security, Security)
+        if security is None:
+            security = Security()
+        elif security is True:
+            security = Security.temporary()
+            self._startup_kwargs["security"] = security
+        elif not isinstance(security, Security):
+            raise TypeError("security must be a Security object")
+
+        self.security = security
 
         if name == "worker":
             self.connection_args = self.security.get_connection_args("worker")
@@ -786,10 +800,12 @@ class Client(Node):
             return "<%s: not connected>" % (self.__class__.__name__,)
 
     def _repr_html_(self):
+        from .scheduler import Scheduler
+
         if (
             self.cluster
             and hasattr(self.cluster, "scheduler")
-            and self.cluster.scheduler
+            and isinstance(self.cluster.scheduler, Scheduler)
         ):
             info = self.cluster.scheduler.identity()
             scheduler = self.cluster.scheduler
@@ -917,9 +933,7 @@ class Client(Node):
         if self.cluster is not None:
             # Ensure the cluster is started (no-op if already running)
             try:
-                await self.cluster._start()
-            except AttributeError:  # Some clusters don't have this method
-                pass
+                await self.cluster
             except Exception:
                 logger.info(
                     "Tried to start cluster and received an error. Proceeding.",
@@ -1266,7 +1280,7 @@ class Client(Node):
                 self._release_key(key=key)
             if self._start_arg is None:
                 with ignoring(AttributeError):
-                    await self.cluster._close()
+                    await self.cluster.close()
             self.rpc.close()
             self.status = "closed"
             if _get_global_client() is self:
@@ -1284,7 +1298,7 @@ class Client(Node):
                 with ignoring(TimeoutError):
                     await gen.with_timeout(timedelta(seconds=2), list(coroutines))
             with ignoring(AttributeError):
-                self.scheduler.close_rpc()
+                await self.scheduler.close_rpc()
             self.scheduler = None
 
         self.status = "closed"
@@ -1336,14 +1350,25 @@ class Client(Node):
         if self._should_close_loop and not shutting_down():
             self._loop_runner.stop()
 
-    def shutdown(self, *args, **kwargs):
-        """ Deprecated, see close instead
+    async def _shutdown(self):
+        logger.info("Shutting down scheduler from Client")
+        if self.cluster:
+            await self.cluster.close()
+        else:
+            with ignoring(CommClosedError):
+                await self.scheduler.terminate(close_workers=True)
 
-        This was deprecated because "shutdown" was sometimes confusingly
-        thought to refer to the cluster rather than the client
+    def shutdown(self):
+        """ Shut down the connected scheduler and workers
+
+        Note, this may disrupt other clients that may be using the same
+        scheudler and workers.
+
+        See also
+        --------
+        Client.close: close only this client
         """
-        warnings.warn("Shutdown is deprecated.  Please use close instead")
-        return self.close(*args, **kwargs)
+        return self.sync(self._shutdown)
 
     def get_executor(self, **kwargs):
         """
@@ -3463,18 +3488,19 @@ class Client(Node):
 
         >>> c.get_versions(packages=['sklearn', 'geopandas'])  # doctest: +SKIP
         """
+        return self.sync(self._get_versions, check=check, packages=packages)
+
+    async def _get_versions(self, check=False, packages=[]):
         client = get_versions(packages=packages)
         try:
-            scheduler = sync(self.loop, self.scheduler.versions, packages=packages)
+            scheduler = await self.scheduler.versions(packages=packages)
         except KeyError:
             scheduler = None
         except TypeError:  # packages keyword not supported
-            scheduler = sync(self.loop, self.scheduler.versions)  # this raises
+            scheduler = await self.scheduler.versions()  # this raises
 
-        workers = sync(
-            self.loop,
-            self.scheduler.broadcast,
-            msg={"op": "versions", "packages": packages},
+        workers = await self.scheduler.broadcast(
+            msg={"op": "versions", "packages": packages}
         )
         result = {"scheduler": scheduler, "workers": workers, "client": client}
 
@@ -3844,7 +3870,7 @@ class Client(Node):
             from .diagnostics.task_stream import rectangles
 
             rects = rectangles(msgs)
-            from .dashboard.components import task_stream_figure
+            from .dashboard.components.scheduler import task_stream_figure
 
             source, figure = task_stream_figure(sizing_mode="stretch_both")
             source.data.update(rects)
@@ -3892,13 +3918,15 @@ class Client(Node):
         """
         Registers a lifecycle worker plugin for all current and future workers.
 
-        This registers a new object to handle setup and teardown for workers in
-        this cluster. The plugin will instantiate itself on all currently
-        connected workers.  It will also be run on any worker that connects in
-        the future.
+        This registers a new object to handle setup, task state transitions and
+        teardown for workers in this cluster. The plugin will instantiate itself
+        on all currently connected workers. It will also be run on any worker
+        that connects in the future.
 
-        The plugin should be an object with ``setup`` and ``teardown`` methods.
-        It must be serializable with the pickle or cloudpickle modules.
+        The plugin may include methods ``setup``, ``teardown``, and
+        ``transition``.  See the ``dask.distributed.WorkerPlugin`` class or the
+        examples below for the interface and docstrings.  It must be
+        serializable with the pickle or cloudpickle modules.
 
         If the plugin has a ``name`` attribute, or if the ``name=`` keyword is
         used then that will control idempotency.  A a plugin with that name has
@@ -3909,7 +3937,7 @@ class Client(Node):
 
         Parameters
         ----------
-        plugin: object
+        plugin: WorkerPlugin
             The plugin object to pass to the workers
         name: str, optional
             A name for the plugin.
@@ -3917,12 +3945,14 @@ class Client(Node):
 
         Examples
         --------
-        >>> class MyPlugin:
+        >>> class MyPlugin(WorkerPlugin):
         ...     def __init__(self, *args, **kwargs):
         ...         pass  # the constructor is up to you
         ...     def setup(self, worker: dask.distributed.Worker):
         ...         pass
         ...     def teardown(self, worker: dask.distributed.Worker):
+        ...         pass
+        ...     def transition(self, key: str, start: str, finish: str, **kwargs):
         ...         pass
 
         >>> plugin = MyPlugin(1, 2, 3)
@@ -3937,11 +3967,15 @@ class Client(Node):
         ...    return plugin.my_state
 
         >>> future = client.run(f)
+
+        See Also
+        --------
+        distributed.WorkerPlugin
         """
         return self.sync(self._register_worker_plugin, plugin=plugin, name=name)
 
 
-class _WorkerSetupPlugin(object):
+class _WorkerSetupPlugin(WorkerPlugin):
     """ This is used to support older setup functions as callbacks """
 
     def __init__(self, setup):
@@ -4399,7 +4433,7 @@ class get_task_stream(object):
 
     To share this file with others you may wish to upload and serve it online.
     A common way to do this is to upload the file as a gist, and then serve it
-    on https://rawgit.com ::
+    on https://raw.githack.com ::
 
        $ pip install gist
        $ gist task-stream.html
@@ -4407,7 +4441,7 @@ class get_task_stream(object):
 
     You can then navigate to that site, click the "Raw" button to the right of
     the ``task-stream.html`` file, and then provide that URL to
-    https://rawgit.com .  This process should provide a sharable link that
+    https://raw.githack.com .  This process should provide a sharable link that
     others can use to see your task stream plot.
 
     See Also

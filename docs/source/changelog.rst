@@ -1,6 +1,65 @@
 Changelog
 =========
 
+2.6.0 - 2019-10-15
+------------------
+
+- Refactor dashboard module (:pr:`3138`) `Jacob Tomlinson`_
+- Use ``setuptools.find_packages`` in ``setup.py`` (:pr:`3150`) `Matthew Rocklin`_
+- Move death timeout logic up to ``Node.start`` (:pr:`3115`) `Matthew Rocklin`_
+- Only include metric in ``WorkerTable`` if it is a scalar (:pr:`3140`) `Matthew Rocklin`_
+- Add ``Nanny(config={...})`` keyword (:pr:`3134`) `Matthew Rocklin`_
+- Xfail ``test_worksapce_concurrency`` on Python 3.6 (:pr:`3132`) `Matthew Rocklin`_
+- Extend Worker plugin API with transition method (:pr:`2994`) `matthieubulte`_
+- Raise exception if the user passes in unused keywords to ``Client`` (:pr:`3117`) `Jonathan De Troye`_
+- Move new ``SSHCluster`` to top level (:pr:`3128`) `Matthew Rocklin`_
+- Bump dask dependency (:pr:`3124`) `Jim Crist`_
+
+
+2.5.2 - 2019-10-04
+------------------
+
+-  Make dask-worker close quietly when given sigint signal (:pr:`3116`) `Matthew Rocklin`_
+-  Replace use of tornado.gen with asyncio in dask-worker (:pr:`3114`) `Matthew Rocklin`_
+-  UCX: allocate CUDA arrays using RMM and Numba (:pr:`3109`) `Mads R. B. Kristensen`_
+-  Support calling `cluster.scale` as async method (:pr:`3110`) `Jim Crist`_
+-  Identify lost workers in SpecCluster based on address not name (:pr:`3088`) `James Bourbeau`_
+-  Add Client.shutdown method (:pr:`3106`) `Matthew Rocklin`_
+-  Collect worker-worker and type bandwidth information (:pr:`3094`) `Matthew Rocklin`_
+-  Send noise over the wire to keep dask-ssh connection alive (:pr:`3105`) `Gil Forsyth`_
+-  Retry scheduler connect multiple times (:pr:`3104`) `Jacob Tomlinson`_
+-  Add favicon of logo to the dashboard (:pr:`3095`) `James Bourbeau`_
+-  Remove utils.py functions for their dask/utils.py equivalents (:pr:`3042`) `Matthew Rocklin`_
+-  Lower default bokeh log level (:pr:`3087`) `Philipp Rudiger`_
+-  Check if self.cluster.scheduler is a local scheduler (:pr:`3099`) `Jacob Tomlinson`_
+
+
+2.5.1 - 2019-09-27
+------------------
+
+-   Support clusters that don't have .security or ._close methods (:pr:`3100`) `Matthew Rocklin`_
+
+
+2.5.0 - 2019-09-27
+------------------
+
+-  Use the new UCX Python bindings (:pr:`3059`) `Mads R. B. Kristensen`_
+-  Fix worker preload config (:pr:`3027`) `byjott`_
+-  Fix widget with spec that generates multiple workers (:pr:`3067`) `Loïc Estève`_
+-  Make Client.get_versions async friendly (:pr:`3064`) `Jacob Tomlinson`_
+-  Add configuation option for longer error tracebacks (:pr:`3086`) `Daniel Farrell`_
+-  Have Client get Security from passed Cluster (:pr:`3079`) `Matthew Rocklin`_
+-  Respect Cluster.dashboard_link in Client._repr_html_ if it exists (:pr:`3077`) `Matthew Rocklin`_
+-  Add monitoring with dask cluster docs (:pr:`3072`) `Arpit Solanki`_
+-  Protocol of cupy and numba handles serialization exclusively  (:pr:`3047`) `Mads R. B. Kristensen`_
+-  Allow specification of worker type in SSHCLuster (:pr:`3061`) `Jacob Tomlinson`_
+-  Use Cluster.scheduler_info for workers= value in repr (:pr:`3058`) `Matthew Rocklin`_
+-  Allow SpecCluster to scale by memory and cores (:pr:`3057`) `Matthew Rocklin`_
+-  Allow full script in preload inputs (:pr:`3052`) `Matthew Rocklin`_
+-  Check multiple cgroups dirs, ceil fractional cpus (:pr:`3056`) `Jim Crist`_
+-  Add blurb about disabling work stealing (:pr:`3055`) `Chris White`_
+
+
 2.4.0 - 2019-09-13
 ------------------
 
@@ -1268,3 +1327,8 @@ significantly without many new features.
 .. _`byjott`: https://github.com/byjott
 .. _`Mohammad Noor`: https://github.com/MdSalih
 .. _`Richard J Zamora`: https://github.com/rjzamora
+.. _`Arpit Solanki`: https://github.com/arpit1997
+.. _`Gil Forsyth`: https://github.com/gforsyth
+.. _`Philipp Rudiger`: https://github.com/philippjfr
+.. _`Jonathan De Troye`: https://github.com/detroyejr
+.. _`matthieubulte`: https://github.com/matthieubulte

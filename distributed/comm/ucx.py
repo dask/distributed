@@ -5,9 +5,12 @@ See :ref:`communications` for more.
 
 .. _UCX: https://github.com/openucx/ucx
 """
-import asyncio
 import logging
-import struct
+import concurrent
+import os
+
+import dask
+import numpy as np
 
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
@@ -15,21 +18,48 @@ from .registry import Backend, backends
 from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors
 
-import ucp
-
-import os
 
 os.environ.setdefault("UCX_RNDV_SCHEME", "put_zcopy")
 os.environ.setdefault("UCX_MEMTYPE_CACHE", "n")
-os.environ.setdefault("UCX_TLS", "rc,cuda_copy,cuda_ipc")
+os.environ.setdefault("UCX_TLS", "all")
+os.environ.setdefault("UCX_SOCKADDR_TLS_PRIORITY", "sockcm")
 
 logger = logging.getLogger(__name__)
-MAX_MSG_LOG = 23
 
 
-# ----------------------------------------------------------------------------
-# Comm Interface
-# ----------------------------------------------------------------------------
+# In order to avoid double init when forking/spawning new processes (multiprocess),
+# we make sure only to import and initialize UCX once at first use.
+ucp = None
+cuda_array = None
+
+
+def init_once():
+    global ucp, cuda_array
+    if ucp is not None:
+        return
+
+    import ucp as _ucp
+
+    ucp = _ucp
+    options = dask.config.get("ucx", default={})
+    ucp.init(options=options)
+
+    # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
+    try:
+        import rmm
+
+        cuda_array = lambda n: rmm.device_array(n, dtype=np.uint8)
+    except ImportError:
+        try:
+            import numba.cuda
+
+            cuda_array = lambda n: numba.cuda.device_array((n,), dtype=np.uint8)
+        except ImportError:
+
+            def cuda_array(n):
+                raise RuntimeError(
+                    "In order to send/recv CUDA arrays, Numba or RMM is required"
+                )
 
 
 class UCX(Comm):
@@ -66,9 +96,7 @@ class UCX(Comm):
     4. Read all the data frames.
     """
 
-    def __init__(
-        self, ep: ucp.Endpoint, local_addr: str, peer_addr: str, deserialize=True
-    ):
+    def __init__(self, ep, local_addr: str, peer_addr: str, deserialize=True):
         Comm.__init__(self)
         self._ep = ep
         if local_addr:
@@ -95,79 +123,95 @@ class UCX(Comm):
         on_error: str = "message",
     ):
         with log_errors():
-            if serializers is None:
-                serializers = ("cuda", "dask", "pickle", "error")
-            # msg can also be a list of dicts when sending batched messages
-            frames = await to_frames(msg, serializers=serializers, on_error=on_error)
-            is_gpus = b"".join(
-                [
-                    struct.pack("?", hasattr(frame, "__cuda_array_interface__"))
-                    for frame in frames
-                ]
-            )
-            sizes = b"".join([struct.pack("Q", nbytes(frame)) for frame in frames])
+            if self.closed():
+                raise CommClosedError("Endpoint is closed -- unable to send message")
+            try:
+                if serializers is None:
+                    serializers = ("cuda", "dask", "pickle", "error")
+                # msg can also be a list of dicts when sending batched messages
+                frames = await to_frames(
+                    msg, serializers=serializers, on_error=on_error
+                )
 
-            nframes = struct.pack("Q", len(frames))
-
-            meta = b"".join([nframes, is_gpus, sizes])
-
-            await self.ep.send_obj(meta)
-
-            for frame in frames:
-                await self.ep.send_obj(frame)
-            return sum(map(nbytes, frames))
+                # Send meta data
+                await self.ep.send(np.array([len(frames)], dtype=np.uint64))
+                await self.ep.send(
+                    np.array(
+                        [hasattr(f, "__cuda_array_interface__") for f in frames],
+                        dtype=np.bool,
+                    )
+                )
+                await self.ep.send(
+                    np.array([nbytes(f) for f in frames], dtype=np.uint64)
+                )
+                # Send frames
+                for frame in frames:
+                    if nbytes(frame) > 0:
+                        await self.ep.send(frame)
+                return sum(map(nbytes, frames))
+            except (ucp.exceptions.UCXBaseException):
+                self.abort()
+                raise CommClosedError("While writing, the connection was closed")
 
     async def read(self, deserializers=("cuda", "dask", "pickle", "error")):
         with log_errors():
+            if self.closed():
+                raise CommClosedError("Endpoint is closed -- unable to read message")
+
             if deserializers is None:
                 deserializers = ("cuda", "dask", "pickle", "error")
-            resp = await self.ep.recv_future()
-            obj = ucp.get_obj_from_msg(resp)
-            (nframes,) = struct.unpack(
-                "Q", obj[:8]
-            )  # first eight bytes for number of frames
 
-            gpu_frame_msg = obj[
-                8 : 8 + nframes
-            ]  # next nframes bytes for if they're GPU frames
-            is_gpus = struct.unpack("{}?".format(nframes), gpu_frame_msg)
+            try:
+                # Recv meta data
+                nframes = np.empty(1, dtype=np.uint64)
+                await self.ep.recv(nframes)
+                is_cudas = np.empty(nframes[0], dtype=np.bool)
+                await self.ep.recv(is_cudas)
+                sizes = np.empty(nframes[0], dtype=np.uint64)
+                await self.ep.recv(sizes)
+            except (
+                ucp.exceptions.UCXBaseException,
+                concurrent.futures._base.CancelledError,
+            ):
+                self.abort()
+                raise CommClosedError("While reading, the connection was closed")
+            else:
+                # Recv frames
+                frames = []
+                for is_cuda, size in zip(is_cudas.tolist(), sizes.tolist()):
+                    if size > 0:
+                        if is_cuda:
+                            frame = cuda_array(size)
+                        else:
+                            frame = np.empty(size, dtype=np.uint8)
+                        await self.ep.recv(frame)
+                        frames.append(frame)
+                    else:
+                        if is_cuda:
+                            frames.append(cuda_array(size))
+                        else:
+                            frames.append(b"")
+                msg = await from_frames(
+                    frames, deserialize=self.deserialize, deserializers=deserializers
+                )
+                return msg
 
-            sized_frame_msg = obj[8 + nframes :]  # then the rest for frame sizes
-            sizes = struct.unpack("{}Q".format(nframes), sized_frame_msg)
-
-            frames = []
-
-            for i, (is_gpu, size) in enumerate(zip(is_gpus, sizes)):
-                if size > 0:
-                    resp = await self.ep.recv_obj(size, cuda=is_gpu)
-                else:
-                    resp = await self.ep.recv_future()
-                frame = ucp.get_obj_from_msg(resp)
-                frames.append(frame)
-
-            msg = await from_frames(
-                frames, deserialize=self.deserialize, deserializers=deserializers
-            )
-
-            return msg
+    async def close(self):
+        if self._ep is not None:
+            await self._ep.close()
+            self._ep = None
 
     def abort(self):
-        if self._ep:
-            ucp.destroy_ep(self._ep)
-            logger.debug("Destroyed UCX endpoint")
+        if self._ep is not None:
+            self._ep.abort()
             self._ep = None
 
     @property
     def ep(self):
-        if self._ep:
+        if self._ep is not None:
             return self._ep
         else:
             raise CommClosedError("UCX Endpoint is closed")
-
-    async def close(self):
-        # TODO: Handle in-flight messages?
-        # sleep is currently used to help flush buffer
-        self.abort()
 
     def closed(self):
         return self._ep is None
@@ -180,9 +224,9 @@ class UCXConnector(Connector):
 
     async def connect(self, address: str, deserialize=True, **connection_args) -> UCX:
         logger.debug("UCXConnector.connect: %s", address)
-        ucp.init()
         ip, port = parse_host_port(address)
-        ep = await ucp.get_endpoint(ip.encode(), port)
+        init_once()
+        ep = await ucp.create_endpoint(ip, port)
         return self.comm_class(
             ep,
             local_addr=None,
@@ -192,7 +236,6 @@ class UCXConnector(Connector):
 
 
 class UCXListener(Listener):
-    # MAX_LISTENERS 256 in ucx-py
     prefix = UCXConnector.prefix
     comm_class = UCXConnector.comm_class
     encrypted = UCXConnector.encrypted
@@ -206,12 +249,8 @@ class UCXListener(Listener):
         self.comm_handler = comm_handler
         self.deserialize = deserialize
         self._ep = None  # type: ucp.Endpoint
-        self.listener_instance = None  # type: ucp.ListenerFuture
         self.ucp_server = None
-        self._task = None
-
         self.connection_args = connection_args
-        self._task = None
 
     @property
     def port(self):
@@ -222,39 +261,21 @@ class UCXListener(Listener):
         return "ucx://" + self.ip + ":" + str(self.port)
 
     def start(self):
-        async def serve_forever(client_ep, listener_instance):
+        async def serve_forever(client_ep):
             ucx = UCX(
                 client_ep,
                 local_addr=self.address,
-                peer_addr=self.address,  # TODO: https://github.com/Akshay-Venkatesh/ucx-py/issues/111
+                peer_addr=self.address,
                 deserialize=self.deserialize,
             )
-            self.listener_instance = listener_instance
             if self.comm_handler:
                 await self.comm_handler(ucx)
 
-        ucp.init()
-        self.ucp_server = ucp.start_listener(
-            serve_forever, listener_port=self._input_port, is_coroutine=True
-        )
-
-        try:
-            loop = asyncio.get_running_loop()
-        except (RuntimeError, AttributeError):
-            loop = asyncio.get_event_loop()
-
-        t = loop.create_task(self.ucp_server.coroutine)
-        self._task = t
+        init_once()
+        self.ucp_server = ucp.create_listener(serve_forever, port=self._input_port)
 
     def stop(self):
-        # What all should this do?
-        if self._task:
-            self._task.cancel()
-
-        if self._ep:
-            ucp.destroy_ep(self._ep)
-        # if self.listener_instance:
-        #   ucp.stop_listener(self.listener_instance)
+        self.ucp_server = None
 
     def get_host_port(self):
         # TODO: TCP raises if this hasn't started yet.

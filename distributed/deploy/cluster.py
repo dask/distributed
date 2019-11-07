@@ -74,7 +74,7 @@ class Cluster(object):
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
-        self.scheduler_comm.close_rpc()
+        await self.scheduler_comm.close_rpc()
 
         self.status = "closed"
 
@@ -207,7 +207,10 @@ class Cluster(object):
     def _widget_status(self):
         workers = len(self.scheduler_info["workers"])
         if hasattr(self, "worker_spec"):
-            requested = len(self.worker_spec)
+            requested = sum(
+                1 if "group" not in each else len(each["group"])
+                for each in self.worker_spec.values()
+            )
         elif hasattr(self, "workers"):
             requested = len(self.workers)
         else:
