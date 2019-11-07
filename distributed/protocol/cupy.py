@@ -3,16 +3,15 @@ Efficient serialization GPU arrays.
 """
 import cupy
 from .cuda import cuda_serialize, cuda_deserialize
-from distutils.version import LooseVersion
 
 
 class PatchedCudaArrayInterface(object):
     # TODO: This class wont be necessary
     #       once Cupy<7.0 is no longer supported
     def __init__(self, ary):
-        vsn = LooseVersion(cupy.__version__)
         cai = ary.__cuda_array_interface__
-        if vsn < "7.0.0rc1" and cai.get("strides") is None:
+        cai_cupy_vsn = cupy.ndarray(0).__cuda_array_interface__["version"]
+        if cai.get("strides") is None and cai_cupy_vsn < 2:
             cai.pop("strides", None)
         self.__cuda_array_interface__ = cai
 
