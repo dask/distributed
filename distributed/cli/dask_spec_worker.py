@@ -8,23 +8,23 @@ from distributed.deploy.spec import run_workers
 
 @click.command(context_settings=dict(ignore_unknown_options=True))
 @click.argument("scheduler", type=str, required=False)
-@click.option("--text", type=str, default="", help="")
-@click.option("--file", type=str, default=None, help="")
+@click.option("--spec", type=str, default="", help="")
+@click.option("--spec-file", type=str, default=None, help="")
 @click.version_option()
-def main(scheduler: str, text: str, file: str):
-    spec = {}
-    if file:
-        with open(file) as f:
-            spec.update(yaml.safe_load(f))
+def main(scheduler: str, spec: str, spec_file: str):
+    _spec = {}
+    if spec_file:
+        with open(spec_file) as f:
+            _spec.update(yaml.safe_load(f))
 
-    if text:
-        spec.update(json.loads(text))
+    if spec:
+        _spec.update(json.loads(spec))
 
-    if "cls" in spec:  # single worker spec
-        spec = {spec["opts"].get("name", 0): spec}
+    if "cls" in _spec:  # single worker spec
+        _spec = {_spec["opts"].get("name", 0): _spec}
 
     async def run():
-        workers = await run_workers(scheduler, spec)
+        workers = await run_workers(scheduler, _spec)
         try:
             await asyncio.gather(*[w.finished() for w in workers.values()])
         except KeyboardInterrupt:

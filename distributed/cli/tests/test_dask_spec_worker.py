@@ -13,7 +13,7 @@ async def test_text(cleanup):
             [
                 "dask-spec-worker",
                 "tcp://localhost:9373",
-                "--text",
+                "--spec",
                 '{"cls": "dask.distributed.Worker", "opts": {"nanny": false, "nthreads": 3, "name": "foo"}}',
             ]
         ) as w:
@@ -38,7 +38,9 @@ async def test_file(cleanup, tmp_path):
         )
 
     with popen(["dask-scheduler", "--port", "9373", "--no-dashboard"]) as sched:
-        with popen(["dask-spec-worker", "tcp://localhost:9373", "--file", fn]) as w:
+        with popen(
+            ["dask-spec-worker", "tcp://localhost:9373", "--spec-file", fn]
+        ) as w:
             async with Client("tcp://localhost:9373", asynchronous=True) as client:
                 await client.wait_for_workers(1)
                 info = await client.scheduler.identity()
