@@ -440,6 +440,11 @@ class Worker(ServerNode):
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
 
+        if protocol is None:
+            protocol_address = scheduler_addr.split("://")
+            if len(protocol_address) == 2:
+                protocol = protocol_address[0]
+
         # Target interface on which we contact the scheduler by default
         # TODO: it is unfortunate that we special-case inproc here
         if not host and not interface and not scheduler_addr.startswith("inproc://"):
@@ -784,17 +789,6 @@ class Worker(ServerNode):
             self.contact_address = self.address
         logger.info("-" * 49)
         while True:
-            if self.death_timeout and time() > start + self.death_timeout:
-                logger.exception(
-                    "Timed out when connecting to scheduler '%s'",
-                    self.scheduler.address,
-                )
-                await self.close(timeout=1)
-                raise gen.TimeoutError(
-                    "Timed out connecting to scheduler '%s'" % self.scheduler.address
-                )
-            if self.status in ("closed", "closing"):
-                return
             try:
                 _start = time()
                 types = {k: typename(v) for k, v in self.data.items()}
@@ -826,11 +820,6 @@ class Worker(ServerNode):
                     serializers=["msgpack"],
                 )
                 future = comm.read(deserializers=["msgpack"])
-                if self.death_timeout:
-                    diff = self.death_timeout - (time() - start)
-                    if diff < 0:
-                        continue
-                    future = gen.with_timeout(timedelta(seconds=diff), future)
                 response = await future
                 _end = time()
                 middle = (_start + _end) / 2
@@ -1079,7 +1068,7 @@ class Worker(ServerNode):
                             address=self.contact_address, safe=safe
                         ),
                     )
-            self.scheduler.close_rpc()
+            await self.scheduler.close_rpc()
             self._workdir.release()
 
             for k, v in self.services.items():
@@ -1172,10 +1161,24 @@ class Worker(ServerNode):
         ):
             max_connections = max_connections * 2
 
+        if self.paused:
+            max_connections = 1
+            throttle_msg = " Throttling outgoing connections because worker is paused."
+        else:
+            throttle_msg = ""
+
         if (
             max_connections is not False
-            and self.outgoing_current_count > max_connections
+            and self.outgoing_current_count >= max_connections
         ):
+            logger.debug(
+                "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",
+                self.address,
+                who,
+                self.outgoing_current_count,
+                max_connections,
+                throttle_msg,
+            )
             return {"status": "busy"}
 
         self.outgoing_current_count += 1

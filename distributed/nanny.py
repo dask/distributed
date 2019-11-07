@@ -106,6 +106,11 @@ class Nanny(ServerNode):
         else:
             self.scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
 
+        if protocol is None:
+            protocol_address = self.scheduler_addr.split("://")
+            if len(protocol_address) == 2:
+                protocol = protocol_address[0]
+
         if ncores is not None:
             warnings.warn("the ncores= parameter has moved to nthreads=")
             nthreads = ncores
@@ -357,6 +362,7 @@ class Nanny(ServerNode):
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return
         frac = memory / self.memory_limit
+
         if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
             logger.warning(
                 "Worker exceeded %d%% memory budget. Restarting",

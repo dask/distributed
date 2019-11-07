@@ -262,7 +262,7 @@ async def test_ping_pong_numba(cleanup):
     assert result["op"] == "ping"
 
 
-@pytest.mark.parametrize("processes", [False])
+@pytest.mark.parametrize("processes", [True, False])
 @pytest.mark.asyncio
 async def test_ucx_localcluster(processes, cleanup):
     async with LocalCluster(
@@ -273,7 +273,7 @@ async def test_ucx_localcluster(processes, cleanup):
         processes=processes,
         asynchronous=True,
     ) as cluster:
-        with Client(cluster, asynchronous=True) as client:
+        async with Client(cluster, asynchronous=True) as client:
             x = client.submit(inc, 1)
             await x.result()
             assert x.key in cluster.scheduler.tasks
