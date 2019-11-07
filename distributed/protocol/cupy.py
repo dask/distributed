@@ -12,7 +12,7 @@ class PatchedCudaArrayInterface(object):
     def __init__(self, ary):
         vsn = LooseVersion(cupy.__version__)
         cai = ary.__cuda_array_interface__
-        if vsn < "7.0.0" and cai.get("strides") is None:
+        if vsn < "7.0.0rc1" and cai.get("strides") is None:
             cai.pop("strides", None)
         self.__cuda_array_interface__ = cai
 
