@@ -7,7 +7,6 @@ See :ref:`communications` for more.
 """
 import logging
 import concurrent
-import os
 
 import dask
 import numpy as np
