@@ -10,7 +10,7 @@ class PatchedCudaArrayInterface(object):
     #       once Cupy<7.0 is no longer supported
     def __init__(self, ary):
         cai = ary.__cuda_array_interface__
-        cai_cupy_vsn = cupy.ndarray(0).__cuda_array_interface__["version"]
+        cai_cupy_vsn = cupy.ndarray(None).__cuda_array_interface__["version"]
         if cai.get("strides") is None and cai_cupy_vsn < 2:
             cai.pop("strides", None)
         self.__cuda_array_interface__ = cai
