@@ -112,7 +112,7 @@ containers to help with scheduling tasks:
 .. attribute:: Scheduler.saturated: {WorkerState}
 
    A set of workers whose computing power (as
-   measured by :attr:`WorkerState.ncores`) is fully exploited by processing
+   measured by :attr:`WorkerState.nthreads`) is fully exploited by processing
    tasks, and whose current :attr:`~WorkerState.occupancy` is a lot greater
    than the average.
 
@@ -131,8 +131,8 @@ Conversely, "saturated" workers may see their workload lightened through
 Client State
 ------------
 
-Information about each individual client is kept in a :class:`ClientState`
-object:
+Information about each individual client of the scheduler is kept
+in a :class:`ClientState` object:
 
 .. autoclass:: ClientState
 

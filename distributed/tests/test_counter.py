@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import pytest
 
 from distributed.counter import Counter
@@ -11,9 +9,17 @@ except ImportError:
     Digest = None
 
 
-@pytest.mark.parametrize('CD,size', [(Counter, lambda d: sum(d.values())),
-                                     pytest.mark.skipif(not Digest, reason="no crick library")(
-                                     (Digest, lambda x: x.size()))])
+@pytest.mark.parametrize(
+    "CD,size",
+    [
+        (Counter, lambda d: sum(d.values())),
+        pytest.param(
+            Digest,
+            lambda x: x.size(),
+            marks=pytest.mark.skipif(not Digest, reason="no crick library"),
+        ),
+    ],
+)
 def test_digest(loop, CD, size):
     c = CD(loop=loop)
     c.add(1)

@@ -11,21 +11,49 @@ distributed:
   scheduler:
     allowed-failures: 3     # number of retries before a task is considered bad
     bandwidth: 100000000    # 100 MB/s estimated worker-worker bandwidth
+    blocked-handlers: []
     default-data-size: 1000
+    # Number of seconds to wait until workers or clients are removed from the events log
+    # after they have been removed from the scheduler
+    events-cleanup-delay: 1h
+    idle-timeout: null      # Shut down after this duration, like "1h" or "30 minutes"
     transition-log-length: 100000
     work-stealing: True     # workers should steal tasks from each other
     worker-ttl: null        # like '60s'. Time to live for workers.  They must heartbeat faster than this
+    pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
+    preload: []
+    preload-argv: []
+    default-task-durations: {}  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
+    dashboard:
+      status:
+        task-stream-length: 1000
+      tasks:
+        task-stream-length: 100000
+      tls:
+        ca-file: null
+        key: null
+        cert: null
 
   worker:
+    blocked-handlers: []
     multiprocessing-method: forkserver
     use-file-locking: True
     connections:            # Maximum concurrent connections for data
       outgoing: 50          # This helps to control network saturation
       incoming: 10
+    preload: []
+    preload-argv: []
+    daemon: True
+    lifetime:
+      duration: null        # Time after which to gracefully shutdown the worker
+      stagger: 0 seconds    # Random amount by which to stagger lifetimes
+      restart: False        # Do we ressurrect the worker after the lifetime deadline?
 
     profile:
       interval: 10ms        # Time between statistical profiling queries
       cycle: 1000ms         # Time between starting new profile
+      low-level: False      # Whether or not to include low-level functions
+                            # Requires https://github.com/numba/stacktrace
 
     # Fractions of worker memory at which we take action to avoid memory blowup
     # Set any of the lower three values to False to turn off the behavior entirely
@@ -38,31 +66,39 @@ distributed:
   client:
     heartbeat: 5s  # time between client heartbeats
 
+  deploy:
+    lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job
+
   comm:
     compression: auto
     default-scheme: tcp
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
 
+    zstd:
+      level: 3      # Compression level, between 1 and 22.
+      threads: 0    # Threads to use. 0 for single-threaded, -1 to infer from cpu count.
+
     timeouts:
       connect: 10s          # time before connecting fails
       tcp: 30s              # time before calling an unresponsive connection dead
 
-  # require-encryption: False   # whether to require encryption on non-local comms
-  #
-  # tls:
-  #   ca-file: xxx.pem
-  #   scheduler:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   worker:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   client:
-  #     key: xxx.pem
-  #     cert: xxx.pem
-  #   ciphers:
-  #     ECDHE-ECDSA-AES128-GCM-SHA256
+    require-encryption: False   # Whether to require encryption on non-local comms
+
+    tls:
+      ciphers: null   # Allowed ciphers, specified as an OpenSSL cipher string.
+      ca-file: null   # Path to a CA file, in pem format, optional
+      scheduler:
+        cert: null    # Path to certificate file for scheduler.
+        key: null     # Path to key file for scheduler. Alternatively, the key
+                      # can be appended to the cert file above, and this field
+                      # left blank.
+      worker:
+        key: null
+        cert: null
+      client:
+        key: null
+        cert: null
 
 
   ###################
@@ -70,7 +106,7 @@ distributed:
   ###################
 
   dashboard:
-    link: "http://{host}:{port}/status"
+    link: "{scheme}://{host}:{port}/status"
     export-tool: False
 
   ##################
@@ -82,6 +118,7 @@ distributed:
       interval: 20ms  # time between event loop health checks
       limit: 3s       # time allowed before triggering a warning
 
+    max-error-length: 10000 # Maximum size traceback after error to return
     log-length: 10000  # default length of logs to keep in memory
     log-format: '%(name)s - %(levelname)s - %(message)s'
     pdb-on-err: False       # enter debug mode on scheduling error
