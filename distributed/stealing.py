@@ -347,6 +347,9 @@ class WorkStealing(SchedulerPlugin):
                             stealable.discard(ts)
                             continue
                         i += 1
+                        if not idle:
+                            break
+
                         if _has_restrictions(ts):
                             thieves = [ws for ws in idle if _can_steal(ws, ts, sat)]
                         else:
@@ -437,10 +440,9 @@ def _has_restrictions(ts):
 def _can_steal(thief, ts, victim):
     """Determine whether worker ``thief`` can steal task ``ts`` from worker
     ``victim``.
-    """
-    if not _has_restrictions(ts):
-        return True
 
+    Assumes that `ts` has some restrictions.
+    """
     if (
         ts.host_restrictions
         and get_address_host(thief.address) not in ts.host_restrictions
