@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import logging
 import sys
 
@@ -14,14 +12,16 @@ logger = logging.getLogger(__name__)
 
 
 def _always_use_pickle_for(x):
-    mod, _, _ = x.__class__.__module__.partition('.')
-    if mod == 'numpy':
+    mod, _, _ = x.__class__.__module__.partition(".")
+    if mod == "numpy":
         import numpy as np
+
         return isinstance(x, np.ndarray)
-    elif mod == 'pandas':
+    elif mod == "pandas":
         import pandas as pd
+
         return isinstance(x, pd.core.generic.NDFrame)
-    elif mod == 'builtins':
+    elif mod == "builtins":
         return isinstance(x, (str, bytes))
     else:
         return False
@@ -37,12 +37,12 @@ def dumps(x):
     try:
         result = pickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
         if len(result) < 1000:
-            if b'__main__' in result:
+            if b"__main__" in result:
                 return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)
             else:
                 return result
         else:
-            if _always_use_pickle_for(x) or b'__main__' not in result:
+            if _always_use_pickle_for(x) or b"__main__" not in result:
                 return result
             else:
                 return cloudpickle.dumps(x, protocol=pickle.HIGHEST_PROTOCOL)

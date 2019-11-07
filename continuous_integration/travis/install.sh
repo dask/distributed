@@ -39,28 +39,35 @@ conda install -q \
     ipywidgets \
     joblib \
     jupyter_client \
-    mock \
     netcdf4 \
     paramiko \
+    prometheus_client \
     psutil \
-    pytest=3.7 \
+    pytest>=4 \
     pytest-timeout \
     python=$PYTHON \
     requests \
     scipy \
     tblib \
     toolz \
-    tornado \
+    tornado=$TORNADO \
     $PACKAGES
 
-pip install -q pytest-repeat pytest-faulthandler
+# For low-level profiler, install libunwind and stacktrace from conda-forge
+# For stacktrace we use --no-deps to avoid upgrade of python
+conda install -c defaults -c conda-forge libunwind zstandard asyncssh
+conda install --no-deps -c defaults -c numba -c conda-forge stacktrace
+
+pip install -q "pytest>=4" pytest-repeat pytest-faulthandler pytest-asyncio
 
 pip install -q git+https://github.com/dask/dask.git --upgrade --no-deps
 pip install -q git+https://github.com/joblib/joblib.git --upgrade --no-deps
+pip install -q git+https://github.com/intake/filesystem_spec.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
 pip install -q sortedcollections msgpack --no-deps
 pip install -q keras --upgrade --no-deps
+pip install -q asyncssh 
 
 if [[ $CRICK == true ]]; then
     conda install -q cython
@@ -69,10 +76,6 @@ fi;
 
 # Install distributed
 pip install --no-deps -e .
-
-if [[ ! -z $TORNADO ]]; then
-    pip install -U tornado==$TORNADO
-fi
 
 # For debugging
 echo -e "--\n--Conda Environment\n--"
