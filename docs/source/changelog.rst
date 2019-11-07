@@ -1,6 +1,151 @@
 Changelog
 =========
 
+2.6.0 - 2019-10-15
+------------------
+
+- Refactor dashboard module (:pr:`3138`) `Jacob Tomlinson`_
+- Use ``setuptools.find_packages`` in ``setup.py`` (:pr:`3150`) `Matthew Rocklin`_
+- Move death timeout logic up to ``Node.start`` (:pr:`3115`) `Matthew Rocklin`_
+- Only include metric in ``WorkerTable`` if it is a scalar (:pr:`3140`) `Matthew Rocklin`_
+- Add ``Nanny(config={...})`` keyword (:pr:`3134`) `Matthew Rocklin`_
+- Xfail ``test_worksapce_concurrency`` on Python 3.6 (:pr:`3132`) `Matthew Rocklin`_
+- Extend Worker plugin API with transition method (:pr:`2994`) `matthieubulte`_
+- Raise exception if the user passes in unused keywords to ``Client`` (:pr:`3117`) `Jonathan De Troye`_
+- Move new ``SSHCluster`` to top level (:pr:`3128`) `Matthew Rocklin`_
+- Bump dask dependency (:pr:`3124`) `Jim Crist`_
+
+
+2.5.2 - 2019-10-04
+------------------
+
+-  Make dask-worker close quietly when given sigint signal (:pr:`3116`) `Matthew Rocklin`_
+-  Replace use of tornado.gen with asyncio in dask-worker (:pr:`3114`) `Matthew Rocklin`_
+-  UCX: allocate CUDA arrays using RMM and Numba (:pr:`3109`) `Mads R. B. Kristensen`_
+-  Support calling `cluster.scale` as async method (:pr:`3110`) `Jim Crist`_
+-  Identify lost workers in SpecCluster based on address not name (:pr:`3088`) `James Bourbeau`_
+-  Add Client.shutdown method (:pr:`3106`) `Matthew Rocklin`_
+-  Collect worker-worker and type bandwidth information (:pr:`3094`) `Matthew Rocklin`_
+-  Send noise over the wire to keep dask-ssh connection alive (:pr:`3105`) `Gil Forsyth`_
+-  Retry scheduler connect multiple times (:pr:`3104`) `Jacob Tomlinson`_
+-  Add favicon of logo to the dashboard (:pr:`3095`) `James Bourbeau`_
+-  Remove utils.py functions for their dask/utils.py equivalents (:pr:`3042`) `Matthew Rocklin`_
+-  Lower default bokeh log level (:pr:`3087`) `Philipp Rudiger`_
+-  Check if self.cluster.scheduler is a local scheduler (:pr:`3099`) `Jacob Tomlinson`_
+
+
+2.5.1 - 2019-09-27
+------------------
+
+-   Support clusters that don't have .security or ._close methods (:pr:`3100`) `Matthew Rocklin`_
+
+
+2.5.0 - 2019-09-27
+------------------
+
+-  Use the new UCX Python bindings (:pr:`3059`) `Mads R. B. Kristensen`_
+-  Fix worker preload config (:pr:`3027`) `byjott`_
+-  Fix widget with spec that generates multiple workers (:pr:`3067`) `Loïc Estève`_
+-  Make Client.get_versions async friendly (:pr:`3064`) `Jacob Tomlinson`_
+-  Add configuation option for longer error tracebacks (:pr:`3086`) `Daniel Farrell`_
+-  Have Client get Security from passed Cluster (:pr:`3079`) `Matthew Rocklin`_
+-  Respect Cluster.dashboard_link in Client._repr_html_ if it exists (:pr:`3077`) `Matthew Rocklin`_
+-  Add monitoring with dask cluster docs (:pr:`3072`) `Arpit Solanki`_
+-  Protocol of cupy and numba handles serialization exclusively  (:pr:`3047`) `Mads R. B. Kristensen`_
+-  Allow specification of worker type in SSHCLuster (:pr:`3061`) `Jacob Tomlinson`_
+-  Use Cluster.scheduler_info for workers= value in repr (:pr:`3058`) `Matthew Rocklin`_
+-  Allow SpecCluster to scale by memory and cores (:pr:`3057`) `Matthew Rocklin`_
+-  Allow full script in preload inputs (:pr:`3052`) `Matthew Rocklin`_
+-  Check multiple cgroups dirs, ceil fractional cpus (:pr:`3056`) `Jim Crist`_
+-  Add blurb about disabling work stealing (:pr:`3055`) `Chris White`_
+
+
+2.4.0 - 2019-09-13
+------------------
+
+- Remove six (:pr:`3045`) `Matthew Rocklin`_
+- Add missing test data to sdist tarball (:pr:`3050`) `Elliott Sales de Andrade`_
+- Use mock from unittest standard library (:pr:`3049`) `Elliott Sales de Andrade`_
+- Use cgroups resource limits to determine default threads and memory (:pr:`3039`) `Jim Crist`_
+- Move task deserialization to immediately before task execution (:pr:`3015`) `James Bourbeau`_
+- Drop joblib shim module in distributed (:pr:`3040`) `John Kirkham`_
+- Redirect configuration doc page (:pr:`3038`) `Matthew Rocklin`_
+- Support ``--name 0`` and ``--nprocs`` keywords in dask-worker cli (:pr:`3037`) `Matthew Rocklin`_
+- Remove lost workers from ``SpecCluster.workers`` (:pr:`2990`) `Guillaume Eynard-Bontemps`_
+- Clean up ``test_local.py::test_defaults`` (:pr:`3017`) `Matthew Rocklin`_
+- Replace print statement in ``Queue.__init__`` with debug message (:pr:`3035`) `Mikhail Akimov`_
+- Set the ``x_range`` limit of the Meory utilization plot to memory-limit (:pr:`3034`) `Matthew Rocklin`_
+- Rely on cudf codebase for cudf serialization (:pr:`2998`) `Benjamin Zaitlen`_
+- Add fallback html repr for Cluster (:pr:`3023`) `Jim Crist`_
+- Add support for zstandard compression to comms (:pr:`2970`) `Abael He`_
+- Avoid collision when using ``os.environ`` in ``dashboard_link`` (:pr:`3021`) `Matthew Rocklin`_
+- Fix ``ConnectionPool`` limit handling (:pr:`3005`) `byjott`_
+- Support Spec jobs that generate multiple workers (:pr:`3013`) `Matthew Rocklin`_
+- Tweak ``Logs`` styling (:pr:`3012`) `Jim Crist`_
+- Better name for cudf deserialization function name (:pr:`3008`) `Benjamin Zaitlen`_
+- Make ``spec.ProcessInterface`` a valid no-op worker (:pr:`3004`) `Matthew Rocklin`_
+- Return dictionaries from ``new_worker_spec`` rather than name/worker pairs (:pr:`3000`) `Matthew Rocklin`_
+- Fix minor typo in documentation (:pr:`3002`) `Mohammad Noor`_
+- Permit more keyword options when scaling with cores and memory (:pr:`2997`) `Matthew Rocklin`_
+- Add ``cuda_ipc`` to UCX environment for NVLink (:pr:`2996`) `Benjamin Zaitlen`_
+- Add ``threads=`` and ``memory=`` to Cluster and Client reprs (:pr:`2995`) `Matthew Rocklin`_
+- Fix PyNVML initialization (:pr:`2993`) `Richard J Zamora`_
+
+
+2.3.2 - 2019-08-23
+------------------
+
+-  Skip exceptions in startup information (:pr:`2991`) `Jacob Tomlinson`_
+
+
+2.3.1 - 2019-08-22
+------------------
+
+-  Add support for separate external address for SpecCluster scheduler (:pr:`2963`) `Jacob Tomlinson`_
+-  Defer cudf serialization/deserialization to that library (:pr:`2881`) `Benjamin Zaitlen`_
+-  Workaround for hanging test now calls ucp.fin() (:pr:`2967`) `Mads R. B. Kristensen`_
+-  Remove unnecessary bullet point (:pr:`2972`) `Pav A`_
+-  Directly import progress from diagnostics.progressbar (:pr:`2975`) `Matthew Rocklin`_
+-  Handle buffer protocol objects in ensure_bytes (:pr:`2969`) `Tom Augspurger`_
+-  Fix documentatation syntax and tree (:pr:`2981`) `Pav A`_
+-  Improve get_ip_interface error message when interface does not exist (:pr:`2964`) `Loïc Estève`_
+-  Add cores= and memory= keywords to scale (:pr:`2974`) `Matthew Rocklin`_
+-  Make workers robust to bad custom metrics (:pr:`2984`) `Matthew Rocklin`_
+
+
+2.3.0 - 2019-08-16
+------------------
+
+- Except all exceptions when checking ``pynvml`` (:pr:`2961`) `Matthew Rocklin`_
+- Pass serialization down through small base collections (:pr:`2948`) `Peter Andreas Entschev`_
+- Use ``pytest.warning(Warning)`` rather than ``Exception`` (:pr:`2958`) `Matthew Rocklin`_
+- Allow ``server_kwargs`` to override defaults in dashboard (:pr:`2955`) `Bruce Merry`_
+- Update ``utils_perf.py`` (:pr:`2954`) `Shayan Amani`_
+- Normalize names with ``str`` in ``retire_workers`` (:pr:`2949`) `Matthew Rocklin`_
+- Update ``client.py`` (:pr:`2951`) `Shayan Amani`_
+- Add ``GPUCurrentLoad`` dashboard plots (:pr:`2944`) `Matthew Rocklin`_
+- Pass GPU diagnostics from worker to scheduler (:pr:`2932`) `Matthew Rocklin`_
+- Import from ``collections.abc`` (:pr:`2938`) `Jim Crist`_
+- Fixes Worker docstring formatting (:pr:`2939`) `James Bourbeau`_
+- Redirect setup docs to docs.dask.org (:pr:`2936`) `Matthew Rocklin`_
+- Wrap offload in ``gen.coroutine`` (:pr:`2934`) `Matthew Rocklin`_
+- Change ``TCP.close`` to a coroutine to avoid task pending warning (:pr:`2930`) `Matthew Rocklin`_
+- Fixup black string normalization (:pr:`2929`) `Jim Crist`_
+- Move core functionality from ``SpecCluster`` to ``Cluster`` (:pr:`2913`) `Matthew Rocklin`_
+- Add aenter/aexit protocols to ``ProcessInterface`` (:pr:`2927`) `Matthew Rocklin`_
+- Add real-time CPU utilization plot to dashboard (:pr:`2922`) `Matthew Rocklin`_
+- Always kill processes in clean tests, even if we don't check (:pr:`2924`) `Matthew Rocklin`_
+- Add timeouts to processes in SSH tests (:pr:`2925`) `Matthew Rocklin`_
+- Add documentation around ``spec.ProcessInterface`` (:pr:`2923`) `Matthew Rocklin`_
+- Cleanup async warnings in tests (:pr:`2920`) `Matthew Rocklin`_
+- Give 404 when requesting nonexistent tasks or workers (:pr:`2921`) `Martin Durant`_
+- Raise informative warning when rescheduling an unknown task (:pr:`2916`) `James Bourbeau`_
+- Fix docstring (:pr:`2917`) `Martin Durant`_
+- Add keep-alive message between worker and scheduler (:pr:`2907`) `Matthew Rocklin`_
+- Rewrite ``Adaptive``/``SpecCluster`` to support slowly arriving workers (:pr:`2904`) `Matthew Rocklin`_
+- Call heartbeat rather than reconnect on disconnection (:pr:`2906`) `Matthew Rocklin`_
+
+
 2.2.0 - 2019-07-31
 ------------------
 
@@ -1166,6 +1311,7 @@ significantly without many new features.
 .. _`Michael Spiegel`: https://github.com/Spiegel0
 .. _`Caleb`: https://github.com/calebho
 .. _`Ben Zaitlen`: https://github.com/quasiben
+.. _`Benjamin Zaitlen`: https://github.com/quasiben
 .. _`Manuel Garrido`: https://github.com/manugarri
 .. _`Magnus Nord`: https://github.com/magnunor
 .. _`Sam Grayson`: https://github.com/charmoniumQ
@@ -1173,3 +1319,16 @@ significantly without many new features.
 .. _`Christian Hudon`: https://github.com/chrish42
 .. _`Gabriel Sailer`: https://github.com/sublinus
 .. _`Pierre Glaser`: https://github.com/pierreglase
+.. _`Shayan Amani`: https://github.com/SHi-ON
+.. _`Pav A`: https://github.com/rs2
+.. _`Mads R. B. Kristensen`: https://github.com/madsbk
+.. _`Mikhail Akimov`: https://github.com/roveo
+.. _`Abael He`: https://github.com/abaelhe
+.. _`byjott`: https://github.com/byjott
+.. _`Mohammad Noor`: https://github.com/MdSalih
+.. _`Richard J Zamora`: https://github.com/rjzamora
+.. _`Arpit Solanki`: https://github.com/arpit1997
+.. _`Gil Forsyth`: https://github.com/gforsyth
+.. _`Philipp Rudiger`: https://github.com/philippjfr
+.. _`Jonathan De Troye`: https://github.com/detroyejr
+.. _`matthieubulte`: https://github.com/matthieubulte

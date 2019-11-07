@@ -1,10 +1,10 @@
 import asyncio
 import bisect
-from collections import defaultdict, deque, MutableMapping
+from collections import defaultdict, deque, namedtuple
+from collections.abc import MutableMapping
 from datetime import timedelta
 import heapq
 import logging
-import multiprocessing
 import os
 from pickle import PicklingError
 import random
@@ -13,24 +13,22 @@ import sys
 import uuid
 import warnings
 import weakref
-import psutil
 
 import dask
 from dask.core import istask
 from dask.compatibility import apply
-from dask.utils import format_bytes
+from dask.utils import format_bytes, funcname
 
 try:
-    from cytoolz import pluck, partial, merge, first
+    from cytoolz import pluck, partial, merge, first, keymap
 except ImportError:
-    from toolz import pluck, partial, merge, first
+    from toolz import pluck, partial, merge, first, keymap
 from tornado import gen
 from tornado.ioloop import IOLoop
 
-from . import profile
+from . import profile, comm, system
 from .batched import BatchedSend
 from .comm import get_address_host, connect
-from .comm.utils import offload
 from .comm.addressing import address_from_user_args
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
@@ -45,7 +43,6 @@ from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
     get_ip,
-    funcname,
     typename,
     has_arg,
     _maybe_complex,
@@ -56,6 +53,7 @@ from .utils import (
     thread_state,
     json_load_robust,
     key_split,
+    offload,
     PeriodicCallback,
     parse_bytes,
     parse_timedelta,
@@ -71,8 +69,6 @@ LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 no_value = "--no-value-sentinel--"
 
-TOTAL_MEMORY = psutil.virtual_memory().total
-
 IN_PLAY = ("waiting", "ready", "executing", "long-running")
 PENDING = ("waiting", "ready", "constrained")
 PROCESSING = ("waiting", "ready", "constrained", "executing", "long-running")
@@ -80,6 +76,12 @@ READY = ("ready", "constrained")
 
 
 DEFAULT_EXTENSIONS = [PubSubWorkerExtension]
+
+DEFAULT_METRICS = {}
+
+DEFAULT_STARTUP_INFORMATION = {}
+
+SerializedTask = namedtuple("SerializedTask", ["function", "args", "kwargs", "task"])
 
 
 class Worker(ServerNode):
@@ -97,7 +99,7 @@ class Worker(ServerNode):
 
         $ dask-worker scheduler-ip:port
 
-    Use the ``--help`` flag to see more options
+    Use the ``--help`` flag to see more options::
 
         $ dask-worker --help
 
@@ -235,7 +237,7 @@ class Worker(ServerNode):
     memory_limit: int, float, string
         Number of bytes of memory that this worker should use.
         Set to zero for no limit.  Set to 'auto' to calculate
-        as TOTAL_MEMORY * min(1, nthreads / total_cores)
+        as system.MEMORY_LIMIT * min(1, nthreads / total_cores)
         Use strings or numbers like 5GB or 5e9
     memory_target_fraction: float
         Fraction of memory to try to stay beneath
@@ -305,7 +307,8 @@ class Worker(ServerNode):
         contact_address=None,
         memory_monitor_interval="200ms",
         extensions=None,
-        metrics=None,
+        metrics=DEFAULT_METRICS,
+        startup_information=DEFAULT_STARTUP_INFORMATION,
         data=None,
         interface=None,
         host=None,
@@ -413,6 +416,10 @@ class Worker(ServerNode):
         self.outgoing_current_count = 0
         self.repetitively_busy = 0
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.bandwidth_workers = defaultdict(
+            lambda: (0, 0)
+        )  # bw/count recent transfers
+        self.bandwidth_types = defaultdict(lambda: (0, 0))  # bw/count recent transfers
         self.latency = 0.001
         self._client = None
         self._client_cleanup = False
@@ -434,6 +441,11 @@ class Worker(ServerNode):
             scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
         self.contact_address = contact_address
 
+        if protocol is None:
+            protocol_address = scheduler_addr.split("://")
+            if len(protocol_address) == 2:
+                protocol = protocol_address[0]
+
         # Target interface on which we contact the scheduler by default
         # TODO: it is unfortunate that we special-case inproc here
         if not host and not interface and not scheduler_addr.startswith("inproc://"):
@@ -451,7 +463,7 @@ class Worker(ServerNode):
             warnings.warn("the ncores= parameter has moved to nthreads=")
             nthreads = ncores
 
-        self.nthreads = nthreads or multiprocessing.cpu_count()
+        self.nthreads = nthreads or system.CPU_COUNT
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
         self.death_timeout = parse_timedelta(death_timeout)
@@ -577,6 +589,9 @@ class Worker(ServerNode):
                 )
 
         self.metrics = dict(metrics) if metrics else {}
+        self.startup_information = (
+            dict(startup_information) if startup_information else {}
+        )
 
         self.low_level_profiler = low_level_profiler
 
@@ -717,17 +732,42 @@ class Worker(ServerNode):
         )
         return self.local_directory
 
-    def get_metrics(self):
+    async def get_metrics(self):
         core = dict(
             executing=len(self.executing),
             in_memory=len(self.data),
             ready=len(self.ready),
             in_flight=len(self.in_flight_tasks),
-            bandwidth=self.bandwidth,
+            bandwidth={
+                "total": self.bandwidth,
+                "workers": dict(self.bandwidth_workers),
+                "types": keymap(typename, self.bandwidth_types),
+            },
         )
-        custom = {k: metric(self) for k, metric in self.metrics.items()}
+        custom = {}
+        for k, metric in self.metrics.items():
+            try:
+                result = metric(self)
+                if hasattr(result, "__await__"):
+                    result = await result
+                custom[k] = result
+            except Exception:  # TODO: log error once
+                pass
 
         return merge(custom, self.monitor.recent(), core)
+
+    async def get_startup_information(self):
+        result = {}
+        for k, f in self.startup_information.items():
+            try:
+                v = f(self)
+                if hasattr(v, "__await__"):
+                    v = await v
+                result[k] = v
+            except Exception:  # TODO: log error once
+                pass
+
+        return result
 
     def identity(self, comm=None):
         return {
@@ -750,17 +790,6 @@ class Worker(ServerNode):
             self.contact_address = self.address
         logger.info("-" * 49)
         while True:
-            if self.death_timeout and time() > start + self.death_timeout:
-                logger.exception(
-                    "Timed out when connecting to scheduler '%s'",
-                    self.scheduler.address,
-                )
-                await self.close(timeout=1)
-                raise gen.TimeoutError(
-                    "Timed out connecting to scheduler '%s'" % self.scheduler.address
-                )
-            if self.status in ("closed", "closing"):
-                return
             try:
                 _start = time()
                 types = {k: typename(v) for k, v in self.data.items()}
@@ -786,16 +815,12 @@ class Worker(ServerNode):
                         services=self.service_ports,
                         nanny=self.nanny,
                         pid=os.getpid(),
-                        metrics=self.get_metrics(),
+                        metrics=await self.get_metrics(),
+                        extra=await self.get_startup_information(),
                     ),
                     serializers=["msgpack"],
                 )
                 future = comm.read(deserializers=["msgpack"])
-                if self.death_timeout:
-                    diff = self.death_timeout - (time() - start)
-                    if diff < 0:
-                        continue
-                    future = gen.with_timeout(timedelta(seconds=diff), future)
                 response = await future
                 _end = time()
                 middle = (_start + _end) / 2
@@ -841,7 +866,9 @@ class Worker(ServerNode):
             try:
                 start = time()
                 response = await self.scheduler.heartbeat_worker(
-                    address=self.contact_address, now=time(), metrics=self.get_metrics()
+                    address=self.contact_address,
+                    now=time(),
+                    metrics=await self.get_metrics(),
                 )
                 end = time()
                 middle = (start + end) / 2
@@ -853,6 +880,8 @@ class Worker(ServerNode):
                 self.periodic_callbacks["heartbeat"].callback_time = (
                     response["heartbeat-interval"] * 1000
                 )
+                self.bandwidth_workers.clear()
+                self.bandwidth_types.clear()
             except CommClosedError:
                 logger.warning("Heartbeat to scheduler failed")
             finally:
@@ -1045,7 +1074,7 @@ class Worker(ServerNode):
                             address=self.contact_address, safe=safe
                         ),
                     )
-            self.scheduler.close_rpc()
+            await self.scheduler.close_rpc()
             self._workdir.release()
 
             for k, v in self.services.items():
@@ -1138,10 +1167,24 @@ class Worker(ServerNode):
         ):
             max_connections = max_connections * 2
 
+        if self.paused:
+            max_connections = 1
+            throttle_msg = " Throttling outgoing connections because worker is paused."
+        else:
+            throttle_msg = ""
+
         if (
             max_connections is not False
-            and self.outgoing_current_count > max_connections
+            and self.outgoing_current_count >= max_connections
         ):
+            logger.debug(
+                "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",
+                self.address,
+                who,
+                self.outgoing_current_count,
+                max_connections,
+                throttle_msg,
+            )
             return {"status": "busy"}
 
         self.outgoing_current_count += 1
@@ -1303,23 +1346,9 @@ class Worker(ServerNode):
                 return
 
             self.log.append((key, "new"))
-            try:
-                start = time()
-                self.tasks[key] = _deserialize(function, args, kwargs, task)
-                if actor:
-                    self.actors[key] = None
-                stop = time()
-
-                if stop - start > 0.010:
-                    self.startstops[key].append(("deserialize", start, stop))
-            except Exception as e:
-                logger.warning("Could not deserialize task", exc_info=True)
-                emsg = error_message(e)
-                emsg["key"] = key
-                emsg["op"] = "task-erred"
-                self.batched_stream.send(emsg)
-                self.log.append((key, "deserialize-error"))
-                return
+            self.tasks[key] = SerializedTask(function, args, kwargs, task)
+            if actor:
+                self.actors[key] = None
 
             self.priorities[key] = priority
             self.durations[key] = duration
@@ -1495,6 +1524,7 @@ class Worker(ServerNode):
         self.task_state[key] = state or finish
         if self.validate:
             self.validate_key(key)
+        self._notify_transition(key, start, finish, **kwargs)
 
     def transition_waiting_ready(self, key):
         try:
@@ -1910,8 +1940,17 @@ class Worker(ServerNode):
                         "who": worker,
                     }
                 )
-                if total_bytes > 10000:
+                if total_bytes > 1000000:
                     self.bandwidth = self.bandwidth * 0.95 + bandwidth * 0.05
+                    bw, cnt = self.bandwidth_workers[worker]
+                    self.bandwidth_workers[worker] = (bw + bandwidth, cnt + 1)
+
+                    types = set(map(type, response["data"].values()))
+                    if len(types) == 1:
+                        [typ] = types
+                        bw, cnt = self.bandwidth_types[typ]
+                        self.bandwidth_types[typ] = (bw + bandwidth, cnt + 1)
+
                 if self.digests is not None:
                     self.digests["transfer-bandwidth"].add(total_bytes / duration)
                     self.digests["transfer-duration"].add(duration)
@@ -2264,15 +2303,16 @@ class Worker(ServerNode):
                 self.plugins[name] = plugin
 
                 logger.info("Starting Worker plugin %s" % name)
-                try:
-                    result = plugin.setup(worker=self)
-                    if hasattr(result, "__await__"):
-                        result = await result
-                except Exception as e:
-                    msg = error_message(e)
-                    return msg
-                else:
-                    return {"status": "OK"}
+                if hasattr(plugin, "setup"):
+                    try:
+                        result = plugin.setup(worker=self)
+                        if hasattr(result, "__await__"):
+                            result = await result
+                    except Exception as e:
+                        msg = error_message(e)
+                        return msg
+
+                return {"status": "OK"}
 
     async def actor_execute(
         self, comm=None, actor=None, function=None, args=(), kwargs={}
@@ -2317,6 +2357,26 @@ class Worker(ServerNode):
 
         return True
 
+    def _maybe_deserialize_task(self, key):
+        if not isinstance(self.tasks[key], SerializedTask):
+            return self.tasks[key]
+        try:
+            start = time()
+            function, args, kwargs = _deserialize(*self.tasks[key])
+            stop = time()
+
+            if stop - start > 0.010:
+                self.startstops[key].append(("deserialize", start, stop))
+            return function, args, kwargs
+        except Exception as e:
+            logger.warning("Could not deserialize task", exc_info=True)
+            emsg = error_message(e)
+            emsg["key"] = key
+            emsg["op"] = "task-erred"
+            self.batched_stream.send(emsg)
+            self.log.append((key, "deserialize-error"))
+            raise
+
     def ensure_computing(self):
         if self.paused:
             return
@@ -2328,12 +2388,22 @@ class Worker(ServerNode):
                     continue
                 if self.meets_resource_constraints(key):
                     self.constrained.popleft()
+                    try:
+                        # Ensure task is deserialized prior to execution
+                        self.tasks[key] = self._maybe_deserialize_task(key)
+                    except Exception:
+                        continue
                     self.transition(key, "executing")
                 else:
                     break
             while self.ready and len(self.executing) < self.nthreads:
                 _, key = heapq.heappop(self.ready)
                 if self.task_state.get(key) in READY:
+                    try:
+                        # Ensure task is deserialized prior to execution
+                        self.tasks[key] = self._maybe_deserialize_task(key)
+                    except Exception:
+                        continue
                     self.transition(key, "executing")
         except Exception as e:
             logger.exception(e)
@@ -2652,6 +2722,16 @@ class Worker(ServerNode):
 
         result = {k: profile.call_stack(frame) for k, frame in frames.items()}
         return result
+
+    def _notify_transition(self, key, start, finish, **kwargs):
+        for name, plugin in self.plugins.items():
+            if hasattr(plugin, "transition"):
+                try:
+                    plugin.transition(key, start, finish, **kwargs)
+                except Exception:
+                    logger.info(
+                        "Plugin '%s' failed with exception" % name, exc_info=True
+                    )
 
     ##############
     # Validation #
@@ -2997,33 +3077,23 @@ class Reschedule(Exception):
     pass
 
 
-def parse_memory_limit(memory_limit, nthreads, total_cores=multiprocessing.cpu_count()):
+def parse_memory_limit(memory_limit, nthreads, total_cores=system.CPU_COUNT):
     if memory_limit is None:
         return None
 
     if memory_limit == "auto":
-        memory_limit = int(TOTAL_MEMORY * min(1, nthreads / total_cores))
+        memory_limit = int(system.MEMORY_LIMIT * min(1, nthreads / total_cores))
     with ignoring(ValueError, TypeError):
         memory_limit = float(memory_limit)
         if isinstance(memory_limit, float) and memory_limit <= 1:
-            memory_limit = int(memory_limit * TOTAL_MEMORY)
+            memory_limit = int(memory_limit * system.MEMORY_LIMIT)
 
     if isinstance(memory_limit, str):
         memory_limit = parse_bytes(memory_limit)
     else:
         memory_limit = int(memory_limit)
 
-    # should be less than hard RSS limit
-    try:
-        import resource
-
-        hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]
-        if hard_limit > 0:
-            memory_limit = min(memory_limit, hard_limit)
-    except (ImportError, OSError):
-        pass
-
-    return memory_limit
+    return min(memory_limit, system.MEMORY_LIMIT)
 
 
 async def get_data_from_worker(
@@ -3360,7 +3430,7 @@ async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=Tru
 
     except Exception as e:
         logger.warning(
-            " Run Failed\n" "Function: %s\n" "args:     %s\n" "kwargs:   %s\n",
+            "Run Failed\nFunction: %s\nargs:     %s\nkwargs:   %s\n",
             str(funcname(function))[:1000],
             convert_args_to_str(args, max_len=1000),
             convert_kwargs_to_str(kwargs, max_len=1000),
@@ -3374,3 +3444,21 @@ async def run(server, comm, function, args=(), kwargs={}, is_coro=None, wait=Tru
 
 
 _global_workers = Worker._instances
+
+try:
+    from .diagnostics import nvml
+except Exception:
+    pass
+else:
+
+    @gen.coroutine
+    def gpu_metric(worker):
+        result = yield offload(nvml.real_time)
+        return result
+
+    DEFAULT_METRICS["gpu"] = gpu_metric
+
+    def gpu_startup(worker):
+        return nvml.one_time()
+
+    DEFAULT_STARTUP_INFORMATION["gpu"] = gpu_startup

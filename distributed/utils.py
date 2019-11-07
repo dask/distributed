@@ -1,6 +1,7 @@
 import asyncio
 import atexit
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
 import functools
@@ -9,7 +10,6 @@ import inspect
 import json
 import logging
 import multiprocessing
-from numbers import Number
 import os
 import re
 import shutil
@@ -24,7 +24,7 @@ import threading
 import warnings
 import weakref
 import pkgutil
-import six
+import base64
 import tblib.pickling_support
 import xml.etree.ElementTree
 
@@ -37,7 +37,14 @@ import dask
 from dask import istask
 
 # provide format_bytes here for backwards compatibility
-from dask.utils import format_bytes  # noqa
+from dask.utils import (  # noqa
+    format_bytes,
+    funcname,
+    format_time,
+    parse_bytes,
+    parse_timedelta,
+)
+
 import toolz
 import tornado
 from tornado import gen
@@ -78,16 +85,6 @@ def _initialize_mp_context():
 
 
 mp_context = _initialize_mp_context()
-
-
-def funcname(func):
-    """Get the name of a function."""
-    while hasattr(func, "func"):
-        func = func.func
-    try:
-        return func.__name__
-    except AttributeError:
-        return str(func)
 
 
 def has_arg(func, argname):
@@ -168,7 +165,16 @@ def get_ip_interface(ifname):
     """
     import psutil
 
-    for info in psutil.net_if_addrs()[ifname]:
+    net_if_addrs = psutil.net_if_addrs()
+
+    if ifname not in net_if_addrs:
+        allowed_ifnames = list(net_if_addrs.keys())
+        raise ValueError(
+            "{!r} is not a valid network interface. "
+            "Valid network interfaces are: {}".format(ifname, allowed_ifnames)
+        )
+
+    for info in net_if_addrs[ifname]:
         if info.family == socket.AF_INET:
             return info.address
     raise ValueError("interface %r doesn't have an IPv4 address" % (ifname,))
@@ -324,7 +330,8 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         while not e.is_set():
             e.wait(10)
     if error[0]:
-        six.reraise(*error[0])
+        typ, exc, tb = error[0]
+        raise exc.with_traceback(tb)
     else:
         return result[0]
 
@@ -903,22 +910,43 @@ def tmpfile(extension=""):
 
 
 def ensure_bytes(s):
-    """ Turn string or bytes to bytes
+    """Attempt to turn `s` into bytes.
+
+    Parameters
+    ----------
+    s : Any
+        The object to be converted. Will correctly handled
+
+        * str
+        * bytes
+        * objects implementing the buffer protocol (memoryview, ndarray, etc.)
+
+    Returns
+    -------
+    b : bytes
+
+    Raises
+    ------
+    TypeError
+        When `s` cannot be converted
+
+    Examples
+    --------
 
     >>> ensure_bytes('123')
     b'123'
     >>> ensure_bytes(b'123')
     b'123'
     """
-    if isinstance(s, bytes):
-        return s
-    if isinstance(s, memoryview):
-        return s.tobytes()
-    if isinstance(s, bytearray):  # noqa: F821
-        return bytes(s)
     if hasattr(s, "encode"):
         return s.encode()
-    raise TypeError("Object %s is neither a bytes object nor has an encode method" % s)
+    else:
+        try:
+            return bytes(s)
+        except Exception as e:
+            raise TypeError(
+                "Object %s is neither a bytes object nor has an encode method" % s
+            ) from e
 
 
 def divide_n_among_bins(n, bins):
@@ -1055,135 +1083,6 @@ class itemgetter(object):
         return (itemgetter, (self.index,))
 
 
-byte_sizes = {
-    "kB": 10 ** 3,
-    "MB": 10 ** 6,
-    "GB": 10 ** 9,
-    "TB": 10 ** 12,
-    "PB": 10 ** 15,
-    "KiB": 2 ** 10,
-    "MiB": 2 ** 20,
-    "GiB": 2 ** 30,
-    "TiB": 2 ** 40,
-    "PiB": 2 ** 50,
-    "B": 1,
-    "": 1,
-}
-byte_sizes = {k.lower(): v for k, v in byte_sizes.items()}
-byte_sizes.update({k[0]: v for k, v in byte_sizes.items() if k and "i" not in k})
-byte_sizes.update({k[:-1]: v for k, v in byte_sizes.items() if k and "i" in k})
-
-
-def parse_bytes(s):
-    """ Parse byte string to numbers
-
-    >>> parse_bytes('100')
-    100
-    >>> parse_bytes('100 MB')
-    100000000
-    >>> parse_bytes('100M')
-    100000000
-    >>> parse_bytes('5kB')
-    5000
-    >>> parse_bytes('5.4 kB')
-    5400
-    >>> parse_bytes('1kiB')
-    1024
-    >>> parse_bytes('1e6')
-    1000000
-    >>> parse_bytes('1e6 kB')
-    1000000000
-    >>> parse_bytes('MB')
-    1000000
-    """
-    if isinstance(s, (int, float)):
-        return int(s)
-    s = s.replace(" ", "")
-    if not s[0].isdigit():
-        s = "1" + s
-
-    for i in range(len(s) - 1, -1, -1):
-        if not s[i].isalpha():
-            break
-    index = i + 1
-
-    prefix = s[:index]
-    suffix = s[index:]
-
-    n = float(prefix)
-
-    multiplier = byte_sizes[suffix.lower()]
-
-    result = n * multiplier
-    return int(result)
-
-
-timedelta_sizes = {
-    "s": 1,
-    "ms": 1e-3,
-    "us": 1e-6,
-    "ns": 1e-9,
-    "m": 60,
-    "h": 3600,
-    "d": 3600 * 24,
-}
-
-tds2 = {
-    "second": 1,
-    "minute": 60,
-    "hour": 60 * 60,
-    "day": 60 * 60 * 24,
-    "millisecond": 1e-3,
-    "microsecond": 1e-6,
-    "nanosecond": 1e-9,
-}
-tds2.update({k + "s": v for k, v in tds2.items()})
-timedelta_sizes.update(tds2)
-timedelta_sizes.update({k.upper(): v for k, v in timedelta_sizes.items()})
-
-
-def parse_timedelta(s, default="seconds"):
-    """ Parse timedelta string to number of seconds
-
-    Examples
-    --------
-    >>> parse_timedelta('3s')
-    3
-    >>> parse_timedelta('3.5 seconds')
-    3.5
-    >>> parse_timedelta('300ms')
-    0.3
-    >>> parse_timedelta(timedelta(seconds=3))  # also supports timedeltas
-    3.0
-    """
-    if s is None:
-        return None
-    if isinstance(s, timedelta):
-        return s.total_seconds()
-    if isinstance(s, Number):
-        s = str(s)
-    s = s.replace(" ", "")
-    if not s[0].isdigit():
-        s = "1" + s
-
-    for i in range(len(s) - 1, -1, -1):
-        if not s[i].isalpha():
-            break
-    index = i + 1
-
-    prefix = s[:index]
-    suffix = s[index:] or default
-
-    n = float(prefix)
-
-    multiplier = timedelta_sizes[suffix.lower()]
-
-    result = n * multiplier
-    if int(result) == result:
-        result = int(result)
-    return result
-
-
 def asciitable(columns, rows):
     """Formats an ascii table for given columns and rows.
 
@@ -1249,25 +1148,6 @@ def json_load_robust(fn, load=json.load):
         except (ValueError, KeyError):  # race with writing process
             pass
         sleep(0.1)
-
-
-def format_time(n):
-    """ format integers as time
-
-    >>> format_time(1)
-    '1.00 s'
-    >>> format_time(0.001234)
-    '1.23 ms'
-    >>> format_time(0.00012345)
-    '123.45 us'
-    >>> format_time(123.456)
-    '123.46 s'
-    """
-    if n >= 1:
-        return "%.2f s" % n
-    if n >= 1e-3:
-        return "%.2f ms" % (n * 1e3)
-    return "%.2f us" % (n * 1e6)
 
 
 class DequeHandler(logging.Handler):
@@ -1403,7 +1283,9 @@ def format_dashboard_link(host, port):
         scheme = "https"
     else:
         scheme = "http"
-    return template.format(scheme=scheme, host=host, port=port, **os.environ)
+    return template.format(
+        **toolz.merge(os.environ, dict(scheme=scheme, host=host, port=port))
+    )
 
 
 def is_coroutine_function(f):
@@ -1422,12 +1304,13 @@ class Logs(dict):
 
     def _repr_html_(self):
         summaries = [
-            "<details>\n<summary>{title}</summary>\n{log}\n</details>".format(
-                title=title, log=log._repr_html_()
-            )
-            for title, log in self.items()
+            "<details>\n"
+            "<summary style='display:list-item'>{title}</summary>\n"
+            "{log}\n"
+            "</details>".format(title=title, log=log._repr_html_())
+            for title, log in sorted(self.items())
         ]
-        return "\n\n".join(summaries)
+        return "\n".join(summaries)
 
 
 def cli_keywords(d: dict, cls=None):
@@ -1471,3 +1354,48 @@ def cli_keywords(d: dict, cls=None):
 
 def is_valid_xml(text):
     return xml.etree.ElementTree.fromstring(text) is not None
+
+
+try:
+    _offload_executor = ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="Dask-Offload"
+    )
+except TypeError:
+    _offload_executor = ThreadPoolExecutor(max_workers=1)
+
+weakref.finalize(_offload_executor, _offload_executor.shutdown)
+
+
+async def offload(fn, *args, **kwargs):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_offload_executor, fn, *args, **kwargs)
+
+
+def serialize_for_cli(data):
+    """ Serialize data into a string that can be passthrough cli
+
+    Parameters
+    ----------
+    data: json-serializable object
+        The data to serialize
+    Returns
+    -------
+    serialized_data: str
+        The serialized data as a string
+    """
+    return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
+
+
+def deserialize_for_cli(data):
+    """ De-serialize data into the original object
+
+    Parameters
+    ----------
+    data: str
+        String serialied by serialize_for_cli()
+    Returns
+    -------
+    deserialized_data: obj
+        The de-serialized data
+    """
+    return json.loads(base64.urlsafe_b64decode(data.encode()).decode())

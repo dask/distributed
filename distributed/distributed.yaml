@@ -23,6 +23,7 @@ distributed:
     pickle: True            # Is the scheduler allowed to deserialize arbitrary bytestrings
     preload: []
     preload-argv: []
+    default-task-durations: {}  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
     dashboard:
       status:
         task-stream-length: 1000
@@ -65,11 +66,18 @@ distributed:
   client:
     heartbeat: 5s  # time between client heartbeats
 
+  deploy:
+    lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job
+
   comm:
     compression: auto
     default-scheme: tcp
     socket-backlog: 2048
     recent-messages-log-length: 0  # number of messages to keep for debugging
+
+    zstd:
+      level: 3      # Compression level, between 1 and 22.
+      threads: 0    # Threads to use. 0 for single-threaded, -1 to infer from cpu count.
 
     timeouts:
       connect: 10s          # time before connecting fails
@@ -110,6 +118,7 @@ distributed:
       interval: 20ms  # time between event loop health checks
       limit: 3s       # time allowed before triggering a warning
 
+    max-error-length: 10000 # Maximum size traceback after error to return
     log-length: 10000  # default length of logs to keep in memory
     log-format: '%(name)s - %(levelname)s - %(message)s'
     pdb-on-err: False       # enter debug mode on scheduling error

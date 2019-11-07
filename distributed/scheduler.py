@@ -1,5 +1,6 @@
 import asyncio
-from collections import defaultdict, deque, OrderedDict, Mapping, Set
+from collections import defaultdict, deque, OrderedDict
+from collections.abc import Mapping, Set
 from datetime import timedelta
 from functools import partial
 import itertools
@@ -11,7 +12,6 @@ import operator
 import os
 import pickle
 import random
-import six
 import warnings
 import weakref
 
@@ -210,6 +210,8 @@ class WorkerState(object):
     __slots__ = (
         "actors",
         "address",
+        "bandwidth",
+        "extra",
         "has_what",
         "last_seen",
         "local_directory",
@@ -239,6 +241,7 @@ class WorkerState(object):
         local_directory=None,
         services=None,
         nanny=None,
+        extra=None,
     ):
         self.address = address
         self.pid = pid
@@ -255,12 +258,15 @@ class WorkerState(object):
         self.metrics = {}
         self.last_seen = 0
         self.time_delay = 0
+        self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
 
         self.actors = set()
         self.has_what = set()
         self.processing = {}
         self.resources = {}
         self.used_resources = {}
+
+        self.extra = extra or {}
 
     @property
     def host(self):
@@ -277,6 +283,7 @@ class WorkerState(object):
             local_directory=self.local_directory,
             services=self.services,
             nanny=self.nanny,
+            extra=self.extra,
         )
         ws.processing = {ts.key for ts in self.processing}
         return ws
@@ -305,6 +312,7 @@ class WorkerState(object):
             "services": self.services,
             "metrics": self.metrics,
             "nanny": self.nanny,
+            **self.extra,
         }
 
     @property
@@ -875,6 +883,8 @@ class Scheduler(ServerNode):
             self.idle_timeout = None
         self.time_started = time()
         self.bandwidth = parse_bytes(dask.config.get("distributed.scheduler.bandwidth"))
+        self.bandwidth_workers = defaultdict(float)
+        self.bandwidth_types = defaultdict(float)
 
         if not preload:
             preload = dask.config.get("distributed.scheduler.preload")
@@ -958,6 +968,10 @@ class Scheduler(ServerNode):
 
         # Prefix-keyed containers
         self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
+        for k, v in dask.config.get(
+            "distributed.scheduler.default-task-durations", {}
+        ).items():
+            self.task_duration[k] = parse_timedelta(v)
         self.unknown_durations = defaultdict(set)
 
         # Client state
@@ -1336,9 +1350,27 @@ class Scheduler(ServerNode):
         host_info = host_info or {}
 
         self.host_info[host]["last-seen"] = local_now
-        frac = 1 / 20 / len(self.workers)
+        frac = 1 / len(self.workers)
         try:
-            self.bandwidth = self.bandwidth * (1 - frac) + metrics["bandwidth"] * frac
+            self.bandwidth = (
+                self.bandwidth * (1 - frac) + metrics["bandwidth"]["total"] * frac
+            )
+            for other, (bw, count) in metrics["bandwidth"]["workers"].items():
+                if (address, other) not in self.bandwidth_workers:
+                    self.bandwidth_workers[address, other] = bw / count
+                else:
+                    alpha = (1 - frac) ** count
+                    self.bandwidth_workers[address, other] = self.bandwidth_workers[
+                        address, other
+                    ] * alpha + bw * (1 - alpha)
+            for typ, (bw, count) in metrics["bandwidth"]["types"].items():
+                if typ not in self.bandwidth_types:
+                    self.bandwidth_types[typ] = bw / count
+                else:
+                    alpha = (1 - frac) ** count
+                    self.bandwidth_types[typ] = self.bandwidth_types[
+                        typ
+                    ] * alpha + bw * (1 - alpha)
         except KeyError:
             pass
 
@@ -1385,6 +1417,7 @@ class Scheduler(ServerNode):
         services=None,
         local_directory=None,
         nanny=None,
+        extra=None,
     ):
         """ Add a new worker to the cluster """
         with log_errors():
@@ -1405,6 +1438,7 @@ class Scheduler(ServerNode):
                 local_directory=local_directory,
                 services=services,
                 nanny=nanny,
+                extra=extra,
             )
 
             if name in self.aliases:
@@ -1939,6 +1973,10 @@ class Scheduler(ServerNode):
             if not self.workers:
                 logger.info("Lost all workers")
 
+            for w in self.workers:
+                self.bandwidth_workers.pop((address, w), None)
+                self.bandwidth_workers.pop((w, address), None)
+
             def remove_worker_from_events():
                 # If the worker isn't registered anymore after the delay, remove from events
                 if address not in self.workers and address in self.events:
@@ -2369,9 +2407,7 @@ class Scheduler(ServerNode):
 
         ws = ts.processing_on
         if ws is None:
-            logger.debug(
-                "Received long-running signal from duplicate task. " "Ignoring."
-            )
+            logger.debug("Received long-running signal from duplicate task. Ignoring.")
             return
 
         if compute_duration:
@@ -2609,8 +2645,7 @@ class Scheduler(ServerNode):
                     "timeout.  Continuuing with restart process"
                 )
             finally:
-                for nanny in nannies:
-                    nanny.close_rpc()
+                await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
 
             await self.start()
 
@@ -3074,9 +3109,11 @@ class Scheduler(ServerNode):
         """
         with log_errors():
             if names is not None:
-                names = set(names)
+                if names:
+                    logger.info("Retire worker names %s", names)
+                names = set(map(str, names))
                 workers = [
-                    ws.address for ws in self.workers.values() if ws.name in names
+                    ws.address for ws in self.workers.values() if str(ws.name) in names
                 ]
             if workers is None:
                 while True:
@@ -3094,6 +3131,7 @@ class Scheduler(ServerNode):
             workers = {self.workers[w] for w in workers if w in self.workers}
             if not workers:
                 return []
+            logger.info("Retire workers %s", workers)
 
             # Keys orphaned by retiring those workers
             keys = set.union(*[w.has_what for w in workers])
@@ -3102,6 +3140,7 @@ class Scheduler(ServerNode):
             other_workers = set(self.workers.values()) - workers
             if keys:
                 if other_workers:
+                    logger.info("Moving %d keys to other workers", len(keys))
                     await self.replicate(
                         keys=keys,
                         workers=[ws.address for ws in other_workers],
@@ -4510,7 +4549,7 @@ class Scheduler(ServerNode):
             addr = self.aliases[addr]
         if isinstance(addr, tuple):
             addr = unparse_host_port(*addr)
-        if not isinstance(addr, six.string_types):
+        if not isinstance(addr, str):
             raise TypeError("addresses should be strings or tuples, got %r" % (addr,))
 
         if resolve:
@@ -4733,7 +4772,7 @@ class Scheduler(ServerNode):
         for ws in self.workers.values():
             if ws.last_seen < now - self.worker_ttl:
                 logger.warning(
-                    "Worker failed to heartbeat within %s seconds. " "Closing: %s",
+                    "Worker failed to heartbeat within %s seconds. Closing: %s",
                     self.worker_ttl,
                     ws,
                 )

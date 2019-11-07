@@ -196,9 +196,9 @@ def test_connection_args():
     basic_checks(ctx)
     if sys.version_info >= (3, 6):
         supported_ciphers = ctx.get_ciphers()
-        tls_12_ciphers = [c for c in supported_ciphers if c["protocol"] == "TLSv1.2"]
+        tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
         assert len(tls_12_ciphers) == 1
-        tls_13_ciphers = [c for c in supported_ciphers if c["protocol"] == "TLSv1.3"]
+        tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
         if len(tls_13_ciphers):
             assert len(tls_13_ciphers) == 3
 
@@ -249,9 +249,9 @@ def test_listen_args():
     basic_checks(ctx)
     if sys.version_info >= (3, 6):
         supported_ciphers = ctx.get_ciphers()
-        tls_12_ciphers = [c for c in supported_ciphers if c["protocol"] == "TLSv1.2"]
+        tls_12_ciphers = [c for c in supported_ciphers if "TLSv1.2" in c["description"]]
         assert len(tls_12_ciphers) == 1
-        tls_13_ciphers = [c for c in supported_ciphers if c["protocol"] == "TLSv1.3"]
+        tls_13_ciphers = [c for c in supported_ciphers if "TLSv1.3" in c["description"]]
         if len(tls_13_ciphers):
             assert len(tls_13_ciphers) == 3
 
@@ -379,3 +379,42 @@ def test_require_encryption():
                 handle_comm,
                 connection_args=sec2.get_listen_args("scheduler"),
             )
+
+
+def test_temporary_credentials():
+    sec = Security.temporary()
+    sec_repr = repr(sec)
+    fields = ["tls_ca_file"]
+    fields.extend(
+        "tls_%s_%s" % (role, kind)
+        for role in ["client", "scheduler", "worker"]
+        for kind in ["key", "cert"]
+    )
+    for f in fields:
+        val = getattr(sec, f)
+        assert "\n" in val
+        assert val not in sec_repr
+
+
+@gen_test()
+def test_tls_temporary_credentials_functional():
+    pytest.importorskip("cryptography")
+
+    @gen.coroutine
+    def handle_comm(comm):
+        peer_addr = comm.peer_address
+        assert peer_addr.startswith("tls://")
+        yield comm.write("hello")
+        yield comm.close()
+
+    sec = Security.temporary()
+
+    with listen(
+        "tls://", handle_comm, connection_args=sec.get_listen_args("scheduler")
+    ) as listener:
+        comm = yield connect(
+            listener.contact_address, connection_args=sec.get_connection_args("worker")
+        )
+        msg = yield comm.read()
+        assert msg == "hello"
+        comm.abort()

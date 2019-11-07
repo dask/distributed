@@ -2,7 +2,6 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 import importlib
 import logging
-import multiprocessing
 from numbers import Number
 from operator import add
 import os
@@ -30,6 +29,7 @@ from distributed import (
     get_worker,
     Reschedule,
     wait,
+    system,
 )
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc
@@ -62,7 +62,7 @@ from distributed.utils_test import (  # noqa: F401
 def test_worker_nthreads():
     w = Worker("127.0.0.1", 8019)
     try:
-        assert w.executor._max_workers == multiprocessing.cpu_count()
+        assert w.executor._max_workers == system.CPU_COUNT
     finally:
         shutil.rmtree(w.local_directory)
 
@@ -173,7 +173,7 @@ def dont_test_delete_data_with_missing_worker(c, a, b):
     assert not c.has_what[bad]
     assert not c.has_what[a.address]
 
-    cc.close_rpc()
+    yield cc.close_rpc()
 
 
 @gen_cluster(client=True)
@@ -356,6 +356,22 @@ def test_error_message():
     msg = error_message(MyException("Hello", "World!"))
     assert "Hello" in str(msg["exception"])
 
+    max_error_len = 100
+    with dask.config.set({"distributed.admin.max-error-length": max_error_len}):
+        msg = error_message(RuntimeError("-" * max_error_len))
+        assert len(msg["text"]) <= max_error_len
+        assert len(msg["text"]) < max_error_len * 2
+        msg = error_message(RuntimeError("-" * max_error_len * 20))
+        cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
+        assert len(cut_text) == max_error_len
+
+    max_error_len = 1000000
+    with dask.config.set({"distributed.admin.max-error-length": max_error_len}):
+        msg = error_message(RuntimeError("-" * max_error_len * 2))
+        cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
+        assert len(cut_text) == max_error_len
+        assert len(msg["text"]) > 10100  # default + 100
+
 
 @gen_cluster()
 def test_gather(s, a, b):
@@ -464,7 +480,7 @@ def test_Executor(c, s):
 
 
 @pytest.mark.skip(
-    reason="Other tests leak memory, so process-level checks" "trigger immediately"
+    reason="Other tests leak memory, so process-level checks trigger immediately"
 )
 @gen_cluster(
     client=True,
@@ -500,7 +516,7 @@ def test_memory_limit_auto():
     assert isinstance(a.memory_limit, Number)
     assert isinstance(b.memory_limit, Number)
 
-    if multiprocessing.cpu_count() > 1:
+    if system.CPU_COUNT > 1:
         assert a.memory_limit < b.memory_limit
 
     assert c.memory_limit == d.memory_limit
@@ -746,8 +762,11 @@ def test_worker_death_timeout(s):
         yield s.close()
         w = Worker(s.address, death_timeout=1)
 
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(gen.TimeoutError) as info:
         yield w
+
+    assert "Worker" in str(info.value)
+    assert "timed out" in str(info.value) or "failed to start" in str(info.value)
 
     assert w.status == "closed"
 
@@ -979,32 +998,27 @@ def test_worker_fds(s):
 
 
 @gen_cluster(nthreads=[])
-def test_service_hosts_match_worker(s):
+async def test_service_hosts_match_worker(s):
     pytest.importorskip("bokeh")
     from distributed.dashboard import BokehWorker
 
-    services = {("dashboard", ":0"): BokehWorker}
-
-    w = yield Worker(
+    async with Worker(
         s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://0.0.0.0"
-    )
-    sock = first(w.services["dashboard"].server._http._sockets.values())
-    assert sock.getsockname()[0] in ("::", "0.0.0.0")
-    yield w.close()
+    ) as w:
+        sock = first(w.services["dashboard"].server._http._sockets.values())
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
-    w = yield Worker(
+    async with Worker(
         s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://127.0.0.1"
-    )
-    sock = first(w.services["dashboard"].server._http._sockets.values())
-    assert sock.getsockname()[0] in ("::", "0.0.0.0")
-    yield w.close()
+    ) as w:
+        sock = first(w.services["dashboard"].server._http._sockets.values())
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
-    w = yield Worker(
+    async with Worker(
         s.address, services={("dashboard", 0): BokehWorker}, host="tcp://127.0.0.1"
-    )
-    sock = first(w.services["dashboard"].server._http._sockets.values())
-    assert sock.getsockname()[0] == "127.0.0.1"
-    yield w.close()
+    ) as w:
+        sock = first(w.services["dashboard"].server._http._sockets.values())
+        assert sock.getsockname()[0] == "127.0.0.1"
 
 
 @gen_cluster(nthreads=[])
@@ -1436,26 +1450,14 @@ def test_host_address(c, s):
     yield n.close()
 
 
-def test_resource_limit():
+def test_resource_limit(monkeypatch):
     assert parse_memory_limit("250MiB", 1, total_cores=1) == 1024 * 1024 * 250
 
-    # get current limit
-    resource = pytest.importorskip("resource")
-    try:
-        hard_limit = resource.getrlimit(resource.RLIMIT_RSS)[1]
-    except OSError:
-        pytest.skip("resource could not get the RSS limit")
-    memory_limit = psutil.virtual_memory().total
-    if hard_limit > memory_limit or hard_limit < 0:
-        hard_limit = memory_limit
+    new_limit = 1024 * 1024 * 200
+    import distributed.worker
 
-    # decrease memory limit by one byte
-    new_limit = hard_limit - 1
-    try:
-        resource.setrlimit(resource.RLIMIT_RSS, (new_limit, new_limit))
-        assert parse_memory_limit(hard_limit, 1, total_cores=1) == new_limit
-    except OSError:
-        pytest.skip("resource could not set the RSS limit")
+    monkeypatch.setattr(distributed.system, "MEMORY_LIMIT", new_limit)
+    assert parse_memory_limit("250MiB", 1, total_cores=1) == new_limit
 
 
 @pytest.mark.asyncio
@@ -1488,6 +1490,20 @@ async def test_interface_async(loop, Worker):
                 info = c.scheduler_info()
                 assert "tcp://127.0.0.1" in info["address"]
                 assert all("127.0.0.1" == d["host"] for d in info["workers"].values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("Worker", [Worker, Nanny])
+async def test_protocol_from_scheduler_address(Worker):
+    ucp = pytest.importorskip("ucp")
+
+    async with Scheduler(protocol="ucx") as s:
+        assert s.address.startswith("ucx://")
+        async with Worker(s.address) as w:
+            assert w.address.startswith("ucx://")
+            async with Client(s.address, asynchronous=True) as c:
+                info = c.scheduler_info()
+                assert info["address"].startswith("ucx://")
 
 
 @pytest.mark.asyncio
@@ -1536,3 +1552,37 @@ async def test_lifetime_stagger(c, s, a, b):
     assert a.lifetime != b.lifetime
     assert 8 <= a.lifetime <= 12
     assert 8 <= b.lifetime <= 12
+
+
+@gen_cluster()
+async def test_gpu_metrics(s, a, b):
+    pytest.importorskip("pynvml")
+    from distributed.diagnostics.nvml import count
+
+    assert "gpu" in a.metrics
+    assert len(s.workers[a.address].metrics["gpu"]["memory-used"]) == count
+
+    assert "gpu" in a.startup_information
+    assert len(s.workers[a.address].extra["gpu"]["name"]) == count
+
+
+@pytest.mark.asyncio
+async def test_bad_metrics(cleanup):
+    def bad_metric(w):
+        raise Exception("Hello")
+
+    async with Scheduler() as s:
+        async with Worker(s.address, metrics={"bad": bad_metric}) as w:
+            assert "bad" not in s.workers[w.address].metrics
+
+
+@pytest.mark.asyncio
+async def test_bad_startup(cleanup):
+    def bad_startup(w):
+        raise Exception("Hello")
+
+    async with Scheduler() as s:
+        try:
+            w = await Worker(s.address, startup_information={"bad": bad_startup})
+        except Exception:
+            pytest.fail("Startup exception was raised")

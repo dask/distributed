@@ -1,6 +1,6 @@
+import asyncio
 from functools import partial
 import gc
-import multiprocessing
 import subprocess
 import sys
 from time import sleep
@@ -15,6 +15,7 @@ import pytest
 from distributed import Client, Worker, Nanny, get_client
 from distributed.deploy.local import LocalCluster, nprocesses_nthreads
 from distributed.metrics import time
+from distributed.system import CPU_COUNT, MEMORY_LIMIT
 from distributed.utils_test import (  # noqa: F401
     clean,
     cleanup,
@@ -26,10 +27,10 @@ from distributed.utils_test import (  # noqa: F401
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
     captured_logger,
+    tls_only_security,
 )
 from distributed.utils_test import loop  # noqa: F401
 from distributed.utils import sync
-from distributed.worker import TOTAL_MEMORY
 
 from distributed.deploy.utils_test import ClusterTest
 
@@ -195,7 +196,7 @@ def test_Client_solo(loop):
 def test_duplicate_clients():
     pytest.importorskip("bokeh")
     c1 = yield Client(processes=False, silence_logs=False, dashboard_address=9876)
-    with pytest.warns(Exception) as info:
+    with pytest.warns(Warning) as info:
         c2 = yield Client(processes=False, silence_logs=False, dashboard_address=9876)
 
     assert "dashboard" in c1.cluster.scheduler.services
@@ -219,85 +220,144 @@ def test_Client_kwargs(loop):
     assert c.cluster.status == "closed"
 
 
+def test_Client_unused_kwargs_with_cluster(loop):
+    with LocalCluster() as cluster:
+        with pytest.raises(Exception) as argexcept:
+            c = Client(cluster, n_workers=2, dashboard_port=8000, silence_logs=None)
+        assert (
+            str(argexcept.value)
+            == "Unexpected keyword arguments: ['dashboard_port', 'n_workers', 'silence_logs']"
+        )
+
+
+def test_Client_unused_kwargs_with_address(loop):
+    with pytest.raises(Exception) as argexcept:
+        c = Client(
+            "127.0.0.1:8786", n_workers=2, dashboard_port=8000, silence_logs=None
+        )
+    assert (
+        str(argexcept.value)
+        == "Unexpected keyword arguments: ['dashboard_port', 'n_workers', 'silence_logs']"
+    )
+
+
 def test_Client_twice(loop):
     with Client(loop=loop, silence_logs=False, dashboard_address=None) as c:
         with Client(loop=loop, silence_logs=False, dashboard_address=None) as f:
             assert c.cluster.scheduler.port != f.cluster.scheduler.port
 
 
-@pytest.mark.skipif("sys.version_info[0] == 2", reason="fork issues")
-def test_defaults():
-    _nthreads = multiprocessing.cpu_count()
-
-    with LocalCluster(
-        scheduler_port=0, silence_logs=False, dashboard_address=None
+@pytest.mark.asyncio
+async def test_client_constructor_with_temporary_security(cleanup):
+    async with Client(
+        security=True, silence_logs=False, dashboard_address=None, asynchronous=True
     ) as c:
-        assert sum(w.nthreads for w in c.workers.values()) == _nthreads
+        assert c.cluster.scheduler_address.startswith("tls")
+        assert c.security == c.cluster.security
+
+
+@pytest.mark.asyncio
+async def test_defaults(cleanup):
+    async with LocalCluster(
+        scheduler_port=0, silence_logs=False, dashboard_address=None, asynchronous=True
+    ) as c:
+        assert sum(w.nthreads for w in c.workers.values()) == CPU_COUNT
         assert all(isinstance(w, Nanny) for w in c.workers.values())
 
-    with LocalCluster(
-        processes=False, scheduler_port=0, silence_logs=False, dashboard_address=None
+
+@pytest.mark.asyncio
+async def test_defaults_2(cleanup):
+    async with LocalCluster(
+        processes=False,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=None,
+        asynchronous=True,
     ) as c:
-        assert sum(w.nthreads for w in c.workers.values()) == _nthreads
+        assert sum(w.nthreads for w in c.workers.values()) == CPU_COUNT
         assert all(isinstance(w, Worker) for w in c.workers.values())
         assert len(c.workers) == 1
 
-    with LocalCluster(
-        n_workers=2, scheduler_port=0, silence_logs=False, dashboard_address=None
-    ) as c:
-        if _nthreads % 2 == 0:
-            expected_total_threads = max(2, _nthreads)
-        else:
-            # n_workers not a divisor of _nthreads => threads are overcommitted
-            expected_total_threads = max(2, _nthreads + 1)
-        assert sum(w.nthreads for w in c.workers.values()) == expected_total_threads
 
-    with LocalCluster(
-        threads_per_worker=_nthreads * 2,
+@pytest.mark.asyncio
+async def test_defaults_3(cleanup):
+    async with LocalCluster(
+        n_workers=2,
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=None,
+        asynchronous=True,
+    ) as c:
+        if CPU_COUNT % 2 == 0:
+            expected_total_threads = max(2, CPU_COUNT)
+        else:
+            # n_workers not a divisor of _nthreads => threads are overcommitted
+            expected_total_threads = max(2, CPU_COUNT + 1)
+        assert sum(w.nthreads for w in c.workers.values()) == expected_total_threads
+
+
+@pytest.mark.asyncio
+async def test_defaults_4(cleanup):
+    async with LocalCluster(
+        threads_per_worker=CPU_COUNT * 2,
+        scheduler_port=0,
+        silence_logs=False,
+        dashboard_address=None,
+        asynchronous=True,
     ) as c:
         assert len(c.workers) == 1
 
-    with LocalCluster(
-        n_workers=_nthreads * 2,
+
+@pytest.mark.asyncio
+async def test_defaults_5(cleanup):
+    async with LocalCluster(
+        n_workers=CPU_COUNT * 2,
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=None,
+        asynchronous=True,
     ) as c:
         assert all(w.nthreads == 1 for w in c.workers.values())
-    with LocalCluster(
+
+
+@pytest.mark.asyncio
+async def test_defaults_6(cleanup):
+    async with LocalCluster(
         threads_per_worker=2,
         n_workers=3,
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=None,
+        asynchronous=True,
     ) as c:
         assert len(c.workers) == 3
         assert all(w.nthreads == 2 for w in c.workers.values())
 
 
-def test_worker_params():
-    with LocalCluster(
+@pytest.mark.asyncio
+async def test_worker_params(cleanup):
+    async with LocalCluster(
         processes=False,
         n_workers=2,
         scheduler_port=0,
         silence_logs=False,
         dashboard_address=None,
         memory_limit=500,
+        asynchronous=True,
     ) as c:
         assert [w.memory_limit for w in c.workers.values()] == [500] * 2
 
 
-def test_memory_limit_none():
-    with LocalCluster(
+@pytest.mark.asyncio
+async def test_memory_limit_none(cleanup):
+    async with LocalCluster(
         n_workers=2,
         scheduler_port=0,
         silence_logs=False,
         processes=False,
         dashboard_address=None,
         memory_limit=None,
+        asynchronous=True,
     ) as c:
         w = c.workers[0]
         assert type(w.data) is dict
@@ -364,34 +424,29 @@ def test_blocks_until_full(loop):
         assert len(c.nthreads()) > 0
 
 
-@gen_test()
-def test_scale_up_and_down():
-    loop = IOLoop.current()
-    cluster = yield LocalCluster(
+@pytest.mark.asyncio
+async def test_scale_up_and_down():
+    async with LocalCluster(
         0,
         scheduler_port=0,
         processes=False,
         silence_logs=False,
         dashboard_address=None,
-        loop=loop,
         asynchronous=True,
-    )
-    c = yield Client(cluster, asynchronous=True)
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as c:
 
-    assert not cluster.workers
+            assert not cluster.workers
 
-    cluster.scale(2)
-    yield cluster
-    assert len(cluster.workers) == 2
-    assert len(cluster.scheduler.nthreads) == 2
+            cluster.scale(2)
+            await cluster
+            assert len(cluster.workers) == 2
+            assert len(cluster.scheduler.nthreads) == 2
 
-    cluster.scale(1)
-    yield cluster
+            cluster.scale(1)
+            await cluster
 
-    assert len(cluster.workers) == 1
-
-    yield c.close()
-    yield cluster.close()
+            assert len(cluster.workers) == 1
 
 
 def test_silent_startup():
@@ -401,7 +456,7 @@ def test_silent_startup():
 
         if __name__ == "__main__":
             with LocalCluster(1, dashboard_address=None, scheduler_port=0):
-                sleep(1.5)
+                sleep(.1)
         """
 
     out = subprocess.check_output(
@@ -445,7 +500,7 @@ def test_memory(loop, n_workers):
         dashboard_address=None,
         loop=loop,
     ) as cluster:
-        assert sum(w.memory_limit for w in cluster.workers.values()) <= TOTAL_MEMORY
+        assert sum(w.memory_limit for w in cluster.workers.values()) <= MEMORY_LIMIT
 
 
 @pytest.mark.parametrize("n_workers", [None, 3])
@@ -461,7 +516,7 @@ def test_memory_nanny(loop, n_workers):
         with Client(cluster.scheduler_address, loop=loop) as c:
             info = c.scheduler_info()
             assert (
-                sum(w["memory_limit"] for w in info["workers"].values()) <= TOTAL_MEMORY
+                sum(w["memory_limit"] for w in info["workers"].values()) <= MEMORY_LIMIT
             )
 
 
@@ -528,6 +583,31 @@ def test_ipywidgets(loop):
         cluster._ipython_display_()
         box = cluster._cached_widget
         assert isinstance(box, ipywidgets.Widget)
+
+
+def test_no_ipywidgets(loop, monkeypatch):
+    from unittest.mock import MagicMock
+
+    mock_display = MagicMock()
+
+    monkeypatch.setitem(sys.modules, "ipywidgets", None)
+    monkeypatch.setitem(sys.modules, "IPython.display", mock_display)
+
+    with LocalCluster(
+        n_workers=0,
+        scheduler_port=0,
+        silence_logs=False,
+        loop=loop,
+        dashboard_address=False,
+        processes=False,
+    ) as cluster:
+        cluster._ipython_display_()
+        args, kwargs = mock_display.display.call_args
+        res = args[0]
+        assert kwargs == {"raw": True}
+        assert isinstance(res, dict)
+        assert "text/plain" in res
+        assert "text/html" in res
 
 
 def test_scale(loop):
@@ -625,10 +705,12 @@ def test_adapt_then_manual(loop):
                 assert time() < start + 5
 
 
-def test_local_tls(loop):
-    from distributed.utils_test import tls_only_security
-
-    security = tls_only_security()
+@pytest.mark.parametrize("temporary", [True, False])
+def test_local_tls(loop, temporary):
+    if temporary:
+        security = True
+    else:
+        security = tls_only_security()
     with LocalCluster(
         n_workers=0,
         scheduler_port=8786,
@@ -642,7 +724,7 @@ def test_local_tls(loop):
             loop,
             assert_can_connect_from_everywhere_4,
             c.scheduler.port,
-            connection_args=security.get_connection_args("client"),
+            connection_args=c.security.get_connection_args("client"),
             protocol="tls",
             timeout=3,
         )
@@ -652,7 +734,7 @@ def test_local_tls(loop):
             loop,
             assert_cannot_connect,
             addr="tcp://127.0.0.1:%d" % c.scheduler.port,
-            connection_args=security.get_connection_args("client"),
+            connection_args=c.security.get_connection_args("client"),
             exception_class=RuntimeError,
         )
 
@@ -861,3 +943,78 @@ def test_client_cluster_synchronous(loop):
         with Client(loop=loop, processes=False) as c:
             assert not c.asynchronous
             assert not c.cluster.asynchronous
+
+
+@pytest.mark.asyncio
+async def test_scale_memory_cores(cleanup):
+    async with LocalCluster(
+        n_workers=0,
+        processes=False,
+        threads_per_worker=2,
+        memory_limit="2GB",
+        asynchronous=True,
+    ) as cluster:
+        cluster.scale(cores=4)
+        assert len(cluster.worker_spec) == 2
+
+        cluster.scale(memory="6GB")
+        assert len(cluster.worker_spec) == 3
+
+        cluster.scale(cores=1)
+        assert len(cluster.worker_spec) == 1
+
+        cluster.scale(memory="7GB")
+        assert len(cluster.worker_spec) == 4
+
+
+@pytest.mark.asyncio
+async def test_repr(cleanup):
+    async with LocalCluster(
+        n_workers=2,
+        processes=False,
+        threads_per_worker=2,
+        memory_limit="2GB",
+        asynchronous=True,
+    ) as cluster:
+        text = repr(cluster)
+        assert "workers=2" in text
+        assert cluster.scheduler_address in text
+        assert "cores=4" in text or "threads=4" in text
+        assert "GB" in text and "4" in text
+
+    async with LocalCluster(
+        n_workers=2, processes=False, memory_limit=None, asynchronous=True
+    ) as cluster:
+        assert "memory" not in repr(cluster)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("temporary", [True, False])
+async def test_capture_security(cleanup, temporary):
+    if temporary:
+        security = True
+    else:
+        security = tls_only_security()
+    async with LocalCluster(
+        n_workers=0,
+        silence_logs=False,
+        security=security,
+        asynchronous=True,
+        dashboard_address=False,
+        host="tls://0.0.0.0",
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            assert client.security == cluster.security
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.version_info < (3, 7), reason="asyncio.all_tasks not implemented"
+)
+async def test_no_danglng_asyncio_tasks(cleanup):
+    start = asyncio.all_tasks()
+    async with LocalCluster(asynchronous=True, processes=False):
+        await asyncio.sleep(0.01)
+
+    tasks = asyncio.all_tasks()
+    assert tasks == start

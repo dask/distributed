@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 from click.testing import CliRunner
 
@@ -9,11 +10,11 @@ import os
 from time import sleep
 
 import distributed.cli.dask_worker
-from distributed import Client
+from distributed import Client, Scheduler
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
 from distributed.utils_test import popen, terminate_process, wait_for_port
-from distributed.utils_test import loop  # noqa: F401
+from distributed.utils_test import loop, cleanup  # noqa: F401
 
 
 def test_nanny_worker_ports(loop):
@@ -180,7 +181,7 @@ def test_nprocs_requires_nanny(loop):
 def test_nprocs_expands_name(loop):
     with popen(["dask-scheduler", "--no-dashboard"]) as sched:
         with popen(
-            ["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "foo"]
+            ["dask-worker", "127.0.0.1:8786", "--nprocs", "2", "--name", "0"]
         ) as worker:
             with popen(["dask-worker", "127.0.0.1:8786", "--nprocs", "2"]) as worker:
                 with Client("tcp://127.0.0.1:8786", loop=loop) as c:
@@ -191,7 +192,7 @@ def test_nprocs_expands_name(loop):
 
                     info = c.scheduler_info()
                     names = [d["name"] for d in info["workers"].values()]
-                    foos = [n for n in names if n.startswith("foo")]
+                    foos = [n for n in names if n.startswith("0-")]
                     assert len(foos) == 2
                     assert len(set(names)) == 4
 
@@ -310,7 +311,6 @@ def test_worker_timeout(no_nanny):
         args.append("--no-nanny")
     result = runner.invoke(distributed.cli.dask_worker.main, args)
     assert result.exit_code != 0
-    assert str(result.exception).startswith("Timed out")
 
 
 def test_bokeh_deprecation():
@@ -330,3 +330,13 @@ def test_bokeh_deprecation():
         except ValueError:
             # didn't pass scheduler
             pass
+
+
+@pytest.mark.asyncio
+async def test_integer_names(cleanup):
+    async with Scheduler(port=0) as s:
+        with popen(["dask-worker", s.address, "--name", "123"]) as worker:
+            while not s.workers:
+                await asyncio.sleep(0.01)
+            [ws] = s.workers.values()
+            assert ws.name == 123

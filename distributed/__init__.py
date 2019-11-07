@@ -2,8 +2,9 @@ from . import config
 from dask.config import config
 from .actor import Actor, ActorFuture
 from .core import connect, rpc
-from .deploy import LocalCluster, Adaptive, SpecCluster
-from .diagnostics import progress
+from .deploy import LocalCluster, Adaptive, SpecCluster, SSHCluster
+from .diagnostics.progressbar import progress
+from .diagnostics.plugin import WorkerPlugin, SchedulerPlugin
 from .client import (
     Client,
     Executor,

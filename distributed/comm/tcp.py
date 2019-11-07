@@ -18,6 +18,7 @@ from tornado.iostream import StreamClosedError, IOStream
 from tornado.tcpclient import TCPClient
 from tornado.tcpserver import TCPServer
 
+from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
 from ..utils import (
     ensure_bytes,
@@ -38,16 +39,7 @@ from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concre
 logger = logging.getLogger(__name__)
 
 
-def get_total_physical_memory():
-    try:
-        import psutil
-
-        return psutil.virtual_memory().total / 2
-    except ImportError:
-        return 2e9
-
-
-MAX_BUFFER_SIZE = get_total_physical_memory()
+MAX_BUFFER_SIZE = MEMORY_LIMIT / 2
 
 
 def set_tcp_timeout(stream):
@@ -221,14 +213,13 @@ class TCP(Comm):
                 raise CommClosedError("aborted stream on truncated data")
             return msg
 
-    @gen.coroutine
-    def write(self, msg, serializers=None, on_error="message"):
+    async def write(self, msg, serializers=None, on_error="message"):
         stream = self.stream
         bytes_since_last_yield = 0
         if stream is None:
             raise CommClosedError
 
-        frames = yield to_frames(
+        frames = await to_frames(
             msg,
             serializers=serializers,
             on_error=on_error,
@@ -255,7 +246,7 @@ class TCP(Comm):
                     future = stream.write(frame)
                     bytes_since_last_yield += nbytes(frame)
                     if bytes_since_last_yield > 32e6:
-                        yield future
+                        await future
                         bytes_since_last_yield = 0
         except StreamClosedError as e:
             stream = None
@@ -268,13 +259,17 @@ class TCP(Comm):
 
         return sum(map(nbytes, frames))
 
-    async def close(self):
+    @gen.coroutine
+    def close(self):
+        # We use gen.coroutine here rather than async def to avoid errors like
+        # Task was destroyed but it is pending!
+        # Triggered by distributed.deploy.tests.test_local::test_silent_startup
         stream, self.stream = self.stream, None
         if stream is not None and not stream.closed():
             try:
                 # Flush the stream's write buffer by waiting for a last write.
                 if stream.writing():
-                    await stream.write(b"")
+                    yield stream.write(b"")
                 stream.socket.shutdown(socket.SHUT_RDWR)
             except EnvironmentError:
                 pass

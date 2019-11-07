@@ -1,5 +1,3 @@
-import six
-
 import dask
 
 from . import registry
@@ -18,7 +16,7 @@ def parse_address(addr, strict=False):
 
     If strict is set to true the address must have a scheme.
     """
-    if not isinstance(addr, six.string_types):
+    if not isinstance(addr, str):
         raise TypeError("expected str, got %r" % addr.__class__.__name__)
     scheme, sep, loc = addr.rpartition("://")
     if strict and not sep:
@@ -123,7 +121,7 @@ def get_address_host_port(addr, strict=False):
         return backend.get_address_host_port(loc)
     except NotImplementedError:
         raise ValueError(
-            "don't know how to extract host and port " "for address %r" % (addr,)
+            "don't know how to extract host and port for address %r" % (addr,)
         )
 
 

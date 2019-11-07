@@ -9,6 +9,7 @@ import tempfile
 import warnings
 
 import click
+import dask
 
 from tornado.ioloop import IOLoop
 
@@ -16,6 +17,7 @@ from distributed import Scheduler
 from distributed.preloading import validate_preload_argv
 from distributed.security import Security
 from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed.utils import deserialize_for_cli
 from distributed.proctitle import (
     enable_proctitle_on_children,
     enable_proctitle_on_current,
@@ -174,6 +176,11 @@ def main(
         }
     )
 
+    if "DASK_INTERNAL_INHERIT_CONFIG" in os.environ:
+        config = deserialize_for_cli(os.environ["DASK_INTERNAL_INHERIT_CONFIG"])
+        # Update the global config given priority to the existing global config
+        dask.config.update(dask.config.global_config, config, priority="old")
+
     if not host and (tls_ca_file or tls_cert or tls_key):
         host = "tls://"
 
@@ -215,7 +222,7 @@ def main(
         port=port,
         dashboard_address=dashboard_address if dashboard else None,
         service_kwargs={"dashboard": {"prefix": dashboard_prefix}},
-        **kwargs,
+        **kwargs
     )
     logger.info("Local Directory: %26s", local_directory)
     logger.info("-" * 47)
