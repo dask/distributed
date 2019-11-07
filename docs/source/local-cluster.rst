@@ -7,7 +7,7 @@ For convenience you can start a local cluster from your Python session.
 
    >>> from distributed import Client, LocalCluster
    >>> cluster = LocalCluster()
-   LocalCluster("127.0.0.1:8786", workers=8, ncores=8)
+   LocalCluster("127.0.0.1:8786", workers=8, nthreads=8)
    >>> client = Client(cluster)
    <Client: scheduler=127.0.0.1:8786 processes=8 cores=8>
 
@@ -27,6 +27,18 @@ an ``Client`` with no arguments:
    >>> client = Client()
    >>> client
    <Client: scheduler=127.0.0.1:8786 processes=8 cores=8>
+
+.. note::
+
+   Within a Python script you need to start a local cluster in the
+   ``if __name__ == '__main__'`` block:
+
+   .. code-block:: python
+
+      if __name__ == '__main__':
+          cluster = LocalCluster()
+          client = Client(cluster)
+          # Your code follows here
 
 API
 ---

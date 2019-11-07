@@ -1,5 +1,4 @@
-from __future__ import print_function, division, absolute_import
-
+import asyncio
 from collections import defaultdict
 import logging
 import uuid
@@ -37,38 +36,37 @@ class VariableExtension(object):
         self.waiting_conditions = defaultdict(tornado.locks.Condition)
         self.started = tornado.locks.Condition()
 
-        self.scheduler.handlers.update({'variable_set': self.set,
-                                        'variable_get': self.get})
+        self.scheduler.handlers.update(
+            {"variable_set": self.set, "variable_get": self.get}
+        )
 
-        self.scheduler.stream_handlers['variable-future-release'] = self.future_release
-        self.scheduler.stream_handlers['variable_delete'] = self.delete
+        self.scheduler.stream_handlers["variable-future-release"] = self.future_release
+        self.scheduler.stream_handlers["variable_delete"] = self.delete
 
-        self.scheduler.extensions['variables'] = self
+        self.scheduler.extensions["variables"] = self
 
     def set(self, stream=None, name=None, key=None, data=None, client=None):
         if key is not None:
-            record = {'type': 'Future', 'value': key}
-            self.scheduler.client_desires_keys(keys=[key], client='variable-%s' % name)
+            record = {"type": "Future", "value": key}
+            self.scheduler.client_desires_keys(keys=[key], client="variable-%s" % name)
         else:
-            record = {'type': 'msgpack', 'value': data}
+            record = {"type": "msgpack", "value": data}
         try:
             old = self.variables[name]
         except KeyError:
             pass
         else:
-            if old['type'] == 'Future' and old['value'] != key:
-                self.release(old['value'], name)
+            if old["type"] == "Future" and old["value"] != key:
+                asyncio.ensure_future(self.release(old["value"], name))
         if name not in self.variables:
             self.started.notify_all()
         self.variables[name] = record
 
-    @gen.coroutine
-    def release(self, key, name):
+    async def release(self, key, name):
         while self.waiting[key, name]:
-            yield self.waiting_conditions[name].wait()
+            await self.waiting_conditions[name].wait()
 
-        self.scheduler.client_releases_keys(keys=[key],
-                                            client='variable-%s' % name)
+        self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
         del self.waiting[key, name]
 
     def future_release(self, name=None, key=None, token=None, client=None):
@@ -76,8 +74,7 @@ class VariableExtension(object):
         if not self.waiting[key, name]:
             self.waiting_conditions[name].notify_all()
 
-    @gen.coroutine
-    def get(self, stream=None, name=None, client=None, timeout=None):
+    async def get(self, stream=None, name=None, client=None, timeout=None):
         start = time()
         while name not in self.variables:
             if timeout is not None:
@@ -86,31 +83,30 @@ class VariableExtension(object):
                 left = None
             if left and left < 0:
                 raise gen.TimeoutError()
-            yield self.started.wait(timeout=left)
+            await self.started.wait(timeout=left)
         record = self.variables[name]
-        if record['type'] == 'Future':
-            key = record['value']
+        if record["type"] == "Future":
+            key = record["value"]
             token = uuid.uuid4().hex
             ts = self.scheduler.tasks.get(key)
-            state = ts.state if ts is not None else 'lost'
-            msg = {'token': token, 'state': state}
-            if state == 'erred':
-                msg['exception'] = ts.exception_blame.exception
-                msg['traceback'] = ts.exception_blame.traceback
+            state = ts.state if ts is not None else "lost"
+            msg = {"token": token, "state": state}
+            if state == "erred":
+                msg["exception"] = ts.exception_blame.exception
+                msg["traceback"] = ts.exception_blame.traceback
             record = merge(record, msg)
             self.waiting[key, name].add(token)
-        raise gen.Return(record)
+        return record
 
-    @gen.coroutine
-    def delete(self, stream=None, name=None, client=None):
+    async def delete(self, stream=None, name=None, client=None):
         with log_errors():
             try:
                 old = self.variables[name]
             except KeyError:
                 pass
             else:
-                if old['type'] == 'Future':
-                    yield self.release(old['value'], name)
+                if old["type"] == "Future":
+                    await self.release(old["value"], name)
             del self.waiting_conditions[name]
             del self.variables[name]
 
@@ -149,16 +145,15 @@ class Variable(object):
 
     def __init__(self, name=None, client=None, maxsize=0):
         self.client = client or _get_global_client()
-        self.name = name or 'variable-' + uuid.uuid4().hex
+        self.name = name or "variable-" + uuid.uuid4().hex
 
-    @gen.coroutine
-    def _set(self, value):
+    async def _set(self, value):
         if isinstance(value, Future):
-            yield self.client.scheduler.variable_set(key=tokey(value.key),
-                                                     name=self.name)
+            await self.client.scheduler.variable_set(
+                key=tokey(value.key), name=self.name
+            )
         else:
-            yield self.client.scheduler.variable_set(data=value,
-                                                     name=self.name)
+            await self.client.scheduler.variable_set(data=value, name=self.name)
 
     def set(self, value, **kwargs):
         """ Set the value of this variable
@@ -170,22 +165,25 @@ class Variable(object):
         """
         return self.client.sync(self._set, value, **kwargs)
 
-    @gen.coroutine
-    def _get(self, timeout=None):
-        d = yield self.client.scheduler.variable_get(timeout=timeout,
-                                                     name=self.name,
-                                                     client=self.client.id)
-        if d['type'] == 'Future':
-            value = Future(d['value'], self.client, inform=True, state=d['state'])
-            if d['state'] == 'erred':
-                value._state.set_error(d['exception'], d['traceback'])
-            self.client._send_to_scheduler({'op': 'variable-future-release',
-                                            'name': self.name,
-                                            'key': d['value'],
-                                            'token': d['token']})
+    async def _get(self, timeout=None):
+        d = await self.client.scheduler.variable_get(
+            timeout=timeout, name=self.name, client=self.client.id
+        )
+        if d["type"] == "Future":
+            value = Future(d["value"], self.client, inform=True, state=d["state"])
+            if d["state"] == "erred":
+                value._state.set_error(d["exception"], d["traceback"])
+            self.client._send_to_scheduler(
+                {
+                    "op": "variable-future-release",
+                    "name": self.name,
+                    "key": d["value"],
+                    "token": d["token"],
+                }
+            )
         else:
-            value = d['value']
-        raise gen.Return(value)
+            value = d["value"]
+        return value
 
     def get(self, timeout=None, **kwargs):
         """ Get the value of this variable """
@@ -196,9 +194,8 @@ class Variable(object):
 
         Caution, this affects all clients currently pointing to this variable.
         """
-        if self.client.status == 'running':  # TODO: can leave zombie futures
-            self.client._send_to_scheduler({'op': 'variable_delete',
-                                            'name': self.name})
+        if self.client.status == "running":  # TODO: can leave zombie futures
+            self.client._send_to_scheduler({"op": "variable_delete", "name": self.name})
 
     def __getstate__(self):
         return (self.name, self.client.scheduler.address)
