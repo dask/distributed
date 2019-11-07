@@ -84,7 +84,9 @@ plot on the ``/status`` page.
 
 Users can also query this data directly using the :doc:`Client.profile <api>`
 function.  This will deliver the raw data structure used to produce these
-plots.
+plots.  They can also pass a filename to save the plot as an HTML file
+directly.  Note that this file will have to be served from a webserver like
+``python -m http.server`` to be visible.
 
 The 10ms and 1s parameters can be controlled by the ``profile-interval`` and
 ``profile-cycle-interval`` entries in the config.yaml file.
@@ -103,7 +105,7 @@ attributes including
 4.  Keys moved
 5.  Peer
 
-These are made available to users through the ``/main`` page of the Worker's
+These are made available to users through the ``/status`` page of the Worker's
 diagnostic dashboard.  You can capture their state explicitly by running a
 command on the workers:
 

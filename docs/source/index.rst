@@ -28,10 +28,10 @@ In particular it meets the following needs:
     Python standard library.  Compatible with `dask`_ API for parallel
     algorithms
 *   **Easy Setup:** As a Pure Python package distributed is ``pip`` installable
-    and easy to :doc:`set up <setup>` on your own cluster.
+    and easy to `set up <https://docs.dask.org/en/latest/setup.html>`_ on your own cluster.
 
 .. _`concurrent.futures`: https://www.python.org/dev/peps/pep-3148/
-.. _`dask`: http://dask.pydata.org/en/latest/
+.. _`dask`: https://dask.org
 
 Architecture
 ------------
@@ -65,8 +65,8 @@ and Pandas, while the simple ``client.submit`` interface provides users with
 custom control when they want to break out of canned "big data" abstractions
 and submit fully custom workloads.
 
-.. _dask.array: http://dask.pydata.org/en/latest/array.html
-.. _dask.dataframe: http://dask.pydata.org/en/latest/dataframe.html
+.. _dask.array: https://dask.docs.org/en/latest/array.html
+.. _dask.dataframe: https://dask.docs.org/en/latest/dataframe.html
 
 Contents
 --------
@@ -77,9 +77,10 @@ Contents
 
    install
    quickstart
-   setup
+   Setup <https://docs.dask.org/en/latest/setup.html>
    client
    api
+   examples-overview
    faq
 
 .. toctree::
@@ -104,12 +105,14 @@ Contents
    :maxdepth: 1
    :caption: Additional Features
 
+   actors
    adaptive
    asynchronous
    configuration
    local-cluster
    ipython
-   joblib
+   Joblib Integration <https://ml.dask.org/joblib.html>
+   prometheus
    publish
    queues
    resources

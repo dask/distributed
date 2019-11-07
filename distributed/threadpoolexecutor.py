@@ -20,11 +20,12 @@ which is included as a comment at the end of this file:
 
    Copyright 2001-2016 Python Software Foundation; All Rights Reserved
 """
-from __future__ import print_function, division, absolute_import
-
 from . import _concurrent_futures_thread as thread
+import os
 import logging
+import queue
 import threading
+import itertools
 
 from .metrics import time
 
@@ -46,7 +47,10 @@ def _worker(executor, work_queue):
                     executor._threads.remove(threading.current_thread())
                     rejoin_event.set()
                     break
-            task = work_queue.get()
+            try:
+                task = work_queue.get(timeout=1)
+            except queue.Empty:
+                continue
             if task is not None:  # sentinel
                 task.run()
                 del task
@@ -55,23 +59,32 @@ def _worker(executor, work_queue):
                 return
         del executor
     except BaseException:
-        logger.critical('Exception in worker', exc_info=True)
+        logger.critical("Exception in worker", exc_info=True)
     finally:
         del thread_state.proceed
         del thread_state.executor
 
 
 class ThreadPoolExecutor(thread.ThreadPoolExecutor):
+    # Used to assign unique thread names
+    _counter = itertools.count()
+
     def __init__(self, *args, **kwargs):
         super(ThreadPoolExecutor, self).__init__(*args, **kwargs)
         self._rejoin_list = []
         self._rejoin_lock = threading.Lock()
+        self._thread_name_prefix = kwargs.get(
+            "thread_name_prefix", "DaskThreadPoolExecutor"
+        )
 
     def _adjust_thread_count(self):
         if len(self._threads) < self._max_workers:
-            t = threading.Thread(target=_worker,
-                                 name="ThreadPool worker %d" % len(self._threads,),
-                                 args=(self, self._work_queue))
+            t = threading.Thread(
+                target=_worker,
+                name=self._thread_name_prefix
+                + "-%d-%d" % (os.getpid(), next(self._counter)),
+                args=(self, self._work_queue),
+            )
             t.daemon = True
             self._threads.add(t)
             t.start()

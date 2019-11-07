@@ -3,7 +3,7 @@
 API
 ===
 
-.. currentmodule:: distributed.client
+.. currentmodule:: distributed
 
 **Client**
 
@@ -20,16 +20,18 @@ API
    Client.get_metadata
    Client.get_scheduler_logs
    Client.get_worker_logs
+   Client.get_task_stream
    Client.has_what
    Client.list_datasets
    Client.map
-   Client.ncores
+   Client.nthreads
    Client.persist
    Client.publish_dataset
    Client.profile
    Client.rebalance
    Client.replicate
    Client.restart
+   Client.retry
    Client.run
    Client.run_on_scheduler
    Client.scatter
@@ -59,7 +61,7 @@ API
    ReplayExceptionClient.get_futures_error
    ReplayExceptionClient.recreate_error_locally
 
-.. currentmodule:: distributed.client
+.. currentmodule:: distributed
 
 
 **Future**
@@ -72,6 +74,7 @@ API
    Future.done
    Future.exception
    Future.result
+   Future.retry
    Future.traceback
 
 **Client Coordination**
@@ -92,6 +95,7 @@ API
    wait
    fire_and_forget
    futures_of
+   get_task_stream
 
 
 Asynchronous methods
@@ -129,7 +133,7 @@ The asynchronous variants must be run within a Tornado coroutine.  See the
 Client
 ------
 
-.. currentmodule:: distributed.client
+.. currentmodule:: distributed
 
 .. autoclass:: Client
    :members:
@@ -148,7 +152,9 @@ Future
 Other
 -----
 
-.. autofunction:: as_completed
+.. autoclass:: as_completed
+   :members:
+
 .. autofunction:: distributed.diagnostics.progress
 .. autofunction:: wait
 .. autofunction:: fire_and_forget
@@ -161,20 +167,14 @@ Other
 .. autofunction:: distributed.get_client
 .. autofunction:: distributed.secede
 .. autofunction:: distributed.rejoin
+.. autoclass:: distributed.Reschedule
+.. autoclass:: get_task_stream
 
 .. autoclass:: Lock
    :members:
 .. autoclass:: Queue
    :members:
 .. autoclass:: Variable
-   :members:
-
-
-Asyncio Client
---------------
-
-.. currentmodule:: distributed.asyncio
-.. autoclass:: AioClient
    :members:
 
 

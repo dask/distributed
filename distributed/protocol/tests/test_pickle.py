@@ -1,20 +1,21 @@
-from distributed.protocol.pickle import dumps, loads
-
-import pytest
+from functools import partial
+import gc
+from operator import add
 import weakref
 
-from operator import add
-from functools import partial
+import pytest
+
+from distributed.protocol.pickle import dumps, loads
 
 
 def test_pickle_data():
-    data = [1, b'123', '123', [123], {}, set()]
+    data = [1, b"123", "123", [123], {}, set()]
     for d in data:
         assert loads(dumps(d)) == d
 
 
 def test_pickle_numpy():
-    np = pytest.importorskip('numpy')
+    np = pytest.importorskip("numpy")
     x = np.ones(5)
     assert (loads(dumps(x)) == x).all()
 
@@ -28,6 +29,7 @@ def test_pickle_functions():
 
         def f(x):  # closure
             return x + value
+
         return f
 
     def funcs():
@@ -41,5 +43,6 @@ def test_pickle_functions():
         wr2 = weakref.ref(func2)
         assert func2(1) == func(1)
         del func, func2
+        gc.collect()
         assert wr() is None
         assert wr2() is None

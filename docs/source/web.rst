@@ -19,37 +19,19 @@ a normal web page in real time.  This web interface is launched by default
 wherever the scheduler is launched if the scheduler machine has Bokeh_
 installed (``conda install bokeh -c bokeh``).
 
-List of Servers
----------------
-
-There are a few sets of diagnostic pages served at different ports:
+These diagnostic pages are:
 
 *   Main Scheduler pages at ``http://scheduler-address:8787``.  These pages,
     particularly the ``/status`` page are the main page that most people
     associate with Dask.  These pages are served from a separate standalone
     Bokeh server application running in a separate process.
-*   Debug Scheduler pages at ``http://scheduler-address:8788``.  These pages
-    have more detailed diagnostic information about the scheduler.  They are
-    more often used by developers than by users, but may still be of interest
-    to the performance-conscious.  These pages run from inside the scheduler
-    process, and so compete for resources with the main scheduler.
-*   Debug Worker pages for each worker at ``http://worker-address:8789``.
-    These pages have detailed diagnostic information about the worker.  Like the
-    diagnostic scheduler pages they are of more utility to developers or to
-    people looking to understand the performance of their underlying cluster.  If
-    port 8789 is unavailable (for example it is in use by another worker) then a
-    random port is chosen.  A list of all ports can be obtained from looking at
-    the service ports for each worker in the result of calling
-    ``client.scheduler_info()``
-
-The rest of this document will be about the main pages at
-``http://scheduler-address:8787``.
 
 The available pages are ``http://scheduler-address:8787/<page>/`` where ``<page>`` is one of
 
 - ``status``: a stream of recently run tasks, progress bars, resource use
 - ``tasks``: a larger stream of the last 100k tasks
 - ``workers``: basic information about workers and their current load
+- ``health``: basic health check, returns ``ok`` if service is running
 
 .. _Bokeh: http://bokeh.pydata.org/en/latest/
 
@@ -161,6 +143,30 @@ available in the ``workers/`` page.
 .. image:: https://raw.githubusercontent.com/dask/dask-org/master/images/bokeh-resources.gif
    :alt: Resources view of Dask web interface
 
+Per-worker resources
+~~~~~~~~~~~~~~~~~~~~
+
+The ``workers/`` page shows per-worker resources, the main ones being CPU and
+memory use. Custom metrics can be registered and displayed in this page. Here
+is an example showing how to display GPU utilization and GPU memory use:
+
+.. code-block:: python
+
+   import subprocess
+
+   def nvidia_data(name):
+       def dask_function(dask_worker):
+           cmd = 'nvidia-smi --query-gpu={} --format=csv,noheader'.format(name)
+           result = subprocess.check_output(cmd.split())
+           return result.strip().decode()
+       return dask_function
+
+   def register_metrics(dask_worker):
+       for name in ['utilization.gpu', 'utilization.memory']:
+           dask_worker.metrics[name] = nvidia_data(name)
+
+   client.run(register_metrics)
+
 Connecting to Web Interface
 ---------------------------
 
@@ -186,7 +192,7 @@ a few ways to handle this:
 1.  Open port ``8787`` to the outside world.  Often this involves asking your
     cluster administrator.
 2.  Use a different port that is publicly accessible using the
-    ``--bokeh-port PORT`` option on the ``dask-scheduler`` command.
+    ``--dashboard-address :8787`` option on the ``dask-scheduler`` command.
 3.  Use fancier techniques, like `Port Forwarding`_
 
 Running distributed on a remote machine can cause issues with viewing the web

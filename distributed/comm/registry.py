@@ -1,11 +1,7 @@
-from __future__ import print_function, division, absolute_import
-
-from abc import ABCMeta, abstractmethod
-
-from six import with_metaclass
+from abc import ABC, abstractmethod
 
 
-class Backend(with_metaclass(ABCMeta)):
+class Backend(ABC):
     """
     A communication backend, selected by a given URI scheme (e.g. 'tcp').
     """
@@ -67,6 +63,7 @@ def get_backend(scheme):
     """
     backend = backends.get(scheme)
     if backend is None:
-        raise ValueError("unknown address scheme %r (known schemes: %s)"
-                         % (scheme, sorted(backends)))
+        raise ValueError(
+            "unknown address scheme %r (known schemes: %s)" % (scheme, sorted(backends))
+        )
     return backend

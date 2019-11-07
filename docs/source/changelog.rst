@@ -1,10 +1,590 @@
 Changelog
 =========
 
-1.21.1 - 2018-XX-XX
+2.6.0 - 2019-10-15
+------------------
+
+- Refactor dashboard module (:pr:`3138`) `Jacob Tomlinson`_
+- Use ``setuptools.find_packages`` in ``setup.py`` (:pr:`3150`) `Matthew Rocklin`_
+- Move death timeout logic up to ``Node.start`` (:pr:`3115`) `Matthew Rocklin`_
+- Only include metric in ``WorkerTable`` if it is a scalar (:pr:`3140`) `Matthew Rocklin`_
+- Add ``Nanny(config={...})`` keyword (:pr:`3134`) `Matthew Rocklin`_
+- Xfail ``test_worksapce_concurrency`` on Python 3.6 (:pr:`3132`) `Matthew Rocklin`_
+- Extend Worker plugin API with transition method (:pr:`2994`) `matthieubulte`_
+- Raise exception if the user passes in unused keywords to ``Client`` (:pr:`3117`) `Jonathan De Troye`_
+- Move new ``SSHCluster`` to top level (:pr:`3128`) `Matthew Rocklin`_
+- Bump dask dependency (:pr:`3124`) `Jim Crist`_
+
+
+2.5.2 - 2019-10-04
+------------------
+
+-  Make dask-worker close quietly when given sigint signal (:pr:`3116`) `Matthew Rocklin`_
+-  Replace use of tornado.gen with asyncio in dask-worker (:pr:`3114`) `Matthew Rocklin`_
+-  UCX: allocate CUDA arrays using RMM and Numba (:pr:`3109`) `Mads R. B. Kristensen`_
+-  Support calling `cluster.scale` as async method (:pr:`3110`) `Jim Crist`_
+-  Identify lost workers in SpecCluster based on address not name (:pr:`3088`) `James Bourbeau`_
+-  Add Client.shutdown method (:pr:`3106`) `Matthew Rocklin`_
+-  Collect worker-worker and type bandwidth information (:pr:`3094`) `Matthew Rocklin`_
+-  Send noise over the wire to keep dask-ssh connection alive (:pr:`3105`) `Gil Forsyth`_
+-  Retry scheduler connect multiple times (:pr:`3104`) `Jacob Tomlinson`_
+-  Add favicon of logo to the dashboard (:pr:`3095`) `James Bourbeau`_
+-  Remove utils.py functions for their dask/utils.py equivalents (:pr:`3042`) `Matthew Rocklin`_
+-  Lower default bokeh log level (:pr:`3087`) `Philipp Rudiger`_
+-  Check if self.cluster.scheduler is a local scheduler (:pr:`3099`) `Jacob Tomlinson`_
+
+
+2.5.1 - 2019-09-27
+------------------
+
+-   Support clusters that don't have .security or ._close methods (:pr:`3100`) `Matthew Rocklin`_
+
+
+2.5.0 - 2019-09-27
+------------------
+
+-  Use the new UCX Python bindings (:pr:`3059`) `Mads R. B. Kristensen`_
+-  Fix worker preload config (:pr:`3027`) `byjott`_
+-  Fix widget with spec that generates multiple workers (:pr:`3067`) `Loïc Estève`_
+-  Make Client.get_versions async friendly (:pr:`3064`) `Jacob Tomlinson`_
+-  Add configuation option for longer error tracebacks (:pr:`3086`) `Daniel Farrell`_
+-  Have Client get Security from passed Cluster (:pr:`3079`) `Matthew Rocklin`_
+-  Respect Cluster.dashboard_link in Client._repr_html_ if it exists (:pr:`3077`) `Matthew Rocklin`_
+-  Add monitoring with dask cluster docs (:pr:`3072`) `Arpit Solanki`_
+-  Protocol of cupy and numba handles serialization exclusively  (:pr:`3047`) `Mads R. B. Kristensen`_
+-  Allow specification of worker type in SSHCLuster (:pr:`3061`) `Jacob Tomlinson`_
+-  Use Cluster.scheduler_info for workers= value in repr (:pr:`3058`) `Matthew Rocklin`_
+-  Allow SpecCluster to scale by memory and cores (:pr:`3057`) `Matthew Rocklin`_
+-  Allow full script in preload inputs (:pr:`3052`) `Matthew Rocklin`_
+-  Check multiple cgroups dirs, ceil fractional cpus (:pr:`3056`) `Jim Crist`_
+-  Add blurb about disabling work stealing (:pr:`3055`) `Chris White`_
+
+
+2.4.0 - 2019-09-13
+------------------
+
+- Remove six (:pr:`3045`) `Matthew Rocklin`_
+- Add missing test data to sdist tarball (:pr:`3050`) `Elliott Sales de Andrade`_
+- Use mock from unittest standard library (:pr:`3049`) `Elliott Sales de Andrade`_
+- Use cgroups resource limits to determine default threads and memory (:pr:`3039`) `Jim Crist`_
+- Move task deserialization to immediately before task execution (:pr:`3015`) `James Bourbeau`_
+- Drop joblib shim module in distributed (:pr:`3040`) `John Kirkham`_
+- Redirect configuration doc page (:pr:`3038`) `Matthew Rocklin`_
+- Support ``--name 0`` and ``--nprocs`` keywords in dask-worker cli (:pr:`3037`) `Matthew Rocklin`_
+- Remove lost workers from ``SpecCluster.workers`` (:pr:`2990`) `Guillaume Eynard-Bontemps`_
+- Clean up ``test_local.py::test_defaults`` (:pr:`3017`) `Matthew Rocklin`_
+- Replace print statement in ``Queue.__init__`` with debug message (:pr:`3035`) `Mikhail Akimov`_
+- Set the ``x_range`` limit of the Meory utilization plot to memory-limit (:pr:`3034`) `Matthew Rocklin`_
+- Rely on cudf codebase for cudf serialization (:pr:`2998`) `Benjamin Zaitlen`_
+- Add fallback html repr for Cluster (:pr:`3023`) `Jim Crist`_
+- Add support for zstandard compression to comms (:pr:`2970`) `Abael He`_
+- Avoid collision when using ``os.environ`` in ``dashboard_link`` (:pr:`3021`) `Matthew Rocklin`_
+- Fix ``ConnectionPool`` limit handling (:pr:`3005`) `byjott`_
+- Support Spec jobs that generate multiple workers (:pr:`3013`) `Matthew Rocklin`_
+- Tweak ``Logs`` styling (:pr:`3012`) `Jim Crist`_
+- Better name for cudf deserialization function name (:pr:`3008`) `Benjamin Zaitlen`_
+- Make ``spec.ProcessInterface`` a valid no-op worker (:pr:`3004`) `Matthew Rocklin`_
+- Return dictionaries from ``new_worker_spec`` rather than name/worker pairs (:pr:`3000`) `Matthew Rocklin`_
+- Fix minor typo in documentation (:pr:`3002`) `Mohammad Noor`_
+- Permit more keyword options when scaling with cores and memory (:pr:`2997`) `Matthew Rocklin`_
+- Add ``cuda_ipc`` to UCX environment for NVLink (:pr:`2996`) `Benjamin Zaitlen`_
+- Add ``threads=`` and ``memory=`` to Cluster and Client reprs (:pr:`2995`) `Matthew Rocklin`_
+- Fix PyNVML initialization (:pr:`2993`) `Richard J Zamora`_
+
+
+2.3.2 - 2019-08-23
+------------------
+
+-  Skip exceptions in startup information (:pr:`2991`) `Jacob Tomlinson`_
+
+
+2.3.1 - 2019-08-22
+------------------
+
+-  Add support for separate external address for SpecCluster scheduler (:pr:`2963`) `Jacob Tomlinson`_
+-  Defer cudf serialization/deserialization to that library (:pr:`2881`) `Benjamin Zaitlen`_
+-  Workaround for hanging test now calls ucp.fin() (:pr:`2967`) `Mads R. B. Kristensen`_
+-  Remove unnecessary bullet point (:pr:`2972`) `Pav A`_
+-  Directly import progress from diagnostics.progressbar (:pr:`2975`) `Matthew Rocklin`_
+-  Handle buffer protocol objects in ensure_bytes (:pr:`2969`) `Tom Augspurger`_
+-  Fix documentatation syntax and tree (:pr:`2981`) `Pav A`_
+-  Improve get_ip_interface error message when interface does not exist (:pr:`2964`) `Loïc Estève`_
+-  Add cores= and memory= keywords to scale (:pr:`2974`) `Matthew Rocklin`_
+-  Make workers robust to bad custom metrics (:pr:`2984`) `Matthew Rocklin`_
+
+
+2.3.0 - 2019-08-16
+------------------
+
+- Except all exceptions when checking ``pynvml`` (:pr:`2961`) `Matthew Rocklin`_
+- Pass serialization down through small base collections (:pr:`2948`) `Peter Andreas Entschev`_
+- Use ``pytest.warning(Warning)`` rather than ``Exception`` (:pr:`2958`) `Matthew Rocklin`_
+- Allow ``server_kwargs`` to override defaults in dashboard (:pr:`2955`) `Bruce Merry`_
+- Update ``utils_perf.py`` (:pr:`2954`) `Shayan Amani`_
+- Normalize names with ``str`` in ``retire_workers`` (:pr:`2949`) `Matthew Rocklin`_
+- Update ``client.py`` (:pr:`2951`) `Shayan Amani`_
+- Add ``GPUCurrentLoad`` dashboard plots (:pr:`2944`) `Matthew Rocklin`_
+- Pass GPU diagnostics from worker to scheduler (:pr:`2932`) `Matthew Rocklin`_
+- Import from ``collections.abc`` (:pr:`2938`) `Jim Crist`_
+- Fixes Worker docstring formatting (:pr:`2939`) `James Bourbeau`_
+- Redirect setup docs to docs.dask.org (:pr:`2936`) `Matthew Rocklin`_
+- Wrap offload in ``gen.coroutine`` (:pr:`2934`) `Matthew Rocklin`_
+- Change ``TCP.close`` to a coroutine to avoid task pending warning (:pr:`2930`) `Matthew Rocklin`_
+- Fixup black string normalization (:pr:`2929`) `Jim Crist`_
+- Move core functionality from ``SpecCluster`` to ``Cluster`` (:pr:`2913`) `Matthew Rocklin`_
+- Add aenter/aexit protocols to ``ProcessInterface`` (:pr:`2927`) `Matthew Rocklin`_
+- Add real-time CPU utilization plot to dashboard (:pr:`2922`) `Matthew Rocklin`_
+- Always kill processes in clean tests, even if we don't check (:pr:`2924`) `Matthew Rocklin`_
+- Add timeouts to processes in SSH tests (:pr:`2925`) `Matthew Rocklin`_
+- Add documentation around ``spec.ProcessInterface`` (:pr:`2923`) `Matthew Rocklin`_
+- Cleanup async warnings in tests (:pr:`2920`) `Matthew Rocklin`_
+- Give 404 when requesting nonexistent tasks or workers (:pr:`2921`) `Martin Durant`_
+- Raise informative warning when rescheduling an unknown task (:pr:`2916`) `James Bourbeau`_
+- Fix docstring (:pr:`2917`) `Martin Durant`_
+- Add keep-alive message between worker and scheduler (:pr:`2907`) `Matthew Rocklin`_
+- Rewrite ``Adaptive``/``SpecCluster`` to support slowly arriving workers (:pr:`2904`) `Matthew Rocklin`_
+- Call heartbeat rather than reconnect on disconnection (:pr:`2906`) `Matthew Rocklin`_
+
+
+2.2.0 - 2019-07-31
+------------------
+
+-  Respect security configuration in LocalCluster (:pr:`2822`) `Russ Bubley`_
+-  Add Nanny to worker docs (:pr:`2826`) `Christian Hudon`_
+-  Don't make False add-keys report to scheduler (:pr:`2421`) `tjb900`_
+-  Include type name in SpecCluster repr (:pr:`2834`) `Jacob Tomlinson`_
+-  Extend prometheus metrics endpoint (:pr:`2833`) `Gabriel Sailer`_
+-  Add alternative SSHCluster implementation (:pr:`2827`) `Matthew Rocklin`_
+-  Dont reuse closed worker in get_worker (:pr:`2841`) `Pierre Glaser`_
+-  SpecCluster: move init logic into start (:pr:`2850`) `Jacob Tomlinson`_
+-  Document distributed.Reschedule in API docs (:pr:`2860`) `James Bourbeau`_
+-  Add fsspec to installation of test builds (:pr:`2859`) `Martin Durant`_
+-  Make await/start more consistent across Scheduler/Worker/Nanny (:pr:`2831`) `Matthew Rocklin`_
+-  Add cleanup fixture for asyncio tests (:pr:`2866`) `Matthew Rocklin`_
+-  Use only remote connection to scheduler in Adaptive (:pr:`2865`) `Matthew Rocklin`_
+-  Add Server.finished async function  (:pr:`2864`) `Matthew Rocklin`_
+-  Align text and remove bullets in Client HTML repr (:pr:`2867`) `Matthew Rocklin`_
+-  Test dask-scheduler --idle-timeout flag (:pr:`2862`) `Matthew Rocklin`_
+-  Remove ``Client.upload_environment`` (:pr:`2877`) `Jim Crist`_
+-  Replace gen.coroutine with async/await in core (:pr:`2871`) `Matthew Rocklin`_
+-  Forcefully kill all processes before each test (:pr:`2882`) `Matthew Rocklin`_
+-  Cleanup Security class and configuration (:pr:`2873`) `Jim Crist`_
+-  Remove unused variable in SpecCluster scale down (:pr:`2870`) `Jacob Tomlinson`_
+-  Add SpecCluster ProcessInterface (:pr:`2874`) `Jacob Tomlinson`_
+-  Add Log(str) and Logs(dict) classes for nice HTML reprs (:pr:`2875`) `Jacob Tomlinson`_
+-  Pass Client._asynchronous to Cluster._asynchronous (:pr:`2890`) `Matthew Rocklin`_
+-  Add default logs method to Spec Cluster (:pr:`2889`) `Matthew Rocklin`_
+-  Add processes keyword back into clean (:pr:`2891`) `Matthew Rocklin`_
+-  Update black (:pr:`2901`) `Matthew Rocklin`_
+-  Move Worker.local_dir attribute to Worker.local_directory (:pr:`2900`) `Matthew Rocklin`_
+-  Link from TapTools to worker info pages in dashboard (:pr:`2894`) `Matthew Rocklin`_
+-  Avoid exception in Client._ensure_connected if closed (:pr:`2893`) `Matthew Rocklin`_
+-  Convert Pythonic kwargs to CLI Keywords for SSHCluster (:pr:`2898`) `Matthew Rocklin`_
+-  Use kwargs in CLI (:pr:`2899`) `Matthew Rocklin`_
+-  Name SSHClusters by providing name= keyword to SpecCluster (:pr:`2903`) `Matthew Rocklin`_
+-  Request feed of worker information from Scheduler to SpecCluster (:pr:`2902`) `Matthew Rocklin`_
+-  Clear out compatibillity file (:pr:`2896`) `Matthew Rocklin`_
+-  Remove future imports (:pr:`2897`) `Matthew Rocklin`_
+-  Use click's show_default=True in relevant places (:pr:`2838`) `Christian Hudon`_
+-  Close workers more gracefully (:pr:`2905`) `Matthew Rocklin`_
+-  Close workers gracefully with --lifetime keywords (:pr:`2892`) `Matthew Rocklin`_
+-  Add closing <li> tags to Client._repr_html_ (:pr:`2911`) `Matthew Rocklin`_
+-  Add endline spacing in Logs._repr_html_ (:pr:`2912`) `Matthew Rocklin`_
+
+2.1.0 - 2019-07-08
+------------------
+
+- Fix typo that prevented error message (:pr:`2825`) `Russ Bubley`_
+- Remove ``dask-mpi`` (:pr:`2824`) `Matthew Rocklin`_
+- Updates to use ``update_graph`` in task journey docs (:pr:`2821`) `James Bourbeau`_
+- Fix Client repr with ``memory_info=None`` (:pr:`2816`) `Matthew Rocklin`_
+- Fix case where key, rather than ``TaskState``, could end up in ``ts.waiting_on`` (:pr:`2819`) `tjb900`_
+- Use Keyword-only arguments (:pr:`2814`) `Matthew Rocklin`_
+- Relax check for worker references in cluster context manager (:pr:`2813`) `Matthew Rocklin`_
+- Add HTTPS support for the dashboard (:pr:`2812`) `Jim Crist`_
+- Use ``dask.utils.format_bytes`` (:pr:`2810`) `Tom Augspurger`_
+
+
+2.0.1 - 2019-06-26
+------------------
+
+We neglected to include ``python_requires=`` in our setup.py file, resulting in
+confusion for Python 2 users who erroneously get packages for 2.0.0.
+This is fixed in 2.0.1 and we have removed the 2.0.0 files from PyPI.
+
+-  Add python_requires entry to setup.py (:pr:`2807`) `Matthew Rocklin`_
+-  Correctly manage tasks beyond deque limit in TaskStream plot (:pr:`2797`) `Matthew Rocklin`_
+-  Fix diagnostics page for memory_limit=None (:pr:`2770`) `Brett Naul`_
+
+
+2.0.0 - 2019-06-25
+------------------
+
+-  **Drop support for Python 2**
+-  Relax warnings before release (:pr:`2796`) `Matthew Rocklin`_
+-  Deprecate --bokeh/--no-bokeh CLI (:pr:`2800`) `Tom Augspurger`_
+-  Typo in bokeh service_kwargs for dask-worker (:pr:`2783`) `Tom Augspurger`_
+-  Update command line cli options docs (:pr:`2794`) `James Bourbeau`_
+-  Remove "experimental" from TLS docs (:pr:`2793`) `James Bourbeau`_
+-  Add warnings around ncores= keywords (:pr:`2791`) `Matthew Rocklin`_
+-  Add --version option to scheduler and worker CLI (:pr:`2782`) `Tom Augspurger`_
+-  Raise when workers initialization times out (:pr:`2784`) `Tom Augspurger`_
+-  Replace ncores with nthreads throughout codebase (:pr:`2758`) `Matthew Rocklin`_
+-  Add unknown pytest markers (:pr:`2764`) `Tom Augspurger`_
+-  Delay lookup of allowed failures. (:pr:`2761`) `Tom Augspurger`_
+-  Change address -> worker in ColumnDataSource for nbytes plot (:pr:`2755`) `Matthew Rocklin`_
+-  Remove module state in Prometheus Handlers (:pr:`2760`) `Matthew Rocklin`_
+-  Add stress test for UCX (:pr:`2759`) `Matthew Rocklin`_
+-  Add nanny logs (:pr:`2744`) `Tom Augspurger`_
+-  Move some of the adaptive logic into the scheduler (:pr:`2735`) `Matthew Rocklin`_
+-  Add SpecCluster.new_worker_spec method (:pr:`2751`) `Matthew Rocklin`_
+-  Worker dashboard fixes (:pr:`2747`) `Matthew Rocklin`_
+-  Add async context managers to scheduler/worker classes (:pr:`2745`) `Matthew Rocklin`_
+-  Fix the resource key representation before sending graphs (:pr:`2733`) `Michael Spiegel`_
+-  Allow user to configure whether workers are daemon. (:pr:`2739`) `Caleb`_
+-  Pin pytest >=4 with pip in appveyor and python 3.5 (:pr:`2737`) `Matthew Rocklin`_
+-  Add Experimental UCX Comm (:pr:`2591`) `Ben Zaitlen`_ `Tom Augspurger`_ `Matthew Rocklin`_
+-  Close nannies gracefully (:pr:`2731`) `Matthew Rocklin`_
+-  add kwargs to progressbars (:pr:`2638`) `Manuel Garrido`_
+-  Add back LocalCluster.__repr__. (:pr:`2732`) `Loïc Estève`_
+-  Move bokeh module to dashboard (:pr:`2724`) `Matthew Rocklin`_
+-  Close clusters at exit (:pr:`2730`) `Matthew Rocklin`_
+-  Add SchedulerPlugin TaskState example (:pr:`2622`) `Matt Nicolls`_
+-  Add SpecificationCluster (:pr:`2675`) `Matthew Rocklin`_
+-  Replace register_worker_callbacks with worker plugins (:pr:`2453`) `Matthew Rocklin`_
+-  Proxy worker dashboards from scheduler dashboard (:pr:`2715`) `Ben Zaitlen`_
+-  Add docstring to Scheduler.check_idle_saturated (:pr:`2721`) `Matthew Rocklin`_
+-  Refer to LocalCluster in Client docstring (:pr:`2719`) `Matthew Rocklin`_
+-  Remove special casing of Scikit-Learn BaseEstimator serialization (:pr:`2713`) `Matthew Rocklin`_
+-  Fix two typos in Pub class docstring (:pr:`2714`) `Magnus Nord`_
+-  Support uploading files with multiple modules (:pr:`2587`) `Sam Grayson`_
+-  Change the main workers bokeh page to /status (:pr:`2689`) `Ben Zaitlen`_
+-  Cleanly stop periodic callbacks in Client (:pr:`2705`) `Matthew Rocklin`_
+-  Disable pan tool for the Progress, Byte Stored and Tasks Processing plot (:pr:`2703`) `Mathieu Dugré`_
+-  Except errors in Nanny's memory monitor if process no longer exists (:pr:`2701`) `Matthew Rocklin`_
+-  Handle heartbeat when worker has just left (:pr:`2702`) `Matthew Rocklin`_
+-  Modify styling of histograms for many-worker dashboard plots (:pr:`2695`) `Mathieu Dugré`_
+-  Add method to wait for n workers before continuing (:pr:`2688`) `Daniel Farrell`_
+-  Support computation on delayed(None) (:pr:`2697`)  `Matthew Rocklin`_
+-  Cleanup localcluster (:pr:`2693`)  `Matthew Rocklin`_
+-  Use 'temporary-directory' from dask.config for Worker's directory (:pr:`2654`) `Matthew Rocklin`_
+-  Remove support for Iterators and Queues (:pr:`2671`) `Matthew Rocklin`_
+
+
+1.28.1 - 2019-05-13
 -------------------
 
--
+This is a small bugfix release due to a config change upstream.
+
+-  Use config accessor method for "scheduler-address" (:pr:`2676`) `James Bourbeau`_
+
+
+1.28.0 - 2019-05-08
+-------------------
+
+- Add Type Attribute to TaskState (:pr:`2657`) `Matthew Rocklin`_
+- Add waiting task count to progress title bar (:pr:`2663`) `James Bourbeau`_
+- DOC: Clean up reference to cluster object (:pr:`2664`) `K.-Michael Aye`_
+- Allow scheduler to politely close workers as part of shutdown (:pr:`2651`) `Matthew Rocklin`_
+- Check direct_to_workers before using get_worker in Client (:pr:`2656`) `Matthew Rocklin`_
+- Fixed comment regarding keeping existing level if less verbose (:pr:`2655`) `Brett Randall`_
+- Add idle timeout to scheduler (:pr:`2652`) `Matthew Rocklin`_
+- Avoid deprecation warnings (:pr:`2653`) `Matthew Rocklin`_
+- Use an LRU cache for deserialized functions (:pr:`2623`) `Matthew Rocklin`_
+- Rename Worker._close to Worker.close (:pr:`2650`) `Matthew Rocklin`_
+- Add Comm closed bookkeeping (:pr:`2648`) `Matthew Rocklin`_
+- Explain LocalCluster behavior in Client docstring (:pr:`2647`) `Matthew Rocklin`_
+- Add last worker into KilledWorker exception to help debug (:pr:`2610`) `@plbertrand`_
+- Set working worker class for dask-ssh (:pr:`2646`) `Martin Durant`_
+- Add as_completed methods to docs (:pr:`2642`) `Jim Crist`_
+- Add timeout to Client._reconnect (:pr:`2639`) `Jim Crist`_
+- Limit test_spill_by_default memory, reenable it (:pr:`2633`) `Peter Andreas Entschev`_
+- Use proper address in worker -> nanny comms (:pr:`2640`) `Jim Crist`_
+- Fix deserialization of bytes chunks larger than 64MB (:pr:`2637`) `Peter Andreas Entschev`_
+
+
+1.27.1 - 2019-04-29
+-------------------
+
+-  Adaptive: recommend close workers when any are idle (:pr:`2330`) `Michael Delgado`_
+-  Increase GC thresholds (:pr:`2624`) `Matthew Rocklin`_
+-  Add interface= keyword to LocalCluster (:pr:`2629`) `Matthew Rocklin`_
+-  Add worker_class argument to LocalCluster (:pr:`2625`) `Matthew Rocklin`_
+-  Remove Python 2.7 from testing matrix (:pr:`2631`) `Matthew Rocklin`_
+-  Add number of trials to diskutils test (:pr:`2630`) `Matthew Rocklin`_
+-  Fix parameter name in LocalCluster docstring (:pr:`2626`) `Loïc Estève`_
+-  Integrate stacktrace for low-level profiling (:pr:`2575`) `Peter Andreas Entschev`_
+-  Apply Black to standardize code styling (:pr:`2614`) `Matthew Rocklin`_
+-  added missing whitespace to start_worker cmd (:pr:`2613`) `condoratberlin`_
+-  Updated logging module doc links from docs.python.org/2 to docs.python.org/3. (:pr:`2635`) `Brett Randall`_
+
+
+1.27.0 - 2019-04-12
+-------------------
+
+-  Add basic health endpoints to scheduler and worker bokeh. (:pr:`2607`) `amerkel2`_
+-  Improved description accuracy of --memory-limit option. (:pr:`2601`) `Brett Randall`_
+-  Check self.dependencies when looking at dependent tasks in memory (:pr:`2606`) `deepthirajagopalan7`_
+-  Add RabbitMQ SchedulerPlugin example (:pr:`2604`) `Matt Nicolls`_
+-  add resources to scheduler update_graph plugin (:pr:`2603`) `Matt Nicolls`_
+-  Use ensure_bytes in serialize_error (:pr:`2588`) `Matthew Rocklin`_
+-  Specify data storage explicitly from Worker constructor (:pr:`2600`) `Matthew Rocklin`_
+-  Change bokeh port keywords to dashboard_address (:pr:`2589`) `Matthew Rocklin`_
+-  .detach_() pytorch tensor to serialize data as numpy array. (:pr:`2586`) `Muammar El Khatib`_
+-  Add warning if creating scratch directories takes a long time (:pr:`2561`) `Matthew Rocklin`_
+-  Fix typo in pub-sub doc. (:pr:`2599`) `Loïc Estève`_
+-  Allow return_when='FIRST_COMPLETED' in wait (:pr:`2598`) `Nikos Tsaousis`_
+-  Forward kwargs through Nanny to Worker (:pr:`2596`) `Brian Chu`_
+-  Use ensure_dict instead of dict (:pr:`2594`) `James Bourbeau`_
+-  Specify protocol in LocalCluster (:pr:`2489`) `Matthew Rocklin`_
+
+1.26.1 - 2019-03-29
+-------------------
+
+-  Fix LocalCluster to not overallocate memory when overcommitting threads per worker (:pr:`2541`) `George Sakkis`_
+-  Make closing resilient to lacking an address (:pr:`2542`) `Matthew Rocklin`_
+-  fix typo in comment (:pr:`2546`) `Brett Jurman`_
+-  Fix double init of prometheus metrics (:pr:`2544`) `Marco Neumann`_
+-  Skip test_duplicate_clients without bokeh. (:pr:`2553`) `Elliott Sales de Andrade`_
+-  Add blocked_handlers to servers (:pr:`2556`) `Chris White`_
+-  Always yield Server.handle_comm coroutine (:pr:`2559`) `Tom Augspurger`_
+-  Use yaml.safe_load (:pr:`2566`) `Matthew Rocklin`_
+-  Fetch executables from build root. (:pr:`2551`) `Elliott Sales de Andrade`_
+-  Fix Torando 6 test failures (:pr:`2570`) `Matthew Rocklin`_
+-  Fix test_sync_closed_loop (:pr:`2572`) `Matthew Rocklin`_
+
+1.26.0 - 2019-02-25
+-------------------
+
+-  Update style to fix recent flake8 update (:pr:`2500`) (:pr:`2509`) `Matthew Rocklin`_
+-  Fix typo in gen_cluster log message (:pr:`2503`) `Loïc Estève`_
+-  Allow KeyError when closing event loop (:pr:`2498`) `Matthew Rocklin`_
+-  Avoid thread testing for TCP ThreadPoolExecutor (:pr:`2510`) `Matthew Rocklin`_
+-  Find Futures inside SubgraphCallable (:pr:`2505`) `Jim Crist`_
+-  Avoid AttributeError when closing and sending a message (:pr:`2514`) `Matthew Rocklin`_
+-  Add deprecation warning to dask_mpi.py (:pr:`2522`) `Julia Kent`_
+-  Relax statistical profiling test (:pr:`2527`) `Matthew Rocklin`_
+-  Support alternative --remote-dask-worker SSHCluster() and dask-ssh CLI (:pr:`2526`) `Adam Beberg`_
+-  Iterate over full list of plugins in transition (:pr:`2518`) `Matthew Rocklin`_
+-  Create Prometheus Endpoint (:pr:`2499`) `Adam Beberg`_
+-  Use pytest.importorskip for prometheus test (:pr:`2533`) `Matthew Rocklin`_
+-  MAINT skip prometheus test when no installed (:pr:`2534`) `Olivier Grisel`_
+-  Fix intermittent testing failures (:pr:`2535`) `Matthew Rocklin`_
+-  Avoid using nprocs keyword in dask-ssh if set to one (:pr:`2531`)  `Matthew Rocklin`_
+-  Bump minimum Tornado version to 5.0
+
+
+1.25.3 - 2019-01-31
+-------------------
+
+-  Fix excess threading on missing connections (:pr:`2403`) `Daniel Farrell`_
+-  Fix typo in doc (:pr:`2457`) `Loïc Estève`_
+-  Start fewer but larger workers with LocalCluster (:pr:`2452`) `Matthew Rocklin`_
+-  Check for non-zero ``length`` first in ``read`` loop (:pr:`2465`) `John Kirkham`_
+-  DOC: Use of local cluster in script (:pr:`2462`) `Peter Killick`_
+-  DOC/API: Signature for base class write / read (:pr:`2472`) `Tom Augspurger`_
+-  Support Pytest 4 in Tests (:pr:`2478`) `Adam Beberg`_
+-  Ensure async behavior in event loop with LocalCluster (:pr:`2484`) `Matthew Rocklin`_
+-  Fix spurious CancelledError (:pr:`2485`) `Loïc Estève`_
+-  Properly reset dask.config scheduler and shuffle when closing the client (:pr:`2475`) `George Sakkis`_
+-  Make it more explict that resources are per worker. (:pr:`2470`) `Loïc Estève`_
+-  Remove references to center (:pr:`2488`)  `Matthew Rocklin`_
+-  Expand client clearing timeout to 10s in testing (:pr:`2493`) `Matthew Rocklin`_
+-  Propagate key keyword in progressbar (:pr:`2492`) `Matthew Rocklin`_
+-  Use provided cluster's IOLoop if present in Client (:pr:`2494`) `Matthew Rocklin`_
+
+
+1.25.2 - 2019-01-04
+-------------------
+
+-  Clean up LocalCluster logging better in async mode (:pr:`2448`) `Matthew Rocklin`_
+-  Add short error message if bokeh cannot be imported (:pr:`2444`) `Dirk Petersen`_
+-  Add optional environment variables to Nanny (:pr:`2431`) `Matthew Rocklin`_
+-  Make the direct keyword docstring entries uniform (:pr:`2441`) `Matthew Rocklin`_
+-  Make LocalCluster.close async friendly (:pr:`2437`) `Matthew Rocklin`_
+-  gather_dep: don't request dependencies we already found out we don't want (:pr:`2428`) `tjb900`_
+-  Add parameters to Client.run docstring (:pr:`2429`) `Matthew Rocklin`_
+-  Support coroutines and async-def functions in run/run_scheduler (:pr:`2427`) `Matthew Rocklin`_
+-  Name threads in ThreadPoolExecutors (:pr:`2408`) `Matthew Rocklin`_
+
+
+
+1.25.1 - 2018-12-15
+-------------------
+
+-  Serialize numpy.ma.masked objects properly (:pr:`2384`) `Jim Crist`_
+-  Turn off bokeh property validation in dashboard (:pr:`2387`) `Jim Crist`_
+-  Fully initialize WorkerState objects (:pr:`2388`) `Jim Crist`_
+-  Fix typo in scheduler docstring (:pr:`2393`) `Russ Bubley`_
+-  DOC: fix typo in distributed.worker.Worker docstring (:pr:`2395`) `Loïc Estève`_
+-  Remove clients and workers from event log after removal (:pr:`2394`) `tjb900`_
+-  Support msgpack 0.6.0 by providing length keywords (:pr:`2399`) `tjb900`_
+-  Use async-await on large messages test (:pr:`2404`) `Matthew Rocklin`_
+-  Fix race condition in normalize_collection (:pr:`2386`) `Jim Crist`_
+-  Fix redict collection after HighLevelGraph fix upstream (:pr:`2413`) `Matthew Rocklin`_
+-  Add a blocking argument to Lock.acquire() (:pr:`2412`) `Stephan Hoyer`_
+-  Fix long traceback test (:pr:`2417`) `Matthew Rocklin`_
+-  Update x509 certificates to current OpenSSL standards. (:pr:`2418`) `Diane Trout`_
+
+
+1.25.0 - 2018-11-28
+-------------------
+
+-  Fixed the 404 error on the Scheduler Dashboard homepage (:pr:`2361`) `Michael Wheeler`_
+-  Consolidate two Worker classes into one (:pr:`2363`) `Matthew Rocklin`_
+-  Avoid warnings in pyarrow and msgpack (:pr:`2364`) `Matthew Rocklin`_
+-  Avoid race condition in Actor's Future (:pr:`2374`) `Matthew Rocklin`_
+-  Support missing packages keyword in Client.get_versions (:pr:`2379`) `Matthew Rocklin`_
+-  Fixup serializing masked arrays (:pr:`2373`) `Jim Crist`_
+
+
+1.24.2 - 2018-11-15
+-------------------
+
+-  Add support for Bokeh 1.0 (:pr:`2348`) (:pr:`2356`) `Matthew Rocklin`_
+-  Fix regression that dropped support for Tornado 4 (:pr:`2353`) `Roy Wedge`_
+-  Avoid deprecation warnings (:pr:`2355`) (:pr:`2357`) `Matthew Rocklin`_
+-  Fix typo in worker documentation (:pr:`2349`) `Tom Rochette`_
+
+
+1.24.1 - 2018-11-09
+-------------------
+
+-  Use tornado's builtin AnyThreadLoopEventPolicy (:pr:`2326`) `Matthew Rocklin`_
+-  Adjust TLS tests for openssl 1.1 (:pr:`2331`) `Marius van Niekerk`_
+-  Avoid setting event loop policy if within Jupyter notebook server (:pr:`2343`) `Matthew Rocklin`_
+-  Add preload script to conf (:pr:`2325`) `Guillaume Eynard-Bontemps`_
+-  Add serializer for Numpy masked arrays (:pr:`2335`) `Peter Killick`_
+-  Use psutil.Process.oneshot (:pr:`2339`) `NotSqrt`_
+-  Use worker SSL context when getting client from worker. (:pr:`2301`) Anonymous
+
+
+1.24.0 - 2018-10-26
+-------------------
+
+-  Remove Joblib Dask Backend from codebase (:pr:`2298`) `Matthew Rocklin`_
+-  Include worker tls protocol in Scheduler.restart (:pr:`2295`) `Matthew Rocklin`_
+-  Adapt to new Bokeh selection for 1.0 (:pr:`2292`) `Matthew Rocklin`_
+-  Add explicit retry method to Future and Client (:pr:`2299`) `Matthew Rocklin`_
+-  Point to main worker page in bokeh links (:pr:`2300`) `Matthew Rocklin`_
+-  Limit concurrency when gathering many times (:pr:`2303`) `Matthew Rocklin`_
+-  Add tls_cluster pytest fixture (:pr:`2302`) `Matthew Rocklin`_
+-  Convert ConnectionPool.open and active to properties (:pr:`2304`) `Matthew Rocklin`_
+-  change export_tb to format_tb (:pr:`2306`) `Eric Ma`_
+-  Redirect joblib page to dask-ml (:pr:`2307`) `Matthew Rocklin`_
+-  Include unserializable object in error message (:pr:`2310`) `Matthew Rocklin`_
+-  Import Mapping, Iterator, Set from collections.abc in Python 3 (:pr:`2315`) `Gaurav Sheni`_
+-  Extend Client.scatter docstring (:pr:`2320`) `Eric Ma`_
+-  Update for new flake8 (:pr:`2321`)  `Matthew Rocklin`_
+
+
+1.23.3 - 2018-10-05
+-------------------
+
+-  Err in dask serialization if not a NotImplementedError (:pr:`2251`) `Matthew Rocklin`_
+-  Protect against key missing from priority in GraphLayout (:pr:`2259`) `Matthew Rocklin`_
+-  Do not pull data twice in Client.gather (:pr:`2263`) `Adam Klein`_
+-  Add pytest fixture for cluster tests (:pr:`2262`) `Matthew Rocklin`_
+-  Cleanup bokeh callbacks  (:pr:`2261`) (:pr:`2278`) `Matthew Rocklin`_
+-  Fix bokeh error for `memory_limit=None` (:pr:`2255`) `Brett Naul`_
+-  Place large keywords into task graph in Client.map (:pr:`2281`) `Matthew Rocklin`_
+-  Remove redundant blosc threading code from protocol.numpy (:pr:`2284`) `Mike Gevaert`_
+-  Add ncores to workertable (:pr:`2289`) `Matthew Rocklin`_
+-  Support upload_file on files with no extension (:pr:`2290`) `Matthew Rocklin`_
+
+
+1.23.2 - 2018-09-17
+-------------------
+
+-  Discard dependent rather than remove (:pr:`2250`) `Matthew Rocklin`_
+-  Use dask_sphinx_theme `Matthew Rocklin`_
+-  Drop the Bokeh index page (:pr:`2241`) `John Kirkham`_
+-  Revert change to keep link relative (:pr:`2242`) `Matthew Rocklin`_
+-  docs: Fix broken AWS link in setup.rst file (:pr:`2240`) `Vladyslav Moisieienkov`_
+-  Return cancelled futures in as_completed (:pr:`2233`) `Chris White`_
+
+
+1.23.1 - 2018-09-06
+-------------------
+
+-  Raise informative error when mixing futures between clients (:pr:`2227`) `Matthew Rocklin`_
+-  add byte_keys to unpack_remotedata call (:pr:`2232`) `Matthew Rocklin`_
+-  Add documentation for gist/rawgit for get_task_stream (:pr:`2236`) `Matthew Rocklin`_
+-  Quiet Client.close by waiting for scheduler stop signal (:pr:`2237`) `Matthew Rocklin`_
+-  Display system graphs nicely on different screen sizes (:pr:`2239`) `Derek Ludwig`_
+-  Mutate passed in workers dict in TaskStreamPlugin.rectangles (:pr:`2238`) `Matthew Rocklin`_
+
+
+1.23.0 - 2018-08-30
+-------------------
+
+-  Add direct_to_workers to Client `Matthew Rocklin`_
+-  Add Scheduler.proxy to workers `Matthew Rocklin`_
+-  Implement Actors `Matthew Rocklin`_
+-  Fix tooltip (:pr:`2168`) `Loïc Estève`_
+-  Fix scale /  avoid returning coroutines (:pr:`2171`) `Joe Hamman`_
+-  Clarify dask-worker --nprocs (:pr:`2173`) `Yu Feng`_
+-  Concatenate all bytes of small messages in TCP comms (:pr:`2172`) `Matthew Rocklin`_
+-  Add dashboard_link property (:pr:`2176`) `Jacob Tomlinson`_
+-  Always offload to_frames (:pr:`2170`) `Matthew Rocklin`_
+-  Warn if desired port is already in use (:pr:`2191`) (:pr:`2199`) `Matthew Rocklin`_
+-  Add profile page for event loop thread (:pr:`2144`) `Matthew Rocklin`_
+-  Use dispatch for dask serialization, also add sklearn, pytorch (:pr:`2175`) `Matthew Rocklin`_
+-  Handle corner cases with busy signal (:pr:`2182`) `Matthew Rocklin`_
+-  Check self.dependencies when looking at tasks in memory (:pr:`2196`) `Matthew Rocklin`_
+-  Add ability to log additional custom metrics from each worker (:pr:`2169`) `Loïc Estève`_
+-  Fix formatting when port is a tuple (:pr:`2204`) `Loïc Estève`_
+-  Describe what ZeroMQ is (:pr:`2211`) `Mike DePalatis`_
+-  Tiny typo fix (:pr:`2214`) `Anderson Banihirwe`_
+-  Add Python 3.7 to travis.yml (:pr:`2203`) `Matthew Rocklin`_
+-  Add plot= keyword to get_task_stream (:pr:`2198`) `Matthew Rocklin`_
+-  Add support for optional versions in Client.get_versions (:pr:`2216`) `Matthew Rocklin`_
+-  Add routes for solo bokeh figures in dashboard (:pr:`2185`) `Matthew Rocklin`_
+-  Be resilient to missing dep after busy signal (:pr:`2217`) `Matthew Rocklin`_
+-  Use CSS Grid to layout status page on the dashboard (:pr:`2213`) `Derek Ludwig`_ and `Luke Canavan`_
+-  Fix deserialization of queues on main ioloop thread (:pr:`2221`) `Matthew Rocklin`_
+-  Add a worker initialization function (:pr:`2201`) `Guillaume Eynard-Bontemps`_
+-  Collapse navbar in dashboard (:pr:`2223`) `Luke Canavan`_
+
+
+1.22.1 - 2018-08-03
+-------------------
+
+-  Add worker_class= keyword to Nanny to support different worker types (:pr:`2147`) `Martin Durant`_
+-  Cleanup intermittent worker failures (:pr:`2152`) (:pr:`2146`) `Matthew Rocklin`_
+-  Fix msgpack PendingDeprecationWarning for encoding='utf-8' (:pr:`2153`) `Olivier Grisel`_
+-  Make bokeh coloring deterministic using hash function (:pr:`2143`) `Matthew Rocklin`_
+-  Allow client to query the task stream plot (:pr:`2122`) `Matthew Rocklin`_
+-  Use PID and counter in thread names (:pr:`2084`) (:pr:`2128`) `Dror Birkman`_
+-  Test that worker restrictions are cleared after cancellation (:pr:`2107`) `Matthew Rocklin`_
+-  Expand resources in graph_to_futures (:pr:`2131`) `Matthew Rocklin`_
+-  Add custom serialization support for pyarrow  (:pr:`2115`) `Dave Hirschfeld`_
+-  Update dask-scheduler cli help text for preload (:pr:`2120`) `Matt Nicolls`_
+-  Added another nested parallelism test (:pr:`1710`) `Tom Augspurger`_
+-  insert newline by default after TextProgressBar (:pr:`1976`) `Phil Tooley`_
+-  Retire workers from scale (:pr:`2104`) `Matthew Rocklin`_
+-  Allow worker to refuse data requests with busy signal (:pr:`2092`) `Matthew Rocklin`_
+-  Don't forget released keys (:pr:`2098`) `Matthew Rocklin`_
+-  Update example for stopping a worker (:pr:`2088`) `John Kirkham`_
+-  removed hardcoded value of memory terminate fraction from a log message (:pr:`2096`) `Bartosz Marcinkowski`_
+-  Adjust worker doc after change in config file location and treatment (:pr:`2094`) `Aurélien Ponte`_
+-  Prefer gathering data from same host (:pr:`2090`) `Matthew Rocklin`_
+-  Handle exceptions on deserialized comm with text error (:pr:`2093`) `Matthew Rocklin`_
+-  Fix typo in docstring (:pr:`2087`) `Loïc Estève`_
+-  Provide communication context to serialization functions (:pr:`2054`) `Matthew Rocklin`_
+-  Allow `name` to be explicitly passed in publish_dataset (:pr:`1995`) `Marius van Niekerk`_
+-  Avoid accessing Worker.scheduler_delay around yield point (:pr:`2074`) `Matthew Rocklin`_
+-  Support TB and PB in format bytes (:pr:`2072`) `Matthew Rocklin`_
+-  Add test for as_completed for loops in Python 2 (:pr:`2071`) `Matthew Rocklin`_
+-  Allow adaptive to exist without a cluster (:pr:`2064`) `Matthew Rocklin`_
+-  Have worker data transfer wait until recipient acknowledges (:pr:`2052`) `Matthew Rocklin`_
+-  Support async def functions in Client.sync (:pr:`2070`) `Matthew Rocklin`_
+-  Add asynchronous parameter to docstring of LocalCluster `Matthew Rocklin`_
+-  Normalize address before comparison (:pr:`2066`) `Tom Augspurger`_
+-  Use ConnectionPool for Worker.scheduler `Matthew Rocklin`_
+-  Avoid reference cycle in str_graph `Matthew Rocklin`_
+-  Pull data outside of while loop in gather (:pr:`2059`) `Matthew Rocklin`_
+
 
 1.22.0 - 2018-06-14
 -------------------
@@ -73,7 +653,7 @@ Changelog
 -  Fix bug where queues would not clean up cleanly (:pr:`1922`) `Matthew Rocklin`_
 -  Delete cached file safely in upload file (:pr:`1921`) `Matthew Rocklin`_
 -  Accept KeyError when closing tornado IOLoop in tests (:pr:`1937`) `Matthew Rocklin`_
--  Quiet the client and scheduler when gather(..., errors='skip'`) (:pr:`1936`) `Matthew Rocklin`_
+-  Quiet the client and scheduler when gather(..., errors='skip') (:pr:`1936`) `Matthew Rocklin`_
 -  Clarify couldn't gather keys warning (:pr:`1942`) `Kenneth Koski`_
 -  Support submit keywords in joblib (:pr:`1947`) `Matthew Rocklin`_
 -  Avoid use of external resources in bokeh server (:pr:`1934`) `Matthew Rocklin`_
@@ -683,3 +1263,72 @@ significantly without many new features.
 .. _`@bmaisson`: https://github.com/bmaisson
 .. _`Martin Durant`: https://github.com/martindurant
 .. _`Grant Jenks`: https://github.com/grantjenks
+.. _`Dror Birkman`: https://github.com/Dror-LightCyber
+.. _`Dave Hirschfeld`: https://github.com/dhirschfeld
+.. _`Matt Nicolls`: https://github.com/nicolls1
+.. _`Phil Tooley`: https://github.com/ptooley
+.. _`Bartosz Marcinkowski`: https://github.com/bm371613
+.. _`Aurélien Ponte`: https://github.com/apatlpo
+.. _`Luke Canavan`: https://github.com/canavandl
+.. _`Derek Ludwig`: https://github.com/dsludwig
+.. _`Anderson Banihirwe`: https://github.com/andersy005
+.. _`Yu Feng`: https://github.com/rainwoodman
+.. _`Guillaume Eynard-Bontemps`: https://github.com/guillaumeeb
+.. _`Vladyslav Moisieienkov`: https://github.com/VMois
+.. _`Chris White`: https://github.com/cicdw
+.. _`Adam Klein`: https://github.com/adamklein
+.. _`Mike Gevaert`: https://github.com/mgeplf
+.. _`Gaurav Sheni`: https://github.com/gsheni
+.. _`Eric Ma`: https://github.com/ericmjl
+.. _`Peter Killick`: https://github.com/dkillick
+.. _`NotSqrt`: https://github.com/NotSqrt
+.. _`Tom Rochette`: https://github.com/tomzx
+.. _`Roy Wedge`: https://github.com/rwedge
+.. _`Michael Wheeler`: https://github.com/mikewheel
+.. _`Diane Trout`: https://github.com/detrout
+.. _`tjb900`: https://github.com/tjb900
+.. _`Stephan Hoyer`: https://github.com/shoyer
+.. _`Dirk Petersen`: https://github.com/dirkpetersen
+.. _`Daniel Farrell`: https://github.com/danpf
+.. _`George Sakkis`: https://github.com/gsakkis
+.. _`Adam Beberg`: https://github.com/beberg
+.. _`Marco Neumann`: https://github.com/crepererum
+.. _`Elliott Sales de Andrade`: https://github.com/QuLogic
+.. _`Brett Jurman`: https://github.com/ibebrett
+.. _`Julia Kent`: https://github.com/jukent
+.. _`Brett Randall`: https://github.com/javabrett
+.. _`deepthirajagopalan7`: https://github.com/deepthirajagopalan7
+.. _`Muammar El Khatib`: https://github.com/muammar
+.. _`Nikos Tsaousis`: https://github.com/tsanikgr
+.. _`Brian Chu`: https://github.com/bchu
+.. _`James Bourbeau`: https://github.com/jrbourbeau
+.. _`amerkel2`: https://github.com/amerkel2
+.. _`Michael Delgado`: https://github.com/delgadom
+.. _`Peter Andreas Entschev`: https://github.com/pentschev
+.. _`condoratberlin`: https://github.com/condoratberlin
+.. _`K.-Michael Aye`: https://github.com/michaelaye
+.. _`@plbertrand`: https://github.com/plbertrand
+.. _`Michael Spiegel`: https://github.com/Spiegel0
+.. _`Caleb`: https://github.com/calebho
+.. _`Ben Zaitlen`: https://github.com/quasiben
+.. _`Benjamin Zaitlen`: https://github.com/quasiben
+.. _`Manuel Garrido`: https://github.com/manugarri
+.. _`Magnus Nord`: https://github.com/magnunor
+.. _`Sam Grayson`: https://github.com/charmoniumQ
+.. _`Mathieu Dugré`: https://github.com/mathdugre
+.. _`Christian Hudon`: https://github.com/chrish42
+.. _`Gabriel Sailer`: https://github.com/sublinus
+.. _`Pierre Glaser`: https://github.com/pierreglase
+.. _`Shayan Amani`: https://github.com/SHi-ON
+.. _`Pav A`: https://github.com/rs2
+.. _`Mads R. B. Kristensen`: https://github.com/madsbk
+.. _`Mikhail Akimov`: https://github.com/roveo
+.. _`Abael He`: https://github.com/abaelhe
+.. _`byjott`: https://github.com/byjott
+.. _`Mohammad Noor`: https://github.com/MdSalih
+.. _`Richard J Zamora`: https://github.com/rjzamora
+.. _`Arpit Solanki`: https://github.com/arpit1997
+.. _`Gil Forsyth`: https://github.com/gforsyth
+.. _`Philipp Rudiger`: https://github.com/philippjfr
+.. _`Jonathan De Troye`: https://github.com/detroyejr
+.. _`matthieubulte`: https://github.com/matthieubulte

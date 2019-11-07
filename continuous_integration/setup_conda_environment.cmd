@@ -18,37 +18,39 @@ call deactivate
 @rem Create test environment
 @rem (note: no cytoolz as it seems to prevent faulthandler tracebacks on crash)
 %CONDA% create -n %CONDA_ENV% -q -y ^
+    zstandard ^
     bokeh ^
     click ^
     cloudpickle ^
     dask ^
     dill ^
-    futures ^
     lz4 ^
     ipykernel ^
     ipywidgets ^
     joblib ^
     jupyter_client ^
-    mock ^
     msgpack-python ^
+    prometheus_client ^
     psutil ^
     pytest ^
     python=%PYTHON% ^
     requests ^
     toolz ^
     tblib ^
-    tornado=4.5 ^
+    tornado=5 ^
     zict ^
+    fsspec ^
     -c conda-forge
 
 call activate %CONDA_ENV%
 
 %CONDA% uninstall -q -y --force dask joblib zict
+%PIP_INSTALL% pip --upgrade
 %PIP_INSTALL% git+https://github.com/dask/dask --upgrade
 %PIP_INSTALL% git+https://github.com/joblib/joblib.git --upgrade
 %PIP_INSTALL% git+https://github.com/dask/zict --upgrade
 
-%PIP_INSTALL% pytest-repeat pytest-timeout pytest-faulthandler sortedcollections
+%PIP_INSTALL% "pytest>=4" pytest-repeat pytest-timeout pytest-faulthandler sortedcollections pytest-asyncio
 
 @rem Display final environment (for reproducing)
 %CONDA% list

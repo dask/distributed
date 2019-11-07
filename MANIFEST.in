@@ -2,7 +2,9 @@ recursive-include distributed *.py
 recursive-include distributed *.js
 recursive-include distributed *.coffee
 recursive-include distributed *.html
+recursive-include distributed *.css
 recursive-include distributed *.svg
+recursive-include distributed *.ico
 recursive-include distributed *.yaml
 recursive-include docs *.rst
 
@@ -11,7 +13,8 @@ include README.rst
 include LICENSE.txt
 include MANIFEST.in
 include requirements.txt
-include distributed/tests/mytestegg-1.0.0-py3.4.egg
+include distributed/tests/testegg-1.0.0-py3.4.egg
+include distributed/tests/mytest.pyz
 include distributed/tests/*.pem
 
 prune docs/_build

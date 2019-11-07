@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 import logging
 
 from dask.sizeof import sizeof
@@ -15,6 +13,5 @@ def safe_sizeof(obj, default_size=1e6):
     try:
         return sizeof(obj)
     except Exception:
-        logger.warning('Sizeof calculation failed.  Defaulting to 1MB',
-                       exc_info=True)
+        logger.warning("Sizeof calculation failed.  Defaulting to 1MB", exc_info=True)
         return int(default_size)
