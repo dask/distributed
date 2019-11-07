@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 import logging
 from multiprocessing.queues import Empty
@@ -595,7 +596,7 @@ class WorkerProcess(object):
         self.child_stop_q.close()
 
         while process.is_alive() and loop.time() < deadline:
-            await gen.sleep(0.05)
+            await asyncio.sleep(0.05)
 
         if process.is_alive():
             logger.warning(
@@ -614,7 +615,7 @@ class WorkerProcess(object):
             try:
                 msg = self.init_result_q.get_nowait()
             except Empty:
-                await gen.sleep(delay)
+                await asyncio.sleep(delay)
                 continue
 
             if msg["uid"] != uid:  # ensure that we didn't cross queues
