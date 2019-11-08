@@ -1,3 +1,4 @@
+import datetime
 import logging
 import math
 from numbers import Number
@@ -861,6 +862,7 @@ class Events(DashboardComponent):
 class TaskStream(DashboardComponent):
     def __init__(self, scheduler, n_rectangles=1000, clear_interval="20s", clear_multipler=3, **kwargs):
         self.scheduler = scheduler
+        self.last_check = datetime.datetime(2000, 1, 1)
         self.offset = 0
         es = [p for p in self.scheduler.plugins if isinstance(p, TaskStreamPlugin)]
         if not es:
@@ -912,10 +914,16 @@ class TaskStream(DashboardComponent):
                     gap_to_previous = self.source.data["start"][-1] - self.source.data["start"][-2] + self.source.data["duration"][-2]
                 else:
                     gap_to_previous = 0
-                avg_duration_of_visualized = np.mean(self.source.data["duration"])
-                if (gap_to_previous > (avg_duration_of_visualized * self.clear_multiplier) > self.clear_interval*1000) or last == 0:
-                    self.offset = min(rectangles["start"])
-                    self.source.data.update({k: [] for k in rectangles})
+
+                # only check every 5 seconds if a refresh should be considered
+                if (datetime.datetime.now() - self.last_check).total_seconds() > 5:
+                    self.last_check = datetime.datetime.now()
+                    avg_duration_of_visualized = np.mean(self.source.data["duration"])
+
+                    # only refresh when there's a long gap
+                    if (gap_to_previous > (avg_duration_of_visualized * self.clear_multiplier) > self.clear_interval*1000) or last == 0:
+                        self.offset = min(rectangles["start"])
+                        self.source.data.update({k: [] for k in rectangles})
 
             rectangles["start"] = [x - self.offset for x in rectangles["start"]]
 
