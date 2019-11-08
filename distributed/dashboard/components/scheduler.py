@@ -917,8 +917,15 @@ class TaskStream(DashboardComponent):
                 print("Whitespace", format_time(new_start - old_end))
                 print("Old width", format_time(old_end - old_start))
 
+                density = (
+                    sum(self.source.data["duration"])
+                    / len(self.workers)
+                    / (old_end - old_start)
+                    / 1000
+                )
+
                 # If whitespace is more than 3x the old width
-                if new_start - old_end > (old_end - old_start) * 3:
+                if (new_start - old_end) > (old_end - old_start) * 2 or density < 0.05:
                     self.source.data.update({k: [] for k in rectangles})  # clear
                     self.offset = min(rectangles["start"])  # redefine offset
 
@@ -1722,7 +1729,7 @@ def status_doc(scheduler, extra, doc):
             n_rectangles=dask.config.get(
                 "distributed.scheduler.dashboard.status.task-stream-length"
             ),
-            clear_interval="2s",
+            clear_interval="5s",
             sizing_mode="stretch_both",
         )
         task_stream.update()
