@@ -7,7 +7,7 @@ down below.
 
 You may also find the `dask comparison with spark`_ of interest.
 
-.. _`dask comparison with spark`: http://dask.pydata.org/en/latest/spark.html
+.. _`dask comparison with spark`: http://docs.dask.org/en/latest/spark.html
 
 
 Big Data World
@@ -185,13 +185,13 @@ IPython Parallel has the following advantages over ``distributed``
     serve in system administration tasks.
 3.  Deployment help:  IPython Parallel has mechanisms built-in to aid
     deployment on SGE, MPI, etc..  Distributed does not have any such sugar,
-    though is fairly simple to :doc:`set up <setup>` by hand.
+    though is fairly simple to `set up <https://docs.dask.org/en/latest/setup.html>`_ by hand.
 4.  Various other advantages:  Over the years IPython parallel has accrued a
     variety of helpful features like IPython interaction magics, ``@parallel``
     decorators, etc..
 
 .. _`a recipe`: https://ipython.org/ipython-doc/3/parallel/dag_dependencies.html#dag-dependencies
-.. _dask: http://dask.pydata.org/en/latest/
+.. _dask: https://dask.org/
 
 
 concurrent.futures

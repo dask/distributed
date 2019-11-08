@@ -1,5 +1,3 @@
-from __future__ import print_function, division, absolute_import
-
 from collections import defaultdict
 
 from tornado.ioloop import IOLoop
@@ -12,6 +10,7 @@ try:
 except ImportError:
     pass
 else:
+
     class Digest(object):
         def __init__(self, loop=None, intervals=(5, 60, 3600)):
             self.intervals = intervals

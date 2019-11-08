@@ -1,15 +1,13 @@
-from __future__ import print_function, division, absolute_import
-
-from abc import ABCMeta, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod, abstractproperty
 from datetime import timedelta
 import logging
+import weakref
 
 import dask
-from six import with_metaclass
 from tornado import gen
 
 from ..metrics import time
-from ..utils import parse_timedelta
+from ..utils import parse_timedelta, ignoring
 from . import registry
 from .addressing import parse_address
 
@@ -21,7 +19,11 @@ class CommClosedError(IOError):
     pass
 
 
-class Comm(with_metaclass(ABCMeta)):
+class FatalCommClosedError(CommClosedError):
+    pass
+
+
+class Comm(ABC):
     """
     A message-oriented communication object, representing an established
     communication channel.  There should be only one reader and one
@@ -33,22 +35,41 @@ class Comm(with_metaclass(ABCMeta)):
     depending on the underlying transport's characteristics.
     """
 
+    _instances = weakref.WeakSet()
+
+    def __init__(self):
+        self._instances.add(self)
+        self.name = None
+
     # XXX add set_close_callback()?
 
     @abstractmethod
-    def read(self):
+    def read(self, deserializers=None):
         """
         Read and return a message (a Python object).
 
         This method is a coroutine.
+
+        Parameters
+        ----------
+        deserializers : Optional[Dict[str, Tuple[Callable, Callable, bool]]]
+            An optional dict appropriate for distributed.protocol.deserialize.
+            See :ref:`serialization` for more.
         """
 
     @abstractmethod
-    def write(self, msg):
+    def write(self, msg, on_error=None):
         """
         Write a message (a Python object).
 
         This method is a coroutine.
+
+        Parameters
+        ----------
+        msg :
+        on_error : Optional[str]
+            The behavior when serialization fails. See
+            ``distributed.protocol.core.dumps`` for valid values.
         """
 
     @abstractmethod
@@ -99,12 +120,15 @@ class Comm(with_metaclass(ABCMeta)):
         if self.closed():
             return "<closed %s>" % (clsname,)
         else:
-            return ("<%s local=%s remote=%s>"
-                    % (clsname, self.local_address, self.peer_address))
+            return "<%s %s local=%s remote=%s>" % (
+                clsname,
+                self.name or "",
+                self.local_address,
+                self.peer_address,
+            )
 
 
-class Listener(with_metaclass(ABCMeta)):
-
+class Listener(ABC):
     @abstractmethod
     def start(self):
         """
@@ -140,8 +164,7 @@ class Listener(with_metaclass(ABCMeta)):
         self.stop()
 
 
-class Connector(with_metaclass(ABCMeta)):
-
+class Connector(ABC):
     @abstractmethod
     def connect(self, address, deserialize=True):
         """
@@ -152,20 +175,20 @@ class Connector(with_metaclass(ABCMeta)):
         """
 
 
-@gen.coroutine
-def connect(addr, timeout=None, deserialize=True, connection_args=None):
+async def connect(addr, timeout=None, deserialize=True, connection_args=None):
     """
     Connect to the given address (a URI such as ``tcp://127.0.0.1:1234``)
     and yield a ``Comm`` object.  If the connection attempt fails, it is
     retried until the *timeout* is expired.
     """
     if timeout is None:
-        timeout = dask.config.get('distributed.comm.timeouts.connect')
-    timeout = parse_timedelta(timeout, default='seconds')
+        timeout = dask.config.get("distributed.comm.timeouts.connect")
+    timeout = parse_timedelta(timeout, default="seconds")
 
     scheme, loc = parse_address(addr)
     backend = registry.get_backend(scheme)
     connector = backend.get_connector()
+    comm = None
 
     start = time()
     deadline = start + timeout
@@ -173,30 +196,42 @@ def connect(addr, timeout=None, deserialize=True, connection_args=None):
 
     def _raise(error):
         error = error or "connect() didn't finish in time"
-        msg = ("Timed out trying to connect to %r after %s s: %s"
-               % (addr, timeout, error))
+        msg = "Timed out trying to connect to %r after %s s: %s" % (
+            addr,
+            timeout,
+            error,
+        )
         raise IOError(msg)
 
+    # This starts a thread
     while True:
         try:
-            future = connector.connect(loc, deserialize=deserialize,
-                                       **(connection_args or {}))
-            comm = yield gen.with_timeout(timedelta(seconds=deadline - time()),
-                                          future,
-                                          quiet_exceptions=EnvironmentError)
+            while deadline - time() > 0:
+                future = connector.connect(
+                    loc, deserialize=deserialize, **(connection_args or {})
+                )
+                with ignoring(gen.TimeoutError):
+                    comm = await gen.with_timeout(
+                        timedelta(seconds=min(deadline - time(), 1)),
+                        future,
+                        quiet_exceptions=EnvironmentError,
+                    )
+                    break
+            if not comm:
+                _raise(error)
+        except FatalCommClosedError:
+            raise
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                yield gen.sleep(0.01)
+                await gen.sleep(0.01)
                 logger.debug("sleeping on connect")
             else:
                 _raise(error)
-        except gen.TimeoutError:
-            _raise(error)
         else:
             break
 
-    raise gen.Return(comm)
+    return comm
 
 
 def listen(addr, handle_comm, deserialize=True, connection_args=None):
@@ -208,8 +243,17 @@ def listen(addr, handle_comm, deserialize=True, connection_args=None):
 
     *handle_comm* can be a regular function or a coroutine.
     """
-    scheme, loc = parse_address(addr)
+    try:
+        scheme, loc = parse_address(addr, strict=True)
+    except ValueError:
+        if connection_args and connection_args.get("ssl_context"):
+            addr = "tls://" + addr
+        else:
+            addr = "tcp://" + addr
+        scheme, loc = parse_address(addr, strict=True)
+
     backend = registry.get_backend(scheme)
 
-    return backend.get_listener(loc, handle_comm, deserialize,
-                                **(connection_args or {}))
+    return backend.get_listener(
+        loc, handle_comm, deserialize, **(connection_args or {})
+    )
