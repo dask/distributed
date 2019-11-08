@@ -1589,31 +1589,31 @@ class Scheduler(ServerNode):
             if not isinstance(task, dict):
                 continue
 
-            if 'annotation' not in task:
+            if "annotation" not in task:
                 continue
 
-            pickled_annotation = task['annotation']
+            pickled_annotation = task["annotation"]
             annotation = pickle.loads(pickled_annotation).annotation
             annotations[k] = annotation
 
-            if 'priority' in annotation:
-                priority[k] = annotation['priority']
+            if "priority" in annotation:
+                priority[k] = annotation["priority"]
 
-            if 'worker' in annotation:
-                worker = annotation['worker']
+            if "worker" in annotation:
+                worker = annotation["worker"]
                 if not isinstance(worker, (list, tuple)):
                     worker = [worker]
 
                 restrictions[k] = worker
 
-            if annotation.get('allow_other_workers', False):
+            if annotation.get("allow_other_workers", False):
                 loose_restrictions.append(k)
 
-            if 'retries' in annotation:
-                retries[k] = annotation['retries']
+            if "retries" in annotation:
+                retries[k] = annotation["retries"]
 
-            if 'resources' in annotation:
-                resources[k] = annotation['resources']
+            if "resources" in annotation:
+                resources[k] = annotation["resources"]
 
         # Remove any self-dependencies (happens on test_publish_bag() and others)
         for k, v in dependencies.items():

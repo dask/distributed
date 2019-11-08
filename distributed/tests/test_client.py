@@ -602,30 +602,29 @@ def test_task_annotations(c, s, a, b):
     from distributed.core import TaskAnnotation as TA
 
     #  Test priority
-    dsk = {'x': (inc, 1, TA({"priority": 1}))}
-    result = yield c.get(dsk, 'x', sync=False)
+    dsk = {"x": (inc, 1, TA({"priority": 1}))}
+    result = yield c.get(dsk, "x", sync=False)
     assert result == 2
 
     # Test specifying a worker
-    dsk = {'y': (inc, 1, TA({'worker': a.address}))}
-    result = yield c.get(dsk, 'y', sync=False)
+    dsk = {"y": (inc, 1, TA({"worker": a.address}))}
+    result = yield c.get(dsk, "y", sync=False)
 
-    assert s.who_has['y'] == set([a.address])
+    assert s.who_has["y"] == set([a.address])
     assert result == 2
 
     # Test specifying multiple workers
-    dsk = {'w': (inc, 1, TA({'worker': [a.address, b.address]}))}
-    result = yield c.get(dsk, 'w', sync=False)
+    dsk = {"w": (inc, 1, TA({"worker": [a.address, b.address]}))}
+    result = yield c.get(dsk, "w", sync=False)
 
-    assert len(s.who_has['w'].intersection(set([a.address, b.address]))) > 0
+    assert len(s.who_has["w"].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
     # Test specifying a non-existent worker with loose restrictions
-    dsk = {'z': (inc, 1, TA({'worker': 'tcp://2.2.2.2/',
-                            'allow_other_workers': True}))}
-    result = yield c.get(dsk, 'z', sync=False)
+    dsk = {"z": (inc, 1, TA({"worker": "tcp://2.2.2.2/", "allow_other_workers": True}))}
+    result = yield c.get(dsk, "z", sync=False)
 
-    assert len(s.who_has['z'].intersection(set([a.address, b.address]))) > 0
+    assert len(s.who_has["z"].intersection(set([a.address, b.address]))) > 0
     assert result == 2
 
 
@@ -635,11 +634,10 @@ def test_task_annotations(c, s, a, b):
 def test_nested_task_annotations(c, s, a, b):
     from distributed.core import TaskAnnotation as TA
 
-    dsk = {'v': (inc, (inc, 1, TA({"worker": a.address})),
-                 TA({"worker": a.address}))}
+    dsk = {"v": (inc, (inc, 1, TA({"worker": a.address})), TA({"worker": a.address}))}
 
-    result = yield c.get(dsk, 'v', sync=False)
-    assert s.who_has['v'] == set([a.address])
+    result = yield c.get(dsk, "v", sync=False)
+    assert s.who_has["v"] == set([a.address])
     assert result == 3
 
 

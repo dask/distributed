@@ -30,8 +30,14 @@ from . import profile, comm, system
 from .batched import BatchedSend
 from .comm import get_address_host, connect
 from .comm.addressing import address_from_user_args
-from .core import (error_message, CommClosedError, send_recv, pingpong, coerce_to_address,
-                   TaskAnnotation)
+from .core import (
+    error_message,
+    CommClosedError,
+    send_recv,
+    pingpong,
+    coerce_to_address,
+    TaskAnnotation,
+)
 from .diskutils import WorkSpace
 from .metrics import time
 from .node import ServerNode
@@ -3162,7 +3168,7 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
             args = ((apply, function, args, kwargs),)
             kwargs = {}
         else:
-            args = ((function, ) + tuple(args),)
+            args = ((function,) + tuple(args),)
 
         function = execute_task
 
@@ -3255,22 +3261,20 @@ def dumps_task(task):
             annots = None
 
         if task[0] is apply:
-            d = {'function': dumps_function(task[1]),
-                 'args': warn_dumps(task[2])}
+            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
 
             if len(task) == 4:
-                d['kwargs'] = warn_dumps(task[3])
+                d["kwargs"] = warn_dumps(task[3])
 
             if annots:
-                d['annotation'] = warn_dumps(annots)
+                d["annotation"] = warn_dumps(annots)
 
             return d
         else:
-            d = {'function': dumps_function(task[0]),
-                 'args': warn_dumps(task[1:])}
+            d = {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
 
             if annots:
-                d['annotation'] = warn_dumps(annots)
+                d["annotation"] = warn_dumps(annots)
 
             return d
 
