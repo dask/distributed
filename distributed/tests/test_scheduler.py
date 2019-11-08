@@ -468,6 +468,34 @@ def test_dumps_task():
     assert cloudpickle.loads(d["args"]) == (1,)
     assert set(d) == {"function", "args"}
 
+    from distributed.core import TaskAnnotation as TA
+    from distributed.protocol.serialize import Serialize
+
+    annot = TA({"priority": 1})
+
+    d = dumps_task((inc, 1, annot))
+    assert cloudpickle.loads(d["function"])(1) == 2
+    assert cloudpickle.loads(d["args"]) == (1,)
+    assert cloudpickle.loads(d["annotation"]) == annot
+
+    d = dumps_task((apply, f, (1, annot), {"y": 10}))
+    assert cloudpickle.loads(d["function"])(1, 2) == 3
+    assert cloudpickle.loads(d["args"]) == (1,)
+    assert cloudpickle.loads(d["kwargs"]) == {"y": 10}
+    assert cloudpickle.loads(d["annotation"]) == annot
+
+    d = dumps_task((inc, (inc, 1)))
+    assert isinstance(d["task"], Serialize)
+    assert d["task"].data == (inc, (inc, 1))
+    assert "annotation" not in d
+
+    func = (apply, f, (inc, 1, annot), {"y": 10})
+    d = dumps_task(func)
+    assert isinstance(d["task"], Serialize)
+    assert d["task"].data == (apply, f, (inc, 1), {"y": 10})
+    assert cloudpickle.loads(d["annotation"]) == annot
+
+
 
 @gen_cluster()
 def test_ready_remove_worker(s, a, b):

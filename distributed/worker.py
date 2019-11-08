@@ -3159,22 +3159,6 @@ def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     if kwargs:
         kwargs = pickle.loads(kwargs)
 
-    args_complex = args is not None and any(map(_maybe_complex, args))
-    kwargs_complex = kwargs is not None and _maybe_complex(kwargs)
-    is_complex = args_complex or kwargs_complex
-
-    if is_complex:
-        if kwargs:
-            args = ((apply, function, args, kwargs),)
-            kwargs = {}
-        else:
-            args = ((function,) + tuple(args),)
-
-        function = execute_task
-
-    # TODO(sjperkins)
-    # This may be removable, considering
-    # the nested task handling case above
     if task is not no_value:
         assert not function and not args and not kwargs
         function = execute_task
@@ -3193,18 +3177,8 @@ def execute_task(task):
     7
     """
     if istask(task):
-        if task[0] == apply:
-            func, args, kwargs = task[1:4]
-            args = map(execute_task, args)
-            kwargs = execute_task(kwargs)
-            return apply(func, args, kwargs)
-        else:
-            if type(task[-1]) == TaskAnnotation:
-                func, args = task[0], task[1:-1]
-            else:
-                func, args = task[0], task[1:]
-
-            return func(*map(execute_task, args))
+        func, args = task[0], task[1:]
+        return func(*map(execute_task, args))
     elif isinstance(task, list):
         return list(map(execute_task, task))
     else:
@@ -3254,29 +3228,44 @@ def dumps_task(task):
     {'task': b'\x80\x04\x95\x03\x00\x00\x00\x00\x00\x00\x00K\x01.'}
     """
     if istask(task):
-        # Remove annotations from the task
-        if type(task[-1]) == TaskAnnotation:
-            task, annots = task[:-1], task[-1]
-        else:
-            annots = None
+        annot = None
 
+        # (apply, func, args [,kwargs])
         if task[0] is apply:
-            d = {"function": dumps_function(task[1]), "args": warn_dumps(task[2])}
+            args = task[2]
 
-            if len(task) == 4:
-                d["kwargs"] = warn_dumps(task[3])
+            # Strip out annotation at end of args
+            if len(args) > 0 and type(args[-1]) == TaskAnnotation:
+                annot = args[-1]
+                args = args[:-1]
 
-            if annots:
-                d["annotation"] = warn_dumps(annots)
+            if any(map(_maybe_complex, (args,) + tuple(task[3:]))):
+                d = {'task': to_serialize((apply, task[1], args) + task[3:])}
+            else:
+                d = {'function': dumps_function(task[1]),
+                     'args': warn_dumps(args)}
 
-            return d
+                if len(task) == 4:
+                    d['kwargs'] = warn_dumps(task[3])
+
+        # (func, arg0, arg1, ..., argn)
         else:
-            d = {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
+            # Strip out annotation at end of args
+            if type(task[-1]) == TaskAnnotation:
+                annot = task[-1]
+                task = task[:-1]
 
-            if annots:
-                d["annotation"] = warn_dumps(annots)
+            if any(map(_maybe_complex, task[1:])):
+                d = {'task': to_serialize(task)}
+            else:
+                d = {'function': dumps_function(task[0]),
+                     'args': warn_dumps(task[1:])}
 
-            return d
+        # Add any extracted annotations
+        if annot is not None:
+            d['annotation'] = warn_dumps(annot)
+
+        return d
 
     return to_serialize(task)
 

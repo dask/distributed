@@ -628,13 +628,11 @@ def test_task_annotations(c, s, a, b):
     assert result == 2
 
 
-# @pytest.mark.xfail(reason="Nested tasks are serialised "
-#                           "and annotations ignored")
 @gen_cluster(client=True, timeout=None)
 def test_nested_task_annotations(c, s, a, b):
     from distributed.core import TaskAnnotation as TA
 
-    dsk = {"v": (inc, (inc, 1, TA({"worker": a.address})), TA({"worker": a.address}))}
+    dsk = {"v": (inc, (inc, 1), TA({"worker": a.address}))}
 
     result = yield c.get(dsk, "v", sync=False)
     assert s.who_has["v"] == set([a.address])
