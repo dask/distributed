@@ -162,7 +162,7 @@ class ServerNode(Node, Server):
 
     def __await__(self):
         if self.status == "running":
-            return asyncio.sleep(0).__await__()
+            return gen.sleep(0).__await__()
         else:
             future = self.start()
             timeout = getattr(self, "death_timeout", 0)
