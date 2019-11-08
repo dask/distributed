@@ -2444,8 +2444,9 @@ class Client(Node):
             }
 
             if values:
-                dsk = dask.optimization.inline(dsk, keys=values,
-                                               dependencies=dependencies)
+                dsk = dask.optimization.inline(
+                    dsk, keys=values, dependencies=dependencies
+                )
 
             d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
             extra_futures = set.union(*[v[1] for v in d.values()]) if d else set()
