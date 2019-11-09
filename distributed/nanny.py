@@ -484,6 +484,14 @@ class WorkerProcess(object):
         self.child_stop_q = mp_context.Queue()
         uid = uuid.uuid4().hex
 
+        if dask.config.get("distributed.nanny.pip"):
+            import subprocess, sys
+
+            subprocess.call(
+                [sys.executable, "-m", "pip", "install"]
+                + dask.config.get("distributed.nanny.pip")
+            )
+
         self.process = AsyncProcess(
             target=self._run,
             name="Dask Worker process (from Nanny)",

@@ -66,6 +66,9 @@ distributed:
   client:
     heartbeat: 5s  # time between client heartbeats
 
+  nanny:
+    pip: []
+
   deploy:
     lost-worker-timeout: 15s  # Interval after which to hard-close a lost worker job
 
