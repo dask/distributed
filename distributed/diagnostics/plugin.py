@@ -1,4 +1,6 @@
 import logging
+import subprocess
+import sys
 
 logger = logging.getLogger(__name__)
 
@@ -126,3 +128,54 @@ class WorkerPlugin(object):
             Final state of the transition.
         kwargs: More options passed when transitioning
         """
+
+
+class PipInstall(WorkerPlugin):
+    """ A Worker Plugin to pip install a set of packages
+
+    This accepts a set of packages to install on all workers.
+    You can also optionally ask for the worker to restart itself after
+    performing this installation.
+
+    Parameters
+    ----------
+    packages : List[str]
+        A list of strings to place after "pip install" command
+    restart : bool
+        Whether or not to restart the worker after pip installing
+        Only functions if the worker has an attached nanny process
+
+    Examples
+    --------
+    >>> from dask.distributed import PipInstall
+    >>> plugin = PipInstall(packages=["dask", "scikit-learn"])
+
+    >>> client.register_worker_plugin(plugin)
+    """
+
+    name = "pip"
+
+    def __init__(self, packages=[], restart=False):
+        self.packages = packages
+        self.restart = restart
+
+    async def setup(self, worker):
+        import socket
+        from ..lock import Lock
+
+        async with Lock(socket.gethostname()):  # don't clobber one installation
+            logger.info("Pip installing the following packages: %s", self.packages)
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "pip", "install"] + self.packages,
+                stdout=subprocess.PIPE,
+            )
+            stdout, stderr = proc.communicate()
+
+            if self.restart and worker.nanny:
+                lines = stdout.strip().split(b"\n")
+                if not all(
+                    line.startswith(b"Requirement already satisfied") for line in lines
+                ):
+                    worker.loop.add_callback(
+                        worker.close_gracefully, restart=True
+                    )  # restart

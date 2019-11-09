@@ -1586,3 +1586,10 @@ async def test_bad_startup(cleanup):
             w = await Worker(s.address, startup_information={"bad": bad_startup})
         except Exception:
             pytest.fail("Startup exception was raised")
+
+
+@gen_cluster(client=True)
+async def test_pip_install(c, s, a, b):
+    from distributed.diagnostics.plugin import PipInstall
+
+    await c.register_worker_plugin(PipInstall(packages=[]))
