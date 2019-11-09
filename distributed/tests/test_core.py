@@ -392,15 +392,14 @@ async def check_large_packets(listen_arg):
     server.listen(listen_arg)
 
     data = b"0" * int(200e6)  # slightly more than 100MB
-    conn = rpc(server.address)
-    result = await conn.echo(x=data)
-    assert result == data
+    async with rpc(server.address) as conn:
+        result = await conn.echo(x=data)
+        assert result == data
 
-    d = {"x": data}
-    result = await conn.echo(x=d)
-    assert result == d
+        d = {"x": data}
+        result = await conn.echo(x=d)
+        assert result == d
 
-    conn.close_comms()
     server.stop()
 
 
