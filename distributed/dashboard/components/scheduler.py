@@ -797,7 +797,7 @@ class Events(DashboardComponent):
             color="color",
             size=50,
             alpha=0.5,
-            legend="action",
+            legend_field="action",
         )
         fig.yaxis.axis_label = "Action"
         fig.legend.location = "top_left"
@@ -1058,7 +1058,7 @@ class TaskGraph(DashboardComponent):
             color=node_colors,
             source=self.node_source,
             view=node_view,
-            legend="state",
+            legend_field="state",
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
