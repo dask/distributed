@@ -1592,9 +1592,7 @@ class Scheduler(ServerNode):
             if "annotation" not in task:
                 continue
 
-            pickled_annotation = task["annotation"]
-            annotation = pickle.loads(pickled_annotation).annotation
-            annotations[k] = annotation
+            annotations[k] = annotation = pickle.loads(task["annotation"]).annotation
 
             if "priority" in annotation:
                 priority[k] = annotation["priority"]
