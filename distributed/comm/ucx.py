@@ -7,7 +7,6 @@ See :ref:`communications` for more.
 """
 import logging
 import concurrent
-import os
 
 import dask
 import numpy as np
@@ -18,11 +17,10 @@ from .registry import Backend, backends
 from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors
 
+import dask
+import ucp
+import numpy as np
 
-os.environ.setdefault("UCX_RNDV_SCHEME", "put_zcopy")
-os.environ.setdefault("UCX_MEMTYPE_CACHE", "n")
-os.environ.setdefault("UCX_TLS", "all")
-os.environ.setdefault("UCX_SOCKADDR_TLS_PRIORITY", "sockcm")
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +39,7 @@ def init_once():
     import ucp as _ucp
 
     ucp = _ucp
-    options = dask.config.get("ucx", default={})
-    ucp.init(options=options)
+    ucp.init(options=dask.config.get("ucx"), env_takes_precedence=True)
 
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
