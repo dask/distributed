@@ -3412,19 +3412,16 @@ def convert_kwargs_to_str(kwargs, max_len=None):
     """
     length = 0
     strs = ["" for i in range(len(kwargs))]
-    if isinstance(kwargs, dict):
-        for i, (argname, arg) in enumerate(kwargs.items()):
-            try:
-                sarg = repr(arg)
-            except Exception:
-                sarg = "< could not convert arg to str >"
-            skwarg = repr(argname) + ": " + sarg
-            strs[i] = skwarg
-            length += len(skwarg) + 2
-            if max_len is not None and length > max_len:
-                return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
-    elif isinstance(kwargs, (tuple, list)):
-        return convert_args_to_str(kwargs, max_len=max_len)
+    for i, (argname, arg) in enumerate(kwargs.items()):
+        try:
+            sarg = repr(arg)
+        except Exception:
+            sarg = "< could not convert arg to str >"
+        skwarg = repr(argname) + ": " + sarg
+        strs[i] = skwarg
+        length += len(skwarg) + 2
+        if max_len is not None and length > max_len:
+            return "{{{}".format(", ".join(strs[: i + 1]))[:max_len]
     else:
         return "{{{}}}".format(", ".join(strs))
 
