@@ -3240,13 +3240,12 @@ def dumps_task(task):
                 args = args[:-1]
 
             if any(map(_maybe_complex, (args,) + tuple(task[3:]))):
-                d = {'task': to_serialize((apply, task[1], args) + task[3:])}
+                d = {"task": to_serialize((apply, task[1], args) + task[3:])}
             else:
-                d = {'function': dumps_function(task[1]),
-                     'args': warn_dumps(args)}
+                d = {"function": dumps_function(task[1]), "args": warn_dumps(args)}
 
                 if len(task) == 4:
-                    d['kwargs'] = warn_dumps(task[3])
+                    d["kwargs"] = warn_dumps(task[3])
 
         # (func, arg0, arg1, ..., argn)
         else:
@@ -3256,14 +3255,13 @@ def dumps_task(task):
                 task = task[:-1]
 
             if any(map(_maybe_complex, task[1:])):
-                d = {'task': to_serialize(task)}
+                d = {"task": to_serialize(task)}
             else:
-                d = {'function': dumps_function(task[0]),
-                     'args': warn_dumps(task[1:])}
+                d = {"function": dumps_function(task[0]), "args": warn_dumps(task[1:])}
 
         # Add any extracted annotations
         if annot is not None:
-            d['annotation'] = warn_dumps(annot)
+            d["annotation"] = warn_dumps(annot)
 
         return d
 

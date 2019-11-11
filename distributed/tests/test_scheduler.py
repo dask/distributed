@@ -496,7 +496,6 @@ def test_dumps_task():
     assert cloudpickle.loads(d["annotation"]) == annot
 
 
-
 @gen_cluster()
 def test_ready_remove_worker(s, a, b):
     s.update_graph(
