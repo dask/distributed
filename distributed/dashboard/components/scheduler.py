@@ -912,11 +912,6 @@ class TaskStream(DashboardComponent):
                     )
                 )
 
-                from dask.utils import format_time
-
-                print("Whitespace", format_time(new_start - old_end))
-                print("Old width", format_time(old_end - old_start))
-
                 # If whitespace is more than 3x the old width
                 if new_start - old_end > (old_end - old_start) * 3:
                     self.source.data.update({k: [] for k in rectangles})  # clear
