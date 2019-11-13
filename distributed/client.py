@@ -383,7 +383,7 @@ class Future(WrappedKey):
     def __repr__(self):
         if self.type:
             try:
-                typ = self.type.__name__
+                typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
             return "<Future: status: %s, type: %s, key: %s>" % (
@@ -405,7 +405,7 @@ class Future(WrappedKey):
         }
         if self.type:
             try:
-                typ = self.type.__name__
+                typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
             text += '<font color="gray">type: </font>%s, ' % typ
