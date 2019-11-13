@@ -334,9 +334,11 @@ def test_retries_dask_array(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_future_repr(c, s, a, b):
+async def test_future_repr(c, s, a, b):
     x = c.submit(inc, 10)
+    await x
     for func in [repr, lambda x: x._repr_html_()]:
+        assert "int" in func(x)
         assert str(x.key) in func(x)
         assert str(x.status) in func(x)
         assert str(x.status) in repr(c.futures[x.key])
