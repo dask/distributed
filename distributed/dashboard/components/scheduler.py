@@ -916,7 +916,6 @@ class TaskStream(DashboardComponent):
                     sum(self.source.data["duration"])
                     / len(self.workers)
                     / (old_end - old_start)
-                    / 1000
                 )
 
                 # If whitespace is more than 3x the old width
