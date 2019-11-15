@@ -2006,9 +2006,8 @@ class Scheduler(ServerNode):
             return
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
             if retries:
-                self.loop.add_future(
-                    asyncio.sleep(0.2),
-                    lambda _: self.cancel_key(key, client, retries - 1),
+                self.loop.call_later(
+                    0.2, lambda: self.cancel_key(key, client, retries - 1)
                 )
             return
         if force or ts.who_wants == {cs}:  # no one else wants this key
