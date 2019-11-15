@@ -704,6 +704,7 @@ class Client(Node):
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
             "error": self._handle_error,
+            "scheduler-shutdown": self.close,
         }
 
         self._state_handlers = {

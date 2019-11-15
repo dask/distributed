@@ -5687,5 +5687,14 @@ async def test_futures_of_sorted(c, s, a, b):
         assert str(k) in str(f)
 
 
+@pytest.mark.asyncio
+async def test_scheduler_cleans_clients(cleanup):
+    s = await Scheduler(port=0)
+    c = await Client(s.address, asynchronous=True)
+
+    await s.close()
+    assert c.status == "closed"
+
+
 if sys.version_info >= (3, 5):
     from distributed.tests.py3_test_client import *  # noqa F401

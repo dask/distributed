@@ -1275,6 +1275,9 @@ class Scheduler(ServerNode):
                 else:
                     break
 
+        for c in self.client_comms.values():
+            c.send({"op": "scheduler-shutdown"})
+
         for pc in self.periodic_callbacks.values():
             pc.stop()
         self.periodic_callbacks.clear()
@@ -1295,6 +1298,8 @@ class Scheduler(ServerNode):
 
         for future in futures:  # TODO: do all at once
             await future
+
+        await asyncio.gather(*[c.close() for c in self.client_comms.values()])
 
         for comm in self.client_comms.values():
             comm.abort()
