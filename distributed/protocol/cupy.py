@@ -14,6 +14,8 @@ class PatchedCudaArrayInterface(object):
         if cai.get("strides") is None and cai_cupy_vsn < 2:
             cai.pop("strides", None)
         self.__cuda_array_interface__ = cai
+        # Save a ref to ary so it won't go out of scope
+        self.base = ary
 
 
 @cuda_serialize.register(cupy.ndarray)
