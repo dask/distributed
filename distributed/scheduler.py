@@ -2553,8 +2553,6 @@ class Scheduler(ServerNode):
             )
             result = {"status": "error", "keys": missing_keys}
             with log_errors():
-                for worker in missing_workers:
-                    self.remove_worker(address=worker)  # this is extreme
                 for key, workers in missing_keys.items():
                     if not workers:
                         continue

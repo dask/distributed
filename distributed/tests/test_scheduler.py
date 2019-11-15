@@ -17,7 +17,8 @@ from tornado import gen
 import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
-from distributed.core import connect, rpc
+from distributed.comm import Comm
+from distributed.core import connect, rpc, ConnectionPool
 from distributed.scheduler import Scheduler, TaskState
 from distributed.client import wait
 from distributed.metrics import time
@@ -1704,3 +1705,71 @@ async def test_no_danglng_asyncio_tasks(cleanup):
 
     tasks = asyncio.all_tasks()
     assert tasks == start
+
+
+class BrokenComm(Comm):
+    peer_address = None
+    local_address = None
+
+    def close(self):
+        pass
+
+    def closed(self):
+        pass
+
+    def abort(self):
+        pass
+
+    def read(self, deserializers=None):
+        raise EnvironmentError
+
+    def write(self, msg, serializers=None, on_error=None):
+        raise EnvironmentError
+
+
+class FlakyConnectionPool(ConnectionPool):
+    def __init__(self, *args, failing_connections=0, **kwargs):
+        self.cnn_count = 0
+        self.failing_connections = failing_connections
+        super(FlakyConnectionPool, self).__init__(*args, **kwargs)
+
+    async def connect(self, *args, **kwargs):
+        self.cnn_count += 1
+        if self.cnn_count > self.failing_connections:
+            return await super(FlakyConnectionPool, self).connect(*args, **kwargs)
+        else:
+            return BrokenComm()
+
+
+@gen_cluster(client=True)
+async def test_gather_failing_cnn_recover(c, s, a, b):
+    orig_rpc = s.rpc
+    x = await c.scatter({"x": 1}, workers=a.address)
+
+    s.rpc = FlakyConnectionPool(failing_connections=1)
+    res = await s.gather(keys=["x"])
+    assert res["status"] == "OK"
+
+
+@gen_cluster(client=True)
+async def test_gather_failing_cnn_error(c, s, a, b):
+    orig_rpc = s.rpc
+    x = await c.scatter({"x": 1}, workers=a.address)
+
+    s.rpc = FlakyConnectionPool(failing_connections=10)
+    res = await s.gather(keys=["x"])
+    assert res["status"] == "error"
+    assert list(res["keys"]) == ["x"]
+
+
+@gen_cluster(client=True)
+async def test_gather_no_workers(c, s, a, b):
+    await asyncio.sleep(1)
+    x = await c.scatter({"x": 1}, workers=a.address)
+
+    await a.close()
+    await b.close()
+
+    res = await s.gather(keys=["x"])
+    assert res["status"] == "error"
+    assert list(res["keys"]) == ["x"]
