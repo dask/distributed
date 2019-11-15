@@ -704,7 +704,7 @@ class Client(Node):
             "task-erred": self._handle_task_erred,
             "restart": self._handle_restart,
             "error": self._handle_error,
-            "scheduler-shutdown": self.close,
+            "scheduler-shutdown": self._scheduler_shutdown,
         }
 
         self._state_handlers = {
@@ -1248,7 +1248,7 @@ class Client(Node):
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
             if self.status == "closed":
-                raise gen.Return()
+                return
 
             if (
                 self.scheduler_comm
@@ -1366,6 +1366,13 @@ class Client(Node):
         Client.close: close only this client
         """
         return self.sync(self._shutdown)
+
+    def _scheduler_shutdown(self):
+        @gen.coroutine
+        def _():
+            yield self._close(fast=True)
+
+        self.loop.add_callback(_)
 
     def get_executor(self, **kwargs):
         """
@@ -1891,7 +1898,7 @@ class Client(Node):
             isinstance(k, (bytes, str)) for k in data
         ):
             d = await self._scatter(keymap(tokey, data), workers, broadcast)
-            raise gen.Return({k: d[tokey(k)] for k in data})
+            return {k: d[tokey(k)] for k in data}
 
         if isinstance(data, type(range(0))):
             data = list(data)
