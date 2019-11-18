@@ -1,31 +1,24 @@
+import asyncio
 import atexit
-from datetime import timedelta
 import logging
 import os
 from queue import Queue as PyQueue
-import re
 import threading
 import weakref
+
 import dask
 
 from .utils import mp_context
-
-from tornado import gen
-from tornado.concurrent import Future
-from tornado.ioloop import IOLoop
 
 
 logger = logging.getLogger(__name__)
 
 
-def _loop_add_callback(loop, func, *args):
-    """
-    Helper to silence "IOLoop is closing" exception on IOLoop.add_callback.
-    """
+def _loop_call_soon_threadsafe(loop, func, *args):
     try:
-        loop.add_callback(func, *args)
+        loop.call_soon_threadsafe(func, *args)
     except RuntimeError as exc:
-        if not re.search("IOLoop is clos(ed|ing)", str(exc)):
+        if "Event loop is closed" not in str(exc):
             raise
 
 
@@ -33,11 +26,11 @@ def _call_and_set_future(loop, future, func, *args, **kwargs):
     try:
         res = func(*args, **kwargs)
     except Exception as exc:
-        # Tornado futures are not thread-safe, need to
-        # set_result() / set_exc_info() from the loop's thread
-        _loop_add_callback(loop, future.set_exception, exc)
+        # Asyncio futures are not thread-safe, need to
+        # set_result() / set_exception() from the loop's thread
+        _loop_call_soon_threadsafe(loop, future.set_exception, exc)
     else:
-        _loop_add_callback(loop, future.set_result, res)
+        _loop_call_soon_threadsafe(loop, future.set_result, res)
 
 
 class _ProcessState(object):
@@ -49,14 +42,14 @@ class _ProcessState(object):
 class AsyncProcess(object):
     """
     A coroutine-compatible multiprocessing.Process-alike.
-    All normally blocking methods are wrapped in Tornado coroutines.
+    All normally blocking methods are wrapped in asyncio coroutines.
     """
 
     def __init__(self, loop=None, target=None, name=None, args=(), kwargs={}):
         if not callable(target):
             raise TypeError("`target` needs to be callable, not %r" % (type(target),))
         self._state = _ProcessState()
-        self._loop = loop or IOLoop.current(instance=False)
+        self._loop = asyncio.get_running_loop()
 
         # _keep_child_alive is the write side of a pipe, which, when it is
         # closed, causes the read side of the pipe to unblock for reading. Note
@@ -84,7 +77,7 @@ class AsyncProcess(object):
         _dangling.add(self._process)
         self._name = self._process.name
         self._watch_q = PyQueue()
-        self._exit_future = Future()
+        self._exit_future = self._loop.create_future()
         self._exit_callback = None
         self._closed = False
 
@@ -125,7 +118,7 @@ class AsyncProcess(object):
         # Called from the event loop when the child process exited
         self._process = None
         if self._exit_callback is not None:
-            self._exit_callback(self)
+            res = self._exit_callback(self)
         self._exit_future.set_result(exitcode)
 
     @classmethod
@@ -162,7 +155,7 @@ class AsyncProcess(object):
 
     @staticmethod
     def reset_logger_locks():
-        """ Python 2's logger's locks don't survive a fork event
+        """ Python's logger locks don't survive a fork event
 
         https://github.com/dask/distributed/issues/1491
         """
@@ -174,12 +167,12 @@ class AsyncProcess(object):
     def _run(
         cls, target, args, kwargs, parent_alive_pipe, _keep_child_alive, inherit_config
     ):
+        cls.reset_logger_locks()
+
         # On Python 2 with the fork method, we inherit the _keep_child_alive fd,
         # whether it is passed or not. Therefore, pass it unconditionally and
         # close it here, so that there are no other references to the pipe lying
         # around.
-        cls.reset_logger_locks()
-
         _keep_child_alive.close()
 
         # Child process entry point
@@ -241,7 +234,7 @@ class AsyncProcess(object):
         self = selfref()  # only keep self alive when required
         try:
             if self is not None:
-                _loop_add_callback(self._loop, self._on_exit, exitcode)
+                _loop_call_soon_threadsafe(self._loop, self._on_exit, exitcode)
         finally:
             self = None  # lose reference
 
@@ -252,7 +245,7 @@ class AsyncProcess(object):
         This method is a coroutine.
         """
         self._check_closed()
-        fut = Future()
+        fut = self._loop.create_future()
         self._watch_q.put_nowait({"op": "start", "future": fut})
         return fut
 
@@ -263,12 +256,11 @@ class AsyncProcess(object):
         This method is a coroutine.
         """
         self._check_closed()
-        fut = Future()
+        fut = self._loop.create_future()
         self._watch_q.put_nowait({"op": "terminate", "future": fut})
         return fut
 
-    @gen.coroutine
-    def join(self, timeout=None):
+    async def join(self, timeout=None):
         """
         Wait for the child process to exit.
 
@@ -279,11 +271,11 @@ class AsyncProcess(object):
         if self._state.exitcode is not None:
             return
         if timeout is None:
-            yield self._exit_future
+            await self._exit_future
         else:
             try:
-                yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
-            except gen.TimeoutError:
+                await asyncio.wait_for(asyncio.shield(self._exit_future), timeout)
+            except asyncio.TimeoutError:
                 pass
 
     def close(self):
@@ -300,8 +292,6 @@ class AsyncProcess(object):
         """
         Set a function to be called by the event loop when the process exits.
         The function is called with the AsyncProcess as sole argument.
-
-        The function may be a coroutine function.
         """
         # XXX should this be a property instead?
         assert callable(func), "exit callback should be callable"
