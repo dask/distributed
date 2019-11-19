@@ -1146,6 +1146,14 @@ class Scheduler(ServerNode):
         for ext in extensions:
             ext(self)
 
+        self._workers_to_retire = []
+        self.retire_workers_active = False
+        self.periodic_callbacks["retire-workers"] = PeriodicCallback(
+            self._retire_workers,
+            parse_timedelta(dask.config.get("distributed.scheduler.worker-retirement-interval")),
+            io_loop=loop
+        )
+
         setproctitle("dask-scheduler [not started]")
         Scheduler._instances.add(self)
 
@@ -3104,69 +3112,86 @@ class Scheduler(ServerNode):
         --------
         Scheduler.workers_to_close
         """
-        with log_errors():
-            if names is not None:
-                if names:
-                    logger.info("Retire worker names %s", names)
-                names = set(map(str, names))
-                workers = [
-                    ws.address for ws in self.workers.values() if str(ws.name) in names
-                ]
-            if workers is None:
-                while True:
-                    try:
-                        workers = self.workers_to_close(**kwargs)
-                        if workers:
-                            workers = await self.retire_workers(
-                                workers=workers,
-                                remove=remove,
-                                close_workers=close_workers,
-                            )
-                        return workers
-                    except KeyError:  # keys left during replicate
-                        pass
-            workers = {self.workers[w] for w in workers if w in self.workers}
-            if not workers:
-                return []
-            logger.info("Retire workers %s", workers)
+        if names is not None:
+            if names:
+                logger.info("Retire worker names %s", names)
+            names = set(map(str, names))
+            workers = [
+                ws.address for ws in self.workers.values() if str(ws.name) in names
+            ]
+        if workers is None:
+            workers = self.workers_to_close(**kwargs)
 
-            # Keys orphaned by retiring those workers
-            keys = set.union(*[w.has_what for w in workers])
-            keys = {ts.key for ts in keys if ts.who_has.issubset(workers)}
+        self._workers_to_retire.extend(workers)
+        # this dict is expected in many tests
+        return {
+                self.workers[w].address: self.workers[w].identity() for w in workers if w in self.workers
+            }
 
-            other_workers = set(self.workers.values()) - workers
-            if keys:
-                if other_workers:
-                    logger.info("Moving %d keys to other workers", len(keys))
-                    await self.replicate(
-                        keys=keys,
-                        workers=[ws.address for ws in other_workers],
-                        n=1,
-                        delete=False,
-                    )
-                else:
+    async def _retire_workers(
+        self, comm=None, remove=True, close_workers=False, names=None, **kwargs
+    ):
+        if not self.retire_workers_active:
+            self.retire_workers_active = True
+            try:
+                if not self._workers_to_retire:
                     return []
 
-            worker_keys = {ws.address: ws.identity() for ws in workers}
-            if close_workers and worker_keys:
-                await asyncio.gather(
-                    *[self.close_worker(worker=w, safe=True) for w in worker_keys]
-                )
-            if remove:
-                for w in worker_keys:
-                    self.remove_worker(address=w, safe=True)
+                currently_retiring = self._workers_to_retire[:]
+                print(f"actually retire stuff {currently_retiring}")
+                self._workers_to_retire = []
+                with log_errors():
+                    workers = {
+                        self.workers[w] for w in currently_retiring if w in self.workers
+                    }
+                    if not workers:
+                        return []
+                    logger.info("Retire workers %s", workers)
 
-            self.log_event(
-                "all",
-                {
-                    "action": "retire-workers",
-                    "workers": worker_keys,
-                    "moved-keys": len(keys),
-                },
-            )
-            self.log_event(list(worker_keys), {"action": "retired"})
+                    # Keys orphaned by retiring those workers
+                    keys = set.union(*[w.has_what for w in workers])
+                    keys = {ts.key for ts in keys if ts.who_has.issubset(workers)}
 
-            return worker_keys
+                    other_workers = set(self.workers.values()) - workers
+                    if keys:
+                        if other_workers:
+                            logger.info("Moving %d keys to other workers", len(keys))
+                            await self.replicate(
+                                keys=keys,
+                                workers=[ws.address for ws in other_workers],
+                                n=1,
+                                delete=False,
+                            )
+                        else:
+                            return []
+
+                    worker_keys = {ws.address: ws.identity() for ws in workers}
+                    if close_workers and worker_keys:
+                        await asyncio.gather(
+                            *[
+                                self.close_worker(worker=w, safe=True)
+                                for w in worker_keys
+                            ]
+                        )
+                    if remove:
+                        for w in worker_keys:
+                            self.remove_worker(address=w, safe=True)
+
+                    self.log_event(
+                        "all",
+                        {
+                            "action": "retire-workers",
+                            "workers": worker_keys,
+                            "moved-keys": len(keys),
+                        },
+                    )
+                    self.log_event(list(worker_keys), {"action": "retired"})
+
+                    return worker_keys
+            finally:
+                self.retire_workers_active = False
+        else:
+            logger.debug("Retire workers skipped: channel busy.")
 
     def add_keys(self, comm=None, worker=None, keys=()):
         """

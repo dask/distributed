@@ -24,6 +24,7 @@ distributed:
     preload: []
     preload-argv: []
     default-task-durations: {}  # How long we expect function names to run ("1h", "1s") (helps for long tasks)
+    worker-retirement-interval: 10s
     dashboard:
       status:
         task-stream-length: 1000

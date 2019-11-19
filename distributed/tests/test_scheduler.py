@@ -669,37 +669,44 @@ def test_scheduler_sees_memory_limits(s):
 
 
 @gen_cluster(client=True, timeout=1000)
-def test_retire_workers(c, s, a, b):
-    [x] = yield c.scatter([1], workers=a.address)
-    [y] = yield c.scatter([list(range(1000))], workers=b.address)
+async def test_retire_workers(c, s, a, b):
+    [x] = await c.scatter([1], workers=a.address)
+    [y] = await c.scatter([list(range(1000))], workers=b.address)
 
     assert s.workers_to_close() == [a.address]
 
-    workers = yield s.retire_workers()
+    workers = await s.retire_workers()
+    await asyncio.sleep(0.1)
+
     assert list(workers) == [a.address]
     assert workers[a.address]["nthreads"] == a.nthreads
-    assert list(s.nthreads) == [b.address]
+
+    assert list(s.workers) == [b.address]
 
     assert s.workers_to_close() == []
 
     assert s.workers[b.address].has_what == {s.tasks[x.key], s.tasks[y.key]}
 
-    workers = yield s.retire_workers()
+    workers = await s.retire_workers()
     assert not workers
 
 
 @gen_cluster(client=True)
 def test_retire_workers_n(c, s, a, b):
     yield s.retire_workers(n=1, close_workers=True)
+    yield asyncio.sleep(0.01)
     assert len(s.workers) == 1
 
     yield s.retire_workers(n=0, close_workers=True)
+    yield asyncio.sleep(0.01)
     assert len(s.workers) == 1
 
     yield s.retire_workers(n=1, close_workers=True)
+    yield asyncio.sleep(0.01)
     assert len(s.workers) == 0
 
     yield s.retire_workers(n=0, close_workers=True)
+    yield asyncio.sleep(0.01)
     assert len(s.workers) == 0
 
     while not (a.status.startswith("clos") and b.status.startswith("clos")):
@@ -762,7 +769,7 @@ def test_retire_workers_no_suspicious_tasks(c, s, a, b):
     )
     yield gen.sleep(0.2)
     yield s.retire_workers(workers=[a.address])
-
+    yield asyncio.sleep(0.01)
     assert all(ts.suspicious == 0 for ts in s.tasks.values())
 
 
@@ -1091,6 +1098,7 @@ def test_close_nanny(c, s, a, b):
 @gen_cluster(client=True, timeout=20)
 def test_retire_workers_close(c, s, a, b):
     yield s.retire_workers(close_workers=True)
+    yield asyncio.sleep(0.01)
     assert not s.workers
     while a.status != "closed" and b.status != "closed":
         yield gen.sleep(0.01)
@@ -1100,6 +1108,7 @@ def test_retire_workers_close(c, s, a, b):
 def test_retire_nannies_close(c, s, a, b):
     nannies = [a, b]
     yield s.retire_workers(close_workers=True, remove=True)
+    yield asyncio.sleep(0.01)
     assert not s.workers
 
     start = time()
@@ -1664,6 +1673,7 @@ async def test_retire_names_str(cleanup):
                     await wait(futures)
                     assert a.data and b.data
                     await s.retire_workers(names=[0])
+                    await asyncio.sleep(0.1)
                     assert all(f.done() for f in futures)
                     assert len(b.data) == 10
 
