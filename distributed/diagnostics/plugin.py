@@ -1,4 +1,5 @@
 import logging
+import socket
 import subprocess
 import sys
 
@@ -137,10 +138,19 @@ class PipInstall(WorkerPlugin):
     You can also optionally ask for the worker to restart itself after
     performing this installation.
 
+    .. note::
+
+       This will increase the time it takes to start up
+       each worker. If possible, we recommend including the
+       libraries in the worker environment or image. This is
+       primarily intended for experimentation and debugging.
+
     Parameters
     ----------
     packages : List[str]
         A list of strings to place after "pip install" command
+    pip_options : List[str]
+        Additional options to pass to pip.
     restart : bool
         Whether or not to restart the worker after pip installing
         Only functions if the worker has an attached nanny process
@@ -148,25 +158,30 @@ class PipInstall(WorkerPlugin):
     Examples
     --------
     >>> from dask.distributed import PipInstall
-    >>> plugin = PipInstall(packages=["dask", "scikit-learn"])
+    >>> plugin = PipInstall(packages=["dask", "scikit-learn"], pip_options=["--upgrade"])
 
     >>> client.register_worker_plugin(plugin)
     """
 
     name = "pip"
 
-    def __init__(self, packages=[], restart=False):
+    def __init__(self, packages, pip_options=None, restart=False):
         self.packages = packages
         self.restart = restart
+        if pip_options is None:
+            pip_options = []
+        self.pip_options = pip_options
 
     async def setup(self, worker):
-        import socket
         from ..lock import Lock
 
         async with Lock(socket.gethostname()):  # don't clobber one installation
             logger.info("Pip installing the following packages: %s", self.packages)
             proc = subprocess.Popen(
-                [sys.executable, "-m", "pip", "install"] + self.packages,
+                [sys.executable, "-m", "pip"]
+                + self.pip_options
+                + ["install"]
+                + self.packages,
                 stdout=subprocess.PIPE,
             )
             stdout, stderr = proc.communicate()

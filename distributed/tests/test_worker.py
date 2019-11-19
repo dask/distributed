@@ -10,6 +10,7 @@ import shutil
 import sys
 from time import sleep
 import traceback
+from unittest import mock
 
 import dask
 from dask import delayed
@@ -1592,4 +1593,18 @@ async def test_bad_startup(cleanup):
 async def test_pip_install(c, s, a, b):
     from distributed.diagnostics.plugin import PipInstall
 
-    await c.register_worker_plugin(PipInstall(packages=[]))
+    with mock.patch(
+        "distributed.diagnostics.plugin.subprocess.Popen.communicate",
+        return_value=(b"", b""),
+    ) as p1:
+        with mock.patch(
+            "distributed.diagnostics.plugin.subprocess.Popen", return_value=p1
+        ) as p2:
+            p1.communicate.return_value = b"", b""
+            await c.register_worker_plugin(
+                PipInstall(packages=["requests"], pip_options=["--upgrade"])
+            )
+
+            args = p2.call_args[0][0]
+            assert "python" in args[0]
+            assert args[1:] == ["-m", "pip", "--upgrade", "install", "requests"]
