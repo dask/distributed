@@ -304,3 +304,6 @@ def test_serialize_writeable_array_readonly_base_object():
     # Serialize / deserialize y
     z = deserialize(*serialize(y))
     np.testing.assert_equal(z, y)
+
+    # Ensure z and y have the same flags (including WRITEABLE)
+    assert z.flags == y.flags
