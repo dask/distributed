@@ -1,3 +1,4 @@
+import asyncio
 import gc
 import logging
 import os
@@ -135,7 +136,7 @@ async def test_no_hang_when_scheduler_closes(s, a, b):
     # https://github.com/dask/distributed/issues/2880
     with captured_logger("tornado.application", logging.ERROR) as logger:
         await s.close()
-        await gen.sleep(1)
+        await asyncio.sleep(1.2)
         assert a.status == "closed"
         assert b.status == "closed"
 
