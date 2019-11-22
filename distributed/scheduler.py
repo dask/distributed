@@ -57,6 +57,7 @@ from .utils import (
     parse_bytes,
     PeriodicCallback,
     shutting_down,
+    empty_context,
 )
 from .utils_comm import scatter_to_workers, gather_from_workers
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
@@ -2838,6 +2839,7 @@ class Scheduler(ServerNode):
         workers=None,
         branching_factor=2,
         delete=True,
+        lock=True,
     ):
         """ Replicate data throughout cluster
 
@@ -2861,7 +2863,7 @@ class Scheduler(ServerNode):
         Scheduler.rebalance
         """
         assert branching_factor > 0
-        async with self._lock:
+        async with self._lock if lock else empty_context:
             workers = {self.workers[w] for w in self.workers_list(workers)}
             if n is None:
                 n = len(workers)
@@ -3090,6 +3092,7 @@ class Scheduler(ServerNode):
         remove=True,
         close_workers=False,
         names=None,
+        lock=True,
         **kwargs
     ):
         """ Gracefully retire workers from cluster
@@ -3122,7 +3125,7 @@ class Scheduler(ServerNode):
         Scheduler.workers_to_close
         """
         with log_errors():
-            async with self._lock:
+            async with self._lock if lock else empty_context:
                 if names is not None:
                     if names:
                         logger.info("Retire worker names %s", names)
@@ -3141,6 +3144,7 @@ class Scheduler(ServerNode):
                                     workers=workers,
                                     remove=remove,
                                     close_workers=close_workers,
+                                    lock=False,
                                 )
                             return workers
                         except KeyError:  # keys left during replicate
@@ -3163,6 +3167,7 @@ class Scheduler(ServerNode):
                             workers=[ws.address for ws in other_workers],
                             n=1,
                             delete=False,
+                            lock=False,
                         )
                     else:
                         return []

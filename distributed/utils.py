@@ -1399,3 +1399,20 @@ def deserialize_for_cli(data):
         The de-serialized data
     """
     return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
+
+
+class EmptyContext:
+    def __enter__(self):
+        pass
+
+    def __exit__(self, *args):
+        pass
+
+    async def __aenter__(self):
+        pass
+
+    async def __aexit__(self, *args):
+        pass
+
+
+empty_context = EmptyContext()
