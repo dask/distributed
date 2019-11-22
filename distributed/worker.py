@@ -3,6 +3,7 @@ import bisect
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from datetime import timedelta
+import functools
 import heapq
 from inspect import isawaitable
 import logging
@@ -3144,8 +3145,6 @@ async def get_data_from_worker(
 
 job_counter = [0]
 
-import functools
-
 
 @functools.lru_cache(100)
 def cached_function_deserialization(func):
@@ -3187,23 +3186,15 @@ def execute_task(task):
         return task
 
 
-try:
-    # a 10 MB cache of deserialized functions and their bytes
-    from zict import LRU
-
-    cache = LRU(10000000, dict(), weight=lambda k, v: len(v))
-except ImportError:
-    cache = dict()
+@functools.lru_cache(100)
+def cached_function_serialization(func):
+    return pickle.dumps(func)
 
 
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     try:
-        result = cache[func]
-    except KeyError:
-        result = pickle.dumps(func)
-        if len(result) < 100000:
-            cache[func] = result
+        result = cached_function_serialization(func)
     except TypeError:
         result = pickle.dumps(func)
     return result
