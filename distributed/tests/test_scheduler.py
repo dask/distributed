@@ -1726,9 +1726,13 @@ async def test_task_groups(c, s, a, b):
 
     assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
 
+    await c.replicate(y)
+    assert tg.nbytes_in_memory == y.nbytes
+
     del y
 
     while s.tasks:
         await asyncio.sleep(0.01)
 
+    assert tg.nbytes_in_memory == 0
     assert tg.states["forgotten"] == 5

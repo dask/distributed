@@ -641,6 +641,8 @@ class TaskState(object):
     def set_nbytes(self, nbytes):
         old_nbytes = self.nbytes
         diff = nbytes - (old_nbytes or 0)
+        self.group.nbytes_total += diff
+        self.group.nbytes_in_memory += diff
         for ws in self.who_has:
             ws.nbytes += diff
         self.nbytes = nbytes
@@ -683,6 +685,8 @@ class TaskGroup(object):
         self.states = {state: 0 for state in ALL_TASK_STATES}
         self.states["forgotten"] = 0
         self.dependencies = set()
+        self.nbytes_total = 0
+        self.nbytes_in_memory = 0
         # self.tasks = weakref.WeakSet()
 
     def add(self, ts):
@@ -3997,6 +4001,7 @@ class Scheduler(ServerNode):
             for ws in ts.who_has:
                 ws.has_what.remove(ts)
                 ws.nbytes -= ts.get_nbytes()
+                ts.group.nbytes_in_memory -= ts.get_nbytes()
                 self.worker_send(
                     ws.address, {"op": "delete-data", "keys": [key], "report": False}
                 )
@@ -4311,6 +4316,9 @@ class Scheduler(ServerNode):
                 recommendations[dts.key] = "forgotten"
         ts.dependencies.clear()
         ts.waiting_on.clear()
+
+        if ts.who_has:
+            ts.group.nbytes_in_memory -= ts.get_nbytes()
 
         for ws in ts.who_has:
             ws.has_what.remove(ts)
