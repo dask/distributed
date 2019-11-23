@@ -682,6 +682,7 @@ class TaskGroup(object):
         self.name = name
         self.states = {state: 0 for state in ALL_TASK_STATES}
         self.states["forgotten"] = 0
+        self.dependencies = set()
         # self.tasks = weakref.WeakSet()
 
     def add(self, ts):
@@ -1736,6 +1737,7 @@ class Scheduler(ServerNode):
             for dep in deps:
                 dts = self.tasks[dep]
                 ts.dependencies.add(dts)
+                ts.group.dependencies.add(dts.group)
                 dts.dependents.add(ts)
 
         # Compute priorities

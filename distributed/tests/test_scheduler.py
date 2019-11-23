@@ -1724,6 +1724,8 @@ async def test_task_groups(c, s, a, b):
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
 
+    assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
+
     del y
 
     while s.tasks:
