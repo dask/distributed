@@ -1721,6 +1721,8 @@ async def test_task_groups(c, s, a, b):
     assert tg.states["released"] == 5
     assert tp.states["memory"] == 0
     assert tp.states["released"] == 5
+    assert tg.prefix is tp
+    assert tg in tp.groups
 
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
@@ -1737,3 +1739,12 @@ async def test_task_groups(c, s, a, b):
 
     assert tg.nbytes_in_memory == 0
     assert tg.states["forgotten"] == 5
+
+
+@gen_cluster(client=True)
+async def test_task_prefix(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.arange(100, chunks=(20,))
+    y = await (x + 1).sum().persist()
+
+    assert s.task_prefixes["sum-aggregate"].states["memory"] == 1

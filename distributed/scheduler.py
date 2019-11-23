@@ -1886,6 +1886,7 @@ class Scheduler(ServerNode):
             tp.groups.append(tg)
             self.task_prefixes[ts.prefix_key] = tp
         ts.prefix = tp
+        tg.prefix = tp
         self.tasks[key] = ts
         return ts
 
