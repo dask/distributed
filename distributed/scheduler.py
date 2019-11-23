@@ -559,6 +559,7 @@ class TaskState(object):
         "key",
         # Key prefix (see key_split())
         "prefix",
+        "prefix_key",
         # How to run the task (None if pure data)
         "run_spec",
         # Alive dependents and dependencies
@@ -600,7 +601,7 @@ class TaskState(object):
 
     def __init__(self, key, run_spec):
         self.key = key
-        self.prefix = key_split(key)
+        self.prefix_key = key_split(key)
         self.run_spec = run_spec
         self._state = None
         self.exception = self.traceback = self.exception_blame = None
@@ -687,6 +688,7 @@ class TaskGroup(object):
         self.dependencies = set()
         self.nbytes_total = 0
         self.nbytes_in_memory = 0
+        self.duration = 0
         # self.tasks = weakref.WeakSet()
 
     def add(self, ts):
@@ -721,6 +723,12 @@ class TaskPrefix(object):
         self.name = name
         self.groups = []
         self.states["forgotten"] = 0
+        if self.name in dask.config.get("distributed.scheduler.default-task-durations"):
+            self.duration_average = dask.config.get(
+                "distributed.scheduler.default-task-durations"
+            )[self.name]
+        else:
+            self.duration_average = None
 
     @property
     def states(self):
@@ -1067,11 +1075,6 @@ class Scheduler(ServerNode):
         self.datasets = dict()
 
         # Prefix-keyed containers
-        self.task_duration = {prefix: 0.00001 for prefix in fast_tasks}
-        for k, v in dask.config.get(
-            "distributed.scheduler.default-task-durations", {}
-        ).items():
-            self.task_duration[k] = parse_timedelta(v)
         self.unknown_durations = defaultdict(set)
 
         # Client state
@@ -1877,11 +1880,12 @@ class Scheduler(ServerNode):
             tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
         tg.add(ts)
         try:
-            self.task_prefixes[ts.prefix]
+            tp = self.task_prefixes[ts.prefix_key]
         except KeyError:
-            tp = TaskPrefix(ts.prefix)
+            tp = TaskPrefix(ts.prefix_key)
             tp.groups.append(tg)
-            self.task_prefixes[ts.prefix] = tp
+            self.task_prefixes[ts.prefix_key] = tp
+        ts.prefix = tp
         self.tasks[key] = ts
         return ts
 
@@ -2525,15 +2529,14 @@ class Scheduler(ServerNode):
             return
 
         if compute_duration:
-            prefix = ts.prefix
-            old_duration = self.task_duration.get(prefix, 0)
+            old_duration = ts.prefix.duration_average or 0
             new_duration = compute_duration
             if not old_duration:
                 avg_duration = new_duration
             else:
                 avg_duration = 0.5 * old_duration + 0.5 * new_duration
 
-            self.task_duration[prefix] = avg_duration
+            ts.prefix.duration_average = avg_duration
 
         ws.occupancy -= ws.processing[ts]
         self.total_occupancy -= ws.processing[ts]
@@ -3526,12 +3529,12 @@ class Scheduler(ServerNode):
         Get the estimated computation cost of the given task
         (not including any communication cost).
         """
-        prefix = ts.prefix
-        try:
-            return self.task_duration[prefix]
-        except KeyError:
-            self.unknown_durations[prefix].add(ts)
+        duration = ts.prefix.duration_average
+        if duration is None:
+            self.unknown_durations[ts.prefix_key].add(ts)
             return default
+
+        return duration
 
     def run_function(self, stream, function, args=(), kwargs={}, wait=True):
         """ Run a function within this process
@@ -3927,17 +3930,17 @@ class Scheduler(ServerNode):
             #############################
             if compute_start and ws.processing.get(ts, True):
                 # Update average task duration for worker
-                prefix = ts.prefix
-                old_duration = self.task_duration.get(prefix, 0)
+                old_duration = ts.prefix.duration_average or 0
                 new_duration = compute_stop - compute_start
                 if not old_duration:
                     avg_duration = new_duration
                 else:
                     avg_duration = 0.5 * old_duration + 0.5 * new_duration
 
-                self.task_duration[prefix] = avg_duration
+                ts.prefix.duration_average = avg_duration
+                ts.group.duration += new_duration
 
-                for tts in self.unknown_durations.pop(prefix, ()):
+                for tts in self.unknown_durations.pop(ts.prefix_key, ()):
                     if tts.processing_on:
                         wws = tts.processing_on
                         old = wws.processing[tts]
@@ -5143,9 +5146,6 @@ def validate_state(tasks, workers, clients):
 
 
 _round_robin = [0]
-
-
-fast_tasks = {"rechunk-split", "shuffle-split"}
 
 
 def heartbeat_interval(n):
