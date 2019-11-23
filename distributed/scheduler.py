@@ -20,9 +20,9 @@ import psutil
 import sortedcontainers
 
 try:
-    from cytoolz import frequencies, merge, pluck, merge_sorted, first
+    from cytoolz import frequencies, merge, pluck, merge_sorted, first, merge_with
 except ImportError:
-    from toolz import frequencies, merge, pluck, merge_sorted, first
+    from toolz import frequencies, merge, pluck, merge_sorted, first, merge_with
 from toolz import valmap, second, compose, groupby
 from tornado import gen
 from tornado.ioloop import IOLoop
@@ -57,6 +57,7 @@ from .utils import (
     parse_bytes,
     PeriodicCallback,
     shutting_down,
+    key_split_group,
 )
 from .utils_comm import scatter_to_workers, gather_from_workers
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
@@ -571,7 +572,7 @@ class TaskState(object):
         "resource_restrictions",
         "loose_restrictions",
         # === Task state ===
-        "state",
+        "_state",
         # Whether some dependencies were forgotten
         "has_lost_dependencies",
         # If in 'waiting' state, which tasks need to complete
@@ -593,13 +594,15 @@ class TaskState(object):
         "retries",
         "nbytes",
         "type",
+        "group_key",
+        "group",
     )
 
     def __init__(self, key, run_spec):
         self.key = key
         self.prefix = key_split(key)
         self.run_spec = run_spec
-        self.state = None
+        self._state = None
         self.exception = self.traceback = self.exception_blame = None
         self.suspicious = self.retries = 0
         self.nbytes = None
@@ -618,6 +621,18 @@ class TaskState(object):
         self.loose_restrictions = False
         self.actor = None
         self.type = None
+        self.group_key = key_split_group(key)
+        self.group = None
+
+    @property
+    def state(self):
+        return self._state
+
+    @state.setter
+    def state(self, value):
+        self.group.states[self._state] -= 1
+        self.group.states[value] += 1
+        self._state = value
 
     def get_nbytes(self):
         nbytes = self.nbytes
@@ -650,6 +665,84 @@ class TaskState(object):
                 import pdb
 
                 pdb.set_trace()
+
+
+class TaskGroup(object):
+    """ Collection tracking all tasks within a group
+
+    Keys often have a structure like ``("x-123", 0)``
+    A group takes the first section, like ``"x-123"``
+
+    See also
+    --------
+    TaskPrefix
+    """
+
+    def __init__(self, name):
+        self.name = name
+        self.states = {state: 0 for state in ALL_TASK_STATES}
+        self.states["forgotten"] = 0
+        # self.tasks = weakref.WeakSet()
+
+    def add(self, ts):
+        # self.tasks.add(ts)
+        self.states[ts.state] += 1
+        ts.group = self
+
+    def __repr__(self):
+        return (
+            "<"
+            + self.name
+            + ": "
+            + ", ".join(
+                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
+            )
+            + ">"
+        )
+
+
+class TaskPrefix(object):
+    """ Collection tracking all tasks within a group
+
+    Keys often have a structure like ``("x-123", 0)``
+    A group takes the first section, like ``"x"``
+
+    See Also
+    --------
+    TaskGroup
+    """
+
+    def __init__(self, name):
+        self.name = name
+        self.groups = []
+        self.states["forgotten"] = 0
+
+    @property
+    def states(self):
+        return merge_with(sum, [g.states for g in self.groups])
+
+    @property
+    def active(self):
+        return [
+            g
+            for g in self.groups
+            if any(v != 0 for k, v in g.states.items() if k != "forgotten")
+        ]
+
+    @property
+    def active_states(self):
+        return merge_with(sum, [g.states for g in self.active])
+
+    def __repr__(self):
+        return (
+            "<"
+            + self.name
+            + ": "
+            + ", ".join(
+                "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
+            )
+            + ">"
+        )
 
 
 class _StateLegacyMapping(Mapping):
@@ -918,6 +1011,8 @@ class Scheduler(ServerNode):
 
         # Task state
         self.tasks = dict()
+        self.task_groups = dict()
+        self.task_prefixes = dict()
         for old_attr, new_attr, wrap in [
             ("priority", "priority", None),
             ("dependencies", "dependencies", _legacy_task_key_set),
@@ -1623,8 +1718,7 @@ class Scheduler(ServerNode):
             # XXX Have a method get_task_state(self, k) ?
             ts = self.tasks.get(k)
             if ts is None:
-                ts = self.tasks[k] = TaskState(k, tasks.get(k))
-                ts.state = "released"
+                ts = self.new_task(k, tasks.get(k), "released")
             elif not ts.run_spec:
                 ts.run_spec = tasks.get(k)
 
@@ -1766,6 +1860,24 @@ class Scheduler(ServerNode):
             self.digests["update-graph-duration"].add(end - start)
 
         # TODO: balance workers
+
+    def new_task(self, key, spec, state):
+        """ Create a new task, and associated states """
+        ts = TaskState(key, spec)
+        ts._state = state
+        try:
+            tg = self.task_groups[ts.group_key]
+        except KeyError:
+            tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
+        tg.add(ts)
+        try:
+            self.task_prefixes[ts.prefix]
+        except KeyError:
+            tp = TaskPrefix(ts.prefix)
+            tp.groups.append(tg)
+            self.task_prefixes[ts.prefix] = tp
+        self.tasks[key] = ts
+        return ts
 
     def stimulus_task_finished(self, key=None, worker=None, **kwargs):
         """ Mark that a task has finished execution on a particular worker """
@@ -2029,8 +2141,7 @@ class Scheduler(ServerNode):
             ts = self.tasks.get(k)
             if ts is None:
                 # For publish, queues etc.
-                ts = self.tasks[k] = TaskState(k, None)
-                ts.state = "released"
+                ts = self.new_task(k, None, "released")
             ts.who_wants.add(cs)
             cs.wants_what.add(ts)
 
@@ -3213,7 +3324,7 @@ class Scheduler(ServerNode):
             for key, workers in who_has.items():
                 ts = self.tasks.get(key)
                 if ts is None:
-                    ts = self.tasks[key] = TaskState(key, None)
+                    ts = self.new_task(key, None, "memory")
                 ts.state = "memory"
                 if key in nbytes:
                     ts.set_nbytes(nbytes[key])

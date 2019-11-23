@@ -1704,3 +1704,29 @@ async def test_no_danglng_asyncio_tasks(cleanup):
 
     tasks = asyncio.all_tasks()
     assert tasks == start
+
+
+@gen_cluster(client=True)
+async def test_task_groups(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.arange(100, chunks=(20,))
+    y = await (x + 1).persist(optimize_graph=False)
+
+    tg = s.task_groups[x.name]
+    tp = s.task_prefixes["arange"]
+    repr(tg)
+    repr(tp)
+    assert tg.states["memory"] == 0
+    assert tg.states["released"] == 5
+    assert tp.states["memory"] == 0
+    assert tp.states["released"] == 5
+
+    tg = s.task_groups[y.name]
+    assert tg.states["memory"] == 5
+
+    del y
+
+    while s.tasks:
+        await asyncio.sleep(0.01)
+
+    assert tg.states["forgotten"] == 5
