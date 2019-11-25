@@ -1,6 +1,6 @@
 import asyncio
 import atexit
-from collections import deque
+from collections import deque, OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
@@ -1399,3 +1399,23 @@ def deserialize_for_cli(data):
         The de-serialized data
     """
     return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
+
+
+class LRU(OrderedDict):
+    """ Limited size mapping, evicting the least recently looked-up key when full
+    """
+
+    def __init__(self, maxsize):
+        self.maxsize = maxsize
+        super().__init__()
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if len(self) >= self.maxsize:
+            oldest = next(iter(self))
+            del self[oldest]
+        super().__setitem__(key, value)

@@ -3,7 +3,6 @@ import bisect
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from datetime import timedelta
-import functools
 import heapq
 from inspect import isawaitable
 import logging
@@ -62,6 +61,7 @@ from .utils import (
     parse_timedelta,
     iscoroutinefunction,
     warn_on_duration,
+    LRU,
 )
 from .utils_comm import pack_data, gather_from_workers
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
@@ -3146,15 +3146,24 @@ async def get_data_from_worker(
 job_counter = [0]
 
 
-@functools.lru_cache(100)
-def cached_function_deserialization(func):
-    return pickle.loads(func)
+cache_loads = LRU(maxsize=100)
+
+
+def loads_function(bytes_object):
+    """ Load a function from bytes, cache bytes """
+    try:
+        result = cache_loads[bytes_object]
+    except KeyError:
+        result = pickle.loads(bytes_object)
+        if len(bytes_object) < 100000:
+            cache_loads[bytes_object] = result
+    return result
 
 
 def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
-        function = cached_function_deserialization(function)
+        function = loads_function(function)
     if args:
         args = pickle.loads(args)
     if kwargs:
@@ -3186,16 +3195,18 @@ def execute_task(task):
         return task
 
 
-@functools.lru_cache(100)
-def cached_function_serialization(func):
-    return pickle.dumps(func)
+cache_dumps = LRU(maxsize=100)
 
 
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     try:
-        result = cached_function_serialization(func)
-    except TypeError:
+        result = cache_dumps[func]
+    except KeyError:
+        result = pickle.dumps(func)
+        if len(result) < 100000:
+            cache_dumps[func] = result
+    except TypeError:  # Unhashable function
         result = pickle.dumps(func)
     return result
 
