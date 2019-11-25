@@ -3141,7 +3141,7 @@ async def get_data_from_worker(
                     await comm.write("OK")
             break
         except (EnvironmentError, CommClosedError):
-            if retry_count <= max_retries:
+            if retry_count < max_retries:
                 await asyncio.sleep(0.1 * (2 ** retry_count))
                 retry_count += 1
                 logger.info(
