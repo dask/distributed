@@ -19,7 +19,6 @@ from bokeh.models import (
     Range1d,
     Plot,
     Quad,
-    Span,
     value,
     LinearAxis,
     NumeralTickFormatter,
@@ -572,6 +571,7 @@ class CurrentLoad(DashboardComponent):
                 id="bk-cpu-worker-plot",
                 width=int(width / 2),
                 name="cpu_hist",
+                x_range=(0, None),
                 **kwargs,
             )
             rect = cpu.rect(
@@ -583,14 +583,6 @@ class CurrentLoad(DashboardComponent):
                 color="blue",
             )
             rect.nonselection_glyph = None
-            hundred_span = Span(
-                location=100,
-                dimension="height",
-                line_color="gray",
-                line_dash="dashed",
-                line_width=3,
-            )
-            cpu.add_layout(hundred_span)
 
             nbytes.axis[0].ticker = BasicTicker(mantissas=[1, 256, 512], base=1024)
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
@@ -694,6 +686,13 @@ class CurrentLoad(DashboardComponent):
                     sum(nbytes)
                 )
                 self.nbytes_figure.x_range.end = max_limit
+                if self.scheduler.workers:
+                    self.cpu_figure.x_range.end = (
+                        max(ws.nthreads or 1 for ws in self.scheduler.workers.values())
+                        * 100
+                    )
+                else:
+                    self.cpu_figure.x_range.end = 100
 
                 update(self.source, result)
 
