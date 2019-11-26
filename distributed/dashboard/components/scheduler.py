@@ -589,7 +589,7 @@ class CurrentLoad(DashboardComponent):
             nbytes.xaxis.major_label_orientation = -math.pi / 12
             nbytes.x_range.start = 0
 
-            for fig in [processing, nbytes]:
+            for fig in [processing, nbytes, cpu]:
                 fig.xaxis.minor_tick_line_alpha = 0
                 fig.yaxis.visible = False
                 fig.ygrid.visible = False
