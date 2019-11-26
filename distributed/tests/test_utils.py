@@ -609,7 +609,7 @@ def test_lru():
     l["c"] = 3
     assert list(l.keys()) == ["a", "b", "c"]
 
-    # Use "a" and ensure it becomes the last recently used item
+    # Use "a" and ensure it becomes the most recently used item
     l["a"]
     assert list(l.keys()) == ["b", "c", "a"]
 
