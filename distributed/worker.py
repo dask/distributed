@@ -3151,13 +3151,14 @@ cache_loads = LRU(maxsize=100)
 
 def loads_function(bytes_object):
     """ Load a function from bytes, cache bytes """
-    try:
-        result = cache_loads[bytes_object]
-    except KeyError:
-        result = pickle.loads(bytes_object)
-        if len(bytes_object) < 100000:
+    if len(bytes_object) < 100000:
+        try:
+            result = cache_loads[bytes_object]
+        except KeyError:
+            result = pickle.loads(bytes_object)
             cache_loads[bytes_object] = result
-    return result
+        return result
+    return pickle.loads(bytes_object)
 
 
 def _deserialize(function=None, args=None, kwargs=None, task=no_value):
