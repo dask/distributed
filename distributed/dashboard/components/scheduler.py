@@ -411,7 +411,15 @@ class BandwidthWorkers(DashboardComponent):
             bw = self.scheduler.bandwidth_workers
             if not bw:
                 return
-            x, y, value = zip(*[(a, b, c) for (a, b), c in bw.items()])
+
+            def name(address):
+                ws = self.scheduler.workers[address]
+                if ws.name is not None:
+                    return str(ws.name)
+                else:
+                    return address
+
+            x, y, value = zip(*[(name(a), name(b), c) for (a, b), c in bw.items()])
 
             self.color_map.high = max(value)
 
