@@ -384,6 +384,9 @@ class BandwidthWorkers(DashboardComponent):
                 location=(0, 0),
             )
             color_bar.formatter = NumeralTickFormatter(format="0 b")
+            color_bar.ticker = AdaptiveTicker(
+                mantissas=[1, 64, 128, 256, 512], base=1024
+            )
             fig.add_layout(color_bar, "right")
 
             fig.toolbar.logo = None
