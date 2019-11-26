@@ -3273,6 +3273,14 @@ class Client(Node):
         stop: time
         workers: list
             List of workers to restrict profile information
+        server : bool
+            If true, return the profile of the worker's administrative thread
+            rather than the worker threads.
+            This is useful when profiling Dask itself, rather than user code.
+        scheduler: bool
+            If true, return the profile information from the scheduler's
+            administrative thread rather than the workers.
+            This is useful when profiling Dask's scheduling itself.
         plot: boolean or string
             Whether or not to return a plot object
         filename: str
