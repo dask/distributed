@@ -425,7 +425,7 @@ class BandwidthWorkers(DashboardComponent):
 
             factors = list(sorted(set(x + y)))
             self.fig.x_range.factors = factors
-            self.fig.y_range.factors = factors
+            self.fig.y_range.factors = factors[::-1]
 
             result = {
                 "source": x,
