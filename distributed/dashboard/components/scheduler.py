@@ -19,11 +19,11 @@ from bokeh.models import (
     Range1d,
     Plot,
     Quad,
-    Span,
     value,
     LinearAxis,
     NumeralTickFormatter,
     BoxZoomTool,
+    AdaptiveTicker,
     BasicTicker,
     NumberFormatter,
     BoxSelectTool,
@@ -241,6 +241,7 @@ class NBytesHistogram(DashboardComponent):
             )
 
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root.xaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
             self.root.xaxis.major_label_orientation = -math.pi / 12
 
             self.root.xaxis.minor_tick_line_alpha = 0
@@ -303,6 +304,7 @@ class BandwidthTypes(DashboardComponent):
             )
             fig.x_range.start = 0
             fig.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            fig.xaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
             rect.nonselection_glyph = None
 
             fig.xaxis.minor_tick_line_alpha = 0
@@ -457,6 +459,7 @@ class MemoryByKey(DashboardComponent):
                 source=self.source, x="name", top="nbytes", width=0.9, color="color"
             )
             fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            fig.yaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
             fig.xaxis.major_label_orientation = -math.pi / 12
             rect.nonselection_glyph = None
 
@@ -572,6 +575,7 @@ class CurrentLoad(DashboardComponent):
                 id="bk-cpu-worker-plot",
                 width=int(width / 2),
                 name="cpu_hist",
+                x_range=(0, None),
                 **kwargs,
             )
             rect = cpu.rect(
@@ -583,21 +587,13 @@ class CurrentLoad(DashboardComponent):
                 color="blue",
             )
             rect.nonselection_glyph = None
-            hundred_span = Span(
-                location=100,
-                dimension="height",
-                line_color="gray",
-                line_dash="dashed",
-                line_width=3,
-            )
-            cpu.add_layout(hundred_span)
 
             nbytes.axis[0].ticker = BasicTicker(mantissas=[1, 256, 512], base=1024)
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             nbytes.xaxis.major_label_orientation = -math.pi / 12
             nbytes.x_range.start = 0
 
-            for fig in [processing, nbytes]:
+            for fig in [processing, nbytes, cpu]:
                 fig.xaxis.minor_tick_line_alpha = 0
                 fig.yaxis.visible = False
                 fig.ygrid.visible = False
@@ -694,6 +690,13 @@ class CurrentLoad(DashboardComponent):
                     sum(nbytes)
                 )
                 self.nbytes_figure.x_range.end = max_limit
+                if self.scheduler.workers:
+                    self.cpu_figure.x_range.end = (
+                        max(ws.nthreads or 1 for ws in self.scheduler.workers.values())
+                        * 100
+                    )
+                else:
+                    self.cpu_figure.x_range.end = 100
 
                 update(self.source, result)
 
@@ -1966,7 +1969,7 @@ def individual_memory_by_key_doc(scheduler, extra, doc):
 def profile_doc(scheduler, extra, doc):
     with log_errors():
         doc.title = "Dask: Profile"
-        prof = ProfileTimePlot(scheduler, sizing_mode="scale_width", doc=doc)
+        prof = ProfileTimePlot(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
@@ -1978,7 +1981,7 @@ def profile_doc(scheduler, extra, doc):
 def profile_server_doc(scheduler, extra, doc):
     with log_errors():
         doc.title = "Dask: Profile of Event Loop"
-        prof = ProfileServer(scheduler, sizing_mode="scale_width", doc=doc)
+        prof = ProfileServer(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)

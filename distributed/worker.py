@@ -320,7 +320,7 @@ class Worker(ServerNode):
         nanny=None,
         plugins=(),
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
-        validate=False,
+        validate=None,
         profile_cycle_interval=None,
         lifetime=None,
         lifetime_stagger=None,
@@ -386,6 +386,8 @@ class Worker(ServerNode):
         self.target_message_size = 50e6  # 50 MB
 
         self.log = deque(maxlen=100000)
+        if validate is None:
+            validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
 
         self._transitions = {
@@ -3123,27 +3125,46 @@ async def get_data_from_worker(
     if deserializers is None:
         deserializers = rpc.deserializers
 
-    comm = await rpc.connect(worker)
-    comm.name = "Ephemeral Worker->Worker for gather"
-    try:
-        response = await send_recv(
-            comm,
-            serializers=serializers,
-            deserializers=deserializers,
-            op="get_data",
-            keys=keys,
-            who=who,
-            max_connections=max_connections,
-        )
+    retry_count = 0
+    max_retries = 3
+
+    while True:
+        comm = await rpc.connect(worker)
+        comm.name = "Ephemeral Worker->Worker for gather"
         try:
-            status = response["status"]
-        except KeyError:
-            raise ValueError("Unexpected response", response)
-        else:
-            if status == "OK":
-                await comm.write("OK")
-    finally:
-        rpc.reuse(worker, comm)
+            response = await send_recv(
+                comm,
+                serializers=serializers,
+                deserializers=deserializers,
+                op="get_data",
+                keys=keys,
+                who=who,
+                max_connections=max_connections,
+            )
+            try:
+                status = response["status"]
+            except KeyError:
+                raise ValueError("Unexpected response", response)
+            else:
+                if status == "OK":
+                    await comm.write("OK")
+            break
+        except (EnvironmentError, CommClosedError):
+            if retry_count < max_retries:
+                await asyncio.sleep(0.1 * (2 ** retry_count))
+                retry_count += 1
+                logger.info(
+                    "Encountered connection issue during data collection of keys %s on worker %s. Retrying (%s / %s)",
+                    keys,
+                    worker,
+                    retry_count,
+                    max_retries,
+                )
+                continue
+            else:
+                raise
+        finally:
+            rpc.reuse(worker, comm)
 
     return response
 
