@@ -3259,6 +3259,8 @@ class Client(Node):
         merge_workers=True,
         plot=False,
         filename=None,
+        server=False,
+        scheduler=False,
     ):
         """ Collect statistical profiling information about recent work
 
@@ -3293,6 +3295,8 @@ class Client(Node):
             stop=stop,
             plot=plot,
             filename=filename,
+            server=server,
+            scheduler=scheduler,
         )
 
     async def _profile(
@@ -3304,6 +3308,8 @@ class Client(Node):
         merge_workers=True,
         plot=False,
         filename=None,
+        server=False,
+        scheduler=False,
     ):
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -3314,6 +3320,8 @@ class Client(Node):
             merge_workers=merge_workers,
             start=start,
             stop=stop,
+            server=server,
+            scheduler=scheduler,
         )
 
         if filename:
