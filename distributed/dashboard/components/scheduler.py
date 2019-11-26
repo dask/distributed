@@ -410,8 +410,7 @@ class BandwidthWorkers(DashboardComponent):
                 return
             x, y, value = zip(*[(a, b, c) for (a, b), c in bw.items()])
 
-            if self.color_map.high < max(value):
-                self.color_map.high = max(value)
+            self.color_map.high = max(value)
 
             factors = list(sorted(set(x + y)))
             self.fig.x_range.factors = factors
