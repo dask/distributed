@@ -724,9 +724,11 @@ class TaskPrefix(object):
         self.groups = []
         self.states["forgotten"] = 0
         if self.name in dask.config.get("distributed.scheduler.default-task-durations"):
-            self.duration_average = dask.config.get(
-                "distributed.scheduler.default-task-durations"
-            )[self.name]
+            self.duration_average = parse_timedelta(
+                dask.config.get("distributed.scheduler.default-task-durations")[
+                    self.name
+                ]
+            )
         else:
             self.duration_average = None
 
