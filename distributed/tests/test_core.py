@@ -1,7 +1,7 @@
 import asyncio
-from contextlib import asynccontextmanager
 import os
 import socket
+import sys
 import threading
 import weakref
 
@@ -133,11 +133,16 @@ class MyServer(Server):
     default_port = 8756
 
 
+@pytest.mark.skipif(
+    sys.version_info < (3, 7),
+    reason="asynccontextmanager not avaiable before Python 3.7",
+)
 @pytest.mark.asyncio
 async def test_server_listen():
     """
     Test various Server.listen() arguments and their effect.
     """
+    from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def listen_on(cls, *args, **kwargs):
