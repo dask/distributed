@@ -34,6 +34,8 @@ distributed:
         ca-file: null
         key: null
         cert: null
+    resources:
+      auto: {}
 
   worker:
     blocked-handlers: []
