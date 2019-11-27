@@ -131,7 +131,7 @@ class Comm(ABC):
 
 class Listener(ABC):
     @abstractmethod
-    def start(self):
+    async def start(self):
         """
         Start listening for incoming connections.
         """
