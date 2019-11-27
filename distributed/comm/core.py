@@ -157,11 +157,11 @@ class Listener(ABC):
         address such as 'tcp://0.0.0.0:123'.
         """
 
-    def __enter__(self):
-        self.start()
+    async def __aenter__(self):
+        await self.start()
         return self
 
-    def __exit__(self, *exc):
+    async def __aexit__(self, *exc):
         self.stop()
 
 
