@@ -40,12 +40,13 @@ async def test_nanny(s):
 
             await nn.kill()
             assert not n.is_alive()
-            assert n.worker_address not in s.nthreads
-            assert n.worker_address not in s.workers
+            start = time()
+            while n.worker_address not in s.workers:
+                assert time() < start + 1
+                await asyncio.sleep(0.01)
 
             await nn.kill()
             assert not n.is_alive()
-            assert n.worker_address not in s.nthreads
             assert n.worker_address not in s.workers
 
             await nn.instantiate()
