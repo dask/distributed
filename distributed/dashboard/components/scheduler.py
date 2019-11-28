@@ -60,7 +60,6 @@ from distributed.dashboard.utils import (
 from distributed.metrics import time
 from distributed.utils import log_errors, format_time, parse_timedelta
 from distributed.diagnostics.progress_stream import color_of, progress_quads
-from distributed.diagnostics.progress import AllProgress
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.task_stream import TaskStreamPlugin
 
