@@ -61,6 +61,7 @@ from .utils import (
     parse_timedelta,
     iscoroutinefunction,
     warn_on_duration,
+    LRU,
 )
 from .utils_comm import pack_data, gather_from_workers
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
@@ -986,7 +987,7 @@ class Worker(ServerNode):
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(self._start_address, listen_args=self.listen_args)
         self.ip = get_address_host(self.address)
 
         if self.name is None:
@@ -2655,12 +2656,17 @@ class Worker(ServerNode):
         if self.digests is not None:
             self.digests["profile-duration"].add(stop - start)
 
-    def get_profile(self, comm=None, start=None, stop=None, key=None):
+    async def get_profile(
+        self, comm=None, start=None, stop=None, key=None, server=False
+    ):
         now = time() + self.scheduler_delay
-        if key is None:
+        if server:
+            history = self.io_loop.profile
+        elif key is None:
             history = self.profile_history
         else:
             history = [(t, d[key]) for t, d in self.profile_keys_history if key in d]
+
         if start is None:
             istart = 0
         else:
@@ -2693,7 +2699,7 @@ class Worker(ServerNode):
 
         return prof
 
-    def get_profile_metadata(self, comm=None, start=0, stop=None):
+    async def get_profile_metadata(self, comm=None, start=0, stop=None):
         if stop is None:
             add_recent = True
         now = time() + self.scheduler_delay
@@ -3171,18 +3177,26 @@ async def get_data_from_worker(
 
 job_counter = [0]
 
-import functools
+
+cache_loads = LRU(maxsize=100)
 
 
-@functools.lru_cache(100)
-def cached_function_deserialization(func):
-    return pickle.loads(func)
+def loads_function(bytes_object):
+    """ Load a function from bytes, cache bytes """
+    if len(bytes_object) < 100000:
+        try:
+            result = cache_loads[bytes_object]
+        except KeyError:
+            result = pickle.loads(bytes_object)
+            cache_loads[bytes_object] = result
+        return result
+    return pickle.loads(bytes_object)
 
 
 def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
-        function = cached_function_deserialization(function)
+        function = loads_function(function)
     if args:
         args = pickle.loads(args)
     if kwargs:
@@ -3214,24 +3228,18 @@ def execute_task(task):
         return task
 
 
-try:
-    # a 10 MB cache of deserialized functions and their bytes
-    from zict import LRU
-
-    cache = LRU(10000000, dict(), weight=lambda k, v: len(v))
-except ImportError:
-    cache = dict()
+cache_dumps = LRU(maxsize=100)
 
 
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     try:
-        result = cache[func]
+        result = cache_dumps[func]
     except KeyError:
         result = pickle.dumps(func)
         if len(result) < 100000:
-            cache[func] = result
-    except TypeError:
+            cache_dumps[func] = result
+    except TypeError:  # Unhashable function
         result = pickle.dumps(func)
     return result
 

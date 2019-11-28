@@ -1318,7 +1318,7 @@ class Scheduler(ServerNode):
                 c.cancel()
 
         if self.status != "running":
-            self.listen(self._start_address, listen_args=self.listen_args)
+            await self.listen(self._start_address, listen_args=self.listen_args)
             self.ip = get_address_host(self.listen_address)
             listen_ip = self.ip
 
@@ -4750,6 +4750,8 @@ class Scheduler(ServerNode):
         self,
         comm=None,
         workers=None,
+        scheduler=False,
+        server=False,
         merge_workers=True,
         start=None,
         stop=None,
@@ -4759,8 +4761,15 @@ class Scheduler(ServerNode):
             workers = self.workers
         else:
             workers = set(self.workers) & set(workers)
+
+        if scheduler:
+            return profile.get_profile(self.io_loop.profile, start=start, stop=stop)
+
         results = await asyncio.gather(
-            *(self.rpc(w).profile(start=start, stop=stop, key=key) for w in workers)
+            *(
+                self.rpc(w).profile(start=start, stop=stop, key=key, server=server)
+                for w in workers
+            )
         )
 
         if merge_workers:
