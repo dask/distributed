@@ -1712,7 +1712,8 @@ async def test_no_danglng_asyncio_tasks(cleanup):
 async def test_task_groups(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
-    y = await (x + 1).persist(optimize_graph=False)
+    y = (x + 1).persist(optimize_graph=False)
+    y = await y
 
     tg = s.task_groups[x.name]
     tp = s.task_prefixes["arange"]
@@ -1746,7 +1747,8 @@ async def test_task_groups(c, s, a, b):
 async def test_task_prefix(c, s, a, b):
     da = pytest.importorskip("dask.array")
     x = da.arange(100, chunks=(20,))
-    y = await (x + 1).sum().persist()
+    y = (x + 1).sum().persist()
+    y = await y
 
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 1
 
