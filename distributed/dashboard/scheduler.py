@@ -30,12 +30,12 @@ from .components.scheduler import (
     individual_profile_doc,
     individual_profile_server_doc,
     individual_nbytes_doc,
-    individual_memory_use_doc,
     individual_cpu_doc,
     individual_nprocessing_doc,
     individual_workers_doc,
     individual_bandwidth_types_doc,
     individual_bandwidth_workers_doc,
+    individual_memory_by_key_doc,
 )
 from .core import BokehServer
 from .worker import counters_doc
@@ -402,12 +402,12 @@ applications = {
     "/individual-profile": individual_profile_doc,
     "/individual-profile-server": individual_profile_server_doc,
     "/individual-nbytes": individual_nbytes_doc,
-    "/individual-memory-use": individual_memory_use_doc,
     "/individual-cpu": individual_cpu_doc,
     "/individual-nprocessing": individual_nprocessing_doc,
     "/individual-workers": individual_workers_doc,
     "/individual-bandwidth-types": individual_bandwidth_types_doc,
     "/individual-bandwidth-workers": individual_bandwidth_workers_doc,
+    "/individual-memory-by-key": individual_memory_by_key_doc,
 }
 
 try:

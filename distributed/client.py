@@ -3267,6 +3267,8 @@ class Client(Node):
         merge_workers=True,
         plot=False,
         filename=None,
+        server=False,
+        scheduler=False,
     ):
         """ Collect statistical profiling information about recent work
 
@@ -3279,6 +3281,14 @@ class Client(Node):
         stop: time
         workers: list
             List of workers to restrict profile information
+        server : bool
+            If true, return the profile of the worker's administrative thread
+            rather than the worker threads.
+            This is useful when profiling Dask itself, rather than user code.
+        scheduler: bool
+            If true, return the profile information from the scheduler's
+            administrative thread rather than the workers.
+            This is useful when profiling Dask's scheduling itself.
         plot: boolean or string
             Whether or not to return a plot object
         filename: str
@@ -3301,6 +3311,8 @@ class Client(Node):
             stop=stop,
             plot=plot,
             filename=filename,
+            server=server,
+            scheduler=scheduler,
         )
 
     async def _profile(
@@ -3312,6 +3324,8 @@ class Client(Node):
         merge_workers=True,
         plot=False,
         filename=None,
+        server=False,
+        scheduler=False,
     ):
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -3322,6 +3336,8 @@ class Client(Node):
             merge_workers=merge_workers,
             start=start,
             stop=stop,
+            server=server,
+            scheduler=scheduler,
         )
 
         if filename:
