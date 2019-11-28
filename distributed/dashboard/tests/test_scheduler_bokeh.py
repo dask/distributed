@@ -28,7 +28,6 @@ from distributed.dashboard.components.scheduler import (
     Events,
     TaskStream,
     TaskProgress,
-    MemoryUse,
     CurrentLoad,
     ProcessingHistogram,
     NBytesHistogram,
@@ -249,19 +248,6 @@ def test_TaskProgress_empty(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_MemoryUse(c, s, a, b):
-    mu = MemoryUse(s)
-
-    futures = c.map(slowinc, range(10), delay=0.001)
-    yield wait(futures)
-
-    mu.update()
-    d = dict(mu.source.data)
-    assert all(len(L) == 1 for L in d.values())
-    assert d["name"] == ["slowinc"]
-
-
-@gen_cluster(client=True)
 def test_CurrentLoad(c, s, a, b):
     cl = CurrentLoad(s)
 
@@ -273,6 +259,8 @@ def test_CurrentLoad(c, s, a, b):
 
     assert all(len(L) == 2 for L in d.values())
     assert all(d["nbytes"])
+
+    assert cl.cpu_figure.x_range.end == 200
 
 
 @gen_cluster(client=True)

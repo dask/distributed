@@ -1,6 +1,6 @@
 import asyncio
 import atexit
-from collections import deque
+from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
@@ -1416,3 +1416,23 @@ class EmptyContext:
 
 
 empty_context = EmptyContext()
+
+
+class LRU(UserDict):
+    """ Limited size mapping, evicting the least recently looked-up key when full
+    """
+
+    def __init__(self, maxsize):
+        super().__init__()
+        self.data = OrderedDict()
+        self.maxsize = maxsize
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.data.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if len(self) >= self.maxsize:
+            self.data.popitem(last=False)
+        super().__setitem__(key, value)

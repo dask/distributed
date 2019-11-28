@@ -841,7 +841,7 @@ class Scheduler(ServerNode):
         service_kwargs=None,
         allowed_failures=None,
         extensions=None,
-        validate=False,
+        validate=None,
         scheduler_file=None,
         security=None,
         worker_ttl=None,
@@ -861,6 +861,8 @@ class Scheduler(ServerNode):
         if allowed_failures is None:
             allowed_failures = dask.config.get("distributed.scheduler.allowed-failures")
         self.allowed_failures = allowed_failures
+        if validate is None:
+            validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
         self.status = None
         self.proc = psutil.Process()
@@ -1213,7 +1215,7 @@ class Scheduler(ServerNode):
                 c.cancel()
 
         if self.status != "running":
-            self.listen(self._start_address, listen_args=self.listen_args)
+            await self.listen(self._start_address, listen_args=self.listen_args)
             self.ip = get_address_host(self.listen_address)
             listen_ip = self.ip
 
@@ -2547,7 +2549,7 @@ class Scheduler(ServerNode):
                 (self.tasks[key].state if key in self.tasks else None)
                 for key in missing_keys
             ]
-            logger.debug(
+            logger.exception(
                 "Couldn't gather keys %s state: %s workers: %s",
                 missing_keys,
                 missing_states,
@@ -2555,17 +2557,21 @@ class Scheduler(ServerNode):
             )
             result = {"status": "error", "keys": missing_keys}
             with log_errors():
+                # Remove suspicious workers from the scheduler but allow them to
+                # reconnect.
                 for worker in missing_workers:
-                    self.remove_worker(address=worker)  # this is extreme
+                    self.remove_worker(address=worker, close=False)
                 for key, workers in missing_keys.items():
-                    if not workers:
-                        continue
-                    ts = self.tasks[key]
+                    # Task may already be gone if it was held by a
+                    # `missing_worker`
+                    ts = self.tasks.get(key)
                     logger.exception(
                         "Workers don't have promised key: %s, %s",
                         str(workers),
                         str(key),
                     )
+                    if not workers or ts is None:
+                        continue
                     for worker in workers:
                         ws = self.workers.get(worker)
                         if ws is not None and ts in ws.has_what:
@@ -4640,6 +4646,8 @@ class Scheduler(ServerNode):
         self,
         comm=None,
         workers=None,
+        scheduler=False,
+        server=False,
         merge_workers=True,
         start=None,
         stop=None,
@@ -4649,8 +4657,15 @@ class Scheduler(ServerNode):
             workers = self.workers
         else:
             workers = set(self.workers) & set(workers)
+
+        if scheduler:
+            return profile.get_profile(self.io_loop.profile, start=start, stop=stop)
+
         results = await asyncio.gather(
-            *(self.rpc(w).profile(start=start, stop=stop, key=key) for w in workers)
+            *(
+                self.rpc(w).profile(start=start, stop=stop, key=key, server=server)
+                for w in workers
+            )
         )
 
         if merge_workers:
