@@ -690,6 +690,7 @@ class TaskGroup(object):
         self.nbytes_total = 0
         self.nbytes_in_memory = 0
         self.duration = 0
+        self.types = set()
         # self.tasks = weakref.WeakSet()
 
     def add(self, ts):
@@ -700,13 +701,16 @@ class TaskGroup(object):
     def __repr__(self):
         return (
             "<"
-            + self.name
+            + (self.name or "no-group")
             + ": "
             + ", ".join(
                 "%s: %d" % (k, v) for (k, v) in sorted(self.states.items()) if v
             )
             + ">"
         )
+
+    def __len__(self):
+        return sum(self.states.values())
 
 
 class TaskPrefix(object):
@@ -759,6 +763,25 @@ class TaskPrefix(object):
             )
             + ">"
         )
+
+    @property
+    def nbytes_in_memory(self):
+        return sum(tg.nbytes_in_memory for tg in self.groups)
+
+    @property
+    def nbytes_total(self):
+        return sum(tg.nbytes_total for tg in self.groups)
+
+    def __len__(self):
+        return sum(map(len, self.groups))
+
+    @property
+    def duration(self):
+        return sum(tg.duration for tg in self.groups)
+
+    @property
+    def types(self):
+        return set.union(*[tg.types for tg in self.groups])
 
 
 class _StateLegacyMapping(Mapping):
@@ -3668,6 +3691,7 @@ class Scheduler(ServerNode):
 
         ts.state = "memory"
         ts.type = typename
+        ts.group.types.add(typename)
 
         cs = self.clients["fire-and-forget"]
         if ts in cs.wants_what:
@@ -4306,9 +4330,6 @@ class Scheduler(ServerNode):
 
         if key in self.task_metadata:
             del self.task_metadata[key]
-
-        if ts.group.states["forgotten"] == sum(ts.group.states.values()):
-            del self.task_groups[ts.group_key]
 
     def _propagate_forgotten(self, ts, recommendations):
         ts.state = "forgotten"

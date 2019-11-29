@@ -1725,6 +1725,9 @@ async def test_task_groups(c, s, a, b):
     assert tp.states["released"] == 5
     assert tg.prefix is tp
     assert tg in tp.groups
+    assert tg.duration == tp.duration
+    assert tg.nbytes_in_memory == tp.nbytes_in_memory
+    assert tg.nbytes_total == tp.nbytes_total
 
     tg = s.task_groups[y.name]
     assert tg.states["memory"] == 5
@@ -1741,6 +1744,8 @@ async def test_task_groups(c, s, a, b):
 
     assert tg.nbytes_in_memory == 0
     assert tg.states["forgotten"] == 5
+    assert "array" in str(tg.types)
+    assert "array" in str(tp.types)
 
 
 @gen_cluster(client=True)
@@ -1906,4 +1911,4 @@ async def test_too_many_groups(c, s, a, b):
     while s.tasks:
         await asyncio.sleep(0.01)
 
-    assert not s.task_groups
+    assert len(s.task_groups) < 3
