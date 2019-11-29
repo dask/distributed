@@ -5889,7 +5889,7 @@ async def test_run_scheduler_async_def_wait(c, s, a, b):
     assert a.foo == "bar"
     assert b.foo == "bar"
 
-    
+
 @gen_cluster(client=True)
 async def test_performance_report(c, s, a, b):
     da = pytest.importorskip("dask.array")
