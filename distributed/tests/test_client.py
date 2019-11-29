@@ -36,6 +36,7 @@ from distributed import (
     get_worker,
     Executor,
     profile,
+    performance_report,
     TimeoutError,
 )
 from distributed.comm import CommClosedError
@@ -5887,3 +5888,19 @@ async def test_run_scheduler_async_def_wait(c, s, a, b):
 
     assert a.foo == "bar"
     assert b.foo == "bar"
+
+    
+@gen_cluster(client=True)
+async def test_performance_report(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.random.random((1000, 1000), chunks=(100, 100))
+
+    with tmpfile(extension="html") as fn:
+        async with performance_report(filename=fn):
+            await c.compute((x + x.T).sum())
+
+        with open(fn) as f:
+            data = f.read()
+
+        assert "bokeh" in data
+        assert "random" in data
