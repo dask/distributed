@@ -1893,3 +1893,17 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
         if "reducer" in key and finish == "processing":
             finish_processing_transitions += 1
     assert finish_processing_transitions == 1
+
+
+@gen_cluster(client=True)
+async def test_too_many_groups(c, s, a, b):
+    x = dask.delayed(inc)(1)
+    y = dask.delayed(dec)(2)
+    z = dask.delayed(operator.add)(x, y)
+
+    await c.compute(z)
+
+    while s.tasks:
+        await asyncio.sleep(0.01)
+
+    assert not s.task_groups

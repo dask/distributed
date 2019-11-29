@@ -4307,6 +4307,9 @@ class Scheduler(ServerNode):
         if key in self.task_metadata:
             del self.task_metadata[key]
 
+        if ts.group.states["forgotten"] == sum(ts.group.states.values()):
+            del self.task_groups[ts.group_key]
+
     def _propagate_forgotten(self, ts, recommendations):
         ts.state = "forgotten"
         key = ts.key
