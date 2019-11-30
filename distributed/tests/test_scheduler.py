@@ -1862,3 +1862,7 @@ async def test_multiple_listeners(cleanup):
                 async with Client(s.address, asynchronous=True) as c:
                     futures = c.map(inc, range(20))
                     await wait(futures)
+
+                    # Force inter-worker communication both ways
+                    await c.submit(sum, futures, workers=[a.address])
+                    await c.submit(len, futures, workers=[b.address])
