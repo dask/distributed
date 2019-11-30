@@ -12,10 +12,10 @@ import os
 from time import sleep
 
 import distributed.cli.dask_worker
-from distributed import Client, Scheduler
+from distributed import Client, Scheduler, Worker, wait
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
-from distributed.utils_test import popen, terminate_process, wait_for_port
+from distributed.utils_test import popen, terminate_process, wait_for_port, slowinc
 from distributed.utils_test import loop, cleanup  # noqa: F401
 
 
@@ -49,29 +49,33 @@ def test_nanny_worker_ports(loop):
                 )
 
 
-def test_nanny_does_not_raise_on_signint(loop):
-    with popen(["dask-scheduler", "--port", "9359", "--no-dashboard"]) as sched:
-        with popen(
-                [
-                    "dask-worker",
-                    "127.0.0.1:9359",
-                    "--host",
-                    "127.0.0.1",
-                    "--worker-port",
-                    "9684",
-                    "--nanny-port",
-                    "5273",
-                    "--no-dashboard",
-                ]
-        ) as worker:
-            with Client("127.0.0.1:9359", loop=loop) as c:
-                c.submit(sleep, 5)
-                worker.send_signal(signal.SIGINT)
-                sleep(0.1)  # wait for signal handling in worker
-                # Note: this consumes the pipe in worker.stderr, which means
-                # that the stderr printout is lost.
-                assert not any((b'TimeoutError' in line)
-                               for line in worker.stderr)
+@pytest.mark.asyncio
+async def test_sigint(cleanup):
+    async with Scheduler(port=0) as s:
+        with popen(["dask-worker", s.address, "--name", "alice"]) as worker:
+            async with Client(s.address, asynchronous=True) as c:
+                async with Worker(s.address) as w:
+                    await c.wait_for_workers(2)
+                    a, b = s.workers.values()
+                    scattered = await asyncio.gather(
+                        c.scatter(list(range(0, 10)), workers=[a.address]),
+                        c.scatter(list(range(10, 20)), workers=[b.address]),
+                    )
+                    scattered = scattered[0] + scattered[1]
+                    assert a.has_what and b.has_what
+
+                    submitted = c.map(slowinc, range(10), delay=0.05)
+                    await asyncio.sleep(0.10)
+
+                    worker.send_signal(signal.SIGINT)
+                    while len(s.workers) > 1:
+                        await asyncio.sleep(0.01)
+
+                    await asyncio.sleep(0.5)
+
+                    await wait(submitted)
+                    assert all(future.status == "finished" for future in scattered)
+                    assert all(future.status == "finished" for future in submitted)
 
 
 def test_memory_limit(loop):

@@ -1,5 +1,6 @@
 import asyncio
 import atexit
+import functools
 import logging
 import gc
 import os
@@ -13,7 +14,7 @@ from dask.utils import ignoring
 from dask.system import CPU_COUNT
 from distributed import Nanny, Worker
 from distributed.security import Security
-from distributed.cli.utils import check_python_3, install_signal_handlers
+from distributed.cli.utils import check_python_3
 from distributed.comm import get_address_host_port
 from distributed.preloading import validate_preload_argv
 from distributed.proctitle import (
@@ -386,32 +387,32 @@ def main(
         for i in range(nprocs)
     ]
 
-    async def close_all():
-        # Unregister all workers from scheduler
-        if nanny:
-            await asyncio.gather(*[n.close(timeout=2) for n in nannies])
-
     signal_fired = False
 
-    async def unregister_with_scheduler():
-        await asyncio.gather(*[n.scheduler.unregister(address=n.worker_address, safe=True)
-               for n in nannies])
-
-    def on_signal(signum):
+    async def _on_signal(signum):
         nonlocal signal_fired
-        signal_fired = True
-        if signum == signal.SIGINT:
-            logger.info('Unregistering workers on SIGINT')
-            loop.add_callback_from_signal(unregister_with_scheduler)
-        else:
+        from distributed.utils import log_errors
+
+        with log_errors():
             logger.info("Exiting on signal %d", signum)
-        loop.add_callback_from_signal(close_all)
+            signal_fired = True
+            if signum == signal.SIGINT:
+                logger.info("Gracefully closing worker because of SIGINT call")
+                await asyncio.gather(*[n.close_gracefully() for n in nannies])
+            logger.info("Closing workers")
+            await asyncio.gather(*[n.close() for n in nannies])
+
+    def on_signal(sig):
+        asyncio.ensure_future(_on_signal(sig))
 
     async def run():
         await asyncio.gather(*nannies)
         await asyncio.gather(*[n.finished() for n in nannies])
 
-    install_signal_handlers(loop, cleanup=on_signal)
+    for sig in [signal.SIGINT, signal.SIGTERM]:
+        asyncio.get_event_loop().add_signal_handler(
+            sig, functools.partial(on_signal, sig)
+        )
     try:
         loop.run_sync(run)
     except TimeoutError:

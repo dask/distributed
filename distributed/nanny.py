@@ -170,7 +170,7 @@ class Nanny(ServerNode):
             # cannot call it 'close' on the rpc side for naming conflict
             "get_logs": self.get_logs,
             "terminate": self.close,
-            "close_gracefully": self.close_gracefully,
+            "close_gracefully": self.close_gracefully_signal,
             "run": self.run,
         }
 
@@ -423,13 +423,20 @@ class Nanny(ServerNode):
         warnings.warn("Worker._close has moved to Worker.close", stacklevel=2)
         return self.close(*args, **kwargs)
 
-    def close_gracefully(self, comm=None):
+    def close_gracefully_signal(self, comm=None):
         """
         A signal that we shouldn't try to restart workers if they go away
 
         This is used as part of the cluster shutdown process.
         """
         self.status = "closing-gracefully"
+
+    async def close_gracefully(self):
+        try:
+            await self.rpc(self.worker_address).close_gracefully()
+        except CommClosedError:  # worker will have closed connection
+            pass
+        await self.close()
 
     async def close(self, comm=None, timeout=5, report=None):
         """
