@@ -1089,7 +1089,7 @@ class Worker(ServerNode):
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
-                self.batched_stream.close()
+                await self.batched_stream.close()
 
             self.actor_executor._work_queue.queue.clear()
             if isinstance(self.executor, ThreadPoolExecutor):
