@@ -13,6 +13,7 @@ from time import sleep
 
 import distributed.cli.dask_worker
 from distributed import Client, Scheduler, Worker, wait
+from distributed.compatibility import WINDOWS
 from distributed.metrics import time
 from distributed.utils import sync, tmpfile
 from distributed.utils_test import popen, terminate_process, wait_for_port, slowinc
@@ -49,6 +50,7 @@ def test_nanny_worker_ports(loop):
                 )
 
 
+@pytest.mark.skipif(WINDOWS, reason="Not supported on Windows")
 @pytest.mark.asyncio
 async def test_sigint(cleanup):
     async with Scheduler(port=0) as s:
