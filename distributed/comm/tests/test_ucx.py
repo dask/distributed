@@ -1,18 +1,18 @@
 import asyncio
-
 import pytest
-from dask.dataframe.utils import assert_eq
-
-from distributed import Client, Scheduler, Worker, wait
-from distributed.comm import connect, listen, parse_address, ucx
-from distributed.comm.registry import backends, get_backend
-from distributed.deploy.local import LocalCluster
-from distributed.protocol import to_serialize
-from distributed.utils_test import cleanup, gen_test, inc, loop  # noqa: 401
-
-from .test_comms import check_deserialize
 
 ucp = pytest.importorskip("ucp")
+
+from distributed import Client, Worker, Scheduler, wait
+from distributed.comm import ucx, listen, connect
+from distributed.comm.registry import backends, get_backend
+from distributed.comm import ucx, parse_address
+from distributed.protocol import to_serialize
+from distributed.deploy.local import LocalCluster
+from dask.dataframe.utils import assert_eq
+from distributed.utils_test import gen_test, loop, inc, cleanup  # noqa: 401
+
+from .test_comms import check_deserialize
 
 
 try:
