@@ -36,13 +36,12 @@ async def get_comm_pair(
         await q.put(comm)
 
     listener = listen(listen_addr, handle_comm, connection_args=listen_args, **kwargs)
-    await listener.start()
-
-    comm = await connect(
-        listener.contact_address, connection_args=connect_args, **kwargs
-    )
-    serv_comm = await q.get()
-    return (comm, serv_comm)
+    async with listener:
+        comm = await connect(
+            listener.contact_address, connection_args=connect_args, **kwargs
+        )
+        serv_comm = await q.get()
+        return (comm, serv_comm)
 
 
 @pytest.mark.asyncio
