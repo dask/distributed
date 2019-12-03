@@ -306,8 +306,6 @@ def test_nanny_terminate(c, s, a):
     nthreads=[("127.0.0.1", 1)] * 8,
     client=True,
     Worker=Nanny,
-    worker_kwargs={"memory_limit": 2e8},
-    timeout=20,
     clean_kwargs={"threads": False},
 )
 async def test_nanny_throttle(c, s, *workers):
@@ -317,8 +315,7 @@ async def test_nanny_throttle(c, s, *workers):
     # 2. Pausing that worker
     # 3. Requesting data from that worker from many other workers
     a = workers[0]
-    proc = a.process.pid
-    size = 1000
+    size = 10
 
     def data(size):
         return b"0" * size
@@ -334,7 +331,7 @@ async def test_nanny_throttle(c, s, *workers):
         return dask_worker.paused
 
     futures = [
-        c.submit(data, size, workers=[a.worker_address], pure=False) for i in range(4)
+        c.submit(data, size, workers=[a.worker_address], pure=False) for _ in range(4)
     ]
     await wait(futures)
     await c.run(patch, workers=[a.worker_address])
