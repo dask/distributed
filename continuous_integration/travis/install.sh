@@ -74,6 +74,8 @@ if [[ $CRICK == true ]]; then
     pip install -q git+https://github.com/jcrist/crick.git
 fi;
 
+conda uninstall --force cryptography
+
 # Install distributed
 pip install --no-deps -e .
 
