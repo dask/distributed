@@ -709,6 +709,7 @@ def test_adapt_then_manual(loop):
 @pytest.mark.parametrize("temporary", [True, False])
 def test_local_tls(loop, temporary):
     if temporary:
+        pytest.importorskip("cryptography")
         security = True
     else:
         security = tls_only_security()
