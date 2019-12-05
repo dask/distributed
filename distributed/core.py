@@ -832,7 +832,12 @@ class ConnectionPool(object):
         self._created = weakref.WeakSet()
         self._instances.add(self)
 
-    def validate(self):
+    def _validate(self):
+        """
+        Validate important invariants of this class
+
+        Used only for testing / debugging
+        """
         assert self.semaphore._value == self.limit - self.open - self._n_connecting
 
     @property
