@@ -36,7 +36,7 @@ from .comm import (
     get_address_host,
     unparse_host_port,
 )
-from .comm.addressing import address_from_user_args
+from .comm.addressing import addresses_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from . import profile
@@ -59,7 +59,7 @@ from .utils import (
     shutting_down,
     tmpfile,
 )
-from .utils_comm import scatter_to_workers, gather_from_workers
+from .utils_comm import scatter_to_workers, gather_from_workers, retry_operation
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
 
 from .publish import PublishExtension
@@ -1118,7 +1118,7 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
-        self._start_address = address_from_user_args(
+        self._start_address = addresses_from_user_args(
             host=host,
             port=port,
             interface=interface,
@@ -1215,14 +1215,15 @@ class Scheduler(ServerNode):
                 c.cancel()
 
         if self.status != "running":
-            await self.listen(self._start_address, listen_args=self.listen_args)
-            self.ip = get_address_host(self.listen_address)
-            listen_ip = self.ip
+            for addr in self._start_address:
+                await self.listen(addr, listen_args=self.listen_args)
+                self.ip = get_address_host(self.listen_address)
+                listen_ip = self.ip
 
-            if listen_ip == "0.0.0.0":
-                listen_ip = ""
+                if listen_ip == "0.0.0.0":
+                    listen_ip = ""
 
-            if self._start_address.startswith("inproc://"):
+            if self.address.startswith("inproc://"):
                 listen_ip = "localhost"
 
             # Services listen on all addresses
@@ -2785,7 +2786,10 @@ class Scheduler(ServerNode):
                 to_senders[sender.address].append(ts.key)
 
             result = await asyncio.gather(
-                *(self.rpc(addr=r).gather(who_has=v) for r, v in to_recipients.items())
+                *(
+                    retry_operation(self.rpc(addr=r).gather, who_has=v)
+                    for r, v in to_recipients.items()
+                )
             )
             for r, v in to_recipients.items():
                 self.log_event(r, {"action": "rebalance", "who_has": v})
@@ -2818,7 +2822,7 @@ class Scheduler(ServerNode):
 
             await asyncio.gather(
                 *(
-                    self.rpc(addr=r).delete_data(keys=v, report=False)
+                    retry_operation(self.rpc(addr=r).delete_data, keys=v, report=False)
                     for r, v in to_senders.items()
                 )
             )
@@ -2886,8 +2890,10 @@ class Scheduler(ServerNode):
 
             await asyncio.gather(
                 *(
-                    self.rpc(addr=ws.address).delete_data(
-                        keys=[ts.key for ts in tasks], report=False
+                    retry_operation(
+                        self.rpc(addr=ws.address).delete_data,
+                        keys=[ts.key for ts in tasks],
+                        report=False,
                     )
                     for ws, tasks in del_worker_tasks.items()
                 )
@@ -2921,7 +2927,7 @@ class Scheduler(ServerNode):
 
             results = await asyncio.gather(
                 *(
-                    self.rpc(addr=w).gather(who_has=who_has)
+                    retry_operation(self.rpc(addr=w).gather, who_has=who_has)
                     for w, who_has in gathers.items()
                 )
             )
