@@ -74,7 +74,7 @@ def test_retry_no_exception(loop):
         return retval
 
     assert (
-        loop.run_sync(lambda: retry(coro, max_retries=0, base_delay=-1, max_delay=-1))
+        loop.run_sync(lambda: retry(coro, count=0, delay_min=-1, delay_max=-1))
         is retval
     )
     assert n_calls == 1
@@ -91,7 +91,7 @@ def test_retry0_raises_immediately(loop):
         raise RuntimeError(f"RT_ERROR {n_calls}")
 
     with pytest.raises(RuntimeError, match="RT_ERROR 1"):
-        loop.run_sync(lambda: retry(coro, max_retries=0, base_delay=-1, max_delay=-1))
+        loop.run_sync(lambda: retry(coro, count=0, delay_min=-1, delay_max=-1))
 
     assert n_calls == 1
 
@@ -120,9 +120,9 @@ def test_retry_does_retry_and_sleep(loop):
                 lambda: retry(
                     coro,
                     retry_on_exceptions=(MyEx,),
-                    max_retries=5,
-                    base_delay=1.0,
-                    max_delay=6.0,
+                    count=5,
+                    delay_min=1.0,
+                    delay_max=6.0,
                     jitter_fraction=0.0,
                 )
             )

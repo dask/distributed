@@ -1750,7 +1750,7 @@ async def test_gather_failing_cnn_recover(c, s, a, b):
     x = await c.scatter({"x": 1}, workers=a.address)
 
     s.rpc = FlakyConnectionPool(failing_connections=1)
-    with mock.patch("distributed.utils_comm.retry_max_retries", 1):
+    with mock.patch("distributed.utils_comm.retry_count", 1):
         res = await s.gather(keys=["x"])
     assert res["status"] == "OK"
 
@@ -1820,9 +1820,9 @@ async def test_gather_allow_worker_reconnect(c, s, a, b):
     ) as client_logger, captured_logger(
         logging.getLogger("distributed.utils_comm")
     ) as utils_comm_logger, mock.patch(
-        "distributed.utils_comm.retry_max_retries", 3
+        "distributed.utils_comm.retry_count", 3
     ), mock.patch(
-        "distributed.utils_comm.retry_base_delay", 0.5
+        "distributed.utils_comm.retry_delay_min", 0.5
     ):
         # Gather using the client (as an ordinary user would)
         # Upon a missing key, the client will reschedule the computations

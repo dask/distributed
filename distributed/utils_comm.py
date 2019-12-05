@@ -280,20 +280,20 @@ def pack_data(o, d, key_types=object):
         return o
 
 
-retry_max_retries = dask.config.get("distributed.comm.retry_operations.max_retries")
-retry_base_delay = parse_timedelta(
-    dask.config.get("distributed.comm.retry_operations.base_delay"), default="s"
+retry_count = dask.config.get("distributed.comm.retry.count")
+retry_delay_min = parse_timedelta(
+    dask.config.get("distributed.comm.retry.delay.min"), default="s"
 )
-retry_max_delay = parse_timedelta(
-    dask.config.get("distributed.comm.retry_operations.max_delay"), default="s"
+retry_delay_max = parse_timedelta(
+    dask.config.get("distributed.comm.retry.delay.max"), default="s"
 )
 
 
 async def retry(
     coro,
-    max_retries,
-    base_delay,
-    max_delay,
+    count,
+    delay_min,
+    delay_max,
     jitter_fraction=0.1,
     retry_on_exceptions=(EnvironmentError, IOError),
     operation=None,
@@ -301,9 +301,9 @@ async def retry(
     """
     Return the result of ``await coro()``, re-trying in case of exceptions
 
-    The delay between attempts is ``base_delay * (2 ** i - 1)`` where ``i`` enumerates the attempt that just failed
-    (starting at 0), but never larger than ``max_delay``.
-    This yields no delay between the first and second attempt, then ``base_delay``, ``3 * base_delay``, etc.
+    The delay between attempts is ``delay_min * (2 ** i - 1)`` where ``i`` enumerates the attempt that just failed
+    (starting at 0), but never larger than ``delay_max``.
+    This yields no delay between the first and second attempt, then ``delay_min``, ``3 * delay_min``, etc.
     (The reason to re-try with no delay is that in most cases this is sufficient and will thus recover faster
     from a communication failure).
 
@@ -311,11 +311,11 @@ async def retry(
     ----------
     coro
         The coroutine function to call and await
-    max_retries
+    count
         The maximum number of re-tries before giving up. 0 means no re-try; must be >= 0.
-    base_delay
+    delay_min
         The base factor for the delay (in seconds); this is the first non-zero delay between re-tries.
-    max_delay
+    delay_max
         The maximum delay (in seconds) between consecutive re-tries (without jitter)
     jitter_fraction
         The maximum jitter to add to the delay, as fraction of the total delay. No jitter is added if this
@@ -332,15 +332,15 @@ async def retry(
         Whatever `await `coro()` returned
     """
     # this loop is a no-op in case max_retries<=0
-    for i_try in range(max_retries):
+    for i_try in range(count):
         try:
             return await coro()
         except retry_on_exceptions as ex:
             operation = operation or str(coro)
             logger.info(
-                f"Retrying {operation} after exception in attempt {i_try}/{max_retries}: {ex}"
+                f"Retrying {operation} after exception in attempt {i_try}/{count}: {ex}"
             )
-            delay = min(base_delay * (2 ** i_try - 1), max_delay)
+            delay = min(delay_min * (2 ** i_try - 1), delay_max)
             if jitter_fraction > 0:
                 delay *= 1 + random.random() * jitter_fraction
             await asyncio.sleep(delay)
@@ -353,8 +353,8 @@ async def retry_operation(coro, *args, operation=None, **kwargs):
     """
     return await retry(
         partial(coro, *args, **kwargs),
-        max_retries=retry_max_retries,
-        base_delay=retry_base_delay,
-        max_delay=retry_max_delay,
+        count=retry_count,
+        delay_min=retry_delay_min,
+        delay_max=retry_delay_max,
         operation=operation,
     )
