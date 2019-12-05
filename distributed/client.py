@@ -51,6 +51,7 @@ from .utils_comm import (
     WrappedKey,
     unpack_remotedata,
     pack_data,
+    subs_multiple,
     scatter_to_workers,
     gather_from_workers,
 )
@@ -2439,7 +2440,7 @@ class Client(Node):
                 if isinstance(v, Future) and k not in keyset
             }
             if values:
-                dsk = pack_data(dsk, values)
+                dsk = subs_multiple(dsk, values)
 
             d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
             extra_futures = set.union(*[v[1] for v in d.values()]) if d else set()
