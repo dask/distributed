@@ -2828,7 +2828,9 @@ class Scheduler(ServerNode):
 
                 await asyncio.gather(
                     *(
-                        retry_operation(self.rpc(addr=r).delete_data, keys=v, report=False)
+                        retry_operation(
+                            self.rpc(addr=r).delete_data, keys=v, report=False
+                        )
                         for r, v in to_senders.items()
                     )
                 )
@@ -2899,8 +2901,10 @@ class Scheduler(ServerNode):
 
                 await asyncio.gather(
                     *(
-                        retry_operation(self.rpc(addr=ws.address).delete_data,
-                            keys=[ts.key for ts in tasks], report=False
+                        retry_operation(
+                            self.rpc(addr=ws.address).delete_data,
+                            keys=[ts.key for ts in tasks],
+                            report=False,
                         )
                         for ws, tasks in del_worker_tasks.items()
                     )
