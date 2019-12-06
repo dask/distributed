@@ -65,3 +65,25 @@ async def test_file(cleanup, tmp_path):
                 [w] = info["workers"].values()
                 assert w["name"] == "foo"
                 assert w["nthreads"] == 3
+
+
+def test_errors():
+    with popen(
+        [
+            sys.executable,
+            "-m",
+            "distributed.cli.dask_spec",
+            "--spec",
+            '{"foo": "bar"}',
+            "--spec-file",
+            "foo.yaml",
+        ]
+    ) as proc:
+        line = proc.stdout.readline().decode()
+        assert "exactly one" in line
+        assert "--spec" in line and "--spec-file" in line
+
+    with popen([sys.executable, "-m", "distributed.cli.dask_spec"]) as proc:
+        line = proc.stdout.readline().decode()
+        assert "exactly one" in line
+        assert "--spec" in line and "--spec-file" in line
