@@ -347,7 +347,7 @@ async def test_nanny_throttle(c, s, *workers):
         range(n),
         workers=[w.worker_address for w in workers[1:]],
     )
-    await result[0]
+    await wait(result)
     wlogs = await c.get_worker_logs(workers=[a.worker_address])
     wlogs = "\n".join(x[1] for x in wlogs[a.worker_address])
     assert "throttling" in wlogs.lower()
