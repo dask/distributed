@@ -584,13 +584,13 @@ class SpecCluster(Cluster):
         return super().adapt(*args, minimum=minimum, maximum=maximum, **kwargs)
 
 
-async def run_workers(scheduler: str, spec: dict, name=None):
+async def run_spec(spec: dict, *args):
     workers = {}
     for k, d in spec.items():
         cls = d["cls"]
         if isinstance(cls, str):
             cls = import_term(cls)
-        workers[k] = cls(scheduler, **d.get("opts", {}))
+        workers[k] = cls(*args, **d.get("opts", {}))
 
     if workers:
         await asyncio.gather(*workers.values())

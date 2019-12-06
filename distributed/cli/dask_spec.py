@@ -3,15 +3,15 @@ import click
 import json
 import yaml
 
-from distributed.deploy.spec import run_workers
+from distributed.deploy.spec import run_spec
 
 
 @click.command(context_settings=dict(ignore_unknown_options=True))
-@click.argument("scheduler", type=str, required=False)
+@click.argument("args", nargs=-1)
 @click.option("--spec", type=str, default="", help="")
 @click.option("--spec-file", type=str, default=None, help="")
 @click.version_option()
-def main(scheduler: str, spec: str, spec_file: str):
+def main(args, spec: str, spec_file: str):
     _spec = {}
     if spec_file:
         with open(spec_file) as f:
@@ -24,11 +24,11 @@ def main(scheduler: str, spec: str, spec_file: str):
         _spec = {_spec["opts"].get("name", 0): _spec}
 
     async def run():
-        workers = await run_workers(scheduler, _spec)
+        servers = await run_spec(_spec, *args)
         try:
-            await asyncio.gather(*[w.finished() for w in workers.values()])
+            await asyncio.gather(*[w.finished() for w in servers.values()])
         except KeyboardInterrupt:
-            await asyncio.gather(*[w.close() for w in workers.values()])
+            await asyncio.gather(*[w.close() for w in servers.values()])
 
     asyncio.get_event_loop().run_until_complete(run())
 

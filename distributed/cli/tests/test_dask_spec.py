@@ -8,10 +8,16 @@ from distributed.utils_test import cleanup  # noqa: F401
 
 @pytest.mark.asyncio
 async def test_text(cleanup):
-    with popen(["dask-scheduler", "--port", "9373", "--no-dashboard"]) as sched:
+    with popen(
+        [
+            "dask-spec",
+            "--spec",
+            '{"cls": "dask.distributed.Scheduler", "opts": {"port": 9373}}',
+        ]
+    ) as sched:
         with popen(
             [
-                "dask-spec-worker",
+                "dask-spec",
                 "tcp://localhost:9373",
                 "--spec",
                 '{"cls": "dask.distributed.Worker", "opts": {"nanny": false, "nthreads": 3, "name": "foo"}}',
@@ -38,9 +44,7 @@ async def test_file(cleanup, tmp_path):
         )
 
     with popen(["dask-scheduler", "--port", "9373", "--no-dashboard"]) as sched:
-        with popen(
-            ["dask-spec-worker", "tcp://localhost:9373", "--spec-file", fn]
-        ) as w:
+        with popen(["dask-spec", "tcp://localhost:9373", "--spec-file", fn]) as w:
             async with Client("tcp://localhost:9373", asynchronous=True) as client:
                 await client.wait_for_workers(1)
                 info = await client.scheduler.identity()
