@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod, abstractproperty
+import asyncio
 from datetime import timedelta
 import logging
 import weakref
@@ -58,7 +59,7 @@ class Comm(ABC):
         """
 
     @abstractmethod
-    def write(self, msg, on_error=None):
+    def write(self, msg, serializers=None, on_error=None):
         """
         Write a message (a Python object).
 
@@ -130,7 +131,7 @@ class Comm(ABC):
 
 class Listener(ABC):
     @abstractmethod
-    def start(self):
+    async def start(self):
         """
         Start listening for incoming connections.
         """
@@ -156,11 +157,11 @@ class Listener(ABC):
         address such as 'tcp://0.0.0.0:123'.
         """
 
-    def __enter__(self):
-        self.start()
+    async def __aenter__(self):
+        await self.start()
         return self
 
-    def __exit__(self, *exc):
+    async def __aexit__(self, *exc):
         self.stop()
 
 
@@ -224,7 +225,7 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                await gen.sleep(0.01)
+                await asyncio.sleep(0.01)
                 logger.debug("sleeping on connect")
             else:
                 _raise(error)

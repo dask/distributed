@@ -4,6 +4,7 @@ from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
 from datetime import timedelta
 import heapq
+from inspect import isawaitable
 import logging
 import os
 from pickle import PicklingError
@@ -18,6 +19,7 @@ import dask
 from dask.core import istask
 from dask.compatibility import apply
 from dask.utils import format_bytes, funcname
+from dask.system import CPU_COUNT
 
 try:
     from cytoolz import pluck, partial, merge, first, keymap
@@ -59,8 +61,9 @@ from .utils import (
     parse_timedelta,
     iscoroutinefunction,
     warn_on_duration,
+    LRU,
 )
-from .utils_comm import pack_data, gather_from_workers
+from .utils_comm import pack_data, gather_from_workers, retry_operation
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 
 logger = logging.getLogger(__name__)
@@ -318,7 +321,7 @@ class Worker(ServerNode):
         nanny=None,
         plugins=(),
         low_level_profiler=dask.config.get("distributed.worker.profile.low-level"),
-        validate=False,
+        validate=None,
         profile_cycle_interval=None,
         lifetime=None,
         lifetime_stagger=None,
@@ -384,6 +387,8 @@ class Worker(ServerNode):
         self.target_message_size = 50e6  # 50 MB
 
         self.log = deque(maxlen=100000)
+        if validate is None:
+            validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
 
         self._transitions = {
@@ -462,7 +467,7 @@ class Worker(ServerNode):
             warnings.warn("the ncores= parameter has moved to nthreads=")
             nthreads = ncores
 
-        self.nthreads = nthreads or system.CPU_COUNT
+        self.nthreads = nthreads or CPU_COUNT
         self.total_resources = resources or {}
         self.available_resources = (resources or {}).copy()
         self.death_timeout = parse_timedelta(death_timeout)
@@ -747,7 +752,7 @@ class Worker(ServerNode):
         for k, metric in self.metrics.items():
             try:
                 result = metric(self)
-                if hasattr(result, "__await__"):
+                if isawaitable(result):
                     result = await result
                 custom[k] = result
             except Exception:  # TODO: log error once
@@ -760,7 +765,7 @@ class Worker(ServerNode):
         for k, f in self.startup_information.items():
             try:
                 v = f(self)
-                if hasattr(v, "__await__"):
+                if isawaitable(v):
                     v = await v
                 result[k] = v
             except Exception:  # TODO: log error once
@@ -829,7 +834,7 @@ class Worker(ServerNode):
                 break
             except EnvironmentError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
-                await gen.sleep(0.1)
+                await asyncio.sleep(0.1)
             except gen.TimeoutError:
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
@@ -863,7 +868,8 @@ class Worker(ServerNode):
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                response = await self.scheduler.heartbeat_worker(
+                response = await retry_operation(
+                    self.scheduler.heartbeat_worker,
                     address=self.contact_address,
                     now=time(),
                     metrics=await self.get_metrics(),
@@ -880,6 +886,12 @@ class Worker(ServerNode):
                 )
                 self.bandwidth_workers.clear()
                 self.bandwidth_types.clear()
+            except IOError as e:
+                # Scheduler is gone. Respect distributed.comm.timeouts.connect
+                if "Timed out trying to connect" in str(e):
+                    await self.close(report=False)
+                else:
+                    raise e
             except CommClosedError:
                 logger.warning("Heartbeat to scheduler failed")
             finally:
@@ -976,7 +988,7 @@ class Worker(ServerNode):
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(self._start_address, listen_args=self.listen_args)
         self.ip = get_address_host(self.address)
 
         if self.name is None:
@@ -1056,7 +1068,7 @@ class Worker(ServerNode):
                 if hasattr(plugin, "teardown")
             ]
 
-            await asyncio.gather(*[td for td in teardowns if hasattr(td, "__await__")])
+            await asyncio.gather(*[td for td in teardowns if isawaitable(td)])
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
@@ -1078,7 +1090,8 @@ class Worker(ServerNode):
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
-                self.batched_stream.close()
+                with ignoring(gen.TimeoutError):
+                    await self.batched_stream.close(timedelta(seconds=timeout))
 
             self.actor_executor._work_queue.queue.clear()
             if isinstance(self.executor, ThreadPoolExecutor):
@@ -1287,8 +1300,10 @@ class Worker(ServerNode):
                 self.available_resources[r] = quantity
             self.total_resources[r] = quantity
 
-        await self.scheduler.set_resources(
-            resources=self.total_resources, worker=self.contact_address
+        await retry_operation(
+            self.scheduler.set_resources,
+            resources=self.total_resources,
+            worker=self.contact_address,
         )
 
     ###################
@@ -1997,7 +2012,7 @@ class Worker(ServerNode):
                 else:
                     # Exponential backoff to avoid hammering scheduler/worker
                     self.repetitively_busy += 1
-                    await gen.sleep(0.100 * 1.5 ** self.repetitively_busy)
+                    await asyncio.sleep(0.100 * 1.5 ** self.repetitively_busy)
 
                     # See if anyone new has the data
                     await self.query_who_has(dep)
@@ -2035,7 +2050,7 @@ class Worker(ServerNode):
                     self.suspicious_deps[dep],
                 )
 
-            who_has = await self.scheduler.who_has(keys=list(deps))
+            who_has = await retry_operation(self.scheduler.who_has, keys=list(deps))
             who_has = {k: v for k, v in who_has.items() if v}
             self.update_who_has(who_has)
             for dep in deps:
@@ -2069,7 +2084,7 @@ class Worker(ServerNode):
 
     async def query_who_has(self, *deps):
         with log_errors():
-            response = await self.scheduler.who_has(keys=deps)
+            response = await retry_operation(self.scheduler.who_has, keys=deps)
             self.update_who_has(response)
             return response
 
@@ -2300,7 +2315,7 @@ class Worker(ServerNode):
                 if hasattr(plugin, "setup"):
                     try:
                         result = plugin.setup(worker=self)
-                        if hasattr(result, "__await__"):
+                        if isawaitable(result):
                             result = await result
                     except Exception as e:
                         msg = error_message(e)
@@ -2586,7 +2601,7 @@ class Worker(ServerNode):
                 del k, v
                 total += weight
                 count += 1
-                await gen.sleep(0)
+                await asyncio.sleep(0)
                 memory = proc.memory_info().rss
                 if total > need and memory > target:
                     # Issue a GC to ensure that the evicted data is actually
@@ -2645,12 +2660,17 @@ class Worker(ServerNode):
         if self.digests is not None:
             self.digests["profile-duration"].add(stop - start)
 
-    def get_profile(self, comm=None, start=None, stop=None, key=None):
+    async def get_profile(
+        self, comm=None, start=None, stop=None, key=None, server=False
+    ):
         now = time() + self.scheduler_delay
-        if key is None:
+        if server:
+            history = self.io_loop.profile
+        elif key is None:
             history = self.profile_history
         else:
             history = [(t, d[key]) for t, d in self.profile_keys_history if key in d]
+
         if start is None:
             istart = 0
         else:
@@ -2683,7 +2703,7 @@ class Worker(ServerNode):
 
         return prof
 
-    def get_profile_metadata(self, comm=None, start=0, stop=None):
+    async def get_profile_metadata(self, comm=None, start=0, stop=None):
         if stop is None:
             add_recent = True
         now = time() + self.scheduler_delay
@@ -3071,7 +3091,7 @@ class Reschedule(Exception):
     pass
 
 
-def parse_memory_limit(memory_limit, nthreads, total_cores=system.CPU_COUNT):
+def parse_memory_limit(memory_limit, nthreads, total_cores=CPU_COUNT):
     if memory_limit is None:
         return None
 
@@ -3115,38 +3135,55 @@ async def get_data_from_worker(
     if deserializers is None:
         deserializers = rpc.deserializers
 
-    comm = await rpc.connect(worker)
-    comm.name = "Ephemeral Worker->Worker for gather"
-    try:
-        response = await send_recv(
-            comm,
-            serializers=serializers,
-            deserializers=deserializers,
-            op="get_data",
-            keys=keys,
-            who=who,
-            max_connections=max_connections,
-        )
+    async def _get_data():
+        comm = await rpc.connect(worker)
+        comm.name = "Ephemeral Worker->Worker for gather"
         try:
-            status = response["status"]
-        except KeyError:
-            raise ValueError("Unexpected response", response)
-        else:
-            if status == "OK":
-                await comm.write("OK")
-    finally:
-        rpc.reuse(worker, comm)
+            response = await send_recv(
+                comm,
+                serializers=serializers,
+                deserializers=deserializers,
+                op="get_data",
+                keys=keys,
+                who=who,
+                max_connections=max_connections,
+            )
+            try:
+                status = response["status"]
+            except KeyError:
+                raise ValueError("Unexpected response", response)
+            else:
+                if status == "OK":
+                    await comm.write("OK")
+            return response
+        finally:
+            rpc.reuse(worker, comm)
 
-    return response
+    return await retry_operation(_get_data, operation="get_data_from_worker")
 
 
 job_counter = [0]
 
 
+cache_loads = LRU(maxsize=100)
+
+
+def loads_function(bytes_object):
+    """ Load a function from bytes, cache bytes """
+    if len(bytes_object) < 100000:
+        try:
+            result = cache_loads[bytes_object]
+        except KeyError:
+            result = pickle.loads(bytes_object)
+            cache_loads[bytes_object] = result
+        return result
+    return pickle.loads(bytes_object)
+
+
 def _deserialize(function=None, args=None, kwargs=None, task=no_value):
     """ Deserialize task inputs and regularize to func, args, kwargs """
     if function is not None:
-        function = pickle.loads(function)
+        function = loads_function(function)
     if args:
         args = pickle.loads(args)
     if kwargs:
@@ -3178,24 +3215,18 @@ def execute_task(task):
         return task
 
 
-try:
-    # a 10 MB cache of deserialized functions and their bytes
-    from zict import LRU
-
-    cache = LRU(10000000, dict(), weight=lambda k, v: len(v))
-except ImportError:
-    cache = dict()
+cache_dumps = LRU(maxsize=100)
 
 
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     try:
-        result = cache[func]
+        result = cache_dumps[func]
     except KeyError:
         result = pickle.dumps(func)
         if len(result) < 100000:
-            cache[func] = result
-    except TypeError:
+            cache_dumps[func] = result
+    except TypeError:  # Unhashable function
         result = pickle.dumps(func)
     return result
 

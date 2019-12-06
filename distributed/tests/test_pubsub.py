@@ -1,12 +1,13 @@
-import sys
+import asyncio
 from time import sleep
+
+import pytest
+from tornado import gen
+import toolz
 
 from distributed import Pub, Sub, wait, get_worker, TimeoutError
 from distributed.utils_test import gen_cluster
 from distributed.metrics import time
-
-import pytest
-from tornado import gen
 
 
 @gen_cluster(client=True, timeout=None)
@@ -125,5 +126,42 @@ def test_timeouts(c, s, a, b):
     assert stop - start < 1
 
 
-if sys.version_info >= (3, 5):
-    from distributed.tests.py3_test_pubsub import *  # noqa: F401, F403
+@gen_cluster(client=True)
+async def test_repr(c, s, a, b):
+    pub = Pub("my-topic")
+    sub = Sub("my-topic")
+    assert "my-topic" in str(pub)
+    assert "Pub" in str(pub)
+    assert "my-topic" in str(sub)
+    assert "Sub" in str(sub)
+
+
+@pytest.mark.xfail(reason="out of order execution")
+@gen_cluster(client=True)
+def test_basic(c, s, a, b):
+    async def publish():
+        pub = Pub("a")
+
+        i = 0
+        while True:
+            await gen.sleep(0.01)
+            pub._put(i)
+            i += 1
+
+    def f(_):
+        sub = Sub("a")
+        return list(toolz.take(5, sub))
+
+    asyncio.ensure_future(c.run(publish, workers=[a.address]))
+
+    tasks = [c.submit(f, i) for i in range(4)]
+    results = yield c.gather(tasks)
+
+    for r in results:
+        x = r[0]
+        # race conditions and unintended (but correct) messages
+        # can make this test not true
+        # assert r == [x, x + 1, x + 2, x + 3, x + 4]
+
+        assert len(r) == 5
+        assert all(r[i] < r[i + 1] for i in range(0, 4)), r

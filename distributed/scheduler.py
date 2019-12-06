@@ -3,6 +3,7 @@ from collections import defaultdict, deque, OrderedDict
 from collections.abc import Mapping, Set
 from datetime import timedelta
 from functools import partial
+from inspect import isawaitable
 import itertools
 import json
 import logging
@@ -24,7 +25,6 @@ except ImportError:
     from toolz import frequencies, merge, pluck, merge_sorted, first
 from toolz import valmap, second, compose, groupby
 from tornado import gen
-from tornado.gen import Return
 from tornado.ioloop import IOLoop
 
 import dask
@@ -36,7 +36,7 @@ from .comm import (
     get_address_host,
     unparse_host_port,
 )
-from .comm.addressing import address_from_user_args
+from .comm.addressing import addresses_from_user_args
 from .core import rpc, connect, send_recv, clean_exception, CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from . import profile
@@ -57,8 +57,9 @@ from .utils import (
     parse_bytes,
     PeriodicCallback,
     shutting_down,
+    tmpfile,
 )
-from .utils_comm import scatter_to_workers, gather_from_workers
+from .utils_comm import scatter_to_workers, gather_from_workers, retry_operation
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
 
 from .publish import PublishExtension
@@ -840,7 +841,7 @@ class Scheduler(ServerNode):
         service_kwargs=None,
         allowed_failures=None,
         extensions=None,
-        validate=False,
+        validate=None,
         scheduler_file=None,
         security=None,
         worker_ttl=None,
@@ -860,6 +861,8 @@ class Scheduler(ServerNode):
         if allowed_failures is None:
             allowed_failures = dask.config.get("distributed.scheduler.allowed-failures")
         self.allowed_failures = allowed_failures
+        if validate is None:
+            validate = dask.config.get("distributed.scheduler.validate")
         self.validate = validate
         self.status = None
         self.proc = psutil.Process()
@@ -1071,6 +1074,7 @@ class Scheduler(ServerNode):
             "processing": self.get_processing,
             "call_stack": self.get_call_stack,
             "profile": self.get_profile,
+            "performance_report": self.performance_report,
             "logs": self.get_logs,
             "worker_logs": self.get_worker_logs,
             "nbytes": self.get_nbytes,
@@ -1114,7 +1118,7 @@ class Scheduler(ServerNode):
 
         connection_limit = get_fileno_limit() / 2
 
-        self._start_address = address_from_user_args(
+        self._start_address = addresses_from_user_args(
             host=host,
             port=port,
             interface=interface,
@@ -1211,14 +1215,15 @@ class Scheduler(ServerNode):
                 c.cancel()
 
         if self.status != "running":
-            self.listen(self._start_address, listen_args=self.listen_args)
-            self.ip = get_address_host(self.listen_address)
-            listen_ip = self.ip
+            for addr in self._start_address:
+                await self.listen(addr, listen_args=self.listen_args)
+                self.ip = get_address_host(self.listen_address)
+                listen_ip = self.ip
 
-            if listen_ip == "0.0.0.0":
-                listen_ip = ""
+                if listen_ip == "0.0.0.0":
+                    listen_ip = ""
 
-            if self._start_address.startswith("inproc://"):
+            if self.address.startswith("inproc://"):
                 listen_ip = "localhost"
 
             # Services listen on all addresses
@@ -1271,7 +1276,7 @@ class Scheduler(ServerNode):
                 self.worker_send(worker, {"op": "close"})
             for i in range(20):  # wait a second for send signals to clear
                 if self.workers:
-                    await gen.sleep(0.05)
+                    await asyncio.sleep(0.05)
                 else:
                     break
 
@@ -1604,7 +1609,7 @@ class Scheduler(ServerNode):
                     else:
                         child_deps = self.dependencies[dep]
                     if all(d in done for d in child_deps):
-                        if dep in self.tasks:
+                        if dep in self.tasks and dep not in done:
                             done.add(dep)
                             stack.append(dep)
 
@@ -2007,8 +2012,8 @@ class Scheduler(ServerNode):
             return
         if ts is None or not ts.who_wants:  # no key yet, lets try again in a moment
             if retries:
-                self.loop.add_future(
-                    gen.sleep(0.2), lambda _: self.cancel_key(key, client, retries - 1)
+                self.loop.call_later(
+                    0.2, lambda: self.cancel_key(key, client, retries - 1)
                 )
             return
         if force or ts.who_wants == {cs}:  # no one else wants this key
@@ -2494,7 +2499,7 @@ class Scheduler(ServerNode):
         """
         start = time()
         while not self.workers:
-            await gen.sleep(0.2)
+            await asyncio.sleep(0.2)
             if time() > start + timeout:
                 raise gen.TimeoutError("No workers found")
 
@@ -2545,7 +2550,7 @@ class Scheduler(ServerNode):
                 (self.tasks[key].state if key in self.tasks else None)
                 for key in missing_keys
             ]
-            logger.debug(
+            logger.exception(
                 "Couldn't gather keys %s state: %s workers: %s",
                 missing_keys,
                 missing_states,
@@ -2553,17 +2558,21 @@ class Scheduler(ServerNode):
             )
             result = {"status": "error", "keys": missing_keys}
             with log_errors():
+                # Remove suspicious workers from the scheduler but allow them to
+                # reconnect.
                 for worker in missing_workers:
-                    self.remove_worker(address=worker)  # this is extreme
+                    self.remove_worker(address=worker, close=False)
                 for key, workers in missing_keys.items():
-                    if not workers:
-                        continue
-                    ts = self.tasks[key]
+                    # Task may already be gone if it was held by a
+                    # `missing_worker`
+                    ts = self.tasks.get(key)
                     logger.exception(
                         "Workers don't have promised key: %s, %s",
                         str(workers),
                         str(key),
                     )
+                    if not workers or ts is None:
+                        continue
                     for worker in workers:
                         ws = self.workers.get(worker)
                         if ws is not None and ts in ws.has_what:
@@ -2649,7 +2658,7 @@ class Scheduler(ServerNode):
             self.log_event([client, "all"], {"action": "restart", "client": client})
             start = time()
             while time() < start + 10 and len(self.workers) < n_workers:
-                await gen.sleep(0.01)
+                await asyncio.sleep(0.01)
 
             self.report({"op": "restart"})
 
@@ -2700,8 +2709,7 @@ class Scheduler(ServerNode):
         )
         return d[worker]
 
-    @gen.coroutine
-    def rebalance(self, comm=None, keys=None, workers=None):
+    async def rebalance(self, comm=None, keys=None, workers=None):
         """ Rebalance keys so that each worker stores roughly equal bytes
 
         **Policy**
@@ -2777,9 +2785,12 @@ class Scheduler(ServerNode):
                 to_recipients[recipient.address][ts.key].append(sender.address)
                 to_senders[sender.address].append(ts.key)
 
-            result = yield {
-                r: self.rpc(addr=r).gather(who_has=v) for r, v in to_recipients.items()
-            }
+            result = await asyncio.gather(
+                *(
+                    retry_operation(self.rpc(addr=r).gather, who_has=v)
+                    for r, v in to_recipients.items()
+                )
+            )
             for r, v in to_recipients.items():
                 self.log_event(r, {"action": "rebalance", "who_has": v})
 
@@ -2794,13 +2805,11 @@ class Scheduler(ServerNode):
                 },
             )
 
-            if not all(r["status"] == "OK" for r in result.values()):
-                raise Return(
-                    {
-                        "status": "missing-data",
-                        "keys": sum([r["keys"] for r in result if "keys" in r], []),
-                    }
-                )
+            if not all(r["status"] == "OK" for r in result):
+                return {
+                    "status": "missing-data",
+                    "keys": sum([r["keys"] for r in result if "keys" in r], []),
+                }
 
             for sender, recipient, ts in msgs:
                 assert ts.state == "memory"
@@ -2811,20 +2820,21 @@ class Scheduler(ServerNode):
                     ("rebalance", ts.key, time(), sender.address, recipient.address)
                 )
 
-            result = yield {
-                r: self.rpc(addr=r).delete_data(keys=v, report=False)
-                for r, v in to_senders.items()
-            }
+            await asyncio.gather(
+                *(
+                    retry_operation(self.rpc(addr=r).delete_data, keys=v, report=False)
+                    for r, v in to_senders.items()
+                )
+            )
 
             for sender, recipient, ts in msgs:
                 ts.who_has.remove(sender)
                 sender.has_what.remove(ts)
                 sender.nbytes -= ts.get_nbytes()
 
-            raise Return({"status": "OK"})
+            return {"status": "OK"}
 
-    @gen.coroutine
-    def replicate(
+    async def replicate(
         self,
         comm=None,
         keys=None,
@@ -2867,7 +2877,7 @@ class Scheduler(ServerNode):
         tasks = {self.tasks[k] for k in keys}
         missing_data = [ts.key for ts in tasks if not ts.who_has]
         if missing_data:
-            raise Return({"status": "missing-data", "keys": missing_data})
+            return {"status": "missing-data", "keys": missing_data}
 
         # Delete extraneous data
         if delete:
@@ -2878,12 +2888,16 @@ class Scheduler(ServerNode):
                     for ws in random.sample(del_candidates, len(del_candidates) - n):
                         del_worker_tasks[ws].add(ts)
 
-            yield [
-                self.rpc(addr=ws.address).delete_data(
-                    keys=[ts.key for ts in tasks], report=False
+            await asyncio.gather(
+                *(
+                    retry_operation(
+                        self.rpc(addr=ws.address).delete_data,
+                        keys=[ts.key for ts in tasks],
+                        report=False,
+                    )
+                    for ws, tasks in del_worker_tasks.items()
                 )
-                for ws, tasks in del_worker_tasks.items()
-            ]
+            )
 
             for ws, tasks in del_worker_tasks.items():
                 ws.has_what -= tasks
@@ -2911,11 +2925,13 @@ class Scheduler(ServerNode):
                 for ws in random.sample(workers - ts.who_has, count):
                     gathers[ws.address][ts.key] = [wws.address for wws in ts.who_has]
 
-            results = yield {
-                w: self.rpc(addr=w).gather(who_has=who_has)
-                for w, who_has in gathers.items()
-            }
-            for w, v in results.items():
+            results = await asyncio.gather(
+                *(
+                    retry_operation(self.rpc(addr=w).gather, who_has=who_has)
+                    for w, who_has in gathers.items()
+                )
+            )
+            for w, v in zip(gathers, results):
                 if v["status"] == "OK":
                     self.add_keys(worker=w, keys=list(gathers[w]))
                 else:
@@ -3062,7 +3078,7 @@ class Scheduler(ServerNode):
 
             result = [getattr(ws, attribute) for g in to_close for ws in groups[g]]
             if result:
-                logger.info("Suggest closing workers: %s", result)
+                logger.debug("Suggest closing workers: %s", result)
 
             return result
 
@@ -3283,7 +3299,7 @@ class Scheduler(ServerNode):
             if teardown:
                 teardown = pickle.loads(teardown)
             state = setup(self) if setup else None
-            if hasattr(state, "__await__"):
+            if isawaitable(state):
                 state = await state
             try:
                 while self.status == "running":
@@ -3292,7 +3308,7 @@ class Scheduler(ServerNode):
                     else:
                         response = function(self, state)
                     await comm.write(response)
-                    await gen.sleep(interval)
+                    await asyncio.sleep(interval)
             except (EnvironmentError, CommClosedError):
                 pass
             finally:
@@ -3348,8 +3364,7 @@ class Scheduler(ServerNode):
         else:
             return {w: ws.nthreads for w, ws in self.workers.items()}
 
-    @gen.coroutine
-    def get_call_stack(self, comm=None, keys=None):
+    async def get_call_stack(self, comm=None, keys=None):
         if keys is not None:
             stack = list(keys)
             processing = set()
@@ -3369,14 +3384,13 @@ class Scheduler(ServerNode):
             workers = {w: None for w in self.workers}
 
         if not workers:
-            raise gen.Return({})
+            return {}
 
-        else:
-            response = yield {
-                w: self.rpc(w).call_stack(keys=v) for w, v in workers.items()
-            }
-            response = {k: v for k, v in response.items() if v}
-            raise gen.Return(response)
+        results = await asyncio.gather(
+            *(self.rpc(w).call_stack(keys=v) for w, v in workers.items())
+        )
+        response = {w: r for w, r in zip(workers, results) if r}
+        return response
 
     def get_nbytes(self, comm=None, keys=None, summary=True):
         with log_errors():
@@ -4613,11 +4627,12 @@ class Scheduler(ServerNode):
         else:
             return (start_time, ws.nbytes)
 
-    @gen.coroutine
-    def get_profile(
+    async def get_profile(
         self,
         comm=None,
         workers=None,
+        scheduler=False,
+        server=False,
         merge_workers=True,
         start=None,
         stop=None,
@@ -4627,15 +4642,24 @@ class Scheduler(ServerNode):
             workers = self.workers
         else:
             workers = set(self.workers) & set(workers)
-        result = yield {
-            w: self.rpc(w).profile(start=start, stop=stop, key=key) for w in workers
-        }
-        if merge_workers:
-            result = profile.merge(*result.values())
-        raise gen.Return(result)
 
-    @gen.coroutine
-    def get_profile_metadata(
+        if scheduler:
+            return profile.get_profile(self.io_loop.profile, start=start, stop=stop)
+
+        results = await asyncio.gather(
+            *(
+                self.rpc(w).profile(start=start, stop=stop, key=key, server=server)
+                for w in workers
+            )
+        )
+
+        if merge_workers:
+            response = profile.merge(*results)
+        else:
+            response = dict(zip(workers, results))
+        return response
+
+    async def get_profile_metadata(
         self,
         comm=None,
         workers=None,
@@ -4653,22 +4677,22 @@ class Scheduler(ServerNode):
             workers = self.workers
         else:
             workers = set(self.workers) & set(workers)
-        result = yield {
-            w: self.rpc(w).profile_metadata(start=start, stop=stop) for w in workers
-        }
+        results = await asyncio.gather(
+            *(self.rpc(w).profile_metadata(start=start, stop=stop) for w in workers)
+        )
 
-        counts = [v["counts"] for v in result.values()]
+        counts = [v["counts"] for v in results]
         counts = itertools.groupby(merge_sorted(*counts), lambda t: t[0] // dt * dt)
         counts = [(time, sum(pluck(1, group))) for time, group in counts]
 
         keys = set()
-        for v in result.values():
+        for v in results:
             for t, d in v["keys"]:
                 for k in d:
                     keys.add(k)
         keys = {k: [] for k in keys}
 
-        groups1 = [v["keys"] for v in result.values()]
+        groups1 = [v["keys"] for v in results]
         groups2 = list(merge_sorted(*groups1, key=first))
 
         last = 0
@@ -4681,7 +4705,79 @@ class Scheduler(ServerNode):
             for k, v in d.items():
                 keys[k][-1][1] += v
 
-        raise gen.Return({"counts": counts, "keys": keys})
+        return {"counts": counts, "keys": keys}
+
+    async def performance_report(self, comm=None, start=None):
+        # Profiles
+        compute, scheduler, workers = await asyncio.gather(
+            *[
+                self.get_profile(start=start),
+                self.get_profile(scheduler=True, start=start),
+                self.get_profile(server=True, start=start),
+            ]
+        )
+        from . import profile
+
+        def profile_to_figure(state):
+            data = profile.plot_data(state)
+            figure, source = profile.plot_figure(data, sizing_mode="stretch_both")
+            return figure
+
+        compute, scheduler, workers = map(
+            profile_to_figure, (compute, scheduler, workers)
+        )
+
+        # Task stream
+        task_stream = self.get_task_stream(start=start)
+        from .diagnostics.task_stream import rectangles
+        from .dashboard.components.scheduler import task_stream_figure
+
+        rects = rectangles(task_stream)
+        source, task_stream = task_stream_figure(sizing_mode="stretch_both")
+        source.data.update(rects)
+
+        from distributed.dashboard.components.scheduler import (
+            BandwidthWorkers,
+            BandwidthTypes,
+        )
+
+        bandwidth_workers = BandwidthWorkers(self, sizing_mode="stretch_both")
+        bandwidth_workers.update()
+        bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
+        bandwidth_types.update()
+
+        from bokeh.models import Panel, Tabs
+
+        compute = Panel(child=compute, title="Worker Profile (compute)")
+        workers = Panel(child=workers, title="Worker Profile (administrative)")
+        scheduler = Panel(child=scheduler, title="Scheduler Profile (administrative)")
+        task_stream = Panel(child=task_stream, title="Task Stream")
+        bandwidth_workers = Panel(
+            child=bandwidth_workers.fig, title="Bandwidth (Workers)"
+        )
+        bandwidth_types = Panel(child=bandwidth_types.fig, title="Bandwidth (Types)")
+
+        tabs = Tabs(
+            tabs=[
+                task_stream,
+                compute,
+                workers,
+                scheduler,
+                bandwidth_workers,
+                bandwidth_types,
+            ]
+        )
+
+        from bokeh.plotting import save, output_file
+
+        with tmpfile(extension=".html") as fn:
+            output_file(filename=fn, title="Dask Performance Report")
+            save(tabs, filename=fn)
+
+            with open(fn) as f:
+                data = f.read()
+
+        return data
 
     async def get_worker_logs(self, comm=None, n=None, workers=None, nanny=False):
         results = await self.broadcast(

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import timedelta
 import logging
 from multiprocessing.queues import Empty
@@ -10,6 +11,7 @@ import warnings
 import weakref
 
 import dask
+from dask.system import CPU_COUNT
 from tornado import gen
 from tornado.ioloop import IOLoop, TimeoutError
 from tornado.locks import Event
@@ -22,7 +24,6 @@ from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
-from .system import CPU_COUNT
 from .utils import (
     get_ip,
     mp_context,
@@ -243,7 +244,7 @@ class Nanny(ServerNode):
 
     async def start(self):
         """ Start nanny, start local process, start watching """
-        self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(self._start_address, listen_args=self.listen_args)
         self.ip = get_address_host(self.address)
 
         logger.info("        Start Nanny at: %r", self.address)
@@ -349,6 +350,19 @@ class Nanny(ServerNode):
         else:
             return "OK"
 
+    @property
+    def _psutil_process(self):
+        pid = self.process.process.pid
+        try:
+            proc = self._psutil_process_obj
+        except AttributeError:
+            self._psutil_process_obj = psutil.Process(pid)
+
+        if self._psutil_process_obj.pid != pid:
+            self._psutil_process_obj = psutil.Process(pid)
+
+        return self._psutil_process_obj
+
     def memory_monitor(self):
         """ Track worker's memory.  Restart if it goes above terminate fraction """
         if self.status != "running":
@@ -357,7 +371,7 @@ class Nanny(ServerNode):
         if process is None:
             return
         try:
-            proc = psutil.Process(process.pid)
+            proc = self._psutil_process
             memory = proc.memory_info().rss
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return
@@ -595,7 +609,7 @@ class WorkerProcess(object):
         self.child_stop_q.close()
 
         while process.is_alive() and loop.time() < deadline:
-            await gen.sleep(0.05)
+            await asyncio.sleep(0.05)
 
         if process.is_alive():
             logger.warning(
@@ -614,7 +628,7 @@ class WorkerProcess(object):
             try:
                 msg = self.init_result_q.get_nowait()
             except Empty:
-                await gen.sleep(delay)
+                await asyncio.sleep(delay)
                 continue
 
             if msg["uid"] != uid:  # ensure that we didn't cross queues

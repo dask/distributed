@@ -53,6 +53,7 @@ from .utils_comm import (
     pack_data,
     scatter_to_workers,
     gather_from_workers,
+    retry_operation,
 )
 from .cfexecutor import ClientExecutor
 from .core import connect, rpc, clean_exception, CommClosedError, PooledRPCCall
@@ -383,16 +384,12 @@ class Future(WrappedKey):
     def __repr__(self):
         if self.type:
             try:
-                typ = self.type.__name__
+                typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
-            return "<Future: status: %s, type: %s, key: %s>" % (
-                self.status,
-                typ,
-                self.key,
-            )
+            return "<Future: %s, type: %s, key: %s>" % (self.status, typ, self.key)
         else:
-            return "<Future: status: %s, key: %s>" % (self.status, self.key)
+            return "<Future: %s, key: %s>" % (self.status, self.key)
 
     def _repr_html_(self):
         text = "<b>Future: %s</b> " % html.escape(key_split(self.key))
@@ -405,7 +402,7 @@ class Future(WrappedKey):
         }
         if self.type:
             try:
-                typ = self.type.__name__
+                typ = self.type.__module__.split(".")[0] + "." + self.type.__name__
             except AttributeError:
                 typ = str(self.type)
             text += '<font color="gray">type: </font>%s, ' % typ
@@ -942,7 +939,7 @@ class Client(Node):
             address = self.cluster.scheduler_address
         elif self.scheduler_file is not None:
             while not os.path.exists(self.scheduler_file):
-                await gen.sleep(0.01)
+                await asyncio.sleep(0.01)
             for i in range(10):
                 try:
                     with open(self.scheduler_file) as f:
@@ -950,7 +947,7 @@ class Client(Node):
                     address = cfg["address"]
                     break
                 except (ValueError, KeyError):  # JSON file not yet flushed
-                    await gen.sleep(0.01)
+                    await asyncio.sleep(0.01)
         elif self._start_arg is None:
             from .deploy import LocalCluster
 
@@ -976,7 +973,7 @@ class Client(Node):
             while not self.cluster.workers or len(self.cluster.scheduler.workers) < len(
                 self.cluster.workers
             ):
-                await gen.sleep(0.01)
+                await asyncio.sleep(0.01)
 
             address = self.cluster.scheduler_address
 
@@ -1017,7 +1014,7 @@ class Client(Node):
                     break
                 except EnvironmentError:
                     # Wait a bit before retrying
-                    await gen.sleep(0.1)
+                    await asyncio.sleep(0.1)
                     timeout = deadline - self.loop.time()
             else:
                 logger.error(
@@ -1092,7 +1089,7 @@ class Client(Node):
     async def _wait_for_workers(self, n_workers=0):
         info = await self.scheduler.identity()
         while n_workers and len(info["workers"]) < n_workers:
-            await gen.sleep(0.1)
+            await asyncio.sleep(0.1)
             info = await self.scheduler.identity()
 
     def wait_for_workers(self, n_workers=0):
@@ -1429,6 +1426,15 @@ class Client(Node):
             Higher priorities take precedence
         fifo_timeout: str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
+        resources: dict (defaults to {})
+            Defines the `resources` this job requires on the worker; e.g.
+            ``{'GPU': 2}``. See :doc:`worker resources <resources>` for details
+            on defining resources.
+        actor: bool (default False)
+            Whether this task should exist on the worker as a stateful actor.
+            See :doc:`actors` for additional details.
+        actors: bool (default False)
+            Alias for `actor`
 
         Examples
         --------
@@ -1531,6 +1537,9 @@ class Client(Node):
         workers: set, iterable of sets
             A set of worker hostnames on which computations may be performed.
             Leave empty to default to all workers (common case)
+        allow_other_workers: bool (defaults to False)
+            Used with `workers`. Indicates whether or not the computations
+            may be performed on workers that are not in the `workers` set(s).
         retries: int (default to 0)
             Number of allowed automatic retries if a task fails
         priority: Number
@@ -1538,6 +1547,16 @@ class Client(Node):
             Higher priorities take precedence
         fifo_timeout: str timedelta (default '100ms')
             Allowed amount of time between calls to consider the same priority
+        resources: dict (defaults to {})
+            Defines the `resources` each instance of this mapped task requires
+            on the worker; e.g. ``{'GPU': 2}``. See
+            :doc:`worker resources <resources>` for details on defining
+            resources.
+        actor: bool (default False)
+            Whether these tasks should exist on the worker as stateful actors.
+            See :doc:`actors` for additional details.
+        actors: bool (default False)
+            Alias for `actor`
         **kwargs: dict
             Extra keywords to send to the function.
             Large values will be included explicitly in the task graph.
@@ -1776,19 +1795,19 @@ class Client(Node):
 
         try:
             if direct or local_worker:  # gather directly from workers
-                who_has = await self.scheduler.who_has(keys=keys)
+                who_has = await retry_operation(self.scheduler.who_has, keys=keys)
                 data2, missing_keys, missing_workers = await gather_from_workers(
                     who_has, rpc=self.rpc, close=False
                 )
                 response = {"status": "OK", "data": data2}
                 if missing_keys:
                     keys2 = [key for key in keys if key not in data2]
-                    response = await self.scheduler.gather(keys=keys2)
+                    response = await retry_operation(self.scheduler.gather, keys=keys2)
                     if response["status"] == "OK":
                         response["data"].update(data2)
 
             else:  # ask scheduler to gather data for us
-                response = await self.scheduler.gather(keys=keys)
+                response = await retry_operation(self.scheduler.gather, keys=keys)
         finally:
             self._gather_semaphore.release()
 
@@ -1924,7 +1943,7 @@ class Client(Node):
                 start = time()
                 while not nthreads:
                     if nthreads is not None:
-                        await gen.sleep(0.1)
+                        await asyncio.sleep(0.1)
                     if time() > start + timeout:
                         raise gen.TimeoutError("No valid workers found")
                     nthreads = await self.scheduler.ncores(workers=workers)
@@ -2258,7 +2277,7 @@ class Client(Node):
         >>> async def print_state(dask_scheduler):  # doctest: +SKIP
         ...    while True:
         ...        print(dask_scheduler.status)
-        ...        await gen.sleep(1)
+        ...        await asyncio.sleep(1)
 
         >>> c.run(print_state, wait=False)  # doctest: +SKIP
 
@@ -2348,7 +2367,7 @@ class Client(Node):
         >>> async def print_state(dask_worker):  # doctest: +SKIP
         ...    while True:
         ...        print(dask_worker.status)
-        ...        await gen.sleep(1)
+        ...        await asyncio.sleep(1)
 
         >>> c.run(print_state, wait=False)  # doctest: +SKIP
         """
@@ -2656,6 +2675,21 @@ class Client(Node):
             Higher priorities take precedence
         fifo_timeout: timedelta str (defaults to '60s')
             Allowed amount of time between calls to consider the same priority
+        traverse: bool (defaults to True)
+            By default dask traverses builtin python collections looking for
+            dask objects passed to ``compute``. For large collections this can
+            be expensive. If none of the arguments contain any dask objects,
+            set ``traverse=False`` to avoid doing this traversal.
+        resources: dict (defaults to {})
+            Defines the `resources` these tasks require on the worker. Can
+            specify global resources (``{'GPU': 2}``), or per-task resources
+            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
+        actors: bool or dict (default None)
+            Whether these tasks should exist on the worker as stateful actors.
+            Specified on a global (True/False) or per-task (``{'x': True,
+            'y': False}``) basis. See :doc:`actors` for additional details.
         **kwargs:
             Options to pass to the graph optimize calls
 
@@ -2791,7 +2825,17 @@ class Client(Node):
             Higher priorities take precedence
         fifo_timeout: timedelta str (defaults to '60s')
             Allowed amount of time between calls to consider the same priority
-        kwargs:
+        resources: dict (defaults to {})
+            Defines the `resources` these tasks require on the worker. Can
+            specify global resources (``{'GPU': 2}``), or per-task resources
+            (``{'x': {'GPU': 1}, 'y': {'SSD': 4}}``), but not both.
+            See :doc:`worker resources <resources>` for details on defining
+            resources.
+        actors: bool or dict (default None)
+            Whether these tasks should exist on the worker as stateful actors.
+            Specified on a global (True/False) or per-task (``{'x': True,
+            'y': False}``) basis. See :doc:`actors` for additional details.
+        **kwargs:
             Options to pass to the graph optimize calls
 
         Returns
@@ -3216,6 +3260,8 @@ class Client(Node):
         merge_workers=True,
         plot=False,
         filename=None,
+        server=False,
+        scheduler=False,
     ):
         """ Collect statistical profiling information about recent work
 
@@ -3228,6 +3274,14 @@ class Client(Node):
         stop: time
         workers: list
             List of workers to restrict profile information
+        server : bool
+            If true, return the profile of the worker's administrative thread
+            rather than the worker threads.
+            This is useful when profiling Dask itself, rather than user code.
+        scheduler: bool
+            If true, return the profile information from the scheduler's
+            administrative thread rather than the workers.
+            This is useful when profiling Dask's scheduling itself.
         plot: boolean or string
             Whether or not to return a plot object
         filename: str
@@ -3238,9 +3292,6 @@ class Client(Node):
         >>> client.profile()  # call on collections
         >>> client.profile(filename='dask-profile.html')  # save to html file
         """
-        if isinstance(workers, (str, Number)):
-            workers = [workers]
-
         return self.sync(
             self._profile,
             key=key,
@@ -3250,6 +3301,8 @@ class Client(Node):
             stop=stop,
             plot=plot,
             filename=filename,
+            server=server,
+            scheduler=scheduler,
         )
 
     async def _profile(
@@ -3261,6 +3314,8 @@ class Client(Node):
         merge_workers=True,
         plot=False,
         filename=None,
+        server=False,
+        scheduler=False,
     ):
         if isinstance(workers, (str, Number)):
             workers = [workers]
@@ -3271,6 +3326,8 @@ class Client(Node):
             merge_workers=merge_workers,
             start=start,
             stop=stop,
+            server=server,
+            scheduler=scheduler,
         )
 
         if filename:
@@ -4046,6 +4103,10 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     fs: list of futures
     timeout: number, optional
         Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+    return_when: str, optional
+        One of `ALL_COMPLETED` or `FIRST_COMPLETED`
+
+    Returns
     -------
     Named tuple of completed, not completed
     """
@@ -4342,9 +4403,27 @@ def redict_collection(c, dsk):
 
 
 def futures_of(o, client=None):
-    """ Future objects in a collection """
+    """ Future objects in a collection
+
+    Parameters
+    ----------
+    o: collection
+        A possibly nested collection of Dask objects
+
+    Examples
+    --------
+    >>> futures_of(my_dask_dataframe)
+    [<Future: finished key: ...>,
+     <Future: pending  key: ...>]
+
+    Returns
+    -------
+    futures : List[Future]
+        A list of futures held by those collections
+    """
     stack = [o]
-    futures = set()
+    seen = set()
+    futures = list()
     while stack:
         x = stack.pop()
         if type(x) in (tuple, set, list):
@@ -4354,7 +4433,9 @@ def futures_of(o, client=None):
         elif type(x) is SubgraphCallable:
             stack.extend(x.dsk.values())
         elif isinstance(x, Future):
-            futures.add(x)
+            if x not in seen:
+                seen.add(x)
+                futures.append(x)
         elif dask.is_dask_collection(x):
             stack.extend(x.__dask_graph__().values())
 
@@ -4363,7 +4444,7 @@ def futures_of(o, client=None):
         if bad:
             raise CancelledError(bad)
 
-    return list(futures)
+    return futures[::-1]
 
 
 def fire_and_forget(obj):
@@ -4479,6 +4560,44 @@ class get_task_stream(object):
         if self._plot:
             L, self.figure = L
         self.data.extend(L)
+
+
+class performance_report:
+    """ Gather performance report
+
+    This creates a static HTML file that includes many of the same plots of the
+    dashboard for later viewing.
+
+    The resulting file uses JavaScript, and so must be viewed with a web
+    browser.  Locally we recommend using ``python -m http.server`` or hosting
+    the file live online.
+
+    Examples
+    --------
+    >>> with performance_report(filename="myfile.html"):
+    ...     x.compute()
+
+    $ python -m http.server
+    $ open myfile.html
+    """
+
+    def __init__(self, filename="dask-report.html"):
+        self.filename = filename
+
+    async def __aenter__(self):
+        self.start = time()
+        await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
+
+    async def __aexit__(self, typ, value, traceback):
+        data = await get_client().scheduler.performance_report(start=self.start)
+        with open(self.filename, "w") as f:
+            f.write(data)
+
+    def __enter__(self):
+        get_client().sync(self.__aenter__)
+
+    def __exit__(self, typ, value, traceback):
+        get_client().sync(self.__aexit__, type, value, traceback)
 
 
 @contextmanager

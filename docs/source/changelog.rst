@@ -1,6 +1,74 @@
 Changelog
 =========
 
+2.8.1 - 2019-11-22
+------------------
+
+- Fix hanging worker when the scheduler leaves (:pr:`3250`) `Tom Augspurger`_
+- Fix NumPy writeable serialization bug (:pr:`3253`) `James Bourbeau`_
+- Skip ``numba.cuda`` tests if CUDA is not available (:pr:`3255`) `Peter Andreas Entschev`_
+- Add new dashboard plot for memory use by key (:pr:`3243`) `Matthew Rocklin`_
+- Fix ``array.shape()`` -> ``array.shape`` (:pr:`3247`) `Jed Brown`_
+- Fixed typos in ``pubsub.py`` (:pr:`3244`) `He Jia`_
+- Fixed cupy array going out of scope (:pr:`3240`) `Mads R. B. Kristensen`_
+- Remove ``gen.coroutine`` usage in scheduler (:pr:`3242`) `Jim Crist-Harif`_
+- Use ``inspect.isawaitable`` where relevant (:pr:`3241`) `Jim Crist-Harif`_
+
+
+2.8.0 - 2019-11-14
+------------------
+
+-  Add UCX config values (:pr:`3135`) `Matthew Rocklin`_
+-  Relax test_MultiWorker (:pr:`3210`) `Matthew Rocklin`_
+-  Avoid ucp.init at import time (:pr:`3211`) `Matthew Rocklin`_
+-  Clean up rpc to avoid intermittent test failure (:pr:`3215`) `Matthew Rocklin`_
+-  Respect protocol if given to Scheduler (:pr:`3212`) `Matthew Rocklin`_
+-  Use legend_field= keyword in bokeh plots (:pr:`3218`) `Matthew Rocklin`_
+-  Cache psutil.Process object in Nanny (:pr:`3207`) `Matthew Rocklin`_
+-  Replace gen.sleep with asyncio.sleep (:pr:`3208`) `Matthew Rocklin`_
+-  Avoid offloading serialization for small messages (:pr:`3224`) `Matthew Rocklin`_
+-  Add desired_workers metric (:pr:`3221`) `Gabriel Sailer`_
+-  Fail fast when importing distributed.comm.ucx (:pr:`3228`) `Matthew Rocklin`_
+-  Add module name to Future repr (:pr:`3231`) `Matthew Rocklin`_
+-  Add name to Pub/Sub repr (:pr:`3235`) `Matthew Rocklin`_
+-  Import CPU_COUNT from dask.system (:pr:`3199`) `James Bourbeau`_
+-  Efficiently serialize zero strided NumPy arrays (:pr:`3180`) `James Bourbeau`_
+-  Cache function deserialization in workers (:pr:`3234`) `Matthew Rocklin`_
+-  Respect ordering of futures in futures_of (:pr:`3236`) `Matthew Rocklin`_
+-  Bump dask dependency to 2.7.0 (:pr:`3237`) `James Bourbeau`_
+-  Avoid setting inf x_range (:pr:`3229`) `rockwellw`_
+-  Clear task stream based on recent behavior (:pr:`3200`) `Matthew Rocklin`_
+-  Use the percentage field for profile plots (:pr:`3238`) `Matthew Rocklin`_
+
+2.7.0 - 2019-11-08
+------------------
+
+This release drops support for Python 3.5
+
+-  Adds badges to README.rst [skip ci] (:pr:`3152`) `James Bourbeau`_
+-  Don't overwrite `self.address` if it is present (:pr:`3153`) `Gil Forsyth`_
+-  Remove outdated references to debug scheduler and worker bokeh pages. (:pr:`3160`) `darindf`_
+-  Update CONTRIBUTING.md (:pr:`3159`) `Jacob Tomlinson`_
+-  Add Prometheus metric for a worker's executing tasks count (:pr:`3163`) `darindf`_
+-  Update Prometheus documentation (:pr:`3165`) `darindf`_
+-  Fix Numba serialization when strides is None (:pr:`3166`) `Peter Andreas Entschev`_
+-  Await cluster in Adaptive.recommendations (:pr:`3168`) `Simon Boothroyd`_
+-  Support automatic TLS (:pr:`3164`) `Jim Crist`_
+-  Avoid swamping high-memory workers with data requests (:pr:`3071`) `Tom Augspurger`_
+-  Update UCX variables to use sockcm by default (:pr:`3177`) `Peter Andreas Entschev`_
+-  Get protocol in Nanny/Worker from scheduler address (:pr:`3175`) `Peter Andreas Entschev`_
+-  Add worker and tasks state for Prometheus data collection (:pr:`3174`) `darindf`_
+-  Use async def functions for offload to/from_frames (:pr:`3171`) `Mads R. B. Kristensen`_
+-  Subprocesses inherit the global dask config (:pr:`3192`) `Mads R. B. Kristensen`_
+-  XFail test_open_close_many_workers (:pr:`3194`) `Matthew Rocklin`_
+-  Drop Python 3.5 (:pr:`3179`) `James Bourbeau`_
+-  UCX: avoid double init after fork (:pr:`3178`) `Mads R. B. Kristensen`_
+-  Silence warning when importing while offline (:pr:`3203`) `James A. Bednar`_
+-  Adds docs to Client methods for resources, actors, and traverse (:pr:`2851`) `IPetrik`_
+-  Add test for concurrent scatter operations (:pr:`2244`) `Matthew Rocklin`_
+-  Expand async docs (:pr:`2293`) `Dave Hirschfeld`_
+-  Add PatchedDeviceArray to drop stride attribute for cupy<7.0 (:pr:`3198`) `Richard J Zamora`_
+
 2.6.0 - 2019-10-15
 ------------------
 
@@ -1332,3 +1400,11 @@ significantly without many new features.
 .. _`Philipp Rudiger`: https://github.com/philippjfr
 .. _`Jonathan De Troye`: https://github.com/detroyejr
 .. _`matthieubulte`: https://github.com/matthieubulte
+.. _`darindf`: https://github.com/darindf
+.. _`James A. Bednar`: https://github.com/jbednar
+.. _`IPetrik`: https://github.com/IPetrik
+.. _`Simon Boothroyd`: https://github.com/SimonBoothroyd
+.. _`rockwellw`: https://github.com/rockwellw
+.. _`Jed Brown`: https://github.com/jedbrown
+.. _`He Jia`: https://github.com/HerculesJack
+.. _`Jim Crist-Harif`: https://github.com/jcrist

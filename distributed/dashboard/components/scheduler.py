@@ -1,7 +1,8 @@
+from collections import defaultdict
 import logging
 import math
 from numbers import Number
-from operator import add
+import operator
 import os
 
 from bokeh.layouts import column, row
@@ -16,13 +17,10 @@ from bokeh.models import (
     TapTool,
     OpenURL,
     Range1d,
-    Plot,
-    Quad,
-    Span,
     value,
-    LinearAxis,
     NumeralTickFormatter,
     BoxZoomTool,
+    AdaptiveTicker,
     BasicTicker,
     NumberFormatter,
     BoxSelectTool,
@@ -36,7 +34,7 @@ from bokeh.themes import Theme
 from bokeh.transform import factor_cmap, linear_cmap
 from bokeh.io import curdoc
 import dask
-from dask.utils import format_bytes
+from dask.utils import format_bytes, key_split
 from toolz import pipe
 from tornado import escape
 
@@ -61,7 +59,7 @@ from distributed.dashboard.utils import (
 )
 from distributed.metrics import time
 from distributed.utils import log_errors, format_time, parse_timedelta
-from distributed.diagnostics.progress_stream import color_of, progress_quads, nbytes_bar
+from distributed.diagnostics.progress_stream import color_of, progress_quads
 from distributed.diagnostics.progress import AllProgress
 from distributed.diagnostics.graph_layout import GraphLayout
 from distributed.diagnostics.task_stream import TaskStreamPlugin
@@ -113,7 +111,7 @@ class Occupancy(DashboardComponent):
                 tools="",
                 id="bk-occupancy-plot",
                 x_axis_type="datetime",
-                **kwargs
+                **kwargs,
             )
             rect = fig.rect(
                 source=self.source, x="x", width="ms", y="y", height=1, color="color"
@@ -193,7 +191,7 @@ class ProcessingHistogram(DashboardComponent):
                 name="processing_hist",
                 y_axis_label="frequency",
                 tools="",
-                **kwargs
+                **kwargs,
             )
 
             self.root.xaxis.minor_tick_line_alpha = 0
@@ -236,10 +234,11 @@ class NBytesHistogram(DashboardComponent):
                 id="bk-nbytes-histogram-plot",
                 y_axis_label="frequency",
                 tools="",
-                **kwargs
+                **kwargs,
             )
 
             self.root.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            self.root.xaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
             self.root.xaxis.major_label_orientation = -math.pi / 12
 
             self.root.xaxis.minor_tick_line_alpha = 0
@@ -290,7 +289,7 @@ class BandwidthTypes(DashboardComponent):
                 id="bk-bandwidth-type-plot",
                 name="bandwidth_type_histogram",
                 y_range=["a", "b"],
-                **kwargs
+                **kwargs,
             )
             rect = fig.rect(
                 source=self.source,
@@ -302,6 +301,7 @@ class BandwidthTypes(DashboardComponent):
             )
             fig.x_range.start = 0
             fig.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            fig.xaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
             rect.nonselection_glyph = None
 
             fig.xaxis.minor_tick_line_alpha = 0
@@ -364,7 +364,7 @@ class BandwidthWorkers(DashboardComponent):
                 name="bandwidth_worker_heatmap",
                 x_range=["a", "b"],
                 y_range=["a", "b"],
-                **kwargs
+                **kwargs,
             )
             fig.xaxis.major_label_orientation = -math.pi / 12
             rect = fig.rect(
@@ -383,7 +383,10 @@ class BandwidthWorkers(DashboardComponent):
                 border_line_color=None,
                 location=(0, 0),
             )
-            color_bar.formatter = NumeralTickFormatter(format="0 b")
+            color_bar.formatter = NumeralTickFormatter(format="0.0 b")
+            color_bar.ticker = AdaptiveTicker(
+                mantissas=[1, 64, 128, 256, 512], base=1024
+            )
             fig.add_layout(color_bar, "right")
 
             fig.toolbar.logo = None
@@ -408,14 +411,21 @@ class BandwidthWorkers(DashboardComponent):
             bw = self.scheduler.bandwidth_workers
             if not bw:
                 return
-            x, y, value = zip(*[(a, b, c) for (a, b), c in bw.items()])
 
-            if self.color_map.high < max(value):
-                self.color_map.high = max(value)
+            def name(address):
+                ws = self.scheduler.workers[address]
+                if ws.name is not None:
+                    return str(ws.name)
+                else:
+                    return address
+
+            x, y, value = zip(*[(name(a), name(b), c) for (a, b), c in bw.items()])
+
+            self.color_map.high = max(value)
 
             factors = list(sorted(set(x + y)))
             self.fig.x_range.factors = factors
-            self.fig.y_range.factors = factors
+            self.fig.y_range.factors = factors[::-1]
 
             result = {
                 "source": x,
@@ -424,6 +434,83 @@ class BandwidthWorkers(DashboardComponent):
                 "bandwidth_text": list(map(format_bytes, value)),
             }
             self.fig.title.text = "Bandwidth: " + format_bytes(self.scheduler.bandwidth)
+
+            update(self.source, result)
+
+
+class MemoryByKey(DashboardComponent):
+    """ Bar chart showing memory use by key prefix"""
+
+    def __init__(self, scheduler, **kwargs):
+        with log_errors():
+            self.last = 0
+            self.scheduler = scheduler
+            self.source = ColumnDataSource(
+                {
+                    "name": ["a", "b"],
+                    "nbytes": [100, 1000],
+                    "count": [1, 2],
+                    "color": ["blue", "blue"],
+                }
+            )
+
+            fig = figure(
+                title="Memory Use",
+                tools="",
+                id="bk-memory-by-key-plot",
+                name="memory_by_key",
+                x_range=["a", "b"],
+                **kwargs,
+            )
+            rect = fig.vbar(
+                source=self.source, x="name", top="nbytes", width=0.9, color="color"
+            )
+            fig.yaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
+            fig.yaxis.ticker = AdaptiveTicker(mantissas=[1, 256, 512], base=1024)
+            fig.xaxis.major_label_orientation = -math.pi / 12
+            rect.nonselection_glyph = None
+
+            fig.xaxis.minor_tick_line_alpha = 0
+            fig.ygrid.visible = False
+
+            fig.toolbar.logo = None
+            fig.toolbar_location = None
+
+            hover = HoverTool()
+            hover.tooltips = "@name: @nbytes_text"
+            hover.tooltips = """
+            <div>
+                <p><b>Name:</b> @name</p>
+                <p><b>Bytes:</b> @nbytes_text </p>
+                <p><b>Count:</b> @count objects </p>
+            </div>
+            """
+            hover.point_policy = "follow_mouse"
+            fig.add_tools(hover)
+
+            self.fig = fig
+
+    @without_property_validation
+    def update(self):
+        with log_errors():
+            counts = defaultdict(int)
+            nbytes = defaultdict(int)
+            for ws in self.scheduler.workers.values():
+                for ts in ws.has_what:
+                    ks = key_split(ts.key)
+                    counts[ks] += 1
+                    nbytes[ks] += ts.nbytes
+
+            names = list(sorted(counts))
+            self.fig.x_range.factors = names
+            result = {
+                "name": names,
+                "count": [counts[name] for name in names],
+                "nbytes": [nbytes[name] for name in names],
+                "nbytes_text": [format_bytes(nbytes[name]) for name in names],
+                "color": [color_of(name) for name in names],
+            }
+            self.fig.title.text = "Total Use: " + format_bytes(sum(nbytes.values()))
 
             update(self.source, result)
 
@@ -458,7 +545,7 @@ class CurrentLoad(DashboardComponent):
                 id="bk-nprocessing-plot",
                 name="processing_hist",
                 width=int(width / 2),
-                **kwargs
+                **kwargs,
             )
             rect = processing.rect(
                 source=self.source,
@@ -477,7 +564,7 @@ class CurrentLoad(DashboardComponent):
                 id="bk-nbytes-worker-plot",
                 width=int(width / 2),
                 name="nbytes_hist",
-                **kwargs
+                **kwargs,
             )
             rect = nbytes.rect(
                 source=self.source,
@@ -495,7 +582,8 @@ class CurrentLoad(DashboardComponent):
                 id="bk-cpu-worker-plot",
                 width=int(width / 2),
                 name="cpu_hist",
-                **kwargs
+                x_range=(0, None),
+                **kwargs,
             )
             rect = cpu.rect(
                 source=self.source,
@@ -506,21 +594,13 @@ class CurrentLoad(DashboardComponent):
                 color="blue",
             )
             rect.nonselection_glyph = None
-            hundred_span = Span(
-                location=100,
-                dimension="height",
-                line_color="gray",
-                line_dash="dashed",
-                line_width=3,
-            )
-            cpu.add_layout(hundred_span)
 
             nbytes.axis[0].ticker = BasicTicker(mantissas=[1, 256, 512], base=1024)
             nbytes.xaxis[0].formatter = NumeralTickFormatter(format="0.0 b")
             nbytes.xaxis.major_label_orientation = -math.pi / 12
             nbytes.x_range.start = 0
 
-            for fig in [processing, nbytes]:
+            for fig in [processing, nbytes, cpu]:
                 fig.xaxis.minor_tick_line_alpha = 0
                 fig.yaxis.visible = False
                 fig.ygrid.visible = False
@@ -585,7 +665,7 @@ class CurrentLoad(DashboardComponent):
                     or inf
                 )
 
-                if limit > max_limit:
+                if limit > max_limit and limit != inf:
                     max_limit = limit
 
                 if nb > limit:
@@ -617,6 +697,13 @@ class CurrentLoad(DashboardComponent):
                     sum(nbytes)
                 )
                 self.nbytes_figure.x_range.end = max_limit
+                if self.scheduler.workers:
+                    self.cpu_figure.x_range.end = (
+                        max(ws.nthreads or 1 for ws in self.scheduler.workers.values())
+                        * 100
+                    )
+                else:
+                    self.cpu_figure.x_range.end = 100
 
                 update(self.source, result)
 
@@ -637,7 +724,7 @@ class StealingTimeSeries(DashboardComponent):
             height=150,
             tools="",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
         fig.line(source=self.source, x="time", y="idle", color="red")
         fig.line(source=self.source, x="time", y="saturated", color="green")
@@ -691,7 +778,7 @@ class StealingEvents(DashboardComponent):
             height=250,
             tools="",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
 
         fig.circle(
@@ -787,7 +874,7 @@ class Events(DashboardComponent):
             height=height,
             tools="",
             x_range=x_range,
-            **kwargs
+            **kwargs,
         )
 
         fig.circle(
@@ -797,7 +884,7 @@ class Events(DashboardComponent):
             color="color",
             size=50,
             alpha=0.5,
-            legend="action",
+            **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "action"},
         )
         fig.yaxis.axis_label = "Action"
         fig.legend.location = "top_left"
@@ -873,6 +960,7 @@ class TaskStream(DashboardComponent):
         clear_interval = parse_timedelta(clear_interval, default="ms")
         self.clear_interval = clear_interval
         self.last = 0
+        self.last_seen = 0
 
         self.source, self.root = task_stream_figure(clear_interval, **kwargs)
 
@@ -899,16 +987,31 @@ class TaskStream(DashboardComponent):
             if not rectangles["start"]:
                 return
 
-            # If there has been a significant delay then clear old rectangles
-            first_end = min(map(add, rectangles["start"], rectangles["duration"]))
-            if first_end > self.last:
-                last = self.last
-                self.last = first_end
-                if first_end > last + self.clear_interval * 1000:
-                    self.offset = min(rectangles["start"])
-                    self.source.data.update({k: [] for k in rectangles})
+            # If it has been a while since we've updated the plot
+            if time() > self.last_seen + self.clear_interval:
+                new_start = min(rectangles["start"]) - self.offset
+                old_start = min(self.source.data["start"])
+                old_end = max(
+                    map(
+                        operator.add,
+                        self.source.data["start"],
+                        self.source.data["duration"],
+                    )
+                )
+
+                density = (
+                    sum(self.source.data["duration"])
+                    / len(self.workers)
+                    / (old_end - old_start)
+                )
+
+                # If whitespace is more than 3x the old width
+                if (new_start - old_end) > (old_end - old_start) * 2 or density < 0.05:
+                    self.source.data.update({k: [] for k in rectangles})  # clear
+                    self.offset = min(rectangles["start"])  # redefine offset
 
             rectangles["start"] = [x - self.offset for x in rectangles["start"]]
+            self.last_seen = time()
 
             # Convert to numpy for serialization speed
             if n >= 10 and np:
@@ -958,7 +1061,7 @@ def task_stream_figure(clear_interval="20s", **kwargs):
         x_axis_type="datetime",
         min_border_right=35,
         tools="",
-        **kwargs
+        **kwargs,
     )
 
     rect = root.rect(
@@ -1058,7 +1161,7 @@ class TaskGraph(DashboardComponent):
             color=node_colors,
             source=self.node_source,
             view=node_view,
-            legend="state",
+            **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "state"},
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
@@ -1202,7 +1305,7 @@ class TaskProgress(DashboardComponent):
             y_range=y_range,
             toolbar_location=None,
             tools="",
-            **kwargs
+            **kwargs,
         )
         self.root.line(  # just to define early ranges
             x=[0, 0.9], y=[-1, 0], line_color="#FFFFFF", alpha=0.0
@@ -1338,83 +1441,6 @@ class TaskProgress(DashboardComponent):
             )
 
 
-class MemoryUse(DashboardComponent):
-    """ The memory usage across the cluster, grouped by task type """
-
-    def __init__(self, scheduler, **kwargs):
-        self.scheduler = scheduler
-        ps = [p for p in scheduler.plugins if isinstance(p, AllProgress)]
-        if ps:
-            self.plugin = ps[0]
-        else:
-            self.plugin = AllProgress(scheduler)
-
-        self.source = ColumnDataSource(
-            data=dict(
-                name=[],
-                left=[],
-                right=[],
-                center=[],
-                color=[],
-                percent=[],
-                MB=[],
-                text=[],
-            )
-        )
-
-        self.root = Plot(
-            id="bk-nbytes-plot",
-            x_range=DataRange1d(),
-            y_range=DataRange1d(),
-            toolbar_location=None,
-            outline_line_color=None,
-            **kwargs
-        )
-
-        self.root.add_glyph(
-            self.source,
-            Quad(
-                top=1,
-                bottom=0,
-                left="left",
-                right="right",
-                fill_color="color",
-                fill_alpha=1,
-            ),
-        )
-
-        self.root.add_layout(LinearAxis(), "left")
-        self.root.add_layout(LinearAxis(), "below")
-
-        hover = HoverTool(
-            point_policy="follow_mouse",
-            tooltips="""
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Name:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@name</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">Percent:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@percent</span>
-                </div>
-                <div>
-                    <span style="font-size: 14px; font-weight: bold;">MB:</span>&nbsp;
-                    <span style="font-size: 10px; font-family: Monaco, monospace;">@MB</span>
-                </div>
-                """,
-        )
-        self.root.add_tools(hover)
-
-    @without_property_validation
-    def update(self):
-        with log_errors():
-            nb = nbytes_bar(self.plugin.nbytes)
-            update(self.source, nb)
-            self.root.title.text = "Memory Use: %0.2f MB" % (
-                sum(self.plugin.nbytes.values()) / 1e6
-            )
-
-
 class WorkerTable(DashboardComponent):
     """ Status of the current workers
 
@@ -1492,7 +1518,7 @@ class WorkerTable(DashboardComponent):
             reorderable=True,
             sortable=True,
             width=width,
-            **dt_kwargs
+            **dt_kwargs,
         )
 
         for name in table_names:
@@ -1511,7 +1537,7 @@ class WorkerTable(DashboardComponent):
             reorderable=True,
             sortable=True,
             width=width,
-            **dt_kwargs
+            **dt_kwargs,
         )
 
         hover = HoverTool(
@@ -1532,7 +1558,7 @@ class WorkerTable(DashboardComponent):
             height=60,
             width=width,
             tools="",
-            **kwargs
+            **kwargs,
         )
         mem_plot.circle(
             source=self.source, x="memory_percent", y=0, size=10, fill_alpha=0.5
@@ -1561,7 +1587,7 @@ class WorkerTable(DashboardComponent):
             height=60,
             width=width,
             tools="",
-            **kwargs
+            **kwargs,
         )
         cpu_plot.circle(
             source=self.source, x="cpu_fraction", y=0, size=10, fill_alpha=0.5
@@ -1707,7 +1733,7 @@ def status_doc(scheduler, extra, doc):
             n_rectangles=dask.config.get(
                 "distributed.scheduler.dashboard.status.task-stream-length"
             ),
-            clear_interval="10s",
+            clear_interval="5s",
             sizing_mode="stretch_both",
         )
         task_stream.update()
@@ -1761,14 +1787,6 @@ def individual_nbytes_doc(scheduler, extra, doc):
     current_load.update()
     add_periodic_callback(doc, current_load, 100)
     doc.add_root(current_load.nbytes_figure)
-    doc.theme = BOKEH_THEME
-
-
-def individual_memory_use_doc(scheduler, extra, doc):
-    memory_use = MemoryUse(scheduler, sizing_mode="stretch_both")
-    memory_use.update()
-    add_periodic_callback(doc, memory_use, 100)
-    doc.add_root(memory_use.root)
     doc.theme = BOKEH_THEME
 
 
@@ -1849,10 +1867,19 @@ def individual_bandwidth_workers_doc(scheduler, extra, doc):
         doc.theme = BOKEH_THEME
 
 
+def individual_memory_by_key_doc(scheduler, extra, doc):
+    with log_errors():
+        component = MemoryByKey(scheduler, sizing_mode="stretch_both")
+        component.update()
+        add_periodic_callback(doc, component, 500)
+        doc.add_root(component.fig)
+        doc.theme = BOKEH_THEME
+
+
 def profile_doc(scheduler, extra, doc):
     with log_errors():
         doc.title = "Dask: Profile"
-        prof = ProfileTimePlot(scheduler, sizing_mode="scale_width", doc=doc)
+        prof = ProfileTimePlot(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)
@@ -1864,7 +1891,7 @@ def profile_doc(scheduler, extra, doc):
 def profile_server_doc(scheduler, extra, doc):
     with log_errors():
         doc.title = "Dask: Profile of Event Loop"
-        prof = ProfileServer(scheduler, sizing_mode="scale_width", doc=doc)
+        prof = ProfileServer(scheduler, sizing_mode="stretch_both", doc=doc)
         doc.add_root(prof.root)
         doc.template = env.get_template("simple.html")
         doc.template_variables.update(extra)

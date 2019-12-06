@@ -30,12 +30,12 @@ from .components.scheduler import (
     individual_profile_doc,
     individual_profile_server_doc,
     individual_nbytes_doc,
-    individual_memory_use_doc,
     individual_cpu_doc,
     individual_nprocessing_doc,
     individual_workers_doc,
     individual_bandwidth_types_doc,
     individual_bandwidth_workers_doc,
+    individual_memory_by_key_doc,
 )
 from .core import BokehServer
 from .worker import counters_doc
@@ -171,6 +171,7 @@ class CountsJSON(RequestHandler):
         released = 0
         waiting = 0
         waiting_data = 0
+        desired_workers = scheduler.adaptive_target()
 
         for ts in scheduler.tasks.values():
             if ts.exception_blame is not None:
@@ -203,6 +204,7 @@ class CountsJSON(RequestHandler):
             "waiting": waiting,
             "waiting_data": waiting_data,
             "workers": len(scheduler.workers),
+            "desired_workers": desired_workers,
         }
         self.write(response)
 
@@ -243,6 +245,12 @@ class _PrometheusCollector(object):
             "dask_scheduler_clients",
             "Number of clients connected.",
             value=len(self.server.clients),
+        )
+
+        yield GaugeMetricFamily(
+            "dask_scheduler_desired_workers",
+            "Number of workers scheduler needs for task graph.",
+            value=self.server.adaptive_target(),
         )
 
         tasks = GaugeMetricFamily(
@@ -394,12 +402,12 @@ applications = {
     "/individual-profile": individual_profile_doc,
     "/individual-profile-server": individual_profile_server_doc,
     "/individual-nbytes": individual_nbytes_doc,
-    "/individual-memory-use": individual_memory_use_doc,
     "/individual-cpu": individual_cpu_doc,
     "/individual-nprocessing": individual_nprocessing_doc,
     "/individual-workers": individual_workers_doc,
     "/individual-bandwidth-types": individual_bandwidth_types_doc,
     "/individual-bandwidth-workers": individual_bandwidth_workers_doc,
+    "/individual-memory-by-key": individual_memory_by_key_doc,
 }
 
 try:
