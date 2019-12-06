@@ -15,8 +15,6 @@ from .utils import All, tokey
 
 logger = logging.getLogger(__name__)
 
-__no_value__ = "__no_value__"
-
 
 async def gather_from_workers(who_has, rpc, close=True, serializers=None, who=None):
     """ Gather data directly from peers
@@ -301,20 +299,17 @@ def subs_multiple(o, d):
 
     """
     typ = type(o)
-    if not (typ is tuple and o and callable(o[0])):  # not istask(o)
-        try:  # Is o a key to substitute?
-            result = d.get(o, __no_value__)
-            if result is not __no_value__:
-                return result
-        except TypeError:  # unhashable type
-            pass
-        if typ is list:
-            return typ([subs_multiple(i, d) for i in o])
-        elif typ is dict:
-            return {k: subs_multiple(v, d) for (k, v) in o.items()}
-        return o
-    else:
+    if typ is tuple and o and callable(o[0]):  # istask(o)
         return (o[0],) + tuple(subs_multiple(i, d) for i in o[1:])
+    elif typ is list:
+        return [subs_multiple(i, d) for i in o]
+    elif typ is dict:
+        return {k: subs_multiple(v, d) for (k, v) in o.items()}
+    else:
+        try:
+            return d.get(o, o)
+        except TypeError:
+            return o
 
 
 retry_count = dask.config.get("distributed.comm.retry.count")
