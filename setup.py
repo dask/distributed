@@ -56,7 +56,6 @@ setup(
         dask-ssh=distributed.cli.dask_ssh:go
         dask-scheduler=distributed.cli.dask_scheduler:go
         dask-worker=distributed.cli.dask_worker:go
-        dask-spec=distributed.cli.dask_spec:main
       """,
     zip_safe=False,
 )
