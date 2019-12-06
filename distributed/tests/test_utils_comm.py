@@ -23,6 +23,11 @@ def test_subs_multiple():
     dsk = {"a": (sum, ["x", "y"])}
     assert subs_multiple(dsk, data) == {"a": (sum, [1, 2])}
 
+    # Tuple key
+    data = {"x": 1, ("y", 0): 2}
+    dsk = {"a": (sum, ["x", ("y", 0)])}
+    assert subs_multiple(dsk, data) == {"a": (sum, [1, 2])}
+
 
 @gen_cluster(client=True)
 def test_gather_from_workers_permissive(c, s, a, b):
