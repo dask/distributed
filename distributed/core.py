@@ -951,11 +951,13 @@ class ConnectionPool(object):
 
     async def close(self):
         """
-        Close all communications abruptly.
+        Close all communications
         """
         for d in [self.available, self.occupied]:
             comms = [comm for comms in d.values() for comm in comms]
-            await asyncio.gather(*[comm.close() for comm in comms])
+            await asyncio.gather(
+                *[comm.close() for comm in comms], return_exceptions=True
+            )
             for _ in comms:
                 self.semaphore.release()
 
