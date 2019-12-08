@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 
+import pkg_resources
+
 
 class Backend(ABC):
     """
@@ -60,8 +62,25 @@ backends = {}
 def get_backend(scheme):
     """
     Get the Backend instance for the given *scheme*.
+
+    New backends can be registered using setuptools entry_points, e.g.:
+    setup(..., entry_points={
+            'distributed.comm.backends': [
+                'udp=dask_udp.backend:UDPBackend',
+            ]
+        },
+    )
     """
-    backend = backends.get(scheme)
+
+    backend = backends.get(scheme) or next(
+        iter(
+            backend_class_ep.load()()
+            for backend_class_ep in pkg_resources.iter_entry_points(
+                "distributed.comm.backends", scheme
+            )
+        ),
+        None,
+    )
     if backend is None:
         raise ValueError(
             "unknown address scheme %r (known schemes: %s)" % (scheme, sorted(backends))
