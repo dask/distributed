@@ -314,7 +314,7 @@ async def test_throttle_outgoing_connections(c, s, a, *workers):
     remote_data = c.map(
         lambda x: b"0" * 10000, range(10), pure=False, workers=[a.address]
     )
-    wait(remote_data)
+    await wait(remote_data)
 
     def pause(dask_worker):
         # Patch paused and memory_monitor on the one worker
