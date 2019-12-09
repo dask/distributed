@@ -3533,9 +3533,6 @@ def test_reconnect(loop):
         assert time() < start + 5
         sleep(0.01)
 
-    with pytest.raises(Exception):
-        c.nthreads()
-
     assert x.status == "cancelled"
     with pytest.raises(CancelledError):
         x.result()
@@ -5910,3 +5907,4 @@ async def test_performance_report(c, s, a, b):
 
         assert "bokeh" in data
         assert "random" in data
+        assert "Dask Performance Report" in data
