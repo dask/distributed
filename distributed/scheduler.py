@@ -334,7 +334,7 @@ class TaskState(object):
        from the name of the function, followed by a hash of the function
        and arguments, like ``'inc-ab31c010444977004d656610d2d421ec'``.
 
-    .. attribute:: prefix: str
+    .. attribute:: prefix_key: str
 
        The key prefix, used in certain calculations to get an estimate
        of the task's duration based on the duration of other tasks in the
@@ -552,6 +552,10 @@ class TaskState(object):
     .. attribute: actor: bool
 
        Whether or not this task is an Actor.
+
+    .. attribute: group: TaskGroup
+
+:      The group of tasks to which this one belongs.
     """
 
     __slots__ = (
@@ -678,6 +682,36 @@ class TaskGroup(object):
     Keys often have a structure like ``("x-123", 0)``
     A group takes the first section, like ``"x-123"``
 
+    .. attribute:: name: str
+
+       The name of a group of tasks.
+       For a task like ``("x-123", 0)`` this is the text ``"x-123"``
+
+    .. attribute:: states: Dict[str, int]
+
+       The number of tasks in each statek,
+       like ``{"memory": 10, "processing": 3, "released": 4, ...}``
+
+    .. attribute:: dependencies: Set[TaskGroup]
+
+       The other TaskGroups on which this one depends
+
+    .. attribute:: nbytes_total: int
+
+       The total number of bytes that this task group has produced
+
+    .. attribute:: nbytes_in_memory: int
+
+       The number of bytes currently stored by this TaskGroup
+
+    .. attribute:: duration: float
+
+       The total amount of time spent on all tasks in this TaskGroup
+
+    .. attribute:: types: Set[str]
+
+       The result types of this TaskGroup
+
     See also
     --------
     TaskPrefix
@@ -720,6 +754,20 @@ class TaskPrefix(object):
     Keys often have a structure like ``("x-123", 0)``
     A group takes the first section, like ``"x"``
 
+    .. attribute:: name: str
+
+       The name of a group of tasks.
+       For a task like ``("x-123", 0)`` this is the text ``"x"``
+
+    .. attribute:: states: Dict[str, int]
+
+       The number of tasks in each statek,
+       like ``{"memory": 10, "processing": 3, "released": 4, ...}``
+
+    .. attribute:: duration_average: float
+
+       An exponentially weighted moving average duration of all tasks with this prefix
+
     See Also
     --------
     TaskGroup
@@ -728,7 +776,6 @@ class TaskPrefix(object):
     def __init__(self, name):
         self.name = name
         self.groups = []
-        self.states["forgotten"] = 0
         if self.name in dask.config.get("distributed.scheduler.default-task-durations"):
             self.duration_average = parse_timedelta(
                 dask.config.get("distributed.scheduler.default-task-durations")[
