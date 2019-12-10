@@ -907,7 +907,7 @@ class Scheduler(ServerNode):
             try:
                 from distributed.dashboard import BokehScheduler
             except ImportError:
-                logger.debug("To start diagnostics web server please install Bokeh")
+                logger.warning("To start diagnostics web server please install Bokeh")
             else:
                 self.service_specs[("dashboard", dashboard_address)] = (
                     BokehScheduler,
@@ -1574,7 +1574,7 @@ class Scheduler(ServerNode):
                 if any(
                     dep not in self.tasks and dep not in tasks for dep in deps
                 ):  # bad key
-                    logger.info("User asked for computation on lost data, %s", k)
+                    logger.warning("User asked for computation on lost data, %s", k)
                     del tasks[k]
                     del dependencies[k]
                     if k in keys:
@@ -4394,7 +4394,7 @@ class Scheduler(ServerNode):
                     try:
                         plugin.transition(key, start, finish2, *args, **kwargs)
                     except Exception:
-                        logger.info("Plugin failed with exception", exc_info=True)
+                        logger.error("Plugin failed with exception", exc_info=True)
                 if ts.state == "forgotten":
                     del self.tasks[ts.key]
 

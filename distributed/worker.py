@@ -585,7 +585,7 @@ class Worker(ServerNode):
             try:
                 from distributed.dashboard import BokehWorker
             except ImportError:
-                logger.debug("To start diagnostics web server please install Bokeh")
+                logger.warning("To start diagnostics web server please install Bokeh")
             else:
                 self.service_specs[("dashboard", dashboard_address)] = (
                     BokehWorker,
@@ -916,7 +916,7 @@ class Worker(ServerNode):
             raise
         finally:
             if self.reconnect and self.status == "running":
-                logger.info("Connection to scheduler broken.  Reconnecting...")
+                logger.warning("Connection to scheduler broken.  Reconnecting...")
                 self.loop.add_callback(self.heartbeat)
             else:
                 await self.close(report=False)
@@ -1191,7 +1191,7 @@ class Worker(ServerNode):
             max_connections is not False
             and self.outgoing_current_count >= max_connections
         ):
-            logger.debug(
+            logger.warning(
                 "Worker %s has too many open connections to respond to data request from %s (%d/%d).%s",
                 self.address,
                 who,
@@ -1644,7 +1644,7 @@ class Worker(ServerNode):
                     self.task_state[key] = "memory"
                     self.put_key_in_memory(key, value, transition=False)
                 except Exception as e:
-                    logger.info("Failed to put key in memory", exc_info=True)
+                    logger.error("Failed to put key in memory", exc_info=True)
                     msg = error_message(e)
                     self.exceptions[key] = msg["exception"]
                     self.tracebacks[key] = msg["traceback"]
@@ -1662,7 +1662,7 @@ class Worker(ServerNode):
             return out
 
         except EnvironmentError:
-            logger.info("Comm closed")
+            logger.warning("Comm closed")
         except Exception as e:
             logger.exception(e)
             if LOG_PDB:
@@ -1753,7 +1753,7 @@ class Worker(ServerNode):
 
                 missing_deps = {dep for dep in deps if not self.who_has.get(dep)}
                 if missing_deps:
-                    logger.info("Can't find dependencies for key %s", key)
+                    logger.warning("Can't find dependencies for key %s", key)
                     missing_deps2 = {
                         dep
                         for dep in missing_deps
@@ -2750,7 +2750,7 @@ class Worker(ServerNode):
                 try:
                     plugin.transition(key, start, finish, **kwargs)
                 except Exception:
-                    logger.info(
+                    logger.error(
                         "Plugin '%s' failed with exception" % name, exc_info=True
                     )
 
