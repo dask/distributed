@@ -641,6 +641,12 @@ class TaskState(object):
         self.group.states[value] += 1
         self._state = value
 
+    def add_dependency(self, other: "TaskState"):
+        """ Add another task as a dependency of this task """
+        self.dependencies.add(other)
+        self.group.dependencies.add(other.group)
+        other.dependents.add(self)
+
     def get_nbytes(self):
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
@@ -1823,9 +1829,7 @@ class Scheduler(ServerNode):
                 continue
             for dep in deps:
                 dts = self.tasks[dep]
-                ts.dependencies.add(dts)
-                ts.group.dependencies.add(dts.group)
-                dts.dependents.add(ts)
+                ts.add_dependency(dts)
 
         # Compute priorities
         if isinstance(user_priority, Number):
