@@ -632,11 +632,11 @@ class TaskState(object):
         self.group = None
 
     @property
-    def state(self):
+    def state(self) -> str:
         return self._state
 
     @state.setter
-    def state(self, value):
+    def state(self, value: str):
         self.group.states[self._state] -= 1
         self.group.states[value] += 1
         self._state = value
@@ -647,11 +647,11 @@ class TaskState(object):
         self.group.dependencies.add(other.group)
         other.dependents.add(self)
 
-    def get_nbytes(self):
+    def get_nbytes(self) -> int:
         nbytes = self.nbytes
         return nbytes if nbytes is not None else DEFAULT_DATA_SIZE
 
-    def set_nbytes(self, nbytes):
+    def set_nbytes(self, nbytes: int):
         old_nbytes = self.nbytes
         diff = nbytes - (old_nbytes or 0)
         self.group.nbytes_total += diff
