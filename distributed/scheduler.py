@@ -334,11 +334,10 @@ class TaskState(object):
        from the name of the function, followed by a hash of the function
        and arguments, like ``'inc-ab31c010444977004d656610d2d421ec'``.
 
-    .. attribute:: prefix_key: str
+    .. attribute:: prefix: TaskPrefix
 
-       The key prefix, used in certain calculations to get an estimate
-       of the task's duration based on the duration of other tasks in the
-       same "family" (for example ``'inc'``).
+       The broad class of tasks to which this task belongs like "inc" or
+       "read_csv"
 
     .. attribute:: run_spec: object
 
@@ -565,7 +564,6 @@ class TaskState(object):
         "key",
         # Key prefix (see key_split())
         "prefix",
-        "prefix_key",
         # How to run the task (None if pure data)
         "run_spec",
         # Alive dependents and dependencies
@@ -607,7 +605,6 @@ class TaskState(object):
 
     def __init__(self, key, run_spec):
         self.key = key
-        self.prefix_key = key_split(key)
         self.run_spec = run_spec
         self._state = None
         self.exception = self.traceback = self.exception_blame = None
@@ -634,6 +631,10 @@ class TaskState(object):
     @property
     def state(self) -> str:
         return self._state
+
+    @property
+    def prefix_key(self):
+        return self.prefix.name
 
     @state.setter
     def state(self, value: str):
@@ -1963,12 +1964,13 @@ class Scheduler(ServerNode):
         except KeyError:
             tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
         tg.add(ts)
+        prefix_key = key_split(key)
         try:
-            tp = self.task_prefixes[ts.prefix_key]
+            tp = self.task_prefixes[prefix_key]
         except KeyError:
-            tp = TaskPrefix(ts.prefix_key)
+            tp = TaskPrefix(prefix_key)
             tp.groups.append(tg)
-            self.task_prefixes[ts.prefix_key] = tp
+            self.task_prefixes[prefix_key] = tp
         ts.prefix = tp
         tg.prefix = tp
         self.tasks[key] = ts
@@ -3645,7 +3647,7 @@ class Scheduler(ServerNode):
         """
         duration = ts.prefix.duration_average
         if duration is None:
-            self.unknown_durations[ts.prefix_key].add(ts)
+            self.unknown_durations[ts.prefix.name].add(ts)
             return default
 
         return duration
@@ -4055,7 +4057,7 @@ class Scheduler(ServerNode):
                 ts.prefix.duration_average = avg_duration
                 ts.group.duration += new_duration
 
-                for tts in self.unknown_durations.pop(ts.prefix_key, ()):
+                for tts in self.unknown_durations.pop(ts.prefix.name, ()):
                     if tts.processing_on:
                         wws = tts.processing_on
                         old = wws.processing[tts]
