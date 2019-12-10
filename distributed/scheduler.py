@@ -696,7 +696,7 @@ class TaskGroup(object):
 
     .. attribute:: states: Dict[str, int]
 
-       The number of tasks in each statek,
+       The number of tasks in each state,
        like ``{"memory": 10, "processing": 3, "released": 4, ...}``
 
     .. attribute:: dependencies: Set[TaskGroup]
@@ -733,7 +733,6 @@ class TaskGroup(object):
         self.nbytes_in_memory = 0
         self.duration = 0
         self.types = set()
-        # self.tasks = weakref.WeakSet()
 
     def add(self, ts):
         # self.tasks.add(ts)
@@ -768,7 +767,7 @@ class TaskPrefix(object):
 
     .. attribute:: states: Dict[str, int]
 
-       The number of tasks in each statek,
+       The number of tasks in each state,
        like ``{"memory": 10, "processing": 3, "released": 4, ...}``
 
     .. attribute:: duration_average: float
