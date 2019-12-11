@@ -1,5 +1,6 @@
 from datetime import datetime
 from functools import partial
+import json
 import logging
 
 import dask
@@ -7,6 +8,7 @@ from dask.utils import format_bytes
 import toolz
 from toolz import merge
 from tornado import escape
+from tornado.websocket import WebSocketHandler
 
 try:
     import numpy as np
@@ -41,6 +43,7 @@ from .core import BokehServer
 from .worker import counters_doc
 from .proxy import GlobalProxyHandler
 from .utils import RequestHandler, redirect
+from ..diagnostics.websocket import WebsocketPlugin
 from ..utils import log_errors, format_time
 
 
@@ -301,6 +304,27 @@ class HealthHandler(RequestHandler):
         self.set_header("Content-Type", "text/plain")
 
 
+class EventsHandler(WebSocketHandler):
+    def initialize(self, server=None, extra=None):
+        self.server = server
+        self.extra = extra or {}
+        self.plugin = WebsocketPlugin(self, server)
+
+    def open(self):
+        for worker in self.server.workers:
+            self.plugin.add_worker(self.server, worker)
+
+    def on_message(self, message):
+        message = json.loads(message)
+        if message["name"] == "ping":
+            self.write_message(
+                json.dumps({"name": "pong", "timestamp": str(datetime.now())})
+            )
+
+    def on_close(self):
+        pass
+
+
 routes = [
     (r"info", redirect("info/main/workers.html")),
     (r"info/main/workers.html", Workers),
@@ -316,6 +340,7 @@ routes = [
     (r"individual-plots.json", IndividualPlots),
     (r"metrics", PrometheusHandler),
     (r"health", HealthHandler),
+    (r"events", EventsHandler),
     (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler),
 ]
 
