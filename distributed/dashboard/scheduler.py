@@ -290,19 +290,21 @@ class _PrometheusCollector(object):
 
 
 class PrometheusHandler(RequestHandler):
-    _initialized = False
+    _collector = None
 
     def __init__(self, *args, **kwargs):
         import prometheus_client
 
         super(PrometheusHandler, self).__init__(*args, **kwargs)
 
-        if PrometheusHandler._initialized:
+        if PrometheusHandler._collector:
+            # Especially during testing, multiple schedulers are started
+            # sequentially in the same python process
+            PrometheusHandler._collector.server = self.server
             return
 
-        prometheus_client.REGISTRY.register(_PrometheusCollector(self.server))
-
-        PrometheusHandler._initialized = True
+        PrometheusHandler._collector = _PrometheusCollector(self.server)
+        prometheus_client.REGISTRY.register(PrometheusHandler._collector)
 
     def get(self):
         import prometheus_client
