@@ -1,7 +1,5 @@
 from abc import ABC, abstractmethod
 
-import pkg_resources
-
 
 class Backend(ABC):
     """
@@ -72,17 +70,22 @@ def get_backend(scheme):
     )
     """
 
-    backend = backends.get(scheme) or next(
-        iter(
-            backend_class_ep.load()()
-            for backend_class_ep in pkg_resources.iter_entry_points(
-                "distributed.comm.backends", scheme
-            )
-        ),
-        None,
-    )
+    backend = backends.get(scheme)
     if backend is None:
-        raise ValueError(
-            "unknown address scheme %r (known schemes: %s)" % (scheme, sorted(backends))
+        import pkg_resources
+
+        backend = next(
+            iter(
+                backend_class_ep.load()()
+                for backend_class_ep in pkg_resources.iter_entry_points(
+                    "distributed.comm.backends", scheme
+                )
+            ),
+            None,
         )
+        if backend is None:
+            raise ValueError(
+                "unknown address scheme %r (known schemes: %s)"
+                % (scheme, sorted(backends))
+            )
     return backend
