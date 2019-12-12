@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 
+import entrypoints
+
 
 class Backend(ABC):
     """
@@ -72,18 +74,11 @@ def get_backend(scheme):
 
     backend = backends.get(scheme)
     if backend is None:
-        import pkg_resources
-
-        backend = next(
-            iter(
-                backend_class_ep.load()()
-                for backend_class_ep in pkg_resources.iter_entry_points(
-                    "distributed.comm.backends", scheme
-                )
-            ),
-            None,
-        )
-        if backend is None:
+        try:
+            backend = entrypoints.get_single(
+                "distributed.comm.backends", scheme
+            ).load()()
+        except entrypoints.NoSuchEntryPoint:
             raise ValueError(
                 "unknown address scheme %r (known schemes: %s)"
                 % (scheme, sorted(backends))
