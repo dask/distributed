@@ -119,20 +119,20 @@ def rectangles(msgs, workers=None, start_boundary=0):
         if worker_thread not in workers:
             workers[worker_thread] = len(workers) / 2
 
-        for action, start, stop in startstops:
-            if start < start_boundary:
+        for startstop in startstops:
+            if startstop["start"] < start_boundary:
                 continue
-            color = colors[action]
+            color = colors[startstop["action"]]
             if type(color) is not str:
                 color = color(msg)
 
-            L_start.append((start + stop) / 2 * 1000)
-            L_duration.append(1000 * (stop - start))
-            L_duration_text.append(format_time(stop - start))
+            L_start.append((startstop["start"] + startstop["stop"]) / 2 * 1000)
+            L_duration.append(1000 * (startstop["stop"] - startstop["start"]))
+            L_duration_text.append(format_time(startstop["stop"] - startstop["start"]))
             L_key.append(key)
-            L_name.append(prefix[action] + name)
+            L_name.append(prefix[startstop["action"]] + name)
             L_color.append(color)
-            L_alpha.append(alphas[action])
+            L_alpha.append(alphas[startstop["action"]])
             L_worker.append(msg["worker"])
             L_worker_thread.append(worker_thread)
             L_y.append(workers[worker_thread])
