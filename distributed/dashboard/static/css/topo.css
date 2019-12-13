@@ -21,9 +21,9 @@
     stroke-width: 4;
     stroke-linecap: round;
     fill: transparent;
-    stroke-dasharray: 1000;
-    stroke-dashoffset: 1000;
-    animation: shoot 0.15s linear infinite;
+    stroke-dasharray: 20 1000;
+    stroke-dashoffset: 0;
+    animation: shoot 0.5s linear infinite;
 }
 
 .transfer {
@@ -46,7 +46,7 @@
 
 @keyframes shoot {
     from {
-        stroke-dashoffset: -1000;
+        stroke-dashoffset: 0;
     }
     to {
         stroke-dashoffset: 1000;

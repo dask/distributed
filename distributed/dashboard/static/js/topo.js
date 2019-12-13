@@ -9,8 +9,9 @@ class Dashboard {
     constructor() {
         this.workers = []
         this.scheduler = "scheduler"
+        this.schedulerNode = null
         this.dashboard = document.getElementById('vis')
-        this.transfers = {}
+        this.transfers = []
         this.tasks = {}
     }
 
@@ -49,6 +50,17 @@ class Dashboard {
             case 'reset':
                 this.reset();
                 break;
+            case 'transition':
+                if (event['action'] === "compute") {
+                    this.start_task(event['worker_id'], event['key'], event['color']);
+                    setTimeout(function () { this.end_task(event['worker_id'], event['key']) }.bind(this), event['stop'] - event['start']);
+                    break;
+                } else if (event['action'] === "transfer") {
+                    let randomWorker = this.workers[Math.floor(Math.random() * this.workers.length)]; // Until we can work out where the tranfer is coming from let's illustrate with a random worker
+                    let arc = this.start_transfer(randomWorker, event['worker_id']);
+                    setTimeout(function () { this.end_transfer(randomWorker, event['worker_id'], arc) }.bind(this).bind(arc), Math.max(250, (event['stop'] - event['start']) * 1000));
+                    break;
+                }
             default:
                 console.log("Unknown event " + event['name']);
                 console.log(event);
@@ -56,22 +68,22 @@ class Dashboard {
     }
 
     add_scheduler() {
-        let newpath = document.createElementNS('http://www.w3.org/2000/svg', "circle");
-        newpath.setAttributeNS(null, "id", this.scheduler);
-        newpath.setAttributeNS(null, "class", "node scheduler");
-        this.dashboard.appendChild(newpath);
+        this.schedulerNode = document.createElementNS('http://www.w3.org/2000/svg', "circle");
+        this.schedulerNode.setAttributeNS(null, "id", this.scheduler);
+        this.schedulerNode.setAttributeNS(null, "class", "node scheduler");
+        this.dashboard.appendChild(this.schedulerNode);
         gsap.fromTo("#" + this.scheduler, { r: 0, cx: "50%", cy: "50%" }, { r: 30, cx: "50%", cy: "50%", duration: 0.25 });
     }
 
     add_worker(id) {
-        let newpath = document.createElementNS('http://www.w3.org/2000/svg', "circle");
-        newpath.setAttributeNS(null, "id", id);
-        newpath.setAttributeNS(null, "r", "0");
-        newpath.setAttributeNS(null, "cx", "50%");
-        newpath.setAttributeNS(null, "cy", "50%");
-        newpath.setAttributeNS(null, "class", "node worker");
-        this.dashboard.appendChild(newpath);
-        this.workers.push(id)
+        let workerNode = document.createElementNS('http://www.w3.org/2000/svg', "circle");
+        workerNode.setAttributeNS(null, "id", id);
+        workerNode.setAttributeNS(null, "r", "0");
+        workerNode.setAttributeNS(null, "cx", "50%");
+        workerNode.setAttributeNS(null, "cy", "50%");
+        workerNode.setAttributeNS(null, "class", "node worker");
+        this.dashboard.appendChild(workerNode);
+        this.workers.splice(Math.floor(Math.random() * this.workers.length) - 1, 0, id)
         this.transfers[id] = {}
         this.update_worker_positions()
     }
@@ -106,11 +118,10 @@ class Dashboard {
         this.tasks[task] = { 'worker': worker }
     }
 
-    start_task(worker_id, task_name) {
+    start_task(worker_id, task_name, color) {
         this.create_task(task_name, worker_id)
         let worker = document.getElementById(worker_id)
         let scheduler = document.getElementById("scheduler")
-        let color = "rgba(0, 0, 255, .6)"
         let taskTl = gsap.timeline({});
         taskTl.add(() => {
             this.fire_projectile(
@@ -118,7 +129,7 @@ class Dashboard {
                 worker,
                 color)
         })
-        taskTl.to('#' + worker_id, { fill: color, duration: 0.25 }, 0.2);
+        taskTl.to('#' + worker_id, { fill: color, duration: 0.25 }, 0.5);
     }
 
     end_task(worker_id) {
@@ -128,24 +139,25 @@ class Dashboard {
     fire_projectile(start_element, end_element, color) {
         let projectileTl = gsap.timeline({});
         let arc = this.draw_arc(start_element, end_element, color, "projectile")
-        projectileTl.add(() => { this.dashboard.appendChild(arc) }, 0)
-        projectileTl.add(() => { this.dashboard.removeChild(arc) }, 0.15)
+        projectileTl.add(() => { this.dashboard.insertBefore(arc, this.schedulerNode); }, 0)
+        projectileTl.add(() => { this.dashboard.removeChild(arc) }, 1)
         projectileTl.play()
     }
 
     start_transfer(start_worker, end_worker) {
         let color = "rgba(255, 0, 0, .6)"
         let arc = this.draw_arc(document.getElementById(start_worker), document.getElementById(end_worker), color, "transfer")
-        this.dashboard.appendChild(arc)
-        this.transfers[start_worker][end_worker] = arc
+        this.dashboard.insertBefore(arc, this.schedulerNode);
+        this.transfers.push(arc)
         gsap.to('#' + start_worker, { fill: color, duration: 0.25 });
         gsap.to('#' + end_worker, { fill: color, duration: 0.25 });
+        return arc;
     }
 
-    end_transfer(start_worker, end_worker) {
-        let arc = this.transfers[start_worker][end_worker]
+    end_transfer(start_worker, end_worker, arc) {
         this.dashboard.removeChild(arc)
-        delete this.transfers[start_worker][end_worker]
+        var index = this.transfers.indexOf(arc);
+        if (index !== -1) this.transfers.splice(index, 1);
         gsap.to('#' + start_worker, { fill: null, duration: 0.25 });
         gsap.to('#' + end_worker, { fill: null, duration: 0.25 });
     }
@@ -168,11 +180,10 @@ class Dashboard {
         for (var i = 0; i < this.workers.length; i++) {
             gsap.to('#' + this.workers[i], { fill: null, duration: 0.25 });
         }
-        for (var start_worker in this.transfers) {
-            for (var end_worker in this.transfers[start_worker]) {
-                this.dashboard.removeChild(this.transfers[start_worker][end_worker])
-                delete this.transfers[start_worker][end_worker]
-            }
+        for (var arc in this.transfers) {
+            this.dashboard.removeChild(tarc)
+            var index = this.transfers.indexOf(arc);
+            if (index !== -1) this.transfers.splice(index, 1);
         }
     }
 

@@ -4,6 +4,8 @@ import json
 import tornado.websocket
 
 from .plugin import SchedulerPlugin
+from ..utils import key_split
+from .task_stream import colors
 
 
 class WebsocketPlugin(SchedulerPlugin):
@@ -50,43 +52,65 @@ class WebsocketPlugin(SchedulerPlugin):
         *args, **kwargs: More options passed when transitioning
             This may include worker ID, compute time, etc.
         """
-        if start == "released" and finish == "waiting":
-            # Task is queued
-            pass
-        elif start == "waiting" and finish == "processing":
-            # Task has begun on a worker
-            worker = self.scheduler.tasks[key].processing_on.name
-            self._send(
-                "start_task", {"id": self._hash_worker(worker), "task_name": key}
-            )
-        elif start == "processing" and finish == "memory":
-            # Task result is in memory on a worker
-            start_worker = self._hash_worker(
-                list(self.scheduler.tasks[key].who_has)[0].name
-            )
-            end_worker = self._hash_worker(kwargs["worker"])
-            if start_worker != end_worker:
-                self._send(
-                    "start_transfer",
-                    {
-                        "start_worker": start_worker,
-                        "end_worker": end_worker,
+        if start == "processing":
+            if key not in self.scheduler.tasks:
+                return
+            kwargs["key"] = key
+            if finish == "memory" or finish == "erred":
+                startstops = kwargs.get("startstops", [])
+                for action, start, stop in startstops:
+                    color = colors[action]
+                    if type(color) is not str:
+                        color = color(kwargs)
+                    data = {
                         "key": key,
-                    },
-                )
-        elif start == "memory" and finish in ["released", "forgotten"]:
-            # Task has been forgotten
-            pass
-        elif start == "released" and finish == "forgotten":
-            # Worker has garbage collected task
-            pass
-        else:
-            data = {
-                "key": key,
-                "start": start,
-                "finish": finish,
-                "args": args,
-                **kwargs,
-            }
-            print(data)
-            self._send("transition", data)
+                        "name": key_split(key),
+                        "action": action,
+                        "start": start,
+                        "stop": stop,
+                        "worker_id": self._hash_worker(kwargs["worker"]),
+                        "worker_name": kwargs["worker"],
+                        "color": color,
+                    }
+                    self._send("transition", data)
+
+        # if start == "released" and finish == "waiting":
+        #     # Task is queued
+        #     pass
+        # elif start == "waiting" and finish == "processing":
+        #     # Task has begun on a worker
+        #     worker = self.scheduler.tasks[key].processing_on.name
+        #     self._send(
+        #         "start_task", {"id": self._hash_worker(worker), "task_name": key}
+        #     )
+        # elif start == "processing" and finish == "memory":
+        #     # Task result is in memory on a worker
+        #     start_worker = self._hash_worker(
+        #         list(self.scheduler.tasks[key].who_has)[0].name
+        #     )
+        #     end_worker = self._hash_worker(kwargs["worker"])
+        #     if start_worker != end_worker:
+        #         self._send(
+        #             "start_transfer",
+        #             {
+        #                 "start_worker": start_worker,
+        #                 "end_worker": end_worker,
+        #                 "key": key,
+        #             },
+        #         )
+        # elif start == "memory" and finish in ["released", "forgotten"]:
+        #     # Task has been forgotten
+        #     pass
+        # elif start == "released" and finish == "forgotten":
+        #     # Worker has garbage collected task
+        #     pass
+        # else:
+        #     data = {
+        #         "key": key,
+        #         "start": start,
+        #         "finish": finish,
+        #         "args": args,
+        #         **kwargs,
+        #     }
+        #     print(data)
+        #     self._send("transition", data)
