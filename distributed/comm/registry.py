@@ -60,14 +60,8 @@ backends = {}
 def get_backend(scheme):
     """
     Get the Backend instance for the given *scheme*.
-
-    New backends can be registered using setuptools entry_points, e.g.:
-    setup(..., entry_points={
-            'distributed.comm.backends': [
-                'udp=dask_udp.backend:UDPBackend',
-            ]
-        },
-    )
+    It looks for matching scheme in dask's internal cache, and falls-back to
+    package metadata for the group name ``distributed.comm.backends``
     """
 
     backend = backends.get(scheme)
