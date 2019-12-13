@@ -4020,7 +4020,7 @@ class Scheduler(ServerNode):
             if ws is None:
                 return {key: "released"}
 
-            if ws is not ts.processing_on:  # someone else has this task
+            if ws != ts.processing_on:  # someone else has this task
                 logger.info(
                     "Unexpected worker completed task, likely due to"
                     " work stealing.  Expected: %s, Got: %s, Key: %s",
