@@ -27,7 +27,7 @@ conda create -q -n test-environment python=$PYTHON
 source activate test-environment
 
 # Install dependencies
-conda install -q \
+conda install -c conda-forge -q \
     bokeh \
     click \
     coverage \
@@ -48,7 +48,6 @@ conda install -q \
     python=$PYTHON \
     requests \
     scipy \
-    tblib \
     toolz \
     tornado=$TORNADO \
     $PACKAGES
@@ -68,6 +67,12 @@ pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
 pip install -q sortedcollections msgpack --no-deps
 pip install -q keras --upgrade --no-deps
 pip install -q asyncssh 
+# There was a bug in tblib on Python 3.8 that was fixed in tblib==1.5.0
+# (ref https://github.com/ionelmc/python-tblib/issues/46)
+# Version 1.5.0 is not currently available on conda-forge, so we're installing
+# from PyPI for now. Remove the tblib line below and conda install above
+# once tblib>=1.5.0 is on conda-forge.
+pip install -q tblib
 
 if [[ $CRICK == true ]]; then
     conda install -q cython
