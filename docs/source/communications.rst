@@ -99,7 +99,7 @@ entry points into all transport-specific routines.
 
 Out-of-tree backends can be registered under the group ``distributed.comm.backends``
 in setuptools `entry_points`_. For example, a hypothetical ``dask_udp`` package
-would register its UDP backend class by including the following in its ``setup.py``file:
+would register its UDP backend class by including the following in its ``setup.py`` file:
 
 .. code-block:: python
 
