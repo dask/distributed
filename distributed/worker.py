@@ -1939,7 +1939,7 @@ class Worker(ServerNode):
                             "action": "transfer",
                             "start": start + self.scheduler_delay,
                             "stop": stop + self.scheduler_delay,
-                            "worker": worker,
+                            "source": worker,
                         }
                     )
 
