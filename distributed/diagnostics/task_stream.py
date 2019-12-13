@@ -42,7 +42,9 @@ class TaskStreamPlugin(SchedulerPlugin):
                 return left
 
             mid = (left + right) // 2
-            value = max(stop for _, start, stop in self.buffer[mid]["startstops"])
+            value = max(
+                startstop["stop"] for startstop in self.buffer[mid]["startstops"]
+            )
 
             if value < target:
                 return bisect(target, mid + 1, right)
