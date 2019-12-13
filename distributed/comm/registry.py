@@ -82,4 +82,6 @@ def get_backend(scheme):
                 "unknown address scheme %r (known schemes: %s)"
                 % (scheme, sorted(backends))
             )
+        else:
+            backends[scheme] = backend
     return backend
