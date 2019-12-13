@@ -103,14 +103,14 @@ would register its UDP backend class by including the following in its ``setup.p
 
 .. code-block:: python
 
-setup(name="dask_udp",
-      entry_points={
-        "distributed.comm.backends": [
-            "udp=dask_udp.backend:UDPBackend",
-        ]
-      },
-      ...
-)
+    setup(name="dask_udp",
+          entry_points={
+            "distributed.comm.backends": [
+                "udp=dask_udp.backend:UDPBackend",
+            ]
+          },
+          ...
+    )
 
 .. autoclass:: distributed.comm.registry.Backend
    :members:
