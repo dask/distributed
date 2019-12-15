@@ -1963,10 +1963,11 @@ class Scheduler(ServerNode):
             tp = self.task_prefixes[prefix_key] = TaskPrefix(prefix_key)
         ts.prefix = tp
 
+        group_key = ts.group_key or prefix_key
         try:
-            tg = self.task_groups[ts.group_key]
+            tg = self.task_groups[group_key]
         except KeyError:
-            tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
+            tg = self.task_groups[group_key] = TaskGroup(group_key)
             tg.prefix = tp
             tp.groups.append(tg)
         tg.add(ts)

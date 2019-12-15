@@ -1768,6 +1768,25 @@ async def test_task_prefix(c, s, a, b):
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 2
 
 
+@gen_cluster(client=True)
+async def test_task_group_non_tuple_key(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    np = pytest.importorskip("numpy")
+    x = da.arange(100, chunks=(20,))
+    y = (x + 1).sum().persist()
+    y = await y
+
+    assert s.task_prefixes["sum"].states["released"] == 4
+    assert "sum" not in s.task_groups
+
+    f = c.submit(np.sum, [1, 2, 3])
+    await f
+
+    assert s.task_prefixes["sum"].states["released"] == 4
+    assert s.task_prefixes["sum"].states["memory"] == 1
+    assert "sum" in s.task_groups
+
+
 class BrokenComm(Comm):
     peer_address = None
     local_address = None
@@ -1928,13 +1947,14 @@ async def test_too_many_groups(c, s, a, b):
     x = dask.delayed(inc)(1)
     y = dask.delayed(dec)(2)
     z = dask.delayed(operator.add)(x, y)
+    zz = dask.delayed(operator.add)(z, y)
 
     await c.compute(z)
 
     while s.tasks:
         await asyncio.sleep(0.01)
 
-    assert len(s.task_groups) < 3
+    assert len(s.task_groups) == 3
 
 
 @pytest.mark.asyncio
