@@ -1761,6 +1761,12 @@ async def test_task_prefix(c, s, a, b):
 
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 1
 
+    a = da.arange(101, chunks=(20,))
+    b = (a + 1).sum().persist()
+    b = await b
+
+    assert s.task_prefixes["sum-aggregate"].states["memory"] == 2
+
 
 class BrokenComm(Comm):
     peer_address = None

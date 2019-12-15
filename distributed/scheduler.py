@@ -1956,20 +1956,20 @@ class Scheduler(ServerNode):
         """ Create a new task, and associated states """
         ts = TaskState(key, spec)
         ts._state = state
-        try:
-            tg = self.task_groups[ts.group_key]
-        except KeyError:
-            tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
-        tg.add(ts)
         prefix_key = key_split(key)
         try:
             tp = self.task_prefixes[prefix_key]
         except KeyError:
-            tp = TaskPrefix(prefix_key)
-            tp.groups.append(tg)
-            self.task_prefixes[prefix_key] = tp
+            tp = self.task_prefixes[prefix_key] = TaskPrefix(prefix_key)
         ts.prefix = tp
-        tg.prefix = tp
+
+        try:
+            tg = self.task_groups[ts.group_key]
+        except KeyError:
+            tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
+            tg.prefix = tp
+            tp.groups.append(tg)
+        tg.add(ts)
         self.tasks[key] = ts
         return ts
 
