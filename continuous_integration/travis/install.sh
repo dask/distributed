@@ -72,7 +72,7 @@ pip install -q asyncssh
 # Version 1.5.0 is not currently available on conda-forge, so we're installing
 # from PyPI for now. Remove the tblib line below and conda install above
 # once tblib>=1.5.0 is on conda-forge.
-pip install -q tblib
+pip install -q tblib>=1.5.0
 
 if [[ $CRICK == true ]]; then
     conda install -q cython
