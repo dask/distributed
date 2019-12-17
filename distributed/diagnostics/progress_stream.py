@@ -55,52 +55,6 @@ async def progress_stream(address, interval):
     return comm
 
 
-def nbytes_bar(nbytes):
-    """ Convert nbytes message into rectangle placements
-
-    >>> nbytes_bar({'inc': 1000, 'dec': 3000}) # doctest: +NORMALIZE_WHITESPACE
-    {'names': ['dec', 'inc'],
-     'left': [0, 0.75],
-     'center': [0.375, 0.875],
-     'right': [0.75, 1.0]}
-    """
-    total = sum(nbytes.values())
-    names = sorted(nbytes)
-
-    d = {
-        "name": [],
-        "text": [],
-        "left": [],
-        "right": [],
-        "center": [],
-        "color": [],
-        "percent": [],
-        "MB": [],
-    }
-
-    if not total:
-        return d
-
-    right = 0
-    for name in names:
-        left = right
-        right = nbytes[name] / total + left
-        center = (right + left) / 2
-        d["MB"].append(nbytes[name] / 1000000)
-        d["percent"].append(round(nbytes[name] / total * 100, 2))
-        d["left"].append(left)
-        d["right"].append(right)
-        d["center"].append(center)
-        d["color"].append(color_of(name))
-        d["name"].append(name)
-        if right - left > 0.1:
-            d["text"].append(name)
-        else:
-            d["text"].append("")
-
-    return d
-
-
 def progress_quads(msg, nrows=8, ncols=3):
     """
 
@@ -202,17 +156,17 @@ def task_stream_append(lists, msg, workers):
     name = key_split(key)
     startstops = msg.get("startstops", [])
 
-    for action, start, stop in startstops:
-        color = colors[action]
+    for startstop in startstops:
+        color = colors[startstop["action"]]
         if type(color) is not str:
             color = color(msg)
 
-        lists["start"].append((start + stop) / 2 * 1000)
-        lists["duration"].append(1000 * (stop - start))
+        lists["start"].append((startstop["start"] + startstop["stop"]) / 2 * 1000)
+        lists["duration"].append(1000 * (startstop["stop"] - startstop["start"]))
         lists["key"].append(key)
-        lists["name"].append(prefix[action] + name)
+        lists["name"].append(prefix[startstop["action"]] + name)
         lists["color"].append(color)
-        lists["alpha"].append(alphas[action])
+        lists["alpha"].append(alphas[startstop["action"]])
         lists["worker"].append(msg["worker"])
 
         worker_thread = "%s-%d" % (msg["worker"], msg["thread"])

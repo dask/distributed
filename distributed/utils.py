@@ -1,11 +1,12 @@
 import asyncio
 import atexit
-from collections import deque
+from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import timedelta
 import functools
 from hashlib import md5
+import html
 import inspect
 import json
 import logging
@@ -118,7 +119,7 @@ def get_fileno_limit():
 
 
 @toolz.memoize
-def _get_ip(host, port, family, default):
+def _get_ip(host, port, family):
     # By using a UDP socket, we don't actually try to connect but
     # simply select the local address through which *host* is reachable.
     sock = socket.socket(family, socket.SOCK_DGRAM)
@@ -130,10 +131,10 @@ def _get_ip(host, port, family, default):
         # XXX Should first try getaddrinfo() on socket.gethostname() and getfqdn()
         warnings.warn(
             "Couldn't detect a suitable IP address for "
-            "reaching %r, defaulting to %r: %s" % (host, default, e),
+            "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        return default
+        return socket.gethostname()
     finally:
         sock.close()
 
@@ -145,14 +146,14 @@ def get_ip(host="8.8.8.8", port=80):
     *host* defaults to a well-known Internet host (one of Google's public
     DNS servers).
     """
-    return _get_ip(host, port, family=socket.AF_INET, default="127.0.0.1")
+    return _get_ip(host, port, family=socket.AF_INET)
 
 
 def get_ipv6(host="2001:4860:4860::8888", port=80):
     """
     The same as get_ip(), but for IPv6.
     """
-    return _get_ip(host, port, family=socket.AF_INET6, default="::1")
+    return _get_ip(host, port, family=socket.AF_INET6)
 
 
 def get_ip_interface(ifname):
@@ -614,28 +615,16 @@ def key_split(s):
 def key_split_group(x):
     """A more fine-grained version of key_split
 
-    >>> key_split_group('x')
-    'x'
-    >>> key_split_group('x-1')
-    'x-1'
-    >>> key_split_group('x-1-2-3')
-    'x-1-2-3'
     >>> key_split_group(('x-2', 1))
     'x-2'
     >>> key_split_group("('x-2', 1)")
     'x-2'
-    >>> key_split_group('hello-world-1')
-    'hello-world-1'
-    >>> key_split_group(b'hello-world-1')
-    'hello-world-1'
     >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
     'data'
     >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
     'myclass'
-    >>> key_split_group(None)
-    'Other'
-    >>> key_split_group('x-abcdefab')  # ignores hex
-    'x-abcdefab'
+    >>> key_split_group('x')
+    >>> key_split_group('x-1')
     """
     typ = type(x)
     if typ is tuple:
@@ -648,11 +637,11 @@ def key_split_group(x):
         elif x[0] == "<":
             return x.strip("<>").split()[0].split(".")[-1]
         else:
-            return x
+            return ""
     elif typ is bytes:
         return key_split_group(x.decode())
     else:
-        return "Other"
+        return ""
 
 
 @contextmanager
@@ -1296,7 +1285,9 @@ class Log(str):
     """ A container for logs """
 
     def _repr_html_(self):
-        return "<pre><code>\n{log}\n</code></pre>".format(log=self.rstrip())
+        return "<pre><code>\n{log}\n</code></pre>".format(
+            log=html.escape(self.rstrip())
+        )
 
 
 class Logs(dict):
@@ -1366,6 +1357,23 @@ except TypeError:
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
+def import_term(name: str):
+    """ Return the fully qualified term
+
+    Examples
+    --------
+    >>> import_term("math.sin")
+    <function math.sin(x, /)>
+    """
+    try:
+        module_name, attr_name = name.rsplit(".", 1)
+    except ValueError:
+        return importlib.import_module(name)
+
+    module = importlib.import_module(module_name)
+    return getattr(module, attr_name)
+
+
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_offload_executor, fn, *args, **kwargs)
@@ -1399,3 +1407,40 @@ def deserialize_for_cli(data):
         The de-serialized data
     """
     return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
+
+
+class EmptyContext:
+    def __enter__(self):
+        pass
+
+    def __exit__(self, *args):
+        pass
+
+    async def __aenter__(self):
+        pass
+
+    async def __aexit__(self, *args):
+        pass
+
+
+empty_context = EmptyContext()
+
+
+class LRU(UserDict):
+    """ Limited size mapping, evicting the least recently looked-up key when full
+    """
+
+    def __init__(self, maxsize):
+        super().__init__()
+        self.data = OrderedDict()
+        self.maxsize = maxsize
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.data.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if len(self) >= self.maxsize:
+            self.data.popitem(last=False)
+        super().__setitem__(key, value)

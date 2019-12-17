@@ -5,8 +5,10 @@ from collections import defaultdict
 from datetime import timedelta
 import json
 import operator
+import re
 import sys
 from time import sleep
+from unittest import mock
 import logging
 
 import dask
@@ -17,8 +19,9 @@ from tornado import gen
 import pytest
 
 from distributed import Nanny, Worker, Client, wait, fire_and_forget
-from distributed.core import connect, rpc
-from distributed.scheduler import Scheduler, TaskState
+from distributed.comm import Comm
+from distributed.core import connect, rpc, ConnectionPool
+from distributed.scheduler import Scheduler
 from distributed.client import wait
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
@@ -707,18 +710,17 @@ def test_retire_workers_n(c, s, a, b):
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
-def test_workers_to_close(cl, s, *workers):
-    s.task_duration["a"] = 4
-    s.task_duration["b"] = 4
-    s.task_duration["c"] = 1
+async def test_workers_to_close(cl, s, *workers):
+    with dask.config.set(
+        {"distributed.scheduler.default-task-durations": {"a": 4, "b": 4, "c": 1}}
+    ):
+        futures = cl.map(slowinc, [1, 1, 1], key=["a-4", "b-4", "c-1"])
+        while sum(len(w.processing) for w in s.workers.values()) < 3:
+            await gen.sleep(0.001)
 
-    futures = cl.map(slowinc, [1, 1, 1], key=["a-4", "b-4", "c-1"])
-    while sum(len(w.processing) for w in s.workers.values()) < 3:
-        yield gen.sleep(0.001)
-
-    wtc = s.workers_to_close()
-    assert all(not s.workers[w].processing for w in wtc)
-    assert len(wtc) == 1
+        wtc = s.workers_to_close()
+        assert all(not s.workers[w].processing for w in wtc)
+        assert len(wtc) == 1
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 4)
@@ -894,19 +896,19 @@ def test_learn_occupancy_multiple_workers(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_include_communication_in_occupancy(c, s, a, b):
-    s.task_duration["slowadd"] = 0.001
+async def test_include_communication_in_occupancy(c, s, a, b):
+    await c.submit(slowadd, 1, 2, delay=0)
     x = c.submit(operator.mul, b"0", int(s.bandwidth), workers=a.address)
     y = c.submit(operator.mul, b"1", int(s.bandwidth * 1.5), workers=b.address)
 
     z = c.submit(slowadd, x, y, delay=1)
     while z.key not in s.tasks or not s.tasks[z.key].processing_on:
-        yield gen.sleep(0.01)
+        await asyncio.sleep(0.01)
 
     ts = s.tasks[z.key]
     assert ts.processing_on == s.workers[b.address]
     assert s.workers[b.address].processing[ts] > 1
-    yield wait(z)
+    await wait(z)
     del z
 
 
@@ -1511,8 +1513,10 @@ def test_idle_timeout(c, s, a, b):
         yield gen.sleep(0.01)
     assert time() < start + 3
 
-    assert a.status == "closed"
-    assert b.status == "closed"
+    start = time()
+    while not (a.status == "closed" and b.status == "closed"):
+        yield gen.sleep(0.01)
+        assert time() < start + 1
 
 
 @gen_cluster(client=True, config={"distributed.scheduler.bandwidth": "100 GB"})
@@ -1597,27 +1601,28 @@ def test_dashboard_address():
 
 @gen_cluster(client=True)
 async def test_adaptive_target(c, s, a, b):
-    assert s.adaptive_target() == 0
-    x = c.submit(inc, 1)
-    await x
-    assert s.adaptive_target() == 1
+    with dask.config.set(
+        {"distributed.scheduler.default-task-durations": {"slowinc": 10}}
+    ):
+        assert s.adaptive_target() == 0
+        x = c.submit(inc, 1)
+        await x
+        assert s.adaptive_target() == 1
 
-    # Long task
-    s.task_duration["slowinc"] = 10
-    x = c.submit(slowinc, 1, delay=0.5)
-    while x.key not in s.tasks:
-        await gen.sleep(0.01)
-    assert s.adaptive_target(target_duration=".1s") == 1  # still one
+        # Long task
+        x = c.submit(slowinc, 1, delay=0.5)
+        while x.key not in s.tasks:
+            await gen.sleep(0.01)
+        assert s.adaptive_target(target_duration=".1s") == 1  # still one
 
-    s.task_duration["slowinc"] = 10
-    L = c.map(slowinc, range(100), delay=0.5)
-    while len(s.tasks) < 100:
-        await gen.sleep(0.01)
-    assert 10 < s.adaptive_target(target_duration=".1s") <= 100
-    del x, L
-    while s.tasks:
-        await gen.sleep(0.01)
-    assert s.adaptive_target(target_duration=".1s") == 0
+        L = c.map(slowinc, range(100), delay=0.5)
+        while len(s.tasks) < 100:
+            await gen.sleep(0.01)
+        assert 10 < s.adaptive_target(target_duration=".1s") <= 100
+        del x, L
+        while s.tasks:
+            await gen.sleep(0.01)
+        assert s.adaptive_target(target_duration=".1s") == 0
 
 
 @pytest.mark.asyncio
@@ -1668,27 +1673,28 @@ async def test_retire_names_str(cleanup):
                     assert len(b.data) == 10
 
 
-def test_get_task_duration():
+@gen_cluster(client=True)
+async def test_get_task_duration(c, s, a, b):
     with dask.config.set(
-        {"distributed.scheduler.default-task-durations": {"prefix_1": 100}}
+        {"distributed.scheduler.default-task-durations": {"inc": 100}}
     ):
-        s = Scheduler(port=0)
-        assert "prefix_1" in s.task_duration
-        assert s.task_duration["prefix_1"] == 100
+        future = c.submit(inc, 1)
+        await future
+        assert 10 < s.task_prefixes["inc"].duration_average < 100
 
-        ts_pref1 = TaskState("prefix_1-abcdefab", None)
-        assert s.get_task_duration(ts_pref1) == 100
+        ts_pref1 = s.new_task("inc-abcdefab", None, "released")
+        assert 10 < s.get_task_duration(ts_pref1) < 100
 
         # make sure get_task_duration adds TaskStates to unknown dict
         assert len(s.unknown_durations) == 0
-        ts_pref2 = TaskState("prefix_2-abcdefab", None)
-        assert s.get_task_duration(ts_pref2) == 0.5  # default
+        x = c.submit(slowinc, 1, delay=0.5)
+        while len(s.tasks) < 3:
+            await asyncio.sleep(0.01)
+
+        ts = s.tasks[x.key]
+        assert s.get_task_duration(ts) == 0.5  # default
         assert len(s.unknown_durations) == 1
-        assert len(s.unknown_durations["prefix_2"]) == 1
-        ts_pref2_2 = TaskState("prefix_2-accdefab", None)
-        assert s.get_task_duration(ts_pref2_2) == 0.5  # default
-        assert len(s.unknown_durations) == 1
-        assert len(s.unknown_durations["prefix_2"]) == 2
+        assert len(s.unknown_durations["slowinc"]) == 1
 
 
 @pytest.mark.asyncio
@@ -1704,3 +1710,246 @@ async def test_no_danglng_asyncio_tasks(cleanup):
 
     tasks = asyncio.all_tasks()
     assert tasks == start
+
+
+@gen_cluster(client=True)
+async def test_task_groups(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.arange(100, chunks=(20,))
+    y = (x + 1).persist(optimize_graph=False)
+    y = await y
+
+    tg = s.task_groups[x.name]
+    tp = s.task_prefixes["arange"]
+    repr(tg)
+    repr(tp)
+    assert tg.states["memory"] == 0
+    assert tg.states["released"] == 5
+    assert tp.states["memory"] == 0
+    assert tp.states["released"] == 5
+    assert tg.prefix is tp
+    assert tg in tp.groups
+    assert tg.duration == tp.duration
+    assert tg.nbytes_in_memory == tp.nbytes_in_memory
+    assert tg.nbytes_total == tp.nbytes_total
+
+    tg = s.task_groups[y.name]
+    assert tg.states["memory"] == 5
+
+    assert s.task_groups[y.name].dependencies == {s.task_groups[x.name]}
+
+    await c.replicate(y)
+    assert tg.nbytes_in_memory == y.nbytes
+
+    del y
+
+    while s.tasks:
+        await asyncio.sleep(0.01)
+
+    assert tg.nbytes_in_memory == 0
+    assert tg.states["forgotten"] == 5
+    assert "array" in str(tg.types)
+    assert "array" in str(tp.types)
+
+
+@gen_cluster(client=True)
+async def test_task_prefix(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.arange(100, chunks=(20,))
+    y = (x + 1).sum().persist()
+    y = await y
+
+    assert s.task_prefixes["sum-aggregate"].states["memory"] == 1
+
+
+class BrokenComm(Comm):
+    peer_address = None
+    local_address = None
+
+    def close(self):
+        pass
+
+    def closed(self):
+        pass
+
+    def abort(self):
+        pass
+
+    def read(self, deserializers=None):
+        raise EnvironmentError
+
+    def write(self, msg, serializers=None, on_error=None):
+        raise EnvironmentError
+
+
+class FlakyConnectionPool(ConnectionPool):
+    def __init__(self, *args, failing_connections=0, **kwargs):
+        self.cnn_count = 0
+        self.failing_connections = failing_connections
+        super(FlakyConnectionPool, self).__init__(*args, **kwargs)
+
+    async def connect(self, *args, **kwargs):
+        self.cnn_count += 1
+        if self.cnn_count > self.failing_connections:
+            return await super(FlakyConnectionPool, self).connect(*args, **kwargs)
+        else:
+            return BrokenComm()
+
+
+@gen_cluster(client=True)
+async def test_gather_failing_cnn_recover(c, s, a, b):
+    orig_rpc = s.rpc
+    x = await c.scatter({"x": 1}, workers=a.address)
+
+    s.rpc = FlakyConnectionPool(failing_connections=1)
+    with mock.patch("distributed.utils_comm.retry_count", 1):
+        res = await s.gather(keys=["x"])
+    assert res["status"] == "OK"
+
+
+@gen_cluster(client=True)
+async def test_gather_failing_cnn_error(c, s, a, b):
+    orig_rpc = s.rpc
+    x = await c.scatter({"x": 1}, workers=a.address)
+
+    s.rpc = FlakyConnectionPool(failing_connections=10)
+    res = await s.gather(keys=["x"])
+    assert res["status"] == "error"
+    assert list(res["keys"]) == ["x"]
+
+
+@gen_cluster(client=True)
+async def test_gather_no_workers(c, s, a, b):
+    await asyncio.sleep(1)
+    x = await c.scatter({"x": 1}, workers=a.address)
+
+    await a.close()
+    await b.close()
+
+    res = await s.gather(keys=["x"])
+    assert res["status"] == "error"
+    assert list(res["keys"]) == ["x"]
+
+
+@gen_cluster(client=True, client_kwargs={"direct_to_workers": False})
+async def test_gather_allow_worker_reconnect(c, s, a, b):
+    """
+    Test that client resubmissions allow failed workers to reconnect and re-use
+    their results. Failure scenario would be a connection issue during result
+    gathering.
+    Upon connection failure, the worker is flagged as suspicious and removed
+    from the scheduler. If the worker is healthy and reconnencts we want to use
+    its results instead of recomputing them.
+    """
+    # GH3246
+    ALREADY_CALCULATED = []
+
+    import time
+
+    def inc_slow(x):
+        # Once the graph below is rescheduled this computation runs again. We
+        # need to sleep for at least 0.5 seconds to give the worker a chance to
+        # reconnect (Heartbeat timing)
+        if x in ALREADY_CALCULATED:
+            time.sleep(0.5)
+        ALREADY_CALCULATED.append(x)
+        return x + 1
+
+    x = c.submit(inc_slow, 1)
+    y = c.submit(inc_slow, 2)
+
+    def reducer(x, y):
+        return x + y
+
+    z = c.submit(reducer, x, y)
+
+    s.rpc = FlakyConnectionPool(failing_connections=4)
+
+    with captured_logger(
+        logging.getLogger("distributed.scheduler")
+    ) as sched_logger, captured_logger(
+        logging.getLogger("distributed.client")
+    ) as client_logger, captured_logger(
+        logging.getLogger("distributed.utils_comm")
+    ) as utils_comm_logger, mock.patch(
+        "distributed.utils_comm.retry_count", 3
+    ), mock.patch(
+        "distributed.utils_comm.retry_delay_min", 0.5
+    ):
+        # Gather using the client (as an ordinary user would)
+        # Upon a missing key, the client will reschedule the computations
+        res = await c.gather(z)
+
+    assert res == 5
+
+    sched_logger = sched_logger.getvalue()
+    client_logger = client_logger.getvalue()
+    utils_comm_logger = utils_comm_logger.getvalue()
+
+    # Ensure that the communication was done via the scheduler, i.e. we actually hit a bad connection
+    assert s.rpc.cnn_count > 0
+
+    assert "Retrying get_data_from_worker after exception" in utils_comm_logger
+
+    # The reducer task was actually not found upon first collection. The client will reschedule the graph
+    assert "Couldn't gather 1 keys, rescheduling" in client_logger
+    # There will also be a `Unexpected worker completed task` message but this
+    # is rather an artifact and not the intention
+    assert "Workers don't have promised key" in sched_logger
+
+    # Once the worker reconnects, it will also submit the keys it holds such
+    # that the scheduler again knows about the result.
+    # The final reduce step should then be used from the re-connected worker
+    # instead of recomputing it.
+    transitions_to_processing = [
+        (key, start, timestamp)
+        for key, start, finish, recommendations, timestamp in s.transition_log
+        if finish == "processing" and "reducer" in key
+    ]
+    assert len(transitions_to_processing) == 1
+
+    starts = []
+    finish_processing_transitions = 0
+    for transition in s.transition_log:
+        key, start, finish, recommendations, timestamp = transition
+        if "reducer" in key and finish == "processing":
+            finish_processing_transitions += 1
+    assert finish_processing_transitions == 1
+
+
+@gen_cluster(client=True)
+async def test_too_many_groups(c, s, a, b):
+    x = dask.delayed(inc)(1)
+    y = dask.delayed(dec)(2)
+    z = dask.delayed(operator.add)(x, y)
+
+    await c.compute(z)
+
+    while s.tasks:
+        await asyncio.sleep(0.01)
+
+    assert len(s.task_groups) < 3
+
+
+@pytest.mark.asyncio
+async def test_multiple_listeners(cleanup):
+    with captured_logger(logging.getLogger("distributed.scheduler")) as log:
+        async with Scheduler(port=0, protocol=["inproc", "tcp"]) as s:
+            async with Worker(s.listeners[0].contact_address) as a:
+                async with Worker(s.listeners[1].contact_address) as b:
+                    assert a.address.startswith("inproc")
+                    assert a.scheduler.address.startswith("inproc")
+                    assert b.address.startswith("tcp")
+                    assert b.scheduler.address.startswith("tcp")
+
+                    async with Client(s.address, asynchronous=True) as c:
+                        futures = c.map(inc, range(20))
+                        await wait(futures)
+
+                        # Force inter-worker communication both ways
+                        await c.submit(sum, futures, workers=[a.address])
+                        await c.submit(len, futures, workers=[b.address])
+
+    log = log.getvalue()
+    assert re.search(r"Scheduler at:\s*tcp://", log)
+    assert re.search(r"Scheduler at:\s*inproc://", log)

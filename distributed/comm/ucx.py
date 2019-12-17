@@ -46,7 +46,10 @@ def init_once():
     try:
         import rmm
 
-        cuda_array = lambda n: rmm.device_array(n, dtype=np.uint8)
+        if hasattr(rmm, "DeviceBuffer"):
+            cuda_array = lambda n: rmm.DeviceBuffer(size=n)
+        else:  # pre-0.11.0
+            cuda_array = lambda n: rmm.device_array(n, dtype=np.uint8)
     except ImportError:
         try:
             import numba.cuda
@@ -258,7 +261,7 @@ class UCXListener(Listener):
     def address(self):
         return "ucx://" + self.ip + ":" + str(self.port)
 
-    def start(self):
+    async def start(self):
         async def serve_forever(client_ep):
             ucx = UCX(
                 client_ep,

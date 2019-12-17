@@ -668,7 +668,7 @@ def test_multiple_transfers(c, s, w1, w2, w3):
     yield wait(z)
 
     r = w3.startstops[z.key]
-    transfers = [t for t in r if t[0] == "transfer"]
+    transfers = [t for t in r if t["action"] == "transfer"]
     assert len(transfers) == 2
 
 
@@ -1079,7 +1079,7 @@ def test_statistical_profiling_2(c, s, a, b):
         y = (x + x * 2) - x.sum().persist()
         yield wait(y)
 
-        profile = a.get_profile()
+        profile = yield a.get_profile()
         text = str(profile)
         if profile["count"] and "sum" in text and "random" in text:
             break
@@ -1165,15 +1165,15 @@ def test_statistical_profiling_cycle(c, s, a, b):
     end = time()
     assert len(a.profile_history) > 3
 
-    x = a.get_profile(start=time() + 10, stop=time() + 20)
+    x = yield a.get_profile(start=time() + 10, stop=time() + 20)
     assert not x["count"]
 
-    x = a.get_profile(start=0, stop=time())
+    x = yield a.get_profile(start=0, stop=time())
     actual = sum(p["count"] for _, p in a.profile_history) + a.profile_recent["count"]
-    x2 = a.get_profile(start=0, stop=time())
+    x2 = yield a.get_profile(start=0, stop=time())
     assert x["count"] <= actual <= x2["count"]
 
-    y = a.get_profile(start=end - 0.300, stop=time())
+    y = yield a.get_profile(start=end - 0.300, stop=time())
     assert 0 < y["count"] <= x["count"]
 
 
@@ -1586,3 +1586,15 @@ async def test_bad_startup(cleanup):
             w = await Worker(s.address, startup_information={"bad": bad_startup})
         except Exception:
             pytest.fail("Startup exception was raised")
+
+
+@pytest.mark.asyncio
+async def test_update_latency(cleanup):
+    async with await Scheduler() as s:
+        async with await Worker(s.address) as w:
+            original = w.latency
+            await w.heartbeat()
+            assert original != w.latency
+
+            if w.digests is not None:
+                assert w.digests["latency"].size() > 0

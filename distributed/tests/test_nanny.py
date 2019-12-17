@@ -1,3 +1,4 @@
+import asyncio
 import gc
 import logging
 import os
@@ -34,23 +35,26 @@ async def test_nanny(s):
     async with Nanny(s.address, nthreads=2, loop=s.loop) as n:
         async with rpc(n.address) as nn:
             assert n.is_alive()
-            assert s.nthreads[n.worker_address] == 2
-            assert s.workers[n.worker_address].nanny == n.address
+            [ws] = s.workers.values()
+            assert ws.nthreads == 2
+            assert ws.nanny == n.address
 
             await nn.kill()
             assert not n.is_alive()
-            assert n.worker_address not in s.nthreads
-            assert n.worker_address not in s.workers
+            start = time()
+            while n.worker_address in s.workers:
+                assert time() < start + 1
+                await asyncio.sleep(0.01)
 
             await nn.kill()
             assert not n.is_alive()
-            assert n.worker_address not in s.nthreads
             assert n.worker_address not in s.workers
 
             await nn.instantiate()
             assert n.is_alive()
-            assert s.nthreads[n.worker_address] == 2
-            assert s.workers[n.worker_address].nanny == n.address
+            [ws] = s.workers.values()
+            assert ws.nthreads == 2
+            assert ws.nanny == n.address
 
             await nn.terminate()
             assert not n.is_alive()
@@ -127,6 +131,20 @@ def test_run(s):
         assert response["result"] == 1
 
     yield n.close()
+
+
+@pytest.mark.slow
+@gen_cluster(config={"distributed.comm.timeouts.connect": "1s"})
+async def test_no_hang_when_scheduler_closes(s, a, b):
+    # https://github.com/dask/distributed/issues/2880
+    with captured_logger("tornado.application", logging.ERROR) as logger:
+        await s.close()
+        await asyncio.sleep(1.2)
+        assert a.status == "closed"
+        assert b.status == "closed"
+
+    out = logger.getvalue()
+    assert "Timed out trying to connect" not in out
 
 
 @pytest.mark.slow
@@ -290,54 +308,34 @@ def test_nanny_terminate(c, s, a):
 @gen_cluster(
     nthreads=[("127.0.0.1", 1)] * 8,
     client=True,
-    Worker=Nanny,
-    worker_kwargs={"memory_limit": 2e8},
-    timeout=20,
+    Worker=Worker,
     clean_kwargs={"threads": False},
 )
-async def test_nanny_throttle(c, s, *workers):
-    # Verify that get_data requests are throttled when the worker
-    # with the data is at high-memory by
-    # 1. Allocation some data on a worker
-    # 2. Pausing that worker
-    # 3. Requesting data from that worker from many other workers
-    a = workers[0]
-    proc = a.process.pid
-    size = 1000
+async def test_throttle_outgoing_connections(c, s, a, *workers):
+    # But a bunch of small data on worker a
+    await c.run(lambda: logging.getLogger("distributed.worker").setLevel(logging.DEBUG))
+    remote_data = c.map(
+        lambda x: b"0" * 10000, range(10), pure=False, workers=[a.address]
+    )
+    await wait(remote_data)
 
-    def data(size):
-        return b"0" * size
-
-    def patch(dask_worker):
+    def pause(dask_worker):
         # Patch paused and memory_monitor on the one worker
         # This is is very fragile, since a refactor of memory_monitor to
         # remove _memory_monitoring will break this test.
         dask_worker._memory_monitoring = True
         dask_worker.paused = True
+        dask_worker.outgoing_current_count = 2
 
-    def check(dask_worker):
-        return dask_worker.paused
-
-    futures = [
-        c.submit(data, size, workers=[a.worker_address], pure=False) for i in range(4)
+    await c.run(pause, workers=[a.address])
+    requests = [
+        await a.get_data(await w.rpc.connect(w.address), keys=[f.key], who=w.address)
+        for w in workers
+        for f in remote_data
     ]
-    await wait(futures)
-    await c.run(patch, workers=[a.worker_address])
-    paused = await c.run(check, workers=[a.worker_address])
-    assert paused[a.worker_address]
-
-    await c.run(lambda: logging.getLogger("distributed.worker").setLevel(logging.DEBUG))
-    # Cluster is in the correct state, now for the test.
-    n = len(workers)
-    result = c.map(
-        lambda x, i: x[i],
-        [futures[0]] * n,
-        range(n),
-        workers=[w.worker_address for w in workers[1:]],
-    )
-    await result[0]
-    wlogs = await c.get_worker_logs(workers=[a.worker_address])
-    wlogs = "\n".join(x[1] for x in wlogs[a.worker_address])
+    await wait(requests)
+    wlogs = await c.get_worker_logs(workers=[a.address])
+    wlogs = "\n".join(x[1] for x in wlogs[a.address])
     assert "throttling" in wlogs.lower()
 
 
