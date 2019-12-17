@@ -28,6 +28,7 @@ source activate test-environment
 
 # Install dependencies
 conda install -c conda-forge -q \
+    asyncssh \
     bokeh \
     click \
     coverage \
@@ -51,12 +52,17 @@ conda install -c conda-forge -q \
     tblib>=1.5.0 \
     toolz \
     tornado=$TORNADO \
+    zstandard \
     $PACKAGES
 
-# For low-level profiler, install libunwind and stacktrace from conda-forge
-# For stacktrace we use --no-deps to avoid upgrade of python
-conda install -c defaults -c conda-forge libunwind zstandard asyncssh
-conda install --no-deps -c defaults -c numba -c conda-forge stacktrace
+# stacktrace is not currently avaiable for Python 3.8.
+# Remove the version check block below when it is avaiable.
+if [[ $PYTHON != 3.8 ]]; then
+    # For low-level profiler, install libunwind and stacktrace from conda-forge
+    # For stacktrace we use --no-deps to avoid upgrade of python
+    conda install -c defaults -c conda-forge libunwind
+    conda install --no-deps -c defaults -c numba -c conda-forge stacktrace
+fi;
 
 pip install -q "pytest>=4" pytest-repeat pytest-faulthandler pytest-asyncio
 
@@ -67,7 +73,6 @@ pip install -q git+https://github.com/dask/s3fs.git --upgrade --no-deps
 pip install -q git+https://github.com/dask/zict.git --upgrade --no-deps
 pip install -q sortedcollections msgpack --no-deps
 pip install -q keras --upgrade --no-deps
-pip install -q asyncssh 
 
 if [[ $CRICK == true ]]; then
     conda install -q cython
