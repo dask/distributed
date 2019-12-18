@@ -51,8 +51,10 @@ from .utils_comm import (
     WrappedKey,
     unpack_remotedata,
     pack_data,
+    subs_multiple,
     scatter_to_workers,
     gather_from_workers,
+    retry_operation,
 )
 from .cfexecutor import ClientExecutor
 from .core import connect, rpc, clean_exception, CommClosedError, PooledRPCCall
@@ -1278,7 +1280,7 @@ class Client(Node):
             if self._start_arg is None:
                 with ignoring(AttributeError):
                     await self.cluster.close()
-            self.rpc.close()
+            await self.rpc.close()
             self.status = "closed"
             if _get_global_client() is self:
                 _set_global_client(None)
@@ -1802,19 +1804,19 @@ class Client(Node):
 
         try:
             if direct or local_worker:  # gather directly from workers
-                who_has = await self.scheduler.who_has(keys=keys)
+                who_has = await retry_operation(self.scheduler.who_has, keys=keys)
                 data2, missing_keys, missing_workers = await gather_from_workers(
                     who_has, rpc=self.rpc, close=False
                 )
                 response = {"status": "OK", "data": data2}
                 if missing_keys:
                     keys2 = [key for key in keys if key not in data2]
-                    response = await self.scheduler.gather(keys=keys2)
+                    response = await retry_operation(self.scheduler.gather, keys=keys2)
                     if response["status"] == "OK":
                         response["data"].update(data2)
 
             else:  # ask scheduler to gather data for us
-                response = await self.scheduler.gather(keys=keys)
+                response = await retry_operation(self.scheduler.gather, keys=keys)
         finally:
             self._gather_semaphore.release()
 
@@ -2442,10 +2444,12 @@ class Client(Node):
             futures = {key: Future(key, self, inform=False) for key in keyset}
 
             values = {
-                k for k, v in dsk.items() if isinstance(v, Future) and k not in keyset
+                k: v
+                for k, v in dsk.items()
+                if isinstance(v, Future) and k not in keyset
             }
             if values:
-                dsk = dask.optimization.inline(dsk, keys=values)
+                dsk = subs_multiple(dsk, values)
 
             d = {k: unpack_remotedata(v, byte_keys=True) for k, v in dsk.items()}
             extra_futures = set.union(*[v[1] for v in d.values()]) if d else set()
@@ -3299,9 +3303,6 @@ class Client(Node):
         >>> client.profile()  # call on collections
         >>> client.profile(filename='dask-profile.html')  # save to html file
         """
-        if isinstance(workers, (str, Number)):
-            workers = [workers]
-
         return self.sync(
             self._profile,
             key=key,
@@ -4113,6 +4114,10 @@ def wait(fs, timeout=None, return_when=ALL_COMPLETED):
     fs: list of futures
     timeout: number, optional
         Time in seconds after which to raise a ``dask.distributed.TimeoutError``
+    return_when: str, optional
+        One of `ALL_COMPLETED` or `FIRST_COMPLETED`
+
+    Returns
     -------
     Named tuple of completed, not completed
     """
@@ -4566,6 +4571,44 @@ class get_task_stream(object):
         if self._plot:
             L, self.figure = L
         self.data.extend(L)
+
+
+class performance_report:
+    """ Gather performance report
+
+    This creates a static HTML file that includes many of the same plots of the
+    dashboard for later viewing.
+
+    The resulting file uses JavaScript, and so must be viewed with a web
+    browser.  Locally we recommend using ``python -m http.server`` or hosting
+    the file live online.
+
+    Examples
+    --------
+    >>> with performance_report(filename="myfile.html"):
+    ...     x.compute()
+
+    $ python -m http.server
+    $ open myfile.html
+    """
+
+    def __init__(self, filename="dask-report.html"):
+        self.filename = filename
+
+    async def __aenter__(self):
+        self.start = time()
+        await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
+
+    async def __aexit__(self, typ, value, traceback):
+        data = await get_client().scheduler.performance_report(start=self.start)
+        with open(self.filename, "w") as f:
+            f.write(data)
+
+    def __enter__(self):
+        get_client().sync(self.__aenter__)
+
+    def __exit__(self, typ, value, traceback):
+        get_client().sync(self.__aexit__, type, value, traceback)
 
 
 @contextmanager

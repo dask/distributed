@@ -36,6 +36,7 @@ from distributed import (
     get_worker,
     Executor,
     profile,
+    performance_report,
     TimeoutError,
 )
 from distributed.comm import CommClosedError
@@ -1261,7 +1262,9 @@ def test_if_intermediates_clear_on_error(c, s, a, b):
     assert not any(ts.who_has for ts in s.tasks.values())
 
 
-@gen_cluster(client=True)
+@gen_cluster(
+    client=True, config={"distributed.scheduler.default-task-durations": {"f": "1ms"}}
+)
 def test_pragmatic_move_small_data_to_large_data(c, s, a, b):
     np = pytest.importorskip("numpy")
     lists = c.map(np.ones, [10000] * 10, pure=False)
@@ -1271,7 +1274,6 @@ def test_pragmatic_move_small_data_to_large_data(c, s, a, b):
     def f(x, y):
         return None
 
-    s.task_duration["f"] = 0.001
     results = c.map(f, lists, [total] * 10)
 
     yield wait([total])
@@ -3101,12 +3103,12 @@ def test_client_replicate_sync(c):
 def test_task_load_adapts_quickly(c, s, a):
     future = c.submit(slowinc, 1, delay=0.2)  # slow
     yield wait(future)
-    assert 0.15 < s.task_duration["slowinc"] < 0.4
+    assert 0.15 < s.task_prefixes["slowinc"].duration_average < 0.4
 
     futures = c.map(slowinc, range(10), delay=0)  # very fast
     yield wait(futures)
 
-    assert 0 < s.task_duration["slowinc"] < 0.1
+    assert 0 < s.task_prefixes["slowinc"].duration_average < 0.1
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 2)
@@ -3530,9 +3532,6 @@ def test_reconnect(loop):
     while c.status != "connecting":
         assert time() < start + 5
         sleep(0.01)
-
-    with pytest.raises(Exception):
-        c.nthreads()
 
     assert x.status == "cancelled"
     with pytest.raises(CancelledError):
@@ -4015,10 +4014,13 @@ def test_retire_many_workers(c, s, *workers):
         assert 15 < len(keys) < 50
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 3)] * 2)
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 3)] * 2,
+    config={"distributed.scheduler.default-task-durations": {"f": "10ms"}},
+)
 def test_weight_occupancy_against_data_movement(c, s, a, b):
     s.extensions["stealing"]._pc.callback_time = 1000000
-    s.task_duration["f"] = 0.01
 
     def f(x, y=0, z=0):
         sleep(0.01)
@@ -4035,9 +4037,12 @@ def test_weight_occupancy_against_data_movement(c, s, a, b):
     assert sum(f.key in b.data for f in futures) >= 1
 
 
-@gen_cluster(client=True, nthreads=[("127.0.0.1", 1), ("127.0.0.1", 10)])
+@gen_cluster(
+    client=True,
+    nthreads=[("127.0.0.1", 1), ("127.0.0.1", 10)],
+    config={"distributed.scheduler.default-task-durations": {"f": "10ms"}},
+)
 def test_distribute_tasks_by_nthreads(c, s, a, b):
-    s.task_duration["f"] = 0.01
     s.extensions["stealing"]._pc.callback_time = 1000000
 
     def f(x, y=0):
@@ -4750,7 +4755,6 @@ def test_secede_balances(c, s, a, b):
         yield gen.sleep(0.01)
         assert threading.active_count() < count + 50
 
-    # assert 0.005 < s.task_duration['f'] < 0.1
     assert len(a.log) < 2 * len(b.log)
     assert len(b.log) < 2 * len(a.log)
 
@@ -5712,5 +5716,204 @@ async def test_profile_server(c, s, a, b):
     assert "slowdec" in str(p)
 
 
-if sys.version_info >= (3, 5):
-    from distributed.tests.py3_test_client import *  # noqa F401
+@gen_cluster(client=True)
+def test_await_future(c, s, a, b):
+    future = c.submit(inc, 1)
+
+    async def f():  # flake8: noqa
+        result = await future
+        assert result == 2
+
+    yield f()
+
+    future = c.submit(div, 1, 0)
+
+    async def f():
+        with pytest.raises(ZeroDivisionError):
+            await future
+
+    yield f()
+
+
+@gen_cluster(client=True)
+def test_as_completed_async_for(c, s, a, b):
+    futures = c.map(inc, range(10))
+    ac = as_completed(futures)
+    results = []
+
+    async def f():
+        async for future in ac:
+            result = await future
+            results.append(result)
+
+    yield f()
+
+    assert set(results) == set(range(1, 11))
+
+
+@gen_cluster(client=True)
+def test_as_completed_async_for_results(c, s, a, b):
+    futures = c.map(inc, range(10))
+    ac = as_completed(futures, with_results=True)
+    results = []
+
+    async def f():
+        async for future, result in ac:
+            results.append(result)
+
+    yield f()
+
+    assert set(results) == set(range(1, 11))
+    assert not s.counters["op"].components[0]["gather"]
+
+
+@gen_cluster(client=True)
+def test_as_completed_async_for_cancel(c, s, a, b):
+    x = c.submit(inc, 1)
+    y = c.submit(sleep, 0.3)
+    ac = as_completed([x, y])
+
+    async def _():
+        await gen.sleep(0.1)
+        await y.cancel(asynchronous=True)
+
+    c.loop.add_callback(_)
+
+    L = []
+
+    async def f():
+        async for future in ac:
+            L.append(future)
+
+    yield f()
+
+    assert L == [x, y]
+
+
+def test_async_with(loop):
+    result = None
+    client = None
+    cluster = None
+
+    async def f():
+        async with Client(processes=False, asynchronous=True) as c:
+            nonlocal result, client, cluster
+            result = await c.submit(lambda x: x + 1, 10)
+
+            client = c
+            cluster = c.cluster
+
+    loop.run_sync(f)
+
+    assert result == 11
+    assert client.status == "closed"
+    assert cluster.status == "closed"
+
+
+def test_client_sync_with_async_def(loop):
+    async def ff():
+        await gen.sleep(0.01)
+        return 1
+
+    with cluster() as (s, [a, b]):
+        with Client(s["address"], loop=loop) as c:
+            assert sync(loop, ff) == 1
+            assert c.sync(ff) == 1
+
+
+@pytest.mark.xfail(reason="known intermittent failure")
+@gen_cluster(client=True)
+async def test_dont_hold_on_to_large_messages(c, s, a, b):
+    np = pytest.importorskip("numpy")
+    da = pytest.importorskip("dask.array")
+    x = np.random.random(1000000)
+    xr = weakref.ref(x)
+
+    d = da.from_array(x, chunks=(100000,))
+    d = d.persist()
+    del x
+
+    start = time()
+    while xr() is not None:
+        if time() > start + 5:
+            # Help diagnosing
+            from types import FrameType
+
+            x = xr()
+            if x is not None:
+                del x
+                rc = sys.getrefcount(xr())
+                refs = gc.get_referrers(xr())
+                print("refs to x:", rc, refs, gc.isenabled())
+                frames = [r for r in refs if isinstance(r, FrameType)]
+                for i, f in enumerate(frames):
+                    print(
+                        "frames #%d:" % i,
+                        f.f_code.co_name,
+                        f.f_code.co_filename,
+                        sorted(f.f_locals),
+                    )
+            pytest.fail("array should have been destroyed")
+
+        await gen.sleep(0.200)
+
+
+@gen_cluster(client=True)
+async def test_run_scheduler_async_def(c, s, a, b):
+    async def f(dask_scheduler):
+        await gen.sleep(0.01)
+        dask_scheduler.foo = "bar"
+
+    await c.run_on_scheduler(f)
+
+    assert s.foo == "bar"
+
+    async def f(dask_worker):
+        await gen.sleep(0.01)
+        dask_worker.foo = "bar"
+
+    await c.run(f)
+    assert a.foo == "bar"
+    assert b.foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_run_scheduler_async_def_wait(c, s, a, b):
+    async def f(dask_scheduler):
+        await gen.sleep(0.01)
+        dask_scheduler.foo = "bar"
+
+    await c.run_on_scheduler(f, wait=False)
+
+    while not hasattr(s, "foo"):
+        await gen.sleep(0.01)
+    assert s.foo == "bar"
+
+    async def f(dask_worker):
+        await gen.sleep(0.01)
+        dask_worker.foo = "bar"
+
+    await c.run(f, wait=False)
+
+    while not hasattr(a, "foo") or not hasattr(b, "foo"):
+        await gen.sleep(0.01)
+
+    assert a.foo == "bar"
+    assert b.foo == "bar"
+
+
+@gen_cluster(client=True)
+async def test_performance_report(c, s, a, b):
+    da = pytest.importorskip("dask.array")
+    x = da.random.random((1000, 1000), chunks=(100, 100))
+
+    with tmpfile(extension="html") as fn:
+        async with performance_report(filename=fn):
+            await c.compute((x + x.T).sum())
+
+        with open(fn) as f:
+            data = f.read()
+
+        assert "bokeh" in data
+        assert "random" in data
+        assert "Dask Performance Report" in data

@@ -668,7 +668,7 @@ def test_multiple_transfers(c, s, w1, w2, w3):
     yield wait(z)
 
     r = w3.startstops[z.key]
-    transfers = [t for t in r if t[0] == "transfer"]
+    transfers = [t for t in r if t["action"] == "transfer"]
     assert len(transfers) == 2
 
 
@@ -1586,3 +1586,15 @@ async def test_bad_startup(cleanup):
             w = await Worker(s.address, startup_information={"bad": bad_startup})
         except Exception:
             pytest.fail("Startup exception was raised")
+
+
+@pytest.mark.asyncio
+async def test_update_latency(cleanup):
+    async with await Scheduler() as s:
+        async with await Worker(s.address) as w:
+            original = w.latency
+            await w.heartbeat()
+            assert original != w.latency
+
+            if w.digests is not None:
+                assert w.digests["latency"].size() > 0

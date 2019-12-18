@@ -63,7 +63,7 @@ from .utils import (
     warn_on_duration,
     LRU,
 )
-from .utils_comm import pack_data, gather_from_workers
+from .utils_comm import pack_data, gather_from_workers, retry_operation
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
 
 logger = logging.getLogger(__name__)
@@ -215,7 +215,7 @@ class Worker(ServerNode):
         The exception caused by running a task if it erred
     * **tracebacks**: ``{key: traceback}``
         The exception caused by running a task if it erred
-    * **startstops**: ``{key: [(str, float, float)]}``
+    * **startstops**: ``{key: [{startstop}]}``
         Log of transfer, load, and compute times for a task
 
     * **priorities**: ``{key: tuple}``
@@ -709,10 +709,11 @@ class Worker(ServerNode):
 
     def __repr__(self):
         return (
-            "<%s: %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
+            "<%s: %r, %s, %s, stored: %d, running: %d/%d, ready: %d, comm: %d, waiting: %d>"
             % (
                 self.__class__.__name__,
                 self.address,
+                self.name,
                 self.status,
                 len(self.data),
                 len(self.executing),
@@ -828,7 +829,7 @@ class Worker(ServerNode):
                 response = await future
                 _end = time()
                 middle = (_start + _end) / 2
-                self.latency = (_end - start) * 0.05 + self.latency * 0.95
+                self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
                 self.status = "running"
                 break
@@ -862,19 +863,27 @@ class Worker(ServerNode):
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
+    def _update_latency(self, latency):
+        self.latency = latency * 0.05 + self.latency * 0.95
+        if self.digests is not None:
+            self.digests["latency"].add(latency)
+
     async def heartbeat(self):
         if not self.heartbeat_active:
             self.heartbeat_active = True
             logger.debug("Heartbeat: %s" % self.address)
             try:
                 start = time()
-                response = await self.scheduler.heartbeat_worker(
+                response = await retry_operation(
+                    self.scheduler.heartbeat_worker,
                     address=self.contact_address,
                     now=time(),
                     metrics=await self.get_metrics(),
                 )
                 end = time()
                 middle = (start + end) / 2
+
+                self._update_latency(end - start)
 
                 if response["status"] == "missing":
                     await self._register_with_scheduler()
@@ -1089,7 +1098,8 @@ class Worker(ServerNode):
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
-                self.batched_stream.close()
+                with ignoring(gen.TimeoutError):
+                    await self.batched_stream.close(timedelta(seconds=timeout))
 
             self.actor_executor._work_queue.queue.clear()
             if isinstance(self.executor, ThreadPoolExecutor):
@@ -1100,7 +1110,7 @@ class Worker(ServerNode):
             self.actor_executor.shutdown(wait=executor_wait, timeout=timeout)
 
             self.stop()
-            self.rpc.close()
+            await self.rpc.close()
 
             self.status = "closed"
             await ServerNode.close(self)
@@ -1298,8 +1308,10 @@ class Worker(ServerNode):
                 self.available_resources[r] = quantity
             self.total_resources[r] = quantity
 
-        await self.scheduler.set_resources(
-            resources=self.total_resources, worker=self.contact_address
+        await retry_operation(
+            self.scheduler.set_resources,
+            resources=self.total_resources,
+            worker=self.contact_address,
         )
 
     ###################
@@ -1854,7 +1866,9 @@ class Worker(ServerNode):
             self.data[key] = value
             stop = time()
             if stop - start > 0.020:
-                self.startstops[key].append(("disk-write", start, stop))
+                self.startstops[key].append(
+                    {"action": "disk-write", "start": start, "stop": stop}
+                )
 
         if key not in self.nbytes:
             self.nbytes[key] = sizeof(value)
@@ -1921,11 +1935,12 @@ class Worker(ServerNode):
 
                 if cause:
                     self.startstops[cause].append(
-                        (
-                            "transfer",
-                            start + self.scheduler_delay,
-                            stop + self.scheduler_delay,
-                        )
+                        {
+                            "action": "transfer",
+                            "start": start + self.scheduler_delay,
+                            "stop": stop + self.scheduler_delay,
+                            "source": worker,
+                        }
                     )
 
                 total_bytes = sum(self.nbytes.get(dep, 0) for dep in response["data"])
@@ -2046,7 +2061,7 @@ class Worker(ServerNode):
                     self.suspicious_deps[dep],
                 )
 
-            who_has = await self.scheduler.who_has(keys=list(deps))
+            who_has = await retry_operation(self.scheduler.who_has, keys=list(deps))
             who_has = {k: v for k, v in who_has.items() if v}
             self.update_who_has(who_has)
             for dep in deps:
@@ -2080,7 +2095,7 @@ class Worker(ServerNode):
 
     async def query_who_has(self, *deps):
         with log_errors():
-            response = await self.scheduler.who_has(keys=deps)
+            response = await retry_operation(self.scheduler.who_has, keys=deps)
             self.update_who_has(response)
             return response
 
@@ -2371,7 +2386,9 @@ class Worker(ServerNode):
             stop = time()
 
             if stop - start > 0.010:
-                self.startstops[key].append(("deserialize", start, stop))
+                self.startstops[key].append(
+                    {"action": "deserialize", "start": start, "stop": stop}
+                )
             return function, args, kwargs
         except Exception as e:
             logger.warning("Could not deserialize task", exc_info=True)
@@ -2444,7 +2461,9 @@ class Worker(ServerNode):
             kwargs2 = pack_data(kwargs, data, key_types=(bytes, str))
             stop = time()
             if stop - start > 0.005:
-                self.startstops[key].append(("disk-read", start, stop))
+                self.startstops[key].append(
+                    {"action": "disk-read", "start": start, "stop": stop}
+                )
                 if self.digests is not None:
                     self.digests["disk-load-duration"].add(stop - start)
 
@@ -2475,7 +2494,9 @@ class Worker(ServerNode):
 
             result["key"] = key
             value = result.pop("result", None)
-            self.startstops[key].append(("compute", result["start"], result["stop"]))
+            self.startstops[key].append(
+                {"action": "compute", "start": result["start"], "stop": result["stop"]}
+            )
             self.threads[key] = result["thread"]
 
             if result["op"] == "task-finished":
@@ -3131,10 +3152,7 @@ async def get_data_from_worker(
     if deserializers is None:
         deserializers = rpc.deserializers
 
-    retry_count = 0
-    max_retries = 3
-
-    while True:
+    async def _get_data():
         comm = await rpc.connect(worker)
         comm.name = "Ephemeral Worker->Worker for gather"
         try:
@@ -3154,25 +3172,11 @@ async def get_data_from_worker(
             else:
                 if status == "OK":
                     await comm.write("OK")
-            break
-        except (EnvironmentError, CommClosedError):
-            if retry_count < max_retries:
-                await asyncio.sleep(0.1 * (2 ** retry_count))
-                retry_count += 1
-                logger.info(
-                    "Encountered connection issue during data collection of keys %s on worker %s. Retrying (%s / %s)",
-                    keys,
-                    worker,
-                    retry_count,
-                    max_retries,
-                )
-                continue
-            else:
-                raise
+            return response
         finally:
             rpc.reuse(worker, comm)
 
-    return response
+    return await retry_operation(_get_data, operation="get_data_from_worker")
 
 
 job_counter = [0]
