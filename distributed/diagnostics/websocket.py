@@ -1,4 +1,3 @@
-import hashlib
 import json
 
 import tornado.websocket
@@ -12,7 +11,6 @@ class WebsocketPlugin(SchedulerPlugin):
     def __init__(self, socket: tornado.websocket.WebSocketHandler, scheduler):
         self.socket = socket
         self.scheduler = scheduler
-        self.scheduler.add_plugin(self)
 
     def _send(self, name, data):
         data["name"] = name
@@ -22,21 +20,17 @@ class WebsocketPlugin(SchedulerPlugin):
                 del data[k]
         self.socket.write_message(json.dumps(data))
 
-    @staticmethod
-    def _hash_worker(worker):
-        return "worker-" + hashlib.md5(worker.encode()).hexdigest()[:8]
-
     def restart(self, scheduler, **kwargs):
         """ Run when the scheduler restarts itself """
-        self._send("reset", {})
+        self._send("restart", {})
 
     def add_worker(self, scheduler=None, worker=None, **kwargs):
         """ Run when a new worker enters the cluster """
-        self._send("worker_join", {"id": self._hash_worker(worker), "worker": worker})
+        self._send("add_worker", {"worker": worker})
 
     def remove_worker(self, scheduler=None, worker=None, **kwargs):
         """ Run when a worker leaves the cluster"""
-        self._send("remove_worker", {"id": self._hash_worker(worker)})
+        self._send("remove_worker", {"worker": worker})
 
     def transition(self, key, start, finish, *args, **kwargs):
         """ Run whenever a task changes state
@@ -58,59 +52,15 @@ class WebsocketPlugin(SchedulerPlugin):
             kwargs["key"] = key
             if finish == "memory" or finish == "erred":
                 startstops = kwargs.get("startstops", [])
-                for action, start, stop in startstops:
-                    color = colors[action]
+                for startstop in startstops:
+                    color = colors[startstop["action"]]
                     if type(color) is not str:
                         color = color(kwargs)
                     data = {
                         "key": key,
                         "name": key_split(key),
-                        "action": action,
-                        "start": start,
-                        "stop": stop,
-                        "worker_id": self._hash_worker(kwargs["worker"]),
-                        "worker_name": kwargs["worker"],
                         "color": color,
+                        **kwargs,
+                        **startstop,
                     }
                     self._send("transition", data)
-
-        # if start == "released" and finish == "waiting":
-        #     # Task is queued
-        #     pass
-        # elif start == "waiting" and finish == "processing":
-        #     # Task has begun on a worker
-        #     worker = self.scheduler.tasks[key].processing_on.name
-        #     self._send(
-        #         "start_task", {"id": self._hash_worker(worker), "task_name": key}
-        #     )
-        # elif start == "processing" and finish == "memory":
-        #     # Task result is in memory on a worker
-        #     start_worker = self._hash_worker(
-        #         list(self.scheduler.tasks[key].who_has)[0].name
-        #     )
-        #     end_worker = self._hash_worker(kwargs["worker"])
-        #     if start_worker != end_worker:
-        #         self._send(
-        #             "start_transfer",
-        #             {
-        #                 "start_worker": start_worker,
-        #                 "end_worker": end_worker,
-        #                 "key": key,
-        #             },
-        #         )
-        # elif start == "memory" and finish in ["released", "forgotten"]:
-        #     # Task has been forgotten
-        #     pass
-        # elif start == "released" and finish == "forgotten":
-        #     # Worker has garbage collected task
-        #     pass
-        # else:
-        #     data = {
-        #         "key": key,
-        #         "start": start,
-        #         "finish": finish,
-        #         "args": args,
-        #         **kwargs,
-        #     }
-        #     print(data)
-        #     self._send("transition", data)

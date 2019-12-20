@@ -327,6 +327,7 @@ class EventsHandler(WebSocketHandler):
         self.server = server
         self.extra = extra or {}
         self.plugin = WebsocketPlugin(self, server)
+        self.server.add_plugin(self.plugin)
 
     def open(self):
         for worker in self.server.workers:
@@ -340,7 +341,7 @@ class EventsHandler(WebSocketHandler):
             )
 
     def on_close(self):
-        pass
+        self.server.remove_plugin(self.plugin)
 
 
 routes = [
