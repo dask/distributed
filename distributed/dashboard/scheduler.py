@@ -329,6 +329,14 @@ class EventsHandler(WebSocketHandler):
         self.plugin = WebsocketPlugin(self, server)
         self.server.add_plugin(self.plugin)
 
+    def send(self, name, data):
+        data["name"] = name
+        for k in list(data):
+            # Drop bytes objects for now
+            if isinstance(data[k], bytes):
+                del data[k]
+        self.write_message(json.dumps(data))
+
     def open(self):
         for worker in self.server.workers:
             self.plugin.add_worker(self.server, worker)
@@ -336,9 +344,7 @@ class EventsHandler(WebSocketHandler):
     def on_message(self, message):
         message = json.loads(message)
         if message["name"] == "ping":
-            self.write_message(
-                json.dumps({"name": "pong", "timestamp": str(datetime.now())})
-            )
+            self.send("pong", {"timestamp": str(datetime.now())})
 
     def on_close(self):
         self.server.remove_plugin(self.plugin)
