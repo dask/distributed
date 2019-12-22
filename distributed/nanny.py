@@ -23,7 +23,7 @@ from .metrics import time
 from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
-from .security import TLSSecurity
+from .security import TLSSecurity, Security
 from .utils import (
     get_ip,
     mp_context,
@@ -93,7 +93,7 @@ class Nanny(ServerNode):
         self._setup_logging(logger)
         self.loop = loop or IOLoop.current()
         self.security = security or TLSSecurity()
-        assert isinstance(self.security, TLSSecurity)
+        assert isinstance(self.security, Security)
         self.connection_args = self.security.get_connection_args("worker")
         self.listen_args = self.security.get_listen_args("worker")
 

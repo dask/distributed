@@ -10,7 +10,7 @@ from dask.system import CPU_COUNT
 from .spec import SpecCluster
 from ..nanny import Nanny
 from ..scheduler import Scheduler
-from ..security import TLSSecurity
+from ..security import TLSSecurity, Security
 from ..worker import Worker, parse_memory_limit
 
 logger = logging.getLogger(__name__)
@@ -132,7 +132,7 @@ class LocalCluster(SpecCluster):
         elif security is True:
             # True indicates self-signed temporary credentials should be used
             security = TLSSecurity.temporary()
-        elif not isinstance(security, TLSSecurity):
+        elif not isinstance(security, Security):
             raise TypeError("security must be a Security object")
 
         if protocol is None:

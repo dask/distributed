@@ -64,7 +64,7 @@ from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
 from .pubsub import PubSubClientExtension
-from .security import TLSSecurity
+from .security import TLSSecurity, Security
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
 from .worker import dumps_task, get_client, get_worker, secede
@@ -664,7 +664,7 @@ class Client(Node):
         elif security is True:
             security = TLSSecurity.temporary()
             self._startup_kwargs["security"] = security
-        elif not isinstance(security, TLSSecurity):
+        elif not isinstance(security, Security):
             raise TypeError("security must be a Security object")
 
         self.security = security
