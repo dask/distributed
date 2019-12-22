@@ -1,6 +1,7 @@
 import datetime
 import tempfile
 import os
+from abc import ABCMeta, abstractmethod
 
 try:
     import ssl
@@ -10,10 +11,34 @@ except ImportError:
 import dask
 
 
-__all__ = ("TLSSecurity",)
+__all__ = ("Security", "TLSSecurity")
 
 
-class TLSSecurity(object):
+class Security(object, metaclass=ABCMeta):
+    """
+    Security configuration for a Dask cluster
+    """
+
+    @abstractmethod
+    def get_connection_args(self, role: str):
+        """
+        Get the *connection_args* argument for a connect() call with
+        the given *role*.
+        :type role: str: one of client, scheduler, worker
+        """
+        pass
+
+    @abstractmethod
+    def get_listen_args(self, role: str):
+        """
+        Get the *connection_args* argument for a listen() call with
+        the given *role*.
+        :type role: str: one of client, scheduler, worker
+        """
+        pass
+
+
+class TLSSecurity(Security):
     """TLSSecurity configuration for a Dask cluster.
 
     Default values are loaded from Dask's configuration files, and can be
