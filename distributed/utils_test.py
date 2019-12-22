@@ -48,7 +48,7 @@ from .deploy import SpecCluster
 from .metrics import time
 from .process import _cleanup_dangling
 from .proctitle import enable_proctitle_on_children
-from .security import Security
+from .security import TLSSecurity
 from .utils import (
     ignoring,
     log_errors,
@@ -1355,7 +1355,7 @@ def tls_security():
     A Security object with proper TLS configuration.
     """
     with new_config(tls_config()):
-        sec = Security()
+        sec = TLSSecurity()
     return sec
 
 
@@ -1365,7 +1365,7 @@ def tls_only_security():
     TCP communications.
     """
     with new_config(tls_only_config()):
-        sec = Security()
+        sec = TLSSecurity()
     assert sec.require_encryption
     return sec
 

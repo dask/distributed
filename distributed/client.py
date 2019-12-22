@@ -64,7 +64,7 @@ from .protocol import to_serialize
 from .protocol.pickle import dumps, loads
 from .publish import Datasets
 from .pubsub import PubSubClientExtension
-from .security import Security
+from .security import TLSSecurity
 from .sizeof import sizeof
 from .threadpoolexecutor import rejoin
 from .worker import dumps_task, get_client, get_worker, secede
@@ -660,11 +660,11 @@ class Client(Node):
                 security = getattr(self.cluster, "security", None)
 
         if security is None:
-            security = Security()
+            security = TLSSecurity()
         elif security is True:
-            security = Security.temporary()
+            security = TLSSecurity.temporary()
             self._startup_kwargs["security"] = security
-        elif not isinstance(security, Security):
+        elif not isinstance(security, TLSSecurity):
             raise TypeError("security must be a Security object")
 
         self.security = security

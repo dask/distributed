@@ -10,11 +10,11 @@ except ImportError:
 import dask
 
 
-__all__ = ("Security",)
+__all__ = ("TLSSecurity",)
 
 
-class Security(object):
-    """Security configuration for a Dask cluster.
+class TLSSecurity(object):
+    """TLSSecurity configuration for a Dask cluster.
 
     Default values are loaded from Dask's configuration files, and can be
     overridden in the constructor.

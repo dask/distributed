@@ -9,7 +9,7 @@ except ImportError:
 import pytest
 
 from distributed.comm import connect, listen
-from distributed.security import Security
+from distributed.security import TLSSecurity
 from distributed.utils_test import get_cert
 
 import dask
@@ -33,7 +33,7 @@ TLS_13_CIPHERS = [
 
 
 def test_defaults():
-    sec = Security()
+    sec = TLSSecurity()
     assert sec.require_encryption in (None, False)
     assert sec.tls_ca_file is None
     assert sec.tls_ciphers is None
@@ -47,13 +47,13 @@ def test_defaults():
 
 def test_constructor_errors():
     with pytest.raises(TypeError) as exc:
-        Security(unknown_keyword="bar")
+        TLSSecurity(unknown_keyword="bar")
 
     assert "unknown_keyword" in str(exc.value)
 
 
 def test_attribute_error():
-    sec = Security()
+    sec = TLSSecurity()
     assert hasattr(sec, "tls_ca_file")
     with pytest.raises(AttributeError):
         sec.tls_foobar
@@ -72,7 +72,7 @@ def test_from_config():
     }
 
     with dask.config.set(c):
-        sec = Security()
+        sec = TLSSecurity()
 
     assert sec.require_encryption is True
     assert sec.tls_ca_file == "ca.pem"
@@ -92,7 +92,7 @@ def test_kwargs():
         "distributed.comm.tls.scheduler.cert": "scert.pem",
     }
     with dask.config.set(c):
-        sec = Security(
+        sec = TLSSecurity(
             tls_scheduler_cert="newcert.pem", require_encryption=True, tls_ca_file=None
         )
     assert sec.require_encryption is True
@@ -107,7 +107,7 @@ def test_kwargs():
 
 
 def test_repr():
-    sec = Security(tls_ca_file="ca.pem", tls_scheduler_cert="scert.pem")
+    sec = TLSSecurity(tls_ca_file="ca.pem", tls_scheduler_cert="scert.pem")
     assert (
         repr(sec)
         == "Security(require_encryption=False, tls_ca_file='ca.pem', tls_scheduler_cert='scert.pem')"
@@ -123,7 +123,7 @@ def test_tls_config_for_role():
         "distributed.comm.tls.ciphers": FORCED_CIPHER,
     }
     with dask.config.set(c):
-        sec = Security()
+        sec = TLSSecurity()
     t = sec.get_tls_config_for_role("scheduler")
     assert t == {
         "ca_file": "ca.pem",
@@ -165,7 +165,7 @@ def test_connection_args():
         "distributed.comm.tls.worker.cert": keycert1,
     }
     with dask.config.set(c):
-        sec = Security()
+        sec = TLSSecurity()
 
     d = sec.get_connection_args("scheduler")
     assert not d["require_encryption"]
@@ -187,7 +187,7 @@ def test_connection_args():
     c["distributed.comm.require-encryption"] = True
 
     with dask.config.set(c):
-        sec = Security()
+        sec = TLSSecurity()
 
     d = sec.get_listen_args("scheduler")
     assert d["require_encryption"]
@@ -218,7 +218,7 @@ def test_listen_args():
         "distributed.comm.tls.worker.cert": keycert1,
     }
     with dask.config.set(c):
-        sec = Security()
+        sec = TLSSecurity()
 
     d = sec.get_listen_args("scheduler")
     assert not d["require_encryption"]
@@ -240,7 +240,7 @@ def test_listen_args():
     c["distributed.comm.require-encryption"] = True
 
     with dask.config.set(c):
-        sec = Security()
+        sec = TLSSecurity()
 
     d = sec.get_listen_args("scheduler")
     assert d["require_encryption"]
@@ -274,11 +274,11 @@ async def test_tls_listen_connect():
         "distributed.comm.tls.worker.cert": keycert1,
     }
     with dask.config.set(c):
-        sec = Security()
+        sec = TLSSecurity()
 
     c["distributed.comm.tls.ciphers"] = FORCED_CIPHER
     with dask.config.set(c):
-        forced_cipher_sec = Security()
+        forced_cipher_sec = TLSSecurity()
 
     async with listen(
         "tls://", handle_comm, connection_args=sec.get_listen_args("scheduler")
@@ -323,11 +323,11 @@ async def test_require_encryption():
         "distributed.comm.tls.worker.cert": keycert1,
     }
     with dask.config.set(c):
-        sec = Security()
+        sec = TLSSecurity()
 
     c["distributed.comm.require-encryption"] = True
     with dask.config.set(c):
-        sec2 = Security()
+        sec2 = TLSSecurity()
 
     for listen_addr in ["inproc://", "tls://"]:
         async with listen(
@@ -381,7 +381,7 @@ async def test_require_encryption():
 def test_temporary_credentials():
     pytest.importorskip("cryptography")
 
-    sec = Security.temporary()
+    sec = TLSSecurity.temporary()
     sec_repr = repr(sec)
     fields = ["tls_ca_file"]
     fields.extend(
@@ -405,7 +405,7 @@ async def test_tls_temporary_credentials_functional():
         await comm.write("hello")
         await comm.close()
 
-    sec = Security.temporary()
+    sec = TLSSecurity.temporary()
 
     async with listen(
         "tls://", handle_comm, connection_args=sec.get_listen_args("scheduler")
