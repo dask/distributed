@@ -138,7 +138,11 @@ class LocalCluster(SpecCluster):
         if protocol is None:
             if host and "://" in host:
                 protocol = host.split("://")[0]
-            elif security and security.require_encryption:
+            elif (
+                security
+                and isinstance(security, TLSSecurity)
+                and security.require_encryption
+            ):
                 protocol = "tls://"
             elif not self.processes and not scheduler_port:
                 protocol = "inproc://"
