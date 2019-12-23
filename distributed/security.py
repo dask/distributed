@@ -68,6 +68,10 @@ class Security(ABC):
             + ")"
         )
 
+    @classmethod
+    def temporary(cls):
+        return TLSSecurity.temporary()
+
 
 class TLSSecurity(Security):
     """TLSSecurity configuration for a Dask cluster.
