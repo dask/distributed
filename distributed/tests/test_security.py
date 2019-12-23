@@ -110,7 +110,7 @@ def test_repr():
     sec = TLSSecurity(tls_ca_file="ca.pem", tls_scheduler_cert="scert.pem")
     assert (
         repr(sec)
-        == "Security(require_encryption=False, tls_ca_file='ca.pem', tls_scheduler_cert='scert.pem')"
+        == "TLSSecurity(require_encryption=False, tls_ca_file='ca.pem', tls_scheduler_cert='scert.pem')"
     )
 
 

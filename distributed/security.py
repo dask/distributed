@@ -1,7 +1,7 @@
 import datetime
 import tempfile
 import os
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod, ABC
 
 try:
     import ssl
@@ -14,10 +14,17 @@ import dask
 __all__ = ("Security", "TLSSecurity")
 
 
-class Security(object, metaclass=ABCMeta):
+class Security(ABC):
     """
     Security configuration for a Dask cluster
     """
+
+    __slots__ = ()
+
+    def __init__(self, **kwargs):
+        extra = set(kwargs).difference(self.__slots__)
+        if extra:
+            raise TypeError("Unknown parameters: %r" % sorted(extra))
 
     @abstractmethod
     def get_connection_args(self, role: str):
@@ -36,6 +43,30 @@ class Security(object, metaclass=ABCMeta):
         :type role: str: one of client, scheduler, worker
         """
         pass
+
+    def _set_field(self, kwargs: dict, field: str, config_name: str):
+        if field in kwargs:
+            out = kwargs[field]
+        else:
+            out = dask.config.get(config_name)
+        setattr(self, field, out)
+
+    def __repr__(self):
+        keys = sorted(self.__slots__)
+        items = []
+        for k in keys:
+            val = getattr(self, k)
+            if val is not None:
+                if isinstance(val, str) and "\n" in val:
+                    items.append((k, "..."))
+                else:
+                    items.append((k, repr(val)))
+        return (
+            type(self).__name__
+            + "("
+            + ", ".join("%s=%s" % (k, v) for k, v in items)
+            + ")"
+        )
 
 
 class TLSSecurity(Security):
@@ -86,9 +117,7 @@ class TLSSecurity(Security):
     )
 
     def __init__(self, **kwargs):
-        extra = set(kwargs).difference(self.__slots__)
-        if extra:
-            raise TypeError("Unknown parameters: %r" % sorted(extra))
+        super().__init__(**kwargs)
         self._set_field(
             kwargs, "require_encryption", "distributed.comm.require-encryption"
         )
@@ -165,25 +194,6 @@ class TLSSecurity(Security):
             tls_worker_key=key_contents,
             tls_worker_cert=cert_contents,
         )
-
-    def _set_field(self, kwargs, field, config_name):
-        if field in kwargs:
-            out = kwargs[field]
-        else:
-            out = dask.config.get(config_name)
-        setattr(self, field, out)
-
-    def __repr__(self):
-        keys = sorted(self.__slots__)
-        items = []
-        for k in keys:
-            val = getattr(self, k)
-            if val is not None:
-                if isinstance(val, str) and "\n" in val:
-                    items.append((k, "..."))
-                else:
-                    items.append((k, repr(val)))
-        return "Security(" + ", ".join("%s=%s" % (k, v) for k, v in items) + ")"
 
     def get_tls_config_for_role(self, role):
         """
