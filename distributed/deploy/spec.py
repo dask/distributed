@@ -21,7 +21,7 @@ from ..utils import (
     import_term,
 )
 from ..scheduler import Scheduler
-from ..security import TLSSecurity
+from ..security import Security
 
 
 logger = logging.getLogger(__name__)
@@ -232,7 +232,7 @@ class SpecCluster(Cluster):
         self.new_spec = copy.copy(worker)
         self.workers = {}
         self._i = 0
-        self.security = security or TLSSecurity()
+        self.security = security or Security()
         self.scheduler_comm = None
         self._futures = set()
 

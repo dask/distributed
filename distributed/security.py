@@ -10,11 +10,10 @@ except ImportError:
 
 import dask
 
+__all__ = ("BaseSecurity", "Security")
 
-__all__ = ("Security", "TLSSecurity")
 
-
-class Security(ABC):
+class BaseSecurity(ABC):
     """
     Security configuration for a Dask cluster
     """
@@ -68,13 +67,9 @@ class Security(ABC):
             + ")"
         )
 
-    @classmethod
-    def temporary(cls):
-        return TLSSecurity.temporary()
 
-
-class TLSSecurity(Security):
-    """TLSSecurity configuration for a Dask cluster.
+class Security(BaseSecurity):
+    """(TLS)Security configuration for a Dask cluster.
 
     Default values are loaded from Dask's configuration files, and can be
     overridden in the constructor.

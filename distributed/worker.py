@@ -40,7 +40,7 @@ from .preloading import preload_modules
 from .proctitle import setproctitle
 from .protocol import pickle, to_serialize, deserialize_bytes, serialize_bytelist
 from .pubsub import PubSubWorkerExtension
-from .security import TLSSecurity, Security
+from .security import Security, BaseSecurity
 from .sizeof import safe_sizeof as sizeof
 from .threadpoolexecutor import ThreadPoolExecutor, secede as tpe_secede
 from .utils import (
@@ -505,8 +505,8 @@ class Worker(ServerNode):
             self._workdir = self._workspace.new_work_dir(prefix="worker-")
             self.local_directory = self._workdir.dir_path
 
-        self.security = security or TLSSecurity()
-        assert isinstance(self.security, Security)
+        self.security = security or Security()
+        assert isinstance(self.security, BaseSecurity)
         self.connection_args = self.security.get_connection_args("worker")
         self.listen_args = self.security.get_listen_args("worker")
 

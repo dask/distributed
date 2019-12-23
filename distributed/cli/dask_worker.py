@@ -12,7 +12,7 @@ import dask
 from dask.utils import ignoring
 from dask.system import CPU_COUNT
 from distributed import Nanny, Worker
-from distributed.security import TLSSecurity
+from distributed.security import Security
 from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.comm import get_address_host_port
 from distributed.preloading import validate_preload_argv
@@ -253,7 +253,7 @@ def main(
         )
         dashboard = bokeh
 
-    sec = TLSSecurity(
+    sec = Security(
         **{
             k: v
             for k, v in [
