@@ -92,10 +92,9 @@ class Nanny(ServerNode):
     ):
         self._setup_logging(logger)
         self.loop = loop or IOLoop.current()
+
         self.security = security or Security()
         assert isinstance(self.security, Security)
-        self.connection_args = self.security.get_connection_args("worker")
-        self.listen_args = self.security.get_listen_args("worker")
 
         if scheduler_file:
             cfg = json_load_robust(scheduler_file)
@@ -175,7 +174,9 @@ class Nanny(ServerNode):
         }
 
         super(Nanny, self).__init__(
-            handlers=handlers, io_loop=self.loop, connection_args=self.connection_args
+            handlers=handlers,
+            io_loop=self.loop,
+            connection_args=self.security.get_connection_args("worker"),
         )
 
         self.scheduler = self.rpc(self.scheduler_addr)
@@ -244,7 +245,9 @@ class Nanny(ServerNode):
 
     async def start(self):
         """ Start nanny, start local process, start watching """
-        await self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(
+            self._start_address, listen_args=self.security.get_listen_args("worker")
+        )
         self.ip = get_address_host(self.address)
 
         logger.info("        Start Nanny at: %r", self.address)

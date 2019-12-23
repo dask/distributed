@@ -2,7 +2,7 @@ import asyncio
 from collections import defaultdict, deque, OrderedDict
 from collections.abc import Mapping, Set
 from datetime import timedelta
-from functools import partial
+import functools
 from inspect import isawaitable
 import itertools
 import json
@@ -37,7 +37,7 @@ from .comm import (
     unparse_host_port,
 )
 from .comm.addressing import addresses_from_user_args
-from .core import rpc, connect, send_recv, clean_exception, CommClosedError
+from .core import send_recv, clean_exception, CommClosedError
 from .diagnostics.plugin import SchedulerPlugin
 from . import profile
 from .metrics import time
@@ -1082,8 +1082,6 @@ class Scheduler(ServerNode):
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
-        self.connection_args = self.security.get_connection_args("scheduler")
-        self.listen_args = self.security.get_listen_args("scheduler")
 
         if dashboard_address is not None:
             try:
@@ -1314,7 +1312,7 @@ class Scheduler(ServerNode):
             io_loop=self.loop,
             connection_limit=connection_limit,
             deserialize=False,
-            connection_args=self.connection_args,
+            connection_args=self.security.get_connection_args("scheduler"),
             **kwargs
         )
 
@@ -1397,7 +1395,9 @@ class Scheduler(ServerNode):
 
         if self.status != "running":
             for addr in self._start_address:
-                await self.listen(addr, listen_args=self.listen_args)
+                await self.listen(
+                    addr, listen_args=self.security.get_listen_args("scheduler")
+                )
                 self.ip = get_address_host(self.listen_address)
                 listen_ip = self.ip
 
@@ -2825,7 +2825,7 @@ class Scheduler(ServerNode):
             logger.debug("Send kill signal to nannies: %s", nannies)
 
             nannies = [
-                rpc(nanny_address, connection_args=self.connection_args)
+                self.rpc(nanny_address)
                 for nanny_address in nannies.values()
                 if nanny_address is not None
             ]
@@ -2888,12 +2888,14 @@ class Scheduler(ServerNode):
             addresses = workers
 
         async def send_message(addr):
-            comm = await connect(
-                addr, deserialize=self.deserialize, connection_args=self.connection_args
-            )
-            comm.name = "Scheduler Broadcast"
-            resp = await send_recv(comm, close=True, serializers=serializers, **msg)
-            return resp
+            comm = await self.rpc.connect(addr)
+            name, comm.name = comm.name, "Scheduler Broadcast"
+            try:
+                result = await send_recv(comm=comm, serializers=serializers, **msg)
+            finally:
+                self.rpc.reuse(addr, comm)
+                comm.name = name
+            return result
 
         results = await All(
             [send_message(address) for address in addresses if address is not None]
@@ -3887,7 +3889,7 @@ class Scheduler(ServerNode):
                 ts,
                 self.workers.values(),
                 valid_workers,
-                partial(self.worker_objective, ts),
+                functools.partial(self.worker_objective, ts),
             )
         elif self.idle:
             if len(self.idle) < 20:  # smart but linear in small case
