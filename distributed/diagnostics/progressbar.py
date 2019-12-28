@@ -81,6 +81,7 @@ class ProgressBar(object):
             try:
                 response = await self.comm.read()
             except CommClosedError:
+                self.client().rpc.reuse(self.scheduler, self.comm)
                 break
             self._last_response = response
             self.status = response["status"]
@@ -254,10 +255,11 @@ class MultiProgressBar(object):
                 result.update(p.extra)
             return result
 
-        self.comm = await connect(
-            self.scheduler,
-            connection_args=self.client().connection_args if self.client else None,
-        )
+        if self.client is not None:
+            self.comm = await self.client().rpc.connect(self.scheduler)
+        else:
+            self.comm = await connect(self.scheduler)
+
         logger.debug("Progressbar Connected to scheduler")
 
         await self.comm.write(
@@ -270,14 +272,12 @@ class MultiProgressBar(object):
         )
 
         while True:
-            response = await self.comm.read(
-                deserializers=self.client()._deserializers if self.client else None
-            )
+            response = await self.comm.read()
             self._last_response = response
             self.status = response["status"]
             self._draw_bar(**response)
             if response["status"] in ("error", "finished"):
-                await self.comm.close()
+                self.client().rpc.reuse(self.scheduler, self.comm)
                 self._draw_stop(**response)
                 break
         logger.debug("Progressbar disconnected from scheduler")
