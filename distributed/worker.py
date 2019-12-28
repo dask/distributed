@@ -1098,6 +1098,7 @@ class Worker(ServerNode):
             if self.batched_stream:
                 with ignoring(gen.TimeoutError):
                     await self.batched_stream.close(timedelta(seconds=timeout))
+                    self.rpc.reuse(self.scheduler.address, self.batched_stream.comm)
 
             self.actor_executor._work_queue.queue.clear()
             if isinstance(self.executor, ThreadPoolExecutor):
