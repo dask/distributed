@@ -2,6 +2,7 @@ import asyncio
 import bisect
 from collections import defaultdict, deque, namedtuple
 from collections.abc import MutableMapping
+import concurrent.futures
 from datetime import timedelta
 import heapq
 from inspect import isawaitable
@@ -619,6 +620,7 @@ class Worker(ServerNode):
             "actor_execute": self.actor_execute,
             "actor_attribute": self.actor_attribute,
             "plugin-add": self.plugin_add,
+            "close_gracefully": self.close_gracefully,
         }
 
         stream_handlers = {
@@ -1113,27 +1115,29 @@ class Worker(ServerNode):
             await self.rpc.close()
 
             self.status = "closed"
-            await ServerNode.close(self)
+            with ignoring(concurrent.futures.CancelledError):
+                await ServerNode.close(self)
 
             setproctitle("dask-worker [closed]")
         return "OK"
 
-    async def close_gracefully(self):
+    async def close_gracefully(self, comm=None):
         """ Gracefully shut down a worker
 
         This first informs the scheduler that we're shutting down, and asks it
         to move our data elsewhere.  Afterwards, we close as normal
         """
-        if self.status.startswith("closing"):
-            await self.finished()
+        with log_errors():
+            if self.status.startswith("closing"):
+                await self.finished()
 
-        if self.status == "closed":
-            return
+            if self.status == "closed":
+                return
 
-        logger.info("Closing worker gracefully: %s", self.address)
-        self.status = "closing-gracefully"
-        await self.scheduler.retire_workers(workers=[self.address], remove=False)
-        await self.close(safe=True, nanny=not self.lifetime_restart)
+            logger.info("Closing worker gracefully: %s", self.address)
+            self.status = "closing-gracefully"
+            await self.scheduler.retire_workers(workers=[self.address], remove=False)
+            await self.close(safe=True, nanny=not self.lifetime_restart)
 
     async def terminate(self, comm, report=True, **kwargs):
         await self.close(report=report, **kwargs)

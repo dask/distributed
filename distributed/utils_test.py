@@ -982,7 +982,7 @@ def terminate_process(proc):
         if sys.platform.startswith("win"):
             proc.send_signal(signal.CTRL_BREAK_EVENT)
         else:
-            proc.send_signal(signal.SIGINT)
+            proc.send_signal(signal.SIGTERM)
         try:
             if sys.version_info[0] == 3:
                 proc.wait(10)

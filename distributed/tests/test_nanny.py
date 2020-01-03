@@ -494,3 +494,14 @@ async def test_config(cleanup):
             async with Client(s.address, asynchronous=True) as client:
                 config = await client.run(dask.config.get, "foo")
                 assert config[n.worker_address] == "bar"
+
+
+@gen_cluster(client=True, Worker=Nanny)
+async def test_close_gracefully(c, s, a, b):
+    futures = await c.scatter(list(range(10)))
+    assert all(ws.has_what for ws in s.workers.values())
+
+    await a.close_gracefully()
+    assert a.status == "closed"
+    assert len(s.workers) == 1
+    assert all(f.status == "finished" for f in futures)
