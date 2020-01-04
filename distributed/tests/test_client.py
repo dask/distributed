@@ -5616,6 +5616,13 @@ def test_wait_for_workers(c, s, a, b):
     yield w.close()
 
 
+@gen_cluster(client=True)
+def test_scheduler_info(c, s, a, b):
+    assert a.scheduler_info == b.scheduler_info
+    for k in a.scheduler_info:
+        assert a.scheduler_info[k] == c.scheduler_info()[k]
+
+        
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])

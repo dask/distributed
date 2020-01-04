@@ -427,6 +427,7 @@ class Worker(ServerNode):
         self.bandwidth_types = defaultdict(lambda: (0, 0))  # bw/count recent transfers
         self.latency = 0.001
         self._client = None
+        self._client_cleanup = False
 
         if profile_cycle_interval is None:
             profile_cycle_interval = dask.config.get("distributed.worker.profile.cycle")
@@ -831,6 +832,7 @@ class Worker(ServerNode):
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
                 self.scheduler_delay = response["time"] - middle
+                self.scheduler_info = response["info"]
                 self.status = "running"
                 break
             except EnvironmentError:
@@ -1067,6 +1069,10 @@ class Worker(ServerNode):
             if nanny and self.nanny:
                 with self.rpc(self.nanny) as r:
                     await r.close_gracefully()
+
+            if self._client_cleanup:
+                await self._client._close()
+                self._client = None
 
             setproctitle("dask-worker [closing]")
 
@@ -2927,7 +2933,7 @@ class Worker(ServerNode):
         else:
             if (
                 client.scheduler
-                and client.scheduler.address == self.scheduler.address
+                and client.scheduler_info().get("id", "") == self.scheduler_info["id"]
                 or client._start_arg == self.scheduler.address
             ):
                 self._client = client
@@ -2946,6 +2952,7 @@ class Worker(ServerNode):
                 name="worker",
                 timeout=timeout,
             )
+            self._client_cleanup = True
             if not asynchronous:
                 assert self._client.status == "running"
         return self._client
@@ -2999,7 +3006,7 @@ def get_worker():
             raise ValueError("No workers found")
 
 
-def get_client(address=None, timeout=3, resolve_address=True):
+def get_client(address=None, ident=None, timeout=3):
     """Get a client while within a task.
 
     This client connects to the same scheduler to which the worker is connected
@@ -3009,10 +3016,11 @@ def get_client(address=None, timeout=3, resolve_address=True):
     address : str, optional
         The address of the scheduler to connect to. Defaults to the scheduler
         the worker is connected to.
+    ident : str
+        The identity of the scheduler, if known
+        This is mostly used by automated systems)
     timeout : int, default 3
         Timeout (in seconds) for getting the Client
-    resolve_address : bool, default True
-        Whether to resolve `address` to its canonical form.
 
     Returns
     -------
@@ -3036,20 +3044,18 @@ def get_client(address=None, timeout=3, resolve_address=True):
     worker_client
     secede
     """
-    if address and resolve_address:
-        address = comm.resolve_address(address)
     try:
         worker = get_worker()
     except ValueError:  # could not find worker
         pass
     else:
-        if not address or worker.scheduler.address == address:
+        if not ident or ident == worker.scheduler_info["id"]:
             return worker._get_client(timeout=timeout)
 
     from .client import _get_global_client
 
     client = _get_global_client()  # TODO: assumes the same scheduler
-    if client and (not address or client.scheduler.address == address):
+    if client and (not ident or ident == client.scheduler_info()["id"]):
         return client
     elif address:
         from .client import Client

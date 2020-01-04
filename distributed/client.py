@@ -361,11 +361,15 @@ class Future(WrappedKey):
                 pass  # Shutting down, add_callback may be None
 
     def __getstate__(self):
-        return (self.key, self.client.scheduler.address)
+        return (
+            self.key,
+            self.client.scheduler.address,
+            self.client.scheduler_info()["id"],
+        )
 
     def __setstate__(self, state):
-        key, address = state
-        c = get_client(address)
+        key, address, ident = state
+        c = get_client(address, ident)
         Future.__init__(self, key, c)
         c._send_to_scheduler(
             {

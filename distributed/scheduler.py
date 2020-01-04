@@ -1699,6 +1699,8 @@ class Scheduler(ServerNode):
             self.log_event("all", {"action": "add-worker", "worker": address})
             logger.info("Register worker %s", ws)
 
+            info = self.identity()
+            del info["workers"]
             if comm:
                 await comm.write(
                     {
@@ -1706,6 +1708,7 @@ class Scheduler(ServerNode):
                         "time": time(),
                         "heartbeat-interval": heartbeat_interval(len(self.workers)),
                         "worker-plugins": self.worker_plugins,
+                        "info": info,
                     }
                 )
             await self.handle_worker(comm=comm, worker=address)
