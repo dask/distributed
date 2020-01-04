@@ -62,10 +62,10 @@ class ProgressBar(object):
                 result.update(p.extra)
             return result
 
-        self.comm = await connect(
-            self.scheduler,
-            connection_args=self.client().connection_args if self.client else None,
-        )
+        if self.client is not None:
+            self.comm = await self.client().rpc.connect(self.scheduler)
+        else:
+            self.comm = await connect(self.scheduler)
         logger.debug("Progressbar Connected to scheduler")
 
         await self.comm.write(
@@ -74,16 +74,14 @@ class ProgressBar(object):
                 "setup": dumps(setup),
                 "function": dumps(function),
                 "interval": self.interval,
-            },
-            serializers=self.client()._serializers if self.client else None,
+            }
         )
 
         while True:
             try:
-                response = await self.comm.read(
-                    deserializers=self.client()._deserializers if self.client else None
-                )
+                response = await self.comm.read()
             except CommClosedError:
+                self.client().rpc.reuse(self.scheduler, self.comm)
                 break
             self._last_response = response
             self.status = response["status"]
@@ -121,7 +119,9 @@ class TextProgressBar(ProgressBar):
 
         if start:
             loop_runner = LoopRunner(self.loop)
-            loop_runner.run_sync(self.listen)
+
+            if self.client is not None:
+                self.client().sync(self.listen)
 
     def _draw_bar(self, remaining, all, **kwargs):
         frac = (1 - remaining / all) if all else 1.0
@@ -255,10 +255,11 @@ class MultiProgressBar(object):
                 result.update(p.extra)
             return result
 
-        self.comm = await connect(
-            self.scheduler,
-            connection_args=self.client().connection_args if self.client else None,
-        )
+        if self.client is not None:
+            self.comm = await self.client().rpc.connect(self.scheduler)
+        else:
+            self.comm = await connect(self.scheduler)
+
         logger.debug("Progressbar Connected to scheduler")
 
         await self.comm.write(
@@ -271,14 +272,12 @@ class MultiProgressBar(object):
         )
 
         while True:
-            response = await self.comm.read(
-                deserializers=self.client()._deserializers if self.client else None
-            )
+            response = await self.comm.read()
             self._last_response = response
             self.status = response["status"]
             self._draw_bar(**response)
             if response["status"] in ("error", "finished"):
-                await self.comm.close()
+                self.client().rpc.reuse(self.scheduler, self.comm)
                 self._draw_stop(**response)
                 break
         logger.debug("Progressbar disconnected from scheduler")

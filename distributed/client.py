@@ -669,11 +669,6 @@ class Client(Node):
 
         self.security = security
 
-        if name == "worker":
-            self.connection_args = self.security.get_connection_args("worker")
-        else:
-            self.connection_args = self.security.get_connection_args("client")
-
         self._connecting_to_scheduler = False
         self._asynchronous = asynchronous
         self._should_close_loop = not loop
@@ -714,8 +709,13 @@ class Client(Node):
             "erred": self._handle_task_erred,
         }
 
+        if name == "worker":
+            connection_args = self.security.get_connection_args("worker")
+        else:
+            connection_args = self.security.get_connection_args("client")
+
         super(Client, self).__init__(
-            connection_args=self.connection_args,
+            connection_args=connection_args,
             io_loop=self.loop,
             serializers=serializers,
             deserializers=deserializers,
@@ -1037,10 +1037,11 @@ class Client(Node):
         self._connecting_to_scheduler = True
 
         try:
+            # TODO: comm = await self.rpc.connect(self.scheduler.address, timeout=timeout)
             comm = await connect(
                 self.scheduler.address,
                 timeout=timeout,
-                connection_args=self.connection_args,
+                connection_args=self.security.get_connection_args("scheduler"),
             )
             comm.name = "Client->Scheduler"
             if timeout is not None:

@@ -30,7 +30,7 @@ from tornado.ioloop import IOLoop
 
 from . import profile, comm, system
 from .batched import BatchedSend
-from .comm import get_address_host, connect
+from .comm import get_address_host
 from .comm.addressing import address_from_user_args
 from .core import error_message, CommClosedError, send_recv, pingpong, coerce_to_address
 from .diskutils import WorkSpace
@@ -507,8 +507,6 @@ class Worker(ServerNode):
 
         self.security = security or Security()
         assert isinstance(self.security, Security)
-        self.connection_args = self.security.get_connection_args("worker")
-        self.listen_args = self.security.get_listen_args("worker")
 
         self.memory_limit = parse_memory_limit(memory_limit, self.nthreads)
 
@@ -633,7 +631,7 @@ class Worker(ServerNode):
             handlers=handlers,
             stream_handlers=stream_handlers,
             io_loop=self.loop,
-            connection_args=self.connection_args,
+            connection_args=self.security.get_connection_args("worker"),
             **kwargs
         )
 
@@ -798,9 +796,7 @@ class Worker(ServerNode):
             try:
                 _start = time()
                 types = {k: typename(v) for k, v in self.data.items()}
-                comm = await connect(
-                    self.scheduler.address, connection_args=self.connection_args
-                )
+                comm = await self.rpc.connect(self.scheduler.address)
                 comm.name = "Worker->Scheduler"
                 comm._server = weakref.ref(self)
                 await comm.write(
@@ -996,7 +992,9 @@ class Worker(ServerNode):
         enable_gc_diagnosis()
         thread_state.on_event_loop_thread = True
 
-        await self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(
+            self._start_address, listen_args=self.security.get_listen_args("worker")
+        )
         self.ip = get_address_host(self.address)
 
         if self.name is None:
@@ -1100,6 +1098,7 @@ class Worker(ServerNode):
             if self.batched_stream:
                 with ignoring(gen.TimeoutError):
                     await self.batched_stream.close(timedelta(seconds=timeout))
+                    self.rpc.reuse(self.scheduler.address, self.batched_stream.comm)
 
             self.actor_executor._work_queue.queue.clear()
             if isinstance(self.executor, ThreadPoolExecutor):
@@ -1154,9 +1153,7 @@ class Worker(ServerNode):
             self.stream_comms[address] = bcomm
 
             async def batched_send_connect():
-                comm = await connect(
-                    address, connection_args=self.connection_args  # TODO, serialization
-                )
+                comm = await self.rpc.connect(address)
                 comm.name = "Worker->Worker"
                 await comm.write({"op": "connection_stream"})
 

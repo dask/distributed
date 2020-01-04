@@ -261,7 +261,7 @@ def deserialize(header, frames, deserializers=None):
     name = header.get("serializer")
     if deserializers is not None and name not in deserializers:
         raise TypeError(
-            "Data serialized with %s but only able to deserialize "
+            "Data serialized with '%s' but only able to deserialize "
             "data with %s" % (name, str(list(deserializers)))
         )
     dumps, loads, wants_context = families[name]
