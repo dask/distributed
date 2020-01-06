@@ -322,7 +322,7 @@ class HealthHandler(RequestHandler):
         self.set_header("Content-Type", "text/plain")
 
 
-class EventsHandler(WebSocketHandler):
+class EventstreamHandler(WebSocketHandler):
     def initialize(self, server=None, extra=None):
         self.server = server
         self.extra = extra or {}
@@ -365,7 +365,7 @@ routes = [
     (r"individual-plots.json", IndividualPlots),
     (r"metrics", PrometheusHandler),
     (r"health", HealthHandler),
-    (r"events", EventsHandler),
+    (r"eventstream", EventstreamHandler),
     (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler),
 ]
 

@@ -1,12 +1,10 @@
-import tornado.websocket
-
 from .plugin import SchedulerPlugin
 from ..utils import key_split
 from .task_stream import colors
 
 
 class WebsocketPlugin(SchedulerPlugin):
-    def __init__(self, socket: tornado.websocket.WebSocketHandler, scheduler):
+    def __init__(self, socket, scheduler):
         self.socket = socket
         self.scheduler = scheduler
 
