@@ -5823,7 +5823,7 @@ def test_client_sync_with_async_def(loop):
             assert c.sync(ff) == 1
 
 
-@pytest.mark.xfail(reason="known intermittent failure")
+@pytest.mark.skip(reason="known intermittent failure")
 @gen_cluster(client=True)
 async def test_dont_hold_on_to_large_messages(c, s, a, b):
     np = pytest.importorskip("numpy")
