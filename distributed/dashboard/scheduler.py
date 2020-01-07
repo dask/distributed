@@ -335,7 +335,7 @@ class EventstreamHandler(WebSocketHandler):
             # Drop bytes objects for now
             if isinstance(data[k], bytes):
                 del data[k]
-        self.write_message(json.dumps(data))
+        self.write_message(data)
 
     def open(self):
         for worker in self.server.workers:

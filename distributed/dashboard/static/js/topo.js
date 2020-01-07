@@ -325,7 +325,7 @@ function main() {
   dashboard = new Dashboard();
   dashboard.add_scheduler();
 
-  var ws = new WebSocket(websocket_url("/events"));
+  var ws = new WebSocket(websocket_url("/eventstream"));
   ws.onopen = function() {
     ws.send(
       JSON.stringify({
