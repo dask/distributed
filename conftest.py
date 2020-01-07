@@ -7,12 +7,12 @@ import pytest
 # Note this makes things slower and might consume much memory.
 # os.environ["PYTHONASYNCIODEBUG"] = "1"
 
-# try:
-#     import faulthandler
-# except ImportError:
-#     pass
-# else:
-#     faulthandler.enable()
+try:
+    import faulthandler
+except ImportError:
+    pass
+else:
+    faulthandler.enable()
 
 
 def pytest_addoption(parser):
