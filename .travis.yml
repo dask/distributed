@@ -1,8 +1,8 @@
-language: python
+language: generic
 # sudo shouldn't be required, but currently tests fail when run in a container
 # on travis instead of a vm. See https://github.com/dask/distributed/pull/1563.
 sudo: required
-dist: xenial
+dist: trusty
 
 env:
   matrix:
@@ -16,7 +16,6 @@ matrix:
     python: 3.6
     env: LINT=true
   - os: osx
-    python: 3.7
     env: PYTHON=3.7 TESTS=true PACKAGES="scikit-learn python-snappy python-blosc" TORNADO=6
 
 install:
