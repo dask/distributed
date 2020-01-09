@@ -3,7 +3,6 @@
 // TODO Add clients
 // TODO Show future retrieval
 // TODO Show graph submission
-// TODO Handle window resize
 
 class Dashboard {
   constructor() {
@@ -12,7 +11,6 @@ class Dashboard {
     this.schedulerNode = null;
     this.dashboard = document.getElementById("vis");
     this.transfers = [];
-    this.tasks = {};
   }
 
   handle_event(event) {
@@ -31,34 +29,18 @@ class Dashboard {
         break;
       case "transition":
         if (event["action"] === "compute") {
-          this.start_task(
+          this.run_task(
             this.hash_worker(event["worker"]),
             event["key"],
+            event["stop"] - event["start"],
             event["color"]
-          );
-          setTimeout(
-            function() {
-              this.end_task(this.hash_worker(event["worker"]), event["key"]);
-            }.bind(this),
-            event["stop"] - event["start"]
           );
           break;
         } else if (event["action"] === "transfer") {
-          let arc = this.start_transfer(
+          this.run_transfer(
             this.hash_worker(event["source"]),
-            this.hash_worker(event["worker"])
-          );
-          setTimeout(
-            function() {
-              this.end_transfer(
-                this.hash_worker(event["source"]),
-                this.hash_worker(event["worker"]),
-                arc
-              );
-            }
-              .bind(this)
-              .bind(arc),
-            Math.max(250, (event["stop"] - event["start"]) * 1000)
+            this.hash_worker(event["worker"]),
+            event["stop"] - event["start"]
           );
           break;
         }
@@ -145,97 +127,73 @@ class Dashboard {
     }
   }
 
-  create_task(task, worker) {
-    this.tasks[task] = { worker: worker };
-  }
-
-  start_task(worker_id, task_name, color) {
-    this.create_task(task_name, worker_id);
+  run_task(worker_id, task_name, duration, color) {
     let worker = document.getElementById(worker_id);
     let scheduler = document.getElementById("scheduler");
-    this.fire_projectile(scheduler, worker, color);
-    anime({
-      targets: "#" + worker_id,
-      fill: color,
-      duration: 250,
-      delay: 500
-    });
+    let arc = this.draw_arc(scheduler, worker, color, "projectile");
+
+    anime
+      .timeline({
+        targets: "#" + worker_id
+      })
+      .add({
+        begin: () => this.dashboard.insertBefore(arc, this.schedulerNode)
+      })
+      .add(
+        {
+          fill: color,
+          begin: () => this.dashboard.removeChild(arc)
+        },
+        500
+      )
+      .add({ fill: null }, "+=" + duration);
   }
 
-  end_task(worker_id) {
-    anime({
-      targets: "#" + worker_id,
-      fill: null,
-      duration: 250
-    });
-  }
-
-  fire_projectile(start_element, end_element, color) {
-    let arc = this.draw_arc(start_element, end_element, color, "projectile");
-    this.dashboard.insertBefore(arc, this.schedulerNode);
-    setTimeout(
-      function() {
-        this.dashboard.removeChild(arc);
-      }
-        .bind(this)
-        .bind(arc),
-      1000
-    );
-  }
-
-  start_transfer(start_worker, end_worker) {
+  run_transfer(start_worker, end_worker, duration) {
+    start_worker = document.getElementById(start_worker);
+    end_worker = document.getElementById(end_worker);
+    duration = Math.max(250, duration);
     let color = "rgba(255, 0, 0, .6)";
-    let arc = this.draw_arc(
-      document.getElementById(start_worker),
-      document.getElementById(end_worker),
-      color,
-      "transfer"
-    );
-    this.dashboard.insertBefore(arc, this.schedulerNode);
-    this.transfers.push(arc);
+    let arc = this.draw_arc(start_worker, end_worker, color, "transfer");
 
-    anime({
-      targets: ["#" + start_worker, "#" + end_worker],
-      fill: color,
-      duration: 250
-    });
-    return arc;
+    anime
+      .timeline({
+        targets: ["#" + start_worker, "#" + end_worker]
+      })
+      .add({
+        fill: color,
+        begin: () => this.dashboard.insertBefore(arc, this.schedulerNode)
+      })
+      .add(
+        {
+          fill: null,
+          begin: () => this.dashboard.removeChild(arc)
+        },
+        "+=" + duration
+      );
   }
 
-  end_transfer(start_worker, end_worker, arc) {
-    this.dashboard.removeChild(arc);
-    var index = this.transfers.indexOf(arc);
-    if (index !== -1) this.transfers.splice(index, 1);
-
-    anime({
-      targets: ["#" + start_worker, "#" + end_worker],
-      fill: null,
-      duration: 250
-    });
-  }
-
-  start_swap(worker) {
-    let color = "#D67548";
-    anime({
-      targets: "#" + worker,
-      fill: color,
-      duration: 250
-    });
-  }
-
-  end_swap(worker) {
-    anime({
-      targets: "#" + worker,
-      fill: null,
-      duration: 250
-    });
+  run_swap(worker, duration) {
+    anime
+      .timeline({
+        targets: "#" + worker,
+        duration: 250
+      })
+      .add({
+        fill: "#D67548"
+      })
+      .add(
+        {
+          fill: null
+        },
+        "+=" + duration
+      );
   }
 
   kill_worker(worker) {
-    let color = "rgba(0, 0, 0, 1)";
     anime({
       targets: "#" + worker,
-      fill: color,
+      fill: "rgba(0, 0, 0, 1)",
       duration: 250
     });
   }
