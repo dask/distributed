@@ -340,3 +340,52 @@ async def test_integer_names(cleanup):
                 await asyncio.sleep(0.01)
             [ws] = s.workers.values()
             assert ws.name == 123
+
+
+WORKER_CLASS_TEXT = """
+from distributed.worker import Worker
+
+class MyWorker(Worker):
+    def __repr__(self):
+        return "asdfsafasdf"
+"""
+
+
+@pytest.mark.asyncio
+async def test_worker_class(tmp_path):
+    # Create module with custom worker class
+    tmpdir = str(tmp_path)
+    tmpfile = str(tmp_path / "myworker.py")
+    with open(tmpfile, "w") as f:
+        f.write(WORKER_CLASS_TEXT)
+
+    # Put module on PYTHONPATH
+    env = os.environ.copy()
+    if "PYTHONPATH" in env:
+        env["PYTHONPATH"] = tmpdir + ":" + env["PYTHONPATH"]
+    else:
+        env["PYTHONPATH"] = tmpdir
+
+    async with Scheduler(port=0) as s:
+        async with Client(s.address, asynchronous=True) as c:
+            with popen(
+                ["dask-worker", s.address, "--worker-class", "myworker.MyWorker"],
+                env=env,
+            ) as worker:
+                await c.wait_for_workers(1)
+
+                def worker_type(dask_worker):
+                    return type(dask_worker).__name__
+
+                worker_types = await c.run(worker_type)
+                assert all(name == "MyWorker" for name in worker_types.values())
+
+
+def test_worker_class_raises():
+    runner = CliRunner()
+    with pytest.raises(ValueError, match="nanny option"):
+        runner.invoke(
+            distributed.cli.dask_worker.main,
+            ["--no-nanny", "--worker-class", "myworker.MyWorker"],
+            catch_exceptions=False,
+        )

@@ -20,7 +20,7 @@ from distributed.proctitle import (
     enable_proctitle_on_children,
     enable_proctitle_on_current,
 )
-from distributed.utils import deserialize_for_cli
+from distributed.utils import deserialize_for_cli, import_term
 
 from toolz import valmap
 from tornado.ioloop import IOLoop, TimeoutError
@@ -191,6 +191,13 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     help="Random amount by which to stagger lifetime values",
 )
 @click.option(
+    "--worker-class",
+    type=str,
+    default=None,
+    help="Worker class used to instantiate workers from. Defaults to "
+    "distributed.worker.Worker. Only supported when using --nanny.",
+)
+@click.option(
     "--lifetime-restart/--no-lifetime-restart",
     "lifetime_restart",
     default=False,
@@ -338,6 +345,15 @@ def main(
         resources = None
 
     loop = IOLoop.current()
+
+    worker_class = kwargs.pop("worker_class")
+    if worker_class is not None:
+        if nanny:
+            kwargs["worker_class"] = import_term(worker_class)
+        else:
+            raise ValueError(
+                "Cannot use the --worker-class option without using the --nanny option"
+            )
 
     if nanny:
         kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
