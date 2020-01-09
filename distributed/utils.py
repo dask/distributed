@@ -1211,9 +1211,13 @@ if tornado.version_info[0] >= 5:
         if not is_kernel_and_no_running_loop:
             import tornado.platform.asyncio
 
-            asyncio.set_event_loop_policy(
-                tornado.platform.asyncio.AnyThreadEventLoopPolicy()
-            )
+            if sys.platform == "win32":
+                # https://github.com/tornadoweb/tornado/issues/2608
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            else:
+                asyncio.set_event_loop_policy(
+                    tornado.platform.asyncio.AnyThreadEventLoopPolicy()
+                )
 
 
 @functools.lru_cache(1000)
