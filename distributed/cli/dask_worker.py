@@ -348,12 +348,11 @@ def main(
 
     worker_class = kwargs.pop("worker_class")
     if worker_class is not None:
+        worker_class = import_term(worker_class)
         if nanny:
-            kwargs["worker_class"] = import_term(worker_class)
-        else:
-            raise ValueError(
-                "Cannot use the --worker-class option without using the --nanny option"
-            )
+            kwargs["worker_class"] = worker_class
+    else:
+        worker_class = Worker
 
     if nanny:
         kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
@@ -361,7 +360,7 @@ def main(
     else:
         if nanny_port:
             kwargs["service_ports"] = {"nanny": nanny_port}
-        t = Worker
+        t = worker_class
 
     if (
         not scheduler

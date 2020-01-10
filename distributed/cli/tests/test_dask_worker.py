@@ -346,13 +346,13 @@ WORKER_CLASS_TEXT = """
 from distributed.worker import Worker
 
 class MyWorker(Worker):
-    def __repr__(self):
-        return "asdfsafasdf"
+    pass
 """
 
 
 @pytest.mark.asyncio
-async def test_worker_class(tmp_path):
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+async def test_worker_class(cleanup, tmp_path, nanny):
     # Create module with custom worker class
     tmpdir = str(tmp_path)
     tmpfile = str(tmp_path / "myworker.py")
@@ -369,7 +369,13 @@ async def test_worker_class(tmp_path):
     async with Scheduler(port=0) as s:
         async with Client(s.address, asynchronous=True) as c:
             with popen(
-                ["dask-worker", s.address, "--worker-class", "myworker.MyWorker"],
+                [
+                    "dask-worker",
+                    s.address,
+                    nanny,
+                    "--worker-class",
+                    "myworker.MyWorker",
+                ],
                 env=env,
             ) as worker:
                 await c.wait_for_workers(1)
@@ -379,13 +385,3 @@ async def test_worker_class(tmp_path):
 
                 worker_types = await c.run(worker_type)
                 assert all(name == "MyWorker" for name in worker_types.values())
-
-
-def test_worker_class_raises():
-    runner = CliRunner()
-    with pytest.raises(ValueError, match="nanny option"):
-        runner.invoke(
-            distributed.cli.dask_worker.main,
-            ["--no-nanny", "--worker-class", "myworker.MyWorker"],
-            catch_exceptions=False,
-        )
