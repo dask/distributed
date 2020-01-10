@@ -342,18 +342,16 @@ async def test_integer_names(cleanup):
             assert ws.name == 123
 
 
-WORKER_CLASS_TEXT = """
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
+async def test_worker_class(cleanup, tmp_path, nanny):
+    # Create module with custom worker class
+    WORKER_CLASS_TEXT = """
 from distributed.worker import Worker
 
 class MyWorker(Worker):
     pass
 """
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("nanny", ["--nanny", "--no-nanny"])
-async def test_worker_class(cleanup, tmp_path, nanny):
-    # Create module with custom worker class
     tmpdir = str(tmp_path)
     tmpfile = str(tmp_path / "myworker.py")
     with open(tmpfile, "w") as f:
