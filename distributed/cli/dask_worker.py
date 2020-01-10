@@ -194,8 +194,8 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
     "--worker-class",
     type=str,
     default=None,
-    help="Worker class used to instantiate workers from. Defaults to "
-    "distributed.worker.Worker. Only supported when using --nanny.",
+    help="Worker class used to instantiate workers from. Defaults "
+    "to distributed.worker.Worker.",
 )
 @click.option(
     "--lifetime-restart/--no-lifetime-restart",
