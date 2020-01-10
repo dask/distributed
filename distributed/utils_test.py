@@ -911,40 +911,41 @@ def gen_cluster(
                                 **client_kwargs
                             )
                             args = [c] + args
+                        future = func(*args)
+                        if timeout:
+                            future = gen.with_timeout(
+                                timedelta(seconds=timeout), future
+                            )
                         try:
-                            future = func(*args)
-                            if timeout:
-                                future = gen.with_timeout(
-                                    timedelta(seconds=timeout), future
-                                )
                             result = await future
                             if s.validate:
                                 s.validate_state()
                         finally:
-                            if client and c.status not in ("closing", "closed"):
-                                await c._close(fast=s.status == "closed")
-                            await end_cluster(s, workers)
-                            await gen.with_timeout(
-                                timedelta(seconds=1), cleanup_global_workers()
-                            )
+                            if not s.loop.asyncio_loop.is_closed():
+                                if client and c.status not in ("closing", "closed"):
+                                    await c._close(fast=s.status == "closed")
+                                await end_cluster(s, workers)
+                                await gen.with_timeout(
+                                    timedelta(seconds=1), cleanup_global_workers()
+                                )
 
-                        try:
-                            c = await default_client()
-                        except ValueError:
-                            pass
-                        else:
-                            await c._close(fast=True)
+                                try:
+                                    c = await default_client()
+                                except ValueError:
+                                    pass
+                                else:
+                                    await c._close(fast=True)
 
-                        for i in range(5):
-                            if all(c.closed() for c in Comm._instances):
-                                break
+                            for i in range(5):
+                                if all(c.closed() for c in Comm._instances):
+                                    break
+                                else:
+                                    await asyncio.sleep(0.05)
                             else:
-                                await asyncio.sleep(0.05)
-                        else:
-                            L = [c for c in Comm._instances if not c.closed()]
-                            Comm._instances.clear()
-                            # raise ValueError("Unclosed Comms", L)
-                            print("Unclosed Comms", L)
+                                L = [c for c in Comm._instances if not c.closed()]
+                                Comm._instances.clear()
+                                # raise ValueError("Unclosed Comms", L)
+                                print("Unclosed Comms", L)
 
                         return result
 
@@ -1474,6 +1475,13 @@ def check_process_leak(check=True):
 
 @contextmanager
 def check_instances():
+    try:
+        default_client()
+    except ValueError:
+        pass
+    else:
+        raise Exception("Default client found at beginning of test")
+
     Client._instances.clear()
     Worker._instances.clear()
     Scheduler._instances.clear()
@@ -1485,43 +1493,52 @@ def check_instances():
     _global_clients.clear()
     Comm._instances.clear()
 
-    yield
+    try:
+        yield
+    finally:
+        try:
+            start = time()
+            while set(_global_clients):
+                sleep(0.1)
+                assert time() < start + 5
 
-    start = time()
-    while set(_global_clients):
-        sleep(0.1)
-        assert time() < start + 10
+            try:
+                c = default_client()
+            except ValueError:
+                pass
+            else:
+                raise Exception("Default client found at end of test")
+        finally:
+            _global_clients.clear()
 
-    _global_clients.clear()
+            for w in Worker._instances:
+                with ignoring(RuntimeError):  # closed IOLoop
+                    w.loop.add_callback(w.close, report=False, executor_wait=False)
+                    if w.status == "running":
+                        w.loop.add_callback(w.close)
+            Worker._instances.clear()
 
-    for w in Worker._instances:
-        with ignoring(RuntimeError):  # closed IOLoop
-            w.loop.add_callback(w.close, report=False, executor_wait=False)
-            if w.status == "running":
-                w.loop.add_callback(w.close)
-    Worker._instances.clear()
+            for i in range(5):
+                if all(c.closed() for c in Comm._instances):
+                    break
+                else:
+                    sleep(0.1)
+            else:
+                L = [c for c in Comm._instances if not c.closed()]
+                Comm._instances.clear()
+                print("Unclosed Comms", L)
+                # raise ValueError("Unclosed Comms", L)
 
-    for i in range(5):
-        if all(c.closed() for c in Comm._instances):
-            break
-        else:
-            sleep(0.1)
-    else:
-        L = [c for c in Comm._instances if not c.closed()]
-        Comm._instances.clear()
-        print("Unclosed Comms", L)
-        # raise ValueError("Unclosed Comms", L)
+            assert all(
+                n.status == "closed" or n.status == "init" for n in Nanny._instances
+            ), {n: n.status for n in Nanny._instances}
 
-    assert all(n.status == "closed" or n.status == "init" for n in Nanny._instances), {
-        n: n.status for n in Nanny._instances
-    }
+            # assert not list(SpecCluster._instances)  # TODO
+            assert all(c.status == "closed" for c in SpecCluster._instances)
+            SpecCluster._instances.clear()
 
-    # assert not list(SpecCluster._instances)  # TODO
-    assert all(c.status == "closed" for c in SpecCluster._instances)
-    SpecCluster._instances.clear()
-
-    Nanny._instances.clear()
-    DequeHandler.clear_all_instances()
+            Nanny._instances.clear()
+            DequeHandler.clear_all_instances()
 
 
 @contextmanager

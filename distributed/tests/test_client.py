@@ -5054,7 +5054,8 @@ def test_future_auto_inform(c, s, a, b):
     yield client.close()
 
 
-def test_client_async_before_loop_starts():
+@pytest.mark.skip(reason="Hard to close an async started client in sync function")
+def test_client_async_before_loop_starts(cleanup):
     with pristine_loop() as loop:
         client = Client(asynchronous=True, loop=loop)
         assert client.asynchronous
@@ -5219,7 +5220,7 @@ def test_client_name(s, a, b):
     yield c.close()
 
 
-def test_client_doesnt_close_given_loop(loop, s, a, b):
+def test_client_doesnt_close_given_loop(cleanup, loop, s, a, b):
     with Client(s["address"], loop=loop) as c:
         assert c.submit(inc, 1).result() == 2
     with Client(s["address"], loop=loop) as c:
@@ -5792,7 +5793,7 @@ def test_as_completed_async_for_cancel(c, s, a, b):
     assert L == [x, y]
 
 
-def test_async_with(loop):
+def test_async_with(cleanup, loop):
     result = None
     client = None
     cluster = None
@@ -5812,7 +5813,7 @@ def test_async_with(loop):
     assert cluster.status == "closed"
 
 
-def test_client_sync_with_async_def(loop):
+def test_client_sync_with_async_def(cleanup, loop):
     async def ff():
         await gen.sleep(0.01)
         return 1
