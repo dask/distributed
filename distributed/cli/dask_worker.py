@@ -11,7 +11,7 @@ import click
 import dask
 from dask.utils import ignoring
 from dask.system import CPU_COUNT
-from distributed import Nanny, Worker
+from distributed import Nanny
 from distributed.security import Security
 from distributed.cli.utils import check_python_3, install_signal_handlers
 from distributed.comm import get_address_host_port
@@ -193,9 +193,9 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--worker-class",
     type=str,
-    default=None,
-    help="Worker class used to instantiate workers from. Defaults "
-    "to distributed.worker.Worker.",
+    default="distributed.worker.Worker",
+    show_default=True,
+    help="Worker class used to instantiate workers from.",
 )
 @click.option(
     "--lifetime-restart/--no-lifetime-restart",
@@ -347,12 +347,9 @@ def main(
 
     loop = IOLoop.current()
 
-    if worker_class is not None:
-        worker_class = import_term(worker_class)
-        if nanny:
-            kwargs["worker_class"] = worker_class
-    else:
-        worker_class = Worker
+    worker_class = import_term(worker_class)
+    if nanny:
+        kwargs["worker_class"] = worker_class
 
     if nanny:
         kwargs.update({"worker_port": worker_port, "listen_address": listen_address})
