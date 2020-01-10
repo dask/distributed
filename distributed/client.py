@@ -905,7 +905,6 @@ class Client(Node):
         if self.status in ("running", "closing"):
             try:
                 self.scheduler_comm.send(msg)
-                print("Graph sent")
             except (CommClosedError, AttributeError):
                 if self.status == "running":
                     raise
