@@ -905,6 +905,7 @@ class Client(Node):
         if self.status in ("running", "closing"):
             try:
                 self.scheduler_comm.send(msg)
+                print("Graph sent")
             except (CommClosedError, AttributeError):
                 if self.status == "running":
                     raise
@@ -2433,6 +2434,7 @@ class Client(Node):
         actors=None,
     ):
         with self._refcount_lock:
+            self._send_to_scheduler({"op": "preparing-update-graph"})
             if resources:
                 resources = self._expand_resources(
                     resources, all_keys=itertools.chain(dsk, keys)

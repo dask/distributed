@@ -1232,6 +1232,7 @@ class Scheduler(ServerNode):
         }
 
         client_handlers = {
+            "preparing-update-graph": self.preparing_update_graph,
             "update-graph": self.update_graph,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
@@ -1725,6 +1726,19 @@ class Scheduler(ServerNode):
             if comm:
                 await comm.write(msg)
             await self.handle_worker(comm=comm, worker=address)
+
+    def preparing_update_graph(self, client=None):
+        """
+        New computations will be sent through via the update_graph method shortly.
+
+        This happens whenever the Client start processing a call to submit, map, get, or compute.
+        As the serialisation of the graph can take a while the client is being curteous and giving us a heads up.
+        """
+        for plugin in self.plugins[:]:
+            try:
+                plugin.preparing_update_graph(self, client=client)
+            except Exception as e:
+                logger.exception(e)
 
     def update_graph(
         self,
@@ -2465,6 +2479,12 @@ class Scheduler(ServerNode):
         self.log_event(["all", client], {"action": "add-client", "client": client})
         self.clients[client] = ClientState(client, versions=versions)
 
+        for plugin in self.plugins[:]:
+            try:
+                plugin.add_client(scheduler=self, client=client)
+            except Exception as e:
+                logger.exception(e)
+
         try:
             bcomm = BatchedSend(interval="2ms", loop=self.loop)
             bcomm.start(comm)
@@ -2511,6 +2531,12 @@ class Scheduler(ServerNode):
                 keys=[ts.key for ts in cs.wants_what], client=cs.client_key
             )
             del self.clients[client]
+
+            for plugin in self.plugins[:]:
+                try:
+                    plugin.remove_client(scheduler=self, client=client)
+                except Exception as e:
+                    logger.exception(e)
 
         def remove_client_from_events():
             # If the client isn't registered anymore after the delay, remove from events
