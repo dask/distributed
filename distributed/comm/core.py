@@ -6,7 +6,7 @@ import weakref
 import dask
 
 from ..metrics import time
-from ..utils import parse_timedelta
+from ..utils import parse_timedelta, ignoring
 from . import registry
 from .addressing import parse_address
 
@@ -209,13 +209,11 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
                 future = connector.connect(
                     loc, deserialize=deserialize, **(connection_args or {})
                 )
-                try:
+                with ignoring(asyncio.TimeoutError):
                     comm = await asyncio.wait_for(
                         future, timeout=min(deadline - time(), 1)
                     )
                     break
-                except asyncio.TimeoutError:
-                    pass
             if not comm:
                 _raise(error)
         except FatalCommClosedError:
