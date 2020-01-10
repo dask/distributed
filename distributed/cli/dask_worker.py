@@ -240,6 +240,7 @@ def main(
     tls_cert,
     tls_key,
     dashboard_address,
+    worker_class,
     **kwargs
 ):
     g0, g1, g2 = gc.get_threshold()  # https://github.com/dask/distributed/issues/1653
@@ -346,7 +347,6 @@ def main(
 
     loop = IOLoop.current()
 
-    worker_class = kwargs.pop("worker_class")
     if worker_class is not None:
         worker_class = import_term(worker_class)
         if nanny:
