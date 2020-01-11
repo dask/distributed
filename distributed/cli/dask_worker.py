@@ -193,7 +193,7 @@ pem_file_option_type = click.Path(exists=True, resolve_path=True)
 @click.option(
     "--worker-class",
     type=str,
-    default="distributed.worker.Worker",
+    default="dask.distributed.Worker",
     show_default=True,
     help="Worker class used to instantiate workers from.",
 )
