@@ -217,6 +217,15 @@ def test_remove_worker_from_scheduler(s, a, b):
     s.validate_state()
 
 
+@gen_cluster()
+def test_remove_worker_by_name_from_scheduler(s, a, b):
+    assert a.address in s.stream_comms
+    assert s.remove_worker(address=a.name) == "OK"
+    assert a.address not in s.nthreads
+    assert s.remove_worker(address=a.address) == "already-removed"
+    s.validate_state()
+
+
 @gen_cluster(config={"distributed.scheduler.events-cleanup-delay": "10 ms"})
 def test_clear_events_worker_removal(s, a, b):
     assert a.address in s.events
