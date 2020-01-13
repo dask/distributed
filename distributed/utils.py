@@ -1209,15 +1209,28 @@ if tornado.version_info[0] >= 5:
                 is_kernel_and_no_running_loop = True
 
         if not is_kernel_and_no_running_loop:
-            import tornado.platform.asyncio
 
-            if sys.platform == "win32":
+            BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
+            if WINDOWS and sys.version_info >= (3, 8):
+                # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+                # fallback to the pre-3.8 default of Selector
                 # https://github.com/tornadoweb/tornado/issues/2608
-                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-            else:
-                asyncio.set_event_loop_policy(
-                    tornado.platform.asyncio.AnyThreadEventLoopPolicy()
-                )
+                if (
+                    type(asyncio.get_event_loop_policy())
+                    is asyncio.WindowsProactorEventLoopPolicy
+                ):
+                    BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+
+            class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
+                def get_event_loop(self):
+                    try:
+                        return super().get_event_loop()
+                    except (RuntimeError, AssertionError):
+                        loop = self.new_event_loop()
+                        self.set_event_loop(loop)
+                        return loop
+
+            asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
 
 
 @functools.lru_cache(1000)
