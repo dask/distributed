@@ -575,7 +575,7 @@ def test_coerce_address():
             "tcp://127.0.0.1:8000",
             "tcp://[::1]:8000",
         )
-        assert s.coerce_address(u"localhost:8000") in (
+        assert s.coerce_address("localhost:8000") in (
             "tcp://127.0.0.1:8000",
             "tcp://[::1]:8000",
         )
