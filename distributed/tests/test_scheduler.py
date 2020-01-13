@@ -1966,3 +1966,16 @@ async def test_multiple_listeners(cleanup):
     log = log.getvalue()
     assert re.search(r"Scheduler at:\s*tcp://", log)
     assert re.search(r"Scheduler at:\s*inproc://", log)
+
+
+@gen_cluster(nthreads=[("127.0.0.1", 1)])
+async def test_worker_name_collision(s, a):
+    # test that a name collision for workers produces the expected respsone
+    # and leaves the data structures of Scheduler in a good state
+    # is not updated by the second worker
+    with pytest.raises(ValueError, match=f"name taken, {a.name!r}"):
+        await Worker(s.address, name=a.name, loop=s.loop, host="127.0.0.1")
+
+    s.validate_state()
+    assert set(s.workers) == {a.address}
+    assert s.aliases == {a.name: a.address}
