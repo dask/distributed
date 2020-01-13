@@ -5,7 +5,6 @@ from concurrent.futures import ThreadPoolExecutor, CancelledError
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
 import copy
-from datetime import timedelta
 import errno
 from functools import partial
 import html
@@ -761,7 +760,7 @@ class Client(Node):
         ):
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             return future
         else:
             return sync(
@@ -1043,9 +1042,7 @@ class Client(Node):
             )
             comm.name = "Client->Scheduler"
             if timeout is not None:
-                await gen.with_timeout(
-                    timedelta(seconds=timeout), self._update_scheduler_info()
-                )
+                await asyncio.wait_for(self._update_scheduler_info(), timeout)
             else:
                 await self._update_scheduler_info()
             await comm.write(
@@ -1064,7 +1061,7 @@ class Client(Node):
         finally:
             self._connecting_to_scheduler = False
         if timeout is not None:
-            msg = await gen.with_timeout(timedelta(seconds=timeout), comm.read())
+            msg = await asyncio.wait_for(comm.read(), timeout)
         else:
             msg = await comm.read()
         assert len(msg) == 1
@@ -1268,12 +1265,8 @@ class Client(Node):
 
             # Give the scheduler 'stream-closed' message 100ms to come through
             # This makes the shutdown slightly smoother and quieter
-            with ignoring(AttributeError, gen.TimeoutError):
-                await gen.with_timeout(
-                    timedelta(milliseconds=100),
-                    self._handle_scheduler_coroutine,
-                    quiet_exceptions=(CancelledError,),
-                )
+            with ignoring(AttributeError, gen.TimeoutError, CancelledError):
+                await asyncio.wait_for(self._handle_scheduler_coroutine, 0.1)
 
             if (
                 self.scheduler_comm
@@ -1308,7 +1301,7 @@ class Client(Node):
 
             if not fast:
                 with ignoring(TimeoutError):
-                    await gen.with_timeout(timedelta(seconds=2), list(coroutines))
+                    await asyncio.wait_for(list(coroutines), 2)
 
             with ignoring(AttributeError):
                 await self.scheduler.close_rpc()
@@ -1344,7 +1337,7 @@ class Client(Node):
         if self.asynchronous:
             future = self._close()
             if timeout:
-                future = gen.with_timeout(timedelta(seconds=timeout), future)
+                future = asyncio.wait_for(future, timeout)
             return future
 
         if self._start_arg is None:
@@ -4077,7 +4070,7 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
 
     future = wait_for({f._state.wait() for f in fs})
     if timeout is not None:
-        future = gen.with_timeout(timedelta(seconds=timeout), future)
+        future = asyncio.wait_for(future, timeout)
     await future
 
     done, not_done = (

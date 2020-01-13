@@ -2,7 +2,6 @@ import asyncio
 import cloudpickle
 import pickle
 from collections import defaultdict
-from datetime import timedelta
 import json
 import operator
 import re
@@ -147,7 +146,7 @@ def test_no_valid_workers(client, s, a, b, c):
     assert s.tasks[x.key] in s.unrunnable
 
     with pytest.raises(gen.TimeoutError):
-        yield gen.with_timeout(timedelta(milliseconds=50), x)
+        yield asyncio.wait_for(x, 0.05)
 
 
 @gen_cluster(client=True, nthreads=[("127.0.0.1", 1)] * 3)
@@ -167,7 +166,7 @@ def test_no_workers(client, s):
     assert s.tasks[x.key] in s.unrunnable
 
     with pytest.raises(gen.TimeoutError):
-        yield gen.with_timeout(timedelta(milliseconds=50), x)
+        yield asyncio.wait_for(x, 0.05)
 
 
 @gen_cluster(nthreads=[])

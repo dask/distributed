@@ -1,5 +1,5 @@
-from datetime import timedelta
 from time import sleep
+import asyncio
 
 import pytest
 from tornado import gen
@@ -182,7 +182,7 @@ def test_get_many(c, s, a, b):
     assert data == [1, 2]
 
     with pytest.raises(gen.TimeoutError):
-        data = yield gen.with_timeout(timedelta(seconds=0.100), xx.get(batch=2))
+        data = yield asyncio.wait_for(xx.get(batch=2), 0.1)
 
 
 @gen_cluster(client=True)

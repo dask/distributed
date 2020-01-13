@@ -1097,11 +1097,11 @@ class Worker(ServerNode):
                 pc.stop()
             with ignoring(EnvironmentError, gen.TimeoutError):
                 if report and self.contact_address is not None:
-                    await gen.with_timeout(
-                        timedelta(seconds=timeout),
+                    await asyncio.wait_for(
                         self.scheduler.unregister(
                             address=self.contact_address, safe=safe
                         ),
+                        timeout,
                     )
             await self.scheduler.close_rpc()
             self._workdir.release()

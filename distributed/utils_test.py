@@ -2,7 +2,6 @@ import asyncio
 import collections
 from contextlib import contextmanager
 import copy
-from datetime import timedelta
 import functools
 from glob import glob
 import io
@@ -741,7 +740,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
                 await w.terminate(close=True)
 
     with ignoring(TimeoutError):
-        await gen.with_timeout(timedelta(seconds=timeout), do_disconnect())
+        await asyncio.wait_for(do_disconnect(), timeout)
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
@@ -914,9 +913,7 @@ def gen_cluster(
                         try:
                             future = func(*args)
                             if timeout:
-                                future = gen.with_timeout(
-                                    timedelta(seconds=timeout), future
-                                )
+                                future = asyncio.wait_for(future, timeout)
                             result = await future
                             if s.validate:
                                 s.validate_state()
@@ -924,9 +921,7 @@ def gen_cluster(
                             if client and c.status not in ("closing", "closed"):
                                 await c._close(fast=s.status == "closed")
                             await end_cluster(s, workers)
-                            await gen.with_timeout(
-                                timedelta(seconds=1), cleanup_global_workers()
-                            )
+                            await asyncio.wait_for(cleanup_global_workers(), 1)
 
                         try:
                             c = await default_client()

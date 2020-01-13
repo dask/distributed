@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
 import importlib
 import logging
 from numbers import Number
@@ -10,6 +9,7 @@ import shutil
 import sys
 from time import sleep
 import traceback
+import asyncio
 
 import dask
 from dask import delayed
@@ -326,7 +326,7 @@ def test_worker_waits_for_scheduler(loop):
     def f():
         w = Worker("127.0.0.1", 8007)
         try:
-            yield gen.with_timeout(timedelta(seconds=3), w)
+            yield asyncio.wait_for(w, 3)
         except TimeoutError:
             pass
         else:
