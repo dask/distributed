@@ -28,10 +28,6 @@ class WebsocketPlugin(SchedulerPlugin):
         """ Run when a client disconnects """
         self.socket.send("remove_client", {"client": client})
 
-    def preparing_update_graph(self, scheduler, client=None, **kwargs):
-        """ Run when a new graph / tasks will enter the scheduler soon """
-        self.socket.send("preparing_update_graph", {"client": client})
-
     def update_graph(self, scheduler, client=None, **kwargs):
         """ Run when a new graph / tasks enter the scheduler """
         self.socket.send("update_graph", {"client": client})

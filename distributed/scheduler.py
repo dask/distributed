@@ -1232,7 +1232,6 @@ class Scheduler(ServerNode):
         }
 
         client_handlers = {
-            "preparing-update-graph": self.preparing_update_graph,
             "update-graph": self.update_graph,
             "client-desires-keys": self.client_desires_keys,
             "update-data": self.update_data,
@@ -1726,19 +1725,6 @@ class Scheduler(ServerNode):
             if comm:
                 await comm.write(msg)
             await self.handle_worker(comm=comm, worker=address)
-
-    def preparing_update_graph(self, client=None):
-        """
-        New computations will be sent through via the update_graph method shortly.
-
-        This happens whenever the Client start processing a call to submit, map, get, or compute.
-        As the serialisation of the graph can take a while the client is being curteous and giving us a heads up.
-        """
-        for plugin in self.plugins[:]:
-            try:
-                plugin.preparing_update_graph(self, client=client)
-            except Exception as e:
-                logger.exception(e)
 
     def update_graph(
         self,

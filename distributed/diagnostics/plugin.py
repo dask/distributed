@@ -37,9 +37,6 @@ class SchedulerPlugin(object):
     >>> scheduler.add_plugin(plugin)  # doctest: +SKIP
     """
 
-    def preparing_update_graph(self, scheduler, client=None, **kwargs):
-        """ Run when a new graph / tasks will enter the scheduler soon """
-
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         """ Run when a new graph / tasks enter the scheduler """
 

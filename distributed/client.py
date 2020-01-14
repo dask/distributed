@@ -2433,7 +2433,6 @@ class Client(Node):
         actors=None,
     ):
         with self._refcount_lock:
-            self._send_to_scheduler({"op": "preparing-update-graph"})
             if resources:
                 resources = self._expand_resources(
                     resources, all_keys=itertools.chain(dsk, keys)
