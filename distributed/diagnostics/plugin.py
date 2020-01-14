@@ -65,13 +65,7 @@ class SchedulerPlugin(object):
         """ Run when a new worker enters the cluster """
 
     def remove_worker(self, scheduler=None, worker=None, **kwargs):
-        """ Run when a worker leaves the cluster """
-
-    def add_client(self, scheduler=None, client=None, **kwargs):
-        """ Run when a new client connects """
-
-    def remove_client(self, scheduler=None, client=None, **kwargs):
-        """ Run when a client disconnects """
+        """ Run when a worker leaves the cluster"""
 
 
 class WorkerPlugin(object):
