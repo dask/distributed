@@ -1784,6 +1784,20 @@ async def test_task_prefix(c, s, a, b):
     assert s.task_prefixes["sum-aggregate"].states["memory"] == 1
 
 
+@gen_cluster(client=True)
+async def test_task_unique_groups(c, s, a, b):
+    """ This test ensure that task groups remain unique
+    when using submit
+    """
+    h = await c.submit(sum, [3, 4])
+    g = await c.submit(len, [1, 2])
+
+    assert s.task_prefixes["len"].states["memory"] == 1
+    assert s.task_prefixes["sum"].states["forgotten"] == 1
+    print(s.task_prefixes)
+    print("\n\n")
+
+
 class BrokenComm(Comm):
     peer_address = None
     local_address = None

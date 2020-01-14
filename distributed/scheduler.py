@@ -1973,7 +1973,10 @@ class Scheduler(ServerNode):
         ts = TaskState(key, spec)
         ts._state = state
         try:
-            tg = self.task_groups[ts.group_key]
+            if not ts.group_key:
+                tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
+            else:
+                tg = self.task_groups[ts.group_key]
         except KeyError:
             tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
         tg.add(ts)
