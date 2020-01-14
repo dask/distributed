@@ -37,7 +37,7 @@ call deactivate
     requests ^
     toolz ^
     tblib ^
-    tornado=6 ^
+    tornado=5 ^
     zict ^
     fsspec ^
     -c conda-forge
