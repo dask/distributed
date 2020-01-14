@@ -1794,8 +1794,6 @@ async def test_task_unique_groups(c, s, a, b):
 
     assert s.task_prefixes["len"].states["memory"] == 1
     assert s.task_prefixes["sum"].states["forgotten"] == 1
-    print(s.task_prefixes)
-    print("\n\n")
 
 
 class BrokenComm(Comm):
