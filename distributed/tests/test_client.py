@@ -496,7 +496,7 @@ def test_thread(c):
     assert x.result() == 2
 
     x = c.submit(slowinc, 1, delay=0.3)
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises((gen.TimeoutError, asyncio.TimeoutError)):
         x.result(timeout=0.01)
     assert x.result() == 2
 
