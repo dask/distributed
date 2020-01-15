@@ -739,8 +739,8 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
             with rpc(addr, **rpc_kwargs) as w:
                 await w.terminate(close=True)
 
-    with ignoring(TimeoutError):
-        await asyncio.wait_for(do_disconnect(), timeout)
+    task = asyncio.ensure_future(do_disconnect())
+    await asyncio.wait([task], timeout=timeout)
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
