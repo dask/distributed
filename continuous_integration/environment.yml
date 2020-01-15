@@ -29,7 +29,6 @@ dependencies:
       - pytest-repeat
       - pytest-timeout
       - pytest-faulthandler
-      - pytest-xdist
       - sortedcollections
       - pytest-asyncio
       - git+https://github.com/dask/dask
