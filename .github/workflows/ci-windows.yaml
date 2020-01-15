@@ -30,4 +30,4 @@ jobs:
         shell: powershell
         env:
           PYTHONFAULTHANDLER: 1
-        run: py.test --tb=native --timeout=120 -r s -v -m "not avoid_travis" distributed
+        run: py.test -m "not avoid_travis" distributed --verbose -r s --timeout-method=thread --timeout=300 --durations=20
