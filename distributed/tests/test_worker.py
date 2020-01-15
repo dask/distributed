@@ -19,7 +19,6 @@ import pytest
 from toolz import pluck, sliding_window, first
 import tornado
 from tornado import gen
-from tornado.ioloop import TimeoutError
 
 from distributed import (
     Client,
@@ -327,7 +326,7 @@ def test_worker_waits_for_scheduler(loop):
         w = Worker("127.0.0.1", 8007)
         try:
             yield asyncio.wait_for(w, 3)
-        except TimeoutError:
+        except asyncio.TimeoutError:
             pass
         else:
             assert False
@@ -762,7 +761,7 @@ def test_worker_death_timeout(s):
         yield s.close()
         w = Worker(s.address, death_timeout=1)
 
-    with pytest.raises(gen.TimeoutError) as info:
+    with pytest.raises(asyncio.TimeoutError) as info:
         yield w
 
     assert "Worker" in str(info.value)
