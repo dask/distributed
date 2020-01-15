@@ -3,7 +3,6 @@ import random
 
 import pytest
 from toolz import assoc
-from tornado import gen
 
 from distributed.batched import BatchedSend
 from distributed.core import listen, connect, CommClosedError
@@ -253,5 +252,5 @@ async def test_serializers():
         msg = await comm.read()
         assert list(msg) == [{"x": 123}, {"x": "hello"}]
 
-        with pytest.raises(gen.TimeoutError):
+        with pytest.raises(asyncio.TimeoutError):
             msg = await asyncio.wait_for(comm.read(), 0.1)

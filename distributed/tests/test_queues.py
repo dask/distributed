@@ -181,7 +181,7 @@ def test_get_many(c, s, a, b):
     data = yield xx.get(batch=2)
     assert data == [1, 2]
 
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         data = yield asyncio.wait_for(xx.get(batch=2), 0.1)
 
 

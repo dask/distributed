@@ -340,7 +340,7 @@ class Nanny(ServerNode):
 
         try:
             await asyncio.wait_for(_(), timeout)
-        except gen.TimeoutError:
+        except asyncio.TimeoutError:
             logger.error("Restart timed out, returning before finished")
             return "timed out"
         else:
