@@ -3,28 +3,28 @@ channels:
   - defaults
   - conda-forge
 dependencies:
-    - zstandard
-    - bokeh
-    - click
-    - cloudpickle
-    - dask
-    - dill
-    - lz4
-    - ipykernel
-    - ipywidgets
-    - joblib
-    - jupyter_client
-    - msgpack-python
-    - prometheus_client
-    - psutil
-    - pytest
-    - python=%PYTHON%
-    - requests
-    - toolz
-    - tblib
-    - tornado=5
-    - zict
-    - fsspec
+  - zstandard
+  - bokeh
+  - click
+  - cloudpickle
+  - dask
+  - dill
+  - lz4
+  - ipykernel
+  - ipywidgets
+  - joblib
+  - jupyter_client
+  - msgpack-python
+  - prometheus_client
+  - psutil
+  - pytest
+  - python=%PYTHON%
+  - requests
+  - toolz
+  - tblib
+  - tornado=5
+  - zict
+  - fsspec
   - pip:
       - pytest-repeat
       - pytest-timeout
