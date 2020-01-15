@@ -18,13 +18,13 @@ dependencies:
   - prometheus_client
   - psutil
   - pytest
-  - python=%PYTHON%
   - requests
   - toolz
   - tblib
   - tornado=5
   - zict
   - fsspec
+  - pip
   - pip:
       - pytest-repeat
       - pytest-timeout
