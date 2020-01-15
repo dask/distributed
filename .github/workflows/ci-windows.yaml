@@ -10,10 +10,6 @@ jobs:
         python-version: ["3.6", "3.7"]
 
     env:
-      # SDK v7.0 MSVC Express 2008's SetEnv.cmd script will fail if the
-      # /E:ON and /V:ON options are not enabled in the batch script intepreter
-      # See: http://stackoverflow.com/a/13751649/163740
-      CMD_IN_ENV: "cmd /E:ON /V:ON /C .\\continuous_integration\\run_with_env.cmd"
       JUNIT_OUT: junit-results.xml
 
     steps:
@@ -23,9 +19,14 @@ jobs:
           miniconda-version: "latest"
           python-version: ${{ matrix.python-version }}
           activate-environment: testenv
-      - shell: cmd /C CALL {0}
-        run: continuous_integration\\setup_conda_environment.cmd
-      - shell: cmd /C CALL {0}
-        run: continuous_integration\\build.cmd
-      - shell: cmd /C CALL {0}
-        run: "%CMD_IN_ENV% continuous_integration\\run_tests.cmd"
+          environment-file: continuous_integration/environment.yml
+      - shell: powershell
+        run: |
+          conda activate testenv
+          pip install -q --no-deps -e .
+      - shell: powershell
+        env:
+          PYTHONFAULTHANDLER: 1
+        run: |
+          conda activate testenv
+          py.test --tb=native --timeout=120 -r s -v -m "not avoid_travis" --junit-xml="$Env.JUNIT_OUT" distributed
