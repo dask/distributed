@@ -30,4 +30,4 @@ jobs:
         shell: powershell
         env:
           PYTHONFAULTHANDLER: 1
-        run: py.test -m "not avoid_travis" distributed --verbose -r s --timeout-method=thread --timeout=300 --durations=20
+        run: py.test -m "not avoid_travis" distributed/cli/tests/test_dask_scheduler.py::test_defaults --verbose -r s --timeout-method=thread --timeout=300 --durations=20
