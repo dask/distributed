@@ -145,7 +145,7 @@ def test_no_valid_workers(client, s, a, b, c):
 
     assert s.tasks[x.key] in s.unrunnable
 
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         yield asyncio.wait_for(x, 0.05)
 
 
@@ -165,7 +165,7 @@ def test_no_workers(client, s):
 
     assert s.tasks[x.key] in s.unrunnable
 
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         yield asyncio.wait_for(x, 0.05)
 
 
