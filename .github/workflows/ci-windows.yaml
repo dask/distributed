@@ -9,24 +9,25 @@ jobs:
       matrix:
         python-version: ["3.6", "3.7"]
 
-    env:
-      JUNIT_OUT: junit-results.xml
-
     steps:
-      - uses: actions/checkout@v1
-      - uses: goanpeca/setup-miniconda@v1
+      - name: Checkout source
+        uses: actions/checkout@v1
+
+      - name: Setup Conda Environment
+        uses: goanpeca/setup-miniconda@v1
         with:
           miniconda-version: "latest"
           python-version: ${{ matrix.python-version }}
-          activate-environment: testenv
           environment-file: continuous_integration/environment.yml
-      - shell: powershell
-        run: |
-          conda activate testenv
-          pip install -q --no-deps -e .
-      - shell: powershell
+          activate-environment: testenv
+          auto-activate-base: false
+
+      - name: Install distributed from source
+        shell: powershell
+        run: pip install -q --no-deps -e .
+
+      - name: Run tests
+        shell: powershell
         env:
           PYTHONFAULTHANDLER: 1
-        run: |
-          conda activate testenv
-          py.test --tb=native --timeout=120 -r s -v -m "not avoid_travis" --junit-xml="$Env.JUNIT_OUT" distributed
+        run: py.test --tb=native --timeout=120 -r s -v -m "not avoid_travis" distributed
