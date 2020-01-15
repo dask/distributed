@@ -1265,8 +1265,8 @@ class Client(Node):
 
             # Give the scheduler 'stream-closed' message 100ms to come through
             # This makes the shutdown slightly smoother and quieter
-            with ignoring(AttributeError, gen.TimeoutError, CancelledError):
-                await asyncio.wait_for(self._handle_scheduler_coroutine, 0.1)
+            with ignoring(AttributeError, CancelledError):
+                await asyncio.wait([self._handle_scheduler_coroutine], timeout=0.1)
 
             if (
                 self.scheduler_comm
@@ -1301,7 +1301,11 @@ class Client(Node):
 
             if not fast:
                 with ignoring(TimeoutError):
-                    await asyncio.wait_for(list(coroutines), 2)
+
+                    async def _(c):
+                        await asyncio.wait_for(c, 2)
+
+                    await asyncio.gather(*[_(c) for c in coroutines])
 
             with ignoring(AttributeError):
                 await self.scheduler.close_rpc()
