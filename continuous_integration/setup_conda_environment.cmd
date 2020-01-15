@@ -7,7 +7,7 @@ set PIP_INSTALL=pip install -q
 @echo on
 
 @rem Deactivate any environment
-call deactivate
+%CONDA% deactivate
 @rem Update conda
 %CONDA% update -q -y conda
 @rem Display root environment (for debugging)
@@ -17,7 +17,7 @@ call deactivate
 
 @rem Create test environment
 @rem (note: no cytoolz as it seems to prevent faulthandler tracebacks on crash)
-%CONDA% create -n %CONDA_ENV% -q -y ^
+%CONDA% install -n %CONDA_ENV% -q -y ^
     zstandard ^
     bokeh ^
     click ^

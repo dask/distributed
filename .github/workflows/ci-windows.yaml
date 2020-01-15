@@ -23,9 +23,9 @@ jobs:
           miniconda-version: "latest"
           python-version: ${{ matrix.python-version }}
           activate-environment: testenv
-      - shell: powershell
+      - shell: cmd /C CALL {0}
         run: continuous_integration\\setup_conda_environment.cmd
-      - shell: powershell
+      - shell: cmd /C CALL {0}
         run: continuous_integration\\build.cmd
-      - shell: powershell
+      - shell: cmd /C CALL {0}
         run: "%CMD_IN_ENV% continuous_integration\\run_tests.cmd"
