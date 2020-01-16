@@ -688,10 +688,10 @@ def cluster(
 
             loop.run_sync(
                 lambda: disconnect_all(
-                    [w["address"] for w in workers], timeout=0.5, rpc_kwargs=rpc_kwargs
+                    [w["address"] for w in workers], timeout=3, rpc_kwargs=rpc_kwargs
                 )
             )
-            loop.run_sync(lambda: disconnect(saddr, timeout=0.5, rpc_kwargs=rpc_kwargs))
+            loop.run_sync(lambda: disconnect(saddr, timeout=3, rpc_kwargs=rpc_kwargs))
 
             scheduler.terminate()
             scheduler_q.close()
@@ -739,8 +739,7 @@ async def disconnect(addr, timeout=3, rpc_kwargs=None):
             with rpc(addr, **rpc_kwargs) as w:
                 await w.terminate(close=True)
 
-    task = asyncio.ensure_future(do_disconnect())
-    await asyncio.wait([task], timeout=timeout)
+    await asyncio.wait_for(do_disconnect(), timeout=timeout)
 
 
 async def disconnect_all(addresses, timeout=3, rpc_kwargs=None):
