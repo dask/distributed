@@ -605,7 +605,12 @@ def security():
 
 @contextmanager
 def cluster(
-    nworkers=2, nanny=False, worker_kwargs={}, active_rpc_timeout=1, scheduler_kwargs={}
+    nworkers=2,
+    nanny=False,
+    worker_kwargs={},
+    active_rpc_timeout=1,
+    disconnect_timeout=3,
+    scheduler_kwargs={},
 ):
     ws = weakref.WeakSet()
     enable_proctitle_on_children()
@@ -688,10 +693,16 @@ def cluster(
 
             loop.run_sync(
                 lambda: disconnect_all(
-                    [w["address"] for w in workers], timeout=3, rpc_kwargs=rpc_kwargs
+                    [w["address"] for w in workers],
+                    timeout=disconnect_timeout,
+                    rpc_kwargs=rpc_kwargs,
                 )
             )
-            loop.run_sync(lambda: disconnect(saddr, timeout=3, rpc_kwargs=rpc_kwargs))
+            loop.run_sync(
+                lambda: disconnect(
+                    saddr, timeout=disconnect_timeout, rpc_kwargs=rpc_kwargs
+                )
+            )
 
             scheduler.terminate()
             scheduler_q.close()
