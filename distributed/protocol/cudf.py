@@ -9,7 +9,7 @@ from ..utils import log_errors
 # here we ammend the returned headers with `is_gpu` for
 # UCX buffer consumption
 @cuda_serialize.register(
-    (cudf.DataFrame, cudf.Series, cudf.groupby.groupby._Groupby)
+    (cudf.DataFrame, cudf.Index, cudf.Series, cudf.groupby.groupby._Groupby)
 )
 def serialize_cudf_dataframe(x):
     with log_errors():
@@ -18,7 +18,7 @@ def serialize_cudf_dataframe(x):
 
 
 @cuda_deserialize.register(
-    (cudf.DataFrame, cudf.Series, cudf.groupby.groupby._Groupby)
+    (cudf.DataFrame, cudf.Index, cudf.Series, cudf.groupby.groupby._Groupby)
 )
 def deserialize_cudf_dataframe(header, frames):
     with log_errors():
