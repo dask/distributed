@@ -2285,8 +2285,7 @@ class Worker(ServerNode):
     # Execute Task #
     ################
 
-    @gen.coroutine
-    def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
+    async def executor_submit(self, key, function, args=(), kwargs=None, executor=None):
         """ Safely run function in thread pool executor
 
         We've run into issues running concurrent.future futures within
@@ -2296,7 +2295,6 @@ class Worker(ServerNode):
         """
         executor = executor or self.executor
         job_counter[0] += 1
-        # logger.info("%s:%d Starts job %d, %s", self.ip, self.port, i, key)
         kwargs = kwargs or {}
         future = executor.submit(function, *args, **kwargs)
         pc = PeriodicCallback(
@@ -2304,14 +2302,13 @@ class Worker(ServerNode):
         )
         pc.start()
         try:
-            yield future
+            await asyncio.wrap_future(future)
         finally:
             pc.stop()
 
         result = future.result()
 
-        # logger.info("Finish job %d, %s", i, key)
-        raise gen.Return(result)
+        return result
 
     def run(self, comm, function, args=(), wait=True, kwargs=None):
         kwargs = kwargs or {}
@@ -3512,9 +3509,8 @@ except Exception:
     pass
 else:
 
-    @gen.coroutine
-    def gpu_metric(worker):
-        result = yield offload(nvml.real_time)
+    async def gpu_metric(worker):
+        result = await offload(nvml.real_time)
         return result
 
     DEFAULT_METRICS["gpu"] = gpu_metric
