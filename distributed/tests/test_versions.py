@@ -12,10 +12,10 @@ this_version = get_versions()
 mismatched_version = get_versions()
 mismatched_version["packages"]["distributed"] = "0.0.0.dev0"
 
-# for really old versions, the `package` key may be missing
+# for really old versions, the `package` key is missing - version is UNKNOWN
 key_err_version = {}
 
-# if one no key is available for one package, we assume it's MISSING
+# if no key is available for one package, we assume it's MISSING
 missing_version = get_versions()
 del missing_version["packages"]["distributed"]
 
@@ -82,4 +82,3 @@ def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
     assert "Mismatched versions found" in msg
     assert "distributed" in msg
     assert re.search(node + r"\s+\|\s+" + pattern, msg)
-    print(msg)
