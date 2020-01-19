@@ -5,10 +5,10 @@ import pytest
 from distributed.versions import get_versions, error_message
 
 
-# if every component (client, scheduler, workers) have this version, we're good
+# if every node (client, scheduler, workers) have this version, we're good
 this_version = get_versions()
 
-# if one of the components reports this version, there's a mismatch
+# if one of the nodes reports this version, there's a mismatch
 mismatched_version = get_versions()
 mismatched_version["packages"]["distributed"] = "0.0.0.dev0"
 
@@ -19,7 +19,7 @@ key_err_version = {}
 missing_version = get_versions()
 del missing_version["packages"]["distributed"]
 
-# if a component doesn't report any version info, we treat them as UNKNOWN
+# if a node doesn't report any version info, we treat them as UNKNOWN
 # the happens if the node is pre-32cb96e, i.e. <=2.9.1
 unknown_version = None
 
@@ -38,19 +38,19 @@ def test_versions_match(kwargs_matching):
 
 
 @pytest.fixture(params=["client", "scheduler", "worker-1"])
-def component(request):
-    """Component affected by version mismatch"""
+def node(request):
+    """Node affected by version mismatch."""
     return request.param
 
 
 @pytest.fixture(params=["MISMATCHED", "MISSING", "KEY_ERROR", "NONE"])
 def effect(request):
-    """Compinont affected by version mismatch"""
+    """Specify type of mismatch."""
     return request.param
 
 
 @pytest.fixture
-def kwargs_not_matching(kwargs_matching, component, effect):
+def kwargs_not_matching(kwargs_matching, node, effect):
     affected_version = {
         "MISMATCHED": mismatched_version,
         "MISSING": missing_version,
@@ -58,10 +58,10 @@ def kwargs_not_matching(kwargs_matching, component, effect):
         "NONE": unknown_version,
     }[effect]
     kwargs = kwargs_matching
-    if component in kwargs["workers"]:
-        kwargs["workers"][component] = affected_version
+    if node in kwargs["workers"]:
+        kwargs["workers"][node] = affected_version
     else:
-        kwargs[component] = affected_version
+        kwargs[node] = affected_version
     return kwargs
 
 
@@ -76,9 +76,10 @@ def pattern(effect):
     }[effect]
 
 
-def test_version_mismatch(component, effect, kwargs_not_matching, pattern):
+def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
     msg = error_message(**kwargs_not_matching)
 
     assert "Mismatched versions found" in msg
     assert "distributed" in msg
-    assert re.search(component + r"\s+\|\s+" + pattern, msg)
+    assert re.search(node + r"\s+\|\s+" + pattern, msg)
+    print(msg)

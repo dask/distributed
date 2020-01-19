@@ -103,31 +103,31 @@ def error_message(scheduler, workers, client, client_name="client"):
     MISSING, UNKNOWN = "MISSING", "UNKNOWN"
     scheduler_name = "scheduler"
 
-    components = {**{client_name: client}, **{scheduler_name: scheduler}, **workers}
+    nodes = {**{client_name: client}, **{scheduler_name: scheduler}, **workers}
 
     # Hold all versions, e.g. versions["scheduler"]["distributed"] = 2.9.3
-    component_packages = defaultdict(dict)
+    node_packages = defaultdict(dict)
 
     # Collect all package versions
     packages = set()
 
-    for component, info in components.items():
+    for node, info in nodes.items():
         if info is None or not (isinstance(info, dict)) or "packages" not in info:
-            component_packages[component] = defaultdict(lambda: UNKNOWN)
+            node_packages[node] = defaultdict(lambda: UNKNOWN)
         else:
-            component_packages[component] = defaultdict(lambda: MISSING)
+            node_packages[node] = defaultdict(lambda: MISSING)
             for pkg, version in info["packages"].items():
-                component_packages[component][pkg] = version
+                node_packages[node][pkg] = version
                 packages.add(pkg)
 
     errs = []
     for pkg in sorted(packages):
-        versions = set(component_packages[component][pkg] for component in components)
+        versions = set(node_packages[node][pkg] for node in nodes)
         if len(versions) <= 1:
             continue
         rows = [
-            (component_name, component_packages[component_name][pkg])
-            for component_name in components.keys()
+            (node_name, node_packages[node_name][pkg])
+            for node_name in nodes.keys()
         ]
         errs.append("%s\n%s" % (pkg, asciitable(["", "version"], rows)))
     if errs:
