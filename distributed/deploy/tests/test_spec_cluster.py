@@ -1,6 +1,7 @@
 import asyncio
 import re
 from time import sleep
+import weakref
 
 import dask
 from dask.distributed import SpecCluster, Worker, Client, Scheduler, Nanny
@@ -81,6 +82,19 @@ def test_spec_sync(loop):
             assert cluster.loop is client.loop
             result = client.submit(lambda x: x + 1, 10).result()
             assert result == 11
+
+
+def test_no_circular_references(cleanup, loop):
+    import time
+
+    ref = weakref.ref(SpecCluster(scheduler=scheduler, loop=loop))
+
+    for i in range(100):
+        if ref() is None:
+            break
+        time.sleep(0.1)
+    else:
+        assert False
 
 
 def test_loop_started():

@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import threading
+import weakref
 
 from dask.utils import format_bytes
 
@@ -87,12 +88,17 @@ class Cluster(object):
 
     async def _watch_worker_status(self, comm):
         """ Listen to scheduler for updates on adding and removing workers """
+        ref_self = weakref.ref(self)
         while True:
+            self = None
             try:
                 msgs = await comm.read()
             except OSError:
                 break
 
+            self = ref_self()
+            if self is None:
+                break
             with log_errors():
                 for op, msg in msgs:
                     self._update_worker_status(op, msg)
