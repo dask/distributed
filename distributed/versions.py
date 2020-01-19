@@ -98,34 +98,39 @@ def get_package_info(pkgs):
 
 
 def error_message(scheduler, workers, client, client_name="client"):
-    # we care about the required & optional packages matching
-    try:
-        client_versions = client["packages"]
-        versions = [("scheduler", scheduler["packages"])]
-        versions.extend((w, d["packages"]) for w, d in sorted(workers.items()))
-    except KeyError:
-        return (
-            "Version mismatch for dask.distributed. "
-            "The scheduler has version >= 1.28.0 "
-            "but some other component is less than this"
-        )
+    from .utils import asciitable
 
-    mismatched = defaultdict(list)
-    for name, vers in versions:
-        for pkg, cv in client_versions.items():
-            v = vers.get(pkg, "MISSING")
-            if cv != v:
-                mismatched[pkg].append((name, v))
+    MISSING, UNKNOWN = "MISSING", "UNKNOWN"
+    scheduler_name = "scheduler"
 
-    if mismatched:
-        from .utils import asciitable
+    components = {**{client_name: client}, **{scheduler_name: scheduler}, **workers}
 
-        errs = []
-        for pkg, versions in sorted(mismatched.items()):
-            rows = [(client_name, client_versions[pkg])]
-            rows.extend(versions)
-            errs.append("%s\n%s" % (pkg, asciitable(["", "version"], rows)))
+    # Hold all versions, e.g. versions["scheduler"]["distributed"] = 2.9.3
+    component_packages = defaultdict(dict)
 
+    # Collect all package versions
+    packages = set()
+
+    for component, info in components.items():
+        if info is None or not (isinstance(info, dict)) or "packages" not in info:
+            component_packages[component] = defaultdict(lambda: UNKNOWN)
+        else:
+            component_packages[component] = defaultdict(lambda: MISSING)
+            for pkg, version in info["packages"].items():
+                component_packages[component][pkg] = version
+                packages.add(pkg)
+
+    errs = []
+    for pkg in sorted(packages):
+        versions = set(component_packages[component][pkg] for component in components)
+        if len(versions) <= 1:
+            continue
+        rows = [
+            (component_name, component_packages[component_name][pkg])
+            for component_name in components.keys()
+        ]
+        errs.append("%s\n%s" % (pkg, asciitable(["", "version"], rows)))
+    if errs:
         return "Mismatched versions found\n" "\n" "%s" % ("\n\n".join(errs))
     else:
         return ""

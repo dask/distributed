@@ -37,13 +37,13 @@ def test_versions_match(kwargs_matching):
     assert error_message(**kwargs_matching) == ""
 
 
-@pytest.fixture(params=['client', 'scheduler', 'worker-1'])
+@pytest.fixture(params=["client", "scheduler", "worker-1"])
 def component(request):
     """Component affected by version mismatch"""
     return request.param
 
 
-@pytest.fixture(params=['MISMATCHED', 'MISSING', 'KEY_ERROR', 'NONE'])
+@pytest.fixture(params=["MISMATCHED", "MISSING", "KEY_ERROR", "NONE"])
 def effect(request):
     """Compinont affected by version mismatch"""
     return request.param
