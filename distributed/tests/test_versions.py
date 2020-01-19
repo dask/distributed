@@ -12,6 +12,9 @@ this_version = get_versions()
 mismatched_version = get_versions()
 mismatched_version["packages"]["distributed"] = "0.0.0.dev0"
 
+# for really old versions, the `package` key may be missing
+key_err_version = {}
+
 # if one no key is available for one package, we assume it's MISSING
 missing_version = get_versions()
 del missing_version["packages"]["distributed"]
@@ -40,7 +43,7 @@ def component(request):
     return request.param
 
 
-@pytest.fixture(params=['MISMATCHED', 'MISSING', 'UNKNOWN'])
+@pytest.fixture(params=['MISMATCHED', 'MISSING', 'KEY_ERROR', 'NONE'])
 def effect(request):
     """Compinont affected by version mismatch"""
     return request.param
@@ -51,7 +54,8 @@ def kwargs_not_matching(kwargs_matching, component, effect):
     affected_version = {
         "MISMATCHED": mismatched_version,
         "MISSING": missing_version,
-        "UNKNOWN": unknown_version,
+        "KEY_ERROR": key_err_version,
+        "NONE": unknown_version,
     }[effect]
     kwargs = kwargs_matching
     if component in kwargs["workers"]:
@@ -67,7 +71,8 @@ def pattern(effect):
     return {
         "MISMATCHED": r"0\.0\.0\.dev0",
         "MISSING": "MISSING",
-        "UNKNOWN": "UNKNOWN",
+        "KEY_ERROR": "UNKNOWN",
+        "NONE": "UNKNOWN",
     }[effect]
 
 
