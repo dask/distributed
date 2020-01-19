@@ -126,8 +126,7 @@ def error_message(scheduler, workers, client, client_name="client"):
         if len(versions) <= 1:
             continue
         rows = [
-            (node_name, node_packages[node_name][pkg])
-            for node_name in nodes.keys()
+            (node_name, node_packages[node_name][pkg]) for node_name in nodes.keys()
         ]
         errs.append("%s\n%s" % (pkg, asciitable(["", "version"], rows)))
     if errs:
