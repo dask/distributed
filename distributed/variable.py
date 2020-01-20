@@ -4,6 +4,7 @@ import logging
 import uuid
 
 import tornado.locks
+from tornado import gen
 
 try:
     from cytoolz import merge
@@ -82,7 +83,10 @@ class VariableExtension(object):
                 left = None
             if left and left < 0:
                 raise TimeoutError()
-            await self.started.wait(timeout=left)
+            try:
+                await self.started.wait(timeout=left)
+            except gen.TimeoutError:
+                raise TimeoutError("Timed out waiting for Variable.get")
         record = self.variables[name]
         if record["type"] == "Future":
             key = record["value"]

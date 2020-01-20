@@ -2869,25 +2869,26 @@ class Scheduler(ServerNode):
                 if nanny_address is not None
             ]
 
-            try:
-                resps = All(
-                    [
-                        nanny.restart(
-                            close=True, timeout=timeout * 0.8, executor_wait=False
-                        )
-                        for nanny in nannies
-                    ]
-                )
-                resps = await asyncio.wait_for(resps, timeout)
-                if not all(resp == "OK" for resp in resps):
-                    logger.error(
-                        "Not all workers responded positively: %s", resps, exc_info=True
+            resps = All(
+                [
+                    nanny.restart(
+                        close=True, timeout=timeout * 0.8, executor_wait=False
                     )
+                    for nanny in nannies
+                ]
+            )
+            try:
+                resps = await asyncio.wait_for(resps, timeout)
             except TimeoutError:
                 logger.error(
                     "Nannies didn't report back restarted within "
                     "timeout.  Continuuing with restart process"
                 )
+            else:
+                if not all(resp == "OK" for resp in resps):
+                    logger.error(
+                        "Not all workers responded positively: %s", resps, exc_info=True
+                    )
             finally:
                 await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
 

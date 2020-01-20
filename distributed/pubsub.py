@@ -5,6 +5,7 @@ import threading
 import weakref
 
 import tornado.locks
+from tornado import gen
 
 from .core import CommClosedError
 from .utils import sync, TimeoutError
@@ -402,7 +403,10 @@ class Sub(object):
                     raise TimeoutError()
             else:
                 timeout2 = None
-            await self.condition.wait(timeout=timeout2)
+            try:
+                await self.condition.wait(timeout=timeout2)
+            except gen.TimeoutError:
+                raise TimeoutError("Timed out waiting on Sub")
 
         return self.buffer.popleft()
 

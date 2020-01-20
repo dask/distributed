@@ -13,6 +13,7 @@ import dask
 from dask.system import CPU_COUNT
 from tornado.ioloop import IOLoop
 from tornado.locks import Event
+from tornado import gen
 
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
@@ -729,7 +730,7 @@ class WorkerProcess(object):
 
         try:
             loop.run_sync(run)
-        except TimeoutError:
+        except (TimeoutError, gen.TimeoutError):
             # Loop was stopped before wait_until_closed() returned, ignore
             pass
         except KeyboardInterrupt:
