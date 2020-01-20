@@ -214,12 +214,7 @@ class Nanny(ServerNode):
         if worker_address is None:
             return
 
-        allowed_errors = (
-            TimeoutError,
-            CommClosedError,
-            EnvironmentError,
-            RPCClosed,
-        )
+        allowed_errors = (TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
         with ignoring(allowed_errors):
             await asyncio.wait_for(
                 self.scheduler.unregister(address=self.worker_address), timeout
