@@ -6,7 +6,6 @@ import math
 import weakref
 
 import dask
-from tornado import gen
 from tornado.locks import Event
 
 from .adaptive import Adaptive
@@ -19,6 +18,7 @@ from ..utils import (
     parse_bytes,
     parse_timedelta,
     import_term,
+    TimeoutError,
 )
 from ..scheduler import Scheduler
 from ..security import Security
@@ -602,6 +602,6 @@ async def run_spec(spec: dict, *args):
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        with ignoring(gen.TimeoutError):
+        with ignoring(TimeoutError):
             if cluster.status != "closed":
                 cluster.close(timeout=10)

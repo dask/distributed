@@ -3,7 +3,6 @@ from collections import defaultdict
 import logging
 import uuid
 
-from tornado import gen
 import tornado.locks
 
 try:
@@ -13,7 +12,7 @@ except ImportError:
 
 from .client import Future, _get_global_client, Client
 from .metrics import time
-from .utils import tokey, log_errors
+from .utils import tokey, log_errors, TimeoutError
 from .worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -82,7 +81,7 @@ class VariableExtension(object):
             else:
                 left = None
             if left and left < 0:
-                raise gen.TimeoutError()
+                raise TimeoutError()
             await self.started.wait(timeout=left)
         record = self.variables[name]
         if record["type"] == "Future":

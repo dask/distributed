@@ -24,7 +24,6 @@ try:
 except ImportError:
     from toolz import frequencies, merge, pluck, merge_sorted, first, merge_with
 from toolz import valmap, second, compose, groupby
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
@@ -60,6 +59,7 @@ from .utils import (
     key_split_group,
     empty_context,
     tmpfile,
+    TimeoutError,
 )
 from .utils_comm import scatter_to_workers, gather_from_workers, retry_operation
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
@@ -2739,7 +2739,7 @@ class Scheduler(ServerNode):
         while not self.workers:
             await asyncio.sleep(0.2)
             if time() > start + timeout:
-                raise gen.TimeoutError("No workers found")
+                raise TimeoutError("No workers found")
 
         if workers is None:
             nthreads = {w: ws.nthreads for w, ws in self.workers.items()}
@@ -2883,7 +2883,7 @@ class Scheduler(ServerNode):
                     logger.error(
                         "Not all workers responded positively: %s", resps, exc_info=True
                     )
-            except gen.TimeoutError:
+            except TimeoutError:
                 logger.error(
                     "Nannies didn't report back restarted within "
                     "timeout.  Continuuing with restart process"
