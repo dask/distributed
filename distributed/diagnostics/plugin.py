@@ -37,6 +37,14 @@ class SchedulerPlugin(object):
     >>> scheduler.add_plugin(plugin)  # doctest: +SKIP
     """
 
+    async def start(self, scheduler):
+        """ Run when the scheduler starts up """
+        pass
+
+    async def close(self):
+        """ Run when the scheduler closes down """
+        pass
+
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         """ Run when a new graph / tasks enter the scheduler """
 
