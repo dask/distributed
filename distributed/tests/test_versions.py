@@ -7,9 +7,6 @@ from distributed import Client, Worker
 from distributed.utils_test import gen_cluster
 
 
-# if every node (client, scheduler, workers) have this version, we're good
-this_version = get_versions()
-
 # if one of the nodes reports this version, there's a mismatch
 mismatched_version = get_versions()
 mismatched_version["packages"]["distributed"] = "0.0.0.dev0"
@@ -29,9 +26,9 @@ unknown_version = None
 @pytest.fixture
 def kwargs_matching():
     return dict(
-        scheduler=this_version,
-        workers={f"worker-{i}": this_version for i in range(3)},
-        client=this_version,
+        scheduler=get_versions(),
+        workers={f"worker-{i}": get_versions() for i in range(3)},
+        client=get_versions(),
     )
 
 
@@ -84,6 +81,21 @@ def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
     assert "Mismatched versions found" in msg
     assert "distributed" in msg
     assert re.search(node + r"\s+\|\s+" + pattern, msg)
+
+
+def test_scheduler_mismatched_irrelevant_package(kwargs_matching):
+    """An irrelevant package on the scheduler can have any version."""
+    kwargs_matching["scheduler"]["packages"]["numpy"] = "0.0.0"
+    assert "numpy" in kwargs_matching["client"]["packages"]
+
+    assert error_message(**kwargs_matching) == ""
+
+
+def test_scheduler_additional_irrelevant_package(kwargs_matching):
+    """An irrelevant package on the scheduler can have any version."""
+    kwargs_matching["scheduler"]["packages"]["pyspark"] = "0.0.0"
+
+    assert error_message(**kwargs_matching) == ""
 
 
 @gen_cluster()
