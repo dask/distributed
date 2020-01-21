@@ -3,6 +3,8 @@ import re
 import pytest
 
 from distributed.versions import get_versions, error_message
+from distributed import Client, Worker
+from distributed.utils_test import gen_cluster
 
 
 # if every node (client, scheduler, workers) have this version, we're good
@@ -82,3 +84,24 @@ def test_version_mismatch(node, effect, kwargs_not_matching, pattern):
     assert "Mismatched versions found" in msg
     assert "distributed" in msg
     assert re.search(node + r"\s+\|\s+" + pattern, msg)
+
+
+@gen_cluster()
+async def test_version_warning_in_cluster(s, a, b):
+    s.workers[a.address].versions["packages"]["dask"] = "0.0.0"
+
+    with pytest.warns(None) as record:
+        async with Client(s.address, asynchronous=True) as client:
+            pass
+
+    assert record
+    assert any("dask" in str(r.message) for r in record)
+    assert any("0.0.0" in str(r.message) for r in record)
+    assert any(a.address in str(r.message) for r in record)
+
+    async with Worker(s.address) as w:
+        assert any("This Worker" in line.message for line in w.logs)
+        assert any("dask" in line.message for line in w.logs)
+        assert any(
+            "0.0.0" in line.message and a.address in line.message for line in w.logs
+        )
