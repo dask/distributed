@@ -3,9 +3,6 @@ from collections import defaultdict
 import logging
 import uuid
 
-import tornado.locks
-from tornado import gen
-
 try:
     from cytoolz import merge
 except ImportError:
@@ -33,8 +30,8 @@ class VariableExtension(object):
         self.scheduler = scheduler
         self.variables = dict()
         self.waiting = defaultdict(set)
-        self.waiting_conditions = defaultdict(tornado.locks.Condition)
-        self.started = tornado.locks.Condition()
+        self.waiting_conditions = defaultdict(asyncio.Condition)
+        self.started = asyncio.Condition()
 
         self.scheduler.handlers.update(
             {"variable_set": self.set, "variable_get": self.get}
@@ -83,10 +80,7 @@ class VariableExtension(object):
                 left = None
             if left and left < 0:
                 raise TimeoutError()
-            try:
-                await self.started.wait(timeout=left)
-            except gen.TimeoutError:
-                raise TimeoutError("Timed out waiting for Variable.get")
+            await asyncio.wait_for(self.started.wait(), timeout=left)
         record = self.variables[name]
         if record["type"] == "Future":
             key = record["value"]

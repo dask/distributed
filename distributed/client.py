@@ -37,7 +37,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.locks import Event, Condition, Semaphore
+from asyncio import Event, Condition, Semaphore
 from tornado.ioloop import IOLoop
 from tornado.queues import Queue
 
@@ -470,7 +470,7 @@ class FutureState(object):
             self._event.clear()
 
     async def wait(self, timeout=None):
-        await self._get_event().wait(timeout)
+        await asyncio.wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
         return "<%s: %s>" % (self.__class__.__name__, self.status)
@@ -1238,6 +1238,8 @@ class Client(Node):
 
     async def _close(self, fast=False):
         """ Send close signal and wait until scheduler completes """
+        if self.status == "closed":
+            return
         self.status = "closing"
 
         for pc in self._periodic_callbacks.values():
@@ -1365,6 +1367,7 @@ class Client(Node):
             await self.cluster.close()
         else:
             with ignoring(CommClosedError):
+                self.status = "closing"
                 await self.scheduler.terminate(close_workers=True)
 
     def shutdown(self):
@@ -2912,11 +2915,7 @@ class Client(Node):
             timeout = self._timeout * 2
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
         self._restart_event = Event()
-        try:
-            await self._restart_event.wait(self.loop.time() + timeout)
-        except gen.TimeoutError:
-            logger.error("Restart timed out after %f seconds", timeout)
-            pass
+        await self._restart_event.wait(self.loop.time() + timeout)
         self.generation += 1
         with self._refcount_lock:
             self.refcount.clear()

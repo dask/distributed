@@ -1,11 +1,9 @@
+import asyncio
 from collections import defaultdict, deque
 import datetime
 import logging
 import threading
 import weakref
-
-import tornado.locks
-from tornado import gen
 
 from .core import CommClosedError
 from .utils import sync, TimeoutError
@@ -374,7 +372,7 @@ class Sub(object):
             self.loop = self.client.loop
         self.name = name
         self.buffer = deque()
-        self.condition = tornado.locks.Condition()
+        self.condition = asyncio.Condition()
 
         if self.worker:
             pubsub = self.worker.extensions["pubsub"]
@@ -403,10 +401,7 @@ class Sub(object):
                     raise TimeoutError()
             else:
                 timeout2 = None
-            try:
-                await self.condition.wait(timeout=timeout2)
-            except gen.TimeoutError:
-                raise TimeoutError("Timed out waiting on Sub")
+            await asyncio.wait_for(self.condition.wait(), timeout2)
 
         return self.buffer.popleft()
 
