@@ -92,7 +92,7 @@ def test_scheduler_mismatched_irrelevant_package(kwargs_matching):
 
 
 def test_scheduler_additional_irrelevant_package(kwargs_matching):
-    """An irrelevant package on the scheduler can have any version."""
+    """An irrelevant package on the scheduler does not need to be present elsewhere."""
     kwargs_matching["scheduler"]["packages"]["pyspark"] = "0.0.0"
 
     assert error_message(**kwargs_matching) == ""
