@@ -24,7 +24,6 @@ try:
 except ImportError:
     from toolz import frequencies, merge, pluck, merge_sorted, first, merge_with
 from toolz import valmap, second, compose, groupby
-from tornado import gen
 from tornado.ioloop import IOLoop
 
 import dask
@@ -60,6 +59,7 @@ from .utils import (
     key_split_group,
     empty_context,
     tmpfile,
+    TimeoutError,
 )
 from .utils_comm import scatter_to_workers, gather_from_workers, retry_operation
 from .utils_perf import enable_gc_diagnosis, disable_gc_diagnosis
@@ -1041,6 +1041,7 @@ class Scheduler(ServerNode):
         dashboard_address=None,
         preload=None,
         preload_argv=(),
+        plugins=(),
         **kwargs
     ):
         self._setup_logging(logger)
@@ -1210,7 +1211,7 @@ class Scheduler(ServerNode):
         ]
 
         self.extensions = {}
-        self.plugins = []
+        self.plugins = list(plugins)
         self.transition_log = deque(
             maxlen=dask.config.get("distributed.scheduler.transition-log-length")
         )
@@ -1437,6 +1438,8 @@ class Scheduler(ServerNode):
 
         preload_modules(self.preload, parameter=self, argv=self.preload_argv)
 
+        await asyncio.gather(*[plugin.start(self) for plugin in self.plugins])
+
         self.start_periodic_callbacks()
 
         setproctitle("dask-scheduler [%s]" % (self.address,))
@@ -1466,6 +1469,8 @@ class Scheduler(ServerNode):
                     await asyncio.sleep(0.05)
                 else:
                     break
+
+        await asyncio.gather(*[plugin.close() for plugin in self.plugins])
 
         for pc in self.periodic_callbacks.values():
             pc.stop()
@@ -2739,7 +2744,7 @@ class Scheduler(ServerNode):
         while not self.workers:
             await asyncio.sleep(0.2)
             if time() > start + timeout:
-                raise gen.TimeoutError("No workers found")
+                raise TimeoutError("No workers found")
 
         if workers is None:
             nthreads = {w: ws.nthreads for w, ws in self.workers.items()}
@@ -2869,25 +2874,26 @@ class Scheduler(ServerNode):
                 if nanny_address is not None
             ]
 
-            try:
-                resps = All(
-                    [
-                        nanny.restart(
-                            close=True, timeout=timeout * 0.8, executor_wait=False
-                        )
-                        for nanny in nannies
-                    ]
-                )
-                resps = await gen.with_timeout(timedelta(seconds=timeout), resps)
-                if not all(resp == "OK" for resp in resps):
-                    logger.error(
-                        "Not all workers responded positively: %s", resps, exc_info=True
+            resps = All(
+                [
+                    nanny.restart(
+                        close=True, timeout=timeout * 0.8, executor_wait=False
                     )
-            except gen.TimeoutError:
+                    for nanny in nannies
+                ]
+            )
+            try:
+                resps = await asyncio.wait_for(resps, timeout)
+            except TimeoutError:
                 logger.error(
                     "Nannies didn't report back restarted within "
                     "timeout.  Continuuing with restart process"
                 )
+            else:
+                if not all(resp == "OK" for resp in resps):
+                    logger.error(
+                        "Not all workers responded positively: %s", resps, exc_info=True
+                    )
             finally:
                 await asyncio.gather(*[nanny.close_rpc() for nanny in nannies])
 
