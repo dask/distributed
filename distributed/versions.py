@@ -100,10 +100,7 @@ def get_package_info(pkgs):
 def error_message(scheduler, workers, client, client_name="client"):
     from .utils import asciitable
 
-    MISSING, UNKNOWN = "MISSING", "UNKNOWN"
-    scheduler_name = "scheduler"
-
-    nodes = {**{client_name: client}, **{scheduler_name: scheduler}, **workers}
+    nodes = {**{client_name: client}, **{"scheduler": scheduler}, **workers}
 
     # Hold all versions, e.g. versions["scheduler"]["distributed"] = 2.9.3
     node_packages = defaultdict(dict)
@@ -113,9 +110,9 @@ def error_message(scheduler, workers, client, client_name="client"):
 
     for node, info in nodes.items():
         if info is None or not (isinstance(info, dict)) or "packages" not in info:
-            node_packages[node] = defaultdict(lambda: UNKNOWN)
+            node_packages[node] = defaultdict(lambda: "UNKNOWN")
         else:
-            node_packages[node] = defaultdict(lambda: MISSING)
+            node_packages[node] = defaultdict(lambda: "MISSING")
             for pkg, version in info["packages"].items():
                 node_packages[node][pkg] = version
                 packages.add(pkg)
