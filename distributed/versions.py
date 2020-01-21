@@ -28,7 +28,7 @@ optional_packages = [
 
 def get_versions(packages=None):
     """
-    Return basic information on our software installation, and out installed versions of packages.
+    Return basic information on our software installation, and our installed versions of packages.
     """
     if packages is None:
         packages = []
