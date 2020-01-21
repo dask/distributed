@@ -26,6 +26,12 @@ optional_packages = [
 ]
 
 
+# only these scheduler packages will be checked for version mismatch
+scheduler_relevant_packages = set(pkg for pkg, _ in required_packages) | set(
+    ["lz4", "blosc"]
+)
+
+
 def get_versions(packages=None):
     """
     Return basic information on our software installation, and our installed versions of packages.
@@ -119,7 +125,11 @@ def error_message(scheduler, workers, client, client_name="client"):
 
     errs = []
     for pkg in sorted(packages):
-        versions = set(node_packages[node][pkg] for node in nodes)
+        versions = set(
+            node_packages[node][pkg]
+            for node in nodes
+            if node != "scheduler" or pkg in scheduler_relevant_packages
+        )
         if len(versions) <= 1:
             continue
         rows = [
