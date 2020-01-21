@@ -1234,6 +1234,9 @@ class Client(Node):
 
     async def _close(self, fast=False):
         """ Send close signal and wait until scheduler completes """
+        if self.status == "closed":
+            return
+
         self.status = "closing"
 
         for pc in self._periodic_callbacks.values():
@@ -1354,6 +1357,7 @@ class Client(Node):
             await self.cluster.close()
         else:
             with ignoring(CommClosedError):
+                self.status = "closing"
                 await self.scheduler.terminate(close_workers=True)
 
     def shutdown(self):
