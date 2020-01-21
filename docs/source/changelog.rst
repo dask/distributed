@@ -1,6 +1,33 @@
 Changelog
 =========
 
+2.9.3 - 2020-01-17
+------------------
+
+- Raise ``RuntimeError`` if no running loop (:pr:`3385`) `James Bourbeau`_
+- Fix ``get_running_loop`` import (:pr:`3383`) `James Bourbeau`_
+- Get JavaScript document location instead of window and handle proxied url (:pr:`3382`) `Jacob Tomlinson`_
+
+
+2.9.2 - 2020-01-16
+------------------
+
+- Move Windows CI to GitHub Actions (:pr:`3373`) `Jacob Tomlinson`_
+- Add client join and leave hooks (:pr:`3371`) `Jacob Tomlinson`_
+- Add cluster map dashboard (:pr:`3361`) `Jacob Tomlinson`_
+- Close connection comm on retry (:pr:`3365`) `James Bourbeau`_
+- Fix scheduler state in case of worker name collision (:pr:`3366`) `byjott`_
+- Add ``--worker-class`` option to ``dask-worker`` CLI (:pr:`3364`) `James Bourbeau`_
+- Remove ``locale`` check that fails on OS X (:pr:`3360`) `Jacob Tomlinson`_
+- Rework version checking (:pr:`2627`) `Matthew Rocklin`_
+- Add websocket scheduler plugin (:pr:`3335`) `Jacob Tomlinson`_
+- Return task in ``dask-worker`` ``on_signal`` function (:pr:`3354`) `James Bourbeau`_
+- Fix failures on mixed integer/string worker names (:pr:`3352`) `Benedikt Reinartz`_
+- Avoid calling ``nbytes`` multiple times when sending data (:pr:`3349`) `Markus Mohrhard`_
+- Avoid setting event loop policy if within IPython kernel and no running event loop (:pr:`3336`) `Mana Borwornpadungkitti`_
+- Relax intermittent failing ``test_profile_server`` (:pr:`3346`) `Matthew Rocklin`_
+
+
 2.9.1 - 2019-12-27
 ------------------
 
@@ -1471,3 +1498,6 @@ significantly without many new features.
 .. _`fjetter`: https://github.com/fjetter
 .. _`Patrick Sodré`: https://github.com/sodre
 .. _`Stephan Erb`: https://github.com/StephanErb
+.. _`Benedikt Reinartz`: https://github.com/filmor
+.. _`Markus Mohrhard`: https://github.com/mmohrhard
+.. _`Mana Borwornpadungkitti`: https://github.com/potpath

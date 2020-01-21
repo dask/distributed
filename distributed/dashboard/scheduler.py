@@ -1,5 +1,8 @@
 from datetime import datetime
 from functools import partial
+import os
+import os.path
+import json
 import logging
 
 import dask
@@ -11,6 +14,7 @@ except ImportError:
     from toolz import merge, merge_with
 
 from tornado import escape
+from tornado.websocket import WebSocketHandler
 
 try:
     import numpy as np
@@ -45,6 +49,7 @@ from .core import BokehServer
 from .worker import counters_doc
 from .proxy import GlobalProxyHandler
 from .utils import RequestHandler, redirect
+from ..diagnostics.websocket import WebsocketPlugin
 from ..utils import log_errors, format_time
 from ..scheduler import ALL_TASK_STATES
 
@@ -231,11 +236,18 @@ class IndexJSON(RequestHandler):
 class IndividualPlots(RequestHandler):
     def get(self):
         bokeh_server = self.server.services["dashboard"]
-        result = {
+        individual_bokeh = {
             uri.strip("/").replace("-", " ").title(): uri
             for uri in bokeh_server.apps
             if uri.lstrip("/").startswith("individual-") and not uri.endswith(".json")
         }
+        individual_static = {
+            uri.strip("/").replace(".html", "").replace("-", " ").title(): "/statics/"
+            + uri
+            for uri in os.listdir(os.path.join(os.path.dirname(__file__), "static"))
+            if uri.lstrip("/").startswith("individual-") and uri.endswith(".html")
+        }
+        result = {**individual_bokeh, **individual_static}
         self.write(result)
 
 
@@ -319,6 +331,34 @@ class HealthHandler(RequestHandler):
         self.set_header("Content-Type", "text/plain")
 
 
+class EventstreamHandler(WebSocketHandler):
+    def initialize(self, server=None, extra=None):
+        self.server = server
+        self.extra = extra or {}
+        self.plugin = WebsocketPlugin(self, server)
+        self.server.add_plugin(self.plugin)
+
+    def send(self, name, data):
+        data["name"] = name
+        for k in list(data):
+            # Drop bytes objects for now
+            if isinstance(data[k], bytes):
+                del data[k]
+        self.write_message(data)
+
+    def open(self):
+        for worker in self.server.workers:
+            self.plugin.add_worker(self.server, worker)
+
+    def on_message(self, message):
+        message = json.loads(message)
+        if message["name"] == "ping":
+            self.send("pong", {"timestamp": str(datetime.now())})
+
+    def on_close(self):
+        self.server.remove_plugin(self.plugin)
+
+
 routes = [
     (r"info", redirect("info/main/workers.html")),
     (r"info/main/workers.html", Workers),
@@ -334,6 +374,7 @@ routes = [
     (r"individual-plots.json", IndividualPlots),
     (r"metrics", PrometheusHandler),
     (r"health", HealthHandler),
+    (r"eventstream", EventstreamHandler),
     (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler),
 ]
 

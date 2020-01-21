@@ -56,7 +56,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS
+from .compatibility import PYPY, WINDOWS, get_running_loop
 from .metrics import time
 
 
@@ -81,6 +81,16 @@ def _initialize_mp_context():
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
             preload.append("pkg_resources")
+
+        from .versions import required_packages, optional_packages
+
+        for pkg, _ in required_packages + optional_packages:
+            try:
+                importlib.import_module(pkg)
+            except ImportError:
+                pass
+            else:
+                preload.append(pkg)
         ctx.set_forkserver_preload(preload)
         return ctx
 
@@ -1177,25 +1187,50 @@ def reset_logger_locks():
             handler.createLock()
 
 
-# Only bother if asyncio has been loaded by Tornado
-if "asyncio" in sys.modules and tornado.version_info[0] >= 5:
+if tornado.version_info[0] >= 5:
 
-    jupyter_event_loop_initialized = False
+    is_server_extension = False
 
     if "notebook" in sys.modules:
         import traitlets
         from notebook.notebookapp import NotebookApp
 
-        jupyter_event_loop_initialized = traitlets.config.Application.initialized() and isinstance(
+        is_server_extension = traitlets.config.Application.initialized() and isinstance(
             traitlets.config.Application.instance(), NotebookApp
         )
 
-    if not jupyter_event_loop_initialized:
-        import tornado.platform.asyncio
+    if not is_server_extension:
+        is_kernel_and_no_running_loop = False
 
-        asyncio.set_event_loop_policy(
-            tornado.platform.asyncio.AnyThreadEventLoopPolicy()
-        )
+        if is_kernel():
+            try:
+                get_running_loop()
+            except RuntimeError:
+                is_kernel_and_no_running_loop = True
+
+        if not is_kernel_and_no_running_loop:
+
+            BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
+            if WINDOWS and sys.version_info >= (3, 8):
+                # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+                # fallback to the pre-3.8 default of Selector
+                # https://github.com/tornadoweb/tornado/issues/2608
+                if (
+                    type(asyncio.get_event_loop_policy())
+                    is asyncio.WindowsProactorEventLoopPolicy
+                ):
+                    BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+
+            class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
+                def get_event_loop(self):
+                    try:
+                        return super().get_event_loop()
+                    except (RuntimeError, AssertionError):
+                        loop = self.new_event_loop()
+                        self.set_event_loop(loop)
+                        return loop
+
+            asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
 
 
 @functools.lru_cache(1000)
