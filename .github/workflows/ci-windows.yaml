@@ -22,6 +22,15 @@ jobs:
           activate-environment: testenv
           auto-activate-base: false
 
+      - name: Install tornado
+        shell: bash -l {0}
+        run: |
+          if [[ "${{ matrix.python-version }}" = "3.8" ]]; then
+            conda install tornado=6
+          else
+            conda install tornado=5
+          fi
+
       - name: Install distributed from source
         shell: bash -l {0}
         run: pip install -q --no-deps -e .
