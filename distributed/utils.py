@@ -1,16 +1,16 @@
 import asyncio
+from asyncio import TimeoutError
 import atexit
-from collections import deque
+from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import timedelta
 import functools
 from hashlib import md5
+import html
 import inspect
 import json
 import logging
 import multiprocessing
-from numbers import Number
 import os
 import re
 import shutil
@@ -25,6 +25,7 @@ import threading
 import warnings
 import weakref
 import pkgutil
+import base64
 import tblib.pickling_support
 import xml.etree.ElementTree
 
@@ -37,7 +38,14 @@ import dask
 from dask import istask
 
 # provide format_bytes here for backwards compatibility
-from dask.utils import format_bytes  # noqa
+from dask.utils import (  # noqa
+    format_bytes,
+    funcname,
+    format_time,
+    parse_bytes,
+    parse_timedelta,
+)
+
 import toolz
 import tornado
 from tornado import gen
@@ -48,7 +56,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS
+from .compatibility import PYPY, WINDOWS, get_running_loop
 from .metrics import time
 
 
@@ -73,21 +81,21 @@ def _initialize_mp_context():
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
             preload.append("pkg_resources")
+
+        from .versions import required_packages, optional_packages
+
+        for pkg, _ in required_packages + optional_packages:
+            try:
+                importlib.import_module(pkg)
+            except ImportError:
+                pass
+            else:
+                preload.append(pkg)
         ctx.set_forkserver_preload(preload)
         return ctx
 
 
 mp_context = _initialize_mp_context()
-
-
-def funcname(func):
-    """Get the name of a function."""
-    while hasattr(func, "func"):
-        func = func.func
-    try:
-        return func.__name__
-    except AttributeError:
-        return str(func)
 
 
 def has_arg(func, argname):
@@ -121,7 +129,7 @@ def get_fileno_limit():
 
 
 @toolz.memoize
-def _get_ip(host, port, family, default):
+def _get_ip(host, port, family):
     # By using a UDP socket, we don't actually try to connect but
     # simply select the local address through which *host* is reachable.
     sock = socket.socket(family, socket.SOCK_DGRAM)
@@ -133,10 +141,10 @@ def _get_ip(host, port, family, default):
         # XXX Should first try getaddrinfo() on socket.gethostname() and getfqdn()
         warnings.warn(
             "Couldn't detect a suitable IP address for "
-            "reaching %r, defaulting to %r: %s" % (host, default, e),
+            "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        return default
+        return socket.gethostname()
     finally:
         sock.close()
 
@@ -148,14 +156,14 @@ def get_ip(host="8.8.8.8", port=80):
     *host* defaults to a well-known Internet host (one of Google's public
     DNS servers).
     """
-    return _get_ip(host, port, family=socket.AF_INET, default="127.0.0.1")
+    return _get_ip(host, port, family=socket.AF_INET)
 
 
 def get_ipv6(host="2001:4860:4860::8888", port=80):
     """
     The same as get_ip(), but for IPv6.
     """
-    return _get_ip(host, port, family=socket.AF_INET6, default="::1")
+    return _get_ip(host, port, family=socket.AF_INET6)
 
 
 def get_ip_interface(ifname):
@@ -317,7 +325,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             thread_state.asynchronous = True
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             result[0] = yield future
         except Exception as exc:
             error[0] = sys.exc_info()
@@ -328,7 +336,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     loop.add_callback(f)
     if callback_timeout is not None:
         if not e.wait(callback_timeout):
-            raise gen.TimeoutError("timed out after %s s." % (callback_timeout,))
+            raise TimeoutError("timed out after %s s." % (callback_timeout,))
     else:
         while not e.is_set():
             e.wait(10)
@@ -617,28 +625,16 @@ def key_split(s):
 def key_split_group(x):
     """A more fine-grained version of key_split
 
-    >>> key_split_group('x')
-    'x'
-    >>> key_split_group('x-1')
-    'x-1'
-    >>> key_split_group('x-1-2-3')
-    'x-1-2-3'
     >>> key_split_group(('x-2', 1))
     'x-2'
     >>> key_split_group("('x-2', 1)")
     'x-2'
-    >>> key_split_group('hello-world-1')
-    'hello-world-1'
-    >>> key_split_group(b'hello-world-1')
-    'hello-world-1'
     >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
     'data'
     >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
     'myclass'
-    >>> key_split_group(None)
-    'Other'
-    >>> key_split_group('x-abcdefab')  # ignores hex
-    'x-abcdefab'
+    >>> key_split_group('x')
+    >>> key_split_group('x-1')
     """
     typ = type(x)
     if typ is tuple:
@@ -651,11 +647,11 @@ def key_split_group(x):
         elif x[0] == "<":
             return x.strip("<>").split()[0].split(".")[-1]
         else:
-            return x
+            return ""
     elif typ is bytes:
         return key_split_group(x.decode())
     else:
-        return "Other"
+        return ""
 
 
 @contextmanager
@@ -1086,135 +1082,6 @@ class itemgetter(object):
         return (itemgetter, (self.index,))
 
 
-byte_sizes = {
-    "kB": 10 ** 3,
-    "MB": 10 ** 6,
-    "GB": 10 ** 9,
-    "TB": 10 ** 12,
-    "PB": 10 ** 15,
-    "KiB": 2 ** 10,
-    "MiB": 2 ** 20,
-    "GiB": 2 ** 30,
-    "TiB": 2 ** 40,
-    "PiB": 2 ** 50,
-    "B": 1,
-    "": 1,
-}
-byte_sizes = {k.lower(): v for k, v in byte_sizes.items()}
-byte_sizes.update({k[0]: v for k, v in byte_sizes.items() if k and "i" not in k})
-byte_sizes.update({k[:-1]: v for k, v in byte_sizes.items() if k and "i" in k})
-
-
-def parse_bytes(s):
-    """ Parse byte string to numbers
-
-    >>> parse_bytes('100')
-    100
-    >>> parse_bytes('100 MB')
-    100000000
-    >>> parse_bytes('100M')
-    100000000
-    >>> parse_bytes('5kB')
-    5000
-    >>> parse_bytes('5.4 kB')
-    5400
-    >>> parse_bytes('1kiB')
-    1024
-    >>> parse_bytes('1e6')
-    1000000
-    >>> parse_bytes('1e6 kB')
-    1000000000
-    >>> parse_bytes('MB')
-    1000000
-    """
-    if isinstance(s, (int, float)):
-        return int(s)
-    s = s.replace(" ", "")
-    if not s[0].isdigit():
-        s = "1" + s
-
-    for i in range(len(s) - 1, -1, -1):
-        if not s[i].isalpha():
-            break
-    index = i + 1
-
-    prefix = s[:index]
-    suffix = s[index:]
-
-    n = float(prefix)
-
-    multiplier = byte_sizes[suffix.lower()]
-
-    result = n * multiplier
-    return int(result)
-
-
-timedelta_sizes = {
-    "s": 1,
-    "ms": 1e-3,
-    "us": 1e-6,
-    "ns": 1e-9,
-    "m": 60,
-    "h": 3600,
-    "d": 3600 * 24,
-}
-
-tds2 = {
-    "second": 1,
-    "minute": 60,
-    "hour": 60 * 60,
-    "day": 60 * 60 * 24,
-    "millisecond": 1e-3,
-    "microsecond": 1e-6,
-    "nanosecond": 1e-9,
-}
-tds2.update({k + "s": v for k, v in tds2.items()})
-timedelta_sizes.update(tds2)
-timedelta_sizes.update({k.upper(): v for k, v in timedelta_sizes.items()})
-
-
-def parse_timedelta(s, default="seconds"):
-    """ Parse timedelta string to number of seconds
-
-    Examples
-    --------
-    >>> parse_timedelta('3s')
-    3
-    >>> parse_timedelta('3.5 seconds')
-    3.5
-    >>> parse_timedelta('300ms')
-    0.3
-    >>> parse_timedelta(timedelta(seconds=3))  # also supports timedeltas
-    3.0
-    """
-    if s is None:
-        return None
-    if isinstance(s, timedelta):
-        return s.total_seconds()
-    if isinstance(s, Number):
-        s = str(s)
-    s = s.replace(" ", "")
-    if not s[0].isdigit():
-        s = "1" + s
-
-    for i in range(len(s) - 1, -1, -1):
-        if not s[i].isalpha():
-            break
-    index = i + 1
-
-    prefix = s[:index]
-    suffix = s[index:] or default
-
-    n = float(prefix)
-
-    multiplier = timedelta_sizes[suffix.lower()]
-
-    result = n * multiplier
-    if int(result) == result:
-        result = int(result)
-    return result
-
-
 def asciitable(columns, rows):
     """Formats an ascii table for given columns and rows.
 
@@ -1282,25 +1149,6 @@ def json_load_robust(fn, load=json.load):
         sleep(0.1)
 
 
-def format_time(n):
-    """ format integers as time
-
-    >>> format_time(1)
-    '1.00 s'
-    >>> format_time(0.001234)
-    '1.23 ms'
-    >>> format_time(0.00012345)
-    '123.45 us'
-    >>> format_time(123.456)
-    '123.46 s'
-    """
-    if n >= 1:
-        return "%.2f s" % n
-    if n >= 1e-3:
-        return "%.2f ms" % (n * 1e3)
-    return "%.2f us" % (n * 1e6)
-
-
 class DequeHandler(logging.Handler):
     """ A logging.Handler that records records into a deque """
 
@@ -1339,25 +1187,33 @@ def reset_logger_locks():
             handler.createLock()
 
 
-# Only bother if asyncio has been loaded by Tornado
-if "asyncio" in sys.modules and tornado.version_info[0] >= 5:
+if tornado.version_info[0] >= 5:
 
-    jupyter_event_loop_initialized = False
+    is_server_extension = False
 
     if "notebook" in sys.modules:
         import traitlets
         from notebook.notebookapp import NotebookApp
 
-        jupyter_event_loop_initialized = traitlets.config.Application.initialized() and isinstance(
+        is_server_extension = traitlets.config.Application.initialized() and isinstance(
             traitlets.config.Application.instance(), NotebookApp
         )
 
-    if not jupyter_event_loop_initialized:
-        import tornado.platform.asyncio
+    if not is_server_extension:
+        is_kernel_and_no_running_loop = False
 
-        asyncio.set_event_loop_policy(
-            tornado.platform.asyncio.AnyThreadEventLoopPolicy()
-        )
+        if is_kernel():
+            try:
+                get_running_loop()
+            except RuntimeError:
+                is_kernel_and_no_running_loop = True
+
+        if not is_kernel_and_no_running_loop:
+            import tornado.platform.asyncio
+
+            asyncio.set_event_loop_policy(
+                tornado.platform.asyncio.AnyThreadEventLoopPolicy()
+            )
 
 
 @functools.lru_cache(1000)
@@ -1447,7 +1303,9 @@ class Log(str):
     """ A container for logs """
 
     def _repr_html_(self):
-        return "<pre><code>\n{log}\n</code></pre>".format(log=self.rstrip())
+        return "<pre><code>\n{log}\n</code></pre>".format(
+            log=html.escape(self.rstrip())
+        )
 
 
 class Logs(dict):
@@ -1554,6 +1412,90 @@ except TypeError:
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
-@gen.coroutine
-def offload(fn, *args, **kwargs):
-    return (yield _offload_executor.submit(fn, *args, **kwargs))
+def import_term(name: str):
+    """ Return the fully qualified term
+
+    Examples
+    --------
+    >>> import_term("math.sin")
+    <function math.sin(x, /)>
+    """
+    try:
+        module_name, attr_name = name.rsplit(".", 1)
+    except ValueError:
+        return importlib.import_module(name)
+
+    module = importlib.import_module(module_name)
+    return getattr(module, attr_name)
+
+
+async def offload(fn, *args, **kwargs):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
+
+
+def serialize_for_cli(data):
+    """ Serialize data into a string that can be passthrough cli
+
+    Parameters
+    ----------
+    data: json-serializable object
+        The data to serialize
+    Returns
+    -------
+    serialized_data: str
+        The serialized data as a string
+    """
+    return base64.urlsafe_b64encode(json.dumps(data).encode()).decode()
+
+
+def deserialize_for_cli(data):
+    """ De-serialize data into the original object
+
+    Parameters
+    ----------
+    data: str
+        String serialied by serialize_for_cli()
+    Returns
+    -------
+    deserialized_data: obj
+        The de-serialized data
+    """
+    return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
+
+
+class EmptyContext:
+    def __enter__(self):
+        pass
+
+    def __exit__(self, *args):
+        pass
+
+    async def __aenter__(self):
+        pass
+
+    async def __aexit__(self, *args):
+        pass
+
+
+empty_context = EmptyContext()
+
+
+class LRU(UserDict):
+    """ Limited size mapping, evicting the least recently looked-up key when full
+    """
+
+    def __init__(self, maxsize):
+        super().__init__()
+        self.data = OrderedDict()
+        self.maxsize = maxsize
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.data.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if len(self) >= self.maxsize:
+            self.data.popitem(last=False)
+        super().__setitem__(key, value)

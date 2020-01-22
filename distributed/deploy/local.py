@@ -5,8 +5,8 @@ import warnings
 import weakref
 
 from dask.utils import factors
+from dask.system import CPU_COUNT
 
-from .. import system
 from .spec import SpecCluster
 from ..nanny import Nanny
 from ..scheduler import Scheduler
@@ -56,7 +56,10 @@ class LocalCluster(SpecCluster):
         like ``['feed', 'run_function']``
     service_kwargs: Dict[str, Dict]
         Extra keywords to hand to the running services
-    security : Security
+    security : Security or bool, optional
+        Configures communication security in this cluster. Can be a security
+        object, or True. If True, temporary self-signed credentials will
+        be created automatically.
     protocol: str (optional)
         Protocol to use like ``tcp://``, ``tls://``, ``inproc://``
         This defaults to sensible choice given other keyword arguments like
@@ -122,7 +125,15 @@ class LocalCluster(SpecCluster):
 
         self.status = None
         self.processes = processes
-        security = security or Security()
+
+        if security is None:
+            # Falsey values load the default configuration
+            security = Security()
+        elif security is True:
+            # True indicates self-signed temporary credentials should be used
+            security = Security.temporary()
+        elif not isinstance(security, Security):
+            raise TypeError("security must be a Security object")
 
         if protocol is None:
             if host and "://" in host:
@@ -146,12 +157,12 @@ class LocalCluster(SpecCluster):
                 n_workers, threads_per_worker = nprocesses_nthreads()
             else:
                 n_workers = 1
-                threads_per_worker = system.CPU_COUNT
+                threads_per_worker = CPU_COUNT
         if n_workers is None and threads_per_worker is not None:
-            n_workers = max(1, system.CPU_COUNT // threads_per_worker)
+            n_workers = max(1, CPU_COUNT // threads_per_worker)
         if n_workers and threads_per_worker is None:
             # Overcommit threads per worker, rather than undercommit
-            threads_per_worker = max(1, int(math.ceil(system.CPU_COUNT / n_workers)))
+            threads_per_worker = max(1, int(math.ceil(CPU_COUNT / n_workers)))
         if n_workers and "memory_limit" not in worker_kwargs:
             worker_kwargs["memory_limit"] = parse_memory_limit("auto", 1, n_workers)
 
@@ -206,7 +217,7 @@ class LocalCluster(SpecCluster):
         )
 
 
-def nprocesses_nthreads(n=system.CPU_COUNT):
+def nprocesses_nthreads(n=CPU_COUNT):
     """
     The default breakdown of processes and threads for a given number of cores
 

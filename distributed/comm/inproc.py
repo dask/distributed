@@ -1,9 +1,11 @@
+import asyncio
 from collections import deque, namedtuple
 import itertools
 import logging
 import os
 import threading
 import weakref
+import warnings
 
 from tornado import locks
 from tornado.concurrent import Future
@@ -31,7 +33,11 @@ class Manager(object):
     def __init__(self):
         self.listeners = weakref.WeakValueDictionary()
         self.addr_suffixes = itertools.count(1)
-        self.ip = get_ip()
+        with warnings.catch_warnings():
+            # Avoid immediate warning for unreachable network
+            # (will still warn for other get_ip() calls when actually used)
+            warnings.simplefilter("ignore")
+            self.ip = get_ip()
         self.lock = threading.Lock()
 
     def add_listener(self, addr, listener):
@@ -260,9 +266,9 @@ class InProcListener(Listener):
     def connect_threadsafe(self, conn_req):
         self.loop.add_callback(self.listen_q.put_nowait, conn_req)
 
-    def start(self):
+    async def start(self):
         self.loop = IOLoop.current()
-        self.loop.add_callback(self._listen)
+        self._listen_future = asyncio.ensure_future(self._listen())
         self.manager.add_listener(self.address, self)
 
     def stop(self):

@@ -2,6 +2,7 @@ import asyncio
 from collections import defaultdict, deque
 from concurrent.futures import CancelledError
 from functools import partial
+from inspect import isawaitable
 import logging
 import threading
 import traceback
@@ -135,7 +136,7 @@ class Server(object):
         self._ongoing_coroutines = weakref.WeakSet()
         self._event_finished = Event()
 
-        self.listener = None
+        self.listeners = []
         self.io_loop = io_loop or IOLoop.current()
         self.loop = self.io_loop
 
@@ -220,7 +221,7 @@ class Server(object):
     def stop(self):
         if not self.__stopped:
             self.__stopped = True
-            if self.listener is not None:
+            for listener in self.listeners:
                 # Delay closing the server socket until the next IO loop tick.
                 # Otherwise race conditions can appear if an event handler
                 # for an accept() call is already scheduled by the IO loop,
@@ -228,7 +229,14 @@ class Server(object):
                 # The demonstrator for this is Worker.terminate(), which
                 # closes the server socket in response to an incoming message.
                 # See https://github.com/tornadoweb/tornado/issues/2069
-                self.io_loop.add_callback(self.listener.stop)
+                self.io_loop.add_callback(listener.stop)
+
+    @property
+    def listener(self):
+        if self.listeners:
+            return self.listeners[0]
+        else:
+            return None
 
     def _measure_tick(self):
         now = time()
@@ -294,7 +302,7 @@ class Server(object):
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
 
-    def listen(self, port_or_addr=None, listen_args=None):
+    async def listen(self, port_or_addr=None, listen_args=None):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -304,13 +312,14 @@ class Server(object):
         else:
             addr = port_or_addr
             assert isinstance(addr, str)
-        self.listener = listen(
+        listener = listen(
             addr,
             self.handle_comm,
             deserialize=self.deserialize,
             connection_args=listen_args,
         )
-        self.listener.start()
+        await listener.start()
+        self.listeners.append(listener)
 
     async def handle_comm(self, comm, shutting_down=shutting_down):
         """ Dispatch new communications to coroutine-handlers
@@ -397,7 +406,7 @@ class Server(object):
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
-                        if hasattr(result, "__await__"):
+                        if isawaitable(result):
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
@@ -464,7 +473,7 @@ class Server(object):
                                 handler(**merge(extra, msg))
                         else:
                             logger.error("odd message %s", msg)
-                    await gen.sleep(0)
+                    await asyncio.sleep(0)
 
                 for func in every_cycle:
                     func()
@@ -486,13 +495,13 @@ class Server(object):
     def close(self):
         for pc in self.periodic_callbacks.values():
             pc.stop()
-        if self.listener:
+        for listener in self.listeners:
             self.listener.stop()
         for i in range(20):  # let comms close naturally for a second
             if not self._comms:
                 break
             else:
-                yield gen.sleep(0.05)
+                yield asyncio.sleep(0.05)
         yield [comm.close() for comm in self._comms]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
@@ -500,7 +509,7 @@ class Server(object):
             if all(cb.cancelled() for c in self._ongoing_coroutines):
                 break
             else:
-                yield gen.sleep(0.01)
+                yield asyncio.sleep(0.01)
 
         self._event_finished.set()
 
@@ -641,25 +650,29 @@ class rpc(object):
         return comm
 
     def close_comms(self):
-        @gen.coroutine
-        def _close_comm(comm):
+        async def _close_comm(comm):
             # Make sure we tell the peer to close
             try:
                 if not comm.closed():
-                    yield comm.write({"op": "close", "reply": False})
-                    yield comm.close()
+                    await comm.write({"op": "close", "reply": False})
+                    await comm.close()
             except EnvironmentError:
                 comm.abort()
 
+        tasks = []
         for comm in list(self.comms):
             if comm and not comm.closed():
                 # IOLoop.current().add_callback(_close_comm, comm)
                 task = asyncio.ensure_future(_close_comm(comm))
+                tasks.append(task)
         for comm in list(self._created):
             if comm and not comm.closed():
                 # IOLoop.current().add_callback(_close_comm, comm)
                 task = asyncio.ensure_future(_close_comm(comm))
+                tasks.append(task)
+
         self.comms.clear()
+        return tasks
 
     def __getattr__(self, key):
         async def send_recv_from_rpc(**kwargs):
@@ -685,13 +698,19 @@ class rpc(object):
         if self.status != "closed":
             rpc.active.discard(self)
         self.status = "closed"
-        self.close_comms()
+        return asyncio.gather(*self.close_comms())
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        self.close_rpc()
+        asyncio.ensure_future(self.close_rpc())
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.close_rpc()
 
     def __del__(self):
         if self.status != "closed":
@@ -744,7 +763,7 @@ class PooledRPCCall(object):
 
         return send_recv_from_rpc
 
-    def close_rpc(self):
+    async def close_rpc(self):
         pass
 
     # For compatibility with rpc()
@@ -821,6 +840,14 @@ class ConnectionPool(object):
         self._created = weakref.WeakSet()
         self._instances.add(self)
 
+    def _validate(self):
+        """
+        Validate important invariants of this class
+
+        Used only for testing / debugging
+        """
+        assert self.semaphore._value == self.limit - self.open - self._n_connecting
+
     @property
     def active(self):
         return sum(map(len, self.occupied.values()))
@@ -849,9 +876,11 @@ class ConnectionPool(object):
         """
         available = self.available[addr]
         occupied = self.occupied[addr]
-        if available:
+        while available:
             comm = available.pop()
-            if not comm.closed():
+            if comm.closed():
+                self.semaphore.release()
+            else:
                 occupied.add(comm)
                 return comm
 
@@ -930,18 +959,17 @@ class ConnectionPool(object):
                 IOLoop.current().add_callback(comm.close)
                 self.semaphore.release()
 
-    def close(self):
+    async def close(self):
         """
-        Close all communications abruptly.
+        Close all communications
         """
-        for comms in self.available.values():
-            for comm in comms:
-                comm.abort()
+        for d in [self.available, self.occupied]:
+            comms = [comm for comms in d.values() for comm in comms]
+            await asyncio.gather(
+                *[comm.close() for comm in comms], return_exceptions=True
+            )
+            for _ in comms:
                 self.semaphore.release()
-        for comms in self.occupied.values():
-            for comm in comms:
-                self.semaphore.release()
-                comm.abort()
 
         for comm in self._created:
             IOLoop.current().add_callback(comm.abort)
@@ -969,8 +997,9 @@ def error_message(e, status="error"):
     --------
     clean_exception: deserialize and unpack message into exception/traceback
     """
+    MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
     tb = get_traceback()
-    e2 = truncate_exception(e, 1000)
+    e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:
         e3 = protocol.pickle.dumps(e2)
         protocol.pickle.loads(e3)
@@ -982,7 +1011,7 @@ def error_message(e, status="error"):
     except Exception:
         tb = tb2 = "".join(traceback.format_tb(tb))
 
-    if len(tb2) > 10000:
+    if len(tb2) > MAX_ERROR_LEN:
         tb_result = None
     else:
         tb_result = protocol.to_serialize(tb)

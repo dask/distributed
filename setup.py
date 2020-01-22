@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import os
-from setuptools import setup
+from setuptools import setup, find_packages
 import versioneer
 
 requires = open("requirements.txt").read().strip().split("\n")
@@ -26,7 +26,7 @@ setup(
     url="https://distributed.dask.org",
     maintainer="Matthew Rocklin",
     maintainer_email="mrocklin@gmail.com",
-    python_requires=">=3.5",
+    python_requires=">=3.6",
     license="BSD",
     package_data={
         "": ["templates/index.html", "template.html"],
@@ -35,15 +35,7 @@ setup(
     include_package_data=True,
     install_requires=install_requires,
     extras_require=extras_require,
-    packages=[
-        "distributed",
-        "distributed.dashboard",
-        "distributed.cli",
-        "distributed.comm",
-        "distributed.deploy",
-        "distributed.diagnostics",
-        "distributed.protocol",
-    ],
+    packages=find_packages(exclude=["*tests*"]),
     long_description=(
         open("README.rst").read() if os.path.exists("README.rst") else ""
     ),
@@ -54,7 +46,6 @@ setup(
         "License :: OSI Approved :: BSD License",
         "Operating System :: OS Independent",
         "Programming Language :: Python",
-        "Programming Language :: Python :: 3.5",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Topic :: Scientific/Engineering",
@@ -63,8 +54,6 @@ setup(
     entry_points="""
         [console_scripts]
         dask-ssh=distributed.cli.dask_ssh:go
-        dask-submit=distributed.cli.dask_submit:go
-        dask-remote=distributed.cli.dask_remote:go
         dask-scheduler=distributed.cli.dask_scheduler:go
         dask-worker=distributed.cli.dask_worker:go
       """,

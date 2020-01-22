@@ -8,7 +8,7 @@ import tornado.locks
 from tornado import gen
 
 from .core import CommClosedError
-from .utils import sync
+from .utils import sync, TimeoutError
 from .protocol.serialize import to_serialize
 
 logger = logging.getLogger(__name__)
@@ -74,7 +74,7 @@ class PubSubSchedulerExtension(object):
 
     def remove_subscriber(self, comm=None, name=None, worker=None, client=None):
         if worker:
-            logger.debug("Add worker subscriber: %s %s", name, worker)
+            logger.debug("Remove worker subscriber: %s %s", name, worker)
             self.subscribers[name].remove(worker)
             for pub in self.publishers[name]:
                 self.scheduler.worker_send(
@@ -82,7 +82,7 @@ class PubSubSchedulerExtension(object):
                     {"op": "pubsub-remove-subscriber", "address": worker, "name": name},
                 )
         elif client:
-            logger.debug("Add client subscriber: %s %s", name, client)
+            logger.debug("Remove client subscriber: %s %s", name, client)
             self.client_subscribers[name].remove(client)
             if not self.client_subscribers[name]:
                 del self.client_subscribers[name]
@@ -343,6 +343,11 @@ class Pub(object):
         """ Publish a message to all subscribers of this topic """
         self.loop.add_callback(self._put, msg)
 
+    def __repr__(self):
+        return "<Pub: {}>".format(self.name)
+
+    __str__ = __repr__
+
 
 class Sub(object):
     """ Subscribe to a Publish/Subscribe topic
@@ -395,10 +400,13 @@ class Sub(object):
             if timeout is not None:
                 timeout2 = timeout - (datetime.datetime.now() - start)
                 if timeout2.total_seconds() < 0:
-                    raise gen.TimeoutError()
+                    raise TimeoutError()
             else:
                 timeout2 = None
-            await self.condition.wait(timeout=timeout2)
+            try:
+                await self.condition.wait(timeout=timeout2)
+            except gen.TimeoutError:
+                raise TimeoutError("Timed out waiting on Sub")
 
         return self.buffer.popleft()
 
@@ -426,3 +434,8 @@ class Sub(object):
     def _put(self, msg):
         self.buffer.append(msg)
         self.condition.notify()
+
+    def __repr__(self):
+        return "<Sub: {}>".format(self.name)
+
+    __str__ = __repr__

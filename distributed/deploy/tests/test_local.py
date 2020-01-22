@@ -1,3 +1,4 @@
+import asyncio
 from functools import partial
 import gc
 import subprocess
@@ -11,10 +12,11 @@ from tornado.ioloop import IOLoop
 from tornado import gen
 import pytest
 
+from dask.system import CPU_COUNT
 from distributed import Client, Worker, Nanny, get_client
 from distributed.deploy.local import LocalCluster, nprocesses_nthreads
 from distributed.metrics import time
-from distributed.system import CPU_COUNT, MEMORY_LIMIT
+from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (  # noqa: F401
     clean,
     cleanup,
@@ -26,9 +28,10 @@ from distributed.utils_test import (  # noqa: F401
     assert_can_connect_from_everywhere_4,
     assert_can_connect_from_everywhere_4_6,
     captured_logger,
+    tls_only_security,
 )
 from distributed.utils_test import loop  # noqa: F401
-from distributed.utils import sync
+from distributed.utils import sync, TimeoutError
 
 from distributed.deploy.utils_test import ClusterTest
 
@@ -218,10 +221,41 @@ def test_Client_kwargs(loop):
     assert c.cluster.status == "closed"
 
 
+def test_Client_unused_kwargs_with_cluster(loop):
+    with LocalCluster() as cluster:
+        with pytest.raises(Exception) as argexcept:
+            c = Client(cluster, n_workers=2, dashboard_port=8000, silence_logs=None)
+        assert (
+            str(argexcept.value)
+            == "Unexpected keyword arguments: ['dashboard_port', 'n_workers', 'silence_logs']"
+        )
+
+
+def test_Client_unused_kwargs_with_address(loop):
+    with pytest.raises(Exception) as argexcept:
+        c = Client(
+            "127.0.0.1:8786", n_workers=2, dashboard_port=8000, silence_logs=None
+        )
+    assert (
+        str(argexcept.value)
+        == "Unexpected keyword arguments: ['dashboard_port', 'n_workers', 'silence_logs']"
+    )
+
+
 def test_Client_twice(loop):
     with Client(loop=loop, silence_logs=False, dashboard_address=None) as c:
         with Client(loop=loop, silence_logs=False, dashboard_address=None) as f:
             assert c.cluster.scheduler.port != f.cluster.scheduler.port
+
+
+@pytest.mark.asyncio
+async def test_client_constructor_with_temporary_security(cleanup):
+    pytest.importorskip("cryptography")
+    async with Client(
+        security=True, silence_logs=False, dashboard_address=None, asynchronous=True
+    ) as c:
+        assert c.cluster.scheduler_address.startswith("tls")
+        assert c.security == c.cluster.security
 
 
 @pytest.mark.asyncio
@@ -424,7 +458,7 @@ def test_silent_startup():
 
         if __name__ == "__main__":
             with LocalCluster(1, dashboard_address=None, scheduler_port=0):
-                sleep(1.5)
+                sleep(.1)
         """
 
     out = subprocess.check_output(
@@ -489,7 +523,7 @@ def test_memory_nanny(loop, n_workers):
 
 
 def test_death_timeout_raises(loop):
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         with LocalCluster(
             scheduler_port=0,
             silence_logs=False,
@@ -673,10 +707,13 @@ def test_adapt_then_manual(loop):
                 assert time() < start + 5
 
 
-def test_local_tls(loop):
-    from distributed.utils_test import tls_only_security
-
-    security = tls_only_security()
+@pytest.mark.parametrize("temporary", [True, False])
+def test_local_tls(loop, temporary):
+    if temporary:
+        pytest.importorskip("cryptography")
+        security = True
+    else:
+        security = tls_only_security()
     with LocalCluster(
         n_workers=0,
         scheduler_port=8786,
@@ -690,7 +727,7 @@ def test_local_tls(loop):
             loop,
             assert_can_connect_from_everywhere_4,
             c.scheduler.port,
-            connection_args=security.get_connection_args("client"),
+            connection_args=c.security.get_connection_args("client"),
             protocol="tls",
             timeout=3,
         )
@@ -700,7 +737,7 @@ def test_local_tls(loop):
             loop,
             assert_cannot_connect,
             addr="tcp://127.0.0.1:%d" % c.scheduler.port,
-            connection_args=security.get_connection_args("client"),
+            connection_args=c.security.get_connection_args("client"),
             exception_class=RuntimeError,
         )
 
@@ -863,10 +900,6 @@ async def test_worker_class_nanny_async(cleanup):
         assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
 
 
-if sys.version_info >= (3, 5):
-    from distributed.deploy.tests.py3_test_deploy import *  # noqa F401
-
-
 def test_starts_up_sync(loop):
     cluster = LocalCluster(
         n_workers=2,
@@ -952,3 +985,45 @@ async def test_repr(cleanup):
         n_workers=2, processes=False, memory_limit=None, asynchronous=True
     ) as cluster:
         assert "memory" not in repr(cluster)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("temporary", [True, False])
+async def test_capture_security(cleanup, temporary):
+    if temporary:
+        pytest.importorskip("cryptography")
+        security = True
+    else:
+        security = tls_only_security()
+    async with LocalCluster(
+        n_workers=0,
+        silence_logs=False,
+        security=security,
+        asynchronous=True,
+        dashboard_address=False,
+        host="tls://0.0.0.0",
+    ) as cluster:
+        async with Client(cluster, asynchronous=True) as client:
+            assert client.security == cluster.security
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.version_info < (3, 7), reason="asyncio.all_tasks not implemented"
+)
+async def test_no_danglng_asyncio_tasks(cleanup):
+    start = asyncio.all_tasks()
+    async with LocalCluster(asynchronous=True, processes=False):
+        await asyncio.sleep(0.01)
+
+    tasks = asyncio.all_tasks()
+    assert tasks == start
+
+
+@pytest.mark.asyncio
+async def test_async_with():
+    async with LocalCluster(processes=False, asynchronous=True) as cluster:
+        w = cluster.workers
+        assert w
+
+    assert not w

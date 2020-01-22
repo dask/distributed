@@ -6,17 +6,14 @@ from bokeh.models import ColumnDataSource, Model
 from tornado import gen
 
 from distributed.utils_test import slowinc, gen_cluster
-
-from distributed.dashboard.components import (
-    TaskStream,
-    MemoryUsage,
+from distributed.dashboard.components.shared import (
     Processing,
     ProfilePlot,
     ProfileTimePlot,
 )
 
 
-@pytest.mark.parametrize("Component", [TaskStream, MemoryUsage, Processing])
+@pytest.mark.parametrize("Component", [Processing])
 def test_basic(Component):
     c = Component()
     assert isinstance(c.source, ColumnDataSource)

@@ -1,3 +1,4 @@
+from inspect import isawaitable
 import logging
 import math
 
@@ -113,6 +114,14 @@ class Adaptive(AdaptiveCore):
             target_duration=self.target_duration
         )
 
+    async def recommendations(self, target: int) -> dict:
+        if len(self.plan) != len(self.requested):
+            # Ensure that the number of planned and requested workers
+            # are in sync before making recommendations.
+            await self.cluster
+
+        return await super(Adaptive, self).recommendations(target)
+
     async def workers_to_close(self, target: int):
         """
         Determine which, if any, workers should potentially be removed from
@@ -150,7 +159,7 @@ class Adaptive(AdaptiveCore):
             # close workers more forcefully
             logger.info("Retiring workers %s", workers)
             f = self.cluster.scale_down(workers)
-            if hasattr(f, "__await__"):
+            if isawaitable(f):
                 await f
 
     async def scale_up(self, n):

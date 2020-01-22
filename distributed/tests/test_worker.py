@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
 import importlib
 import logging
 from numbers import Number
@@ -10,15 +9,16 @@ import shutil
 import sys
 from time import sleep
 import traceback
+import asyncio
 
 import dask
 from dask import delayed
 from dask.utils import format_bytes
+from dask.system import CPU_COUNT
 import pytest
 from toolz import pluck, sliding_window, first
 import tornado
 from tornado import gen
-from tornado.ioloop import TimeoutError
 
 from distributed import (
     Client,
@@ -29,14 +29,13 @@ from distributed import (
     get_worker,
     Reschedule,
     wait,
-    system,
 )
 from distributed.compatibility import WINDOWS
 from distributed.core import rpc
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
-from distributed.utils import tmpfile
+from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
     inc,
@@ -62,7 +61,7 @@ from distributed.utils_test import (  # noqa: F401
 def test_worker_nthreads():
     w = Worker("127.0.0.1", 8019)
     try:
-        assert w.executor._max_workers == system.CPU_COUNT
+        assert w.executor._max_workers == CPU_COUNT
     finally:
         shutil.rmtree(w.local_directory)
 
@@ -173,7 +172,7 @@ def dont_test_delete_data_with_missing_worker(c, a, b):
     assert not c.has_what[bad]
     assert not c.has_what[a.address]
 
-    cc.close_rpc()
+    yield cc.close_rpc()
 
 
 @gen_cluster(client=True)
@@ -326,7 +325,7 @@ def test_worker_waits_for_scheduler(loop):
     def f():
         w = Worker("127.0.0.1", 8007)
         try:
-            yield gen.with_timeout(timedelta(seconds=3), w)
+            yield asyncio.wait_for(w, 3)
         except TimeoutError:
             pass
         else:
@@ -355,6 +354,22 @@ def test_error_message():
 
     msg = error_message(MyException("Hello", "World!"))
     assert "Hello" in str(msg["exception"])
+
+    max_error_len = 100
+    with dask.config.set({"distributed.admin.max-error-length": max_error_len}):
+        msg = error_message(RuntimeError("-" * max_error_len))
+        assert len(msg["text"]) <= max_error_len
+        assert len(msg["text"]) < max_error_len * 2
+        msg = error_message(RuntimeError("-" * max_error_len * 20))
+        cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
+        assert len(cut_text) == max_error_len
+
+    max_error_len = 1000000
+    with dask.config.set({"distributed.admin.max-error-length": max_error_len}):
+        msg = error_message(RuntimeError("-" * max_error_len * 2))
+        cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
+        assert len(cut_text) == max_error_len
+        assert len(msg["text"]) > 10100  # default + 100
 
 
 @gen_cluster()
@@ -500,7 +515,7 @@ def test_memory_limit_auto():
     assert isinstance(a.memory_limit, Number)
     assert isinstance(b.memory_limit, Number)
 
-    if system.CPU_COUNT > 1:
+    if CPU_COUNT > 1:
         assert a.memory_limit < b.memory_limit
 
     assert c.memory_limit == d.memory_limit
@@ -652,7 +667,7 @@ def test_multiple_transfers(c, s, w1, w2, w3):
     yield wait(z)
 
     r = w3.startstops[z.key]
-    transfers = [t for t in r if t[0] == "transfer"]
+    transfers = [t for t in r if t["action"] == "transfer"]
     assert len(transfers) == 2
 
 
@@ -746,8 +761,11 @@ def test_worker_death_timeout(s):
         yield s.close()
         w = Worker(s.address, death_timeout=1)
 
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError) as info:
         yield w
+
+    assert "Worker" in str(info.value)
+    assert "timed out" in str(info.value) or "failed to start" in str(info.value)
 
     assert w.status == "closed"
 
@@ -979,32 +997,27 @@ def test_worker_fds(s):
 
 
 @gen_cluster(nthreads=[])
-def test_service_hosts_match_worker(s):
+async def test_service_hosts_match_worker(s):
     pytest.importorskip("bokeh")
     from distributed.dashboard import BokehWorker
 
-    services = {("dashboard", ":0"): BokehWorker}
-
-    w = yield Worker(
+    async with Worker(
         s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://0.0.0.0"
-    )
-    sock = first(w.services["dashboard"].server._http._sockets.values())
-    assert sock.getsockname()[0] in ("::", "0.0.0.0")
-    yield w.close()
+    ) as w:
+        sock = first(w.services["dashboard"].server._http._sockets.values())
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
-    w = yield Worker(
+    async with Worker(
         s.address, services={("dashboard", ":0"): BokehWorker}, host="tcp://127.0.0.1"
-    )
-    sock = first(w.services["dashboard"].server._http._sockets.values())
-    assert sock.getsockname()[0] in ("::", "0.0.0.0")
-    yield w.close()
+    ) as w:
+        sock = first(w.services["dashboard"].server._http._sockets.values())
+        assert sock.getsockname()[0] in ("::", "0.0.0.0")
 
-    w = yield Worker(
+    async with Worker(
         s.address, services={("dashboard", 0): BokehWorker}, host="tcp://127.0.0.1"
-    )
-    sock = first(w.services["dashboard"].server._http._sockets.values())
-    assert sock.getsockname()[0] == "127.0.0.1"
-    yield w.close()
+    ) as w:
+        sock = first(w.services["dashboard"].server._http._sockets.values())
+        assert sock.getsockname()[0] == "127.0.0.1"
 
 
 @gen_cluster(nthreads=[])
@@ -1065,7 +1078,7 @@ def test_statistical_profiling_2(c, s, a, b):
         y = (x + x * 2) - x.sum().persist()
         yield wait(y)
 
-        profile = a.get_profile()
+        profile = yield a.get_profile()
         text = str(profile)
         if profile["count"] and "sum" in text and "random" in text:
             break
@@ -1151,15 +1164,16 @@ def test_statistical_profiling_cycle(c, s, a, b):
     end = time()
     assert len(a.profile_history) > 3
 
-    x = a.get_profile(start=time() + 10, stop=time() + 20)
+    x = yield a.get_profile(start=time() + 10, stop=time() + 20)
     assert not x["count"]
 
-    x = a.get_profile(start=0, stop=time())
+    x = yield a.get_profile(start=0, stop=time() + 10)
+    recent = a.profile_recent["count"]
     actual = sum(p["count"] for _, p in a.profile_history) + a.profile_recent["count"]
-    x2 = a.get_profile(start=0, stop=time())
+    x2 = yield a.get_profile(start=0, stop=time() + 10)
     assert x["count"] <= actual <= x2["count"]
 
-    y = a.get_profile(start=end - 0.300, stop=time())
+    y = yield a.get_profile(start=end - 0.300, stop=time())
     assert 0 < y["count"] <= x["count"]
 
 
@@ -1480,6 +1494,20 @@ async def test_interface_async(loop, Worker):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("Worker", [Worker, Nanny])
+async def test_protocol_from_scheduler_address(Worker):
+    ucp = pytest.importorskip("ucp")
+
+    async with Scheduler(protocol="ucx") as s:
+        assert s.address.startswith("ucx://")
+        async with Worker(s.address) as w:
+            assert w.address.startswith("ucx://")
+            async with Client(s.address, asynchronous=True) as c:
+                info = c.scheduler_info()
+                assert info["address"].startswith("ucx://")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("Worker", [Worker, Nanny])
 async def test_worker_listens_on_same_interface_by_default(Worker):
     async with Scheduler(host="localhost") as s:
         assert s.ip in {"127.0.0.1", "localhost"}
@@ -1558,3 +1586,15 @@ async def test_bad_startup(cleanup):
             w = await Worker(s.address, startup_information={"bad": bad_startup})
         except Exception:
             pytest.fail("Startup exception was raised")
+
+
+@pytest.mark.asyncio
+async def test_update_latency(cleanup):
+    async with await Scheduler() as s:
+        async with await Worker(s.address) as w:
+            original = w.latency
+            await w.heartbeat()
+            assert original != w.latency
+
+            if w.digests is not None:
+                assert w.digests["latency"].size() > 0

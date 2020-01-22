@@ -1,13 +1,12 @@
 from collections import defaultdict, deque
-from datetime import timedelta
 import logging
 import uuid
+import asyncio
 
-from tornado import gen
 import tornado.locks
 
 from .client import _get_global_client
-from .utils import log_errors
+from .utils import log_errors, TimeoutError
 from .worker import get_worker
 
 logger = logging.getLogger(__name__)
@@ -45,10 +44,10 @@ class LockExtension(object):
                     self.events[name].append(event)
                     future = event.wait()
                     if timeout is not None:
-                        future = gen.with_timeout(timedelta(seconds=timeout), future)
+                        future = asyncio.wait_for(future, timeout)
                     try:
                         await future
-                    except gen.TimeoutError:
+                    except TimeoutError:
                         result = False
                         break
                     else:

@@ -1,4 +1,4 @@
-from datetime import timedelta
+import asyncio
 import logging
 from multiprocessing.queues import Empty
 import os
@@ -10,9 +10,10 @@ import warnings
 import weakref
 
 import dask
-from tornado import gen
-from tornado.ioloop import IOLoop, TimeoutError
+from dask.system import CPU_COUNT
+from tornado.ioloop import IOLoop
 from tornado.locks import Event
+from tornado import gen
 
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
@@ -22,7 +23,6 @@ from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
-from .system import CPU_COUNT
 from .utils import (
     get_ip,
     mp_context,
@@ -30,6 +30,8 @@ from .utils import (
     json_load_robust,
     PeriodicCallback,
     parse_timedelta,
+    ignoring,
+    TimeoutError,
 )
 from .worker import run, parse_memory_limit, Worker
 
@@ -75,8 +77,8 @@ class Nanny(ServerNode):
         resources=None,
         silence_logs=None,
         death_timeout=None,
-        preload=(),
-        preload_argv=[],
+        preload=None,
+        preload_argv=None,
         security=None,
         contact_address=None,
         listen_address=None,
@@ -86,6 +88,7 @@ class Nanny(ServerNode):
         host=None,
         port=None,
         protocol=None,
+        config=None,
         **worker_kwargs
     ):
         self._setup_logging(logger)
@@ -105,6 +108,11 @@ class Nanny(ServerNode):
         else:
             self.scheduler_addr = coerce_to_address((scheduler_ip, scheduler_port))
 
+        if protocol is None:
+            protocol_address = self.scheduler_addr.split("://")
+            if len(protocol_address) == 2:
+                protocol = protocol_address[0]
+
         if ncores is not None:
             warnings.warn("the ncores= parameter has moved to nthreads=")
             nthreads = ncores
@@ -116,9 +124,14 @@ class Nanny(ServerNode):
         self.resources = resources
         self.death_timeout = parse_timedelta(death_timeout)
         self.preload = preload
+        if self.preload is None:
+            self.preload = dask.config.get("distributed.worker.preload")
         self.preload_argv = preload_argv
+        if self.preload_argv is None:
+            self.preload_argv = dask.config.get("distributed.worker.preload-argv")
         self.Worker = Worker if worker_class is None else worker_class
         self.env = env or {}
+        self.config = config or {}
         worker_kwargs.update(
             {
                 "port": worker_port,
@@ -201,20 +214,11 @@ class Nanny(ServerNode):
         if worker_address is None:
             return
 
-        allowed_errors = (
-            gen.TimeoutError,
-            CommClosedError,
-            EnvironmentError,
-            RPCClosed,
-        )
-        try:
-            await gen.with_timeout(
-                timedelta(seconds=timeout),
-                self.scheduler.unregister(address=self.worker_address),
-                quiet_exceptions=allowed_errors,
+        allowed_errors = (TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
+        with ignoring(allowed_errors):
+            await asyncio.wait_for(
+                self.scheduler.unregister(address=self.worker_address), timeout
             )
-        except allowed_errors:
-            pass
 
     @property
     def worker_address(self):
@@ -232,7 +236,7 @@ class Nanny(ServerNode):
 
     async def start(self):
         """ Start nanny, start local process, start watching """
-        self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(self._start_address, listen_args=self.listen_args)
         self.ip = get_address_host(self.address)
 
         logger.info("        Start Nanny at: %r", self.address)
@@ -300,17 +304,18 @@ class Nanny(ServerNode):
                 on_exit=self._on_exit_sync,
                 worker=self.Worker,
                 env=self.env,
+                config=self.config,
             )
 
         self.auto_restart = True
         if self.death_timeout:
             try:
-                result = await gen.with_timeout(
-                    timedelta(seconds=self.death_timeout), self.process.start()
+                result = await asyncio.wait_for(
+                    self.process.start(), self.death_timeout
                 )
-            except gen.TimeoutError:
+            except TimeoutError:
                 await self.close(timeout=self.death_timeout)
-                logger.exception(
+                logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
                     self,
                     self.scheduler_addr,
@@ -330,12 +335,25 @@ class Nanny(ServerNode):
                 await self.instantiate()
 
         try:
-            await gen.with_timeout(timedelta(seconds=timeout), _())
-        except gen.TimeoutError:
+            await asyncio.wait_for(_(), timeout)
+        except TimeoutError:
             logger.error("Restart timed out, returning before finished")
             return "timed out"
         else:
             return "OK"
+
+    @property
+    def _psutil_process(self):
+        pid = self.process.process.pid
+        try:
+            proc = self._psutil_process_obj
+        except AttributeError:
+            self._psutil_process_obj = psutil.Process(pid)
+
+        if self._psutil_process_obj.pid != pid:
+            self._psutil_process_obj = psutil.Process(pid)
+
+        return self._psutil_process_obj
 
     def memory_monitor(self):
         """ Track worker's memory.  Restart if it goes above terminate fraction """
@@ -345,11 +363,12 @@ class Nanny(ServerNode):
         if process is None:
             return
         try:
-            proc = psutil.Process(process.pid)
+            proc = self._psutil_process
             memory = proc.memory_info().rss
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return
         frac = memory / self.memory_limit
+
         if self.memory_terminate_fraction and frac > self.memory_terminate_fraction:
             logger.warning(
                 "Worker exceeded %d%% memory budget. Restarting",
@@ -424,7 +443,7 @@ class Nanny(ServerNode):
         except Exception:
             pass
         self.process = None
-        self.rpc.close()
+        await self.rpc.close()
         self.status = "closed"
         if comm:
             await comm.write("OK")
@@ -433,7 +452,14 @@ class Nanny(ServerNode):
 
 class WorkerProcess(object):
     def __init__(
-        self, worker_kwargs, worker_start_args, silence_logs, on_exit, worker, env
+        self,
+        worker_kwargs,
+        worker_start_args,
+        silence_logs,
+        on_exit,
+        worker,
+        env,
+        config,
     ):
         self.status = "init"
         self.silence_logs = silence_logs
@@ -443,6 +469,7 @@ class WorkerProcess(object):
         self.process = None
         self.Worker = worker
         self.env = env
+        self.config = config
 
         # Initialized when worker is ready
         self.worker_dir = None
@@ -475,6 +502,7 @@ class WorkerProcess(object):
                 uid=uid,
                 Worker=self.Worker,
                 env=self.env,
+                config=self.config,
             ),
         )
         self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
@@ -573,7 +601,7 @@ class WorkerProcess(object):
         self.child_stop_q.close()
 
         while process.is_alive() and loop.time() < deadline:
-            await gen.sleep(0.05)
+            await asyncio.sleep(0.05)
 
         if process.is_alive():
             logger.warning(
@@ -592,7 +620,7 @@ class WorkerProcess(object):
             try:
                 msg = self.init_result_q.get_nowait()
             except Empty:
-                await gen.sleep(delay)
+                await asyncio.sleep(delay)
                 continue
 
             if msg["uid"] != uid:  # ensure that we didn't cross queues
@@ -617,9 +645,11 @@ class WorkerProcess(object):
         child_stop_q,
         uid,
         env,
+        config,
         Worker,
     ):  # pragma: no cover
         os.environ.update(env)
+        dask.config.set(config)
         try:
             from dask.multiprocessing import initialize_worker_process
         except ImportError:  # old Dask version
@@ -695,7 +725,7 @@ class WorkerProcess(object):
 
         try:
             loop.run_sync(run)
-        except TimeoutError:
+        except (TimeoutError, gen.TimeoutError):
             # Loop was stopped before wait_until_closed() returned, ignore
             pass
         except KeyboardInterrupt:
