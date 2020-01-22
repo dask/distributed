@@ -47,7 +47,6 @@ async def test_keywords():
                 )
             ) == 5
             d = client.scheduler_info()["workers"]
-            assert all(v["nprocs"] == 2 for v in d.values())
             assert all(v["nthreads"] == 2 for v in d.values())
 
 
