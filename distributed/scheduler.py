@@ -3084,6 +3084,28 @@ class Scheduler(ServerNode):
 
                 return {"status": "OK"}
 
+    async def _replicate_remove(self, ws, tasks):
+        """ Delete data from a worker and update the corresponding worker/task states
+
+        Parameters
+        ----------
+        ws: WorkerState
+        tasks: Set[TaskState]
+        """
+        await retry_operation(
+            self.rpc(addr=ws.address).delete_data,
+            keys=[ts.key for ts in tasks],
+            report=False,
+        )
+        ws.has_what -= tasks
+        for ts in tasks:
+            ts.who_has.remove(ws)
+            ws.nbytes -= ts.get_nbytes()
+        self.log_event(
+            ws.address,
+            {"action": "replicate-remove", "keys": [ts.key for ts in tasks],},
+        )
+
     async def replicate(
         self,
         comm=None,
@@ -3143,27 +3165,10 @@ class Scheduler(ServerNode):
 
                 await asyncio.gather(
                     *(
-                        retry_operation(
-                            self.rpc(addr=ws.address).delete_data,
-                            keys=[ts.key for ts in tasks],
-                            report=False,
-                        )
+                        self._replicate_remove(ws, tasks)
                         for ws, tasks in del_worker_tasks.items()
                     )
                 )
-
-                for ws, tasks in del_worker_tasks.items():
-                    ws.has_what -= tasks
-                    for ts in tasks:
-                        ts.who_has.remove(ws)
-                        ws.nbytes -= ts.get_nbytes()
-                    self.log_event(
-                        ws.address,
-                        {
-                            "action": "replicate-remove",
-                            "keys": [ts.key for ts in tasks],
-                        },
-                    )
 
             # Copy not-yet-filled data
             while tasks:
