@@ -333,7 +333,6 @@ class SpecCluster(Cluster):
                 await asyncio.wait(workers)
                 for w in workers:
                     w._cluster = weakref.ref(self)
-                await asyncio.gather(*workers)
             self.workers.update(dict(zip(to_open, workers)))
 
     def _update_worker_status(self, op, msg):
