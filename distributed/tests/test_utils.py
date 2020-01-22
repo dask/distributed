@@ -44,6 +44,7 @@ from distributed.utils import (
     format_dashboard_link,
     LRU,
     offload,
+    TimeoutError,
 )
 from distributed.utils_test import loop, loop_in_thread  # noqa: F401
 from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, captured_logger
@@ -110,7 +111,7 @@ def test_sync_error(loop_in_thread):
 
 def test_sync_timeout(loop_in_thread):
     loop = loop_in_thread
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         sync(loop_in_thread, gen.sleep, 0.5, callback_timeout=0.05)
 
 
