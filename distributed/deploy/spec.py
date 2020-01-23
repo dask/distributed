@@ -308,7 +308,7 @@ class SpecCluster(Cluster):
                 if self.scheduler.status == "running":
                     await self.scheduler_comm.retire_workers(workers=list(to_close))
                 tasks = [self.workers[w].close() for w in to_close if w in self.workers]
-                await asyncio.wait(tasks)
+                await asyncio.gather(*tasks)
             for name in to_close:
                 if name in self.workers:
                     del self.workers[name]
