@@ -365,7 +365,7 @@ class SpecCluster(Cluster):
             await self.scheduler
             await self._correct_state()
             if self.workers:
-                await asyncio.wait(list(self.workers.values()))  # maybe there are more
+                await asyncio.gather(*self.workers.values())  # maybe there are more
             return self
 
         return _().__await__()
