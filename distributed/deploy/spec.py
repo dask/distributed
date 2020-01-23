@@ -330,7 +330,7 @@ class SpecCluster(Cluster):
                 self._created.add(worker)
                 workers.append(worker)
             if workers:
-                await asyncio.wait(workers)
+                 await asyncio.gather(*workers)
                 for w in workers:
                     w._cluster = weakref.ref(self)
             self.workers.update(dict(zip(to_open, workers)))
