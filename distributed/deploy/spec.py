@@ -594,8 +594,6 @@ async def run_spec(spec: dict, *args):
 
     if workers:
         await asyncio.gather(*workers.values())
-        for w in workers.values():
-            await w  # for tornado gen.coroutine support
     return workers
 
 
