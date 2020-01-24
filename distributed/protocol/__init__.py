@@ -78,14 +78,3 @@ def _register_cupy():
 @cuda_deserialize.register_lazy("numba")
 def _register_numba():
     from . import numba
-
-
-@cuda_serialize.register_lazy("cudf")
-@cuda_deserialize.register_lazy("cudf")
-def _register_cudf():
-    import cudf
-
-    if LooseVersion(cudf.__version__) > "0.9":
-        from cudf.comm import serialize
-    else:
-        from . import cudf
