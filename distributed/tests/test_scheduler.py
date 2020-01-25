@@ -596,6 +596,19 @@ def test_coerce_address():
         yield [w.close() for w in [a, b, c]]
 
 
+@gen_test()
+def test_config_stealing():
+    # Regression test for https://github.com/dask/distributed/issues/3409
+
+    with dask.config.set({"distributed.scheduler.work-stealing": True}):
+        s = yield Scheduler(port=0)
+        assert "stealing" in s.extensions
+
+    with dask.config.set({"distributed.scheduler.work-stealing": False}):
+        s = yield Scheduler(port=0)
+        assert "stealing" not in s.extensions
+
+
 @pytest.mark.skipif(
     sys.platform.startswith("win"), reason="file descriptors not really a thing"
 )
