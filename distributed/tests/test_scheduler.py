@@ -1967,7 +1967,7 @@ async def test_too_many_groups(c, s, a, b):
     while s.tasks:
         await asyncio.sleep(0.01)
 
-    assert len(s.task_groups) <= 3
+    assert len(s.task_groups) < 3
 
 
 @pytest.mark.asyncio
