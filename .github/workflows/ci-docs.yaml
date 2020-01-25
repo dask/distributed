@@ -3,8 +3,7 @@ name: Documentation CI
 on: [push, pull_request]
 
 jobs:
-  checks:
-    name: Documentation build
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
