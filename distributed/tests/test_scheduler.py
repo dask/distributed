@@ -1740,6 +1740,8 @@ async def test_task_groups(c, s, a, b):
 
     await c.replicate(y)
     assert tg.nbytes_in_memory == y.nbytes
+    assert "array" in str(tg.types)
+    assert "array" in str(tp.types)
 
     del y
 
@@ -1748,8 +1750,9 @@ async def test_task_groups(c, s, a, b):
 
     assert tg.nbytes_in_memory == 0
     assert tg.states["forgotten"] == 5
-    assert "array" in str(tg.types)
-    assert "array" in str(tp.types)
+    # Ensure TaskGroup is removed once all tasks are in forgotten state
+    assert tg.name not in s.task_groups
+    assert sys.getrefcount(tg) == 2
 
 
 @gen_cluster(client=True)
@@ -1785,6 +1788,17 @@ async def test_task_group_non_tuple_key(c, s, a, b):
     assert s.task_prefixes["sum"].states["released"] == 4
     assert s.task_prefixes["sum"].states["memory"] == 1
     assert "sum" in s.task_groups
+
+
+@gen_cluster(client=True)
+async def test_task_unique_groups(c, s, a, b):
+    """ This test ensure that task groups remain unique when using submit
+    """
+    h = await c.submit(sum, [3, 4])
+    g = await c.submit(len, [1, 2])
+
+    assert s.task_prefixes["len"].states["memory"] == 1
+    assert s.task_prefixes["sum"].states["forgotten"] == 1
 
 
 class BrokenComm(Comm):
@@ -1947,14 +1961,13 @@ async def test_too_many_groups(c, s, a, b):
     x = dask.delayed(inc)(1)
     y = dask.delayed(dec)(2)
     z = dask.delayed(operator.add)(x, y)
-    zz = dask.delayed(operator.add)(z, y)
 
     await c.compute(z)
 
     while s.tasks:
         await asyncio.sleep(0.01)
 
-    assert len(s.task_groups) == 3
+    assert len(s.task_groups) <= 3
 
 
 @pytest.mark.asyncio
