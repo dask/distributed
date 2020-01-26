@@ -1,7 +1,7 @@
 import atexit
 from collections import defaultdict
 from collections.abc import Iterator
-from concurrent.futures import ThreadPoolExecutor, CancelledError
+from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
 import copy
@@ -85,6 +85,7 @@ from .utils import (
     has_keyword,
     format_dashboard_link,
     TimeoutError,
+    CancelledError,
 )
 from . import versions as version_module
 

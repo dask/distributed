@@ -1,5 +1,5 @@
 import asyncio
-from asyncio import TimeoutError
+from asyncio import TimeoutError, CancelledError  # noqa: F401
 import atexit
 from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor
