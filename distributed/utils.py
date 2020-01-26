@@ -1,8 +1,8 @@
 import asyncio
-from asyncio import TimeoutError, CancelledError  # noqa: F401
+from asyncio import TimeoutError
 import atexit
 from collections import deque, OrderedDict, UserDict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, CancelledError  # noqa: F401
 from contextlib import contextmanager
 import functools
 from hashlib import md5
