@@ -2557,7 +2557,7 @@ class Scheduler(ServerNode):
         if ts is None:
             return
         ws = self.workers[worker]
-        if ts.processing_on is not ws:
+        if ts.processing_on != ws:
             return
         r = self.stimulus_missing_data(key=key, ensure=False, **msg)
         self.transitions(r)
