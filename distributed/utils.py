@@ -138,13 +138,12 @@ def _get_ip(host, port, family):
         ip = sock.getsockname()[0]
         return ip
     except EnvironmentError as e:
-        # XXX Should first try getaddrinfo() on socket.gethostname() and getfqdn()
         warnings.warn(
             "Couldn't detect a suitable IP address for "
             "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        return socket.gethostname()
+        return socket.getfqdn(socket.gethostname())
     finally:
         sock.close()
 
