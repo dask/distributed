@@ -13,6 +13,7 @@ matrix:
   fast_finish: true
   include:
   - os: linux
+    language: python
     python: 3.6
     env: LINT=true
   - os: osx
