@@ -1,14 +1,14 @@
 import atexit
-from datetime import timedelta
 import logging
 import os
 from queue import Queue as PyQueue
 import re
 import threading
 import weakref
+import asyncio
 import dask
 
-from .utils import mp_context
+from .utils import mp_context, TimeoutError
 
 from tornado import gen
 from tornado.concurrent import Future
@@ -282,8 +282,8 @@ class AsyncProcess(object):
             yield self._exit_future
         else:
             try:
-                yield gen.with_timeout(timedelta(seconds=timeout), self._exit_future)
-            except gen.TimeoutError:
+                yield asyncio.wait_for(self._exit_future, timeout)
+            except TimeoutError:
                 pass
 
     def close(self):

@@ -1,9 +1,9 @@
 import asyncio
+from asyncio import TimeoutError
 import atexit
 from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import timedelta
 import functools
 from hashlib import md5
 import html
@@ -56,7 +56,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS
+from .compatibility import PYPY, WINDOWS, get_running_loop
 from .metrics import time
 
 
@@ -81,6 +81,16 @@ def _initialize_mp_context():
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
             preload.append("pkg_resources")
+
+        from .versions import required_packages, optional_packages
+
+        for pkg, _ in required_packages + optional_packages:
+            try:
+                importlib.import_module(pkg)
+            except ImportError:
+                pass
+            else:
+                preload.append(pkg)
         ctx.set_forkserver_preload(preload)
         return ctx
 
@@ -315,7 +325,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             thread_state.asynchronous = True
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             result[0] = yield future
         except Exception as exc:
             error[0] = sys.exc_info()
@@ -326,7 +336,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     loop.add_callback(f)
     if callback_timeout is not None:
         if not e.wait(callback_timeout):
-            raise gen.TimeoutError("timed out after %s s." % (callback_timeout,))
+            raise TimeoutError("timed out after %s s." % (callback_timeout,))
     else:
         while not e.is_set():
             e.wait(10)
@@ -1194,7 +1204,7 @@ if tornado.version_info[0] >= 5:
 
         if is_kernel():
             try:
-                asyncio.get_running_loop()
+                get_running_loop()
             except RuntimeError:
                 is_kernel_and_no_running_loop = True
 
@@ -1384,7 +1394,7 @@ def import_term(name: str):
 
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_offload_executor, fn, *args, **kwargs)
+    return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
 
 
 def serialize_for_cli(data):
