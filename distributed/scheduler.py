@@ -2953,6 +2953,30 @@ class Scheduler(ServerNode):
         )
         return d[worker]
 
+    async def _delete_worker_data(self, worker_address, keys):
+        """ Delete data from a worker and update the corresponding worker/task states
+
+        Parameters
+        ----------
+        worker_address: str
+            Worker address to delete keys from
+        keys: List[str]
+            List of keys to delete on the specified worker
+        """
+        await retry_operation(
+            self.rpc(addr=worker_address).delete_data, keys=list(keys), report=False,
+        )
+
+        ws = self.workers[worker_address]
+        tasks = {self.tasks[key] for key in keys}
+        ws.has_what -= tasks
+        for ts in tasks:
+            ts.who_has.remove(ws)
+            ws.nbytes -= ts.get_nbytes()
+        self.log_event(
+            ws.address, {"action": "remove-worker-data", "keys": keys},
+        )
+
     async def rebalance(self, comm=None, keys=None, workers=None):
         """ Rebalance keys so that each worker stores roughly equal bytes
 
@@ -3069,42 +3093,10 @@ class Scheduler(ServerNode):
                     )
 
                 await asyncio.gather(
-                    *(
-                        retry_operation(
-                            self.rpc(addr=r).delete_data, keys=v, report=False
-                        )
-                        for r, v in to_senders.items()
-                    )
+                    *(self._delete_worker_data(r, v) for r, v in to_senders.items())
                 )
 
-                for sender, recipient, ts in msgs:
-                    ts.who_has.remove(sender)
-                    sender.has_what.remove(ts)
-                    sender.nbytes -= ts.get_nbytes()
-
                 return {"status": "OK"}
-
-    async def _replicate_remove(self, ws, tasks):
-        """ Delete data from a worker and update the corresponding worker/task states
-
-        Parameters
-        ----------
-        ws: WorkerState
-        tasks: Set[TaskState]
-        """
-        await retry_operation(
-            self.rpc(addr=ws.address).delete_data,
-            keys=[ts.key for ts in tasks],
-            report=False,
-        )
-        ws.has_what -= tasks
-        for ts in tasks:
-            ts.who_has.remove(ws)
-            ws.nbytes -= ts.get_nbytes()
-        self.log_event(
-            ws.address,
-            {"action": "replicate-remove", "keys": [ts.key for ts in tasks],},
-        )
 
     async def replicate(
         self,
@@ -3165,7 +3157,7 @@ class Scheduler(ServerNode):
 
                 await asyncio.gather(
                     *(
-                        self._replicate_remove(ws, tasks)
+                        self._delete_worker_data(ws.address, [t.key for t in tasks])
                         for ws, tasks in del_worker_tasks.items()
                     )
                 )
