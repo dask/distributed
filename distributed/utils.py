@@ -144,11 +144,7 @@ def _get_ip(host, port, family):
             RuntimeWarning,
         )
         addr_info = socket.getaddrinfo(
-            socket.gethostname(),
-            port,
-            family,
-            socket.SOCK_DGRAM,
-            socket.IPPROTO_UDP
+            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
         )[0]
         return addr_info[4][0]
     finally:
