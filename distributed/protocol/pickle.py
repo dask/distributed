@@ -5,7 +5,12 @@ import cloudpickle
 
 if sys.version_info.major == 2:
     import cPickle as pickle
-else:
+elif sys.version_info.major == 3 and sys.version_info.minor < 8:
+    try:
+        import pickle5 as pickle
+    except ImportError:
+        import pickle
+elif sys.version_info.minor:
     import pickle
 
 logger = logging.getLogger(__name__)
