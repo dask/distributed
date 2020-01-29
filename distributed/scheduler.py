@@ -43,7 +43,7 @@ from .metrics import time
 from .node import ServerNode
 from .preloading import preload_modules
 from .proctitle import setproctitle
-from .security import Security
+from .security import Security, BaseSecurity
 from .utils import (
     All,
     ignoring,
@@ -1084,7 +1084,7 @@ class Scheduler(ServerNode):
         self.preload_argv = preload_argv
 
         self.security = security or Security()
-        assert isinstance(self.security, Security)
+        assert isinstance(self.security, BaseSecurity)
         self.connection_args = self.security.get_connection_args("scheduler")
         self.listen_args = self.security.get_listen_args("scheduler")
 

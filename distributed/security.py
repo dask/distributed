@@ -1,6 +1,7 @@
 import datetime
 import tempfile
 import os
+from abc import abstractmethod, ABC
 
 try:
     import ssl
@@ -9,12 +10,66 @@ except ImportError:
 
 import dask
 
+__all__ = ("BaseSecurity", "Security")
 
-__all__ = ("Security",)
+
+class BaseSecurity(ABC):
+    """
+    Security configuration for a Dask cluster
+    """
+
+    __slots__ = ()
+
+    def __init__(self, **kwargs):
+        extra = set(kwargs).difference(self.__slots__)
+        if extra:
+            raise TypeError("Unknown parameters: %r" % sorted(extra))
+
+    @abstractmethod
+    def get_connection_args(self, role: str):
+        """
+        Get the *connection_args* argument for a connect() call with
+        the given *role*.
+        :type role: str: one of client, scheduler, worker
+        """
+        pass
+
+    @abstractmethod
+    def get_listen_args(self, role: str):
+        """
+        Get the *connection_args* argument for a listen() call with
+        the given *role*.
+        :type role: str: one of client, scheduler, worker
+        """
+        pass
+
+    def _set_field(self, kwargs: dict, field: str, config_name: str):
+        if field in kwargs:
+            out = kwargs[field]
+        else:
+            out = dask.config.get(config_name)
+        setattr(self, field, out)
+
+    def __repr__(self):
+        keys = sorted(self.__slots__)
+        items = []
+        for k in keys:
+            val = getattr(self, k)
+            if val is not None:
+                if isinstance(val, str) and "\n" in val:
+                    items.append((k, "..."))
+                else:
+                    items.append((k, repr(val)))
+        return (
+            type(self).__name__
+            + "("
+            + ", ".join("%s=%s" % (k, v) for k, v in items)
+            + ")"
+        )
 
 
-class Security(object):
-    """Security configuration for a Dask cluster.
+class Security(BaseSecurity):
+    """(TLS)Security configuration for a Dask cluster.
 
     Default values are loaded from Dask's configuration files, and can be
     overridden in the constructor.
@@ -61,9 +116,7 @@ class Security(object):
     )
 
     def __init__(self, **kwargs):
-        extra = set(kwargs).difference(self.__slots__)
-        if extra:
-            raise TypeError("Unknown parameters: %r" % sorted(extra))
+        super().__init__(**kwargs)
         self._set_field(
             kwargs, "require_encryption", "distributed.comm.require-encryption"
         )
@@ -140,25 +193,6 @@ class Security(object):
             tls_worker_key=key_contents,
             tls_worker_cert=cert_contents,
         )
-
-    def _set_field(self, kwargs, field, config_name):
-        if field in kwargs:
-            out = kwargs[field]
-        else:
-            out = dask.config.get(config_name)
-        setattr(self, field, out)
-
-    def __repr__(self):
-        keys = sorted(self.__slots__)
-        items = []
-        for k in keys:
-            val = getattr(self, k)
-            if val is not None:
-                if isinstance(val, str) and "\n" in val:
-                    items.append((k, "..."))
-                else:
-                    items.append((k, repr(val)))
-        return "Security(" + ", ".join("%s=%s" % (k, v) for k, v in items) + ")"
 
     def get_tls_config_for_role(self, role):
         """
