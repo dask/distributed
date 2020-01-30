@@ -56,14 +56,16 @@ class VariableExtension(object):
             if old["type"] == "Future" and old["value"] != key:
                 asyncio.ensure_future(self.release(old["value"], name))
         if name not in self.variables:
-            async with self.started:
-                self.started.notify_all()
+            await self.started.acquire()
+            self.started.notify_all()
+            self.started.release()
         self.variables[name] = record
 
     async def release(self, key, name):
         while self.waiting[key, name]:
-            async with self.waiting_conditions[name]:
-                await self.waiting_conditions[name].wait()
+            await self.waiting_conditions[name].acquire()
+            await self.waiting_conditions[name].wait()
+            self.waiting_conditions[name].release()
 
         self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
         del self.waiting[key, name]
@@ -71,8 +73,9 @@ class VariableExtension(object):
     async def future_release(self, name=None, key=None, token=None, client=None):
         self.waiting[key, name].remove(token)
         if not self.waiting[key, name]:
-            async with self.waiting_conditions[name]:
-                self.waiting_conditions[name].notify_all()
+            await self.waiting_conditions[name].acquire()
+            self.waiting_conditions[name].notify_all()
+            self.waiting_conditions[name].release()
 
     async def get(self, stream=None, name=None, client=None, timeout=None):
         start = time()
@@ -83,8 +86,9 @@ class VariableExtension(object):
                 left = None
             if left and left < 0:
                 raise TimeoutError()
-            async with self.started:
-                await asyncio.wait_for(self.started.wait(), timeout=left)
+            await self.started.acquire()
+            await asyncio.wait_for(self.started.wait(), timeout=left)
+            self.started.release()
         record = self.variables[name]
         if record["type"] == "Future":
             key = record["value"]

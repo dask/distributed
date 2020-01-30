@@ -399,8 +399,9 @@ class Sub(object):
                     raise TimeoutError()
             else:
                 timeout2 = None
-            async with self.condition:
-                await asyncio.wait_for(self.condition.wait(), timeout2)
+            await self.condition.acquire()
+            await asyncio.wait_for(self.condition.wait(), timeout2)
+            self.condition.release()
 
         return self.buffer.popleft()
 
@@ -427,8 +428,9 @@ class Sub(object):
 
     async def _put(self, msg):
         self.buffer.append(msg)
-        async with self.condition:
-            self.condition.notify()
+        await self.condition.acquire()
+        self.condition.notify()
+        self.condition.release()
 
     def __repr__(self):
         return "<Sub: {}>".format(self.name)
