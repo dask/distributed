@@ -1,6 +1,5 @@
 import asyncio
 from collections import defaultdict
-import datetime
 import logging
 import uuid
 
@@ -74,8 +73,6 @@ class QueueExtension(object):
             self.scheduler.client_desires_keys(keys=[key], client="queue-%s" % name)
         else:
             record = {"type": "msgpack", "value": data}
-        if timeout is not None:
-            timeout = datetime.timedelta(seconds=timeout)
         await asyncio.wait_for(self.queues[name].put(record), timeout=timeout)
 
     def future_release(self, name=None, key=None, client=None):
@@ -120,8 +117,6 @@ class QueueExtension(object):
             out = [process(o) for o in out]
             return out
         else:
-            if timeout is not None:
-                timeout = datetime.timedelta(seconds=timeout)
             record = await asyncio.wait_for(self.queues[name].get(), timeout=timeout)
             record = process(record)
             return record
