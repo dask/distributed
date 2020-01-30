@@ -4220,9 +4220,8 @@ class as_completed(object):
                 self.queue.put_nowait((future, result))
             else:
                 self.queue.put_nowait(future)
-            await self.condition.acquire()
-            self.condition.notify()
-            self.condition.release()
+            async with self.condition:
+                self.condition.notify()
             with self.thread_condition:
                 self.thread_condition.notify()
 
@@ -4291,11 +4290,8 @@ class as_completed(object):
         while self.queue.empty():
             if not self.futures:
                 raise StopAsyncIteration
-            await self.condition.acquire()
-            try:
+            async with self.condition:
                 await self.condition.wait()
-            finally:
-                self.condition.release()
 
         return self._get_and_raise()
 
