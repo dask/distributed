@@ -6,7 +6,7 @@ import weakref
 
 from .core import CommClosedError
 from .metrics import time
-from .utils import sync, TimeoutError
+from .utils import sync, TimeoutError, ignoring
 from .protocol.serialize import to_serialize
 
 logger = logging.getLogger(__name__)
@@ -399,11 +399,16 @@ class Sub(object):
                     raise TimeoutError()
             else:
                 timeout2 = None
-            await self.condition.acquire()
+
+            async def _():
+                await self.condition.acquire()
+                await self.condition.wait()
+
             try:
-                await asyncio.wait_for(self.condition.wait(), timeout2)
+                await asyncio.wait_for(_(), timeout2)
             finally:
-                self.condition.release()
+                with ignoring(RuntimeError):  # Python 3.6 fails here sometimes
+                    self.condition.release()
 
         return self.buffer.popleft()
 
@@ -430,9 +435,8 @@ class Sub(object):
 
     async def _put(self, msg):
         self.buffer.append(msg)
-        await self.condition.acquire()
-        self.condition.notify()
-        self.condition.release()
+        async with self.condition:
+            self.condition.notify()
 
     def __repr__(self):
         return "<Sub: {}>".format(self.name)
