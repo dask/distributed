@@ -8,6 +8,7 @@ import copy
 import errno
 from functools import partial
 import html
+from inspect import isawaitable
 import itertools
 import json
 import logging
@@ -37,12 +38,10 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from asyncio import Event, Condition, Semaphore
 from tornado.ioloop import IOLoop
 from tornado.queues import Queue
 
 import asyncio
-from asyncio import iscoroutine
 
 from .batched import BatchedSend
 from .utils_comm import (
@@ -431,7 +430,7 @@ class FutureState(object):
         # (https://github.com/tornadoweb/tornado/issues/2189)
         event = self._event
         if event is None:
-            event = self._event = Event()
+            event = self._event = asyncio.Event()
         return event
 
     def cancel(self):
@@ -630,10 +629,6 @@ class Client(Node):
         self._deserializers = deserializers
         self.direct_to_workers = direct_to_workers
 
-        self._gather_semaphore = Semaphore(5)
-        self._gather_keys = None
-        self._gather_future = None
-
         # Communication
         self.scheduler_comm = None
 
@@ -677,6 +672,10 @@ class Client(Node):
         self._should_close_loop = not loop
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
+
+        self._gather_semaphore = asyncio.Semaphore(5, loop=self.loop.asyncio_loop)
+        self._gather_keys = None
+        self._gather_future = None
 
         if heartbeat_interval is None:
             heartbeat_interval = dask.config.get("distributed.client.heartbeat")
@@ -1182,7 +1181,9 @@ class Client(Node):
 
                         try:
                             handler = self._stream_handlers[op]
-                            handler(**msg)
+                            result = handler(**msg)
+                            if isawaitable(result):
+                                await result
                         except Exception as e:
                             logger.exception(e)
                     if breakout:
@@ -1347,7 +1348,7 @@ class Client(Node):
         if self._start_arg is None:
             with ignoring(AttributeError):
                 f = self.cluster.close()
-                if iscoroutine(f):
+                if asyncio.iscoroutine(f):
 
                     async def _():
                         await f
@@ -1803,12 +1804,11 @@ class Client(Node):
         few.  In controls access using a Tornado semaphore, and picks up keys
         from other requests made recently.
         """
-        await self._gather_semaphore.acquire()
-        keys = list(self._gather_keys)
-        self._gather_keys = None  # clear state, these keys are being sent off
-        self._gather_future = None
+        async with self._gather_semaphore:
+            keys = list(self._gather_keys)
+            self._gather_keys = None  # clear state, these keys are being sent off
+            self._gather_future = None
 
-        try:
             if direct or local_worker:  # gather directly from workers
                 who_has = await retry_operation(self.scheduler.who_has, keys=keys)
                 data2, missing_keys, missing_workers = await gather_from_workers(
@@ -1823,8 +1823,6 @@ class Client(Node):
 
             else:  # ask scheduler to gather data for us
                 response = await retry_operation(self.scheduler.gather, keys=keys)
-        finally:
-            self._gather_semaphore.release()
 
         return response
 
@@ -2914,8 +2912,8 @@ class Client(Node):
         if timeout == no_default:
             timeout = self._timeout * 2
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
-        self._restart_event = Event()
-        await self._restart_event.wait(self.loop.time() + timeout)
+        self._restart_event = asyncio.Event()
+        await asyncio.wait_for(self._restart_event.wait(), self.loop.time() + timeout)
         self.generation += 1
         with self._refcount_lock:
             self.refcount.clear()
@@ -4198,18 +4196,13 @@ class as_completed(object):
         self.queue = pyQueue()
         self.lock = threading.Lock()
         self.loop = loop or default_client().loop
-        self.condition = Condition()
+        self.condition = asyncio.Condition(loop=self.loop.asyncio_loop)
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
 
         if futures:
             self.update(futures)
-
-    def _notify(self):
-        self.condition.notify()
-        with self.thread_condition:
-            self.thread_condition.notify()
 
     async def _track_future(self, future):
         try:
@@ -4229,7 +4222,10 @@ class as_completed(object):
                 self.queue.put_nowait((future, result))
             else:
                 self.queue.put_nowait(future)
-            self._notify()
+            async with self.condition:
+                self.condition.notify()
+            with self.thread_condition:
+                self.thread_condition.notify()
 
     def update(self, futures):
         """ Add multiple futures to the collection.
@@ -4296,7 +4292,8 @@ class as_completed(object):
         while self.queue.empty():
             if not self.futures:
                 raise StopAsyncIteration
-            await self.condition.wait()
+            async with self.condition:
+                await self.condition.wait()
 
         return self._get_and_raise()
 
