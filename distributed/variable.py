@@ -9,7 +9,6 @@ except ImportError:
     from toolz import merge
 
 from .client import Future, _get_global_client, Client
-from .metrics import time
 from .utils import tokey, log_errors, TimeoutError
 from .worker import get_client
 
@@ -80,10 +79,10 @@ class VariableExtension(object):
             self.waiting_conditions[name].release()
 
     async def get(self, stream=None, name=None, client=None, timeout=None):
-        start = time()
+        start = self.scheduler.loop.time()
         while name not in self.variables:
             if timeout is not None:
-                left = timeout - (time() - start)
+                left = timeout - (self.scheduler.loop.time() - start)
             else:
                 left = None
             if left and left < 0:

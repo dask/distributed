@@ -85,9 +85,9 @@ def test_timeout(c, s, a, b):
 
     start = time()
     with pytest.raises(TimeoutError):
-        yield v.get(timeout=0.2)
+        yield v.get(timeout=0.1)
     stop = time()
-    assert 0.2 < stop - start < 2.0
+    assert 0.1 < stop - start < 2.0
 
     with pytest.raises(TimeoutError):
         yield v.get(timeout=0.01)
