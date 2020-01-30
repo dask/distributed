@@ -42,7 +42,7 @@ class VariableExtension(object):
 
         self.scheduler.extensions["variables"] = self
 
-    def set(self, stream=None, name=None, key=None, data=None, client=None):
+    async def set(self, stream=None, name=None, key=None, data=None, client=None):
         if key is not None:
             record = {"type": "Future", "value": key}
             self.scheduler.client_desires_keys(keys=[key], client="variable-%s" % name)
@@ -56,20 +56,23 @@ class VariableExtension(object):
             if old["type"] == "Future" and old["value"] != key:
                 asyncio.ensure_future(self.release(old["value"], name))
         if name not in self.variables:
-            self.started.notify_all()
+            async with self.started:
+                self.started.notify_all()
         self.variables[name] = record
 
     async def release(self, key, name):
         while self.waiting[key, name]:
-            await self.waiting_conditions[name].wait()
+            async with self.waiting_conditions[name]:
+                await self.waiting_conditions[name].wait()
 
         self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
         del self.waiting[key, name]
 
-    def future_release(self, name=None, key=None, token=None, client=None):
+    async def future_release(self, name=None, key=None, token=None, client=None):
         self.waiting[key, name].remove(token)
         if not self.waiting[key, name]:
-            self.waiting_conditions[name].notify_all()
+            async with self.waiting_conditions[name]:
+                self.waiting_conditions[name].notify_all()
 
     async def get(self, stream=None, name=None, client=None, timeout=None):
         start = time()
@@ -80,7 +83,8 @@ class VariableExtension(object):
                 left = None
             if left and left < 0:
                 raise TimeoutError()
-            await asyncio.wait_for(self.started.wait(), timeout=left)
+            async with self.started:
+                await asyncio.wait_for(self.started.wait(), timeout=left)
         record = self.variables[name]
         if record["type"] == "Future":
             key = record["value"]
