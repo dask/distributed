@@ -9,6 +9,7 @@ from tornado.ioloop import IOLoop
 
 from distributed import Client, Variable, worker_client, Nanny, wait, TimeoutError
 from distributed.metrics import time
+from distributed.compatibility import WINDOWS
 from distributed.utils_test import gen_cluster, inc, div
 from distributed.utils_test import client, cluster_fixture, loop  # noqa: F401
 
@@ -88,7 +89,11 @@ def test_timeout(c, s, a, b):
     with pytest.raises(TimeoutError):
         yield v.get(timeout=0.2)
     stop = IOLoop.current().time()
-    assert 0.2 < stop - start < 2.0
+
+    if WINDOWS:  # timing is weird with asyncio and Windows
+        assert 0.1 < stop - start < 2.0
+    else:
+        assert 0.2 < stop - start < 2.0
 
     with pytest.raises(TimeoutError):
         yield v.get(timeout=0.01)
@@ -100,7 +105,12 @@ def test_timeout_sync(client):
     with pytest.raises(TimeoutError):
         v.get(timeout=0.2)
     stop = IOLoop.current().time()
-    assert 0.2 < stop - start < 2.0
+
+    if WINDOWS:
+        assert 0.1 < stop - start < 2.0
+    else:
+        assert 0.2 < stop - start < 2.0
+
     with pytest.raises(TimeoutError):
         yield v.get(timeout=0.01)
 
