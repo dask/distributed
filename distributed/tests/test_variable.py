@@ -5,6 +5,7 @@ import sys
 
 import pytest
 from tornado import gen
+from tornado.ioloop import IOLoop
 
 from distributed import Client, Variable, worker_client, Nanny, wait, TimeoutError
 from distributed.metrics import time
@@ -83,10 +84,10 @@ def test_hold_futures(s, a, b):
 def test_timeout(c, s, a, b):
     v = Variable("v")
 
-    start = time()
+    start = IOLoop.current().time()
     with pytest.raises(TimeoutError):
         yield v.get(timeout=0.2)
-    stop = time()
+    stop = IOLoop.current().time()
     assert 0.2 < stop - start < 2.0
 
     with pytest.raises(TimeoutError):
@@ -95,10 +96,10 @@ def test_timeout(c, s, a, b):
 
 def test_timeout_sync(client):
     v = Variable("v")
-    start = time()
+    start = IOLoop.current().time()
     with pytest.raises(TimeoutError):
         v.get(timeout=0.2)
-    stop = time()
+    stop = IOLoop.current().time()
     assert 0.2 < stop - start < 2.0
     with pytest.raises(TimeoutError):
         yield v.get(timeout=0.01)
