@@ -400,8 +400,10 @@ class Sub(object):
             else:
                 timeout2 = None
             await self.condition.acquire()
-            await asyncio.wait_for(self.condition.wait(), timeout2)
-            self.condition.release()
+            try:
+                await asyncio.wait_for(self.condition.wait(), timeout2)
+            finally:
+                self.condition.release()
 
         return self.buffer.popleft()
 

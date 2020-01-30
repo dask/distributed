@@ -64,8 +64,10 @@ class VariableExtension(object):
     async def release(self, key, name):
         while self.waiting[key, name]:
             await self.waiting_conditions[name].acquire()
-            await self.waiting_conditions[name].wait()
-            self.waiting_conditions[name].release()
+            try:
+                await self.waiting_conditions[name].wait()
+            finally:
+                self.waiting_conditions[name].release()
 
         self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
         del self.waiting[key, name]
@@ -87,8 +89,11 @@ class VariableExtension(object):
             if left and left < 0:
                 raise TimeoutError()
             await self.started.acquire()
-            await asyncio.wait_for(self.started.wait(), timeout=left)
-            self.started.release()
+            try:
+                await asyncio.wait_for(self.started.wait(), timeout=left)
+            finally:
+                self.started.release()
+
         record = self.variables[name]
         if record["type"] == "Future":
             key = record["value"]

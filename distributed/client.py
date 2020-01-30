@@ -4292,8 +4292,10 @@ class as_completed(object):
             if not self.futures:
                 raise StopAsyncIteration
             await self.condition.acquire()
-            await self.condition.wait()
-            self.condition.release()
+            try:
+                await self.condition.wait()
+            finally:
+                self.condition.release()
 
         return self._get_and_raise()
 
