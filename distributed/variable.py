@@ -9,7 +9,7 @@ except ImportError:
     from toolz import merge
 
 from .client import Future, _get_global_client, Client
-from .utils import tokey, log_errors, TimeoutError
+from .utils import tokey, log_errors, TimeoutError, ignoring
 from .worker import get_client
 
 logger = logging.getLogger(__name__)
@@ -55,18 +55,14 @@ class VariableExtension(object):
             if old["type"] == "Future" and old["value"] != key:
                 asyncio.ensure_future(self.release(old["value"], name))
         if name not in self.variables:
-            await self.started.acquire()
-            self.started.notify_all()
-            self.started.release()
+            async with self.started:
+                self.started.notify_all()
         self.variables[name] = record
 
     async def release(self, key, name):
         while self.waiting[key, name]:
-            await self.waiting_conditions[name].acquire()
-            try:
+            async with self.waiting_conditions[name]:
                 await self.waiting_conditions[name].wait()
-            finally:
-                self.waiting_conditions[name].release()
 
         self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
         del self.waiting[key, name]
@@ -74,9 +70,8 @@ class VariableExtension(object):
     async def future_release(self, name=None, key=None, token=None, client=None):
         self.waiting[key, name].remove(token)
         if not self.waiting[key, name]:
-            await self.waiting_conditions[name].acquire()
-            self.waiting_conditions[name].notify_all()
-            self.waiting_conditions[name].release()
+            async with self.waiting_conditions[name]:
+                self.waiting_conditions[name].notify_all()
 
     async def get(self, stream=None, name=None, client=None, timeout=None):
         start = self.scheduler.loop.time()
@@ -87,11 +82,16 @@ class VariableExtension(object):
                 left = None
             if left and left < 0:
                 raise TimeoutError()
-            await self.started.acquire()
             try:
-                await asyncio.wait_for(self.started.wait(), timeout=left)
+
+                async def _():  # Python 3.6 is odd and requires special help here
+                    await self.started.acquire()
+                    await self.started.wait()
+
+                await asyncio.wait_for(_(), timeout=left)
             finally:
-                self.started.release()
+                with ignoring(RuntimeError):  # Python 3.6 loses lock on finally clause
+                    self.started.release()
 
         record = self.variables[name]
         if record["type"] == "Future":

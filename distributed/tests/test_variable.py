@@ -101,7 +101,7 @@ def test_timeout_sync(client):
     stop = time()
     assert 0.1 < stop - start < 2.0
     with pytest.raises(TimeoutError):
-        v.get(timeout=0.01)
+        yield v.get(timeout=0.01)
 
 
 @gen_cluster(client=True)
