@@ -1,3 +1,4 @@
+import asyncio
 import atexit
 from collections import defaultdict
 from collections.abc import Iterator
@@ -39,9 +40,6 @@ except ImportError:
     single_key = first
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.queues import Queue
-
-import asyncio
 
 from .batched import BatchedSend
 from .utils_comm import (
@@ -4125,7 +4123,7 @@ async def _first_completed(futures):
     See Also:
         _as_completed
     """
-    q = Queue()
+    q = asyncio.Queue()
     await _as_completed(futures, q)
     result = await q.get()
     return result
