@@ -1253,8 +1253,6 @@ class Client(Node):
                     pass
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
-            if self.status == "closed":
-                return
 
             if (
                 self.scheduler_comm
@@ -2911,7 +2909,13 @@ class Client(Node):
             timeout = self._timeout * 2
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
         self._restart_event = asyncio.Event()
-        await asyncio.wait_for(self._restart_event.wait(), self.loop.time() + timeout)
+        try:
+            await asyncio.wait_for(
+                self._restart_event.wait(), self.loop.time() + timeout
+            )
+        except TimeoutError:
+            logger.error("Restart timed out after %f seconds", timeout)
+            pass
         self.generation += 1
         with self._refcount_lock:
             self.refcount.clear()
