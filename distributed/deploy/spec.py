@@ -6,7 +6,6 @@ import math
 import weakref
 
 import dask
-from tornado.locks import Event
 from tornado import gen
 
 from .adaptive import Adaptive
@@ -42,7 +41,7 @@ class ProcessInterface:
         self.external_address = None
         self.lock = asyncio.Lock()
         self.status = "created"
-        self._event_finished = Event()
+        self._event_finished = asyncio.Event()
 
     def __await__(self):
         async def _():
@@ -92,7 +91,7 @@ class ProcessInterface:
         await self.close()
 
 
-class NoOpAwaitable(object):
+class NoOpAwaitable:
     """An awaitable object that always returns None.
 
     Useful to return from a method that can be called in both asynchronous and

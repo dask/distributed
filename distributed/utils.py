@@ -138,13 +138,15 @@ def _get_ip(host, port, family):
         ip = sock.getsockname()[0]
         return ip
     except EnvironmentError as e:
-        # XXX Should first try getaddrinfo() on socket.gethostname() and getfqdn()
         warnings.warn(
             "Couldn't detect a suitable IP address for "
             "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        return socket.gethostname()
+        addr_info = socket.getaddrinfo(
+            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
+        )[0]
+        return addr_info[4][0]
     finally:
         sock.close()
 
@@ -347,7 +349,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         return result[0]
 
 
-class LoopRunner(object):
+class LoopRunner:
     """
     A helper to start and stop an IO loop in a controlled way.
     Several loop runners can associate safely to the same IO loop.
@@ -1059,7 +1061,7 @@ def import_file(path):
     return loaded
 
 
-class itemgetter(object):
+class itemgetter:
     """A picklable itemgetter.
 
     Examples
@@ -1411,7 +1413,7 @@ def import_term(name: str):
 
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_offload_executor, fn, *args, **kwargs)
+    return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
 
 
 def serialize_for_cli(data):

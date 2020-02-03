@@ -1,3 +1,4 @@
+import asyncio
 import atexit
 from collections import defaultdict
 from collections.abc import Iterator
@@ -8,6 +9,7 @@ import copy
 import errno
 from functools import partial
 import html
+from inspect import isawaitable
 import itertools
 import json
 import logging
@@ -37,12 +39,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.locks import Event, Condition, Semaphore
 from tornado.ioloop import IOLoop
-from tornado.queues import Queue
-
-import asyncio
-from asyncio import iscoroutine
 
 from .batched import BatchedSend
 from .utils_comm import (
@@ -413,7 +410,7 @@ class Future(WrappedKey):
         return self.result().__await__()
 
 
-class FutureState(object):
+class FutureState:
     """A Future's internal state.
 
     This is shared between all Futures with the same key and client.
@@ -432,7 +429,7 @@ class FutureState(object):
         # (https://github.com/tornadoweb/tornado/issues/2189)
         event = self._event
         if event is None:
-            event = self._event = Event()
+            event = self._event = asyncio.Event()
         return event
 
     def cancel(self):
@@ -471,7 +468,7 @@ class FutureState(object):
             self._event.clear()
 
     async def wait(self, timeout=None):
-        await self._get_event().wait(timeout)
+        await asyncio.wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
         return "<%s: %s>" % (self.__class__.__name__, self.status)
@@ -631,10 +628,6 @@ class Client(Node):
         self._deserializers = deserializers
         self.direct_to_workers = direct_to_workers
 
-        self._gather_semaphore = Semaphore(5)
-        self._gather_keys = None
-        self._gather_future = None
-
         # Communication
         self.scheduler_comm = None
 
@@ -678,6 +671,10 @@ class Client(Node):
         self._should_close_loop = not loop
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
+
+        self._gather_semaphore = asyncio.Semaphore(5, loop=self.loop.asyncio_loop)
+        self._gather_keys = None
+        self._gather_future = None
 
         if heartbeat_interval is None:
             heartbeat_interval = dask.config.get("distributed.client.heartbeat")
@@ -753,6 +750,22 @@ class Client(Node):
         """
         return self._asynchronous and self.loop is IOLoop.current()
 
+    @property
+    def dashboard_link(self):
+        scheduler, info = self._get_scheduler_info()
+        try:
+            return self.cluster.dashboard_link
+        except AttributeError:
+            protocol, rest = scheduler.address.split("://")
+
+            port = info["services"]["dashboard"]
+            if protocol == "inproc":
+                host = "localhost"
+            else:
+                host = rest.split(":")[0]
+
+            return format_dashboard_link(host, port)
+
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
         if (
             asynchronous
@@ -767,6 +780,29 @@ class Client(Node):
             return sync(
                 self.loop, func, *args, callback_timeout=callback_timeout, **kwargs
             )
+
+    def _get_scheduler_info(self):
+        from .scheduler import Scheduler
+
+        if (
+            self.cluster
+            and hasattr(self.cluster, "scheduler")
+            and isinstance(self.cluster.scheduler, Scheduler)
+        ):
+            info = self.cluster.scheduler.identity()
+            scheduler = self.cluster.scheduler
+        elif (
+            self._loop_runner.is_started()
+            and self.scheduler
+            and not (self.asynchronous and self.loop is IOLoop.current())
+        ):
+            info = sync(self.loop, self.scheduler.identity)
+            scheduler = self.scheduler
+        else:
+            info = self._scheduler_identity
+            scheduler = self.scheduler
+
+        return scheduler, info
 
     def __repr__(self):
         # Note: avoid doing I/O here...
@@ -797,25 +833,7 @@ class Client(Node):
             return "<%s: not connected>" % (self.__class__.__name__,)
 
     def _repr_html_(self):
-        from .scheduler import Scheduler
-
-        if (
-            self.cluster
-            and hasattr(self.cluster, "scheduler")
-            and isinstance(self.cluster.scheduler, Scheduler)
-        ):
-            info = self.cluster.scheduler.identity()
-            scheduler = self.cluster.scheduler
-        elif (
-            self._loop_runner.is_started()
-            and self.scheduler
-            and not (self.asynchronous and self.loop is IOLoop.current())
-        ):
-            info = sync(self.loop, self.scheduler.identity)
-            scheduler = self.scheduler
-        else:
-            info = self._scheduler_identity
-            scheduler = self.scheduler
+        scheduler, info = self._get_scheduler_info()
 
         text = (
             '<h3 style="text-align: left;">Client</h3>\n'
@@ -827,22 +845,9 @@ class Client(Node):
             text += "  <li><b>Scheduler: not connected</b></li>\n"
 
         if info and "dashboard" in info["services"]:
-            try:
-                address = self.cluster.dashboard_link
-            except AttributeError:
-                protocol, rest = scheduler.address.split("://")
-
-                port = info["services"]["dashboard"]
-                if protocol == "inproc":
-                    host = "localhost"
-                else:
-                    host = rest.split(":")[0]
-
-                address = format_dashboard_link(host, port)
-
             text += (
                 "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n"
-                % {"web": address}
+                % {"web": self.dashboard_link}
             )
 
         text += "</ul>\n"
@@ -1183,7 +1188,9 @@ class Client(Node):
 
                         try:
                             handler = self._stream_handlers[op]
-                            handler(**msg)
+                            result = handler(**msg)
+                            if isawaitable(result):
+                                await result
                         except Exception as e:
                             logger.exception(e)
                     if breakout:
@@ -1256,8 +1263,6 @@ class Client(Node):
                     pass
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
-            if self.status == "closed":
-                return
 
             if (
                 self.scheduler_comm
@@ -1349,7 +1354,7 @@ class Client(Node):
         if self._start_arg is None:
             with ignoring(AttributeError):
                 f = self.cluster.close()
-                if iscoroutine(f):
+                if asyncio.iscoroutine(f):
 
                     async def _():
                         await f
@@ -1805,12 +1810,11 @@ class Client(Node):
         few.  In controls access using a Tornado semaphore, and picks up keys
         from other requests made recently.
         """
-        await self._gather_semaphore.acquire()
-        keys = list(self._gather_keys)
-        self._gather_keys = None  # clear state, these keys are being sent off
-        self._gather_future = None
+        async with self._gather_semaphore:
+            keys = list(self._gather_keys)
+            self._gather_keys = None  # clear state, these keys are being sent off
+            self._gather_future = None
 
-        try:
             if direct or local_worker:  # gather directly from workers
                 who_has = await retry_operation(self.scheduler.who_has, keys=keys)
                 data2, missing_keys, missing_workers = await gather_from_workers(
@@ -1825,8 +1829,6 @@ class Client(Node):
 
             else:  # ask scheduler to gather data for us
                 response = await retry_operation(self.scheduler.gather, keys=keys)
-        finally:
-            self._gather_semaphore.release()
 
         return response
 
@@ -2916,10 +2918,12 @@ class Client(Node):
         if timeout == no_default:
             timeout = self._timeout * 2
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
-        self._restart_event = Event()
+        self._restart_event = asyncio.Event()
         try:
-            await self._restart_event.wait(self.loop.time() + timeout)
-        except gen.TimeoutError:
+            await asyncio.wait_for(
+                self._restart_event.wait(), self.loop.time() + timeout
+            )
+        except TimeoutError:
             logger.error("Restart timed out after %f seconds", timeout)
             pass
         self.generation += 1
@@ -4133,13 +4137,13 @@ async def _first_completed(futures):
     See Also:
         _as_completed
     """
-    q = Queue()
+    q = asyncio.Queue()
     await _as_completed(futures, q)
     result = await q.get()
     return result
 
 
-class as_completed(object):
+class as_completed:
     """
     Return futures in the order in which they complete
 
@@ -4204,18 +4208,13 @@ class as_completed(object):
         self.queue = pyQueue()
         self.lock = threading.Lock()
         self.loop = loop or default_client().loop
-        self.condition = Condition()
+        self.condition = asyncio.Condition(loop=self.loop.asyncio_loop)
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
 
         if futures:
             self.update(futures)
-
-    def _notify(self):
-        self.condition.notify()
-        with self.thread_condition:
-            self.thread_condition.notify()
 
     async def _track_future(self, future):
         try:
@@ -4235,7 +4234,10 @@ class as_completed(object):
                 self.queue.put_nowait((future, result))
             else:
                 self.queue.put_nowait(future)
-            self._notify()
+            async with self.condition:
+                self.condition.notify()
+            with self.thread_condition:
+                self.thread_condition.notify()
 
     def update(self, futures):
         """ Add multiple futures to the collection.
@@ -4302,7 +4304,8 @@ class as_completed(object):
         while self.queue.empty():
             if not self.futures:
                 raise StopAsyncIteration
-            await self.condition.wait()
+            async with self.condition:
+                await self.condition.wait()
 
         return self._get_and_raise()
 
@@ -4477,7 +4480,7 @@ def fire_and_forget(obj):
         )
 
 
-class get_task_stream(object):
+class get_task_stream:
     """
     Collect task stream within a context block
 
@@ -4512,7 +4515,7 @@ class get_task_stream(object):
     A common way to do this is to upload the file as a gist, and then serve it
     on https://raw.githack.com ::
 
-       $ pip install gist
+       $ python -m pip install gist
        $ gist task-stream.html
        https://gist.github.com/8a5b3c74b10b413f612bb5e250856ceb
 

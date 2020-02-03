@@ -1,9 +1,7 @@
+import asyncio
 from collections import defaultdict, deque
 import logging
 import uuid
-import asyncio
-
-import tornado.locks
 
 from .client import _get_global_client
 from .utils import log_errors, TimeoutError
@@ -12,7 +10,7 @@ from .worker import get_worker
 logger = logging.getLogger(__name__)
 
 
-class LockExtension(object):
+class LockExtension:
     """ An extension for the scheduler to manage Locks
 
     This adds the following routes to the scheduler
@@ -40,7 +38,7 @@ class LockExtension(object):
                 result = True
             else:
                 while name in self.ids:
-                    event = tornado.locks.Event()
+                    event = asyncio.Event()
                     self.events[name].append(event)
                     future = event.wait()
                     if timeout is not None:
@@ -73,14 +71,18 @@ class LockExtension(object):
                 del self.events[name]
 
 
-class Lock(object):
+class Lock:
     """ Distributed Centralized Lock
 
     Parameters
     ----------
-    name: string
+    name: string (optional)
         Name of the lock to acquire.  Choosing the same name allows two
-        disconnected processes to coordinate a lock.
+        disconnected processes to coordinate a lock.  If not given, a random
+        name will be generated.
+    client: Client (optional)
+        Client to use for communication with the scheduler.  If not given, the
+        default global client will be used.
 
     Examples
     --------

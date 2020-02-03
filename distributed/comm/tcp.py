@@ -324,7 +324,7 @@ def _expect_tls_context(connection_args):
     return ctx
 
 
-class RequireEncryptionMixin(object):
+class RequireEncryptionMixin:
     def _check_encryption(self, address, connection_args):
         if not self.encrypted and connection_args.get("require_encryption"):
             # XXX Should we have a dedicated SecurityError class?
@@ -345,7 +345,7 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         kwargs = self._get_connect_args(**connection_args)
 
         try:
-            stream = await BaseTCPConnector.client.connect(
+            stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
 

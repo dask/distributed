@@ -12,7 +12,6 @@ import weakref
 import dask
 from dask.system import CPU_COUNT
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 from tornado import gen
 
 from .comm import get_address_host, unparse_host_port
@@ -450,7 +449,7 @@ class Nanny(ServerNode):
         await ServerNode.close(self)
 
 
-class WorkerProcess(object):
+class WorkerProcess:
     def __init__(
         self,
         worker_kwargs,
@@ -507,8 +506,8 @@ class WorkerProcess(object):
         )
         self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)
-        self.running = Event()
-        self.stopped = Event()
+        self.running = asyncio.Event()
+        self.stopped = asyncio.Event()
         self.status = "starting"
         try:
             await self.process.start()

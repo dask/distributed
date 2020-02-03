@@ -3,23 +3,19 @@ from collections import defaultdict
 import logging
 import uuid
 
-import tornado.locks
-from tornado import gen
-
 try:
     from cytoolz import merge
 except ImportError:
     from toolz import merge
 
 from .client import Future, _get_global_client, Client
-from .metrics import time
-from .utils import tokey, log_errors, TimeoutError
+from .utils import tokey, log_errors, TimeoutError, ignoring
 from .worker import get_client
 
 logger = logging.getLogger(__name__)
 
 
-class VariableExtension(object):
+class VariableExtension:
     """ An extension for the scheduler to manage queues
 
     This adds the following routes to the scheduler
@@ -33,8 +29,8 @@ class VariableExtension(object):
         self.scheduler = scheduler
         self.variables = dict()
         self.waiting = defaultdict(set)
-        self.waiting_conditions = defaultdict(tornado.locks.Condition)
-        self.started = tornado.locks.Condition()
+        self.waiting_conditions = defaultdict(asyncio.Condition)
+        self.started = asyncio.Condition()
 
         self.scheduler.handlers.update(
             {"variable_set": self.set, "variable_get": self.get}
@@ -45,7 +41,7 @@ class VariableExtension(object):
 
         self.scheduler.extensions["variables"] = self
 
-    def set(self, stream=None, name=None, key=None, data=None, client=None):
+    async def set(self, stream=None, name=None, key=None, data=None, client=None):
         if key is not None:
             record = {"type": "Future", "value": key}
             self.scheduler.client_desires_keys(keys=[key], client="variable-%s" % name)
@@ -59,34 +55,44 @@ class VariableExtension(object):
             if old["type"] == "Future" and old["value"] != key:
                 asyncio.ensure_future(self.release(old["value"], name))
         if name not in self.variables:
-            self.started.notify_all()
+            async with self.started:
+                self.started.notify_all()
         self.variables[name] = record
 
     async def release(self, key, name):
         while self.waiting[key, name]:
-            await self.waiting_conditions[name].wait()
+            async with self.waiting_conditions[name]:
+                await self.waiting_conditions[name].wait()
 
         self.scheduler.client_releases_keys(keys=[key], client="variable-%s" % name)
         del self.waiting[key, name]
 
-    def future_release(self, name=None, key=None, token=None, client=None):
+    async def future_release(self, name=None, key=None, token=None, client=None):
         self.waiting[key, name].remove(token)
         if not self.waiting[key, name]:
-            self.waiting_conditions[name].notify_all()
+            async with self.waiting_conditions[name]:
+                self.waiting_conditions[name].notify_all()
 
     async def get(self, stream=None, name=None, client=None, timeout=None):
-        start = time()
+        start = self.scheduler.loop.time()
         while name not in self.variables:
             if timeout is not None:
-                left = timeout - (time() - start)
+                left = timeout - (self.scheduler.loop.time() - start)
             else:
                 left = None
             if left and left < 0:
                 raise TimeoutError()
             try:
-                await self.started.wait(timeout=left)
-            except gen.TimeoutError:
-                raise TimeoutError("Timed out waiting for Variable.get")
+
+                async def _():  # Python 3.6 is odd and requires special help here
+                    await self.started.acquire()
+                    await self.started.wait()
+
+                await asyncio.wait_for(_(), timeout=left)
+            finally:
+                with ignoring(RuntimeError):  # Python 3.6 loses lock on finally clause
+                    self.started.release()
+
         record = self.variables[name]
         if record["type"] == "Future":
             key = record["value"]
@@ -114,7 +120,7 @@ class VariableExtension(object):
             del self.variables[name]
 
 
-class Variable(object):
+class Variable:
     """ Distributed Global Variable
 
     This allows multiple clients to share futures and data between each other
@@ -129,6 +135,15 @@ class Variable(object):
     .. warning::
 
        This object is experimental and has known issues in Python 2
+
+    Parameters
+    ----------
+    name: string (optional)
+        Name used by other clients and the scheduler to identify the variable.
+        If not given, a random name will be generated.
+    client: Client (optional)
+        Client used for communication with the scheduler. Defaults to the
+        value of ``_get_global_client()``.
 
     Examples
     --------

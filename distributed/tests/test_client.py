@@ -1130,7 +1130,7 @@ def test_scatter_hash(c, s, a, b):
 def test_scatter_tokenize_local(c, s, a, b):
     from dask.base import normalize_token
 
-    class MyObj(object):
+    class MyObj:
         pass
 
     L = []
@@ -1846,7 +1846,7 @@ def test_map_on_futures_with_kwargs(c, s, a, b):
     assert result == 100 + 1 + 200
 
 
-class BadlySerializedObject(object):
+class BadlySerializedObject:
     def __getstate__(self):
         return 1
 
@@ -1854,7 +1854,7 @@ class BadlySerializedObject(object):
         raise TypeError("hello!")
 
 
-class FatallySerializedObject(object):
+class FatallySerializedObject:
     def __getstate__(self):
         return 1
 
@@ -3018,7 +3018,7 @@ def test_replicate_workers(c, s, *workers):
     s.validate_state()
 
 
-class CountSerialization(object):
+class CountSerialization:
     def __init__(self):
         self.n = 0
 
@@ -4472,7 +4472,7 @@ class MyException(Exception):
 
 @gen_cluster(client=True)
 def test_robust_unserializable(c, s, a, b):
-    class Foo(object):
+    class Foo:
         def __getstate__(self):
             raise MyException()
 
@@ -4488,7 +4488,7 @@ def test_robust_unserializable(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_robust_undeserializable(c, s, a, b):
-    class Foo(object):
+    class Foo:
         def __getstate__(self):
             return 1
 
@@ -4508,7 +4508,7 @@ def test_robust_undeserializable(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_robust_undeserializable_function(c, s, a, b):
-    class Foo(object):
+    class Foo:
         def __getstate__(self):
             return 1
 
@@ -5249,8 +5249,9 @@ def test_dashboard_link(loop, monkeypatch):
             with dask.config.set(
                 {"distributed.dashboard.link": "{scheme}://foo-{USER}:{port}/status"}
             ):
-                text = c._repr_html_()
                 link = "http://foo-myusername:12355/status"
+                assert link == c.dashboard_link
+                text = c._repr_html_()
                 assert link in text
 
 
