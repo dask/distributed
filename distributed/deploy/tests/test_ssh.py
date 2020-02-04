@@ -33,7 +33,7 @@ async def test_keywords():
         connect_options=dict(known_hosts=None),
         asynchronous=True,
         worker_options={
-            "nprocs": 2,
+            "nprocs": 2,  # nprocs checks custom arguments with cli_keywords
             "nthreads": 2,
             "memory_limit": "2 GiB",
             "death_timeout": "5s",
