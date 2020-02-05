@@ -20,6 +20,9 @@ def test_serialize_cupy_from_numba(dtype):
     cuda = pytest.importorskip("numba.cuda")
     np = pytest.importorskip("numpy")
 
+    if not cuda.is_available():
+        pytest.skip("CUDA is not available")
+
     size = 10
     x_np = np.arange(size, dtype=dtype)
     x = cuda.to_device(x_np)
