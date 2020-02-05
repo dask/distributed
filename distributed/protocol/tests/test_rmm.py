@@ -19,7 +19,7 @@ def test_serialize_rmm_device_buffer(size):
 
     header, frames = serialize(x, serializers=("cuda", "dask", "pickle"))
     y = deserialize(header, frames, deserializers=("cuda", "dask", "pickle", "error"))
-    y_np = cuda.as_cuda_array(y).copy_to_host()
+    y_np = y.copy_to_host()
 
     assert (x_np == y_np).all()
 
