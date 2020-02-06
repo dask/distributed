@@ -69,7 +69,7 @@ def init_once():
 
             def cuda_array(n):
                 raise RuntimeError(
-                    "In order to send/recv CUDA arrays, Numba or RMM is required"
+                    "In order to send/recv CUDA arrays, Numba and RMM are required"
                 )
 
 
