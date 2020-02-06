@@ -26,6 +26,14 @@ from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError, FatalCommClosedError
 from .utils import to_frames, from_frames, get_tcp_server_address, ensure_concrete_host
 
+import asyncio
+from itertools import starmap
+from operator import add
+
+try:
+    from cytoolz import accumulate, cons, sliding_window
+except ImportError:
+    from toolz import accumulate, cons, sliding_window
 
 logger = logging.getLogger(__name__)
 
@@ -190,18 +198,24 @@ class TCP(Comm):
             lengths = await stream.read_bytes(8 * n_frames)
             lengths = struct.unpack("Q" * n_frames, lengths)
 
-            frames = []
-            for length in lengths:
-                if length:
-                    if self._iostream_has_read_into:
-                        frame = bytearray(length)
-                        n = await stream.read_into(frame)
-                        assert n == length, (n, length)
-                    else:
+            if self._iostream_has_read_into:
+                frame_arr = bytearray(sum(lengths))
+                slices = starmap(
+                    slice, sliding_window(2, accumulate(add, cons(0, sizes)))
+                )
+                frames = [frames_arr[sl] for sl in slices]
+                recvd_lengths = await asyncio.gather([
+                    stream.read_into(f) for f in frames if len(f)
+                ])
+                assert all(recvd_lengths == lengths), (recvd_lengths, lengths)
+            else:
+                frames = []
+                for length in lengths:
+                    if length:
                         frame = await stream.read_bytes(length)
-                else:
-                    frame = b""
-                frames.append(frame)
+                    else:
+                        frame = b""
+                    frames.append(frame)
         except StreamClosedError as e:
             self.stream = None
             if not shutting_down():

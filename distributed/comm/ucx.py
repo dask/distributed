@@ -22,6 +22,15 @@ from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors
 import dask
 import numpy as np
 
+import asyncio
+from itertools import starmap
+from operator import add
+
+try:
+    from cytoolz import accumulate, cons, sliding_window
+except ImportError:
+    from toolz import accumulate, cons, sliding_window
+
 
 logger = logging.getLogger(__name__)
 
@@ -188,20 +197,16 @@ class UCX(Comm):
                 raise CommClosedError("While reading, the connection was closed")
             else:
                 # Recv frames
-                frames = []
-                for is_cuda, size in zip(is_cudas.tolist(), sizes.tolist()):
-                    if size > 0:
-                        if is_cuda:
-                            frame = cuda_array(size)
-                        else:
-                            frame = np.empty(size, dtype=np.uint8)
-                        await self.ep.recv(frame)
-                        frames.append(frame)
-                    else:
-                        if is_cuda:
-                            frames.append(cuda_array(size))
-                        else:
-                            frames.append(b"")
+                frames_dev_arr = cuda_array(sum(sizes[is_cudas]))
+                frames_host_arr = np.empty(sum(sizes[~is_cudas]), dtype=np.uint8)
+                slices = starmap(
+                    slice, sliding_window(2, accumulate(add, cons(0, sizes)))
+                )
+                frames = [
+                    frames_dev_arr[sl] if is_cuda else frames_host_arr[sl]
+                    for is_cuda, size in zip(is_cudas.tolist(), slices)
+                ]
+                await asyncio.gather([self.ep.recv(f) for f in frames if len(f)])
                 msg = await from_frames(
                     frames, deserialize=self.deserialize, deserializers=deserializers
                 )
