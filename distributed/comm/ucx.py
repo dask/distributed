@@ -42,6 +42,16 @@ def init_once():
     ucp = _ucp
     ucp.init(options=dask.config.get("ucx"), env_takes_precedence=True)
 
+    # Find the function, `as_cuda_array()`, to get array-likes from CUDA
+    try:
+        import numba.cuda
+
+        as_cuda_array = lambda a: numba.cuda.as_cuda_array(a)
+    except ImportError:
+
+        def as_cuda_array(a):
+            raise RuntimeError("In order to send/recv CUDA arrays, Numba is required")
+
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
         import rmm
