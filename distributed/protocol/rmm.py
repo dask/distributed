@@ -15,10 +15,9 @@ if hasattr(rmm, "DeviceBuffer"):
     def deserialize_rmm_device_buffer(header, frames):
         (arr,) = frames
 
-        # Copy data into new `DeviceBuffer` if needed
-        if not isinstance(arr, rmm.DeviceBuffer):
-            (ptr, _) = arr.__cuda_array_interface__["data"]
-            (size,) = header["shape"]
-            arr = rmm.DeviceBuffer(ptr=ptr, size=size)
+        # We should already have `DeviceBuffer`
+        # as RMM is used preferably for allocations
+        # when it is available (as it is here).
+        assert isinstance(arr, rmm.DeviceBuffer)
 
         return arr
