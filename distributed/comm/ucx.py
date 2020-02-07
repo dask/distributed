@@ -197,15 +197,23 @@ class UCX(Comm):
                 raise CommClosedError("While reading, the connection was closed")
             else:
                 # Recv frames
-                frames_dev_arr = cuda_array(sum(sizes[is_cudas]))
-                frames_host_arr = np.empty(sum(sizes[~is_cudas]), dtype=np.uint8)
-                slices = starmap(
-                    slice, sliding_window(2, accumulate(add, cons(0, sizes)))
+                sizes_dev = sizes[is_cudas]
+                sizes_host = sizes[~is_cudas]
+                frames_dev_arr = cuda_array(sum(sizes_dev))
+                frames_host_arr = np.empty(sum(sizes_host), dtype=np.uint8)
+                slices_dev = starmap(
+                    slice, sliding_window(2, accumulate(add, cons(0, sizes_dev)))
                 )
-                frames = [
-                    frames_dev_arr[sl] if is_cuda else frames_host_arr[sl]
-                    for is_cuda, size in zip(is_cudas.tolist(), slices)
-                ]
+                slices_host = starmap(
+                    slice, sliding_window(2, accumulate(add, cons(0, sizes_host)))
+                )
+                frames_dev = [frames_dev_arr[sl] for sl in slices_dev]
+                frames_host = [frames_host_arr[sl] for sl in slices_host]
+                frames = len(sizes) * [None]
+                for i, f in zip(is_cudas.nonzero()[0], frames_dev):
+                    frames[i] = f
+                for i, f in zip((~is_cudas).nonzero()[0], frames_host):
+                    frames[i] = f
                 await asyncio.gather([self.ep.recv(f) for f in frames if len(f)])
                 msg = await from_frames(
                     frames, deserialize=self.deserialize, deserializers=deserializers
