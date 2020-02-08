@@ -397,6 +397,8 @@ redirect_files = [
         "local-cluster.html",
         "https://docs.dask.org/en/latest/setup/single-distributed.html",
     ),
+    ("adaptive.html", "https://docs.dask.org/en/latest/setup/adaptive.html"),
+    ("prometheus.html", "https://docs.dask.org/en/latest/setup/prometheus.html"),
 ]
 
 
