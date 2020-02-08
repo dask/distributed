@@ -114,7 +114,6 @@ Contents
    resources
    task-launch
    tls
-   web
 
 .. toctree::
    :maxdepth: 1

@@ -399,6 +399,7 @@ redirect_files = [
     ),
     ("adaptive.html", "https://docs.dask.org/en/latest/setup/adaptive.html"),
     ("prometheus.html", "https://docs.dask.org/en/latest/setup/prometheus.html"),
+    ("web.html", "https://docs.dask.org/en/latest/diagnostics-distributed.html"),
 ]
 
 
