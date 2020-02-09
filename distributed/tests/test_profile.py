@@ -4,8 +4,6 @@ import time
 from toolz import first
 import threading
 
-from dask.sizeof import sizeof
-
 from distributed.compatibility import WINDOWS
 from distributed import metrics
 from distributed.profile import (
@@ -18,7 +16,6 @@ from distributed.profile import (
     llprocess,
     ll_get_stack,
     plot_data,
-    Profile,
 )
 
 
@@ -202,16 +199,3 @@ def test_watch():
     while threading.active_count() > start_threads:
         assert metrics.time() < start + 2
         time.sleep(0.01)
-
-
-def test_profile_nested_sizeof():
-    # https://github.com/dask/distributed/issues/1674
-    n = 500
-    original = outer = {}
-    inner = {}
-
-    for i in range(n):
-        outer["children"] = inner
-        outer, inner = inner, {}
-    profile = Profile(original)
-    sizeof(profile)

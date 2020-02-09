@@ -1,3 +1,4 @@
+import sys
 import logging
 import socket
 
@@ -37,7 +38,12 @@ async def to_frames(msg, serializers=None, on_error="message", context=None):
             logger.exception(e)
             raise
 
-    if FRAME_OFFLOAD_THRESHOLD and sizeof(msg) > FRAME_OFFLOAD_THRESHOLD:
+    try:
+        msg_size = sizeof(msg)
+    except RecursionError:
+        msg_size = sys.getsizeof(msg)
+
+    if FRAME_OFFLOAD_THRESHOLD and msg_size > FRAME_OFFLOAD_THRESHOLD:
         return await offload(_to_frames)
     else:
         return _to_frames()
