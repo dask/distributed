@@ -57,7 +57,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS, get_running_loop
+from .compatibility import PYPY, OSX, WINDOWS, get_running_loop
 from .metrics import time
 
 
@@ -77,6 +77,15 @@ def _initialize_mp_context():
         return multiprocessing
     else:
         method = dask.config.get("distributed.worker.multiprocessing-method")
+        if method == "forkserver" and OSX:
+            logger.debug(
+                "forkserver multiprocessing method disabled on OSX. "
+                "Switching to spawn. "
+                "set `distributed.worker.multiprocessing-method` to spawn "
+                "to remove this warning. "
+                "https://docs.dask.org/en/latest/configuration.html"
+            )
+            method = "spawn"
         ctx = multiprocessing.get_context(method)
         # Makes the test suite much faster
         preload = ["distributed"]
