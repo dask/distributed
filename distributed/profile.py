@@ -27,7 +27,6 @@ We represent this tree as a nested dictionary with the following form:
 import bisect
 from collections import defaultdict, deque
 import linecache
-import json
 import sys
 import threading
 from time import sleep
@@ -36,7 +35,6 @@ import toolz
 
 from .metrics import time
 from .utils import format_time, color_of, parse_timedelta
-from dask.sizeof import sizeof
 
 
 def identifier(frame):
@@ -73,25 +71,6 @@ def info_frame(frame):
         "line_number": frame.f_lineno,
         "line": line,
     }
-
-
-class Profile(dict):
-    """
-    Simple dict subclass for custom sizeof implementation.
-
-    profile can very short, nested dictionaries. The current
-    implementation of dask.sizeof.sizeof(dict) can run into
-    RecursionErrors attempting to measure the size of these
-    data structures.
-    """
-
-    pass
-
-
-@sizeof.register(Profile)
-def sizeof_profile(prof):
-    size = len(json.dumps(prof))
-    return size
 
 
 def process(frame, child, state, stop=None, omit=None):
@@ -160,25 +139,21 @@ def merge(*args):
 
     children = {k: merge(*v) for k, v in children.items()}
     count = sum(arg["count"] for arg in args)
-    return Profile(
-        {
-            "description": args[0]["description"],
-            "children": dict(children),
-            "count": count,
-            "identifier": args[0]["identifier"],
-        }
-    )
+    return {
+        "description": args[0]["description"],
+        "children": dict(children),
+        "count": count,
+        "identifier": args[0]["identifier"],
+    }
 
 
 def create():
-    return Profile(
-        {
-            "count": 0,
-            "children": {},
-            "identifier": "root",
-            "description": {"filename": "", "name": "", "line_number": 0, "line": ""},
-        }
-    )
+    return {
+        "count": 0,
+        "children": {},
+        "identifier": "root",
+        "description": {"filename": "", "name": "", "line_number": 0, "line": ""},
+    }
 
 
 def call_stack(frame):
@@ -387,7 +362,7 @@ def get_profile(history, recent=None, start=None, stop=None, key=None):
     if recent:
         prof = merge(prof, recent)
 
-    return Profile(prof)
+    return prof
 
 
 def plot_figure(data, **kwargs):
