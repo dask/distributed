@@ -1643,7 +1643,9 @@ class WorkerTable(DashboardComponent):
 
         for name in self.names + self.extra_names:
             if name == "name":
-                data[name].insert(0, "Total ({nworkers})".format(nworkers=len(data[name])))
+                data[name].insert(
+                    0, "Total ({nworkers})".format(nworkers=len(data[name]))
+                )
                 continue
             try:
                 data[name].insert(0, sum(data[name]))
