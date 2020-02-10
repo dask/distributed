@@ -4593,9 +4593,10 @@ class performance_report:
         self.start = time()
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
-    async def __aexit__(self, typ, value, traceback):
-        frame = inspect.currentframe().f_back
-        code = inspect.getsource(frame)
+    async def __aexit__(self, typ, value, traceback, code=None):
+        if not code:
+            frame = inspect.currentframe().f_back
+            code = inspect.getsource(frame)
         data = await get_client().scheduler.performance_report(
             start=self.start, code=code
         )
@@ -4606,7 +4607,9 @@ class performance_report:
         get_client().sync(self.__aenter__)
 
     def __exit__(self, typ, value, traceback):
-        get_client().sync(self.__aexit__, type, value, traceback)
+        frame = inspect.currentframe().f_back
+        code = inspect.getsource(frame)
+        get_client().sync(self.__aexit__, type, value, traceback, code=code)
 
 
 @contextmanager
