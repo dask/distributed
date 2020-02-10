@@ -1643,12 +1643,12 @@ class WorkerTable(DashboardComponent):
 
         for name in self.names + self.extra_names:
             if name == "name":
-                data[name].append("Total ({nworkers})".format(nworkers=len(data[name])))
+                data[name].insert(0, "Total ({nworkers})".format(nworkers=len(data[name])))
                 continue
             try:
-                data[name].append(sum(data[name]))
+                data[name].insert(0, sum(data[name]))
             except TypeError:
-                data[name].append(None)
+                data[name].insert(0, None)
 
         self.source.data.update(data)
 
