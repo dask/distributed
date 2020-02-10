@@ -271,6 +271,12 @@ class WorkerState(object):
 
         self.extra = extra or {}
 
+    def __hash__(self):
+        return hash((self.name, self.host))
+
+    def __eq__(self, other):
+        return type(self) == type(other) and hash(self) == hash(other)
+
     @property
     def host(self):
         return get_address_host(self.address)
