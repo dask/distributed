@@ -1,5 +1,5 @@
-import sys
 import logging
+import math
 import socket
 
 import dask
@@ -41,7 +41,7 @@ async def to_frames(msg, serializers=None, on_error="message", context=None):
     try:
         msg_size = sizeof(msg)
     except RecursionError:
-        msg_size = sys.getsizeof(msg)
+        msg_size = math.inf
 
     if FRAME_OFFLOAD_THRESHOLD and msg_size > FRAME_OFFLOAD_THRESHOLD:
         return await offload(_to_frames)
