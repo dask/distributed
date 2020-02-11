@@ -5,13 +5,20 @@ from .cuda import cuda_serialize, cuda_deserialize
 
 @cuda_serialize.register(numba.cuda.devicearray.DeviceNDArray)
 def serialize_numba_ndarray(x):
+    header = x.__cuda_array_interface__.copy()
+
     # Making sure `x` is behaving
-    if not x.is_c_contiguous():
+    if x.is_c_contiguous():
+        x = x.ravel(order="C")
+    elif x.is_f_contiguous():
+        x = x.ravel(order="F")
+    else:
         shape = x.shape
         t = numba.cuda.device_array(shape, dtype=x.dtype, order="C")
         t.copy_to_device(x)
         x = t
-    header = x.__cuda_array_interface__.copy()
+        header["strides"] = tuple(x.strides)
+
     return header, [x]
 
 
