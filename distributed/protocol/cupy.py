@@ -38,11 +38,18 @@ class PatchedCudaArrayInterface:
 
 @cuda_serialize.register(cupy.ndarray)
 def serialize_cupy_ndarray(x):
-    # Making sure `x` is behaving
-    if not x.flags.c_contiguous:
-        x = x.copy(order="C")
-
     header = x.__cuda_array_interface__.copy()
+
+    # Making sure `x` is behaving
+    if x.flags.c_contiguous:
+        x = x.ravel(order="C")
+    elif x.flags.f_contiguous:
+        x = x.ravel(order="F")
+    else:
+        x = x.copy(order="C")
+        header["strides"] = tuple(x.strides)
+        x = x.ravel(order="C")
+
     return header, [x]
 
 
@@ -52,6 +59,9 @@ def deserialize_cupy_array(header, frames):
     if not isinstance(frame, cupy.ndarray):
         frame = PatchedCudaArrayInterface(frame)
     arr = cupy.ndarray(
-        header["shape"], dtype=header["typestr"], memptr=cupy.asarray(frame).data
+        header["shape"],
+        dtype=header["typestr"],
+        memptr=cupy.asarray(frame).data,
+        strides=header["strides"],
     )
     return arr
