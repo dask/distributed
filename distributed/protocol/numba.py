@@ -9,9 +9,20 @@ def serialize_numba_ndarray(x):
 
     # Making sure `x` is behaving
     if x.is_c_contiguous():
-        x = x.ravel(order="C")
+        x = numba.cuda.devicearray.DeviceNDArray(
+            (int(np.product(x.shape)),),
+            (x.dtype.itemsize,),
+            x.dtype,
+            gpu_data=x.gpu_data,
+        )
     elif x.is_f_contiguous():
-        x = x.ravel(order="F")
+        header["strides"] = header["strides"][::-1]
+        x = numba.cuda.devicearray.DeviceNDArray(
+            (int(np.product(x.shape)),),
+            (x.dtype.itemsize,),
+            x.dtype,
+            gpu_data=x.gpu_data,
+        )
     else:
         shape = x.shape
         t = numba.cuda.device_array(shape, dtype=x.dtype, order="C")
