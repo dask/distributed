@@ -4,6 +4,7 @@ import os
 import os.path
 import json
 import logging
+from time import time
 
 import dask
 from dask.utils import format_bytes
@@ -55,7 +56,8 @@ from ..scheduler import ALL_TASK_STATES
 
 
 ns = {
-    func.__name__: func for func in [format_bytes, format_time, datetime.fromtimestamp]
+    func.__name__: func
+    for func in [format_bytes, format_time, datetime.fromtimestamp, time]
 }
 
 rel_path_statics = {"rel_path_statics": "../../"}
