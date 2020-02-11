@@ -5255,6 +5255,12 @@ def test_dashboard_link(loop, monkeypatch):
                 assert link in text
 
 
+def test_dashboard_link_inproc(loop, monkeypatch):
+    with Client(processes=False, loop=loop) as c:
+        with dask.config.set({"distributed.dashboard.link": "{host}"}):
+            assert "/" not in c.dashboard_link
+
+
 @gen_test()
 def test_client_timeout_2():
     with dask.config.set({"distributed.comm.timeouts.connect": "10ms"}):
