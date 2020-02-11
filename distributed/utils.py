@@ -1215,16 +1215,13 @@ if tornado.version_info[0] >= 5:
 
             # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
             # once tornado > 6.0.3 is available.
-            BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
-            if WINDOWS and sys.version_info >= (3, 8):
+            if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
                 # WindowsProactorEventLoopPolicy is not compatible with tornado 6
                 # fallback to the pre-3.8 default of Selector
                 # https://github.com/tornadoweb/tornado/issues/2608
-                if (
-                    type(asyncio.get_event_loop_policy())
-                    is asyncio.WindowsProactorEventLoopPolicy
-                ):
-                    BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+                BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+            else:
+                BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
 
             class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
                 def get_event_loop(self):
