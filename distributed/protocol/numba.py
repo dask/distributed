@@ -8,7 +8,7 @@ def serialize_numba_ndarray(x):
     # Making sure `x` is behaving
     if not x.is_c_contiguous():
         shape = x.shape
-        t = numba.cuda.device_array(shape, dtype=x.dtype)
+        t = numba.cuda.device_array(shape, dtype=x.dtype, order="C")
         t.copy_to_device(x)
         x = t
     header = x.__cuda_array_interface__.copy()
