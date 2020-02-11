@@ -1,6 +1,65 @@
 Changelog
 =========
 
+2.10.0 - 2020-01-28
+-------------------
+
+- Fixed ``ZeroDivisionError`` in dashboard when no workers were present (:pr:`3407`) `James Bourbeau`_
+- Respect the ``dashboard-prefix`` when redirecting from the root (:pr:`3387`) `Chrysostomos Nanakos`_
+- Allow enabling / disabling work-stealing after the cluster has started (:pr:`3410`) `John Kirkham`_
+- Support ``*args`` and ``**kwargs`` in offload (:pr:`3392`) `Matthew Rocklin`_
+- Add lifecycle hooks to SchedulerPlugin (:pr:`3391`) `Matthew Rocklin`_
+
+
+2.9.3 - 2020-01-17
+------------------
+
+- Raise ``RuntimeError`` if no running loop (:pr:`3385`) `James Bourbeau`_
+- Fix ``get_running_loop`` import (:pr:`3383`) `James Bourbeau`_
+- Get JavaScript document location instead of window and handle proxied url (:pr:`3382`) `Jacob Tomlinson`_
+
+
+2.9.2 - 2020-01-16
+------------------
+
+- Move Windows CI to GitHub Actions (:pr:`3373`) `Jacob Tomlinson`_
+- Add client join and leave hooks (:pr:`3371`) `Jacob Tomlinson`_
+- Add cluster map dashboard (:pr:`3361`) `Jacob Tomlinson`_
+- Close connection comm on retry (:pr:`3365`) `James Bourbeau`_
+- Fix scheduler state in case of worker name collision (:pr:`3366`) `byjott`_
+- Add ``--worker-class`` option to ``dask-worker`` CLI (:pr:`3364`) `James Bourbeau`_
+- Remove ``locale`` check that fails on OS X (:pr:`3360`) `Jacob Tomlinson`_
+- Rework version checking (:pr:`2627`) `Matthew Rocklin`_
+- Add websocket scheduler plugin (:pr:`3335`) `Jacob Tomlinson`_
+- Return task in ``dask-worker`` ``on_signal`` function (:pr:`3354`) `James Bourbeau`_
+- Fix failures on mixed integer/string worker names (:pr:`3352`) `Benedikt Reinartz`_
+- Avoid calling ``nbytes`` multiple times when sending data (:pr:`3349`) `Markus Mohrhard`_
+- Avoid setting event loop policy if within IPython kernel and no running event loop (:pr:`3336`) `Mana Borwornpadungkitti`_
+- Relax intermittent failing ``test_profile_server`` (:pr:`3346`) `Matthew Rocklin`_
+
+
+2.9.1 - 2019-12-27
+------------------
+
+-  Add lock around dumps_function cache (:pr:`3337`) `Matthew Rocklin`_
+-  Add setuptools to dependencies (:pr:`3320`) `James Bourbeau`_
+-  Use TaskPrefix.name in Graph layout (:pr:`3328`) `Matthew Rocklin`_
+-  Add missing `"` in performance report example (:pr:`3329`) `John Kirkham`_
+-  Add performance report docs and color definitions to docs (:pr:`3325`) `Benjamin Zaitlen`_
+-  Switch startstops to dicts and add worker name to transfer (:pr:`3319`) `Jacob Tomlinson`_
+-  Add plugin entry point for out-of-tree comms library (:pr:`3305`) `Patrick Sodré`_
+-  All scheduler task states in prometheus (:pr:`3307`) `fjetter`_
+-  Use worker name in logs (:pr:`3309`) `Stephan Erb`_
+-  Add TaskGroup and TaskPrefix scheduler state (:pr:`3262`)  `Matthew Rocklin`_
+-  Update latencies with heartbeats (:pr:`3310`) `fjetter`_
+-  Update inlining Futures in task graph in Client._graph_to_futures (:pr:`3303`) `James Bourbeau`_
+-  Use hostname as default IP address rather than localhost (:pr:`3308`) `Matthew Rocklin`_
+-  Clean up flaky test_nanny_throttle (:pr:`3295`) `Tom Augspurger`_
+-  Add lock to scheduler for sensitive operations (:pr:`3259`) `Matthew Rocklin`_
+-  Log address for each of the Scheduler listerners (:pr:`3306`) `Matthew Rocklin`_
+-  Make ConnectionPool.close asynchronous (:pr:`3304`) `Matthew Rocklin`_
+
+
 2.9.0 - 2019-12-06
 ------------------
 
@@ -1447,3 +1506,9 @@ significantly without many new features.
 .. _`He Jia`: https://github.com/HerculesJack
 .. _`Jim Crist-Harif`: https://github.com/jcrist
 .. _`fjetter`: https://github.com/fjetter
+.. _`Patrick Sodré`: https://github.com/sodre
+.. _`Stephan Erb`: https://github.com/StephanErb
+.. _`Benedikt Reinartz`: https://github.com/filmor
+.. _`Markus Mohrhard`: https://github.com/mmohrhard
+.. _`Mana Borwornpadungkitti`: https://github.com/potpath
+.. _`Chrysostomos Nanakos`: https://github.com/cnanakos

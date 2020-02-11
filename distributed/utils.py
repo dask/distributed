@@ -1,9 +1,10 @@
 import asyncio
+from asyncio import TimeoutError
 import atexit
+import click
 from collections import deque, OrderedDict, UserDict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import timedelta
 import functools
 from hashlib import md5
 import html
@@ -56,7 +57,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS
+from .compatibility import PYPY, WINDOWS, get_running_loop
 from .metrics import time
 
 
@@ -81,6 +82,16 @@ def _initialize_mp_context():
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
             preload.append("pkg_resources")
+
+        from .versions import required_packages, optional_packages
+
+        for pkg, _ in required_packages + optional_packages:
+            try:
+                importlib.import_module(pkg)
+            except ImportError:
+                pass
+            else:
+                preload.append(pkg)
         ctx.set_forkserver_preload(preload)
         return ctx
 
@@ -128,13 +139,15 @@ def _get_ip(host, port, family):
         ip = sock.getsockname()[0]
         return ip
     except EnvironmentError as e:
-        # XXX Should first try getaddrinfo() on socket.gethostname() and getfqdn()
         warnings.warn(
             "Couldn't detect a suitable IP address for "
             "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        return socket.gethostname()
+        addr_info = socket.getaddrinfo(
+            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
+        )[0]
+        return addr_info[4][0]
     finally:
         sock.close()
 
@@ -315,7 +328,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             thread_state.asynchronous = True
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             result[0] = yield future
         except Exception as exc:
             error[0] = sys.exc_info()
@@ -326,7 +339,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     loop.add_callback(f)
     if callback_timeout is not None:
         if not e.wait(callback_timeout):
-            raise gen.TimeoutError("timed out after %s s." % (callback_timeout,))
+            raise TimeoutError("timed out after %s s." % (callback_timeout,))
     else:
         while not e.is_set():
             e.wait(10)
@@ -337,7 +350,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         return result[0]
 
 
-class LoopRunner(object):
+class LoopRunner:
     """
     A helper to start and stop an IO loop in a controlled way.
     Several loop runners can associate safely to the same IO loop.
@@ -637,11 +650,11 @@ def key_split_group(x):
         elif x[0] == "<":
             return x.strip("<>").split()[0].split(".")[-1]
         else:
-            return ""
+            return key_split(x)
     elif typ is bytes:
         return key_split_group(x.decode())
     else:
-        return ""
+        return key_split(x)
 
 
 @contextmanager
@@ -1049,7 +1062,7 @@ def import_file(path):
     return loaded
 
 
-class itemgetter(object):
+class itemgetter:
     """A picklable itemgetter.
 
     Examples
@@ -1177,30 +1190,64 @@ def reset_logger_locks():
             handler.createLock()
 
 
-# Only bother if asyncio has been loaded by Tornado
-if "asyncio" in sys.modules and tornado.version_info[0] >= 5:
+if tornado.version_info[0] >= 5:
 
-    jupyter_event_loop_initialized = False
+    is_server_extension = False
 
     if "notebook" in sys.modules:
         import traitlets
         from notebook.notebookapp import NotebookApp
 
-        jupyter_event_loop_initialized = traitlets.config.Application.initialized() and isinstance(
+        is_server_extension = traitlets.config.Application.initialized() and isinstance(
             traitlets.config.Application.instance(), NotebookApp
         )
 
-    if not jupyter_event_loop_initialized:
-        import tornado.platform.asyncio
+    if not is_server_extension:
+        is_kernel_and_no_running_loop = False
 
-        asyncio.set_event_loop_policy(
-            tornado.platform.asyncio.AnyThreadEventLoopPolicy()
-        )
+        if is_kernel():
+            try:
+                get_running_loop()
+            except RuntimeError:
+                is_kernel_and_no_running_loop = True
+
+        if not is_kernel_and_no_running_loop:
+            import tornado.platform.asyncio
+
+            asyncio.set_event_loop_policy(
+                tornado.platform.asyncio.AnyThreadEventLoopPolicy()
+            )
 
 
 @functools.lru_cache(1000)
 def has_keyword(func, keyword):
     return keyword in inspect.signature(func).parameters
+
+
+@functools.lru_cache(1000)
+def command_has_keyword(cmd, k):
+    if cmd is not None:
+        if isinstance(cmd, str):
+            try:
+                from importlib import import_module
+
+                cmd = import_module(cmd)
+            except ImportError:
+                raise ImportError("Module for command %s is not available" % cmd)
+
+        if isinstance(getattr(cmd, "main"), click.core.Command):
+            cmd = cmd.main
+        if isinstance(cmd, click.core.Command):
+            cmd_params = set(
+                [
+                    p.human_readable_name
+                    for p in cmd.params
+                    if isinstance(p, click.core.Option)
+                ]
+            )
+            return k in cmd_params
+
+    return False
 
 
 # from bokeh.palettes import viridis
@@ -1304,7 +1351,7 @@ class Logs(dict):
         return "\n".join(summaries)
 
 
-def cli_keywords(d: dict, cls=None):
+def cli_keywords(d: dict, cls=None, cmd=None):
     """ Convert a kwargs dictionary into a list of CLI keywords
 
     Parameters
@@ -1313,6 +1360,12 @@ def cli_keywords(d: dict, cls=None):
         The keywords to convert
     cls: callable
         The callable that consumes these terms to check them for validity
+    cmd: string or object
+        A string with the name of a module, or the module containing a
+        click-generated command with a "main" function, or the function itself.
+        It may be used to parse a module's custom arguments (i.e., arguments that
+        are not part of Worker class), such as nprocs from dask-worker CLI or
+        enable_nvlink from dask-cuda-worker CLI.
 
     Examples
     --------
@@ -1325,12 +1378,22 @@ def cli_keywords(d: dict, cls=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
-    if cls:
+    if cls or cmd:
         for k in d:
-            if not has_keyword(cls, k):
-                raise ValueError(
-                    "Class %s does not support keyword %s" % (typename(cls), k)
-                )
+            if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
+                if cls and cmd:
+                    raise ValueError(
+                        "Neither class %s or module %s support keyword %s"
+                        % (typename(cls), typename(cmd), k)
+                    )
+                elif cls:
+                    raise ValueError(
+                        "Class %s does not support keyword %s" % (typename(cls), k)
+                    )
+                else:
+                    raise ValueError(
+                        "Module %s does not support keyword %s" % (typename(cmd), k)
+                    )
 
     def convert_value(v):
         out = str(v)
@@ -1376,7 +1439,7 @@ def import_term(name: str):
 
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_offload_executor, fn, *args, **kwargs)
+    return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
 
 
 def serialize_for_cli(data):

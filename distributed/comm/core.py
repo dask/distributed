@@ -1,14 +1,12 @@
 from abc import ABC, abstractmethod, abstractproperty
 import asyncio
-from datetime import timedelta
 import logging
 import weakref
 
 import dask
-from tornado import gen
 
 from ..metrics import time
-from ..utils import parse_timedelta, ignoring
+from ..utils import parse_timedelta, ignoring, TimeoutError
 from . import registry
 from .addressing import parse_address
 
@@ -211,11 +209,9 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
                 future = connector.connect(
                     loc, deserialize=deserialize, **(connection_args or {})
                 )
-                with ignoring(gen.TimeoutError):
-                    comm = await gen.with_timeout(
-                        timedelta(seconds=min(deadline - time(), 1)),
-                        future,
-                        quiet_exceptions=EnvironmentError,
+                with ignoring(TimeoutError):
+                    comm = await asyncio.wait_for(
+                        future, timeout=min(deadline - time(), 1)
                     )
                     break
             if not comm:

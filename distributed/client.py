@@ -1,3 +1,4 @@
+import asyncio
 import atexit
 from collections import defaultdict
 from collections.abc import Iterator
@@ -5,10 +6,10 @@ from concurrent.futures import ThreadPoolExecutor, CancelledError
 from concurrent.futures._base import DoneAndNotDoneFutures
 from contextlib import contextmanager
 import copy
-from datetime import timedelta
 import errno
 from functools import partial
 import html
+import inspect
 import itertools
 import json
 import logging
@@ -38,13 +39,7 @@ try:
 except ImportError:
     single_key = first
 from tornado import gen
-from tornado.gen import TimeoutError
-from tornado.locks import Event, Condition, Semaphore
 from tornado.ioloop import IOLoop
-from tornado.queues import Queue
-
-import asyncio
-from asyncio import iscoroutine
 
 from .batched import BatchedSend
 from .utils_comm import (
@@ -77,7 +72,6 @@ from .utils import (
     log_errors,
     str_graph,
     key_split,
-    asciitable,
     thread_state,
     no_default,
     PeriodicCallback,
@@ -87,8 +81,9 @@ from .utils import (
     Any,
     has_keyword,
     format_dashboard_link,
+    TimeoutError,
 )
-from .versions import get_versions
+from . import versions as version_module
 
 
 logger = logging.getLogger(__name__)
@@ -414,7 +409,7 @@ class Future(WrappedKey):
         return self.result().__await__()
 
 
-class FutureState(object):
+class FutureState:
     """A Future's internal state.
 
     This is shared between all Futures with the same key and client.
@@ -433,7 +428,7 @@ class FutureState(object):
         # (https://github.com/tornadoweb/tornado/issues/2189)
         event = self._event
         if event is None:
-            event = self._event = Event()
+            event = self._event = asyncio.Event()
         return event
 
     def cancel(self):
@@ -472,7 +467,7 @@ class FutureState(object):
             self._event.clear()
 
     async def wait(self, timeout=None):
-        await self._get_event().wait(timeout)
+        await asyncio.wait_for(self._get_event().wait(), timeout)
 
     def __repr__(self):
         return "<%s: %s>" % (self.__class__.__name__, self.status)
@@ -632,10 +627,6 @@ class Client(Node):
         self._deserializers = deserializers
         self.direct_to_workers = direct_to_workers
 
-        self._gather_semaphore = Semaphore(5)
-        self._gather_keys = None
-        self._gather_future = None
-
         # Communication
         self.scheduler_comm = None
 
@@ -679,6 +670,9 @@ class Client(Node):
         self._should_close_loop = not loop
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
+
+        self._gather_keys = None
+        self._gather_future = None
 
         if heartbeat_interval is None:
             heartbeat_interval = dask.config.get("distributed.client.heartbeat")
@@ -755,6 +749,22 @@ class Client(Node):
         """
         return self._asynchronous and self.loop is IOLoop.current()
 
+    @property
+    def dashboard_link(self):
+        scheduler, info = self._get_scheduler_info()
+        try:
+            return self.cluster.dashboard_link
+        except AttributeError:
+            protocol, rest = scheduler.address.split("://")
+
+            port = info["services"]["dashboard"]
+            if protocol == "inproc":
+                host = "localhost"
+            else:
+                host = rest.split(":")[0]
+
+            return format_dashboard_link(host, port)
+
     def sync(self, func, *args, asynchronous=None, callback_timeout=None, **kwargs):
         if (
             asynchronous
@@ -763,12 +773,35 @@ class Client(Node):
         ):
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             return future
         else:
             return sync(
                 self.loop, func, *args, callback_timeout=callback_timeout, **kwargs
             )
+
+    def _get_scheduler_info(self):
+        from .scheduler import Scheduler
+
+        if (
+            self.cluster
+            and hasattr(self.cluster, "scheduler")
+            and isinstance(self.cluster.scheduler, Scheduler)
+        ):
+            info = self.cluster.scheduler.identity()
+            scheduler = self.cluster.scheduler
+        elif (
+            self._loop_runner.is_started()
+            and self.scheduler
+            and not (self.asynchronous and self.loop is IOLoop.current())
+        ):
+            info = sync(self.loop, self.scheduler.identity)
+            scheduler = self.scheduler
+        else:
+            info = self._scheduler_identity
+            scheduler = self.scheduler
+
+        return scheduler, info
 
     def __repr__(self):
         # Note: avoid doing I/O here...
@@ -799,25 +832,7 @@ class Client(Node):
             return "<%s: not connected>" % (self.__class__.__name__,)
 
     def _repr_html_(self):
-        from .scheduler import Scheduler
-
-        if (
-            self.cluster
-            and hasattr(self.cluster, "scheduler")
-            and isinstance(self.cluster.scheduler, Scheduler)
-        ):
-            info = self.cluster.scheduler.identity()
-            scheduler = self.cluster.scheduler
-        elif (
-            self._loop_runner.is_started()
-            and self.scheduler
-            and not (self.asynchronous and self.loop is IOLoop.current())
-        ):
-            info = sync(self.loop, self.scheduler.identity)
-            scheduler = self.scheduler
-        else:
-            info = self._scheduler_identity
-            scheduler = self.scheduler
+        scheduler, info = self._get_scheduler_info()
 
         text = (
             '<h3 style="text-align: left;">Client</h3>\n'
@@ -829,22 +844,9 @@ class Client(Node):
             text += "  <li><b>Scheduler: not connected</b></li>\n"
 
         if info and "dashboard" in info["services"]:
-            try:
-                address = self.cluster.dashboard_link
-            except AttributeError:
-                protocol, rest = scheduler.address.split("://")
-
-                port = info["services"]["dashboard"]
-                if protocol == "inproc":
-                    host = "localhost"
-                else:
-                    host = rest.split(":")[0]
-
-                address = format_dashboard_link(host, port)
-
             text += (
                 "  <li><b>Dashboard: </b><a href='%(web)s' target='_blank'>%(web)s</a>\n"
-                % {"web": address}
+                % {"web": self.dashboard_link}
             )
 
         text += "</ul>\n"
@@ -979,6 +981,8 @@ class Client(Node):
 
             address = self.cluster.scheduler_address
 
+        self._gather_semaphore = asyncio.Semaphore(5)
+
         if self.scheduler is None:
             self.scheduler = self.rpc(address)
         self.scheduler_comm = None
@@ -1045,13 +1049,16 @@ class Client(Node):
             )
             comm.name = "Client->Scheduler"
             if timeout is not None:
-                await gen.with_timeout(
-                    timedelta(seconds=timeout), self._update_scheduler_info()
-                )
+                await asyncio.wait_for(self._update_scheduler_info(), timeout)
             else:
                 await self._update_scheduler_info()
             await comm.write(
-                {"op": "register-client", "client": self.id, "reply": False}
+                {
+                    "op": "register-client",
+                    "client": self.id,
+                    "reply": False,
+                    "versions": version_module.get_versions(),
+                }
             )
         except Exception as e:
             if self.status == "closed":
@@ -1061,11 +1068,14 @@ class Client(Node):
         finally:
             self._connecting_to_scheduler = False
         if timeout is not None:
-            msg = await gen.with_timeout(timedelta(seconds=timeout), comm.read())
+            msg = await asyncio.wait_for(comm.read(), timeout)
         else:
             msg = await comm.read()
         assert len(msg) == 1
         assert msg[0]["op"] == "stream-start"
+
+        if msg[0].get("warning"):
+            warnings.warn(version_module.VersionMismatchWarning(msg[0]["warning"]))
 
         bcomm = BatchedSend(interval="10ms", loop=self.loop)
         bcomm.start(comm)
@@ -1179,7 +1189,9 @@ class Client(Node):
 
                         try:
                             handler = self._stream_handlers[op]
-                            handler(**msg)
+                            result = handler(**msg)
+                            if inspect.isawaitable(result):
+                                await result
                         except Exception as e:
                             logger.exception(e)
                     if breakout:
@@ -1235,6 +1247,8 @@ class Client(Node):
 
     async def _close(self, fast=False):
         """ Send close signal and wait until scheduler completes """
+        if self.status == "closed":
+            return
         self.status = "closing"
 
         for pc in self._periodic_callbacks.values():
@@ -1249,8 +1263,6 @@ class Client(Node):
                     pass
             if self.get == dask.config.get("get", None):
                 del dask.config.config["get"]
-            if self.status == "closed":
-                return
 
             if (
                 self.scheduler_comm
@@ -1262,11 +1274,9 @@ class Client(Node):
 
             # Give the scheduler 'stream-closed' message 100ms to come through
             # This makes the shutdown slightly smoother and quieter
-            with ignoring(AttributeError, gen.TimeoutError):
-                await gen.with_timeout(
-                    timedelta(milliseconds=100),
-                    self._handle_scheduler_coroutine,
-                    quiet_exceptions=(CancelledError,),
+            with ignoring(AttributeError, CancelledError, TimeoutError):
+                await asyncio.wait_for(
+                    asyncio.shield(self._handle_scheduler_coroutine), 0.1
                 )
 
             if (
@@ -1275,15 +1285,21 @@ class Client(Node):
                 and not self.scheduler_comm.comm.closed()
             ):
                 await self.scheduler_comm.close()
+
             for key in list(self.futures):
                 self._release_key(key=key)
+
             if self._start_arg is None:
                 with ignoring(AttributeError):
                     await self.cluster.close()
+
             await self.rpc.close()
+
             self.status = "closed"
+
             if _get_global_client() is self:
                 _set_global_client(None)
+
             coroutines = set(self.coroutines)
             for f in self.coroutines:
                 # cancel() works on asyncio futures (Tornado 5)
@@ -1293,11 +1309,14 @@ class Client(Node):
                 if f.cancelled():
                     coroutines.remove(f)
             del self.coroutines[:]
+
             if not fast:
                 with ignoring(TimeoutError):
-                    await gen.with_timeout(timedelta(seconds=2), list(coroutines))
+                    await asyncio.wait_for(asyncio.gather(*coroutines), 2)
+
             with ignoring(AttributeError):
                 await self.scheduler.close_rpc()
+
             self.scheduler = None
 
         self.status = "closed"
@@ -1329,13 +1348,13 @@ class Client(Node):
         if self.asynchronous:
             future = self._close()
             if timeout:
-                future = gen.with_timeout(timedelta(seconds=timeout), future)
+                future = asyncio.wait_for(future, timeout)
             return future
 
         if self._start_arg is None:
             with ignoring(AttributeError):
                 f = self.cluster.close()
-                if iscoroutine(f):
+                if asyncio.iscoroutine(f):
 
                     async def _():
                         await f
@@ -1355,6 +1374,7 @@ class Client(Node):
             await self.cluster.close()
         else:
             with ignoring(CommClosedError):
+                self.status = "closing"
                 await self.scheduler.terminate(close_workers=True)
 
     def shutdown(self):
@@ -1797,12 +1817,11 @@ class Client(Node):
         few.  In controls access using a Tornado semaphore, and picks up keys
         from other requests made recently.
         """
-        await self._gather_semaphore.acquire()
-        keys = list(self._gather_keys)
-        self._gather_keys = None  # clear state, these keys are being sent off
-        self._gather_future = None
+        async with self._gather_semaphore:
+            keys = list(self._gather_keys)
+            self._gather_keys = None  # clear state, these keys are being sent off
+            self._gather_future = None
 
-        try:
             if direct or local_worker:  # gather directly from workers
                 who_has = await retry_operation(self.scheduler.who_has, keys=keys)
                 data2, missing_keys, missing_workers = await gather_from_workers(
@@ -1817,8 +1836,6 @@ class Client(Node):
 
             else:  # ask scheduler to gather data for us
                 response = await retry_operation(self.scheduler.gather, keys=keys)
-        finally:
-            self._gather_semaphore.release()
 
         return response
 
@@ -1954,7 +1971,7 @@ class Client(Node):
                     if nthreads is not None:
                         await asyncio.sleep(0.1)
                     if time() > start + timeout:
-                        raise gen.TimeoutError("No valid workers found")
+                        raise TimeoutError("No valid workers found")
                     nthreads = await self.scheduler.ncores(workers=workers)
                 if not nthreads:
                     raise ValueError("No valid workers")
@@ -2908,10 +2925,12 @@ class Client(Node):
         if timeout == no_default:
             timeout = self._timeout * 2
         self._send_to_scheduler({"op": "restart", "timeout": timeout})
-        self._restart_event = Event()
+        self._restart_event = asyncio.Event()
         try:
-            await self._restart_event.wait(self.loop.time() + timeout)
-        except gen.TimeoutError:
+            await asyncio.wait_for(
+                self._restart_event.wait(), self.loop.time() + timeout
+            )
+        except TimeoutError:
             logger.error("Restart timed out after %f seconds", timeout)
             pass
         self.generation += 1
@@ -3559,7 +3578,7 @@ class Client(Node):
         return self.sync(self._get_versions, check=check, packages=packages)
 
     async def _get_versions(self, check=False, packages=[]):
-        client = get_versions(packages=packages)
+        client = version_module.get_versions(packages=packages)
         try:
             scheduler = await self.scheduler.versions(packages=packages)
         except KeyError:
@@ -3573,32 +3592,9 @@ class Client(Node):
         result = {"scheduler": scheduler, "workers": workers, "client": client}
 
         if check:
-            # we care about the required & optional packages matching
-            def to_packages(d):
-                L = list(d["packages"].values())
-                return dict(sum(L, type(L[0])()))
-
-            client_versions = to_packages(result["client"])
-            versions = [("scheduler", to_packages(result["scheduler"]))]
-            versions.extend((w, to_packages(d)) for w, d in sorted(workers.items()))
-
-            mismatched = defaultdict(list)
-            for name, vers in versions:
-                for pkg, cv in client_versions.items():
-                    v = vers.get(pkg, "MISSING")
-                    if cv != v:
-                        mismatched[pkg].append((name, v))
-
-            if mismatched:
-                errs = []
-                for pkg, versions in sorted(mismatched.items()):
-                    rows = [("client", client_versions[pkg])]
-                    rows.extend(versions)
-                    errs.append("%s\n%s" % (pkg, asciitable(["", "version"], rows)))
-
-                raise ValueError(
-                    "Mismatched versions found\n\n%s" % ("\n\n".join(errs))
-                )
+            msg = version_module.error_message(scheduler, workers, client)
+            if msg:
+                raise ValueError(msg)
 
         return result
 
@@ -4092,7 +4088,7 @@ async def _wait(fs, timeout=None, return_when=ALL_COMPLETED):
 
     future = wait_for({f._state.wait() for f in fs})
     if timeout is not None:
-        future = gen.with_timeout(timedelta(seconds=timeout), future)
+        future = asyncio.wait_for(future, timeout)
     await future
 
     done, not_done = (
@@ -4148,13 +4144,13 @@ async def _first_completed(futures):
     See Also:
         _as_completed
     """
-    q = Queue()
+    q = asyncio.Queue()
     await _as_completed(futures, q)
     result = await q.get()
     return result
 
 
-class as_completed(object):
+class as_completed:
     """
     Return futures in the order in which they complete
 
@@ -4219,7 +4215,6 @@ class as_completed(object):
         self.queue = pyQueue()
         self.lock = threading.Lock()
         self.loop = loop or default_client().loop
-        self.condition = Condition()
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
@@ -4227,10 +4222,13 @@ class as_completed(object):
         if futures:
             self.update(futures)
 
-    def _notify(self):
-        self.condition.notify()
-        with self.thread_condition:
-            self.thread_condition.notify()
+    @property
+    def condition(self):
+        try:
+            return self._condition
+        except AttributeError:
+            self._condition = asyncio.Condition()
+            return self._condition
 
     async def _track_future(self, future):
         try:
@@ -4250,7 +4248,10 @@ class as_completed(object):
                 self.queue.put_nowait((future, result))
             else:
                 self.queue.put_nowait(future)
-            self._notify()
+            async with self.condition:
+                self.condition.notify()
+            with self.thread_condition:
+                self.thread_condition.notify()
 
     def update(self, futures):
         """ Add multiple futures to the collection.
@@ -4317,7 +4318,8 @@ class as_completed(object):
         while self.queue.empty():
             if not self.futures:
                 raise StopAsyncIteration
-            await self.condition.wait()
+            async with self.condition:
+                await self.condition.wait()
 
         return self._get_and_raise()
 
@@ -4492,7 +4494,7 @@ def fire_and_forget(obj):
         )
 
 
-class get_task_stream(object):
+class get_task_stream:
     """
     Collect task stream within a context block
 
@@ -4527,7 +4529,7 @@ class get_task_stream(object):
     A common way to do this is to upload the file as a gist, and then serve it
     on https://raw.githack.com ::
 
-       $ pip install gist
+       $ python -m pip install gist
        $ gist task-stream.html
        https://gist.github.com/8a5b3c74b10b413f612bb5e250856ceb
 
@@ -4599,8 +4601,13 @@ class performance_report:
         self.start = time()
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
-    async def __aexit__(self, typ, value, traceback):
-        data = await get_client().scheduler.performance_report(start=self.start)
+    async def __aexit__(self, typ, value, traceback, code=None):
+        if not code:
+            frame = inspect.currentframe().f_back
+            code = inspect.getsource(frame)
+        data = await get_client().scheduler.performance_report(
+            start=self.start, code=code
+        )
         with open(self.filename, "w") as f:
             f.write(data)
 
@@ -4608,7 +4615,9 @@ class performance_report:
         get_client().sync(self.__aenter__)
 
     def __exit__(self, typ, value, traceback):
-        get_client().sync(self.__aexit__, type, value, traceback)
+        frame = inspect.currentframe().f_back
+        code = inspect.getsource(frame)
+        get_client().sync(self.__aexit__, type, value, traceback, code=code)
 
 
 @contextmanager

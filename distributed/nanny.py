@@ -1,5 +1,4 @@
 import asyncio
-from datetime import timedelta
 import logging
 from multiprocessing.queues import Empty
 import os
@@ -12,9 +11,8 @@ import weakref
 
 import dask
 from dask.system import CPU_COUNT
+from tornado.ioloop import IOLoop
 from tornado import gen
-from tornado.ioloop import IOLoop, TimeoutError
-from tornado.locks import Event
 
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
@@ -31,6 +29,8 @@ from .utils import (
     json_load_robust,
     PeriodicCallback,
     parse_timedelta,
+    ignoring,
+    TimeoutError,
 )
 from .worker import run, parse_memory_limit, Worker
 
@@ -213,20 +213,11 @@ class Nanny(ServerNode):
         if worker_address is None:
             return
 
-        allowed_errors = (
-            gen.TimeoutError,
-            CommClosedError,
-            EnvironmentError,
-            RPCClosed,
-        )
-        try:
-            await gen.with_timeout(
-                timedelta(seconds=timeout),
-                self.scheduler.unregister(address=self.worker_address),
-                quiet_exceptions=allowed_errors,
+        allowed_errors = (TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
+        with ignoring(allowed_errors):
+            await asyncio.wait_for(
+                self.scheduler.unregister(address=self.worker_address), timeout
             )
-        except allowed_errors:
-            pass
 
     @property
     def worker_address(self):
@@ -318,10 +309,10 @@ class Nanny(ServerNode):
         self.auto_restart = True
         if self.death_timeout:
             try:
-                result = await gen.with_timeout(
-                    timedelta(seconds=self.death_timeout), self.process.start()
+                result = await asyncio.wait_for(
+                    self.process.start(), self.death_timeout
                 )
-            except gen.TimeoutError:
+            except TimeoutError:
                 await self.close(timeout=self.death_timeout)
                 logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
@@ -343,8 +334,8 @@ class Nanny(ServerNode):
                 await self.instantiate()
 
         try:
-            await gen.with_timeout(timedelta(seconds=timeout), _())
-        except gen.TimeoutError:
+            await asyncio.wait_for(_(), timeout)
+        except TimeoutError:
             logger.error("Restart timed out, returning before finished")
             return "timed out"
         else:
@@ -458,7 +449,7 @@ class Nanny(ServerNode):
         await ServerNode.close(self)
 
 
-class WorkerProcess(object):
+class WorkerProcess:
     def __init__(
         self,
         worker_kwargs,
@@ -515,8 +506,8 @@ class WorkerProcess(object):
         )
         self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)
-        self.running = Event()
-        self.stopped = Event()
+        self.running = asyncio.Event()
+        self.stopped = asyncio.Event()
         self.status = "starting"
         try:
             await self.process.start()
@@ -733,7 +724,7 @@ class WorkerProcess(object):
 
         try:
             loop.run_sync(run)
-        except TimeoutError:
+        except (TimeoutError, gen.TimeoutError):
             # Loop was stopped before wait_until_closed() returned, ignore
             pass
         except KeyboardInterrupt:

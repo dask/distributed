@@ -7,7 +7,6 @@ import weakref
 
 import dask
 from tornado import gen
-from tornado.locks import Event
 
 from .adaptive import Adaptive
 from .cluster import Cluster
@@ -19,6 +18,7 @@ from ..utils import (
     parse_bytes,
     parse_timedelta,
     import_term,
+    TimeoutError,
 )
 from ..scheduler import Scheduler
 from ..security import Security
@@ -41,7 +41,7 @@ class ProcessInterface:
         self.external_address = None
         self.lock = asyncio.Lock()
         self.status = "created"
-        self._event_finished = Event()
+        self._event_finished = asyncio.Event()
 
     def __await__(self):
         async def _():
@@ -91,7 +91,7 @@ class ProcessInterface:
         await self.close()
 
 
-class NoOpAwaitable(object):
+class NoOpAwaitable:
     """An awaitable object that always returns None.
 
     Useful to return from a method that can be called in both asynchronous and
@@ -602,6 +602,6 @@ async def run_spec(spec: dict, *args):
 @atexit.register
 def close_clusters():
     for cluster in list(SpecCluster._instances):
-        with ignoring(gen.TimeoutError):
+        with ignoring((gen.TimeoutError, TimeoutError)):
             if cluster.status != "closed":
                 cluster.close(timeout=10)

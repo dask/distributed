@@ -10,10 +10,10 @@ import uuid
 import weakref
 
 import dask
+import tblib
 from toolz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 
 from .comm import (
     connect,
@@ -60,7 +60,7 @@ tick_maximum_delay = parse_timedelta(
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
-class Server(object):
+class Server:
     """ Dask Distributed Server
 
     Superclass for endpoints in a distributed cluster, such as Worker
@@ -134,7 +134,7 @@ class Server(object):
         self.events = None
         self.event_counts = None
         self._ongoing_coroutines = weakref.WeakSet()
-        self._event_finished = Event()
+        self._event_finished = asyncio.Event()
 
         self.listeners = []
         self.io_loop = io_loop or IOLoop.current()
@@ -569,7 +569,7 @@ def addr_from_args(addr=None, ip=None, port=None):
     return normalize_address(addr)
 
 
-class rpc(object):
+class rpc:
     """ Conveniently interact with a remote server
 
     >>> remote = rpc(address)  # doctest: +SKIP
@@ -728,7 +728,7 @@ class rpc(object):
         return "<rpc to %r, %d comms>" % (self.address, len(self.comms))
 
 
-class PooledRPCCall(object):
+class PooledRPCCall:
     """ The result of ConnectionPool()('host:port')
 
     See Also:
@@ -777,7 +777,7 @@ class PooledRPCCall(object):
         return "<pooled rpc to %r>" % (self.addr,)
 
 
-class ConnectionPool(object):
+class ConnectionPool:
     """ A maximum sized pool of Comm objects.
 
     This provides a connect method that mirrors the normal distributed.connect
@@ -982,6 +982,14 @@ def coerce_to_address(o):
     return normalize_address(o)
 
 
+def collect_causes(e):
+    causes = []
+    while e.__cause__ is not None:
+        causes.append(e.__cause__)
+        e = e.__cause__
+    return causes
+
+
 def error_message(e, status="error"):
     """ Produce message to send back given an exception has occurred
 
@@ -998,6 +1006,7 @@ def error_message(e, status="error"):
     clean_exception: deserialize and unpack message into exception/traceback
     """
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
+    tblib.pickling_support.install(e, *collect_causes(e))
     tb = get_traceback()
     e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:
