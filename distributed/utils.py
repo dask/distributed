@@ -1212,6 +1212,8 @@ if tornado.version_info[0] >= 5:
 
         if not is_kernel_and_no_running_loop:
 
+            # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
+            # once tornado > 6.0.3 is available.
             BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
             if WINDOWS and sys.version_info >= (3, 8):
                 # WindowsProactorEventLoopPolicy is not compatible with tornado 6

@@ -655,9 +655,6 @@ def test_cleanup_repeated_tasks(c, s, a, b):
     assert not s.who_has
     assert not any(s.has_what.values())
 
-    import gc
-
-    gc.collect()
     assert not list(ws)
 
 
