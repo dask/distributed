@@ -9,7 +9,7 @@ import copy
 import errno
 from functools import partial
 import html
-from inspect import isawaitable
+import inspect
 import itertools
 import json
 import logging
@@ -672,7 +672,6 @@ class Client(Node):
         self._loop_runner = LoopRunner(loop=loop, asynchronous=asynchronous)
         self.loop = self._loop_runner.loop
 
-        self._gather_semaphore = asyncio.Semaphore(5, loop=self.loop.asyncio_loop)
         self._gather_keys = None
         self._gather_future = None
 
@@ -982,6 +981,8 @@ class Client(Node):
 
             address = self.cluster.scheduler_address
 
+        self._gather_semaphore = asyncio.Semaphore(5)
+
         if self.scheduler is None:
             self.scheduler = self.rpc(address)
         self.scheduler_comm = None
@@ -1189,7 +1190,7 @@ class Client(Node):
                         try:
                             handler = self._stream_handlers[op]
                             result = handler(**msg)
-                            if isawaitable(result):
+                            if inspect.isawaitable(result):
                                 await result
                         except Exception as e:
                             logger.exception(e)
@@ -4208,13 +4209,20 @@ class as_completed:
         self.queue = pyQueue()
         self.lock = threading.Lock()
         self.loop = loop or default_client().loop
-        self.condition = asyncio.Condition(loop=self.loop.asyncio_loop)
         self.thread_condition = threading.Condition()
         self.with_results = with_results
         self.raise_errors = raise_errors
 
         if futures:
             self.update(futures)
+
+    @property
+    def condition(self):
+        try:
+            return self._condition
+        except AttributeError:
+            self._condition = asyncio.Condition()
+            return self._condition
 
     async def _track_future(self, future):
         try:
@@ -4587,8 +4595,13 @@ class performance_report:
         self.start = time()
         await get_client().get_task_stream(start=0, stop=0)  # ensure plugin
 
-    async def __aexit__(self, typ, value, traceback):
-        data = await get_client().scheduler.performance_report(start=self.start)
+    async def __aexit__(self, typ, value, traceback, code=None):
+        if not code:
+            frame = inspect.currentframe().f_back
+            code = inspect.getsource(frame)
+        data = await get_client().scheduler.performance_report(
+            start=self.start, code=code
+        )
         with open(self.filename, "w") as f:
             f.write(data)
 
@@ -4596,7 +4609,9 @@ class performance_report:
         get_client().sync(self.__aenter__)
 
     def __exit__(self, typ, value, traceback):
-        get_client().sync(self.__aexit__, type, value, traceback)
+        frame = inspect.currentframe().f_back
+        code = inspect.getsource(frame)
+        get_client().sync(self.__aexit__, type, value, traceback, code=code)
 
 
 @contextmanager

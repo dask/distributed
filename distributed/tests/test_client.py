@@ -3581,7 +3581,7 @@ def test_reconnect_timeout(c, s):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.xfail(reason="TODO: intermittent failures")
+@pytest.mark.skipif(sys.version_info < (3, 7), reason="TODO: intermittent failures")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
 def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip("psutil")
@@ -5920,3 +5920,18 @@ async def test_performance_report(c, s, a, b):
         assert "bokeh" in data
         assert "random" in data
         assert "Dask Performance Report" in data
+        assert "x = da.random" in data
+
+
+@pytest.mark.asyncio
+async def test_client_gather_semaphor_loop(cleanup):
+    async with Scheduler(port=0) as s:
+        async with Client(s.address, asynchronous=True) as c:
+            assert c._gather_semaphore._loop is c.loop.asyncio_loop
+
+
+@gen_cluster(client=True)
+def test_as_completed_condition_loop(c, s, a, b):
+    seq = c.map(inc, range(5))
+    ac = as_completed(seq)
+    assert ac.condition._loop == c.loop.asyncio_loop

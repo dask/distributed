@@ -59,6 +59,8 @@ from .utils import (
     key_split_group,
     empty_context,
     tmpfile,
+    format_bytes,
+    format_time,
     TimeoutError,
 )
 from .utils_comm import scatter_to_workers, gather_from_workers, retry_operation
@@ -835,7 +837,7 @@ class TaskPrefix:
 
     @property
     def types(self):
-        return set.union(*[tg.types for tg in self.groups])
+        return set().union(*[tg.types for tg in self.groups])
 
 
 class _StateLegacyMapping(Mapping):
@@ -1976,20 +1978,21 @@ class Scheduler(ServerNode):
         """ Create a new task, and associated states """
         ts = TaskState(key, spec)
         ts._state = state
-        try:
-            tg = self.task_groups[ts.group_key]
-        except KeyError:
-            tg = self.task_groups[ts.group_key] = TaskGroup(ts.group_key)
-        tg.add(ts)
         prefix_key = key_split(key)
         try:
             tp = self.task_prefixes[prefix_key]
         except KeyError:
-            tp = TaskPrefix(prefix_key)
-            tp.groups.append(tg)
-            self.task_prefixes[prefix_key] = tp
+            tp = self.task_prefixes[prefix_key] = TaskPrefix(prefix_key)
         ts.prefix = tp
-        tg.prefix = tp
+
+        group_key = ts.group_key
+        try:
+            tg = self.task_groups[group_key]
+        except KeyError:
+            tg = self.task_groups[group_key] = TaskGroup(group_key)
+            tg.prefix = tp
+            tp.groups.append(tg)
+        tg.add(ts)
         self.tasks[key] = ts
         return ts
 
@@ -2952,6 +2955,28 @@ class Scheduler(ServerNode):
         )
         return d[worker]
 
+    async def _delete_worker_data(self, worker_address, keys):
+        """ Delete data from a worker and update the corresponding worker/task states
+
+        Parameters
+        ----------
+        worker_address: str
+            Worker address to delete keys from
+        keys: List[str]
+            List of keys to delete on the specified worker
+        """
+        await retry_operation(
+            self.rpc(addr=worker_address).delete_data, keys=list(keys), report=False
+        )
+
+        ws = self.workers[worker_address]
+        tasks = {self.tasks[key] for key in keys}
+        ws.has_what -= tasks
+        for ts in tasks:
+            ts.who_has.remove(ws)
+            ws.nbytes -= ts.get_nbytes()
+        self.log_event(ws.address, {"action": "remove-worker-data", "keys": keys})
+
     async def rebalance(self, comm=None, keys=None, workers=None):
         """ Rebalance keys so that each worker stores roughly equal bytes
 
@@ -3068,18 +3093,8 @@ class Scheduler(ServerNode):
                     )
 
                 await asyncio.gather(
-                    *(
-                        retry_operation(
-                            self.rpc(addr=r).delete_data, keys=v, report=False
-                        )
-                        for r, v in to_senders.items()
-                    )
+                    *(self._delete_worker_data(r, v) for r, v in to_senders.items())
                 )
-
-                for sender, recipient, ts in msgs:
-                    ts.who_has.remove(sender)
-                    sender.has_what.remove(ts)
-                    sender.nbytes -= ts.get_nbytes()
 
                 return {"status": "OK"}
 
@@ -3142,27 +3157,10 @@ class Scheduler(ServerNode):
 
                 await asyncio.gather(
                     *(
-                        retry_operation(
-                            self.rpc(addr=ws.address).delete_data,
-                            keys=[ts.key for ts in tasks],
-                            report=False,
-                        )
+                        self._delete_worker_data(ws.address, [t.key for t in tasks])
                         for ws, tasks in del_worker_tasks.items()
                     )
                 )
-
-                for ws, tasks in del_worker_tasks.items():
-                    ws.has_what -= tasks
-                    for ts in tasks:
-                        ts.who_has.remove(ws)
-                        ws.nbytes -= ts.get_nbytes()
-                    self.log_event(
-                        ws.address,
-                        {
-                            "action": "replicate-remove",
-                            "keys": [ts.key for ts in tasks],
-                        },
-                    )
 
             # Copy not-yet-filled data
             while tasks:
@@ -4647,6 +4645,13 @@ class Scheduler(ServerNode):
                 if ts.state == "forgotten":
                     del self.tasks[ts.key]
 
+            if ts.state == "forgotten":
+                # Remove TaskGroup if all tasks are in the forgotten state
+                tg = ts.group
+                if not any(tg.states.get(s) for s in ALL_TASK_STATES):
+                    ts.prefix.groups.remove(tg)
+                    del self.task_groups[tg.name]
+
             return recommendations
         except Exception as e:
             logger.exception("Error transitioning %r from %r to %r", key, start, finish)
@@ -4979,7 +4984,7 @@ class Scheduler(ServerNode):
 
         return {"counts": counts, "keys": keys}
 
-    async def performance_report(self, comm=None, start=None):
+    async def performance_report(self, comm=None, start=None, code=""):
         # Profiles
         compute, scheduler, workers = await asyncio.gather(
             *[
@@ -5018,8 +5023,39 @@ class Scheduler(ServerNode):
         bandwidth_types = BandwidthTypes(self, sizing_mode="stretch_both")
         bandwidth_types.update()
 
-        from bokeh.models import Panel, Tabs
+        from bokeh.models import Panel, Tabs, Div
 
+        # HTML
+        html = """
+        <h1> Dask Performance Report </h1>
+
+        <i> Select different tabs on the top for additional information </i>
+
+        <h2> Duration: {time} </h2>
+
+        <h2> Scheduler Information </h2>
+        <ul>
+          <li> Address: {address} </li>
+          <li> Workers: {nworkers} </li>
+          <li> Threads: {threads} </li>
+          <li> Memory: {memory} </li>
+        </ul>
+
+        <h2> Calling Code </h2>
+        <pre>
+{code}
+        </pre>
+        """.format(
+            time=format_time(time() - start),
+            address=self.address,
+            nworkers=len(self.workers),
+            threads=sum(w.nthreads for w in self.workers.values()),
+            memory=format_bytes(sum(w.memory_limit for w in self.workers.values())),
+            code=code,
+        )
+        html = Div(text=html)
+
+        html = Panel(child=html, title="Summary")
         compute = Panel(child=compute, title="Worker Profile (compute)")
         workers = Panel(child=workers, title="Worker Profile (administrative)")
         scheduler = Panel(child=scheduler, title="Scheduler Profile (administrative)")
@@ -5031,6 +5067,7 @@ class Scheduler(ServerNode):
 
         tabs = Tabs(
             tabs=[
+                html,
                 task_stream,
                 compute,
                 workers,
