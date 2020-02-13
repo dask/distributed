@@ -1267,7 +1267,7 @@ class Scheduler(ServerNode):
             "call_stack": self.get_call_stack,
             "profile": self.get_profile,
             "performance_report": self.performance_report,
-            "logs": self.get_logs,
+            "logs": self.logs,
             "worker_logs": self.get_worker_logs,
             "nbytes": self.get_nbytes,
             "versions": self.versions,
@@ -5096,7 +5096,7 @@ class Scheduler(ServerNode):
 
     async def get_worker_logs(self, comm=None, n=None, workers=None, nanny=False):
         results = await self.broadcast(
-            msg={"op": "get_logs", "n": n}, workers=workers, nanny=nanny
+            msg={"op": "logs", "n": n}, workers=workers, nanny=nanny
         )
         return results
 

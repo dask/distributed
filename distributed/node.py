@@ -145,6 +145,10 @@ class ServerNode(Node, Server):
         weakref.finalize(self, logger.removeHandler, self._deque_handler)
 
     def get_logs(self, comm=None, n=None):
+        # Deprecated use logs instead
+        return self.logs(comm=comm, n=None)
+
+    def logs(self, comm=None, n=None):
         deque_handler = self._deque_handler
         if n is None:
             L = list(deque_handler.deque)

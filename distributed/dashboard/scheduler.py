@@ -116,7 +116,7 @@ class Task(RequestHandler):
 class Logs(RequestHandler):
     def get(self):
         with log_errors():
-            logs = self.server.get_logs()
+            logs = self.server.logs()
             self.render(
                 "logs.html",
                 title="Logs",
