@@ -13,7 +13,7 @@
         <th> Last seen </th>
     </tr>
     {% for ws in worker_list %}
-    <tr>
+    <tr {{ "style=background-color:#ffcdd2" if time() - ws.last_seen > 60 else ""}}>
         <td><a href="../worker/{{ url_escape(ws.address) }}.html">{{ws.address}}</a></td>
         <td> {{ ws.name if ws.name is not None else "" }} </td>
         <td> {{ ws.nthreads }} </td>

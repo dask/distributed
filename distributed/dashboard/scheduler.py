@@ -4,7 +4,6 @@ import os
 import os.path
 import json
 import logging
-from time import time
 
 import dask
 from dask.utils import format_bytes
@@ -51,6 +50,7 @@ from .worker import counters_doc
 from .proxy import GlobalProxyHandler
 from .utils import RequestHandler, redirect
 from ..diagnostics.websocket import WebsocketPlugin
+from ..metrics import time
 from ..utils import log_errors, format_time
 from ..scheduler import ALL_TASK_STATES
 
