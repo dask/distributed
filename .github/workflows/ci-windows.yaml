@@ -26,10 +26,14 @@ jobs:
         shell: bash -l {0}
         run: |
           if [[ "${{ matrix.python-version }}" = "3.8" ]]; then
-            conda install tornado=6
+            conda install -c conda-forge tornado=6
           else
-            conda install tornado=5
+            conda install -c conda-forge tornado=5
           fi
+
+      - name: List packages in environment
+        shell: bash -l {0}
+        run: conda list
 
       - name: Install distributed from source
         shell: bash -l {0}
