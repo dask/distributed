@@ -11,7 +11,9 @@ def serialize_numba_ndarray(x):
         t = numba.cuda.device_array(shape, dtype=x.dtype)
         t.copy_to_device(x)
         x = t
+
     header = x.__cuda_array_interface__.copy()
+
     return header, [x]
 
 
