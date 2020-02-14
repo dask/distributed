@@ -38,7 +38,11 @@ def serialize_cupy_ndarray(x):
 
     header = x.__cuda_array_interface__.copy()
     header["strides"] = tuple(x.strides)
-    frames = [x]
+    frames = [
+        cupy.ndarray(
+            shape=(x.size,), dtype=x.dtype, memptr=x.data, strides=(x.dtype.itemsize,)
+        )
+    ]
 
     return header, frames
 
