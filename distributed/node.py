@@ -146,7 +146,7 @@ class ServerNode(Node, Server):
 
     def get_logs(self, comm=None, n=None):
         # Deprecated use logs instead
-        return self.logs(comm=comm, n=None)
+        return self.logs(comm=comm, n=n)
 
     def logs(self, comm=None, n=None):
         deque_handler = self._deque_handler
