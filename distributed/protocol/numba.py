@@ -6,7 +6,7 @@ from .cuda import cuda_serialize, cuda_deserialize
 @cuda_serialize.register(numba.cuda.devicearray.DeviceNDArray)
 def serialize_numba_ndarray(x):
     # Making sure `x` is behaving
-    if not x.flags["C_CONTIGUOUS"]:
+    if not (x.flags["C_CONTIGUOUS"] or x.flags["F_CONTIGUOUS"]):
         shape = x.shape
         t = numba.cuda.device_array(shape, dtype=x.dtype)
         t.copy_to_device(x)
