@@ -39,7 +39,7 @@ class PatchedCudaArrayInterface:
 @cuda_serialize.register(cupy.ndarray)
 def serialize_cupy_ndarray(x):
     # Making sure `x` is behaving
-    if not x.flags.c_contiguous:
+    if not x.flags["C_CONTIGUOUS"]:
         x = cupy.array(x, copy=True)
 
     header = x.__cuda_array_interface__.copy()
