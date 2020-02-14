@@ -55,6 +55,9 @@ def deserialize_cupy_array(header, frames):
     if not isinstance(frame, cupy.ndarray):
         frame = PatchedCudaArrayInterface(frame)
     arr = cupy.ndarray(
-        shape=header["shape"], dtype=header["typestr"], memptr=cupy.asarray(frame).data
+        shape=header["shape"],
+        dtype=header["typestr"],
+        memptr=cupy.asarray(frame).data,
+        strides=header["strides"],
     )
     return arr
