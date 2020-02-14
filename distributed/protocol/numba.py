@@ -25,12 +25,6 @@ def deserialize_numba_ndarray(header, frames):
     shape = header["shape"]
     strides = header["strides"]
 
-    # Starting with __cuda_array_interface__ version 2, strides can be None,
-    # meaning the array is C-contiguous, so we have to calculate it.
-    if strides is None:
-        itemsize = np.dtype(header["typestr"]).itemsize
-        strides = tuple((np.cumprod((1,) + shape[:0:-1]) * itemsize).tolist())
-
     arr = numba.cuda.devicearray.DeviceNDArray(
         shape=shape,
         strides=strides,
