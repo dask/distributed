@@ -13,6 +13,7 @@ def serialize_numba_ndarray(x):
         x = t
 
     header = x.__cuda_array_interface__.copy()
+    header["strides"] = tuple(x.strides)
     frames = [x]
 
     return header, frames

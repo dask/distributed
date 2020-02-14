@@ -43,6 +43,7 @@ def serialize_cupy_ndarray(x):
         x = cupy.array(x, copy=True)
 
     header = x.__cuda_array_interface__.copy()
+    header["strides"] = tuple(x.strides)
     frames = [x]
 
     return header, frames
