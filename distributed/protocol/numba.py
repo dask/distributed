@@ -31,9 +31,9 @@ def deserialize_numba_ndarray(header, frames):
         strides = tuple((np.cumprod((1,) + shape[:0:-1]) * itemsize).tolist())
 
     arr = numba.cuda.devicearray.DeviceNDArray(
-        shape,
-        strides,
-        np.dtype(header["typestr"]),
+        shape=shape,
+        strides=strides,
+        dtype=np.dtype(header["typestr"]),
         gpu_data=numba.cuda.as_cuda_array(frame).gpu_data,
     )
     return arr
