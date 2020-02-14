@@ -40,7 +40,7 @@ def serialize_cupy_ndarray(x):
     header["strides"] = tuple(x.strides)
     frames = [
         cupy.ndarray(
-            shape=(x.size,), dtype=x.dtype, memptr=x.data, strides=(x.dtype.itemsize,)
+            shape=(x.nbytes,), dtype=cupy.dtype("u1"), memptr=x.data, strides=(1,)
         )
     ]
 
