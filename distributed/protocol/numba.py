@@ -13,8 +13,9 @@ def serialize_numba_ndarray(x):
         x = t
 
     header = x.__cuda_array_interface__.copy()
+    frames = [x]
 
-    return header, [x]
+    return header, frames
 
 
 @cuda_deserialize.register(numba.cuda.devicearray.DeviceNDArray)

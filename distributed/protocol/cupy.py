@@ -43,8 +43,9 @@ def serialize_cupy_ndarray(x):
         x = cupy.array(x, copy=True)
 
     header = x.__cuda_array_interface__.copy()
+    frames = [x]
 
-    return header, [x]
+    return header, frames
 
 
 @cuda_deserialize.register(cupy.ndarray)
