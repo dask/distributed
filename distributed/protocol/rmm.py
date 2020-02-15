@@ -1,6 +1,10 @@
+import numba
+import numba.cuda
+import numpy
 import rmm
 
 from .cuda import cuda_deserialize, cuda_serialize
+from .serialize import dask_deserialize, dask_serialize
 
 # Used for RMM 0.11.0+ otherwise Numba serializers used
 if hasattr(rmm, "DeviceBuffer"):
@@ -21,3 +25,21 @@ if hasattr(rmm, "DeviceBuffer"):
         assert isinstance(arr, rmm.DeviceBuffer)
 
         return arr
+
+    @dask_serialize.register(rmm.DeviceBuffer)
+    def dask_serialize_rmm_device_buffer(x):
+        header = x.__cuda_array_interface__.copy()
+        frames = [numba.cuda.as_cuda_array(x).copy_to_host().data]
+        return header, frames
+
+    @dask_deserialize.register(rmm.DeviceBuffer)
+    def dask_deserialize_rmm_device_buffer(header, frames):
+        (frame,) = frames
+
+        arr = numpy.asarray(memoryview(frame))
+        ptr = arr.__array_interface__["data"][0]
+        size = arr.nbytes
+
+        buf = rmm.DeviceBuffer(ptr=ptr, size=size)
+
+        return buf

@@ -82,6 +82,8 @@ def _register_numba():
 
 @cuda_serialize.register_lazy("rmm")
 @cuda_deserialize.register_lazy("rmm")
+@dask_serialize.register_lazy("rmm")
+@dask_deserialize.register_lazy("rmm")
 def _register_rmm():
     from . import rmm
 
