@@ -2,7 +2,8 @@
 Efficient serialization GPU arrays.
 """
 import cupy
-from .cuda import cuda_serialize, cuda_deserialize
+
+from .cuda import cuda_deserialize, cuda_serialize
 
 
 class PatchedCudaArrayInterface:

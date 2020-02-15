@@ -1,6 +1,7 @@
-import numpy as np
 import numba.cuda
-from .cuda import cuda_serialize, cuda_deserialize
+import numpy as np
+
+from .cuda import cuda_deserialize, cuda_serialize
 
 
 @cuda_serialize.register(numba.cuda.devicearray.DeviceNDArray)

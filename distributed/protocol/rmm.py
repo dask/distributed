@@ -1,6 +1,6 @@
 import rmm
-from .cuda import cuda_serialize, cuda_deserialize
 
+from .cuda import cuda_deserialize, cuda_serialize
 
 # Used for RMM 0.11.0+ otherwise Numba serializers used
 if hasattr(rmm, "DeviceBuffer"):
