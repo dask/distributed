@@ -48,7 +48,7 @@ def serialize_cupy_ndarray(x):
 
 
 @cuda_deserialize.register(cupy.ndarray)
-def deserialize_cupy_array(header, frames):
+def deserialize_cupy_ndarray(header, frames):
     (frame,) = frames
     if not isinstance(frame, cupy.ndarray):
         frame = PatchedCudaArrayInterface(frame)
