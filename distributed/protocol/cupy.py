@@ -4,6 +4,12 @@ Efficient serialization GPU arrays.
 import cupy
 
 from .cuda import cuda_deserialize, cuda_serialize
+from .serialize import dask_deserialize, dask_serialize
+
+try:
+    from .rmm import dask_deserialize_rmm_device_buffer as dask_deserialize_cuda_buffer
+except ImportError:
+    from .numba import dask_deserialize_numba_array as dask_deserialize_cuda_buffer
 
 
 class PatchedCudaArrayInterface:
@@ -55,4 +61,18 @@ def cuda_deserialize_cupy_ndarray(header, frames):
     arr = cupy.ndarray(
         header["shape"], dtype=header["typestr"], memptr=cupy.asarray(frame).data
     )
+    return arr
+
+
+@dask_serialize.register(cupy.ndarray)
+def dask_serialize_cupy_ndarray(x):
+    header, frames = cuda_serialize_cupy_ndarray(x)
+    frames = [memoryview(cupy.asnumpy(f)) for f in frames]
+    return header, frames
+
+
+@dask_deserialize.register(cupy.ndarray)
+def dask_deserialize_cupy_ndarray(header, frames):
+    frames = [dask_deserialize_cuda_buffer(header, frames)]
+    arr = cuda_deserialize_cupy_ndarray(header, frames)
     return arr
