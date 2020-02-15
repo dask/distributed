@@ -38,7 +38,7 @@ class PatchedCudaArrayInterface:
 
 
 @cuda_serialize.register(cupy.ndarray)
-def serialize_cupy_ndarray(x):
+def cuda_serialize_cupy_ndarray(x):
     # Making sure `x` is behaving
     if not x.flags.c_contiguous:
         x = cupy.array(x, copy=True)
@@ -48,7 +48,7 @@ def serialize_cupy_ndarray(x):
 
 
 @cuda_deserialize.register(cupy.ndarray)
-def deserialize_cupy_ndarray(header, frames):
+def cuda_deserialize_cupy_ndarray(header, frames):
     (frame,) = frames
     if not isinstance(frame, cupy.ndarray):
         frame = PatchedCudaArrayInterface(frame)

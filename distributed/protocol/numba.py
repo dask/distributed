@@ -5,7 +5,7 @@ from .cuda import cuda_deserialize, cuda_serialize
 
 
 @cuda_serialize.register(numba.cuda.devicearray.DeviceNDArray)
-def serialize_numba_ndarray(x):
+def cuda_serialize_numba_ndarray(x):
     # Making sure `x` is behaving
     if not x.is_c_contiguous():
         shape = x.shape
@@ -17,7 +17,7 @@ def serialize_numba_ndarray(x):
 
 
 @cuda_deserialize.register(numba.cuda.devicearray.DeviceNDArray)
-def deserialize_numba_ndarray(header, frames):
+def cuda_deserialize_numba_ndarray(header, frames):
     (frame,) = frames
     shape = header["shape"]
     strides = header["strides"]
