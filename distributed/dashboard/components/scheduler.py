@@ -27,6 +27,7 @@ from bokeh.models import (
     GroupFilter,
     CDSView,
 )
+from bokeh.models.markers import Triangle
 from bokeh.models.widgets import DataTable, TableColumn
 from bokeh.plotting import figure
 from bokeh.palettes import Viridis11
@@ -1126,7 +1127,18 @@ class TaskGraph(DashboardComponent):
         self.node_source = ColumnDataSource(
             {"x": [], "y": [], "name": [], "state": [], "visible": [], "key": []}
         )
-        self.edge_source = ColumnDataSource({"x": [], "y": [], "visible": []})
+
+        self.edge_source = ColumnDataSource({
+            "x0": [],
+            "x1": [],
+            "cx0": [],
+            "cx1": [],
+            "cy0": [],
+            "cy1": [],
+            "y0": [],
+            "y1": [],
+            "visible": []
+        })
 
         node_view = CDSView(
             source=self.node_source,
@@ -1140,30 +1152,64 @@ class TaskGraph(DashboardComponent):
         node_colors = factor_cmap(
             "state",
             factors=["waiting", "processing", "memory", "released", "erred"],
-            palette=["gray", "green", "red", "blue", "black"],
+            palette=["gray", "#4daf4a", "#e41a1c", "#377eb8", "black"],
         )
 
-        self.root = figure(title="Task Graph", **kwargs)
-        self.root.multi_line(
-            xs="x",
-            ys="y",
+        self.root = figure(title="Task Graph", output_backend="webgl", **kwargs)
+        self.root.bezier(
+            x0="x0",
+            y0="y0",
+            x1="x1",
+            y1="y1",
+            cx0="cx0",
+            cy0="cy0",
+            cx1="cx1",
+            cy1="cy1",
             source=self.edge_source,
             line_width=1,
             view=edge_view,
-            color="black",
-            alpha=0.3,
+            color="#377eb8",
+            alpha=1
         )
-        rect = self.root.square(
+        # prevents edges intersecting with nodes
+        self.root.circle(
+            x="x",
+            y="y",
+            size=15,
+            line_width=0,
+            color='black',
+            name="margin",
+            source=self.node_source,
+            view=node_view,
+            **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "state"},
+        )
+        arrow = Triangle(
+            angle=-np.pi/2,
+            x="x1",
+            y="y1",
+            size=8,
+            line_color=None,
+            line_width=0,
+            fill_color='#377eb8'
+        )
+        self.root.add_glyph(self.edge_source, arrow)
+
+        rect = self.root.circle(
             x="x",
             y="y",
             size=10,
+            line_width=2,
             color=node_colors,
+            fill_alpha=0.5,
             source=self.node_source,
             view=node_view,
             **{"legend_field" if BOKEH_VERSION >= "1.4" else "legend": "state"},
         )
         self.root.xgrid.grid_line_color = None
         self.root.ygrid.grid_line_color = None
+
+        self.root.xaxis.visible = False
+        self.root.yaxis.visible = False
 
         hover = HoverTool(
             point_policy="follow_mouse",
@@ -1177,6 +1223,17 @@ class TaskGraph(DashboardComponent):
     @without_property_validation
     def update(self):
         with log_errors():
+            # conditionally hide "margin" if number of nodes is large
+            renderers = self.root.renderers
+            if len(self.node_source.data["x"]) > 1e3:
+                for renderer in renderers:
+                    if renderer.name == "margin":
+                        renderer.visible = False
+            else:
+                for renderer in renderers:
+                    if renderer.name == "margin":
+                        renderer.visible = True
+
             # occasionally reset the column data source to remove old nodes
             if self.invisible_count > len(self.node_source.data["x"]) / 2:
                 self.layout.reset_index()
@@ -1236,7 +1293,23 @@ class TaskGraph(DashboardComponent):
                 "key": node_key,
                 "visible": ["True"] * len(node_x),
             }
-            edge = {"x": edge_x, "y": edge_y, "visible": ["True"] * len(edge_x)}
+
+            control_offset = .5
+            end_offset = .05
+            edge = {
+                "x0": [x[0] + end_offset for x in edge_x],
+                "x1": [x[1] - end_offset for x in edge_x],
+
+                "cx0": [x[0] + control_offset + end_offset for x in edge_x],
+                "cx1": [x[1] - control_offset - end_offset for x in edge_x],
+
+                "cy0": [y[0] for y in edge_y],
+                "cy1": [y[1] for y in edge_y],
+
+                "y0": [y[0] for y in edge_y],
+                "y1": [y[1] for y in edge_y],
+                "visible": ["True"] * len(edge_x)
+            }
 
             if update or not len(self.node_source.data["x"]):
                 # see https://github.com/bokeh/bokeh/issues/7523
@@ -1252,7 +1325,7 @@ class TaskGraph(DashboardComponent):
         Small updates like color changes or lost nodes from task transitions
         """
         n = len(self.node_source.data["x"])
-        m = len(self.edge_source.data["x"])
+        m = len(self.edge_source.data["x0"])
 
         if self.layout.state_updates:
             state_updates = self.layout.state_updates
