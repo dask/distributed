@@ -10,7 +10,7 @@ elif sys.version_info.major == 3 and sys.version_info.minor < 8:
         import pickle5 as pickle
     except ImportError:
         import pickle
-elif sys.version_info.minor:
+else:
     import pickle
 
 logger = logging.getLogger(__name__)
