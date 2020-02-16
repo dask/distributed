@@ -1177,7 +1177,7 @@ class TaskGraph(DashboardComponent):
             y="y",
             size=15,
             line_width=0,
-            color='black',
+            color='white',
             name="margin",
             source=self.node_source,
             view=node_view,
