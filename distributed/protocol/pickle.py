@@ -3,9 +3,7 @@ import sys
 
 import cloudpickle
 
-if sys.version_info.major == 2:
-    import cPickle as pickle
-elif sys.version_info.major == 3 and sys.version_info.minor < 8:
+if sys.version_info.major == 3 and sys.version_info.minor < 8:
     try:
         import pickle5 as pickle
     except ImportError:
