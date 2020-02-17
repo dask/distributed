@@ -5199,7 +5199,7 @@ class Scheduler(ServerNode):
         if close:
             self.loop.add_callback(self.close)
 
-    def adaptive_target(self, comm=None, target_duration="5s"):
+    def adaptive_target(self, comm=None, target_duration=None):
         """ Desired number of workers based on the current workload
 
         This looks at the current running tasks and memory use, and returns a
@@ -5215,6 +5215,8 @@ class Scheduler(ServerNode):
         --------
         distributed.deploy.Adaptive
         """
+        if target_duration is None:
+            target_duration = dask.config.get("distributed.adaptive.target-duration")
         target_duration = parse_timedelta(target_duration)
 
         # CPU
