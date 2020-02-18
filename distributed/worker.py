@@ -798,6 +798,8 @@ class Worker(ServerNode):
 
     async def _register_with_scheduler(self):
         self.periodic_callbacks["heartbeat"].stop()
+        if self.periodic_callbacks.get("keep-alive"):
+            self.periodic_callbacks["keep-alive"].stop()
         start = time()
         if self.contact_address is None:
             self.contact_address = self.address
