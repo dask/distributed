@@ -202,6 +202,9 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         )
         raise IOError(msg)
 
+    # don't spam the server with connect attempts
+    backoff = min(0.1, timeout/20 if timeout else 9999)
+
     # This starts a thread
     while True:
         try:
@@ -221,8 +224,9 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                await asyncio.sleep(0.01)
-                logger.debug("sleeping on connect")
+                logger.debug("delaying before connect retry")
+                await asyncio.sleep(backoff)
+                backoff *= 1.5
             else:
                 _raise(error)
         else:
