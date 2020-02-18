@@ -382,7 +382,7 @@ class Worker(ServerNode):
         self.executed_count = 0
         self.long_running = set()
 
-        self.batched_stream = None
+        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.recent_messages_log = deque(
             maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
         )
@@ -650,6 +650,13 @@ class Worker(ServerNode):
 
         pc = PeriodicCallback(self.heartbeat, 1000, io_loop=self.io_loop)
         self.periodic_callbacks["heartbeat"] = pc
+        pc = PeriodicCallback(
+            lambda: self.batched_stream.send({"op": "keep-alive"}),
+            60000,
+            io_loop=self.io_loop,
+        )
+        self.periodic_callbacks["keep-alive"] = pc
+
         self._address = contact_address
 
         if self.memory_limit:
@@ -797,9 +804,8 @@ class Worker(ServerNode):
     #####################
 
     async def _register_with_scheduler(self):
+        self.periodic_callbacks["keep-alive"].stop()
         self.periodic_callbacks["heartbeat"].stop()
-        if self.periodic_callbacks.get("keep-alive"):
-            self.periodic_callbacks["keep-alive"].stop()
         start = time()
         if self.contact_address is None:
             self.contact_address = self.address
@@ -865,15 +871,8 @@ class Worker(ServerNode):
             logger.info("        Registered to: %26s", self.scheduler.address)
             logger.info("-" * 49)
 
-        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.batched_stream.start(comm)
-        pc = PeriodicCallback(
-            lambda: self.batched_stream.send({"op": "keep-alive"}),
-            60000,
-            io_loop=self.io_loop,
-        )
-        self.periodic_callbacks["keep-alive"] = pc
-        pc.start()
+        self.periodic_callbacks["keep-alive"].start()
         self.periodic_callbacks["heartbeat"].start()
         self.loop.add_callback(self.handle_scheduler, comm)
 
