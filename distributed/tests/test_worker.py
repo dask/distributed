@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
 import importlib
 import logging
 from numbers import Number
@@ -10,6 +9,7 @@ import shutil
 import sys
 from time import sleep
 import traceback
+import asyncio
 
 import dask
 from dask import delayed
@@ -19,7 +19,6 @@ import pytest
 from toolz import pluck, sliding_window, first
 import tornado
 from tornado import gen
-from tornado.ioloop import TimeoutError
 
 from distributed import (
     Client,
@@ -36,7 +35,7 @@ from distributed.core import rpc
 from distributed.scheduler import Scheduler
 from distributed.metrics import time
 from distributed.worker import Worker, error_message, logger, parse_memory_limit
-from distributed.utils import tmpfile
+from distributed.utils import tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     cleanup,
     inc,
@@ -87,7 +86,7 @@ def test_identity():
 
 @gen_cluster(client=True)
 def test_worker_bad_args(c, s, a, b):
-    class NoReprObj(object):
+    class NoReprObj:
         """ This object cannot be properly represented as a string. """
 
         def __str__(self):
@@ -326,7 +325,7 @@ def test_worker_waits_for_scheduler(loop):
     def f():
         w = Worker("127.0.0.1", 8007)
         try:
-            yield gen.with_timeout(timedelta(seconds=3), w)
+            yield asyncio.wait_for(w, 3)
         except TimeoutError:
             pass
         else:
@@ -371,6 +370,32 @@ def test_error_message():
         cut_text = msg["text"].replace("('Long error message', '", "")[:-2]
         assert len(cut_text) == max_error_len
         assert len(msg["text"]) > 10100  # default + 100
+
+
+@gen_cluster(client=True)
+def test_chained_error_message(c, s, a, b):
+    def chained_exception_fn():
+        class MyException(Exception):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __str__(self):
+                return "MyException(%s)" % self.msg
+
+        exception = MyException("Foo")
+        inner_exception = MyException("Bar")
+
+        try:
+            raise inner_exception
+        except Exception as e:
+            raise exception from e
+
+    f = c.submit(chained_exception_fn)
+    try:
+        yield f
+    except Exception as e:
+        assert e.__cause__ is not None
+        assert "Bar" in str(e.__cause__)
 
 
 @gen_cluster()
@@ -762,7 +787,7 @@ def test_worker_death_timeout(s):
         yield s.close()
         w = Worker(s.address, death_timeout=1)
 
-    with pytest.raises(gen.TimeoutError) as info:
+    with pytest.raises(TimeoutError) as info:
         yield w
 
     assert "Worker" in str(info.value)
@@ -834,7 +859,7 @@ def test_worker_dir(worker):
 
 @gen_cluster(client=True)
 def test_dataframe_attribute_error(c, s, a, b):
-    class BadSize(object):
+    class BadSize:
         def __init__(self, data):
             self.data = data
 
@@ -848,7 +873,7 @@ def test_dataframe_attribute_error(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_fail_write_to_disk(c, s, a, b):
-    class Bad(object):
+    class Bad:
         def __getstate__(self):
             raise TypeError()
 
@@ -877,7 +902,7 @@ def test_fail_write_many_to_disk(c, s, a):
     yield gen.sleep(0.1)
     assert not a.paused
 
-    class Bad(object):
+    class Bad:
         def __init__(self, x):
             pass
 
@@ -1095,7 +1120,7 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
     memory = psutil.Process().memory_info().rss
     a.memory_limit = memory / 0.7 + 400e6
 
-    class BadAccounting(object):
+    class BadAccounting:
         def __init__(self, data):
             self.data = data
 
@@ -1116,6 +1141,11 @@ def test_robust_to_bad_sizeof_estimates(c, s, a):
 
 
 @pytest.mark.slow
+@pytest.mark.xfail(
+    sys.version_info[:2] == (3, 8),
+    reason="Sporadic failure on Python 3.8",
+    strict=False,
+)
 @gen_cluster(
     nthreads=[("127.0.0.1", 2)],
     client=True,
@@ -1168,9 +1198,10 @@ def test_statistical_profiling_cycle(c, s, a, b):
     x = yield a.get_profile(start=time() + 10, stop=time() + 20)
     assert not x["count"]
 
-    x = yield a.get_profile(start=0, stop=time())
+    x = yield a.get_profile(start=0, stop=time() + 10)
+    recent = a.profile_recent["count"]
     actual = sum(p["count"] for _, p in a.profile_history) + a.profile_recent["count"]
-    x2 = yield a.get_profile(start=0, stop=time())
+    x2 = yield a.get_profile(start=0, stop=time() + 10)
     assert x["count"] <= actual <= x2["count"]
 
     y = yield a.get_profile(start=end - 0.300, stop=time())

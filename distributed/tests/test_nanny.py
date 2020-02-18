@@ -12,7 +12,6 @@ import pytest
 from toolz import valmap, first
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 
 import dask
 from distributed.diagnostics import SchedulerPlugin
@@ -20,7 +19,7 @@ from distributed import Nanny, rpc, Scheduler, Worker, Client, wait
 from distributed.core import CommClosedError
 from distributed.metrics import time
 from distributed.protocol.pickle import dumps
-from distributed.utils import ignoring, tmpfile
+from distributed.utils import ignoring, tmpfile, TimeoutError
 from distributed.utils_test import (  # noqa: F401
     gen_cluster,
     gen_test,
@@ -184,7 +183,7 @@ def test_nanny_alt_worker_class(c, s, w1, w2):
 def test_nanny_death_timeout(s):
     yield s.close()
     w = Nanny(s.address, death_timeout=1)
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         yield w
 
     assert w.status == "closed"
@@ -453,7 +452,7 @@ async def test_nanny_closes_cleanly(cleanup):
 @pytest.mark.asyncio
 async def test_lifetime(cleanup):
     counter = 0
-    event = Event()
+    event = asyncio.Event()
 
     class Plugin(SchedulerPlugin):
         def add_worker(self, **kwargs):

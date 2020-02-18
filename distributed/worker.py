@@ -62,9 +62,11 @@ from .utils import (
     iscoroutinefunction,
     warn_on_duration,
     LRU,
+    TimeoutError,
 )
 from .utils_comm import pack_data, gather_from_workers, retry_operation
 from .utils_perf import ThrottledGC, enable_gc_diagnosis, disable_gc_diagnosis
+from .versions import get_versions
 
 logger = logging.getLogger(__name__)
 
@@ -545,7 +547,9 @@ class Worker(ServerNode):
             try:
                 from zict import Buffer, File, Func
             except ImportError:
-                raise ImportError("Please `pip install zict` for spill-to-disk workers")
+                raise ImportError(
+                    "Please `python -m pip install zict` for spill-to-disk workers"
+                )
             path = os.path.join(self.local_directory, "storage")
             storage = Func(
                 partial(serialize_bytelist, on_error="raise"),
@@ -725,6 +729,10 @@ class Worker(ServerNode):
         )
 
     @property
+    def logs(self):
+        return self._deque_handler.deque
+
+    @property
     def worker_address(self):
         """ For API compatibility with Nanny """
         return self.address
@@ -797,7 +805,6 @@ class Worker(ServerNode):
         while True:
             try:
                 _start = time()
-                types = {k: typename(v) for k, v in self.data.items()}
                 comm = await connect(
                     self.scheduler.address, connection_args=self.connection_args
                 )
@@ -812,7 +819,7 @@ class Worker(ServerNode):
                         nthreads=self.nthreads,
                         name=self.name,
                         nbytes=self.nbytes,
-                        types=types,
+                        types={k: typename(v) for k, v in self.data.items()},
                         now=time(),
                         resources=self.total_resources,
                         memory_limit=self.memory_limit,
@@ -820,13 +827,18 @@ class Worker(ServerNode):
                         services=self.service_ports,
                         nanny=self.nanny,
                         pid=os.getpid(),
+                        versions=get_versions(),
                         metrics=await self.get_metrics(),
                         extra=await self.get_startup_information(),
                     ),
                     serializers=["msgpack"],
                 )
                 future = comm.read(deserializers=["msgpack"])
+
                 response = await future
+                if response.get("warning"):
+                    logger.warning(response["warning"])
+
                 _end = time()
                 middle = (_start + _end) / 2
                 self._update_latency(_end - start)
@@ -836,7 +848,7 @@ class Worker(ServerNode):
             except EnvironmentError:
                 logger.info("Waiting to connect to: %26s", self.scheduler.address)
                 await asyncio.sleep(0.1)
-            except gen.TimeoutError:
+            except TimeoutError:
                 logger.info("Timed out when connecting to scheduler")
         if response["status"] != "OK":
             raise ValueError("Unexpected response from register: %r" % (response,))
@@ -886,7 +898,13 @@ class Worker(ServerNode):
                 self._update_latency(end - start)
 
                 if response["status"] == "missing":
-                    await self._register_with_scheduler()
+                    for i in range(10):
+                        if self.status != "running":
+                            break
+                        else:
+                            await asyncio.sleep(0.05)
+                    else:
+                        await self._register_with_scheduler()
                     return
                 self.scheduler_delay = response["time"] - middle
                 self.periodic_callbacks["heartbeat"].callback_time = (
@@ -1080,13 +1098,13 @@ class Worker(ServerNode):
 
             for pc in self.periodic_callbacks.values():
                 pc.stop()
-            with ignoring(EnvironmentError, gen.TimeoutError):
-                if report:
-                    await gen.with_timeout(
-                        timedelta(seconds=timeout),
+            with ignoring(EnvironmentError, TimeoutError):
+                if report and self.contact_address is not None:
+                    await asyncio.wait_for(
                         self.scheduler.unregister(
                             address=self.contact_address, safe=safe
                         ),
+                        timeout,
                     )
             await self.scheduler.close_rpc()
             self._workdir.release()
@@ -1098,7 +1116,7 @@ class Worker(ServerNode):
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
-                with ignoring(gen.TimeoutError):
+                with ignoring(TimeoutError):
                     await self.batched_stream.close(timedelta(seconds=timeout))
 
             self.actor_executor._work_queue.queue.clear()
@@ -2568,36 +2586,44 @@ class Worker(ServerNode):
         memory = proc.memory_info().rss
         frac = memory / self.memory_limit
 
-        # Pause worker threads if above 80% memory use
-        if self.memory_pause_fraction and frac > self.memory_pause_fraction:
-            # Try to free some memory while in paused state
-            self._throttled_gc.collect()
-            if not self.paused:
+        def check_pause(memory):
+            frac = memory / self.memory_limit
+            # Pause worker threads if above 80% memory use
+            if self.memory_pause_fraction and frac > self.memory_pause_fraction:
+                # Try to free some memory while in paused state
+                self._throttled_gc.collect()
+                if not self.paused:
+                    logger.warning(
+                        "Worker is at %d%% memory usage. Pausing worker.  "
+                        "Process memory: %s -- Worker memory limit: %s",
+                        int(frac * 100),
+                        format_bytes(memory),
+                        format_bytes(self.memory_limit)
+                        if self.memory_limit is not None
+                        else "None",
+                    )
+                    self.paused = True
+            elif self.paused:
                 logger.warning(
-                    "Worker is at %d%% memory usage. Pausing worker.  "
+                    "Worker is at %d%% memory usage. Resuming worker. "
                     "Process memory: %s -- Worker memory limit: %s",
                     int(frac * 100),
-                    format_bytes(proc.memory_info().rss),
+                    format_bytes(memory),
                     format_bytes(self.memory_limit)
                     if self.memory_limit is not None
                     else "None",
                 )
-                self.paused = True
-        elif self.paused:
-            logger.warning(
-                "Worker is at %d%% memory usage. Resuming worker. "
-                "Process memory: %s -- Worker memory limit: %s",
-                int(frac * 100),
-                format_bytes(proc.memory_info().rss),
-                format_bytes(self.memory_limit)
-                if self.memory_limit is not None
-                else "None",
-            )
-            self.paused = False
-            self.ensure_computing()
+                self.paused = False
+                self.ensure_computing()
 
+        check_pause(memory)
         # Dump data to disk if above 70%
         if self.memory_spill_fraction and frac > self.memory_spill_fraction:
+            logger.debug(
+                "Worker is at %d%% memory usage. Start spilling data to disk.",
+                int(frac * 100),
+            )
+            start = time()
             target = self.memory_limit * self.memory_target_fraction
             count = 0
             need = memory - target
@@ -2608,7 +2634,7 @@ class Worker(ServerNode):
                         "to store to disk.  Perhaps some other process "
                         "is leaking memory?  Process memory: %s -- "
                         "Worker memory limit: %s",
-                        format_bytes(proc.memory_info().rss),
+                        format_bytes(memory),
                         format_bytes(self.memory_limit)
                         if self.memory_limit is not None
                         else "None",
@@ -2618,7 +2644,13 @@ class Worker(ServerNode):
                 del k, v
                 total += weight
                 count += 1
-                await asyncio.sleep(0)
+                # If the current buffer is filled with a lot of small values,
+                # evicting one at a time is very slow and the worker might
+                # generate new data faster than it is able to evict. Therefore,
+                # only pass on control if we spent at least 0.5s evicting
+                if time() - start > 0.5:
+                    await asyncio.sleep(0)
+                    start = time()
                 memory = proc.memory_info().rss
                 if total > need and memory > target:
                     # Issue a GC to ensure that the evicted data is actually
@@ -2626,6 +2658,7 @@ class Worker(ServerNode):
                     # before trying to evict even more data.
                     self._throttled_gc.collect()
                     memory = proc.memory_info().rss
+            check_pause(memory)
             if count:
                 logger.debug(
                     "Moved %d pieces of data data and %s to disk",
@@ -3234,15 +3267,19 @@ def execute_task(task):
 
 cache_dumps = LRU(maxsize=100)
 
+_cache_lock = threading.Lock()
+
 
 def dumps_function(func):
     """ Dump a function to bytes, cache functions """
     try:
-        result = cache_dumps[func]
+        with _cache_lock:
+            result = cache_dumps[func]
     except KeyError:
         result = pickle.dumps(func)
         if len(result) < 100000:
-            cache_dumps[func] = result
+            with _cache_lock:
+                cache_dumps[func] = result
     except TypeError:  # Unhashable function
         result = pickle.dumps(func)
     return result
@@ -3382,7 +3419,7 @@ def get_msg_safe_str(msg):
     ignoring them.
     """
 
-    class Repr(object):
+    class Repr:
         def __init__(self, f, val):
             self._f = f
             self._val = val

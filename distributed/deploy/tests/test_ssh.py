@@ -32,15 +32,20 @@ async def test_keywords():
         ["127.0.0.1"] * 3,
         connect_options=dict(known_hosts=None),
         asynchronous=True,
-        worker_options={"nthreads": 2, "memory_limit": "2 GiB", "death_timeout": "5s"},
-        scheduler_options={"idle_timeout": "5s", "port": 0},
+        worker_options={
+            "nprocs": 2,  # nprocs checks custom arguments with cli_keywords
+            "nthreads": 2,
+            "memory_limit": "2 GiB",
+            "death_timeout": "5s",
+        },
+        scheduler_options={"idle_timeout": "10s", "port": 0},
     ) as cluster:
         async with Client(cluster, asynchronous=True) as client:
             assert (
                 await client.run_on_scheduler(
                     lambda dask_scheduler: dask_scheduler.idle_timeout
                 )
-            ) == 5
+            ) == 10
             d = client.scheduler_info()["workers"]
             assert all(v["nthreads"] == 2 for v in d.values())
 
@@ -74,3 +79,21 @@ async def test_config_inherited_by_subprocess(loop):
             async with Client(cluster, asynchronous=True) as client:
                 result = await client.submit(f, 1)
                 assert result == 101
+
+
+@pytest.mark.asyncio
+async def test_unimplemented_options():
+    with pytest.raises(Exception):
+        async with SSHCluster(
+            ["127.0.0.1"] * 3,
+            connect_kwargs=dict(known_hosts=None),
+            asynchronous=True,
+            worker_kwargs={
+                "nthreads": 2,
+                "memory_limit": "2 GiB",
+                "death_timeout": "5s",
+                "unimplemented_option": 2,
+            },
+            scheduler_kwargs={"idle_timeout": "5s", "port": 0},
+        ) as cluster:
+            assert cluster

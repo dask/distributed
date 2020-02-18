@@ -1219,7 +1219,7 @@ class TaskGraph(DashboardComponent):
                 node_x.append(xx)
                 node_y.append(yy)
                 node_state.append(task.state)
-                node_name.append(task.prefix)
+                node_name.append(task.prefix.name)
 
             for a, b in new_edges:
                 try:
@@ -1418,12 +1418,13 @@ class TaskProgress(DashboardComponent):
             }
 
             for tp in self.scheduler.task_prefixes.values():
-                if any(tp.active_states.values()):
-                    state["memory"][tp.name] = tp.active_states["memory"]
-                    state["erred"][tp.name] = tp.active_states["erred"]
-                    state["released"][tp.name] = tp.active_states["released"]
-                    state["processing"][tp.name] = tp.active_states["processing"]
-                    state["waiting"][tp.name] = tp.active_states["waiting"]
+                active_states = tp.active_states
+                if any(active_states.get(s) for s in state.keys()):
+                    state["memory"][tp.name] = active_states["memory"]
+                    state["erred"][tp.name] = active_states["erred"]
+                    state["released"][tp.name] = active_states["released"]
+                    state["processing"][tp.name] = active_states["processing"]
+                    state["waiting"][tp.name] = active_states["waiting"]
 
             state["all"] = {
                 k: sum(v[k] for v in state.values()) for k in state["memory"]
@@ -1555,7 +1556,7 @@ class WorkerTable(DashboardComponent):
             point_policy="follow_mouse",
             tooltips="""
                 <div>
-                  <span style="font-size: 10px; font-family: Monaco, monospace;">@worker: </span>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">Worker (@name): </span>
                   <span style="font-size: 10px; font-family: Monaco, monospace;">@memory_percent</span>
                 </div>
                 """,
@@ -1584,7 +1585,7 @@ class WorkerTable(DashboardComponent):
             point_policy="follow_mouse",
             tooltips="""
                 <div>
-                  <span style="font-size: 10px; font-family: Monaco, monospace;">@worker: </span>
+                  <span style="font-size: 10px; font-family: Monaco, monospace;">Worker (@name): </span>
                   <span style="font-size: 10px; font-family: Monaco, monospace;">@cpu</span>
                 </div>
                 """,
@@ -1625,7 +1626,7 @@ class WorkerTable(DashboardComponent):
     def update(self):
         data = {name: [] for name in self.names + self.extra_names}
         for i, (addr, ws) in enumerate(
-            sorted(self.scheduler.workers.items(), key=lambda kv: kv[1].name)
+            sorted(self.scheduler.workers.items(), key=lambda kv: str(kv[1].name))
         ):
             for name in self.names + self.extra_names:
                 data[name].append(ws.metrics.get(name, None))
@@ -1639,6 +1640,17 @@ class WorkerTable(DashboardComponent):
             data["cpu"][-1] = ws.metrics["cpu"] / 100.0
             data["cpu_fraction"][-1] = ws.metrics["cpu"] / 100.0 / ws.nthreads
             data["nthreads"][-1] = ws.nthreads
+
+        for name in self.names + self.extra_names:
+            if name == "name":
+                data[name].insert(
+                    0, "Total ({nworkers})".format(nworkers=len(data[name]))
+                )
+                continue
+            try:
+                data[name].insert(0, sum(data[name]))
+            except TypeError:
+                data[name].insert(0, None)
 
         self.source.data.update(data)
 

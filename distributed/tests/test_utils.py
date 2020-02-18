@@ -43,6 +43,8 @@ from distributed.utils import (
     warn_on_duration,
     format_dashboard_link,
     LRU,
+    offload,
+    TimeoutError,
 )
 from distributed.utils_test import loop, loop_in_thread  # noqa: F401
 from distributed.utils_test import div, has_ipv6, inc, throws, gen_test, captured_logger
@@ -109,7 +111,7 @@ def test_sync_error(loop_in_thread):
 
 def test_sync_timeout(loop_in_thread):
     loop = loop_in_thread
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         sync(loop_in_thread, gen.sleep, 0.5, callback_timeout=0.05)
 
 
@@ -617,3 +619,9 @@ def test_lru():
     l["d"] = 4
     assert len(l) == 3
     assert list(l.keys()) == ["c", "a", "d"]
+
+
+@pytest.mark.asyncio
+async def test_offload():
+    assert (await offload(inc, 1)) == 2
+    assert (await offload(lambda x, y: x + y, 1, y=2)) == 3

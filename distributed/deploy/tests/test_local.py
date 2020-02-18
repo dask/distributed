@@ -7,9 +7,11 @@ from time import sleep
 from threading import Lock
 import unittest
 import weakref
+from distutils.version import LooseVersion
 
 from tornado.ioloop import IOLoop
 from tornado import gen
+import tornado
 import pytest
 
 from dask.system import CPU_COUNT
@@ -31,7 +33,7 @@ from distributed.utils_test import (  # noqa: F401
     tls_only_security,
 )
 from distributed.utils_test import loop  # noqa: F401
-from distributed.utils import sync
+from distributed.utils import sync, TimeoutError
 
 from distributed.deploy.utils_test import ClusterTest
 
@@ -451,6 +453,11 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
+@pytest.mark.xfail(
+    sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
+    reason="Known issue with Python 3.8 and Tornado < 6.0.3. See https://github.com/tornadoweb/tornado/pull/2683.",
+    strict=True,
+)
 def test_silent_startup():
     code = """if 1:
         from time import sleep
@@ -523,7 +530,7 @@ def test_memory_nanny(loop, n_workers):
 
 
 def test_death_timeout_raises(loop):
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         with LocalCluster(
             scheduler_port=0,
             silence_logs=False,

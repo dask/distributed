@@ -1,10 +1,8 @@
 import asyncio
-from datetime import timedelta
 import logging
 import threading
 
 from dask.utils import format_bytes
-from tornado import gen
 
 from .adaptive import Adaptive
 
@@ -23,7 +21,7 @@ from ..utils import (
 logger = logging.getLogger(__name__)
 
 
-class Cluster(object):
+class Cluster:
     """ Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
@@ -156,7 +154,7 @@ class Cluster(object):
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             return future
         else:
             return sync(self.loop, func, *args, **kwargs)
@@ -201,7 +199,7 @@ class Cluster(object):
         except KeyError:
             return ""
         else:
-            host = self.scheduler_address.split("://")[1].split(":")[0]
+            host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
             return format_dashboard_link(host, port)
 
     def _widget_status(self):

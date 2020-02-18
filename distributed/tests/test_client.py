@@ -1,6 +1,5 @@
 import asyncio
 from collections import deque
-from concurrent.futures import CancelledError
 import gc
 import logging
 from operator import add
@@ -38,6 +37,7 @@ from distributed import (
     profile,
     performance_report,
     TimeoutError,
+    CancelledError,
 )
 from distributed.comm import CommClosedError
 from distributed.client import (
@@ -496,7 +496,7 @@ def test_thread(c):
     assert x.result() == 2
 
     x = c.submit(slowinc, 1, delay=0.3)
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         x.result(timeout=0.01)
     assert x.result() == 2
 
@@ -681,7 +681,7 @@ def test_wait_first_completed(c, s, a, b):
 @gen_cluster(client=True, timeout=2)
 def test_wait_timeout(c, s, a, b):
     future = c.submit(sleep, 0.3)
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         yield wait(future, timeout=0.01)
 
 
@@ -695,7 +695,7 @@ def test_wait_sync(c):
     assert x.status == y.status == "finished"
 
     future = c.submit(sleep, 0.3)
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         wait(future, timeout=0.01)
 
 
@@ -1130,7 +1130,7 @@ def test_scatter_hash(c, s, a, b):
 def test_scatter_tokenize_local(c, s, a, b):
     from dask.base import normalize_token
 
-    class MyObj(object):
+    class MyObj:
         pass
 
     L = []
@@ -1394,7 +1394,7 @@ def test_scatter_direct_broadcast_target(c, s, *workers):
 
 @gen_cluster(client=True, nthreads=[])
 def test_scatter_direct_empty(c, s):
-    with pytest.raises((ValueError, gen.TimeoutError)):
+    with pytest.raises((ValueError, TimeoutError)):
         yield c.scatter(123, direct=True, timeout=0.1)
 
 
@@ -1801,12 +1801,12 @@ def test_allow_restrictions(c, s, a, b):
 def test_bad_address():
     try:
         Client("123.123.123.123:1234", timeout=0.1)
-    except (IOError, gen.TimeoutError) as e:
+    except (IOError, TimeoutError) as e:
         assert "connect" in str(e).lower()
 
     try:
         Client("127.0.0.1:1234", timeout=0.1)
-    except (IOError, gen.TimeoutError) as e:
+    except (IOError, TimeoutError) as e:
         assert "connect" in str(e).lower()
 
 
@@ -1846,7 +1846,7 @@ def test_map_on_futures_with_kwargs(c, s, a, b):
     assert result == 100 + 1 + 200
 
 
-class BadlySerializedObject(object):
+class BadlySerializedObject:
     def __getstate__(self):
         return 1
 
@@ -1854,7 +1854,7 @@ class BadlySerializedObject(object):
         raise TypeError("hello!")
 
 
-class FatallySerializedObject(object):
+class FatallySerializedObject:
     def __getstate__(self):
         return 1
 
@@ -3018,7 +3018,7 @@ def test_replicate_workers(c, s, *workers):
     s.validate_state()
 
 
-class CountSerialization(object):
+class CountSerialization:
     def __init__(self):
         self.n = 0
 
@@ -3501,7 +3501,7 @@ def test_persist_optimize_graph(c, s, a, b):
 
 @gen_cluster(client=True, nthreads=[])
 def test_scatter_raises_if_no_workers(c, s):
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         yield c.scatter(1, timeout=0.5)
 
 
@@ -3581,7 +3581,7 @@ def test_reconnect_timeout(c, s):
 
 @pytest.mark.slow
 @pytest.mark.skipif(WINDOWS, reason="num_fds not supported on windows")
-@pytest.mark.xfail(reason="TODO: intermittent failures")
+@pytest.mark.skipif(sys.version_info < (3, 7), reason="TODO: intermittent failures")
 @pytest.mark.parametrize("worker,count,repeat", [(Worker, 100, 5), (Nanny, 10, 20)])
 def test_open_close_many_workers(loop, worker, count, repeat):
     psutil = pytest.importorskip("psutil")
@@ -3724,7 +3724,7 @@ def test_get_versions(c):
     # that this does not raise
 
     v = c.get_versions(packages=["requests"])
-    assert dict(v["client"]["packages"]["optional"])["requests"] == requests.__version__
+    assert v["client"]["packages"]["requests"] == requests.__version__
 
 
 @gen_cluster(client=True)
@@ -4007,7 +4007,11 @@ def test_retire_many_workers(c, s, *workers):
     results = yield c.gather(futures)
     assert results == list(range(100))
 
+    while len(s.workers) != 3:
+        yield gen.sleep(0.01)
+
     assert len(s.has_what) == len(s.nthreads) == 3
+
     assert all(future.done() for future in futures)
     assert all(s.tasks[future.key].state == "memory" for future in futures)
     for w, keys in s.has_what.items():
@@ -4468,7 +4472,7 @@ class MyException(Exception):
 
 @gen_cluster(client=True)
 def test_robust_unserializable(c, s, a, b):
-    class Foo(object):
+    class Foo:
         def __getstate__(self):
             raise MyException()
 
@@ -4484,7 +4488,7 @@ def test_robust_unserializable(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_robust_undeserializable(c, s, a, b):
-    class Foo(object):
+    class Foo:
         def __getstate__(self):
             return 1
 
@@ -4504,7 +4508,7 @@ def test_robust_undeserializable(c, s, a, b):
 
 @gen_cluster(client=True)
 def test_robust_undeserializable_function(c, s, a, b):
-    class Foo(object):
+    class Foo:
         def __getstate__(self):
             return 1
 
@@ -5245,9 +5249,17 @@ def test_dashboard_link(loop, monkeypatch):
             with dask.config.set(
                 {"distributed.dashboard.link": "{scheme}://foo-{USER}:{port}/status"}
             ):
-                text = c._repr_html_()
                 link = "http://foo-myusername:12355/status"
+                assert link == c.dashboard_link
+                text = c._repr_html_()
                 assert link in text
+
+
+@pytest.mark.asyncio
+async def test_dashboard_link_inproc(cleanup):
+    async with Client(processes=False, asynchronous=True) as c:
+        with dask.config.set({"distributed.dashboard.link": "{host}"}):
+            assert "/" not in c.dashboard_link
 
 
 @gen_test()
@@ -5284,40 +5296,39 @@ def test_client_active_bad_port():
 @pytest.mark.parametrize("direct", [True, False])
 def test_turn_off_pickle(direct):
     @gen_cluster()
-    def test(s, a, b):
+    async def test(s, a, b):
         import numpy as np
 
-        c = yield Client(s.address, asynchronous=True, serializers=["dask", "msgpack"])
-        try:
-            assert (yield c.submit(inc, 1)) == 2
-            yield c.submit(np.ones, 5)
-            yield c.scatter(1)
+        async with Client(
+            s.address, asynchronous=True, serializers=["dask", "msgpack"]
+        ) as c:
+            assert (await c.submit(inc, 1)) == 2
+            await c.submit(np.ones, 5)
+            await c.scatter(1)
 
             # Can't send complex data
             with pytest.raises(TypeError):
-                future = yield c.scatter(inc)
+                future = await c.scatter(inc)
 
             # can send complex tasks (this uses pickle regardless)
             future = c.submit(lambda x: x, inc)
-            yield wait(future)
+            await wait(future)
 
             # but can't receive complex results
             with pytest.raises(TypeError):
-                yield c.gather(future, direct=direct)
+                await c.gather(future, direct=direct)
 
             # Run works
-            result = yield c.run(lambda: 1)
+            result = await c.run(lambda: 1)
             assert list(result.values()) == [1, 1]
-            result = yield c.run_on_scheduler(lambda: 1)
+            result = await c.run_on_scheduler(lambda: 1)
             assert result == 1
 
             # But not with complex return values
             with pytest.raises(TypeError):
-                yield c.run(lambda: inc)
+                await c.run(lambda: inc)
             with pytest.raises(TypeError):
-                yield c.run_on_scheduler(lambda: inc)
-        finally:
-            yield c.close()
+                await c.run_on_scheduler(lambda: inc)
 
     test()
 
@@ -5699,21 +5710,29 @@ async def test_scheduler_cleans_clients(cleanup):
     await s.close()
     assert c.status == "closed"
 
-    
+
 @gen_cluster(client=True, worker_kwargs={"profile_cycle_interval": "10ms"})
 async def test_profile_server(c, s, a, b):
-    x = c.map(slowinc, range(10), delay=0.01, workers=a.address)
-    await wait(x)
+    for i in range(5):
+        try:
+            x = c.map(slowinc, range(10), delay=0.01, workers=a.address, pure=False)
+            await wait(x)
+            await asyncio.gather(
+                c.run(slowinc, 1, delay=0.5), c.run_on_scheduler(slowdec, 1, delay=0.5)
+            )
 
-    await asyncio.gather(
-        c.run(slowinc, 1, delay=0.5), c.run_on_scheduler(slowdec, 1, delay=0.5)
-    )
+            p = await c.profile(server=True)  #  All worker servers
+            assert "slowinc" in str(p)
 
-    p = await c.profile(server=True)  #  All worker servers
-    assert "slowinc" in str(p)
-
-    p = await c.profile(scheduler=True)  #  Scheduler
-    assert "slowdec" in str(p)
+            p = await c.profile(scheduler=True)  #  Scheduler
+            assert "slowdec" in str(p)
+        except AssertionError:
+            if i == 4:
+                raise
+            else:
+                pass
+        else:
+            break
 
 
 @gen_cluster(client=True)
@@ -5821,7 +5840,7 @@ def test_client_sync_with_async_def(loop):
             assert c.sync(ff) == 1
 
 
-@pytest.mark.xfail(reason="known intermittent failure")
+@pytest.mark.skip(reason="known intermittent failure")
 @gen_cluster(client=True)
 async def test_dont_hold_on_to_large_messages(c, s, a, b):
     np = pytest.importorskip("numpy")
@@ -5917,3 +5936,18 @@ async def test_performance_report(c, s, a, b):
         assert "bokeh" in data
         assert "random" in data
         assert "Dask Performance Report" in data
+        assert "x = da.random" in data
+
+
+@pytest.mark.asyncio
+async def test_client_gather_semaphor_loop(cleanup):
+    async with Scheduler(port=0) as s:
+        async with Client(s.address, asynchronous=True) as c:
+            assert c._gather_semaphore._loop is c.loop.asyncio_loop
+
+
+@gen_cluster(client=True)
+def test_as_completed_condition_loop(c, s, a, b):
+    seq = c.map(inc, range(5))
+    ac = as_completed(seq)
+    assert ac.condition._loop == c.loop.asyncio_loop

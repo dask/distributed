@@ -3,7 +3,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class SchedulerPlugin(object):
+class SchedulerPlugin:
     """ Interface to extend the Scheduler
 
     The scheduler operates by triggering and responding to events like
@@ -37,6 +37,21 @@ class SchedulerPlugin(object):
     >>> scheduler.add_plugin(plugin)  # doctest: +SKIP
     """
 
+    async def start(self, scheduler):
+        """ Run when the scheduler starts up
+
+        This runs at the end of the Scheduler startup process
+        """
+        pass
+
+    async def close(self):
+        """ Run when the scheduler closes down
+
+        This runs at the beginning of the Scheduler shutdown process, but after
+        workers have been asked to shut down gracefully
+        """
+        pass
+
     def update_graph(self, scheduler, dsk=None, keys=None, restrictions=None, **kwargs):
         """ Run when a new graph / tasks enter the scheduler """
 
@@ -62,10 +77,16 @@ class SchedulerPlugin(object):
         """ Run when a new worker enters the cluster """
 
     def remove_worker(self, scheduler=None, worker=None, **kwargs):
-        """ Run when a worker leaves the cluster"""
+        """ Run when a worker leaves the cluster """
+
+    def add_client(self, scheduler=None, client=None, **kwargs):
+        """ Run when a new client connects """
+
+    def remove_client(self, scheduler=None, client=None, **kwargs):
+        """ Run when a client disconnects """
 
 
-class WorkerPlugin(object):
+class WorkerPlugin:
     """ Interface to extend the Worker
 
     A worker plugin enables custom code to run at different stages of the Workers'
