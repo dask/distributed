@@ -20,4 +20,9 @@ def test_serialize_rmm_device_buffer(size, serializers):
     y = deserialize(header, frames, deserializers=serializers)
     y_np = y.copy_to_host()
 
+    if serializers[0] == "cuda":
+        assert all(hasattr(f, "__cuda_array_interface__") for f in frames)
+    elif serializers[0] == "dask":
+        assert all(isinstance(f, memoryview) for f in frames)
+
     assert (x_np == y_np).all()

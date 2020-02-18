@@ -20,6 +20,11 @@ def test_serialize_numba(shape, dtype, order, serializers):
     header, frames = serialize(x, serializers=serializers)
     y = deserialize(header, frames, deserializers=serializers)
 
+    if serializers[0] == "cuda":
+        assert all(hasattr(f, "__cuda_array_interface__") for f in frames)
+    elif serializers[0] == "dask":
+        assert all(isinstance(f, memoryview) for f in frames)
+
     hx = np.empty_like(ary)
     hy = np.empty_like(ary)
     x.copy_to_host(hx)
