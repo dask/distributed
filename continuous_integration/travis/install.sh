@@ -16,6 +16,8 @@ case "$(uname -s)" in
     *)  ;;
 esac
 
+cat /etct/hosts
+
 wget https://repo.continuum.io/miniconda/$MINICONDA_FILENAME -O miniconda.sh
 bash miniconda.sh -b -p $HOME/miniconda
 export PATH="$HOME/miniconda/bin:$PATH"

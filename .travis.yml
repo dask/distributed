@@ -4,6 +4,10 @@ language: generic
 sudo: required
 dist: trusty
 
+addons:
+  hosts:
+    - dask_host
+
 env:
   matrix:
     - PYTHON=3.6 TESTS=true COVERAGE=true PACKAGES="scikit-learn lz4" TORNADO=5 CRICK=true
@@ -20,9 +24,6 @@ matrix:
   - os: osx
     env: PYTHON=3.7 TESTS=true PACKAGES="scikit-learn python-snappy python-blosc" TORNADO=6
     if: type != pull_request OR commit_message =~ test-osx  # Skip on PRs unless the commit message contains "test-osx"
-
-  allow_failures:
-    - os: osx
 
 install:
   - if [[ $TESTS == true ]]; then source continuous_integration/travis/install.sh ; fi
