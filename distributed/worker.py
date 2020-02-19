@@ -382,7 +382,6 @@ class Worker(ServerNode):
         self.executed_count = 0
         self.long_running = set()
 
-        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.recent_messages_log = deque(
             maxlen=dask.config.get("distributed.comm.recent-messages-log-length")
         )
@@ -573,6 +572,7 @@ class Worker(ServerNode):
         self.actor_executor = ThreadPoolExecutor(
             1, thread_name_prefix="Dask-Actor-Threads"
         )
+        self.batched_stream = BatchedSend(interval="2ms", loop=self.loop)
         self.name = name
         self.scheduler_delay = 0
         self.stream_comms = dict()
@@ -1113,7 +1113,11 @@ class Worker(ServerNode):
             for k, v in self.services.items():
                 v.stop()
 
-            if self.batched_stream and not self.batched_stream.comm.closed():
+            if (
+                self.batched_stream
+                and self.batched_stream.comm
+                and not self.batched_stream.comm.closed()
+            ):
                 self.batched_stream.send({"op": "close-stream"})
 
             if self.batched_stream:
