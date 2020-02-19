@@ -1,3 +1,4 @@
+from contextlib import suppress
 from functools import partial
 from distutils.version import LooseVersion
 
@@ -99,4 +100,5 @@ def _register_cudf():
 @dask_serialize.register_lazy("cuml")
 @dask_deserialize.register_lazy("cuml")
 def _register_cuml():
-    from cuml.comm import serialize
+    with suppress(ImportError):
+        from cuml.comm import serialize
