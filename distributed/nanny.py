@@ -168,7 +168,7 @@ class Nanny(ServerNode):
             "kill": self.kill,
             "restart": self.restart,
             # cannot call it 'close' on the rpc side for naming conflict
-            "logs": self.logs,
+            "get_logs": self.get_logs,
             "terminate": self.close,
             "close_gracefully": self.close_gracefully,
             "run": self.run,

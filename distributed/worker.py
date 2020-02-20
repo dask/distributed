@@ -617,7 +617,7 @@ class Worker(ServerNode):
             "call_stack": self.get_call_stack,
             "profile": self.get_profile,
             "profile_metadata": self.get_profile_metadata,
-            "logs": self.logs,
+            "get_logs": self.get_logs,
             "keys": self.keys,
             "versions": self.versions,
             "actor_execute": self.actor_execute,
