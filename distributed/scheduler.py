@@ -202,7 +202,8 @@ class WorkerState:
 
     .. attribute:: status: str
 
-       The current status of the worker, either ``'running'`` or ``'closed'``
+       The current status of the worker, either ``'running'``, ``'closing'``
+       or ``'closed'``
 
     .. attribute:: nanny: str
 
@@ -219,9 +220,11 @@ class WorkerState:
        includes those actors whose state actually lives on this worker, not
        actors to which this worker has a reference.
 
-    """
+    .. attribute:: active: bool
 
-    # XXX need a state field to signal active/removed?
+        Indicate whether the worker is still active and can be served with additional tasks.
+
+    """
 
     __slots__ = (
         "actors",
@@ -246,6 +249,7 @@ class WorkerState:
         "time_delay",
         "used_resources",
         "versions",
+        "retiring",
     )
 
     def __init__(
@@ -286,12 +290,17 @@ class WorkerState:
         self.used_resources = {}
 
         self.extra = extra or {}
+        self.retiring = False
 
     def __hash__(self):
         return hash(self.address)
 
     def __eq__(self, other):
         return type(self) == type(other) and self.address == other.address
+
+    @property
+    def active(self):
+        return self.status == "running" and not self.retiring
 
     @property
     def host(self):
@@ -1234,6 +1243,7 @@ class Scheduler(ServerNode):
 
         self.idle = sortedcontainers.SortedSet(key=operator.attrgetter("address"))
         self.saturated = set()
+        self.active = set()
 
         self.total_nthreads = 0
         self.total_occupancy = 0
@@ -2210,7 +2220,7 @@ class Scheduler(ServerNode):
             for ts in list(ws.processing):
                 k = ts.key
                 recommendations[k] = "released"
-                if not safe:
+                if not safe and not ws.retiring:
                     ts.suspicious += 1
                     ts.prefix.suspicious += 1
                     if ts.suspicious > self.allowed_failures:
@@ -2220,6 +2230,7 @@ class Scheduler(ServerNode):
                         )
                         r = self.transition(k, "erred", exception=e, cause=k)
                         recommendations.update(r)
+            self.active.discard(ws)
 
             for ts in ws.has_what:
                 ts.who_has.remove(ws)
@@ -3039,7 +3050,7 @@ class Scheduler(ServerNode):
                     workers = {self.workers[w] for w in workers}
                     workers_by_task = {ts: ts.who_has & workers for ts in tasks}
                 else:
-                    workers = set(self.workers.values())
+                    workers = self.active
                     workers_by_task = {ts: ts.who_has for ts in tasks}
 
                 tasks_by_worker = {ws: set() for ws in workers}
@@ -3319,7 +3330,7 @@ class Scheduler(ServerNode):
             memory_ratio = 2
 
         with log_errors():
-            if not n and all(ws.processing for ws in self.workers.values()):
+            if not n and all(ws.processing for ws in self.active):
                 return []
 
             if key is None:
@@ -3329,7 +3340,7 @@ class Scheduler(ServerNode):
             ):
                 key = pickle.loads(key)
 
-            groups = groupby(key, self.workers.values())
+            groups = groupby(key, self.active)
 
             limit_bytes = {
                 k: sum(ws.memory_limit for ws in v) for k, v in groups.items()
@@ -3374,6 +3385,25 @@ class Scheduler(ServerNode):
 
             return result
 
+    async def notify_worker_retirement(self, worker):
+        logger.info("Notify worker for retirement %s", worker)
+        with log_errors():
+            self.log_event(worker, {"action": "notify-retire-worker"})
+            ws = self.workers[worker]
+
+            ws.retiring = True
+
+            nanny_addr = ws.nanny
+            address = nanny_addr or worker
+
+            self.worker_send(worker, {"op": "prepare_retirement"})
+
+            if "stealing" in self.extensions:
+                steal = self.extensions["stealing"]
+                for ts in ws.processing:
+                    steal.remove_key_from_stealable(ts)
+                    steal.put_key_in_stealable(ts)
+
     async def retire_workers(
         self,
         comm=None,
@@ -3414,40 +3444,40 @@ class Scheduler(ServerNode):
         Scheduler.workers_to_close
         """
         with log_errors():
-            async with self._lock if lock else empty_context:
-                if names is not None:
-                    if names:
-                        logger.info("Retire worker names %s", names)
-                    names = set(map(str, names))
-                    workers = [
-                        ws.address
-                        for ws in self.workers.values()
-                        if str(ws.name) in names
-                    ]
-                if workers is None:
-                    while True:
-                        try:
-                            workers = self.workers_to_close(**kwargs)
-                            if workers:
-                                workers = await self.retire_workers(
-                                    workers=workers,
-                                    remove=remove,
-                                    close_workers=close_workers,
-                                    lock=False,
-                                )
-                            return workers
-                        except KeyError:  # keys left during replicate
-                            pass
-                workers = {self.workers[w] for w in workers if w in self.workers}
-                if not workers:
-                    return []
-                logger.info("Retire workers %s", workers)
+            if names is not None:
+                if names:
+                    logger.info("Retire worker names %s", names)
+                names = set(map(str, names))
+                workers = [ws.address for ws in self.active if str(ws.name) in names]
+            if workers is None:
+                while True:
+                    try:
+                        workers = self.workers_to_close(**kwargs)
+                        if workers:
+                            workers = await self.retire_workers(
+                                workers=workers,
+                                remove=remove,
+                                close_workers=close_workers,
+                            )
+                        return workers
+                    except KeyError:  # keys left during replicate
+                        pass
+            workers = {self.workers[w] for w in workers if w in self.workers}
+            if not workers:
+                return []
+            logger.info("Retire workers %s", workers)
 
+            worker_keys = {ws.address: ws.identity() for ws in workers}
+            await asyncio.gather(
+                *[self.notify_worker_retirement(worker=w) for w in worker_keys]
+            )
+
+            async with self._lock if lock else empty_context:
                 # Keys orphaned by retiring those workers
                 keys = set.union(*[w.has_what for w in workers])
                 keys = {ts.key for ts in keys if ts.who_has.issubset(workers)}
 
-                other_workers = set(self.workers.values()) - workers
+                other_workers = self.active - workers
                 if keys:
                     if other_workers:
                         logger.info("Moving %d keys to other workers", len(keys))
@@ -3461,26 +3491,28 @@ class Scheduler(ServerNode):
                     else:
                         return []
 
-                worker_keys = {ws.address: ws.identity() for ws in workers}
-                if close_workers and worker_keys:
-                    await asyncio.gather(
-                        *[self.close_worker(worker=w, safe=True) for w in worker_keys]
-                    )
-                if remove:
-                    for w in worker_keys:
-                        self.remove_worker(address=w, safe=True)
-
-                self.log_event(
-                    "all",
-                    {
-                        "action": "retire-workers",
-                        "workers": worker_keys,
-                        "moved-keys": len(keys),
-                    },
+            worker_keys = {ws.address: ws.identity() for ws in workers}
+            if close_workers and worker_keys:
+                logger.info("Closing workers %d", len(worker_keys))
+                await asyncio.gather(
+                    *[self.close_worker(worker=w, safe=True) for w in worker_keys]
                 )
-                self.log_event(list(worker_keys), {"action": "retired"})
+            if remove:
+                logger.info("Removing workers %d", len(worker_keys))
+                for w in worker_keys:
+                    self.remove_worker(address=w, safe=True)
 
-                return worker_keys
+            self.log_event(
+                "all",
+                {
+                    "action": "retire-workers",
+                    "workers": worker_keys,
+                    "moved-keys": len(keys),
+                },
+            )
+            self.log_event(list(worker_keys), {"action": "retired"})
+
+            return worker_keys
 
     def add_keys(self, comm=None, worker=None, keys=()):
         """
@@ -3967,10 +3999,7 @@ class Scheduler(ServerNode):
 
         if ts.dependencies or valid_workers is not True:
             worker = decide_worker(
-                ts,
-                self.workers.values(),
-                valid_workers,
-                partial(self.worker_objective, ts),
+                ts, self.active, valid_workers, partial(self.worker_objective, ts),
             )
         elif self.idle:
             if len(self.idle) < 20:  # smart but linear in small case
@@ -3979,11 +4008,9 @@ class Scheduler(ServerNode):
                 worker = self.idle[self.n_tasks % len(self.idle)]
         else:
             if len(self.workers) < 20:  # smart but linear in small case
-                worker = min(
-                    self.workers.values(), key=operator.attrgetter("occupancy")
-                )
+                worker = min(self.active, key=operator.attrgetter("occupancy"))
             else:  # dumb but fast in large case
-                worker = self.workers.values()[self.n_tasks % len(self.workers)]
+                worker = list(self.active)[self.n_tasks % len(self.workers)]
 
         if self.validate:
             assert worker is None or isinstance(worker, WorkerState), (
@@ -4767,10 +4794,18 @@ class Scheduler(ServerNode):
 
         This is useful for load balancing and adaptivity.
         """
-        if self.total_nthreads == 0 or ws.status == "closed":
+        if self.total_nthreads == 0:
             return
         if occ is None:
             occ = ws.occupancy
+
+        if not ws.active:
+            self.active.discard(ws)
+            self.saturated.discard(ws)
+            self.idle.discard(ws)
+            return
+
+        self.active.add(ws)
         nc = ws.nthreads
         p = len(ws.processing)
 
@@ -4800,8 +4835,15 @@ class Scheduler(ServerNode):
         """
         s = True
 
+        if len(self.active) != len(self.workers):
+            s = self.active
+
         if ts.worker_restrictions:
-            s = {w for w in ts.worker_restrictions if w in self.workers}
+            ss = {w for w in ts.worker_restrictions if w in self.workers}
+            if s is True:
+                s = ss
+            else:
+                s &= ss
 
         if ts.host_restrictions:
             # Resolve the alias here rather than early, for the worker
@@ -4934,6 +4976,8 @@ class Scheduler(ServerNode):
 
         Minimize expected start time.  If a tie then break with data storage.
         """
+        if not ws.active:
+            return (math.inf, None)
         comm_bytes = sum(
             [dts.get_nbytes() for dts in ts.dependencies if ws not in dts.who_has]
         )
@@ -5164,7 +5208,7 @@ class Scheduler(ServerNode):
             next_time = timedelta(seconds=DELAY)
 
             if self.proc.cpu_percent() < 50:
-                workers = list(self.workers.values())
+                workers = list(self.active)
                 for i in range(len(workers)):
                     ws = workers[worker_index % len(workers)]
                     worker_index += 1
@@ -5213,7 +5257,7 @@ class Scheduler(ServerNode):
 
     def check_worker_ttl(self):
         now = time()
-        for ws in self.workers.values():
+        for ws in self.active:
             if ws.last_seen < now - self.worker_ttl:
                 logger.warning(
                     "Worker failed to heartbeat within %s seconds. Closing: %s",
@@ -5223,7 +5267,7 @@ class Scheduler(ServerNode):
                 self.remove_worker(address=ws.address)
 
     def check_idle(self):
-        if any(ws.processing for ws in self.workers.values()):
+        if any(ws.processing for ws in self.active):
             return
         if self.unrunnable:
             return
@@ -5268,7 +5312,7 @@ class Scheduler(ServerNode):
 
         # Avoid a few long tasks from asking for many cores
         tasks_processing = 0
-        for ws in self.workers.values():
+        for ws in self.active:
             tasks_processing += len(ws.processing)
 
             if tasks_processing > cpu:
@@ -5281,7 +5325,7 @@ class Scheduler(ServerNode):
 
         # Memory
         limit_bytes = {addr: ws.memory_limit for addr, ws in self.workers.items()}
-        worker_bytes = [ws.nbytes for ws in self.workers.values()]
+        worker_bytes = [ws.nbytes for ws in self.active]
         limit = sum(limit_bytes.values())
         total = sum(worker_bytes)
         if total > 0.6 * limit:

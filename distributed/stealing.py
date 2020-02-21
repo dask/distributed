@@ -309,6 +309,7 @@ class WorkStealing(SchedulerPlugin):
         with log_errors():
             i = 0
             idle = s.idle
+
             saturated = s.saturated
             if not idle or len(idle) == len(s.workers):
                 return

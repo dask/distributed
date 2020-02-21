@@ -711,6 +711,63 @@ def test_retire_workers(c, s, a, b):
     assert not workers
 
 
+@gen_cluster(client=True, timeout=1000)
+async def test_retire_workers_steal_tasks(c, s, a, b):
+    futures = c.map(slowinc, range(100))
+    while not b.data:
+        await asyncio.sleep(0.01)
+
+    a_orig_tasks = len(a.tasks)
+    b_orig_tasks = len(b.tasks)
+
+    retire = s.retire_workers(workers=[b.address], remove=False)
+
+    # The lock is used to restrict access to
+    acquire_lock = await s._lock.acquire()
+
+    async def emulate_slow_replication(s, a, b):
+        """
+        This coroutine is called "simultaneously" to allow inspection of the
+        state wihle the retirement coroutine is executed.
+        This assumes that retirement will release control to the event loop
+        every now and then (e.g. to communicate).
+        After a period of time this is used to release the lock and allow the
+        replication to proceed.
+        """
+        while len(s.active) == 2:
+            await asyncio.sleep(0)
+        assert b.paused
+        assert a.address in {w.address for w in s.active}
+        assert b.address not in {w.address for w in s.active}
+        await asyncio.sleep(2)
+        s._lock.release()
+
+    assert b.address in s.workers
+
+    await asyncio.wait([retire, emulate_slow_replication(s, a, b)])
+    active_address = {ws.address for ws in s.active}
+
+    assert a.address in active_address
+    assert b.address not in active_address
+
+    a_new_tasks = len(a.tasks)
+    b_new_tasks = len(b.tasks)
+
+    # Work stealing relieved B already
+    assert a_new_tasks > a_orig_tasks
+    assert b_new_tasks < b_orig_tasks
+
+    task_still_on_b = b.tasks
+    await b.close()
+    await asyncio.sleep(0.1)
+
+    for key in task_still_on_b:
+        assert s.tasks[key].suspicious == 0
+
+    results = await c.gather(futures)
+    assert results == list(range(1, 101))
+
+
 @gen_cluster(client=True)
 def test_retire_workers_n(c, s, a, b):
     yield s.retire_workers(n=1, close_workers=True)
