@@ -14,7 +14,15 @@ from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
 from .registry import Backend, backends
 from .utils import ensure_concrete_host, to_frames, from_frames
-from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, log_errors, CancelledError
+from ..utils import (
+    ensure_ip,
+    get_ip,
+    get_ipv6,
+    nbytes,
+    log_errors,
+    CancelledError,
+    parse_bytes,
+)
 
 import dask
 import numpy as np
@@ -39,20 +47,31 @@ def init_once():
     import ucp as _ucp
 
     ucp = _ucp
+
+    # configuration of UCX can happen in two ways:
+    # 1) high level on/off flags which correspond to UCX configuration
+    # 2) explicity defined UCX configuration flags
+
+    # To handle high level flags we grab the full ucx configuration
+    # pop flags from the dictionary and proceed to check flags.  We do this
+    # because UCX/UCP will not nicely process flags it does not know about
+    # ucp.init(options={'foo': 'bar'}) -- `UCXConfigError`
     ucx_conf = dask.config.get("ucx")
 
-    enable_infiniband = str(ucx_conf.get("infiniband", None)).lower()
-    enable_nvlink = str(ucx_conf.get("nvlink", None)).lower()
-    tcp_over_ucx = str(ucx_conf.get("tcp_over_ucx", None)).lower()
-    net_devices = ucx_conf.get("net_devices", None)
+    enable_infiniband = ucx_conf.pop("infiniband", None)
+    enable_nvlink = ucx_conf.pop("nvlink", None)
+    tcp_over_ucx = ucx_conf.pop("tcp-over-ucx", None)
+    net_devices = ucx_conf.pop("net-devices", None)
 
+    # if any of the high level flags are set, as long as they are not Null/None,
+    # we assume we should configure basic TLS settings for UCX
     if any([s is not None for s in (tcp_over_ucx, enable_infiniband, enable_nvlink)]):
         tls = "tcp,sockcm,cuda_copy"
         tls_priority = "sockcm"
 
-        if enable_infiniband == "true":
+        if enable_infiniband:
             tls = "rc," + tls
-        if enable_nvlink == "true":
+        if enable_nvlink:
             tls = tls + ",cuda_ipc"
 
         options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
@@ -60,9 +79,9 @@ def init_once():
         if net_devices is not None and net_devices != "":
             options["NET_DEVICES"] = net_devices
 
-        dask.config.set({"ucx": options})
+        ucx_conf = options
 
-    ucp.init(options=dask.config.get("ucx"), env_takes_precedence=True)
+    ucp.init(options=ucx_conf, env_takes_precedence=True)
 
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
     try:
@@ -83,6 +102,14 @@ def init_once():
                 raise RuntimeError(
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
+
+    pool_size_str = dask.config.get("rmm.pool-size", None)
+
+    if pool_size_str is not None:
+        pool_size = parse_bytes(pool_size_str)
+        rmm.reinitialize(
+            pool_allocator=True, managed_memory=False, initial_pool_size=pool_size
+        )
 
 
 class UCX(Comm):
