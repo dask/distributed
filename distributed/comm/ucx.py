@@ -103,8 +103,8 @@ def init_once():
                     "In order to send/recv CUDA arrays, Numba or RMM is required"
                 )
 
-    pool_size_str = dask.config.get("rmm.pool-size", None)
-
+    pool_size_str = dask.config.get("rmm.pool-size")
+    print(pool_size_str)
     if pool_size_str is not None:
         pool_size = parse_bytes(pool_size_str)
         rmm.reinitialize(
