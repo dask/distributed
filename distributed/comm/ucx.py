@@ -39,6 +39,29 @@ def init_once():
     import ucp as _ucp
 
     ucp = _ucp
+    ucx_conf = dask.config.get("ucx")
+
+    enable_infiniband = str(ucx_conf.get("infiniband", None)).lower()
+    enable_nvlink = str(ucx_conf.get("nvlink", None)).lower()
+    tcp_over_ucx = str(ucx_conf.get("tcp_over_ucx", None)).lower()
+    net_devices = ucx_conf.get("net_devices", None)
+
+    if any([s is not None for s in (tcp_over_ucx, enable_infiniband, enable_nvlink)]):
+        tls = "tcp,sockcm,cuda_copy"
+        tls_priority = "sockcm"
+
+        if enable_infiniband == "true":
+            tls = "rc," + tls
+        if enable_nvlink == "true":
+            tls = tls + ",cuda_ipc"
+
+        options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
+
+        if net_devices is not None and net_devices != "":
+            options["NET_DEVICES"] = net_devices
+
+        dask.config.set({"ucx": options})
+
     ucp.init(options=dask.config.get("ucx"), env_takes_precedence=True)
 
     # Find the function, `cuda_array()`, to use when allocating new CUDA arrays
