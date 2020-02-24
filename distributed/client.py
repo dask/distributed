@@ -4021,6 +4021,8 @@ class Client(Node):
         return self.register_worker_plugin(_WorkerSetupPlugin(setup))
 
     async def _register_worker_plugin(self, plugin=None, name=None):
+        if getattr(plugin, "name", None) is None:
+            plugin.name = name
         responses = await self.scheduler.register_worker_plugin(
             plugin=dumps(plugin), name=name
         )
