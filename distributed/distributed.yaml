@@ -134,7 +134,6 @@ distributed:
     pdb-on-err: False       # enter debug mode on scheduling error
 rmm:
   pool-size: null
-
 ucx:
   nvlink: null
   infiniband: null
