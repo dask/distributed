@@ -13,7 +13,7 @@ import numpy as np
 from .addressing import parse_host_port, unparse_host_port
 from .core import Comm, Connector, Listener, CommClosedError
 from .registry import Backend, backends
-from .utils import ensure_concrete_host, to_frames, from_frames, _srub_ucx_config
+from .utils import ensure_concrete_host, to_frames, from_frames
 from ..utils import (
     ensure_ip,
     get_ip,
@@ -45,7 +45,7 @@ def init_once():
     ucp = _ucp
 
     # remove/process dask.ucx flags for valid ucx options
-    ucx_config = _srub_ucx_config()
+    ucx_config = _scrub_ucx_config()
 
     ucp.init(options=ucx_config, env_takes_precedence=True)
 
@@ -343,3 +343,52 @@ class UCXBackend(Backend):
 
 
 backends["ucx"] = UCXBackend()
+
+
+def _scrub_ucx_config():
+    """Function to scrub dask config options for valid UCX config options"""
+
+    # configuration of UCX can happen in two ways:
+    # 1) high level on/off flags which correspond to UCX configuration
+    # 2) explicity defined UCX configuration flags
+
+    # import does not initialize ucp -- this will occur outside this function
+    from ucp import get_config
+
+    options = {}
+
+    # if any of the high level flags are set, as long as they are not Null/None,
+    # we assume we should configure basic TLS settings for UCX
+    if any(
+        [
+            dask.config.get("ucx.nvlink"),
+            dask.config.get("ucx.infiniband"),
+            dask.config.get("ucx.tcp-over-ucx"),
+            dask.config.get("ucx.net-devices"),
+        ]
+    ):
+        tls = "tcp,sockcm,cuda_copy"
+        tls_priority = "sockcm"
+
+        if dask.config.get("ucx.infiniband"):
+            tls = "rc," + tls
+        if dask.config.get("ucx.nvlink"):
+            tls = tls + ",cuda_ipc"
+
+        options = {"TLS": tls, "SOCKADDR_TLS_PRIORITY": tls_priority}
+
+        net_devices = dask.config.get("ucx.net-devices")
+        if net_devices is not None and net_devices != "":
+            options["NET_DEVICES"] = net_devices
+
+    # ANY UCX options defined in config will overwrite high level dask.ucx flags
+    valid_ucx_keys = list(get_config().keys())
+    for k, v in dask.config.get("ucx").items():
+        if k in valid_ucx_keys:
+            options[k] = v
+        else:
+            logger.debug(
+                "Key: %s with value: %s not a valid UCX configuration option" % (k, v)
+            )
+
+    return options

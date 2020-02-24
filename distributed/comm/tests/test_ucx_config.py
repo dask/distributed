@@ -6,7 +6,7 @@ from dask.utils import format_bytes
 from distributed import Client
 from distributed.utils_test import gen_test, loop, inc, cleanup, popen  # noqa: 401
 from distributed.utils import get_ip
-from distributed.comm.utils import _srub_ucx_config
+from distributed.comm.ucx import _scrub_ucx_config
 
 try:
     HOST = get_ip()
@@ -23,7 +23,7 @@ async def test_ucx_config(cleanup):
     ucx = {"nvlink": True, "infiniband": True, "tcp-over-ucx": True, "net-devices": ""}
 
     with dask.config.set(ucx=ucx):
-        ucx_config = _srub_ucx_config()
+        ucx_config = _scrub_ucx_config()
         assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy,cuda_ipc"
         assert ucx_config.get("NET_DEVICES") is None
 
@@ -35,7 +35,7 @@ async def test_ucx_config(cleanup):
     }
 
     with dask.config.set(ucx=ucx):
-        ucx_config = _srub_ucx_config()
+        ucx_config = _scrub_ucx_config()
         assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy"
         assert ucx_config.get("NET_DEVICES") == "mlx5_0:1"
 
@@ -48,7 +48,7 @@ async def test_ucx_config(cleanup):
     }
 
     with dask.config.set(ucx=ucx):
-        ucx_config = _srub_ucx_config()
+        ucx_config = _scrub_ucx_config()
         assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy"
         assert ucx_config.get("MEMTYPE_CACHE") == "y"
 
