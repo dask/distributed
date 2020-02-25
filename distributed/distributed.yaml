@@ -137,6 +137,5 @@ rmm:
 ucx:
   nvlink: null
   infiniband: null
-  tcp-over-ucx: null
   net-devices: null
 

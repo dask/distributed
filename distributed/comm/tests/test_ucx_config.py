@@ -20,19 +20,14 @@ rmm = pytest.importorskip("rmm")
 @pytest.mark.asyncio
 async def test_ucx_config(cleanup):
 
-    ucx = {"nvlink": True, "infiniband": True, "tcp-over-ucx": True, "net-devices": ""}
+    ucx = {"nvlink": True, "infiniband": True, "net-devices": ""}
 
     with dask.config.set(ucx=ucx):
         ucx_config = _scrub_ucx_config()
         assert ucx_config.get("TLS") == "rc,tcp,sockcm,cuda_copy,cuda_ipc"
         assert ucx_config.get("NET_DEVICES") is None
 
-    ucx = {
-        "nvlink": False,
-        "infiniband": True,
-        "tcp-over-ucx": True,
-        "net-devices": "mlx5_0:1",
-    }
+    ucx = {"nvlink": False, "infiniband": True, "net-devices": "mlx5_0:1"}
 
     with dask.config.set(ucx=ucx):
         ucx_config = _scrub_ucx_config()
@@ -42,7 +37,6 @@ async def test_ucx_config(cleanup):
     ucx = {
         "nvlink": False,
         "infiniband": True,
-        "tcp-over-ucx": True,
         "net-devices": "all",
         "MEMTYPE_CACHE": "y",
     }

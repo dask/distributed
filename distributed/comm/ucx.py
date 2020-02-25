@@ -359,14 +359,7 @@ def _scrub_ucx_config():
 
     # if any of the high level flags are set, as long as they are not Null/None,
     # we assume we should configure basic TLS settings for UCX
-    if any(
-        [
-            dask.config.get("ucx.nvlink"),
-            dask.config.get("ucx.infiniband"),
-            dask.config.get("ucx.tcp-over-ucx"),
-            dask.config.get("ucx.net-devices"),
-        ]
-    ):
+    if any([dask.config.get("ucx.nvlink"), dask.config.get("ucx.infiniband")]):
         tls = "tcp,sockcm,cuda_copy"
         tls_priority = "sockcm"
 
