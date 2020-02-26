@@ -1642,7 +1642,9 @@ async def test_heartbeat_comm_closed(cleanup, monkeypatch, reconnect):
 
             async with await Worker(s.address, reconnect=reconnect) as w:
                 # Trigger CommClosedError during worker heartbeat
-                monkeypatch.setattr(w.scheduler, "heartbeat_worker", bad_heartbeat_worker)
+                monkeypatch.setattr(
+                    w.scheduler, "heartbeat_worker", bad_heartbeat_worker
+                )
 
                 await w.heartbeat()
                 if reconnect:
