@@ -40,8 +40,11 @@ class WorkStealing(SchedulerPlugin):
         for worker in scheduler.workers:
             self.add_worker(worker=worker)
 
+        callback_time = dask.config.get("distributed.scheduler.work-stealing-interval")
         pc = PeriodicCallback(
-            callback=self.balance, callback_time=100, io_loop=self.scheduler.loop
+            callback=self.balance,
+            callback_time=callback_time,
+            io_loop=self.scheduler.loop,
         )
         self._pc = pc
         self.scheduler.periodic_callbacks["stealing"] = pc
