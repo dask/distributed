@@ -12,7 +12,7 @@ from .utils import parse_timedelta
 logger = logging.getLogger(__name__)
 
 
-class BatchedSend(object):
+class BatchedSend:
     """ Batch messages in batches on a stream
 
     This takes an IOStream and an interval (in ms) and ensures that we send no
@@ -123,13 +123,16 @@ class BatchedSend(object):
             self.waker.set()
 
     @gen.coroutine
-    def close(self):
-        """ Flush existing messages and then close comm """
+    def close(self, timeout=None):
+        """ Flush existing messages and then close comm
+
+        If set, raises `tornado.util.TimeoutError` after a timeout.
+        """
         if self.comm is None:
             return
         self.please_stop = True
         self.waker.set()
-        yield self.stopped.wait()
+        yield self.stopped.wait(timeout=timeout)
         if not self.comm.closed():
             try:
                 if self.buffer:

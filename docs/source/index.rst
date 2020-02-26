@@ -106,20 +106,14 @@ Contents
    :caption: Additional Features
 
    actors
-   adaptive
    asynchronous
    configuration
-   local-cluster
    ipython
-   Joblib Integration <https://ml.dask.org/joblib.html>
    prometheus
    publish
-   queues
    resources
-   submitting-applications
    task-launch
    tls
-   web
 
 .. toctree::
    :maxdepth: 1

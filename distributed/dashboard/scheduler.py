@@ -1,12 +1,20 @@
 from datetime import datetime
 from functools import partial
+import os
+import os.path
+import json
 import logging
 
 import dask
 from dask.utils import format_bytes
-import toolz
-from toolz import merge
+
+try:
+    from cytoolz import merge, merge_with
+except ImportError:
+    from toolz import merge, merge_with
+
 from tornado import escape
+from tornado.websocket import WebSocketHandler
 
 try:
     import numpy as np
@@ -30,22 +38,26 @@ from .components.scheduler import (
     individual_profile_doc,
     individual_profile_server_doc,
     individual_nbytes_doc,
-    individual_memory_use_doc,
     individual_cpu_doc,
     individual_nprocessing_doc,
     individual_workers_doc,
     individual_bandwidth_types_doc,
     individual_bandwidth_workers_doc,
+    individual_memory_by_key_doc,
 )
 from .core import BokehServer
 from .worker import counters_doc
 from .proxy import GlobalProxyHandler
 from .utils import RequestHandler, redirect
+from ..diagnostics.websocket import WebsocketPlugin
+from ..metrics import time
 from ..utils import log_errors, format_time
+from ..scheduler import ALL_TASK_STATES
 
 
 ns = {
-    func.__name__: func for func in [format_bytes, format_time, datetime.fromtimestamp]
+    func.__name__: func
+    for func in [format_bytes, format_time, datetime.fromtimestamp, time]
 }
 
 rel_path_statics = {"rel_path_statics": "../../"}
@@ -65,7 +77,7 @@ class Workers(RequestHandler):
                 "workers.html",
                 title="Workers",
                 scheduler=self.server,
-                **toolz.merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
             )
 
 
@@ -81,7 +93,7 @@ class Worker(RequestHandler):
                 title="Worker: " + worker,
                 scheduler=self.server,
                 Worker=worker,
-                **toolz.merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
             )
 
 
@@ -97,7 +109,7 @@ class Task(RequestHandler):
                 title="Task: " + task,
                 Task=task,
                 scheduler=self.server,
-                **toolz.merge(self.server.__dict__, ns, self.extra, rel_path_statics),
+                **merge(self.server.__dict__, ns, self.extra, rel_path_statics),
             )
 
 
@@ -109,7 +121,7 @@ class Logs(RequestHandler):
                 "logs.html",
                 title="Logs",
                 logs=logs,
-                **toolz.merge(self.extra, rel_path_statics),
+                **merge(self.extra, rel_path_statics),
             )
 
 
@@ -123,7 +135,7 @@ class WorkerLogs(RequestHandler):
                 "logs.html",
                 title="Logs: " + worker,
                 logs=logs,
-                **toolz.merge(self.extra, rel_path_statics),
+                **merge(self.extra, rel_path_statics),
             )
 
 
@@ -137,7 +149,7 @@ class WorkerCallStacks(RequestHandler):
                 "call-stack.html",
                 title="Call Stacks: " + worker,
                 call_stack=call_stack,
-                **toolz.merge(self.extra, rel_path_statics),
+                **merge(self.extra, rel_path_statics),
             )
 
 
@@ -156,7 +168,7 @@ class TaskCallStack(RequestHandler):
                     "call-stack.html",
                     title="Call Stack: " + key,
                     call_stack=call_stack,
-                    **toolz.merge(self.extra, rel_path_statics),
+                    **merge(self.extra, rel_path_statics),
                 )
 
 
@@ -171,6 +183,7 @@ class CountsJSON(RequestHandler):
         released = 0
         waiting = 0
         waiting_data = 0
+        desired_workers = scheduler.adaptive_target()
 
         for ts in scheduler.tasks.values():
             if ts.exception_blame is not None:
@@ -203,6 +216,7 @@ class CountsJSON(RequestHandler):
             "waiting": waiting,
             "waiting_data": waiting_data,
             "workers": len(scheduler.workers),
+            "desired_workers": desired_workers,
         }
         self.write(response)
 
@@ -224,20 +238,27 @@ class IndexJSON(RequestHandler):
 class IndividualPlots(RequestHandler):
     def get(self):
         bokeh_server = self.server.services["dashboard"]
-        result = {
+        individual_bokeh = {
             uri.strip("/").replace("-", " ").title(): uri
             for uri in bokeh_server.apps
             if uri.lstrip("/").startswith("individual-") and not uri.endswith(".json")
         }
+        individual_static = {
+            uri.strip("/").replace(".html", "").replace("-", " ").title(): "/statics/"
+            + uri
+            for uri in os.listdir(os.path.join(os.path.dirname(__file__), "static"))
+            if uri.lstrip("/").startswith("individual-") and uri.endswith(".html")
+        }
+        result = {**individual_bokeh, **individual_static}
         self.write(result)
 
 
-class _PrometheusCollector(object):
+class _PrometheusCollector:
     def __init__(self, server):
         self.server = server
 
     def collect(self):
-        from prometheus_client.core import GaugeMetricFamily
+        from prometheus_client.core import GaugeMetricFamily, CounterMetricFamily
 
         yield GaugeMetricFamily(
             "dask_scheduler_clients",
@@ -245,40 +266,63 @@ class _PrometheusCollector(object):
             value=len(self.server.clients),
         )
 
-        tasks = GaugeMetricFamily(
+        yield GaugeMetricFamily(
+            "dask_scheduler_desired_workers",
+            "Number of workers scheduler needs for task graph.",
+            value=self.server.adaptive_target(),
+        )
+
+        worker_states = GaugeMetricFamily(
             "dask_scheduler_workers",
             "Number of workers known by scheduler.",
             labels=["state"],
         )
-        tasks.add_metric(["connected"], len(self.server.workers))
-        tasks.add_metric(["saturated"], len(self.server.saturated))
-        tasks.add_metric(["idle"], len(self.server.idle))
-        yield tasks
+        worker_states.add_metric(["connected"], len(self.server.workers))
+        worker_states.add_metric(["saturated"], len(self.server.saturated))
+        worker_states.add_metric(["idle"], len(self.server.idle))
+        yield worker_states
 
         tasks = GaugeMetricFamily(
             "dask_scheduler_tasks",
             "Number of tasks known by scheduler.",
             labels=["state"],
         )
-        tasks.add_metric(["received"], len(self.server.tasks))
-        tasks.add_metric(["unrunnable"], len(self.server.unrunnable))
+
+        task_counter = merge_with(
+            sum, (tp.states for tp in self.server.task_prefixes.values())
+        )
+
+        yield CounterMetricFamily(
+            "dask_scheduler_tasks_forgotten",
+            (
+                "Total number of processed tasks no longer in memory and already "
+                "removed from the scheduler job queue. Note task groups on the "
+                "scheduler which have all tasks in the forgotten state are not included."
+            ),
+            value=task_counter.get("forgotten", 0.0),
+        )
+
+        for state in ALL_TASK_STATES:
+            tasks.add_metric([state], task_counter.get(state, 0.0))
         yield tasks
 
 
 class PrometheusHandler(RequestHandler):
-    _initialized = False
+    _collector = None
 
     def __init__(self, *args, **kwargs):
         import prometheus_client
 
         super(PrometheusHandler, self).__init__(*args, **kwargs)
 
-        if PrometheusHandler._initialized:
+        if PrometheusHandler._collector:
+            # Especially during testing, multiple schedulers are started
+            # sequentially in the same python process
+            PrometheusHandler._collector.server = self.server
             return
 
-        prometheus_client.REGISTRY.register(_PrometheusCollector(self.server))
-
-        PrometheusHandler._initialized = True
+        PrometheusHandler._collector = _PrometheusCollector(self.server)
+        prometheus_client.REGISTRY.register(PrometheusHandler._collector)
 
     def get(self):
         import prometheus_client
@@ -291,6 +335,34 @@ class HealthHandler(RequestHandler):
     def get(self):
         self.write("ok")
         self.set_header("Content-Type", "text/plain")
+
+
+class EventstreamHandler(WebSocketHandler):
+    def initialize(self, server=None, extra=None):
+        self.server = server
+        self.extra = extra or {}
+        self.plugin = WebsocketPlugin(self, server)
+        self.server.add_plugin(self.plugin)
+
+    def send(self, name, data):
+        data["name"] = name
+        for k in list(data):
+            # Drop bytes objects for now
+            if isinstance(data[k], bytes):
+                del data[k]
+        self.write_message(data)
+
+    def open(self):
+        for worker in self.server.workers:
+            self.plugin.add_worker(self.server, worker)
+
+    def on_message(self, message):
+        message = json.loads(message)
+        if message["name"] == "ping":
+            self.send("pong", {"timestamp": str(datetime.now())})
+
+    def on_close(self):
+        self.server.remove_plugin(self.plugin)
 
 
 routes = [
@@ -308,6 +380,7 @@ routes = [
     (r"individual-plots.json", IndividualPlots),
     (r"metrics", PrometheusHandler),
     (r"health", HealthHandler),
+    (r"eventstream", EventstreamHandler),
     (r"proxy/(\d+)/(.*?)/(.*)", GlobalProxyHandler),
 ]
 
@@ -394,12 +467,12 @@ applications = {
     "/individual-profile": individual_profile_doc,
     "/individual-profile-server": individual_profile_server_doc,
     "/individual-nbytes": individual_nbytes_doc,
-    "/individual-memory-use": individual_memory_use_doc,
     "/individual-cpu": individual_cpu_doc,
     "/individual-nprocessing": individual_nprocessing_doc,
     "/individual-workers": individual_workers_doc,
     "/individual-bandwidth-types": individual_bandwidth_types_doc,
     "/individual-bandwidth-workers": individual_bandwidth_workers_doc,
+    "/individual-memory-by-key": individual_memory_by_key_doc,
 }
 
 try:

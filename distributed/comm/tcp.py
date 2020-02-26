@@ -12,7 +12,6 @@ except ImportError:
     ssl = None
 
 import dask
-import tornado
 from tornado import netutil
 from tornado.iostream import StreamClosedError, IOStream
 from tornado.tcpclient import TCPClient
@@ -20,15 +19,7 @@ from tornado.tcpserver import TCPServer
 
 from ..system import MEMORY_LIMIT
 from ..threadpoolexecutor import ThreadPoolExecutor
-from ..utils import (
-    ensure_bytes,
-    ensure_ip,
-    get_ip,
-    get_ipv6,
-    nbytes,
-    parse_timedelta,
-    shutting_down,
-)
+from ..utils import ensure_ip, get_ip, get_ipv6, nbytes, parse_timedelta, shutting_down
 
 from .registry import Backend, backends
 from .addressing import parse_host_port, unparse_host_port
@@ -132,12 +123,15 @@ def convert_stream_closed_error(obj, exc):
         raise CommClosedError("in %s: %s" % (obj, exc))
 
 
+def _do_nothing():
+    pass
+
+
 class TCP(Comm):
     """
     An established communication based on an underlying Tornado IOStream.
     """
 
-    _iostream_allows_memoryview = tornado.version_info >= (4, 5)
     # IOStream.read_into() currently proposed in
     # https://github.com/tornadoweb/tornado/pull/2193
     _iostream_has_read_into = hasattr(IOStream, "read_into")
@@ -154,6 +148,16 @@ class TCP(Comm):
 
         stream.set_nodelay(True)
         set_tcp_timeout(stream)
+        # set a close callback, to make `self.stream.closed()` more reliable.
+        # Background: if `stream` is unused (e.g. because it's in `ConnectionPool.available`),
+        # the underlying fd is not watched for changes. In this case, even if the
+        # connection is actively closed by the remote end, `self.closed()` would still return `False`.
+        # Registering a closed callback will make tornado register the underlying fd
+        # for changes, and this would be reflected in `self.closed()` even without reading/writing.
+        #
+        # Use a global method (instead of a lambda) to avoid creating a reference
+        # to the local scope.
+        stream.set_close_callback(_do_nothing)
         self._read_extra()
 
     def _read_extra(self):
@@ -237,14 +241,12 @@ class TCP(Comm):
             else:
                 stream.write(b"".join(length_bytes))  # avoid large memcpy, send in many
 
-                for frame in frames:
+                for frame, frame_bytes in zip(frames, lengths):
                     # Can't wait for the write() Future as it may be lost
                     # ("If write is called again before that Future has resolved,
                     #   the previous future will be orphaned and will never resolve")
-                    if not self._iostream_allows_memoryview:
-                        frame = ensure_bytes(frame)
                     future = stream.write(frame)
-                    bytes_since_last_yield += nbytes(frame)
+                    bytes_since_last_yield += frame_bytes
                     if bytes_since_last_yield > 32e6:
                         await future
                         bytes_since_last_yield = 0
@@ -257,7 +259,7 @@ class TCP(Comm):
             else:
                 raise
 
-        return sum(map(nbytes, frames))
+        return sum(lengths)
 
     @gen.coroutine
     def close(self):
@@ -322,7 +324,7 @@ def _expect_tls_context(connection_args):
     return ctx
 
 
-class RequireEncryptionMixin(object):
+class RequireEncryptionMixin:
     def _check_encryption(self, address, connection_args):
         if not self.encrypted and connection_args.get("require_encryption"):
             # XXX Should we have a dedicated SecurityError class?
@@ -343,7 +345,7 @@ class BaseTCPConnector(Connector, RequireEncryptionMixin):
         kwargs = self._get_connect_args(**connection_args)
 
         try:
-            stream = await BaseTCPConnector.client.connect(
+            stream = await self.client.connect(
                 ip, port, max_buffer_size=MAX_BUFFER_SIZE, **kwargs
             )
 
@@ -395,7 +397,7 @@ class BaseTCPListener(Listener, RequireEncryptionMixin):
         self.tcp_server = None
         self.bound_address = None
 
-    def start(self):
+    async def start(self):
         self.tcp_server = TCPServer(max_buffer_size=MAX_BUFFER_SIZE, **self.server_args)
         self.tcp_server.handle_stream = self._handle_stream
         backlog = int(dask.config.get("distributed.comm.socket-backlog"))

@@ -11,6 +11,7 @@ from toolz import first
 from tornado import gen
 from tornado.httpclient import AsyncHTTPClient, HTTPRequest
 
+import dask
 from dask.core import flatten
 from distributed.utils import tokey, format_dashboard_link
 from distributed.client import wait
@@ -27,13 +28,13 @@ from distributed.dashboard.components.scheduler import (
     Events,
     TaskStream,
     TaskProgress,
-    MemoryUse,
     CurrentLoad,
     ProcessingHistogram,
     NBytesHistogram,
     WorkerTable,
     TaskGraph,
     ProfileServer,
+    MemoryByKey,
 )
 
 from distributed.dashboard import scheduler
@@ -247,19 +248,6 @@ def test_TaskProgress_empty(c, s, a, b):
 
 
 @gen_cluster(client=True)
-def test_MemoryUse(c, s, a, b):
-    mu = MemoryUse(s)
-
-    futures = c.map(slowinc, range(10), delay=0.001)
-    yield wait(futures)
-
-    mu.update()
-    d = dict(mu.source.data)
-    assert all(len(L) == 1 for L in d.values())
-    assert d["name"] == ["slowinc"]
-
-
-@gen_cluster(client=True)
 def test_CurrentLoad(c, s, a, b):
     cl = CurrentLoad(s)
 
@@ -271,6 +259,8 @@ def test_CurrentLoad(c, s, a, b):
 
     assert all(len(L) == 2 for L in d.values())
     assert all(d["nbytes"])
+
+    assert cl.cpu_figure.x_range.end == 200
 
 
 @gen_cluster(client=True)
@@ -310,10 +300,13 @@ def test_WorkerTable(c, s, a, b):
         for L in wt.source.data.values()
         for v in L
     ), {type(v).__name__ for L in wt.source.data.values() for v in L}
-    assert all(len(v) == 2 for v in wt.source.data.values())
+
+    assert all(len(v) == 3 for v in wt.source.data.values())
+    assert wt.source.data["name"][0] == "Total (2)"
 
     nthreads = wt.source.data["nthreads"]
     assert all(nthreads)
+    assert nthreads[0] == nthreads[1] + nthreads[2]
 
 
 @gen_cluster(client=True)
@@ -344,7 +337,7 @@ def test_WorkerTable_custom_metrics(c, s, a, b):
         assert name in data
 
     assert all(data.values())
-    assert all(len(v) == 2 for v in data.values())
+    assert all(len(v) == 3 for v in data.values())
     my_index = data["address"].index(a.address), data["address"].index(b.address)
     assert [data["metric_port"][i] for i in my_index] == [a.port, b.port]
     assert [data["metric_address"][i] for i in my_index] == [a.address, b.address]
@@ -369,7 +362,7 @@ def test_WorkerTable_different_metrics(c, s, a, b):
     assert "metric_a" in data
     assert "metric_b" in data
     assert all(data.values())
-    assert all(len(v) == 2 for v in data.values())
+    assert all(len(v) == 3 for v in data.values())
     my_index = data["address"].index(a.address), data["address"].index(b.address)
     assert [data["metric_a"][i] for i in my_index] == [a.port, None]
     assert [data["metric_b"][i] for i in my_index] == [None, b.port]
@@ -389,7 +382,7 @@ def test_WorkerTable_metrics_with_different_metric_2(c, s, a, b):
 
     assert "metric_a" in data
     assert all(data.values())
-    assert all(len(v) == 2 for v in data.values())
+    assert all(len(v) == 3 for v in data.values())
     my_index = data["address"].index(a.address), data["address"].index(b.address)
     assert [data["metric_a"][i] for i in my_index] == [a.port, None]
 
@@ -452,6 +445,8 @@ def test_TaskGraph(c, s, a, b):
     gp.update()
     assert set(map(len, gp.node_source.data.values())) == {6}
     assert set(map(len, gp.edge_source.data.values())) == {5}
+    json.dumps(gp.edge_source.data)
+    json.dumps(gp.node_source.data)
 
     da = pytest.importorskip("dask.array")
     x = da.random.random((20, 20), chunks=(10, 10)).persist()
@@ -615,7 +610,7 @@ def test_proxy_to_workers(c, s, a, b):
         if proxy_exists:
             assert b"Crossfilter" in response_proxy.body
         else:
-            assert b"pip install jupyter-server-proxy" in response_proxy.body
+            assert b"python -m pip install jupyter-server-proxy" in response_proxy.body
         assert response_direct.code == 200
         assert b"Crossfilter" in response_direct.body
 
@@ -687,6 +682,23 @@ def test_https_support(c, s, a, b):
             url="https://localhost:%d/%s" % (port, suffix), ssl_options=ctx
         )
         response = yield http_client.fetch(req)
+        assert response.code < 300
         body = response.body.decode()
-        assert "bokeh" in body.lower()
         assert not re.search("href=./", body)  # no absolute links
+
+
+@gen_cluster(
+    client=True, scheduler_kwargs={"services": {("dashboard", 0): BokehScheduler}}
+)
+async def test_memory_by_key(c, s, a, b):
+    mbk = MemoryByKey(s)
+
+    da = pytest.importorskip("dask.array")
+    x = (da.random.random((20, 20), chunks=(10, 10)) + 1).persist(optimize_graph=False)
+    await x
+
+    y = await dask.delayed(inc)(1).persist()
+
+    mbk.update()
+    assert mbk.source.data["name"] == ["add", "inc"]
+    assert mbk.source.data["nbytes"] == [x.nbytes, sys.getsizeof(1)]

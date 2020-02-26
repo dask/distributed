@@ -1,7 +1,7 @@
 import asyncio
 from collections import defaultdict, deque
-from concurrent.futures import CancelledError
 from functools import partial
+from inspect import isawaitable
 import logging
 import threading
 import traceback
@@ -9,10 +9,10 @@ import uuid
 import weakref
 
 import dask
+import tblib
 from toolz import merge
 from tornado import gen
 from tornado.ioloop import IOLoop
-from tornado.locks import Event
 
 from .comm import (
     connect,
@@ -34,6 +34,7 @@ from .utils import (
     PeriodicCallback,
     parse_timedelta,
     has_keyword,
+    CancelledError,
 )
 from . import protocol
 
@@ -59,7 +60,7 @@ tick_maximum_delay = parse_timedelta(
 LOG_PDB = dask.config.get("distributed.admin.pdb-on-err")
 
 
-class Server(object):
+class Server:
     """ Dask Distributed Server
 
     Superclass for endpoints in a distributed cluster, such as Worker
@@ -133,9 +134,9 @@ class Server(object):
         self.events = None
         self.event_counts = None
         self._ongoing_coroutines = weakref.WeakSet()
-        self._event_finished = Event()
+        self._event_finished = asyncio.Event()
 
-        self.listener = None
+        self.listeners = []
         self.io_loop = io_loop or IOLoop.current()
         self.loop = self.io_loop
 
@@ -220,7 +221,7 @@ class Server(object):
     def stop(self):
         if not self.__stopped:
             self.__stopped = True
-            if self.listener is not None:
+            for listener in self.listeners:
                 # Delay closing the server socket until the next IO loop tick.
                 # Otherwise race conditions can appear if an event handler
                 # for an accept() call is already scheduled by the IO loop,
@@ -228,7 +229,14 @@ class Server(object):
                 # The demonstrator for this is Worker.terminate(), which
                 # closes the server socket in response to an incoming message.
                 # See https://github.com/tornadoweb/tornado/issues/2069
-                self.io_loop.add_callback(self.listener.stop)
+                self.io_loop.add_callback(listener.stop)
+
+    @property
+    def listener(self):
+        if self.listeners:
+            return self.listeners[0]
+        else:
+            return None
 
     def _measure_tick(self):
         now = time()
@@ -294,7 +302,7 @@ class Server(object):
     def identity(self, comm=None):
         return {"type": type(self).__name__, "id": self.id}
 
-    def listen(self, port_or_addr=None, listen_args=None):
+    async def listen(self, port_or_addr=None, listen_args=None):
         if port_or_addr is None:
             port_or_addr = self.default_port
         if isinstance(port_or_addr, int):
@@ -304,13 +312,14 @@ class Server(object):
         else:
             addr = port_or_addr
             assert isinstance(addr, str)
-        self.listener = listen(
+        listener = listen(
             addr,
             self.handle_comm,
             deserialize=self.deserialize,
             connection_args=listen_args,
         )
-        self.listener.start()
+        await listener.start()
+        self.listeners.append(listener)
 
     async def handle_comm(self, comm, shutting_down=shutting_down):
         """ Dispatch new communications to coroutine-handlers
@@ -397,7 +406,7 @@ class Server(object):
                     logger.debug("Calling into handler %s", handler.__name__)
                     try:
                         result = handler(comm, **msg)
-                        if hasattr(result, "__await__"):
+                        if isawaitable(result):
                             result = asyncio.ensure_future(result)
                             self._ongoing_coroutines.add(result)
                             result = await result
@@ -464,7 +473,7 @@ class Server(object):
                                 handler(**merge(extra, msg))
                         else:
                             logger.error("odd message %s", msg)
-                    await gen.sleep(0)
+                    await asyncio.sleep(0)
 
                 for func in every_cycle:
                     func()
@@ -486,13 +495,13 @@ class Server(object):
     def close(self):
         for pc in self.periodic_callbacks.values():
             pc.stop()
-        if self.listener:
+        for listener in self.listeners:
             self.listener.stop()
         for i in range(20):  # let comms close naturally for a second
             if not self._comms:
                 break
             else:
-                yield gen.sleep(0.05)
+                yield asyncio.sleep(0.05)
         yield [comm.close() for comm in self._comms]  # then forcefully close
         for cb in self._ongoing_coroutines:
             cb.cancel()
@@ -500,7 +509,7 @@ class Server(object):
             if all(cb.cancelled() for c in self._ongoing_coroutines):
                 break
             else:
-                yield gen.sleep(0.01)
+                yield asyncio.sleep(0.01)
 
         self._event_finished.set()
 
@@ -560,7 +569,7 @@ def addr_from_args(addr=None, ip=None, port=None):
     return normalize_address(addr)
 
 
-class rpc(object):
+class rpc:
     """ Conveniently interact with a remote server
 
     >>> remote = rpc(address)  # doctest: +SKIP
@@ -719,7 +728,7 @@ class rpc(object):
         return "<rpc to %r, %d comms>" % (self.address, len(self.comms))
 
 
-class PooledRPCCall(object):
+class PooledRPCCall:
     """ The result of ConnectionPool()('host:port')
 
     See Also:
@@ -768,7 +777,7 @@ class PooledRPCCall(object):
         return "<pooled rpc to %r>" % (self.addr,)
 
 
-class ConnectionPool(object):
+class ConnectionPool:
     """ A maximum sized pool of Comm objects.
 
     This provides a connect method that mirrors the normal distributed.connect
@@ -831,6 +840,14 @@ class ConnectionPool(object):
         self._created = weakref.WeakSet()
         self._instances.add(self)
 
+    def _validate(self):
+        """
+        Validate important invariants of this class
+
+        Used only for testing / debugging
+        """
+        assert self.semaphore._value == self.limit - self.open - self._n_connecting
+
     @property
     def active(self):
         return sum(map(len, self.occupied.values()))
@@ -859,9 +876,11 @@ class ConnectionPool(object):
         """
         available = self.available[addr]
         occupied = self.occupied[addr]
-        if available:
+        while available:
             comm = available.pop()
-            if not comm.closed():
+            if comm.closed():
+                self.semaphore.release()
+            else:
                 occupied.add(comm)
                 return comm
 
@@ -940,18 +959,17 @@ class ConnectionPool(object):
                 IOLoop.current().add_callback(comm.close)
                 self.semaphore.release()
 
-    def close(self):
+    async def close(self):
         """
-        Close all communications abruptly.
+        Close all communications
         """
-        for comms in self.available.values():
-            for comm in comms:
-                comm.abort()
+        for d in [self.available, self.occupied]:
+            comms = [comm for comms in d.values() for comm in comms]
+            await asyncio.gather(
+                *[comm.close() for comm in comms], return_exceptions=True
+            )
+            for _ in comms:
                 self.semaphore.release()
-        for comms in self.occupied.values():
-            for comm in comms:
-                self.semaphore.release()
-                comm.abort()
 
         for comm in self._created:
             IOLoop.current().add_callback(comm.abort)
@@ -962,6 +980,14 @@ def coerce_to_address(o):
         o = unparse_host_port(*o)
 
     return normalize_address(o)
+
+
+def collect_causes(e):
+    causes = []
+    while e.__cause__ is not None:
+        causes.append(e.__cause__)
+        e = e.__cause__
+    return causes
 
 
 def error_message(e, status="error"):
@@ -980,6 +1006,7 @@ def error_message(e, status="error"):
     clean_exception: deserialize and unpack message into exception/traceback
     """
     MAX_ERROR_LEN = dask.config.get("distributed.admin.max-error-length")
+    tblib.pickling_support.install(e, *collect_causes(e))
     tb = get_traceback()
     e2 = truncate_exception(e, MAX_ERROR_LEN)
     try:

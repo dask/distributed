@@ -1,4 +1,4 @@
-from datetime import timedelta
+import asyncio
 import logging
 from multiprocessing.queues import Empty
 import os
@@ -10,9 +10,9 @@ import warnings
 import weakref
 
 import dask
+from dask.system import CPU_COUNT
+from tornado.ioloop import IOLoop
 from tornado import gen
-from tornado.ioloop import IOLoop, TimeoutError
-from tornado.locks import Event
 
 from .comm import get_address_host, unparse_host_port
 from .comm.addressing import address_from_user_args
@@ -22,7 +22,6 @@ from .node import ServerNode
 from .process import AsyncProcess
 from .proctitle import enable_proctitle_on_children
 from .security import Security
-from .system import CPU_COUNT
 from .utils import (
     get_ip,
     mp_context,
@@ -30,6 +29,8 @@ from .utils import (
     json_load_robust,
     PeriodicCallback,
     parse_timedelta,
+    ignoring,
+    TimeoutError,
 )
 from .worker import run, parse_memory_limit, Worker
 
@@ -212,20 +213,11 @@ class Nanny(ServerNode):
         if worker_address is None:
             return
 
-        allowed_errors = (
-            gen.TimeoutError,
-            CommClosedError,
-            EnvironmentError,
-            RPCClosed,
-        )
-        try:
-            await gen.with_timeout(
-                timedelta(seconds=timeout),
-                self.scheduler.unregister(address=self.worker_address),
-                quiet_exceptions=allowed_errors,
+        allowed_errors = (TimeoutError, CommClosedError, EnvironmentError, RPCClosed)
+        with ignoring(allowed_errors):
+            await asyncio.wait_for(
+                self.scheduler.unregister(address=self.worker_address), timeout
             )
-        except allowed_errors:
-            pass
 
     @property
     def worker_address(self):
@@ -243,7 +235,7 @@ class Nanny(ServerNode):
 
     async def start(self):
         """ Start nanny, start local process, start watching """
-        self.listen(self._start_address, listen_args=self.listen_args)
+        await self.listen(self._start_address, listen_args=self.listen_args)
         self.ip = get_address_host(self.address)
 
         logger.info("        Start Nanny at: %r", self.address)
@@ -317,10 +309,10 @@ class Nanny(ServerNode):
         self.auto_restart = True
         if self.death_timeout:
             try:
-                result = await gen.with_timeout(
-                    timedelta(seconds=self.death_timeout), self.process.start()
+                result = await asyncio.wait_for(
+                    self.process.start(), self.death_timeout
                 )
-            except gen.TimeoutError:
+            except TimeoutError:
                 await self.close(timeout=self.death_timeout)
                 logger.error(
                     "Timed out connecting Nanny '%s' to scheduler '%s'",
@@ -342,12 +334,25 @@ class Nanny(ServerNode):
                 await self.instantiate()
 
         try:
-            await gen.with_timeout(timedelta(seconds=timeout), _())
-        except gen.TimeoutError:
+            await asyncio.wait_for(_(), timeout)
+        except TimeoutError:
             logger.error("Restart timed out, returning before finished")
             return "timed out"
         else:
             return "OK"
+
+    @property
+    def _psutil_process(self):
+        pid = self.process.process.pid
+        try:
+            proc = self._psutil_process_obj
+        except AttributeError:
+            self._psutil_process_obj = psutil.Process(pid)
+
+        if self._psutil_process_obj.pid != pid:
+            self._psutil_process_obj = psutil.Process(pid)
+
+        return self._psutil_process_obj
 
     def memory_monitor(self):
         """ Track worker's memory.  Restart if it goes above terminate fraction """
@@ -357,7 +362,7 @@ class Nanny(ServerNode):
         if process is None:
             return
         try:
-            proc = psutil.Process(process.pid)
+            proc = self._psutil_process
             memory = proc.memory_info().rss
         except (ProcessLookupError, psutil.NoSuchProcess, psutil.AccessDenied):
             return
@@ -437,14 +442,14 @@ class Nanny(ServerNode):
         except Exception:
             pass
         self.process = None
-        self.rpc.close()
+        await self.rpc.close()
         self.status = "closed"
         if comm:
             await comm.write("OK")
         await ServerNode.close(self)
 
 
-class WorkerProcess(object):
+class WorkerProcess:
     def __init__(
         self,
         worker_kwargs,
@@ -501,8 +506,8 @@ class WorkerProcess(object):
         )
         self.process.daemon = dask.config.get("distributed.worker.daemon", default=True)
         self.process.set_exit_callback(self._on_exit)
-        self.running = Event()
-        self.stopped = Event()
+        self.running = asyncio.Event()
+        self.stopped = asyncio.Event()
         self.status = "starting"
         try:
             await self.process.start()
@@ -592,10 +597,11 @@ class WorkerProcess(object):
                 "executor_wait": executor_wait,
             }
         )
+        await asyncio.sleep(0)  # otherwise we get broken pipe errors
         self.child_stop_q.close()
 
         while process.is_alive() and loop.time() < deadline:
-            await gen.sleep(0.05)
+            await asyncio.sleep(0.05)
 
         if process.is_alive():
             logger.warning(
@@ -614,7 +620,7 @@ class WorkerProcess(object):
             try:
                 msg = self.init_result_q.get_nowait()
             except Empty:
-                await gen.sleep(delay)
+                await asyncio.sleep(delay)
                 continue
 
             if msg["uid"] != uid:  # ensure that we didn't cross queues
@@ -719,7 +725,7 @@ class WorkerProcess(object):
 
         try:
             loop.run_sync(run)
-        except TimeoutError:
+        except (TimeoutError, gen.TimeoutError):
             # Loop was stopped before wait_until_closed() returned, ignore
             pass
         except KeyboardInterrupt:

@@ -1,9 +1,8 @@
-from concurrent.futures import CancelledError
-from datetime import timedelta
 from operator import add
 import random
 import sys
 from time import sleep
+import asyncio
 
 from dask import delayed
 import pytest
@@ -12,7 +11,7 @@ from toolz import concat, sliding_window
 from distributed import Client, wait, Nanny
 from distributed.config import config
 from distributed.metrics import time
-from distributed.utils import All, ignoring
+from distributed.utils import All, ignoring, CancelledError
 from distributed.utils_test import (
     gen_cluster,
     cluster,
@@ -111,9 +110,8 @@ def test_stress_creation_and_deletion(c, s):
             yield n.close()
             print("Killed nanny")
 
-    yield gen.with_timeout(
-        timedelta(minutes=1),
-        All([create_and_destroy_worker(0.1 * i) for i in range(20)]),
+    yield asyncio.wait_for(
+        All([create_and_destroy_worker(0.1 * i) for i in range(20)]), 60
     )
 
 

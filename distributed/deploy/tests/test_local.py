@@ -7,15 +7,18 @@ from time import sleep
 from threading import Lock
 import unittest
 import weakref
+from distutils.version import LooseVersion
 
 from tornado.ioloop import IOLoop
 from tornado import gen
+import tornado
 import pytest
 
+from dask.system import CPU_COUNT
 from distributed import Client, Worker, Nanny, get_client
 from distributed.deploy.local import LocalCluster, nprocesses_nthreads
 from distributed.metrics import time
-from distributed.system import CPU_COUNT, MEMORY_LIMIT
+from distributed.system import MEMORY_LIMIT
 from distributed.utils_test import (  # noqa: F401
     clean,
     cleanup,
@@ -30,7 +33,7 @@ from distributed.utils_test import (  # noqa: F401
     tls_only_security,
 )
 from distributed.utils_test import loop  # noqa: F401
-from distributed.utils import sync
+from distributed.utils import sync, TimeoutError
 
 from distributed.deploy.utils_test import ClusterTest
 
@@ -249,6 +252,7 @@ def test_Client_twice(loop):
 
 @pytest.mark.asyncio
 async def test_client_constructor_with_temporary_security(cleanup):
+    pytest.importorskip("cryptography")
     async with Client(
         security=True, silence_logs=False, dashboard_address=None, asynchronous=True
     ) as c:
@@ -449,6 +453,11 @@ async def test_scale_up_and_down():
             assert len(cluster.workers) == 1
 
 
+@pytest.mark.xfail(
+    sys.version_info >= (3, 8) and LooseVersion(tornado.version) < "6.0.3",
+    reason="Known issue with Python 3.8 and Tornado < 6.0.3. See https://github.com/tornadoweb/tornado/pull/2683.",
+    strict=True,
+)
 def test_silent_startup():
     code = """if 1:
         from time import sleep
@@ -521,7 +530,7 @@ def test_memory_nanny(loop, n_workers):
 
 
 def test_death_timeout_raises(loop):
-    with pytest.raises(gen.TimeoutError):
+    with pytest.raises(TimeoutError):
         with LocalCluster(
             scheduler_port=0,
             silence_logs=False,
@@ -708,6 +717,7 @@ def test_adapt_then_manual(loop):
 @pytest.mark.parametrize("temporary", [True, False])
 def test_local_tls(loop, temporary):
     if temporary:
+        pytest.importorskip("cryptography")
         security = True
     else:
         security = tls_only_security()
@@ -897,10 +907,6 @@ async def test_worker_class_nanny_async(cleanup):
         assert all(isinstance(w, MyNanny) for w in cluster.workers.values())
 
 
-if sys.version_info >= (3, 5):
-    from distributed.deploy.tests.py3_test_deploy import *  # noqa F401
-
-
 def test_starts_up_sync(loop):
     cluster = LocalCluster(
         n_workers=2,
@@ -992,6 +998,7 @@ async def test_repr(cleanup):
 @pytest.mark.parametrize("temporary", [True, False])
 async def test_capture_security(cleanup, temporary):
     if temporary:
+        pytest.importorskip("cryptography")
         security = True
     else:
         security = tls_only_security()
@@ -1018,3 +1025,12 @@ async def test_no_danglng_asyncio_tasks(cleanup):
 
     tasks = asyncio.all_tasks()
     assert tasks == start
+
+
+@pytest.mark.asyncio
+async def test_async_with():
+    async with LocalCluster(processes=False, asynchronous=True) as cluster:
+        w = cluster.workers
+        assert w
+
+    assert not w

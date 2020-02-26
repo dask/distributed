@@ -1,13 +1,12 @@
 from abc import ABC, abstractmethod, abstractproperty
-from datetime import timedelta
+import asyncio
 import logging
 import weakref
 
 import dask
-from tornado import gen
 
 from ..metrics import time
-from ..utils import parse_timedelta, ignoring
+from ..utils import parse_timedelta, ignoring, TimeoutError
 from . import registry
 from .addressing import parse_address
 
@@ -58,7 +57,7 @@ class Comm(ABC):
         """
 
     @abstractmethod
-    def write(self, msg, on_error=None):
+    def write(self, msg, serializers=None, on_error=None):
         """
         Write a message (a Python object).
 
@@ -130,7 +129,7 @@ class Comm(ABC):
 
 class Listener(ABC):
     @abstractmethod
-    def start(self):
+    async def start(self):
         """
         Start listening for incoming connections.
         """
@@ -156,11 +155,11 @@ class Listener(ABC):
         address such as 'tcp://0.0.0.0:123'.
         """
 
-    def __enter__(self):
-        self.start()
+    async def __aenter__(self):
+        await self.start()
         return self
 
-    def __exit__(self, *exc):
+    async def __aexit__(self, *exc):
         self.stop()
 
 
@@ -210,11 +209,9 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
                 future = connector.connect(
                     loc, deserialize=deserialize, **(connection_args or {})
                 )
-                with ignoring(gen.TimeoutError):
-                    comm = await gen.with_timeout(
-                        timedelta(seconds=min(deadline - time(), 1)),
-                        future,
-                        quiet_exceptions=EnvironmentError,
+                with ignoring(TimeoutError):
+                    comm = await asyncio.wait_for(
+                        future, timeout=min(deadline - time(), 1)
                     )
                     break
             if not comm:
@@ -224,7 +221,7 @@ async def connect(addr, timeout=None, deserialize=True, connection_args=None):
         except EnvironmentError as e:
             error = str(e)
             if time() < deadline:
-                await gen.sleep(0.01)
+                await asyncio.sleep(0.01)
                 logger.debug("sleeping on connect")
             else:
                 _raise(error)

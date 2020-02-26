@@ -30,10 +30,12 @@ env = Environment(
 
 BOKEH_THEME = Theme(os.path.join(os.path.dirname(__file__), "theme.yaml"))
 
-template_variables = {"pages": ["status", "system", "profile", "crossfilter"]}
+template_variables = {
+    "pages": ["status", "system", "profile", "crossfilter", "profile-server"]
+}
 
 
-class _PrometheusCollector(object):
+class _PrometheusCollector:
     def __init__(self, server):
         self.worker = server
         self.logger = logging.getLogger("distributed.dask_worker")

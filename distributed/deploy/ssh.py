@@ -73,14 +73,14 @@ class Worker(Process):
         loop=None,
         name=None,
     ):
+        super().__init__()
+
         self.address = address
         self.scheduler = scheduler
         self.worker_module = worker_module
         self.connect_options = connect_options
         self.kwargs = kwargs
         self.name = name
-
-        super().__init__()
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -98,7 +98,7 @@ class Worker(Process):
                     "--name",
                     str(self.name),
                 ]
-                + cli_keywords(self.kwargs, cls=_Worker)
+                + cli_keywords(self.kwargs, cls=_Worker, cmd=self.worker_module)
             )
         )
 
@@ -131,11 +131,11 @@ class Scheduler(Process):
     """
 
     def __init__(self, address: str, connect_options: dict, kwargs: dict):
+        super().__init__()
+
         self.address = address
         self.kwargs = kwargs
         self.connect_options = connect_options
-
-        super().__init__()
 
     async def start(self):
         import asyncssh  # import now to avoid adding to module startup time
@@ -219,21 +219,16 @@ def SSHCluster(
     Parameters
     ----------
     hosts: List[str]
-        List of hostnames or addresses on which to launch our cluster
-        The first will be used for the scheduler and the rest for workers
-    connect_options:
-        Keywords to pass through to asyncssh.connect
-        known_hosts: List[str] or None
-            The list of keys which will be used to validate the server host
-            key presented during the SSH handshake.  If this is not specified,
-            the keys will be looked up in the file .ssh/known_hosts.  If this
-            is explicitly set to None, server host key validation will be disabled.
-    worker_options:
-        Keywords to pass on to dask-worker
-    scheduler_options:
-        Keywords to pass on to dask-scheduler
-    worker_module:
-        Python module to call to start the worker
+        List of hostnames or addresses on which to launch our cluster.
+        The first will be used for the scheduler and the rest for workers.
+    connect_options: dict, optional
+        Keywords to pass through to ``asyncssh.connect``.
+    worker_options: dict, optional
+        Keywords to pass on to workers.
+    scheduler_options: dict, optional
+        Keywords to pass on to scheduler.
+    worker_module: str, optional
+        Python module to call to start the worker.
 
     Examples
     --------

@@ -48,14 +48,13 @@ setup(
         "Programming Language :: Python",
         "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
+        "Programming Language :: Python :: 3.8",
         "Topic :: Scientific/Engineering",
         "Topic :: System :: Distributed Computing",
     ],
     entry_points="""
         [console_scripts]
         dask-ssh=distributed.cli.dask_ssh:go
-        dask-submit=distributed.cli.dask_submit:go
-        dask-remote=distributed.cli.dask_remote:go
         dask-scheduler=distributed.cli.dask_scheduler:go
         dask-worker=distributed.cli.dask_worker:go
       """,

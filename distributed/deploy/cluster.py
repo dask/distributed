@@ -1,10 +1,9 @@
 import asyncio
-from datetime import timedelta
 import logging
 import threading
+import warnings
 
 from dask.utils import format_bytes
-from tornado import gen
 
 from .adaptive import Adaptive
 
@@ -23,7 +22,7 @@ from ..utils import (
 logger = logging.getLogger(__name__)
 
 
-class Cluster(object):
+class Cluster:
     """ Superclass for cluster objects
 
     This class contains common functionality for Dask Cluster manager classes.
@@ -156,16 +155,16 @@ class Cluster(object):
         if asynchronous:
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             return future
         else:
             return sync(self.loop, func, *args, **kwargs)
 
-    async def _logs(self, scheduler=True, workers=True):
+    async def _get_logs(self, scheduler=True, workers=True):
         logs = Logs()
 
         if scheduler:
-            L = await self.scheduler_comm.logs()
+            L = await self.scheduler_comm.get_logs()
             logs["Scheduler"] = Log("\n".join(line for level, line in L))
 
         if workers:
@@ -175,7 +174,7 @@ class Cluster(object):
 
         return logs
 
-    def logs(self, scheduler=True, workers=True):
+    def get_logs(self, scheduler=True, workers=True):
         """ Return logs for the scheduler and workers
 
         Parameters
@@ -192,7 +191,11 @@ class Cluster(object):
             A dictionary of logs, with one item for the scheduler and one for
             each worker
         """
-        return self.sync(self._logs, scheduler=scheduler, workers=workers)
+        return self.sync(self._get_logs, scheduler=scheduler, workers=workers)
+
+    def logs(self, *args, **kwargs):
+        warnings.warn("logs is deprecated, use get_logs instead", DeprecationWarning)
+        return self.get_logs(*args, **kwargs)
 
     @property
     def dashboard_link(self):
@@ -201,7 +204,7 @@ class Cluster(object):
         except KeyError:
             return ""
         else:
-            host = self.scheduler_address.split("://")[1].split(":")[0]
+            host = self.scheduler_address.split("://")[1].split("/")[0].split(":")[0]
             return format_dashboard_link(host, port)
 
     def _widget_status(self):

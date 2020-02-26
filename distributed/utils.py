@@ -1,11 +1,13 @@
 import asyncio
+from asyncio import TimeoutError
 import atexit
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+import click
+from collections import deque, OrderedDict, UserDict
+from concurrent.futures import ThreadPoolExecutor, CancelledError  # noqa: F401
 from contextlib import contextmanager
-from datetime import timedelta
 import functools
 from hashlib import md5
+import html
 import inspect
 import json
 import logging
@@ -55,7 +57,7 @@ try:
 except ImportError:
     PollIOLoop = None  # dropped in tornado 6.0
 
-from .compatibility import PYPY, WINDOWS
+from .compatibility import PYPY, WINDOWS, get_running_loop
 from .metrics import time
 
 
@@ -80,6 +82,16 @@ def _initialize_mp_context():
         preload = ["distributed"]
         if "pkg_resources" in sys.modules:
             preload.append("pkg_resources")
+
+        from .versions import required_packages, optional_packages
+
+        for pkg, _ in required_packages + optional_packages:
+            try:
+                importlib.import_module(pkg)
+            except ImportError:
+                pass
+            else:
+                preload.append(pkg)
         ctx.set_forkserver_preload(preload)
         return ctx
 
@@ -118,7 +130,7 @@ def get_fileno_limit():
 
 
 @toolz.memoize
-def _get_ip(host, port, family, default):
+def _get_ip(host, port, family):
     # By using a UDP socket, we don't actually try to connect but
     # simply select the local address through which *host* is reachable.
     sock = socket.socket(family, socket.SOCK_DGRAM)
@@ -127,13 +139,15 @@ def _get_ip(host, port, family, default):
         ip = sock.getsockname()[0]
         return ip
     except EnvironmentError as e:
-        # XXX Should first try getaddrinfo() on socket.gethostname() and getfqdn()
         warnings.warn(
             "Couldn't detect a suitable IP address for "
-            "reaching %r, defaulting to %r: %s" % (host, default, e),
+            "reaching %r, defaulting to hostname: %s" % (host, e),
             RuntimeWarning,
         )
-        return default
+        addr_info = socket.getaddrinfo(
+            socket.gethostname(), port, family, socket.SOCK_DGRAM, socket.IPPROTO_UDP
+        )[0]
+        return addr_info[4][0]
     finally:
         sock.close()
 
@@ -145,14 +159,14 @@ def get_ip(host="8.8.8.8", port=80):
     *host* defaults to a well-known Internet host (one of Google's public
     DNS servers).
     """
-    return _get_ip(host, port, family=socket.AF_INET, default="127.0.0.1")
+    return _get_ip(host, port, family=socket.AF_INET)
 
 
 def get_ipv6(host="2001:4860:4860::8888", port=80):
     """
     The same as get_ip(), but for IPv6.
     """
-    return _get_ip(host, port, family=socket.AF_INET6, default="::1")
+    return _get_ip(host, port, family=socket.AF_INET6)
 
 
 def get_ip_interface(ifname):
@@ -314,7 +328,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
             thread_state.asynchronous = True
             future = func(*args, **kwargs)
             if callback_timeout is not None:
-                future = gen.with_timeout(timedelta(seconds=callback_timeout), future)
+                future = asyncio.wait_for(future, callback_timeout)
             result[0] = yield future
         except Exception as exc:
             error[0] = sys.exc_info()
@@ -325,7 +339,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
     loop.add_callback(f)
     if callback_timeout is not None:
         if not e.wait(callback_timeout):
-            raise gen.TimeoutError("timed out after %s s." % (callback_timeout,))
+            raise TimeoutError("timed out after %s s." % (callback_timeout,))
     else:
         while not e.is_set():
             e.wait(10)
@@ -336,7 +350,7 @@ def sync(loop, func, *args, callback_timeout=None, **kwargs):
         return result[0]
 
 
-class LoopRunner(object):
+class LoopRunner:
     """
     A helper to start and stop an IO loop in a controlled way.
     Several loop runners can associate safely to the same IO loop.
@@ -614,28 +628,16 @@ def key_split(s):
 def key_split_group(x):
     """A more fine-grained version of key_split
 
-    >>> key_split_group('x')
-    'x'
-    >>> key_split_group('x-1')
-    'x-1'
-    >>> key_split_group('x-1-2-3')
-    'x-1-2-3'
     >>> key_split_group(('x-2', 1))
     'x-2'
     >>> key_split_group("('x-2', 1)")
     'x-2'
-    >>> key_split_group('hello-world-1')
-    'hello-world-1'
-    >>> key_split_group(b'hello-world-1')
-    'hello-world-1'
     >>> key_split_group('ae05086432ca935f6eba409a8ecd4896')
     'data'
     >>> key_split_group('<module.submodule.myclass object at 0xdaf372')
     'myclass'
-    >>> key_split_group(None)
-    'Other'
-    >>> key_split_group('x-abcdefab')  # ignores hex
-    'x-abcdefab'
+    >>> key_split_group('x')
+    >>> key_split_group('x-1')
     """
     typ = type(x)
     if typ is tuple:
@@ -648,11 +650,11 @@ def key_split_group(x):
         elif x[0] == "<":
             return x.strip("<>").split()[0].split(".")[-1]
         else:
-            return x
+            return key_split(x)
     elif typ is bytes:
         return key_split_group(x.decode())
     else:
-        return "Other"
+        return key_split(x)
 
 
 @contextmanager
@@ -1060,7 +1062,7 @@ def import_file(path):
     return loaded
 
 
-class itemgetter(object):
+class itemgetter:
     """A picklable itemgetter.
 
     Examples
@@ -1188,30 +1190,80 @@ def reset_logger_locks():
             handler.createLock()
 
 
-# Only bother if asyncio has been loaded by Tornado
-if "asyncio" in sys.modules and tornado.version_info[0] >= 5:
+if tornado.version_info[0] >= 5:
 
-    jupyter_event_loop_initialized = False
+    is_server_extension = False
 
     if "notebook" in sys.modules:
         import traitlets
         from notebook.notebookapp import NotebookApp
 
-        jupyter_event_loop_initialized = traitlets.config.Application.initialized() and isinstance(
+        is_server_extension = traitlets.config.Application.initialized() and isinstance(
             traitlets.config.Application.instance(), NotebookApp
         )
 
-    if not jupyter_event_loop_initialized:
-        import tornado.platform.asyncio
+    if not is_server_extension:
+        is_kernel_and_no_running_loop = False
 
-        asyncio.set_event_loop_policy(
-            tornado.platform.asyncio.AnyThreadEventLoopPolicy()
-        )
+        if is_kernel():
+            try:
+                get_running_loop()
+            except RuntimeError:
+                is_kernel_and_no_running_loop = True
+
+        if not is_kernel_and_no_running_loop:
+
+            # TODO: Use tornado's AnyThreadEventLoopPolicy, instead of class below,
+            # once tornado > 6.0.3 is available.
+            if WINDOWS and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+                # WindowsProactorEventLoopPolicy is not compatible with tornado 6
+                # fallback to the pre-3.8 default of Selector
+                # https://github.com/tornadoweb/tornado/issues/2608
+                BaseEventLoopPolicy = asyncio.WindowsSelectorEventLoopPolicy
+            else:
+                BaseEventLoopPolicy = asyncio.DefaultEventLoopPolicy
+
+            class AnyThreadEventLoopPolicy(BaseEventLoopPolicy):
+                def get_event_loop(self):
+                    try:
+                        return super().get_event_loop()
+                    except (RuntimeError, AssertionError):
+                        loop = self.new_event_loop()
+                        self.set_event_loop(loop)
+                        return loop
+
+            asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
 
 
 @functools.lru_cache(1000)
 def has_keyword(func, keyword):
     return keyword in inspect.signature(func).parameters
+
+
+@functools.lru_cache(1000)
+def command_has_keyword(cmd, k):
+    if cmd is not None:
+        if isinstance(cmd, str):
+            try:
+                from importlib import import_module
+
+                cmd = import_module(cmd)
+            except ImportError:
+                raise ImportError("Module for command %s is not available" % cmd)
+
+        if isinstance(getattr(cmd, "main"), click.core.Command):
+            cmd = cmd.main
+        if isinstance(cmd, click.core.Command):
+            cmd_params = set(
+                [
+                    p.human_readable_name
+                    for p in cmd.params
+                    if isinstance(p, click.core.Option)
+                ]
+            )
+            return k in cmd_params
+
+    return False
 
 
 # from bokeh.palettes import viridis
@@ -1296,7 +1348,9 @@ class Log(str):
     """ A container for logs """
 
     def _repr_html_(self):
-        return "<pre><code>\n{log}\n</code></pre>".format(log=self.rstrip())
+        return "<pre><code>\n{log}\n</code></pre>".format(
+            log=html.escape(self.rstrip())
+        )
 
 
 class Logs(dict):
@@ -1313,7 +1367,7 @@ class Logs(dict):
         return "\n".join(summaries)
 
 
-def cli_keywords(d: dict, cls=None):
+def cli_keywords(d: dict, cls=None, cmd=None):
     """ Convert a kwargs dictionary into a list of CLI keywords
 
     Parameters
@@ -1322,6 +1376,12 @@ def cli_keywords(d: dict, cls=None):
         The keywords to convert
     cls: callable
         The callable that consumes these terms to check them for validity
+    cmd: string or object
+        A string with the name of a module, or the module containing a
+        click-generated command with a "main" function, or the function itself.
+        It may be used to parse a module's custom arguments (i.e., arguments that
+        are not part of Worker class), such as nprocs from dask-worker CLI or
+        enable_nvlink from dask-cuda-worker CLI.
 
     Examples
     --------
@@ -1334,12 +1394,22 @@ def cli_keywords(d: dict, cls=None):
     ...
     ValueError: Class distributed.worker.Worker does not support keyword x
     """
-    if cls:
+    if cls or cmd:
         for k in d:
-            if not has_keyword(cls, k):
-                raise ValueError(
-                    "Class %s does not support keyword %s" % (typename(cls), k)
-                )
+            if not has_keyword(cls, k) and not command_has_keyword(cmd, k):
+                if cls and cmd:
+                    raise ValueError(
+                        "Neither class %s or module %s support keyword %s"
+                        % (typename(cls), typename(cmd), k)
+                    )
+                elif cls:
+                    raise ValueError(
+                        "Class %s does not support keyword %s" % (typename(cls), k)
+                    )
+                else:
+                    raise ValueError(
+                        "Module %s does not support keyword %s" % (typename(cmd), k)
+                    )
 
     def convert_value(v):
         out = str(v)
@@ -1366,9 +1436,26 @@ except TypeError:
 weakref.finalize(_offload_executor, _offload_executor.shutdown)
 
 
+def import_term(name: str):
+    """ Return the fully qualified term
+
+    Examples
+    --------
+    >>> import_term("math.sin")
+    <function math.sin(x, /)>
+    """
+    try:
+        module_name, attr_name = name.rsplit(".", 1)
+    except ValueError:
+        return importlib.import_module(name)
+
+    module = importlib.import_module(module_name)
+    return getattr(module, attr_name)
+
+
 async def offload(fn, *args, **kwargs):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(_offload_executor, fn, *args, **kwargs)
+    return await loop.run_in_executor(_offload_executor, lambda: fn(*args, **kwargs))
 
 
 def serialize_for_cli(data):
@@ -1399,3 +1486,40 @@ def deserialize_for_cli(data):
         The de-serialized data
     """
     return json.loads(base64.urlsafe_b64decode(data.encode()).decode())
+
+
+class EmptyContext:
+    def __enter__(self):
+        pass
+
+    def __exit__(self, *args):
+        pass
+
+    async def __aenter__(self):
+        pass
+
+    async def __aexit__(self, *args):
+        pass
+
+
+empty_context = EmptyContext()
+
+
+class LRU(UserDict):
+    """ Limited size mapping, evicting the least recently looked-up key when full
+    """
+
+    def __init__(self, maxsize):
+        super().__init__()
+        self.data = OrderedDict()
+        self.maxsize = maxsize
+
+    def __getitem__(self, key):
+        value = super().__getitem__(key)
+        self.data.move_to_end(key)
+        return value
+
+    def __setitem__(self, key, value):
+        if len(self) >= self.maxsize:
+            self.data.popitem(last=False)
+        super().__setitem__(key, value)

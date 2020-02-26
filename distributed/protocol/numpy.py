@@ -44,6 +44,22 @@ def serialize_numpy_ndarray(x):
     else:
         dt = (0, x.dtype.str)
 
+    # Only serialize broadcastable data for arrays with zero strided axes
+    broadcast_to = None
+    if 0 in x.strides:
+        broadcast_to = x.shape
+        strides = x.strides
+        writeable = x.flags.writeable
+        x = x[tuple(slice(None) if s != 0 else slice(1) for s in strides)]
+        if not x.flags.c_contiguous and not x.flags.f_contiguous:
+            # Broadcasting can only be done with contiguous arrays
+            x = np.ascontiguousarray(x)
+            x = np.lib.stride_tricks.as_strided(
+                x,
+                strides=[j if i != 0 else i for i, j in zip(strides, x.strides)],
+                writeable=writeable,
+            )
+
     if not x.shape:
         # 0d array
         strides = x.strides
@@ -67,6 +83,9 @@ def serialize_numpy_ndarray(x):
         data = data.view("u%d" % math.gcd(x.dtype.itemsize, 8)).data
 
     header = {"dtype": dt, "shape": x.shape, "strides": strides}
+
+    if broadcast_to is not None:
+        header["broadcast_to"] = broadcast_to
 
     if x.nbytes > 1e5:
         frames = frame_split_size([data])
@@ -93,9 +112,12 @@ def deserialize_numpy_ndarray(header, frames):
         else:
             dt = np.dtype(dt)
 
-        x = np.ndarray(
-            header["shape"], dtype=dt, buffer=frames[0], strides=header["strides"]
-        )
+        if header.get("broadcast_to"):
+            shape = header["broadcast_to"]
+        else:
+            shape = header["shape"]
+
+        x = np.ndarray(shape, dtype=dt, buffer=frames[0], strides=header["strides"])
 
         return x
 
